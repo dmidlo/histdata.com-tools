@@ -1,20 +1,25 @@
 # histdata.com-tools
+
 Multi-threaded/Multi-Process Downloader for Currency Exchange Rates from Histdata.com
 
 ## Features
 
-- Mutlithreaded for web requests/downloads
-- Multiprocess for zip file extraction
+- Multi-threaded for web requests/downloads
+- Multi-process for zip file extraction
 - Uses a queue and saves state to allow long running requests to be canceled and resumed at a later time.
+  
 ## In Progress
+
 - Export data to InfluxDB
-## Setup
+
+- ## Setup
+
 1. Create a virtual environment
    - `python -m venv venv`
 2. Activate the virtual environment
    - `source venv/bin/activate`
    - validate with `which python`
-    - result should be `.../histdata.com-tools/venv/bin/python`
+     - result should be `.../histdata.com-tools/venv/bin/python`
 3. Install dependencies
    - `pip install influxdb_client rich requests bs4 pytest`
 4. Apply Backport if not already patched upstream
@@ -24,6 +29,7 @@ Multi-threaded/Multi-Process Downloader for Currency Exchange Rates from Histdat
 5. Run `python histdata_com.py` to view help message and flags
 6. Test a run with `python histdata_com.py -p eurusd -P ascii -t tick-data-quotes`
     - Data is found in the `.data/` directory unless otherwise specified with the -d flag
+
 ### CLI Help
 
 ```txt
@@ -48,5 +54,5 @@ options:
   -c HTML_CONTAINER_CLASSNAME, --html_container_classname HTML_CONTAINER_CLASSNAME
                         search url content for parent element with this html/css class for links
   -d WORKING_DATA_DIRECTORY, --working-data-directory WORKING_DATA_DIRECTORY
-                        Not an Executable Search Path! This directory is used to perform work. default is ".data" in the current direcotry
+                        Not an Executable Search Path! This directory is used to perform work. default is ".data" in the current directory
 ```

@@ -22,6 +22,7 @@ class _HistDataCom:
                         csv_counter,
                         csv_progress,
                         **kwargs): 
+        
         random.seed(get_random_seed())
 
         """ Initialization for _HistDataCom Class"""
