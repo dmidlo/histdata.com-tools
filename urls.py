@@ -50,7 +50,6 @@ class _URLs:
         global args
         args = args_
 
-
     def restore_momento(self, record, base_dir):
         record.set_record_data_dir(base_dir)
         if os.path.exists(f"{record.data_dir}.info"):
