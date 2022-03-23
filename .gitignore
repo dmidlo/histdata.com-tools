@@ -1,0 +1,12 @@
+defs.py
+venv/
+*.pkl
+*.csv
+*.txt
+*.zip
+.info
+.queue
+*.profile
+.DS_Store
+__pycache__
+.data/
