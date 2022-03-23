@@ -16,7 +16,7 @@ Multi-threaded/Multi-Process Downloader for Currency Exchange Rates from Histdat
    - validate with `which python`
     - result should be `.../histdata.com-tools/venv/bin/python`
 3. Install dependencies
-   - `pip install influxdb_client rich requests bs4`
+   - `pip install influxdb_client rich requests bs4 pytest`
 4. Apply Backport if not already patched upstream
    - This seems to already be upstream, but you can verify if concerned
    - `lib/python3.XXX/multiprocessing/managers.py > AutoProxy`
