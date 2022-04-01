@@ -28,7 +28,7 @@ Multi-threaded/Multi-Process Downloader for Currency Exchange Rates from Histdat
    - `https://github.com/python/cpython/commit/8aa45de6c6d84397b772bad7e032744010bbd456`
 5. Run `python histdata_com.py` to view help message and flags
 6. Test a run with `python histdata_com.py -p eurusd -P ascii -t tick-data-quotes`
-    - Data is found in the `.data/` directory unless otherwise specified with the -d flag
+    - Data is found in the `data/` directory unless otherwise specified with the -d flag
 
 ### CLI Help
 

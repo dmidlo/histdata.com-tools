@@ -9,4 +9,4 @@ venv/
 *.profile
 .DS_Store
 __pycache__
-.data/
+data/

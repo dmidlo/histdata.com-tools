@@ -4,6 +4,7 @@ from cli import ArgParser
 from records import Records
 from utils import get_random_seed, set_working_data_dir
 from urls import _URLs
+from csvs import _CSVs
 from influx import _Influx
 
 # !Manually Applied Backport of:
@@ -58,6 +59,7 @@ class _HistDataCom:
         self.csv_progress = csv_progress
 
         self.Urls = _URLs(self.args, self.records_current, self.records_next)
+        self.Csvs = _CSVs(self.args, self.records_current, self.records_next)
         self.Influx = _Influx(self.args,
                                 self.records_current,
                                 self.records_next,
@@ -67,8 +69,9 @@ class _HistDataCom:
 
     def run(self):
         self.Urls.walkIndexURLs(self.records_current, self.records_next)
-        self.Urls.downloadCSVs(self.records_current, self.records_next)
-        self.Urls.extractCSVs(self.records_current, self.records_next)
+        self.Urls.download_zips(self.records_current, self.records_next)
+        self.Csvs.extractCSVs(self.records_current, self.records_next)
+        self.Csvs.cleanCSVs(self.records_current, self.records_next)
         # self.Influx.ImportCSVs(self.records_current,
         #                         self.records_next,
         #                         self.csv_chunks_queue,

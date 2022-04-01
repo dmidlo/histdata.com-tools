@@ -2,7 +2,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 import multiprocessing, requests, sys, os, zipfile, pickle
 from urllib.parse import urlparse
 from rich.progress import Progress
-import bs4
+import bs4, csv
 from bs4 import BeautifulSoup
 
 from rich import print
@@ -215,7 +215,7 @@ class _URLs:
         records_next.dump_to_queue(records_current)
         records_current.write_pickle(f"{self.args['working_data_directory']}/{self.args['queue_filename']}")
 
-    def download_csv(self, record):
+    def download_zip(self, record):
         
         if ("FORM" in record.status) and (("DONE" not in record.status) 
                                         or ("KEYERROR" not in record.status)
@@ -262,7 +262,7 @@ class _URLs:
 
         records_current.task_done()
         
-    def downloadCSVs(self, records_current, records_next):
+    def download_zips(self, records_current, records_next):
         with Progress() as progress:
             records_count = records_current.qsize()
             task_id = progress.add_task(f"[cyan]Downloading {records_count} CSVs...", total=records_count)
@@ -279,69 +279,7 @@ class _URLs:
                     if record is None:
                         return
 
-                    future = executor.submit(self.download_csv, record)
-                    progress.advance(task_id, 0.25)
-                    futures.append(future)
-                
-                for future in as_completed(futures):
-                    progress.advance(task_id, 0.75)
-                    records_current.task_done()
-                    futures.remove(future)
-                    del future
-
-        records_current.join()
-
-        records_next.dump_to_queue(records_current)
-        records_current.write_pickle(f"{self.args['working_data_directory']}/{self.args['queue_filename']}")
-
-    def extractCSV(self, record):
-
-        if ("ZIP" in record.status):
-            zip_path = record.data_dir + record.zip_filename
-            status_elements = record.status.split("_")
-
-            try:
-                with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                    [record.csv_filename] = [x for x in zip_ref.namelist() if ".csv" in x]
-                    zip_ref.extract(record.csv_filename, path=record.data_dir)
-
-                os.remove(zip_path)
-            except:
-                print("Unexpected error:", sys.exc_info()[0])
-                record.status = f"CSV_{status_elements[1]}_ZIP_FAIL"
-                record.delete_info_file()
-                records_next.put(record)
-                raise
-            else:
-                record.set_csv_linecount()
-                record.status = f"CSV_{status_elements[1]}_FILE"
-                record.write_info_file(base_dir=args['default_download_dir'])
-                records_next.put(record)
-                records_current.task_done()
-                return
-        else:
-            records_next.put(record)
-
-        records_current.task_done()
-
-    def extractCSVs(self, records_current, records_next):
-        with Progress() as progress:
-            records_count = records_current.qsize()
-            task_id = progress.add_task(f"[cyan]Extracting {records_count} CSVs...", total=records_count)
-            with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 1),
-                                initializer=self.init_counters, 
-                                initargs=(records_current,
-                                    records_next,
-                                    self.args.copy())) as executor:
-                futures = []
-
-                while not records_current.empty():
-                    record = records_current.get()
-
-                    if record is None:
-                        return
-
-                    future = executor.submit(self.extractCSV, record)
+                    future = executor.submit(self.download_zip, record)
                     progress.advance(task_id, 0.25)
                     futures.append(future)
                 

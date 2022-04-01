@@ -2,11 +2,12 @@ import multiprocessing, io
 import rx
 from rx import operators as ops
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from influxdb_client import InfluxDBClient, WriteOptions
+from influxdb_client import Point, InfluxDBClient, WriteOptions
 from influxdb_client.client.write_api import WriteType
 from urllib.request import urlopen
 from rich.progress import Progress
 from csv import DictReader
+from datetime import datetime
 import defs
 
 class _Influx():
@@ -42,16 +43,19 @@ class _Influx():
         global args
         args = args_
 
-    def parse_row(self):
+    def parse_row(self, row):
+        print(row)
         pass
 
-    def parse_rows(self, rows, total_size):
+    def parse_rows(self, rows, record, total_size):
         _parsed_rows = list(map(self.parse_row, rows))
 
         csv_counter.value += len(_parsed_rows)
 
+        csv_chunks_queue.put(_parsed_rows)
+
     def importCSV(self, record):
-        if "FILE" in record.status:
+        if "CLEAN" in record.status:
             status_elements = record.status.split("_")
 
             file_endpoint = "file://" + record.data_dir + record.csv_filename
@@ -76,7 +80,7 @@ class _Influx():
                                     ).pipe(
                                         ops.buffer_with_count(10_000),
                                         ops.flat_map(
-                                            lambda rows: executor.submit(self.parse_rows, rows, content_length)))
+                                            lambda rows: executor.submit(self.parse_rows, rows, record, content_length)))
                     data.subscribe(
                         on_next=lambda x: None,
                         on_error=lambda er: print(f"Unexpected error: {er}")

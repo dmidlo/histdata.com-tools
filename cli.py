@@ -13,7 +13,7 @@ class ArgsNamespace:
         self.timeframes = Timeframe.list_keys()
         self.index_url = 'http://www.histdata.com/download-free-forex-data/'
         self.html_container_classname = 'page-content'
-        self.working_data_directory = ".data"
+        self.working_data_directory = "data"
         self.urls_filename = ".urls"
         self.queue_filename = ".queue"
         self.with_all_defaults = 0
@@ -68,7 +68,7 @@ class ArgParser(argparse.ArgumentParser):
         self.add_argument(
                 '-d','--working-data-directory',
                 type=str,
-                help='Not an Executable Search Path! This directory is used to perform work. default is ".data" in the current direcotry')
+                help='Not an Executable Search Path! This directory is used to perform work. default is "data" in the current direcotry')
 
         # set up the run subcommand
         # TODO: Insert run argument 'run set --majors {platform} {timeframe}

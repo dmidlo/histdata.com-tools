@@ -6,7 +6,11 @@
     "python.testing.pytestEnabled": true,
     "cSpell.words": [
         "CLASSNAME",
+        "destcsv",
+        "Forex",
+        "fxpair",
         "histdata",
+        "srccsv",
         "TIMEFRAME",
         "timeframes"
     ]
