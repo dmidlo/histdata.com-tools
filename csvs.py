@@ -177,4 +177,4 @@ class _CSVs:
         tz_date_object = date_object.replace(tzinfo=pytz.timezone("Etc/GMT+5"))
         utc_milli_timestamp = int(tz_date_object.timestamp() * 1000)
 
-        return utc_milli_timestamp
+        return [str(utc_milli_timestamp)]

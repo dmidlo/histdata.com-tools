@@ -79,7 +79,6 @@ class Pairs(Enum):
 
 class Platform(Enum):
     MT = "metatrader"
-    XLSX = "excel"
     NT = "ninjatrader"
     MS = "metastock"
     ASCII = "ascii"
@@ -111,7 +110,6 @@ class TimeFormat(Enum):
     MT_M1 = "%Y.%m.%d %H:%M"
     ASCII_M1 = "%Y%m%d %H%M%S"
     ASCII_T = "%Y%m%d %H%M%S%f"
-    XLSX_M1 = "%Y%m%d %H%M"
     NT_M1 = "%Y%m%d %H%M%S"
     NT_TL = "%Y%m%d %H%M%S"
     NT_TB = "%Y%m%d %H%M%S"
@@ -130,7 +128,6 @@ class TimePrecision(Enum):
     MT_M1 = WritePrecision.S
     ASCII_M1 = WritePrecision.S
     ASCII_T = WritePrecision.MS
-    XLSX_M1 = WritePrecision.S
     NT_M1 = WritePrecision.S
     NT_TL = WritePrecision.S
     NT_TB = WritePrecision.S

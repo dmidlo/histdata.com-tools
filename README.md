@@ -46,7 +46,7 @@ options:
   -p PAIR [PAIR ...], --pairs PAIR [PAIR ...]
                         space separated currency pairs. e.g. -p eurusd usdjpy ...
   -P PLATFORM [PLATFORM ...], --platforms PLATFORM [PLATFORM ...]
-                        space separated Platforms. e.g. -P metatrader ascii excel ninjatrader metastock
+                        space separated Platforms. e.g. -P metatrader ascii ninjatrader metastock
   -t TIMEFRAME [TIMEFRAME ...], --timeframes TIMEFRAME [TIMEFRAME ...]
                         space separated Timeframes. e.g. -t tick-data-quotes 1-minute-bar-quotes ...
   -i INDEX_URL, --index_url INDEX_URL
