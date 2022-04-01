@@ -1,8 +1,8 @@
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-import multiprocessing, requests, sys, os, zipfile, pickle
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import multiprocessing, requests, sys, os, pickle
 from urllib.parse import urlparse
 from rich.progress import Progress
-import bs4, csv
+import bs4
 from bs4 import BeautifulSoup
 
 from rich import print
