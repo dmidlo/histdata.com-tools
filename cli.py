@@ -48,7 +48,7 @@ class ArgParser(argparse.ArgumentParser):
                 nargs='+',
                 type=str,
                 choices=Platform.list_values(), 
-                help='space separated Platforms. e.g. -P metatrader ascii excel ninjatrader metastock',
+                help='space separated Platforms. e.g. -P metatrader ascii ninjatrader metastock',
                 metavar='PLATFORM')
         self.add_argument(
                 '-t','--timeframes',
