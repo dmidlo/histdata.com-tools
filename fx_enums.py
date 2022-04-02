@@ -111,9 +111,9 @@ class TimeFormat(Enum):
     ASCII_M1 = "%Y%m%d %H%M%S"
     ASCII_T = "%Y%m%d %H%M%S%f"
     NT_M1 = "%Y%m%d %H%M%S"
-    NT_TL = "%Y%m%d %H%M%S"
-    NT_TB = "%Y%m%d %H%M%S"
-    NT_TA = "%Y%m%d %H%M%S"
+    NT_T_LAST = "%Y%m%d %H%M%S"
+    NT_T_BID = "%Y%m%d %H%M%S"
+    NT_T_ASK = "%Y%m%d %H%M%S"
     MS_M1 = "%Y%m%d%H%M"
 
     @classmethod
@@ -129,9 +129,9 @@ class TimePrecision(Enum):
     ASCII_M1 = WritePrecision.S
     ASCII_T = WritePrecision.MS
     NT_M1 = WritePrecision.S
-    NT_TL = WritePrecision.S
-    NT_TB = WritePrecision.S
-    NT_TA = WritePrecision.S
+    NT_T_LAST = WritePrecision.S
+    NT_T_BID = WritePrecision.S
+    NT_T_ASK = WritePrecision.S
     MS_M1 = WritePrecision.S
 
     @classmethod

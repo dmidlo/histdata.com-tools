@@ -99,8 +99,8 @@ class _CSVs:
             status_elements = record.status.split("_")
 
             try:
-                header = ["Source", "Platform", "Instrument","Timeframe","msSinceEpochUTC","BidQuote","AskQuote","Volume"]
-                
+                header = self.header_match(record.data_platform, record.data_timeframe)
+
                 with open(temp_csv_path, 'w', newline="") as destcsv:
                     dest_csv_writer = csv.writer(destcsv)
                     dest_csv_writer.writerow(header)
@@ -111,9 +111,11 @@ class _CSVs:
                         src_csv_reader = csv.reader(srccsv, dialect)
 
                         for row in src_csv_reader:
-                            timestamp_utc = self.convert_datetime(row[0])
+                            timestamp_utc = self.convert_datetime_to_UTC_timestamp(record.data_platform, record.data_timeframe, row)
 
-                            row_data = ["histdata.com", record.data_platform, record.data_fxpair, record.data_timeframe] + timestamp_utc + row[1:]
+                            row_prefix = ["histdata.com", record.data_platform, record.data_timeframe, record.data_fxpair]
+                            row_data =  row_prefix + timestamp_utc + self.trim_row_data(record.data_platform, record.data_timeframe, row)
+
                             dest_csv_writer.writerow(row_data)
 
                 os.remove(csv_path)
@@ -171,10 +173,69 @@ class _CSVs:
         records_current.write_pickle(f"{self.args['working_data_directory']}/{self.args['queue_filename']}")
 
     @classmethod
-    def convert_datetime(cls, est_timestamp):
+    def header_match(cls, platform, timeframe):
 
-        date_object = datetime.strptime(est_timestamp, TimeFormat.ASCII_T.value)
+        pre_header = ["Source", "Platform", "Timeframe", "Instrument"]
+
+        match platform:
+            case "MT" if timeframe == "M1":
+                header = pre_header + ["secsSinceEpochUTC", "MTopenBid", "MThighBid", "MTlowBid", "MTcloseBid", "MTVolume"]
+            case "ASCII" if timeframe == "M1":
+                header = pre_header + ["secsSinceEpochUTC", "openBid", "highBid", "lowBid", "closeBid", "Volume"]
+            case "ASCII" if timeframe == "T":
+                header = pre_header + ["msSinceEpochUTC","bidQuote","askQuote","Volume"]
+            case "NT" if timeframe == "M1":
+                header = pre_header + ["secsSinceEpochUTC", "NTopenBid", "NThighBid", "NTlowBid", "NTcloseBid", "NTVolume"]
+            case "NT" if timeframe == "T_LAST":
+                header = pre_header + ["secsSinceEpochUTC", "sLastQuote", "Volume"]
+            case "NT" if timeframe == "T_BID":
+                header = pre_header + ["secsSinceEpochUTC", "sBidQuote", "Volume"]
+            case "NT" if timeframe == "T_ASK":
+                header = pre_header + ["secsSinceEpochUTC", "sAskQuote", "Volume"]
+            case "MS" if timeframe == "M1":
+                header = pre_header + ["secsSinceEpochUTC", "MSopenBid", "MShighBid", "MSlowBid", "MScloseBid", "MSVolume"]
+
+        return header
+
+    @classmethod
+    def get_timeformat(cls, platform, timeframe):
+
+        format_enum_key = str(platform) + "_" + str(timeframe)
+
+        return TimeFormat[format_enum_key].value
+
+    @classmethod 
+    def parse_datetime_columns(cls, platform, timeframe, row):
+
+        match platform:
+            case "MT" if timeframe == "M1":
+                return str(row[0]) + " " + str(row[1])
+            case "MS" if timeframe == "M1":
+                return str(row[1])
+            case _:
+                return str(row[0])
+
+    @classmethod
+    def convert_datetime_to_UTC_timestamp(cls, platform, timeframe, row):
+        
+        est_timestamp = cls.parse_datetime_columns(platform, timeframe, row)
+        date_object = datetime.strptime(est_timestamp, cls.get_timeformat(platform, timeframe))
         tz_date_object = date_object.replace(tzinfo=pytz.timezone("Etc/GMT+5"))
-        utc_milli_timestamp = int(tz_date_object.timestamp() * 1000)
 
-        return [str(utc_milli_timestamp)]
+        if platform == "ASCII" and timeframe == "T":
+            timestamp = int(tz_date_object.timestamp() * 1000)
+        else:
+            timestamp = int(tz_date_object.timestamp())
+
+        return [str(timestamp)]
+
+    @classmethod
+    def trim_row_data(cls, platform, timeframe, row):
+
+        match platform:
+            case "MT" if timeframe == "M1":
+                return row[2:]
+            case "MS" if timeframe == "M1":
+                return row[2:]
+            case _:
+                return row[1:]

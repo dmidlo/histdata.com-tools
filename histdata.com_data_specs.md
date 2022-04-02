@@ -89,26 +89,6 @@ NNN – Millisecond
 
 TimeZone: Eastern Standard Time (EST) time-zone WITHOUT Day Light Savings adjustments
 
-## Microsoft Excel in M1 Bars (1 Minute Bars)
-
-As example, in DAT_XLSX_EURUSD_M1_201202.xlsx:
-
-20120201 000000;1.306600;1.306600;1.306560;1.306560;0
-20120201 000100;1.306570;1.306570;1.306470;1.306560;0
-20120201 000200;1.306520;1.306560;1.306520;1.306560;0
-20120201 000300;1.306610;1.306610;1.306450;1.306450;0
-20120201 000400;1.306470;1.306540;1.306470;1.306520;0
-20120201 000500;1.306510;1.306650;1.306510;1.306600;0
-20120201 000600;1.306610;1.306760;1.306610;1.306650;0
-
-Row Fields:
-DateTime Stamp;Bar OPEN Bid Quote;Bar HIGH Bid Quote;Bar LOW Bid Quote;Bar CLOSE Bid Quote;Volume
-
-DateTime Stamp Format:
-Excel Native
-
-TimeZone: Eastern Standard Time (EST) time-zone WITHOUT Day Light Savings adjustments
-
 ## Ninja Trader in M1 Bars (1 Minute Bars)
 
 As example, in DAT_NT_EURUSD_M1_201202.csv:

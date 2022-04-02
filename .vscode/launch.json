@@ -12,7 +12,7 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Python: histdata_com.py - Single Pair - Small",
+            "name": "Python: histdata_com.py - EURUSD - Metatrader - 1-Minute-Bar-Quotes",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/histdata_com.py",
@@ -24,11 +24,29 @@
                 "-P",
                 "metatrader",
                 "-t",
-                "1-minute-bar-quotes"   
+                "1-minute-bar-quotes",
+                "-C"
             ]
         },
         {
-            "name": "Python: histdata_com.py - Single Pair - Large",
+            "name": "Python: histdata_com.py - EURUSD - ASCII - 1-Minute-Bar-Quotes",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/histdata_com.py",
+            "cwd": "${fileDirname}",
+            "console": "integratedTerminal",
+            "args": [
+                "-p",
+                "eurusd",
+                "-P",
+                "ascii",
+                "-t",
+                "1-minute-bar-quotes",
+                "-C"
+            ]
+        },
+        {
+            "name": "Python: histdata_com.py - EURUSD - ASCII - Tick-Data-Quotes",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/histdata_com.py",
@@ -40,7 +58,76 @@
                 "-P",
                 "ascii",
                 "-t",
-                "tick-data-quotes"   
+                "tick-data-quotes",
+                "-C"
+            ]
+        },
+        {
+            "name": "Python: histdata_com.py - Single Pair (EURUSD) - NinjaTrader - M1",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/histdata_com.py",
+            "console": "integratedTerminal",
+            "cwd": "${fileDirname}",
+            "args": [
+                "-p",
+                "eurusd",
+                "-P",
+                "ninjatrader",
+                "-t",
+                "1-minute-bar-quotes",
+                "-C"
+            ]
+        },
+        {
+            "name": "Python: histdata_com.py - Single Pair (EURUSD) - NinjaTrader - tick-last",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/histdata_com.py",
+            "console": "integratedTerminal",
+            "cwd": "${fileDirname}",
+            "args": [
+                "-p",
+                "eurusd",
+                "-P",
+                "ninjatrader",
+                "-t",
+                "tick-last-quotes",
+                "-C"
+            ]
+        },
+        {
+            "name": "Python: histdata_com.py - Single Pair (EURUSD) - NinjaTrader - tick-bid",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/histdata_com.py",
+            "console": "integratedTerminal",
+            "cwd": "${fileDirname}",
+            "args": [
+                "-p",
+                "eurusd",
+                "-P",
+                "ninjatrader",
+                "-t",
+                "tick-bid-quotes",
+                "-C"
+            ]
+        },
+        {
+            "name": "Python: histdata_com.py - Single Pair (EURUSD) - NinjaTrader - tick-ask",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/histdata_com.py",
+            "console": "integratedTerminal",
+            "cwd": "${fileDirname}",
+            "args": [
+                "-p",
+                "eurusd",
+                "-P",
+                "ninjatrader",
+                "-t",
+                "tick-ask-quotes",
+                "-C"
             ]
         },
         {
@@ -52,23 +139,8 @@
             "cwd": "${fileDirname}",
             "args": [
                 "-p",
-                "eurusd"   
-            ]
-        },
-        {
-            "name": "Python: histdata_com.py - Single Pair (EURUSD) - ASCII",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/histdata_com.py",
-            "console": "integratedTerminal",
-            "cwd": "${fileDirname}",
-            "args": [
-                "-p",
                 "eurusd",
-                "-P",
-                "ascii",
-                "-t",
-                "tick-data-quotes"
+                "-C"
             ]
         },
         {
@@ -82,7 +154,8 @@
                 "-P",
                 "ascii",
                 "-t",
-                "tick-data-quotes"
+                "tick-data-quotes",
+                "-C"
             ]
         },
         {

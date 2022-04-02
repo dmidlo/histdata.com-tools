@@ -16,6 +16,8 @@ class ArgsNamespace:
         self.working_data_directory = "data"
         self.urls_filename = ".urls"
         self.queue_filename = ".queue"
+        self.clean_csvs = 0
+        self.import_to_influxdb = 0
         self.with_all_defaults = 0
 
 class ArgParser(argparse.ArgumentParser):
@@ -57,6 +59,18 @@ class ArgParser(argparse.ArgumentParser):
                 choices=Timeframe.list_keys(), 
                 help='space separated Timeframes. e.g. -t tick-data-quotes 1-minute-bar-quotes ...',
                 metavar='TIMEFRAME')
+        self.add_argument(
+                "-C","--clean_csvs", 
+                type=int, 
+                nargs="?",
+                const=1,
+                help='add data headers to CSVs and convert EST(noDST) to UTC timestamp')
+        self.add_argument(
+                "-I","--import_to_influxdb", 
+                type=int, 
+                nargs="?",
+                const=1,
+                help='import csv data to influxdb instance. Use defs.py to configure. Implies -C --clean_csvs')
         self.add_argument(
                 '-i','--index_url',
                 type=str,
