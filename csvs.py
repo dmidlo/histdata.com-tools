@@ -187,11 +187,11 @@ class _CSVs:
             case "NT" if timeframe == "M1":
                 header = pre_header + ["secsSinceEpochUTC", "NTopenBid", "NThighBid", "NTlowBid", "NTcloseBid", "NTVolume"]
             case "NT" if timeframe == "T_LAST":
-                header = pre_header + ["secsSinceEpochUTC", "sLastQuote", "Volume"]
+                header = pre_header + ["secsSinceEpochUTC", "sLastQuote", "ntlVolume"]
             case "NT" if timeframe == "T_BID":
-                header = pre_header + ["secsSinceEpochUTC", "sBidQuote", "Volume"]
+                header = pre_header + ["secsSinceEpochUTC", "sBidQuote", "ntbVolume"]
             case "NT" if timeframe == "T_ASK":
-                header = pre_header + ["secsSinceEpochUTC", "sAskQuote", "Volume"]
+                header = pre_header + ["secsSinceEpochUTC", "sAskQuote", "ntaVolume"]
             case "MS" if timeframe == "M1":
                 header = pre_header + ["secsSinceEpochUTC", "MSopenBid", "MShighBid", "MSlowBid", "MScloseBid", "MSVolume"]
 

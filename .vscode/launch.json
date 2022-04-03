@@ -42,7 +42,8 @@
                 "ascii",
                 "-t",
                 "1-minute-bar-quotes",
-                "-C"
+                "-C",
+                "-I"
             ]
         },
         {
@@ -59,7 +60,8 @@
                 "ascii",
                 "-t",
                 "tick-data-quotes",
-                "-C"
+                "-C",
+                "-I"
             ]
         },
         {

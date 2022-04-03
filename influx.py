@@ -2,13 +2,13 @@ import multiprocessing, io
 import rx
 from rx import operators as ops
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from influxdb_client import Point, InfluxDBClient, WriteOptions
+from influxdb_client import Point, InfluxDBClient, WriteOptions, WritePrecision
 from influxdb_client.client.write_api import WriteType
 from urllib.request import urlopen
 from rich.progress import Progress
 from csv import DictReader
-from datetime import datetime
 import defs
+from fx_enums import TimePrecision
 
 class _Influx():
     def __init__(self, args, records_current_, records_next_, csv_chunks_queue_, csv_counter_, csv_progress_):
@@ -44,8 +44,39 @@ class _Influx():
         args = args_
 
     def parse_row(self, row):
-        print(row)
-        pass
+
+        ### This results in a "signed integer is greater than maximum" error
+        # return Point("forex") \
+        #     .tag("source", row["Source"]) \
+        #     .tag("platform", row["Platform"]) \
+        #     .tag("timeframe", row["Timeframe"]) \
+        #     .tag("instrument", row["Instrument"]) \
+        #     .field("bidquote", row["bidQuote"]) \
+        #     .field("askquote", row["askQuote"]) \
+        #     .time(row["msSinceEpochUTC"], write_precision=TimePrecision.ASCII_T.value)
+
+        ### Manually generating line-protocol works and does not generate an error.
+        ### This schema is not quite what I want
+        # return "forex,source=" + row["Source"] + \
+        #         ",platform=" + row["Platform"] + \
+        #         ",timeframe=" + row["Timeframe"] + \
+        #         ",instrument=" + row["Instrument"] + " " + \
+        #         "bidquote=" + str(row["bidQuote"]) + \
+        #         ",askquote=" + str(row["askQuote"]) + \
+        #         ",volume=" + str(row["Volume"]) + " " + \
+        #         str(row["msSinceEpochUTC"])
+
+        return row["Instrument"] + \
+            ",source=" + row["Source"] + \
+            ",platform=" + row["Platform"] + \
+            ",timeframe=" + row["Timeframe"] + " " + \
+            "bidquote=" + str(row["bidQuote"]) + \
+            ",askquote=" + str(row["askQuote"]) + \
+            ",volume=" + str(row["Volume"]) + " " + \
+            str(row["msSinceEpochUTC"])
+        
+        
+        
 
     def parse_rows(self, rows, record, total_size):
         _parsed_rows = list(map(self.parse_row, rows))
@@ -150,7 +181,7 @@ class _InfluxDBWriter(multiprocessing.Process):
                 self.csv_chunks_queue.task_done()
                 break
 
-            self.write_api.write(org=defs.INFLUX_ORG, bucket=defs.INFLUX_BUCKET, record=chunk)
+            self.write_api.write(org=defs.INFLUX_ORG, bucket=defs.INFLUX_BUCKET, record=chunk, write_precision=WritePrecision.MS)
             self.csv_chunks_queue.task_done()
 
     def terminate(self):

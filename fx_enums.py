@@ -1,40 +1,58 @@
 from enum import Enum
 from influxdb_client import WritePrecision
 
+
+# Majors 7
+# eurusd usdjpy gbpusd usdcad usdchf audusd nzdusd
+
+# Minors 7
+# eurgbp euraud gbpchf audnzd audcad audchf gbpaud usdmxn 
+
+# Crosses 10
+# eurchf eurcad eurnzd eurjpy gbpjpy chfjpy cadjpy audjpy nzdjpy gbpcad nzdcad sgdjpy
+
+# Exotics 7
+# eurtry usdtry usdsek usdnok usddkk usdzar usdhkd usdsgd eurpln eurhuf
+
+# metals
+# xauusd xauaud
+
+# indices
+# grxeur auxaud
 class Pairs(Enum):
-    eurusd = "EUR/USD"
-    eurchf = "EUR/CHF"
-    eurgbp = "EUR/GBP"
-    eurjpy = "EUR/JPY"
-    euraud = "EUR/AUD"
-    usdcad = "USD/CAD"
-    usdchf = "USD/CHF"
-    usdjpy = "USD/JPY"
-    usdmxn = "USD/MXN"
-    gbpchf = "GBP/CHF"
-    gbpjpy = "GBP/JPY"
-    gbpusd = "GBP/USD"
-    audjpy = "AUD/JPY"
-    audusd = "AUD/USD"
-    chfjpy = "CHF/JPY"
-    nzdjpy = "NZD/JPY"
-    nzdusd = "NZD/USD"
-    xauusd = "XAU/USD"
-    eurcad = "EUR/CAD"
-    audcad = "AUD/CAD"
-    cadjpy = "CAD/JPY"
-    uernzd = "EUR/NZD"
-    grxeur = "GRX/EUR"
-    nzdcad = "NZD/CAD"
-    sgdspy = "SGD/JPY"
-    usdhkd = "USD/HKD"
-    usdnok = "USD/NOK"
-    usdtry = "USD/TRY"
-    xauaud = "XAU/AUD"
-    audchf = "AUD/CHF"
-    auxaud = "AUX/AUD"
-    eurhuf = "EUR/HUF"
-    eurpln = "EUR/PLN"
+    eurusd = "EUR/USD" #
+    eurchf = "EUR/CHF" #
+    eurgbp = "EUR/GBP" #
+    eurjpy = "EUR/JPY" #
+    euraud = "EUR/AUD" #
+    usdcad = "USD/CAD" #
+    usdchf = "USD/CHF" #
+    usdjpy = "USD/JPY" #
+    usdmxn = "USD/MXN" #
+    gbpchf = "GBP/CHF" #
+    gbpjpy = "GBP/JPY" #
+    gbpusd = "GBP/USD" #
+    audjpy = "AUD/JPY" #
+    audusd = "AUD/USD" #
+    chfjpy = "CHF/JPY" #
+    nzdjpy = "NZD/JPY" #
+    nzdusd = "NZD/USD" #
+    xauusd = "XAU/USD" #
+    eurcad = "EUR/CAD" #
+    audcad = "AUD/CAD" #
+    cadjpy = "CAD/JPY" #
+    eurnzd = "EUR/NZD" #
+    grxeur = "GRX/EUR" #
+    nzdcad = "NZD/CAD" #
+    sgdjpy = "SGD/JPY" #
+    usdhkd = "USD/HKD" #
+    usdnok = "USD/NOK" #
+    usdtry = "USD/TRY" #
+    xauaud = "XAU/AUD" #
+    audchf = "AUD/CHF" #
+    auxaud = "AUX/AUD" #
+    eurhuf = "EUR/HUF" #
+    eurpln = "EUR/PLN" #
     frxeur = "FRX/EUR"
     hkxhkd = "HKX/HKD"
     nadchf = "NZD/CHF"
