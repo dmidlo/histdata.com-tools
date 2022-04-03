@@ -9,16 +9,24 @@ from influxdb_client import WritePrecision
 # eurgbp euraud gbpchf audnzd audcad audchf gbpaud usdmxn 
 
 # Crosses 10
-# eurchf eurcad eurnzd eurjpy gbpjpy chfjpy cadjpy audjpy nzdjpy gbpcad nzdcad sgdjpy
+# eurchf eurcad eurnzd eurjpy gbpjpy chfjpy cadjpy 
+# audjpy nzdjpy gbpcad nzdcad sgdjpy gbpnzd cadchf
+# 
 
 # Exotics 7
-# eurtry usdtry usdsek usdnok usddkk usdzar usdhkd usdsgd eurpln eurhuf
+# eurtry usdtry usdsek usdnok usddkk usdzar usdhkd 
+# usdsgd eurpln eurhuf nadchf usdhuf usdpln eurczk
+# eursek usdczk zarjpy eurdkk eurnok usddkk 
 
-# metals
-# xauusd xauaud
+# metals/commodities
+# xauusd xauaud xauchf bcousd wtiusd xaueur xagusd xaugbp
 
 # indices
-# grxeur auxaud
+# grxeur auxaud frxeur hkxhkd spxusd jpxjpy udxusd
+# nsxusd ukxgbp 
+
+# Crypto
+# etxeur
 class Pairs(Enum):
     eurusd = "EUR/USD" #
     eurchf = "EUR/CHF" #
@@ -53,39 +61,39 @@ class Pairs(Enum):
     auxaud = "AUX/AUD" #
     eurhuf = "EUR/HUF" #
     eurpln = "EUR/PLN" #
-    frxeur = "FRX/EUR"
-    hkxhkd = "HKX/HKD"
-    nadchf = "NZD/CHF"
-    spxusd = "SPX/USD"
-    usdhuf = "USD/HUF"
-    usdpln = "USD/PLN"
-    usdzar = "USD/ZAR"
-    xauchf = "XAU/CHF"
-    zarjpy = "ZAR/JPY"
-    bcousd = "BCO/USD"
-    etxeur = "ETX/EUR"
-    eurczk = "EUR/CZK"
-    eursek = "EUR/SEK"
-    gbpaud = "GBP/AUD"
-    gbpnzd = "GBP/NZD"
-    jpxjpy = "JPX/JPY"
-    udxusd = "UDX/USD"
-    usdczk = "USD/CZK"
-    usdsek = "USD/SEK"
-    wtiusd = "WTI/USD"
-    xaueur = "XAU/EUR"
-    audnzd = "AUD/NZD"
-    cadchf = "CAD/CHF"
-    eurdkk = "EUR/DKK"
-    eurnok = "EUR/NOK"
-    eurtry = "EUR/TRY"
-    gbpcad = "GBP/CAD"
-    nsxusd = "NSX/USD"
-    ukxgbp = "UKX/GBP"
-    usddkk = "USD/DKK"
-    usdsgd = "USD/SGD"
-    xagusd = "XAG/USD"
-    xaugbp = "XAU/GBP"
+    frxeur = "FRX/EUR" #
+    hkxhkd = "HKX/HKD" #
+    nadchf = "NZD/CHF" #
+    spxusd = "SPX/USD" #
+    usdhuf = "USD/HUF" #
+    usdpln = "USD/PLN" #
+    usdzar = "USD/ZAR" #
+    xauchf = "XAU/CHF" #
+    zarjpy = "ZAR/JPY" #
+    bcousd = "BCO/USD" #
+    etxeur = "ETX/EUR" #
+    eurczk = "EUR/CZK" #
+    eursek = "EUR/SEK" #
+    gbpaud = "GBP/AUD" #
+    gbpnzd = "GBP/NZD" #
+    jpxjpy = "JPX/JPY" #
+    udxusd = "UDX/USD" #
+    usdczk = "USD/CZK" #
+    usdsek = "USD/SEK" #
+    wtiusd = "WTI/USD" #
+    xaueur = "XAU/EUR" #
+    audnzd = "AUD/NZD" #
+    cadchf = "CAD/CHF" #
+    eurdkk = "EUR/DKK" #
+    eurnok = "EUR/NOK" #
+    eurtry = "EUR/TRY" #
+    gbpcad = "GBP/CAD" #
+    nsxusd = "NSX/USD" #
+    ukxgbp = "UKX/GBP" #
+    usddkk = "USD/DKK" #
+    usdsgd = "USD/SGD" #
+    xagusd = "XAG/USD" #
+    xaugbp = "XAU/GBP" #
 
     @classmethod
     def list_keys(cls):

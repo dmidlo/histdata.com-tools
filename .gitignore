@@ -12,3 +12,4 @@ __pycache__
 .pytest_cache/
 data/
 mp_influx_samp.py
+test.py

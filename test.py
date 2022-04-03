@@ -1,6 +1,6 @@
+from fx_enums import Pairs
 
-
-def test(row):
+def test_line_protocol(row):
     
     return row["Instrument"] + \
         ",source=" + row["Source"] + \
@@ -12,17 +12,23 @@ def test(row):
         str(row["msSinceEpochUTC"])
 
 
-# Source,Platform,Timeframe,Instrument,msSinceEpochUTC,bidQuote,askQuote,Volume
+# # Source,Platform,Timeframe,Instrument,msSinceEpochUTC,bidQuote,askQuote,Volume
 
-test_row = {
- "Source": "histdata.com",
- "Platform": "ASCII",
- "Timeframe": "T",
- "Instrument": "EURUSD",
- "msSinceEpochUTC": "1080795604000",
- "bidQuote": "1.228000",
- "askQuote": "1.227600",
- "Volume": "0"
-}
+# test_row = {
+#  "Source": "histdata.com",
+#  "Platform": "ASCII",
+#  "Timeframe": "T",
+#  "Instrument": "EURUSD",
+#  "msSinceEpochUTC": "1080795604000",
+#  "bidQuote": "1.228000",
+#  "askQuote": "1.227600",
+#  "Volume": "0"
+# }
 
-print(test(test_row))
+# print(test_line_protocol(test_row))
+
+def test_count_pairs():
+    print(len(Pairs))
+
+test_count_pairs()
+
