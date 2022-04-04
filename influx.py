@@ -9,6 +9,7 @@ from rich.progress import Progress
 from csv import DictReader
 import defs
 from fx_enums import TimePrecision
+import os, sys
 
 class _Influx():
     def __init__(self, args, records_current_, records_next_, csv_chunks_queue_, csv_counter_, csv_progress_):
@@ -87,37 +88,54 @@ class _Influx():
 
     def importCSV(self, record):
         if "CLEAN" in record.status:
-            status_elements = record.status.split("_")
 
+            status_elements = record.status.split("_")
+            csv_path = record.data_dir + record.csv_filename
             file_endpoint = "file://" + record.data_dir + record.csv_filename
 
-            res = urlopen(file_endpoint)
+            try:
+                res = urlopen(file_endpoint)
 
-            if res.headers:
-                content_length = res.headers['content-length']
+                if res.headers:
+                    content_length = res.headers['content-length']
 
-            io_wrapper = _ProgressTextIOWrapper(res)
-            io_wrapper.progress = csv_progress
+                io_wrapper = _ProgressTextIOWrapper(res)
+                io_wrapper.progress = csv_progress
 
-            with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 2),
-                                                    initializer=self.init_counters, 
-                                                    initargs=(csv_chunks_queue,
-                                                                csv_counter,
-                                                                csv_progress,
-                                                                records_current,
-                                                                records_next,
-                                                                self.args.copy())) as executor:
-                    data = rx.from_iterable(DictReader(io_wrapper)
-                                    ).pipe(
-                                        ops.buffer_with_count(10_000),
-                                        ops.flat_map(
-                                            lambda rows: executor.submit(self.parse_rows, rows, record, content_length)))
-                    data.subscribe(
-                        on_next=lambda x: None,
-                        on_error=lambda er: print(f"Unexpected error: {er}")
-                    )
+                with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 2),
+                                                        initializer=self.init_counters, 
+                                                        initargs=(csv_chunks_queue,
+                                                                    csv_counter,
+                                                                    csv_progress,
+                                                                    records_current,
+                                                                    records_next,
+                                                                    self.args.copy())) as executor:
+                        data = rx.from_iterable(DictReader(io_wrapper)
+                                        ).pipe(
+                                            ops.buffer_with_count(10_000),
+                                            ops.flat_map(
+                                                lambda rows: executor.submit(self.parse_rows, rows, record, content_length)))
+                        data.subscribe(
+                            on_next=lambda x: None,
+                            on_error=lambda er: print(f"Unexpected error: {er}")
+                        )
+            except:
+                print("Unexpected error:", sys.exc_info()[0])
+                record.status = f"INFLUX_{status_elements[1]}_UPLOAD_FAIL"
+                record.delete_info_file()
+                records_next.put(record)
+                raise
 
-            record.status = f"INFLUX_{status_elements[1]}_UPLOAD"
+            finally:
+                os.remove(csv_path)
+                record.status = f"INFLUX_{status_elements[1]}_UPLOAD"
+                record.write_info_file(base_dir=args['default_download_dir'])
+                records_next.put(record)
+                records_current.task_done()
+                return
+        else:
+            records_next.put(record)
+
         records_current.task_done()
 
     def ImportCSVs(self, records_current, records_next, csv_chunks_queue, csv_counter, csv_record):

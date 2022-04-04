@@ -23,10 +23,8 @@ from influxdb_client import WritePrecision
 
 # indices
 # grxeur auxaud frxeur hkxhkd spxusd jpxjpy udxusd
-# nsxusd ukxgbp 
+# nsxusd ukxgbp etxeur
 
-# Crypto
-# etxeur
 class Pairs(Enum):
     eurusd = "EUR/USD" #
     eurchf = "EUR/CHF" #
