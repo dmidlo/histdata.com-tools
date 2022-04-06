@@ -188,8 +188,8 @@ class _InfluxDBWriter(multiprocessing.Process):
         self.client = InfluxDBClient(url=defs.INFLUX_URL, token=defs.INFLUX_TOKEN, org=defs.INFLUX_ORG, debug=False)
         self.write_api = self.client.write_api(write_options=WriteOptions(
                                                                 write_type=WriteType.batching,
-                                                                batch_size=50_000,
-                                                                flush_interval=10_000))
+                                                                batch_size=5_000,
+                                                                flush_interval=5_000))
     def run(self):
         while True:
             chunk = self.csv_chunks_queue.get()
