@@ -5,7 +5,7 @@ import csv
 
 from datetime import datetime
 import pytz
-from fx_enums import TimeFormat
+from histdatacom.fx_enums import TimeFormat
 
 from rich import print
 

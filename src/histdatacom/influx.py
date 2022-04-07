@@ -7,8 +7,8 @@ from influxdb_client.client.write_api import WriteType
 from urllib.request import urlopen
 from rich.progress import Progress
 from csv import DictReader
-import defs
-from fx_enums import TimePrecision
+#import defs
+from histdatacom.fx_enums import TimePrecision
 import os, sys
 
 class _Influx():

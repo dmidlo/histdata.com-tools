@@ -1,5 +1,5 @@
 import argparse, sys
-from fx_enums import Pairs, Platform, Timeframe
+from histdatacom.fx_enums import Pairs, Platform, Timeframe
 
 class ArgsNamespace:
     """ An intra-class DTO for Default Arguments for _HistDataCom class. """

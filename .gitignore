@@ -13,3 +13,6 @@ __pycache__
 data/
 mp_influx_samp.py
 test.py
+build/
+dist/
+*.egg-info

@@ -7,9 +7,9 @@ from bs4 import BeautifulSoup
 
 from rich import print
 
-from utils import get_query_string, create_full_path
-from fx_enums import Timeframe, Platform
-from records import Record
+from histdatacom.utils import get_query_string, create_full_path
+from histdatacom.fx_enums import Timeframe, Platform
+from histdatacom.records import Record
 
 class _URLs:
     def __init__(self, args, records_current_, records_next_):

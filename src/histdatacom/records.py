@@ -1,8 +1,8 @@
 import queue, pickle, os
 from rich import print
 from multiprocessing import current_process
-from fx_enums import Timeframe, Platform
-from utils import get_month_from_datemonth, get_year_from_datemonth, get_query_string, create_full_path
+from histdatacom.fx_enums import Timeframe, Platform
+from histdatacom.utils import get_month_from_datemonth, get_year_from_datemonth, get_query_string, create_full_path
 
 class Record:
         def __init__(self,

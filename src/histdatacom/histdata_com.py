@@ -1,11 +1,11 @@
-import random, datetime
 from multiprocessing import managers
-from cli import ArgParser
-from records import Records
-from utils import get_random_seed, set_working_data_dir
-from urls import _URLs
-from csvs import _CSVs
-from influx import _Influx
+from histdatacom.cli import ArgParser
+from histdatacom.records import Records
+from histdatacom.utils import set_working_data_dir
+from histdatacom.urls import _URLs
+from histdatacom.csvs import _CSVs
+from histdatacom.influx import _Influx
+import sys
 
 # !Manually Applied Backport of:
 # https://github.com/python/cpython/commit/8aa45de6c6d84397b772bad7e032744010bbd456
@@ -23,8 +23,6 @@ class _HistDataCom:
                         csv_counter,
                         csv_progress,
                         **kwargs): 
-        
-        random.seed(get_random_seed())
 
         """ Initialization for _HistDataCom Class"""
         # Set User () or Default Arguments respectively utilizing the self.ArgParser and self.ArgsNamespace classes.
@@ -92,8 +90,6 @@ class HistDataCom():
     def __call__(self,
         records_manager = managers.SyncManager(),
         **kwargs):
-        
-        startTime = datetime.datetime.now()
 
         records_manager.register("Records", Records)
         records_manager.start()
@@ -120,7 +116,8 @@ class HistDataCom():
                                 csv_progress)
         scraper.run()
 
-if __name__ == '__main__':
+def main():
     HistDataCom()()
 
-    
+if __name__ == '__main__':    
+    sys.exit(main())
