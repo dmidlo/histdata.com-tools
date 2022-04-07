@@ -18,18 +18,27 @@ Multi-threaded/Multi-Process Downloader for Currency Exchange Rates from Histdat
 
 1. Create a virtual environment
    - `python -m venv venv`
+
 2. Activate the virtual environment
    - `source venv/bin/activate`
    - validate with `which python`
      - result should be `.../histdata_com_tools/venv/bin/python`
-3. Install dependencies
-   - `pip install influxdb_client rich requests bs4`
-4. Apply Backport if not already patched upstream
+
+3. Install CA certificate (macOS)
+   - `pip install certifi`
+
+4. Build and install the app
+   - `python setup.py build`
+   - `python setup.py install`
+
+5. Apply Backport if not already patched upstream
    - This seems to already be upstream, but you can verify if concerned
    - `lib/python3.XXX/multiprocessing/managers.py > AutoProxy`
    - `https://github.com/python/cpython/commit/8aa45de6c6d84397b772bad7e032744010bbd456`
-5. Run `python histdata_com.py` to view help message and flags
-6. Test a run with `python histdata_com.py -p eurusd -P ascii -t tick-data-quotes`
+  
+6. Run `histdatacom` to view help message and flags
+
+7. Test a run with `histdatacom -p eurusd -P ascii -t 1-minute-bar-quotes`
     - Data is found in the `data/` directory unless otherwise specified with the -d flag
 
 ### CLI Help
@@ -55,7 +64,7 @@ options:
   -C [CLEAN_CSVS], --clean_csvs [CLEAN_CSVS]
                         add data headers to CSVs and convert EST(noDST) to UTC timestamp
   -I [IMPORT_TO_INFLUXDB], --import_to_influxdb [IMPORT_TO_INFLUXDB]
-                        import csv data to influxdb instance. Use defs.py to configure. Implies -C --clean_csvs
+                        import csv data to influxdb instance. Use influxdb.yaml to configure. Implies -C --clean_csvs
   -i INDEX_URL, --index_url INDEX_URL
                         url to the web page that will be scraped for top-order links
   -c HTML_CONTAINER_CLASSNAME, --html_container_classname HTML_CONTAINER_CLASSNAME

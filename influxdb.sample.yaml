@@ -1,0 +1,5 @@
+influxdb:
+  org: influx_org
+  bucket: data_bucket
+  url: influx_server_api_url
+  token: influx_user_token

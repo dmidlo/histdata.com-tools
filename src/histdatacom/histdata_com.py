@@ -1,7 +1,7 @@
 from multiprocessing import managers
 from histdatacom.cli import ArgParser
 from histdatacom.records import Records
-from histdatacom.utils import set_working_data_dir
+from histdatacom.utils import set_working_data_dir, load_influx_yaml
 from histdatacom.urls import _URLs
 from histdatacom.csvs import _CSVs
 from histdatacom.influx import _Influx
@@ -50,20 +50,30 @@ class _HistDataCom:
                 "Accept-Encoding": "gzip, deflate",
                 "Accept-Language": "en-US,en;q=0.9"}
 
+        if self.args["import_to_influxdb"] == 1:
+            influx_yaml = load_influx_yaml()
+            self.args['INFLUX_ORG'] = influx_yaml['influxdb']['org']
+            self.args['INFLUX_BUCKET'] = influx_yaml['influxdb']['bucket']
+            self.args['INFLUX_URL'] = influx_yaml['influxdb']['url']
+            self.args['INFLUX_TOKEN'] = influx_yaml['influxdb']['token']
+
         self.records_current = records_current
         self.records_next = records_next
-        self.csv_chunks_queue = csv_chunks_queue
-        self.csv_counter = csv_counter
-        self.csv_progress = csv_progress
 
         self.Urls = _URLs(self.args, self.records_current, self.records_next)
         self.Csvs = _CSVs(self.args, self.records_current, self.records_next)
-        self.Influx = _Influx(self.args,
-                                self.records_current,
-                                self.records_next,
-                                self.csv_chunks_queue,
-                                self.csv_counter,
-                                self.csv_progress)
+
+        if self.args["import_to_influxdb"] == 1:
+            self.csv_chunks_queue = csv_chunks_queue
+            self.csv_counter = csv_counter
+            self.csv_progress = csv_progress
+
+            self.Influx = _Influx(self.args,
+                                    self.records_current,
+                                    self.records_next,
+                                    self.csv_chunks_queue,
+                                    self.csv_counter,
+                                    self.csv_progress)
 
     def run(self):
         self.Urls.walkIndexURLs(self.records_current, self.records_next)

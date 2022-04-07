@@ -30,7 +30,8 @@ setup(
         'influxdb_client',
         'rich',
         'requests',
-        'bs4'
+        'bs4',
+        'pyyaml'
     ],
 )
 

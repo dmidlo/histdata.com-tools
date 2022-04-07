@@ -70,7 +70,7 @@ class ArgParser(argparse.ArgumentParser):
                 type=int, 
                 nargs="?",
                 const=1,
-                help='import csv data to influxdb instance. Use defs.py to configure. Implies -C --clean_csvs')
+                help='import csv data to influxdb instance. Use influxdb.yaml to configure. Implies -C --clean_csvs')
         self.add_argument(
                 '-i','--index_url',
                 type=str,
