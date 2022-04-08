@@ -108,7 +108,7 @@ class _Influx():
                                                                     self.args.copy())) as executor:
                         data = rx.from_iterable(DictReader(io_wrapper)
                                         ).pipe(
-                                            ops.buffer_with_count(25_000),
+                                            ops.buffer_with_count(40_000),
                                             ops.flat_map(
                                                 lambda rows: executor.submit(self.parse_rows, rows, record, content_length)))
                         data.subscribe(
@@ -123,7 +123,7 @@ class _Influx():
                 raise
 
             finally:
-                #os.remove(csv_path)
+                os.remove(csv_path)
                 record.status = f"INFLUX_{status_elements[1]}_UPLOAD"
                 record.write_info_file(base_dir=args['default_download_dir'])
                 records_next.put(record)
@@ -185,8 +185,8 @@ class _InfluxDBWriter(multiprocessing.Process):
         self.client = InfluxDBClient(url=self.args['INFLUX_URL'], token=self.args['INFLUX_TOKEN'], org=self.args['INFLUX_ORG'], debug=False)
         self.write_api = self.client.write_api(write_options=WriteOptions(
                                                                 write_type=WriteType.batching,
-                                                                batch_size=25_000,
-                                                                flush_interval=12_000))
+                                                                batch_size=40_000,
+                                                                flush_interval=20_000))
     def run(self):
         while True:
             chunk = self.csv_chunks_queue.get()
