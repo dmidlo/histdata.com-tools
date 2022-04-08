@@ -40,7 +40,7 @@ class _URLs:
 
                 records_current.put(record)
                 
-        create_full_path(f"{self.args['working_data_directory']}")
+        create_full_path(f"{self.args['data_directory']}")
 
     def init_counters(self, records_current_, records_next_, args_):
         global records_current
@@ -213,7 +213,7 @@ class _URLs:
             
         records_current.join()
         records_next.dump_to_queue(records_current)
-        records_current.write_pickle(f"{self.args['working_data_directory']}/{self.args['queue_filename']}")
+        records_current.write_pickle(f"{self.args['data_directory']}/{self.args['queue_filename']}")
 
     def download_zip(self, record):
         
@@ -292,7 +292,7 @@ class _URLs:
         records_current.join()
 
         records_next.dump_to_queue(records_current)
-        records_current.write_pickle(f"{self.args['working_data_directory']}/{self.args['queue_filename']}")
+        records_current.write_pickle(f"{self.args['data_directory']}/{self.args['queue_filename']}")
 
     @classmethod
     def get_page_data(cls, url):

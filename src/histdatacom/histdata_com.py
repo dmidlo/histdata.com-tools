@@ -35,7 +35,7 @@ class _HistDataCom:
         #       - .copy(): decouple for GC using a hard copy of user args
         self.args = ArgParser._arg_list_to_set(vars(ArgParser()())).copy()
         self.args['base_url'] = _URLs.get_base_url(self.args['index_url'])
-        self.args['default_download_dir'] = set_working_data_dir(self.args['working_data_directory'])
+        self.args['default_download_dir'] = set_working_data_dir(self.args['data_directory'])
         self.args["post_headers"] = {
                 "Host": "www.histdata.com",
                 "Connection": "keep-alive",

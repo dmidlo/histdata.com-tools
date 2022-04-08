@@ -13,7 +13,7 @@ class ArgsNamespace:
         self.timeframes = Timeframe.list_keys()
         self.index_url = 'http://www.histdata.com/download-free-forex-data/'
         self.html_container_classname = 'page-content'
-        self.working_data_directory = "data"
+        self.data_directory = "data"
         self.urls_filename = ".urls"
         self.queue_filename = ".queue"
         self.clean_csvs = 0
@@ -72,30 +72,9 @@ class ArgParser(argparse.ArgumentParser):
                 const=1,
                 help='import csv data to influxdb instance. Use influxdb.yaml to configure. Implies -C --clean_csvs')
         self.add_argument(
-                '-i','--index_url',
+                '-d','--data-directory',
                 type=str,
-                help='url to the web page that will be scraped for top-order links')
-        self.add_argument(
-                '-c','--html_container_classname',
-                type=str,
-                help='search url content for parent element with this html/css class for links')
-        self.add_argument(
-                '-d','--working-data-directory',
-                type=str,
-                help='Not an Executable Search Path! This directory is used to perform work. default is "data" in the current direcotry')
-
-        # set up the run subcommand
-        # TODO: Insert run argument 'run set --majors {platform} {timeframe}
-        # TODO: Insert run argument 'run set --oanda {platform} {timeframe} 
-        self.sp = self.add_subparsers(parser_class=argparse.ArgumentParser)
-        self.sp_run = self.sp.add_parser("run", help='Use "run -d" to execute using the default settings')
-        self.sp_run.add_argument(
-            "-d","--with-all-defaults", 
-            type=int, 
-            nargs="?",
-            const=1,
-            required=True,
-            help='Use "run -d" to execute using the default settings')
+                help='Not an Executable Search Path! This directory is used to perform work. default is "data" in the current directory')
 
         # prevent running from cli with no arguments
         if len(sys.argv)==1:

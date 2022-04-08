@@ -13,6 +13,7 @@ Multi-threaded/Multi-Process Downloader for Currency Exchange Rates from Histdat
 ## In Progress
 
 - Export data to InfluxDB
+- Consider converting initial csv to alternative format for more performant processing (feather, parquet, jay, pickle, hdf5)
 
 - ## Setup
 
@@ -44,14 +45,8 @@ Multi-threaded/Multi-Process Downloader for Currency Exchange Rates from Histdat
 ### CLI Help
 
 ```txt
-python histdata_com.py -h
-usage: histdata_com.py [-h] [-p PAIR [PAIR ...]] [-P PLATFORM [PLATFORM ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-C [CLEAN_CSVS]] [-I [IMPORT_TO_INFLUXDB]] [-i INDEX_URL]
-                       [-c HTML_CONTAINER_CLASSNAME] [-d WORKING_DATA_DIRECTORY]
-                       {run} ...
-
-positional arguments:
-  {run}
-    run                 Use "run -d" to execute using the default settings
+histdatacom
+usage: histdatacom [-h] [-p PAIR [PAIR ...]] [-P PLATFORM [PLATFORM ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-C [CLEAN_CSVS]] [-I [IMPORT_TO_INFLUXDB]] [-d DATA_DIRECTORY]
 
 options:
   -h, --help            show this help message and exit
@@ -65,10 +60,6 @@ options:
                         add data headers to CSVs and convert EST(noDST) to UTC timestamp
   -I [IMPORT_TO_INFLUXDB], --import_to_influxdb [IMPORT_TO_INFLUXDB]
                         import csv data to influxdb instance. Use influxdb.yaml to configure. Implies -C --clean_csvs
-  -i INDEX_URL, --index_url INDEX_URL
-                        url to the web page that will be scraped for top-order links
-  -c HTML_CONTAINER_CLASSNAME, --html_container_classname HTML_CONTAINER_CLASSNAME
-                        search url content for parent element with this html/css class for links
-  -d WORKING_DATA_DIRECTORY, --working-data-directory WORKING_DATA_DIRECTORY
+  -d DATA_DIRECTORY, --data-directory DATA_DIRECTORY
                         Not an Executable Search Path! This directory is used to perform work. default is "data" in the current directory
 ```

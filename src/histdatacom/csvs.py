@@ -89,7 +89,7 @@ class _CSVs:
         records_current.join()
 
         records_next.dump_to_queue(records_current)
-        records_current.write_pickle(f"{self.args['working_data_directory']}/{self.args['queue_filename']}")
+        records_current.write_pickle(f"{self.args['data_directory']}/{self.args['queue_filename']}")
     
     def cleanCSV(self, record):
         
@@ -170,7 +170,7 @@ class _CSVs:
         records_current.join()
 
         records_next.dump_to_queue(records_current)
-        records_current.write_pickle(f"{self.args['working_data_directory']}/{self.args['queue_filename']}")
+        records_current.write_pickle(f"{self.args['data_directory']}/{self.args['queue_filename']}")
 
     @classmethod
     def header_match(cls, platform, timeframe):

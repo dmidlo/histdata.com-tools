@@ -67,13 +67,13 @@ class _Influx():
         #         str(row["msSinceEpochUTC"])
 
         return row["Instrument"] + \
-            ",source=" + row["Source"] + \
-            ",platform=" + row["Platform"] + \
-            ",timeframe=" + row["Timeframe"] + " " + \
-            "bidquote=" + str(row["bidQuote"]) + \
-            ",askquote=" + str(row["askQuote"]) + \
-            ",volume=" + str(row["Volume"]) + " " + \
-            str(row["msSinceEpochUTC"])    
+            ",source=" + row["Source"].replace(" ", "") + \
+            ",platform=" + row["Platform"].replace(" ", "") + \
+            ",timeframe=" + row["Timeframe"].replace(" ", "") + " " + \
+            "bidquote=" + str(row["bidQuote"]).replace(" ", "") + \
+            ",askquote=" + str(row["askQuote"]).replace(" ", "") + \
+            ",volume=" + str(row["Volume"]).replace(" ", "") + " " + \
+            str(row["msSinceEpochUTC"]).replace(" ", "")    
 
     def parse_rows(self, rows, record, total_size):
         _parsed_rows = list(map(self.parse_row, rows))
@@ -108,7 +108,7 @@ class _Influx():
                                                                     self.args.copy())) as executor:
                         data = rx.from_iterable(DictReader(io_wrapper)
                                         ).pipe(
-                                            ops.buffer_with_count(10_000),
+                                            ops.buffer_with_count(25_000),
                                             ops.flat_map(
                                                 lambda rows: executor.submit(self.parse_rows, rows, record, content_length)))
                         data.subscribe(
@@ -116,14 +116,14 @@ class _Influx():
                             on_error=lambda er: print(f"Unexpected error: {er}")
                         )
             except:
-                print("Unexpected error:", sys.exc_info()[0])
+                print("Unexpected error from here:", sys.exc_info()[0],"\n", record)
                 record.status = f"INFLUX_{status_elements[1]}_UPLOAD_FAIL"
                 record.delete_info_file()
                 records_next.put(record)
                 raise
 
             finally:
-                os.remove(csv_path)
+                #os.remove(csv_path)
                 record.status = f"INFLUX_{status_elements[1]}_UPLOAD"
                 record.write_info_file(base_dir=args['default_download_dir'])
                 records_next.put(record)
@@ -175,7 +175,7 @@ class _Influx():
         csv_chunks_queue.join()
 
         records_next.dump_to_queue(records_current)
-        records_current.write_pickle(f"{self.args['working_data_directory']}/{self.args['queue_filename']}")
+        records_current.write_pickle(f"{self.args['data_directory']}/{self.args['queue_filename']}")
 
 class _InfluxDBWriter(multiprocessing.Process):
     def __init__(self, args, csv_chunks_queue):
@@ -185,8 +185,8 @@ class _InfluxDBWriter(multiprocessing.Process):
         self.client = InfluxDBClient(url=self.args['INFLUX_URL'], token=self.args['INFLUX_TOKEN'], org=self.args['INFLUX_ORG'], debug=False)
         self.write_api = self.client.write_api(write_options=WriteOptions(
                                                                 write_type=WriteType.batching,
-                                                                batch_size=5_000,
-                                                                flush_interval=1_000))
+                                                                batch_size=25_000,
+                                                                flush_interval=12_000))
     def run(self):
         while True:
             chunk = self.csv_chunks_queue.get()

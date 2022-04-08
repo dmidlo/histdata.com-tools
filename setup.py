@@ -31,7 +31,10 @@ setup(
         'rich',
         'requests',
         'bs4',
-        'pyyaml'
+        'pyyaml',
+        'rx',
+        'argparse',
+        'pytz'
     ],
 )
 
