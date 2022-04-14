@@ -76,19 +76,20 @@ class _HistDataCom:
                                     self.csv_progress)
 
     def run(self):
-        self.Urls.walkIndexURLs(self.records_current, self.records_next)
-        self.Urls.download_zips(self.records_current, self.records_next)
-        self.Csvs.extractCSVs(self.records_current, self.records_next)
+        self.Urls.populate_initial_queue(records_next)
+        # self.Urls.walkIndexURLs(self.records_current, self.records_next)
+        # self.Urls.download_zips(self.records_current, self.records_next)
+        # self.Csvs.extractCSVs(self.records_current, self.records_next)
 
-        if (self.args["clean_csvs"] == 1) or (self.args["import_to_influxdb"] == 1):
-            self.Csvs.cleanCSVs(self.records_current, self.records_next)
+        # if (self.args["clean_csvs"] == 1) or (self.args["import_to_influxdb"] == 1):
+        #     self.Csvs.cleanCSVs(self.records_current, self.records_next)
 
-        if self.args["import_to_influxdb"] == 1:
-            self.Influx.ImportCSVs(self.records_current,
-                                    self.records_next,
-                                    self.csv_chunks_queue,
-                                    self.csv_counter,
-                                    self.csv_progress)
+        # if self.args["import_to_influxdb"] == 1:
+        #     self.Influx.ImportCSVs(self.records_current,
+        #                             self.records_next,
+        #                             self.csv_chunks_queue,
+        #                             self.csv_counter,
+        #                             self.csv_progress)
 
 class HistDataCom():
     # TODO: presently there is no execution api for calls from other programs.

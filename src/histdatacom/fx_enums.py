@@ -106,6 +106,7 @@ class Platform(Enum):
     NT = "ninjatrader"
     MS = "metastock"
     ASCII = "ascii"
+    XLSX = "excel"
 
     @classmethod
     def list_keys(cls):
