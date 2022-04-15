@@ -9,7 +9,7 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "args": [
-                "-DX",
+                "-DXC",
                 "-p","usdmxn",
                 "-P","ascii",
                 "-t","tick-data-quotes",
