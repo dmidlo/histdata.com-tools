@@ -11,15 +11,14 @@ class ArgsNamespace:
     def __init__(self):
         self.download_data_archives = False
         self.extract_csvs = False
+        self.clean_data = False
         self.pairs = Pairs.list_keys()
         self.platforms = Platform.list_values()
         self.timeframes = Timeframe.list_keys()
         self.start_yearmonth = "2000-00"
         self.end_yearmonth = get_current_datemonth_GMTplus5()
         self.data_directory = "data"
-        self.clean_csvs = 0
         self.import_to_influxdb = 0
-        self.with_all_defaults = 0
 
 class ArgParser(argparse.ArgumentParser):
     """ Encapsulation class for argparse related operations """
@@ -48,6 +47,10 @@ class ArgParser(argparse.ArgumentParser):
                 action='store_true',
                 help='histdata.com delivers zip files.  use the -X flag to extract them to .csv.')
         self.add_argument(
+                "-C","--clean_data", 
+                action='store_true',
+                help='add data headers to CSVs and convert EST(noDST) to UTC timestamp')
+        self.add_argument(
                 '-p','--pairs',
                 nargs='+',
                 type=str,
@@ -75,12 +78,6 @@ class ArgParser(argparse.ArgumentParser):
         self.add_argument(
                 "-e","--end_yearmonth", 
                 type=str,
-                help='add data headers to CSVs and convert EST(noDST) to UTC timestamp')
-        self.add_argument(
-                "-C","--clean_csvs", 
-                type=int,
-                nargs="?",
-                const=1,
                 help='add data headers to CSVs and convert EST(noDST) to UTC timestamp')
         self.add_argument(
                 "-I","--import_to_influxdb", 
