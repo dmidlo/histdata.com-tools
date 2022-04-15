@@ -1,4 +1,5 @@
-import os, yaml, sys
+import os, yaml, sys, pytz, re
+from datetime import datetime
 
 def get_month_from_datemonth(datemonth):
     if len(datemonth) > 4:
@@ -35,3 +36,12 @@ def load_influx_yaml():
         print("\n        there is no influxdb.yaml file in working directory.")
         print("\n        did you forget to set it up?\n")
         sys.exit()
+
+def get_current_datemonth_GMTplus5():
+    now = datetime.now().astimezone()
+    GMTplus5 = now.astimezone(pytz.timezone("Etc/GMT+5"))
+    return f"{GMTplus5.year}{GMTplus5.strftime('%m')}"
+
+def replace_date_punct(datemonth_str):
+    data_datemonth = re.sub("[-_.:]", "", datemonth_str)
+    return data_datemonth

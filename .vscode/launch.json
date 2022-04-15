@@ -1,189 +1,30 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+        {
+            "name": "Python: python -m histdatacom",
+            "type": "python",
+            "request": "launch",
+            "module": "histdatacom",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "-p","usdmxn",
+                "-P","ascii",
+                "-t","tick-data-quotes",//"1-minute-bar-quotes",
+                "-s","2021-00",
+                "-e","2022-04",
+                "-C",
+                "-I"
+            ],
+            "justMyCode": true
+        },
         {
             "name": "Python: Current File",
             "type": "python",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal"
-        },
-        {
-            "name": "Python: histdata_com.py - EURUSD - Metatrader - 1-Minute-Bar-Quotes",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/histdata_com.py",
-            "cwd": "${fileDirname}",
-            "console": "integratedTerminal",
-            "args": [
-                "-p",
-                "eurusd",
-                "-P",
-                "metatrader",
-                "-t",
-                "1-minute-bar-quotes",
-                "-C"
-            ]
-        },
-        {
-            "name": "Python: histdata_com.py - EURUSD - ASCII - 1-Minute-Bar-Quotes",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/histdata_com.py",
-            "cwd": "${fileDirname}",
-            "console": "integratedTerminal",
-            "args": [
-                "-p",
-                "eurusd",
-                "-P",
-                "ascii",
-                "-t",
-                "1-minute-bar-quotes",
-                "-C",
-                "-I"
-            ]
-        },
-        {
-            "name": "Python: histdata_com.py - EURUSD - ASCII - Tick-Data-Quotes",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/histdata_com.py",
-            "console": "integratedTerminal",
-            "cwd": "${fileDirname}",
-            "args": [
-                "-p",
-                "eurusd",
-                "-P",
-                "ascii",
-                "-t",
-                "tick-data-quotes",
-                "-C",
-                "-I"
-            ]
-        },
-        {
-            "name": "Python: histdata_com.py - Single Pair (EURUSD) - NinjaTrader - M1",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/histdata_com.py",
-            "console": "integratedTerminal",
-            "cwd": "${fileDirname}",
-            "args": [
-                "-p",
-                "eurusd",
-                "-P",
-                "ninjatrader",
-                "-t",
-                "1-minute-bar-quotes",
-                "-C"
-            ]
-        },
-        {
-            "name": "Python: histdata_com.py - Single Pair (EURUSD) - NinjaTrader - tick-last",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/histdata_com.py",
-            "console": "integratedTerminal",
-            "cwd": "${fileDirname}",
-            "args": [
-                "-p",
-                "eurusd",
-                "-P",
-                "ninjatrader",
-                "-t",
-                "tick-last-quotes",
-                "-C"
-            ]
-        },
-        {
-            "name": "Python: histdata_com.py - Single Pair (EURUSD) - NinjaTrader - tick-bid",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/histdata_com.py",
-            "console": "integratedTerminal",
-            "cwd": "${fileDirname}",
-            "args": [
-                "-p",
-                "eurusd",
-                "-P",
-                "ninjatrader",
-                "-t",
-                "tick-bid-quotes",
-                "-C"
-            ]
-        },
-        {
-            "name": "Python: histdata_com.py - Single Pair (EURUSD) - NinjaTrader - tick-ask",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/histdata_com.py",
-            "console": "integratedTerminal",
-            "cwd": "${fileDirname}",
-            "args": [
-                "-p",
-                "eurusd",
-                "-P",
-                "ninjatrader",
-                "-t",
-                "tick-ask-quotes",
-                "-C"
-            ]
-        },
-        {
-            "name": "Python: histdata_com.py - Single Pair - All Platforms and Timeframes",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/histdata_com.py",
-            "console": "integratedTerminal",
-            "cwd": "${fileDirname}",
-            "args": [
-                "-p",
-                "eurusd",
-                "-C"
-            ]
-        },
-        {
-            "name": "Python: histdata_com.py - All Pairs - ASCII T",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/histdata_com.py",
-            "console": "integratedTerminal",
-            "cwd": "${fileDirname}",
-            "args": [
-                "-P",
-                "ascii",
-                "-t",
-                "tick-data-quotes",
-                "-C"
-            ]
-        },
-        {
-            "name": "Python: histdata_com.py - Run w/All Defaults",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/histdata_com.py",
-            "console": "integratedTerminal",
-            "cwd": "${fileDirname}",
-            "args": [
-                "run",
-                "-d"
-            ]
-        },
-        {
-            "name": "Python: histdata_com.py - set --oanda",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/histdata_com.py",
-            "console": "integratedTerminal",
-            "cwd": "${fileDirname}",
-            "args": [
-                "run",
-                "set",
-                "-o"
-            ]
         }
     ]
 }
