@@ -69,7 +69,8 @@ class _HistDataCom:
         if self.args["download_data_archives"]:
             self.Urls.downloadZIPs(self.records_current, self.records_next)
             
-        #self.Csvs.extractCSVs(self.records_current, self.records_next)
+        if self.args["extract_csvs"]:
+            self.Csvs.extractCSVs(self.records_current, self.records_next)
 
         if (self.args["clean_csvs"] == 1) or (self.args["import_to_influxdb"] == 1):
             self.Csvs.cleanCSVs(self.records_current, self.records_next)

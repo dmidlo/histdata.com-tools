@@ -10,6 +10,7 @@ class ArgsNamespace:
     # user enters args in the shell, these values will be respectively overwritten
     def __init__(self):
         self.download_data_archives = False
+        self.extract_csvs = False
         self.pairs = Pairs.list_keys()
         self.platforms = Platform.list_values()
         self.timeframes = Timeframe.list_keys()
@@ -42,6 +43,10 @@ class ArgParser(argparse.ArgumentParser):
                 "-D","--download_data_archives", 
                 action='store_true',
                 help='download specified pairs/platforms/timeframe and create data files')
+        self.add_argument(
+                "-X","--extract_csvs", 
+                action='store_true',
+                help='histdata.com delivers zip files.  use the -X flag to extract them to .csv.')
         self.add_argument(
                 '-p','--pairs',
                 nargs='+',
