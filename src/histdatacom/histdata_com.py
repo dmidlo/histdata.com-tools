@@ -35,6 +35,7 @@ class _HistDataCom:
         #       - .copy(): decouple for GC using a hard copy of user args
         self.args = ArgParser._arg_list_to_set(vars(ArgParser()())).copy()
         self.args['default_download_dir'] = set_working_data_dir(self.args['data_directory'])
+        self.args['queue_filename'] = ".queue"
         
         if self.args["import_to_influxdb"] == 1:
             influx_yaml = load_influx_yaml()
@@ -64,8 +65,11 @@ class _HistDataCom:
     def run(self):
         self.Urls.populateInitialQueue(self.records_current, self.records_next)
         self.Urls.validateURLs(self.records_current, self.records_next)
-        self.Urls.downloadZIPs(self.records_current, self.records_next)
-        self.Csvs.extractCSVs(self.records_current, self.records_next)
+
+        if self.args["download_data_archives"]:
+            self.Urls.downloadZIPs(self.records_current, self.records_next)
+            
+        #self.Csvs.extractCSVs(self.records_current, self.records_next)
 
         if (self.args["clean_csvs"] == 1) or (self.args["import_to_influxdb"] == 1):
             self.Csvs.cleanCSVs(self.records_current, self.records_next)

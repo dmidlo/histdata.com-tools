@@ -9,13 +9,13 @@ class ArgsNamespace:
     # writes user's cli args to it.  Preemptively creating here to hold default args; if the 
     # user enters args in the shell, these values will be respectively overwritten
     def __init__(self):
+        self.download_data_archives = False
         self.pairs = Pairs.list_keys()
         self.platforms = Platform.list_values()
         self.timeframes = Timeframe.list_keys()
         self.start_yearmonth = "2000-00"
         self.end_yearmonth = get_current_datemonth_GMTplus5()
         self.data_directory = "data"
-        self.queue_filename = ".queue"
         self.clean_csvs = 0
         self.import_to_influxdb = 0
         self.with_all_defaults = 0
@@ -38,6 +38,10 @@ class ArgParser(argparse.ArgumentParser):
 
         # Nothing special here, adding cli params
         # metavar="..." is used to limit the display of choices="large iterables".
+        self.add_argument(
+                "-D","--download_data_archives", 
+                action='store_true',
+                help='download specified pairs/platforms/timeframe and create data files')
         self.add_argument(
                 '-p','--pairs',
                 nargs='+',
@@ -69,7 +73,7 @@ class ArgParser(argparse.ArgumentParser):
                 help='add data headers to CSVs and convert EST(noDST) to UTC timestamp')
         self.add_argument(
                 "-C","--clean_csvs", 
-                type=int, 
+                type=int,
                 nargs="?",
                 const=1,
                 help='add data headers to CSVs and convert EST(noDST) to UTC timestamp')
