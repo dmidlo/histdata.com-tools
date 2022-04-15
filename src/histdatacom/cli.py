@@ -12,13 +12,13 @@ class ArgsNamespace:
         self.download_data_archives = False
         self.extract_csvs = False
         self.clean_data = False
+        self.import_to_influxdb = False
         self.pairs = Pairs.list_keys()
         self.platforms = Platform.list_values()
         self.timeframes = Timeframe.list_keys()
         self.start_yearmonth = "2000-00"
         self.end_yearmonth = get_current_datemonth_GMTplus5()
         self.data_directory = "data"
-        self.import_to_influxdb = 0
 
 class ArgParser(argparse.ArgumentParser):
     """ Encapsulation class for argparse related operations """
@@ -51,6 +51,10 @@ class ArgParser(argparse.ArgumentParser):
                 action='store_true',
                 help='add data headers to CSVs and convert EST(noDST) to UTC timestamp')
         self.add_argument(
+                "-I","--import_to_influxdb", 
+                action='store_true',
+                help='import csv data to influxdb instance. Use influxdb.yaml to configure. Implies -C --clean_data')
+        self.add_argument(
                 '-p','--pairs',
                 nargs='+',
                 type=str,
@@ -79,12 +83,6 @@ class ArgParser(argparse.ArgumentParser):
                 "-e","--end_yearmonth", 
                 type=str,
                 help='add data headers to CSVs and convert EST(noDST) to UTC timestamp')
-        self.add_argument(
-                "-I","--import_to_influxdb", 
-                type=int, 
-                nargs="?",
-                const=1,
-                help='import csv data to influxdb instance. Use influxdb.yaml to configure. Implies -C --clean_csvs')
         self.add_argument(
                 '-d','--data-directory',
                 type=str,

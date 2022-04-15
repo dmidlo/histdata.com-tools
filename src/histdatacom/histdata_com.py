@@ -72,10 +72,10 @@ class _HistDataCom:
         if self.args["extract_csvs"]:
             self.Csvs.extractCSVs(self.records_current, self.records_next)
 
-        if self.args["clean_data"] or (self.args["import_to_influxdb"] == 1):
+        if self.args["clean_data"] or self.args["import_to_influxdb"]:
             self.Csvs.cleanCSVs(self.records_current, self.records_next)
 
-        if self.args["import_to_influxdb"] == 1:
+        if self.args["import_to_influxdb"]:
             self.Influx.ImportCSVs(self.records_current,
                                     self.records_next,
                                     self.csv_chunks_queue,

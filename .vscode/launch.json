@@ -9,11 +9,11 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "args": [
-                "-DXC",
+                "-DXCI",
                 "-p","usdmxn",
                 "-P","ascii",
                 "-t","tick-data-quotes",
-                "-s","2020-08",
+                "-s","2020-07",
                 "-e","2022-04"
             ],
             "justMyCode": true
