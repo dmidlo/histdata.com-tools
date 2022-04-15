@@ -34,22 +34,8 @@ class _HistDataCom:
         #           - Normalize iterable user arguments whose values are lists and make them sets instead
         #       - .copy(): decouple for GC using a hard copy of user args
         self.args = ArgParser._arg_list_to_set(vars(ArgParser()())).copy()
-        self.args['base_url'] = _URLs.get_base_url(self.args['index_url'])
         self.args['default_download_dir'] = set_working_data_dir(self.args['data_directory'])
-        self.args["post_headers"] = {
-                "Host": "www.histdata.com",
-                "Connection": "keep-alive",
-                "Content-Length": "101",
-                "Cache-Control": "max-age=0",
-                "Origin": "http://www.histdata.com",
-                "Upgrade-Insecure-Requests": "1",
-                "DNT": "1",
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
-                "Referer": "",
-                "Accept-Encoding": "gzip, deflate",
-                "Accept-Language": "en-US,en;q=0.9"}
-
+        
         if self.args["import_to_influxdb"] == 1:
             influx_yaml = load_influx_yaml()
             self.args['INFLUX_ORG'] = influx_yaml['influxdb']['org']
@@ -76,20 +62,20 @@ class _HistDataCom:
                                     self.csv_progress)
 
     def run(self):
-        self.Urls.populate_initial_queue(records_next)
-        # self.Urls.walkIndexURLs(self.records_current, self.records_next)
-        # self.Urls.download_zips(self.records_current, self.records_next)
-        # self.Csvs.extractCSVs(self.records_current, self.records_next)
+        self.Urls.populateInitialQueue(self.records_current, self.records_next)
+        self.Urls.validateURLs(self.records_current, self.records_next)
+        self.Urls.downloadZIPs(self.records_current, self.records_next)
+        self.Csvs.extractCSVs(self.records_current, self.records_next)
 
-        # if (self.args["clean_csvs"] == 1) or (self.args["import_to_influxdb"] == 1):
-        #     self.Csvs.cleanCSVs(self.records_current, self.records_next)
+        if (self.args["clean_csvs"] == 1) or (self.args["import_to_influxdb"] == 1):
+            self.Csvs.cleanCSVs(self.records_current, self.records_next)
 
-        # if self.args["import_to_influxdb"] == 1:
-        #     self.Influx.ImportCSVs(self.records_current,
-        #                             self.records_next,
-        #                             self.csv_chunks_queue,
-        #                             self.csv_counter,
-        #                             self.csv_progress)
+        if self.args["import_to_influxdb"] == 1:
+            self.Influx.ImportCSVs(self.records_current,
+                                    self.records_next,
+                                    self.csv_chunks_queue,
+                                    self.csv_counter,
+                                    self.csv_progress)
 
 class HistDataCom():
     # TODO: presently there is no execution api for calls from other programs.

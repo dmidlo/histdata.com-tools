@@ -1,5 +1,6 @@
 import argparse, sys
 from histdatacom.fx_enums import Pairs, Platform, Timeframe
+from histdatacom.utils import get_current_datemonth_GMTplus5
 
 class ArgsNamespace:
     """ An intra-class DTO for Default Arguments for _HistDataCom class. """
@@ -11,10 +12,9 @@ class ArgsNamespace:
         self.pairs = Pairs.list_keys()
         self.platforms = Platform.list_values()
         self.timeframes = Timeframe.list_keys()
-        self.index_url = 'http://www.histdata.com/download-free-forex-data/'
-        self.html_container_classname = 'page-content'
+        self.start_yearmonth = "2000-00"
+        self.end_yearmonth = get_current_datemonth_GMTplus5()
         self.data_directory = "data"
-        self.urls_filename = ".urls"
         self.queue_filename = ".queue"
         self.clean_csvs = 0
         self.import_to_influxdb = 0
@@ -59,6 +59,14 @@ class ArgParser(argparse.ArgumentParser):
                 choices=Timeframe.list_keys(), 
                 help='space separated Timeframes. e.g. -t tick-data-quotes 1-minute-bar-quotes ...',
                 metavar='TIMEFRAME')
+        self.add_argument(
+                "-s","--start_yearmonth", 
+                type=str,
+                help='add data headers to CSVs and convert EST(noDST) to UTC timestamp')
+        self.add_argument(
+                "-e","--end_yearmonth", 
+                type=str,
+                help='add data headers to CSVs and convert EST(noDST) to UTC timestamp')
         self.add_argument(
                 "-C","--clean_csvs", 
                 type=int, 

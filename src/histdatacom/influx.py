@@ -5,7 +5,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from influxdb_client import Point, InfluxDBClient, WriteOptions, WritePrecision
 from influxdb_client.client.write_api import WriteType
 from urllib.request import urlopen
-from rich.progress import Progress
+from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
 from csv import DictReader
 from histdatacom.fx_enums import TimePrecision
 import os, sys
@@ -82,67 +82,65 @@ class _Influx():
 
         csv_chunks_queue.put(_parsed_rows)
 
-    def importCSV(self, record):
-        if "CLEAN" in record.status:
-
-            status_elements = record.status.split("_")
-            csv_path = record.data_dir + record.csv_filename
-            file_endpoint = "file://" + record.data_dir + record.csv_filename
-
+    def import_csv(self, record):
             try:
-                res = urlopen(file_endpoint)
+                if "CSV_CLEAN" in record.status:
+                    csv_path = record.data_dir + record.csv_filename
+                    file_endpoint = "file://" + record.data_dir + record.csv_filename
 
-                if res.headers:
-                    content_length = res.headers['content-length']
+                    res = urlopen(file_endpoint)
 
-                io_wrapper = _ProgressTextIOWrapper(res)
-                io_wrapper.progress = csv_progress
+                    if res.headers:
+                        content_length = res.headers['content-length']
 
-                with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 2),
-                                                        initializer=self.init_counters, 
-                                                        initargs=(csv_chunks_queue,
-                                                                    csv_counter,
-                                                                    csv_progress,
-                                                                    records_current,
-                                                                    records_next,
-                                                                    self.args.copy())) as executor:
-                        data = rx.from_iterable(DictReader(io_wrapper)
-                                        ).pipe(
-                                            ops.buffer_with_count(40_000),
-                                            ops.flat_map(
-                                                lambda rows: executor.submit(self.parse_rows, rows, record, content_length)))
-                        data.subscribe(
-                            on_next=lambda x: None,
-                            on_error=lambda er: print(f"Unexpected error: {er}")
-                        )
+                    io_wrapper = _ProgressTextIOWrapper(res)
+                    io_wrapper.progress = csv_progress
+
+                    with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 2),
+                                                            initializer=self.init_counters, 
+                                                            initargs=(csv_chunks_queue,
+                                                                        csv_counter,
+                                                                        csv_progress,
+                                                                        records_current,
+                                                                        records_next,
+                                                                        self.args.copy())) as executor:
+                            data = rx.from_iterable(DictReader(io_wrapper)
+                                            ).pipe(
+                                                ops.buffer_with_count(40_000),
+                                                ops.flat_map(
+                                                    lambda rows: executor.submit(self.parse_rows, rows, record, content_length)))
+                            data.subscribe(
+                                on_next=lambda x: None,
+                                on_error=lambda er: print(f"Unexpected error: {er}")
+                            )
+                
+                    os.remove(csv_path)
+                    record.status = f"INFLUX_UPLOADED"
+                    record.write_info_file(base_dir=args['default_download_dir'])
+                else:
+                    records_next.put(record)
             except:
-                print("Unexpected error from here:", sys.exc_info()[0],"\n", record)
-                record.status = f"INFLUX_{status_elements[1]}_UPLOAD_FAIL"
+                print("Unexpected error:", sys.exc_info())
+                record.status = f"INFLUX_UPLOAD_FAIL"
                 record.delete_info_file()
                 records_next.put(record)
                 raise
-
             finally:
-                os.remove(csv_path)
-                record.status = f"INFLUX_{status_elements[1]}_UPLOAD"
-                record.write_info_file(base_dir=args['default_download_dir'])
-                records_next.put(record)
                 records_current.task_done()
-                return
-        else:
-            records_next.put(record)
-
-        records_current.task_done()
 
     def ImportCSVs(self, records_current, records_next, csv_chunks_queue, csv_counter, csv_record):
-        # cpu count -1: Manager, -1: DBWriter,
 
         writer = _InfluxDBWriter(self.args, csv_chunks_queue)
         writer.start()
 
-        with Progress() as progress:
-            records_count = records_current.qsize()
-            task_id = progress.add_task(f"[cyan]Posting CSV lines to InfluxDB...", total=records_count)
+        records_count = records_current.qsize()
+        with Progress(
+                TextColumn(text_format=f"[cyan]Posting {records_count} CSV to InfluxDB..."),
+                BarColumn(),
+                "[progress.percentage]{task.percentage:>3.0f}%",
+                TimeElapsedColumn()) as progress:
+
+            task_id = progress.add_task(f"[cyan]Posting CSV to InfluxDB...", total=records_count)
             with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 2),
                                                 initializer=self.init_counters, 
                                                 initargs=(csv_chunks_queue,
@@ -159,13 +157,12 @@ class _Influx():
                     if record is None:
                         break
 
-                    future = executor.submit(self.importCSV, record)
+                    future = executor.submit(self.import_csv, record)
                     progress.advance(task_id, 0.25)
                     futures.append(future)
 
                 for future in as_completed(futures):
                     progress.advance(task_id, 0.75)
-                    records_current.task_done()
                     futures.remove(future)
                     del future
 
@@ -175,7 +172,6 @@ class _Influx():
         csv_chunks_queue.join()
 
         records_next.dump_to_queue(records_current)
-        records_current.write_pickle(f"{self.args['data_directory']}/{self.args['queue_filename']}")
 
 class _InfluxDBWriter(multiprocessing.Process):
     def __init__(self, args, csv_chunks_queue):

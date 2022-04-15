@@ -42,11 +42,8 @@ class Record:
             self.links = links
 
         def __call__(self, str="updated", **kwargs):
-
             for arg in kwargs:
                 setattr(self, arg, kwargs[arg])
-
-            #self.print_record(str)
             return self
 
         def set_datetime_attrs(self):
@@ -88,6 +85,10 @@ class Record:
                 self.data_dir = record_data_dir
                 return self.data_dir
 
+        def set_csv_linecount(self):
+            with open(f"{self.data_dir}{self.csv_filename}") as csv:
+                self.csv_linecount = sum(1 for line in csv)
+
         def create_record_data_dir(self, base_dir=""):
             if not self.data_dir == "":
                 create_full_path(self.data_dir)
@@ -97,6 +98,42 @@ class Record:
                 else:
                     print("Error: create_record_data_dir not provided base_dir=")
                     raise
+
+        def write_info_file(self, str="Momento", base_dir=""):
+            if self.data_dir == "":
+                if not base_dir == "":
+                    self.create_record_data_dir(base_dir=base_dir)
+                else:
+                    print("Error: create_record_data_dir not provided base_dir=")
+                    raise
+
+            if not os.path.exists(self.data_dir):
+                create_full_path(self.data_dir)
+
+            path = self.data_dir + ".info"
+            
+            with open(path, 'wb') as filepath:
+                pickle.dump(self.to_dict(), filepath)
+
+        def delete_info_file(self):
+            if os.path.exists(f"{self.data_dir}.info"):
+                os.remove(f"{self.data_dir}.info")
+
+        def restore_momento(self, base_dir):
+            self.set_record_data_dir(base_dir)
+            if os.path.exists(f"{self.data_dir}.info"):
+                record_dict = dict()
+                with open(f"{self.data_dir}.info", 'rb') as fileread:
+                    try:
+                        while True:
+                            record_dict.update(pickle.load(fileread))
+                    except:
+                        pass
+
+                self(**record_dict)
+                return True
+            else:
+                return False
 
         def to_dict(self):
             return {'url': self.url,
@@ -117,32 +154,6 @@ class Record:
                     'csv_linecount': self.csv_linecount,
                     'links': self.links}
 
-        def write_info_file(self, str="Momento", base_dir=""):
-            if self.data_dir == "":
-                if not base_dir == "":
-                    self.create_record_data_dir(base_dir=base_dir)
-                else:
-                    print("Error: create_record_data_dir not provided base_dir=")
-                    raise
-
-            if not os.path.exists(self.data_dir):
-                create_full_path(self.data_dir)
-
-            path = self.data_dir + ".info"
-            
-            with open(path, 'wb') as filepath:
-                pickle.dump(self.to_dict(), filepath)
-
-            #self.print_record(str=f"{current_process().name} {str}")
-
-        def delete_info_file(self):
-            if os.path.exists(f"{self.data_dir}.info"):
-                os.remove(f"{self.data_dir}.info")
-
-        def set_csv_linecount(self):
-            with open(f"{self.data_dir}{self.csv_filename}") as csv:
-                self.csv_linecount = sum(1 for line in csv)
-
         def print_record(self, str="Updated"):
             print(f"{str}:",
                     self.status,
@@ -155,54 +166,72 @@ class Record:
                     self.data_dir)
 
 class Records(queue.Queue):
-        def __init__(self, *args, **kwargs):
-            queue.Queue.__init__(self, *args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        queue.Queue.__init__(self, *args, **kwargs)
 
-        def write_pickle(self, path):
-            picklable = []
+    def print(self):
+            printable = []
             
             while not self.empty():
                 record = self.get()
                 if record is None:
                     break
                 
-                picklable.append(record.to_dict())
+                printable.append(record.to_dict())
 
-            with open(path, 'wb') as filepath:
-                pickle.dump(picklable, filepath)
-
-            for r in picklable:
+            for r in printable:
                 new_record = Record(**r)
+                print(new_record.to_dict())
                 self.put(new_record)
 
             return
 
-        def __contains__(self, item):
-            with self.mutex:
-                return item in self.queue
 
-        def __len__(self):
-            return len(self.queue)
-
-        def dump_to_queue(self, queue, count=0):
-            if count == 0:
-                _count = None
-            else:
-                _count = count
-                _counter = 0
+    def write_pickle(self, path):
+        picklable = []
+        
+        while not self.empty():
+            record = self.get()
+            if record is None:
+                break
             
-            while not self.empty():
-                record = self.get()
+            picklable.append(record.to_dict())
 
-                if record is None:
-                    break
-                
-                if _count is None:
+        with open(path, 'wb') as filepath:
+            pickle.dump(picklable, filepath)
+
+        for r in picklable:
+            new_record = Record(**r)
+            self.put(new_record)
+
+        return
+
+    def __contains__(self, item):
+        with self.mutex:
+            return item in self.queue
+
+    def __len__(self):
+        return len(self.queue)
+
+    def dump_to_queue(self, queue, count=0):
+        if count == 0:
+            _count = None
+        else:
+            _count = count
+            _counter = 0
+        
+        while not self.empty():
+            record = self.get()
+
+            if record is None:
+                break
+            
+            if _count is None:
+                queue.put(record)
+            else:
+                if _counter < _count:
                     queue.put(record)
+                    _counter += 1
                 else:
-                    if _counter < _count:
-                        queue.put(record)
-                        _counter += 1
-                    else:
-                        self.put(record)
-                        break
+                    self.put(record)
+                    break

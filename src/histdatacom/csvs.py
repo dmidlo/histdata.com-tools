@@ -1,6 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing, sys, os, zipfile
-from rich.progress import Progress
+from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
 import csv
 
 from datetime import datetime
@@ -29,42 +29,40 @@ class _CSVs:
         global args
         args = args_
 
-    def extractCSV(self, record):
+    def extract_csv(self, record):
+        try:
+            if ("CSV_ZIP" in record.status):
+                zip_path = record.data_dir + record.zip_filename
 
-        if ("ZIP" in record.status):
-
-            zip_path = record.data_dir + record.zip_filename
-            status_elements = record.status.split("_")
-
-            try:
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                    [record.csv_filename] = [x for x in zip_ref.namelist() if ".csv" in x]
+                    [record.csv_filename] = [x for x in zip_ref.namelist() if (".csv" or ".xlsx") in x]
                     zip_ref.extract(record.csv_filename, path=record.data_dir)
 
                 os.remove(zip_path)
-            except:
-                print("Unexpected error:", sys.exc_info()[0])
-                record.status = f"CSV_{status_elements[1]}_ZIP_FAIL"
-                record.delete_info_file()
-                records_next.put(record)
-                raise
-            else:
-                record.status = f"CSV_{status_elements[1]}_FILE"
+                record.status = f"CSV_FILE"
                 record.write_info_file(base_dir=args['default_download_dir'])
                 records_next.put(record)
-                records_current.task_done()
-                return
-        else:
-            records_next.put(record)
-
-        records_current.task_done()
+            else:
+                records_next.put(record)
+        except:
+            print("Unexpected error:", sys.exc_info())
+            record.delete_info_file()
+            raise
+        finally:
+            records_current.task_done()
 
     def extractCSVs(self, records_current, records_next):
-        with Progress() as progress:
-            records_count = records_current.qsize()
-            task_id = progress.add_task(f"[cyan]Extracting {records_count} CSVs...", total=records_count)
+
+        records_count = records_current.qsize()
+        with Progress(
+                TextColumn(text_format=f"[cyan]Extracting {records_count} CSVs..."),
+                BarColumn(),
+                "[progress.percentage]{task.percentage:>3.0f}%",
+                TimeElapsedColumn()) as progress:
+
+            task_id = progress.add_task(f"[cyan]Extracting CSVs", total=records_count)
             with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 1),
-                                initializer=self.init_counters, 
+                                initializer=self.init_counters,
                                 initargs=(records_current,
                                     records_next,
                                     self.args.copy())) as executor:
@@ -76,29 +74,25 @@ class _CSVs:
                     if record is None:
                         return
 
-                    future = executor.submit(self.extractCSV, record)
+                    future = executor.submit(self.extract_csv, record)
                     progress.advance(task_id, 0.25)
                     futures.append(future)
                 
                 for future in as_completed(futures):
                     progress.advance(task_id, 0.75)
-                    records_current.task_done()
                     futures.remove(future)
                     del future
 
         records_current.join()
 
         records_next.dump_to_queue(records_current)
-        records_current.write_pickle(f"{self.args['data_directory']}/{self.args['queue_filename']}")
     
-    def cleanCSV(self, record):
-        
-        if ("FILE" in record.status):
-            csv_path = record.data_dir + record.csv_filename
-            temp_csv_path = record.data_dir + "temp.csv"
-            status_elements = record.status.split("_")
+    def clean_csv(self, record):
+        try:
+            if ("CSV_FILE" in record.status):
+                csv_path = record.data_dir + record.csv_filename
+                temp_csv_path = record.data_dir + "temp.csv"
 
-            try:
                 header = self.header_match(record.data_platform, record.data_timeframe)
 
                 with open(temp_csv_path, 'w', newline="") as destcsv:
@@ -121,29 +115,30 @@ class _CSVs:
                 os.remove(csv_path)
                 os.rename(temp_csv_path, csv_path)
 
-            except:
-                print("Unexpected error:", sys.exc_info()[0])
-                record.status = f"CSV_{status_elements[1]}_CLEAN_FAIL"
-                record.delete_info_file()
-                records_next.put(record)
-                raise
-
-            finally:
-                record.status = f"CSV_{status_elements[1]}_CLEAN"
+                record.status = f"CSV_CLEAN"
                 record.write_info_file(base_dir=args['default_download_dir'])
                 records_next.put(record)
-                records_current.task_done()
-                return
-        else:
+            else:
+                records_next.put(record)
+        except:
+            print("Unexpected error:", sys.exc_info())
+            record.status = f"CSV_CLEAN_FAIL"
+            record.delete_info_file()
             records_next.put(record)
-
-        records_current.task_done()
-
+            raise
+        finally:
+            records_current.task_done()
 
     def cleanCSVs(self, records_current, records_next):
-        with Progress() as progress:
-            records_count = records_current.qsize()
-            task_id = progress.add_task(f"[cyan]Cleaning {records_count} CSVs...", total=records_count)
+        
+        records_count = records_current.qsize()
+        with Progress(
+                TextColumn(text_format=f"[cyan]Cleaning {records_count} CSVs..."),
+                BarColumn(),
+                "[progress.percentage]{task.percentage:>3.0f}%",
+                TimeElapsedColumn()) as progress:
+
+            task_id = progress.add_task(f"[cyan]Cleaning CSVs", total=records_count)
             with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 1),
                                 initializer=self.init_counters, 
                                 initargs=(records_current,
@@ -157,20 +152,17 @@ class _CSVs:
                     if record is None:
                         return
 
-                    future = executor.submit(self.cleanCSV, record)
+                    future = executor.submit(self.clean_csv, record)
                     progress.advance(task_id, 0.25)
                     futures.append(future)
                 
                 for future in as_completed(futures):
                     progress.advance(task_id, 0.75)
-                    records_current.task_done()
                     futures.remove(future)
                     del future
 
         records_current.join()
-
         records_next.dump_to_queue(records_current)
-        records_current.write_pickle(f"{self.args['data_directory']}/{self.args['queue_filename']}")
 
     @classmethod
     def header_match(cls, platform, timeframe):

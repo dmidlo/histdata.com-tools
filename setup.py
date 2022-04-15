@@ -34,7 +34,8 @@ setup(
         'pyyaml',
         'rx',
         'argparse',
-        'pytz'
+        'pytz',
+        'datatable'
     ],
 )
 

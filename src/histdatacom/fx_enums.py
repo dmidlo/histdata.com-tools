@@ -100,7 +100,6 @@ class Pairs(Enum):
     @classmethod
     def list_values(cls):
         return {member.value for _, member in cls.__members__.items()}
-
 class Platform(Enum):
     MT = "metatrader"
     NT = "ninjatrader"
@@ -166,3 +165,20 @@ class TimePrecision(Enum):
     @classmethod
     def list_values(cls):
         return {member.value for _, member in cls.__members__.items()}
+
+def get_valid_platform_timeframes(platform):
+    timeframes = list()
+
+    match platform:
+        case "metatrader":
+            timeframes.extend(["M1"])
+        case "ninjatrader":
+            timeframes.extend(["M1","T_LAST","T_BID","T_ASK"])
+        case "metastock":
+            timeframes.extend(["M1"])
+        case "ascii":
+            timeframes.extend(["M1","T"])
+        case "excel":
+            timeframes.extend(["M1"])
+
+    return timeframes
