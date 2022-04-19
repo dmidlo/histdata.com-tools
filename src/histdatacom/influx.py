@@ -152,7 +152,6 @@ class _Influx():
         csv_chunks_queue.join()
 
         records_next.dump_to_queue(records_current)
-        records_current.write_pickle(f"{self.args['data_directory']}/{self.args['queue_filename']}")
 
     @classmethod
     def load_influx_yaml(cls):
@@ -171,7 +170,7 @@ class _Influx():
             print("\n        there is no influxdb.yaml file in working directory.")
             print("\n        did you forget to set it up?\n")
             sys.exit()
-            
+
 class _InfluxDBWriter(multiprocessing.Process):
     def __init__(self, args, csv_chunks_queue):
         multiprocessing.Process.__init__(self)
