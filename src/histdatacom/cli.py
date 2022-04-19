@@ -9,7 +9,7 @@ class ArgsNamespace:
     # writes user's cli args to it.  Preemptively creating here to hold default args; if the 
     # user enters args in the shell, these values will be respectively overwritten
     def __init__(self):
-        self.validate_urls = False
+        self.validate_urls = True
         self.download_data_archives = False
         self.extract_csvs = False
         self.clean_data = False

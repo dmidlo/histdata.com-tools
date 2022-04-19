@@ -6,6 +6,7 @@ from influxdb_client.client.write_api import WriteType
 from urllib.request import urlopen
 from rich.progress import Progress
 from csv import DictReader
+from rich.progress import BarColumn, TextColumn, TimeElapsedColumn
 
 class _Influx():
     def __init__(self, args, records_current_, records_next_, csv_chunks_queue_):
@@ -115,9 +116,13 @@ class _Influx():
         writer = _InfluxDBWriter(self.args, csv_chunks_queue)
         writer.start()
 
-        with Progress() as progress:
-            records_count = records_current.qsize()
-            task_id = progress.add_task("[cyan]Posting CSV lines to InfluxDB...", total=records_count)
+        records_count = records_current.qsize()
+        with Progress(TextColumn(text_format=f"[cyan]adding lines to influx queue from {records_count} sources..."),
+                        BarColumn(),
+                        "[progress.percentage]{task.percentage:>3.0f}%",
+                        TimeElapsedColumn()) as progress:
+
+            task_id = progress.add_task("influx", total=records_count)
             with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 2),
                                                 initializer=self.init_counters, 
                                                 initargs=(csv_chunks_queue,
