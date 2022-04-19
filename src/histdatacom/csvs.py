@@ -39,11 +39,9 @@ class _CSVs:
                     zip_ref.extract(record.csv_filename, path=record.data_dir)
 
                 os.remove(zip_path)
-                record.status = f"CSV_FILE"
+                record.status = "CSV_FILE"
                 record.write_info_file(base_dir=args['default_download_dir'])
-                records_next.put(record)
-            else:
-                records_next.put(record)
+            records_next.put(record)
         except:
             print("Unexpected error:", sys.exc_info())
             record.delete_info_file()
@@ -51,21 +49,20 @@ class _CSVs:
         finally:
             records_current.task_done()
 
-    def extractCSVs(self, records_current, records_next):
+    def extract_csvs(self, records_current, records_next):
 
         records_count = records_current.qsize()
-        with Progress(
-                TextColumn(text_format=f"[cyan]Extracting {records_count} CSVs..."),
-                BarColumn(),
-                "[progress.percentage]{task.percentage:>3.0f}%",
-                TimeElapsedColumn()) as progress:
+        with Progress(TextColumn(text_format=f"[cyan]Extracting {records_count} CSVs..."),
+                          BarColumn(),
+                          "[progress.percentage]{task.percentage:>3.0f}%",
+                          TimeElapsedColumn()) as progress:
 
-            task_id = progress.add_task(f"[cyan]Extracting CSVs", total=records_count)
+            task_id = progress.add_task("[cyan]Extracting CSVs", total=records_count)
             with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 1),
-                                initializer=self.init_counters,
-                                initargs=(records_current,
-                                    records_next,
-                                    self.args.copy())) as executor:
+                                                        initializer=self.init_counters,
+                                                        initargs=(records_current,
+                                                            records_next,
+                                                            self.args.copy())) as executor:
                 futures = []
 
                 while not records_current.empty():
@@ -77,73 +74,70 @@ class _CSVs:
                     future = executor.submit(self.extract_csv, record)
                     progress.advance(task_id, 0.25)
                     futures.append(future)
-                
+
                 for future in as_completed(futures):
-                    progress.advance(task_id, 0.75)
-                    futures.remove(future)
-                    del future
-
+                    self._extracted_from_clean_data_28(progress, task_id, futures, future)
         records_current.join()
-
         records_next.dump_to_queue(records_current)
     
-    def clean_csv(self, record):
+    def clean_file(self, record):
         try:
             if ("CSV_FILE" in record.status):
-                csv_path = record.data_dir + record.csv_filename
-                temp_csv_path = record.data_dir + "temp.csv"
-
-                header = self.header_match(record.data_platform, record.data_timeframe)
-
-                with open(temp_csv_path, 'w', newline="") as destcsv:
-                    dest_csv_writer = csv.writer(destcsv)
-                    dest_csv_writer.writerow(header)
-
-                    with open(csv_path, "r") as srccsv:
-                        dialect = csv.Sniffer().sniff(srccsv.read(), delimiters=",; ")
-                        srccsv.seek(0)
-                        src_csv_reader = csv.reader(srccsv, dialect)
-
-                        for row in src_csv_reader:
-                            timestamp_utc = self.convert_datetime_to_UTC_timestamp(record.data_platform, record.data_timeframe, row)
-
-                            row_prefix = ["histdata.com", record.data_platform, record.data_timeframe, record.data_fxpair]
-                            row_data =  row_prefix + timestamp_utc + self.trim_row_data(record.data_platform, record.data_timeframe, row)
-
-                            dest_csv_writer.writerow(row_data)
-
-                os.remove(csv_path)
-                os.rename(temp_csv_path, csv_path)
-
-                record.status = f"CSV_CLEAN"
-                record.write_info_file(base_dir=args['default_download_dir'])
-                records_next.put(record)
-            else:
-                records_next.put(record)
+                self.clean_csv(record)
+            records_next.put(record)
         except:
             print("Unexpected error:", sys.exc_info())
-            record.status = f"CSV_CLEAN_FAIL"
+            record.status = "CSV_CLEAN_FAIL"
             record.delete_info_file()
             records_next.put(record)
             raise
         finally:
             records_current.task_done()
 
-    def cleanCSVs(self, records_current, records_next):
+    def clean_csv(self, record):
+        csv_path = record.data_dir + record.csv_filename
+        temp_csv_path = f'{record.data_dir}temp.csv'
+
+        header = self.header_match(record.data_platform, record.data_timeframe)
+
+        with open(temp_csv_path, 'w', newline="") as destcsv:
+            dest_csv_writer = csv.writer(destcsv)
+            dest_csv_writer.writerow(header)
+
+            with open(csv_path, "r") as srccsv:
+                dialect = csv.Sniffer().sniff(srccsv.read(), delimiters=",; ")
+                srccsv.seek(0)
+                src_csv_reader = csv.reader(srccsv, dialect)
+
+                for row in src_csv_reader:
+                    timestamp_utc = self.convert_datetime_to_utc_timestamp(record.data_platform, record.data_timeframe, row)
+
+                    row_prefix = ["histdata.com", record.data_platform, record.data_timeframe, record.data_fxpair]
+                    row_data =  row_prefix + timestamp_utc + self.trim_row_data(record.data_platform, record.data_timeframe, row)
+
+                    dest_csv_writer.writerow(row_data)
+
+        os.remove(csv_path)
+        os.rename(temp_csv_path, csv_path)
+
+        record.status = "CSV_CLEAN"
+        record.write_info_file(base_dir=args['default_download_dir'])
+
+    def clean_data(self, records_current, records_next):
         
         records_count = records_current.qsize()
         with Progress(
-                TextColumn(text_format=f"[cyan]Cleaning {records_count} CSVs..."),
-                BarColumn(),
-                "[progress.percentage]{task.percentage:>3.0f}%",
-                TimeElapsedColumn()) as progress:
+                                TextColumn(text_format=f"[cyan]Cleaning {records_count} CSVs..."),
+                                BarColumn(),
+                                "[progress.percentage]{task.percentage:>3.0f}%",
+                                TimeElapsedColumn()) as progress:
 
-            task_id = progress.add_task(f"[cyan]Cleaning CSVs", total=records_count)
+            task_id = progress.add_task("[cyan]Cleaning CSVs", total=records_count)
             with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 1),
-                                initializer=self.init_counters, 
-                                initargs=(records_current,
-                                    records_next,
-                                    self.args.copy())) as executor:
+                                                        initializer=self.init_counters, 
+                                                        initargs=(records_current,
+                                                            records_next,
+                                                            self.args.copy())) as executor:
                 futures = []
 
                 while not records_current.empty():
@@ -152,17 +146,20 @@ class _CSVs:
                     if record is None:
                         return
 
-                    future = executor.submit(self.clean_csv, record)
+                    future = executor.submit(self.clean_file, record)
                     progress.advance(task_id, 0.25)
                     futures.append(future)
-                
-                for future in as_completed(futures):
-                    progress.advance(task_id, 0.75)
-                    futures.remove(future)
-                    del future
 
+                for future in as_completed(futures):
+                    self._extracted_from_clean_data_28(progress, task_id, futures, future)
         records_current.join()
         records_next.dump_to_queue(records_current)
+
+    # TODO Rename this here and in `extract_csvs` and `clean_data`
+    def _extracted_from_clean_data_28(self, progress, task_id, futures, future):
+        progress.advance(task_id, 0.75)
+        futures.remove(future)
+        del future
 
     @classmethod
     def header_match(cls, platform, timeframe):
@@ -192,7 +189,7 @@ class _CSVs:
     @classmethod
     def get_timeformat(cls, platform, timeframe):
 
-        format_enum_key = str(platform) + "_" + str(timeframe)
+        format_enum_key = f'{str(platform)}_{str(timeframe)}'
 
         return TimeFormat[format_enum_key].value
 
@@ -208,7 +205,7 @@ class _CSVs:
                 return str(row[0])
 
     @classmethod
-    def convert_datetime_to_UTC_timestamp(cls, platform, timeframe, row):
+    def convert_datetime_to_utc_timestamp(cls, platform, timeframe, row):
         
         est_timestamp = cls.parse_datetime_columns(platform, timeframe, row)
         date_object = datetime.strptime(est_timestamp, cls.get_timeformat(platform, timeframe))

@@ -9,12 +9,13 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "args": [
-                "-DXCI",
+                "-VDXCI",
                 "-p","usdmxn",
                 "-P","ascii",
-                "-t","tick-data-quotes",
-                "-s","2020-07",
-                "-e","2022-04"
+                "-t","tick-data-quotes",//"1-minute-bar-quotes",//
+                "-s","2018-08",
+                "-e","now"
+                
             ],
             "justMyCode": true
         },

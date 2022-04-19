@@ -20,8 +20,6 @@ class _HistDataCom:
     def __init__(self, records_current,
                         records_next,
                         csv_chunks_queue,
-                        csv_counter,
-                        csv_progress,
                         **kwargs): 
 
         """ Initialization for _HistDataCom Class"""
@@ -47,40 +45,35 @@ class _HistDataCom:
         self.records_current = records_current
         self.records_next = records_next
 
-        self.Urls = _URLs(self.args, self.records_current, self.records_next)
-        self.Csvs = _CSVs(self.args, self.records_current, self.records_next)
+        self.urls = _URLs(self.args, self.records_current, self.records_next)
+        self.csvs = _CSVs(self.args, self.records_current, self.records_next)
 
         if self.args["import_to_influxdb"] == 1:
             self.csv_chunks_queue = csv_chunks_queue
-            self.csv_counter = csv_counter
-            self.csv_progress = csv_progress
-
-            self.Influx = _Influx(self.args,
+            self.influx = _Influx(self.args,
                                     self.records_current,
                                     self.records_next,
-                                    self.csv_chunks_queue,
-                                    self.csv_counter,
-                                    self.csv_progress)
+                                    self.csv_chunks_queue)
 
     def run(self):
-        self.Urls.populateInitialQueue(self.records_current, self.records_next)
-        self.Urls.validateURLs(self.records_current, self.records_next)
+        self.urls.populate_initial_queue(self.records_current, self.records_next)
+        
+        if self.args["validate_urls"]:
+            self.urls.validate_urls(self.records_current, self.records_next)
 
         if self.args["download_data_archives"]:
-            self.Urls.downloadZIPs(self.records_current, self.records_next)
+            self.urls.download_zips(self.records_current, self.records_next)
             
         if self.args["extract_csvs"]:
-            self.Csvs.extractCSVs(self.records_current, self.records_next)
+            self.csvs.extract_csvs(self.records_current, self.records_next)
 
         if self.args["clean_data"] or self.args["import_to_influxdb"]:
-            self.Csvs.cleanCSVs(self.records_current, self.records_next)
+            self.csvs.clean_data(self.records_current, self.records_next)
 
         if self.args["import_to_influxdb"]:
-            self.Influx.ImportCSVs(self.records_current,
+            self.influx.import_data(self.records_current,
                                     self.records_next,
-                                    self.csv_chunks_queue,
-                                    self.csv_counter,
-                                    self.csv_progress)
+                                    self.csv_chunks_queue)
 
 class HistDataCom():
     # TODO: presently there is no execution api for calls from other programs.
@@ -105,17 +98,9 @@ class HistDataCom():
         global csv_chunks_queue
         csv_chunks_queue = records_manager.Queue()
 
-        global csv_counter
-        csv_counter = records_manager.Value("i", 0)
-
-        global csv_progress
-        csv_progress = records_manager.Value("i", 0)
-
         scraper = _HistDataCom(records_current, 
                                 records_next,
-                                csv_chunks_queue,
-                                csv_counter,
-                                csv_progress)
+                                csv_chunks_queue)
         scraper.run()
 
 def main():

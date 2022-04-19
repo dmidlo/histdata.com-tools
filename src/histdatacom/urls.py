@@ -1,6 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import multiprocessing, requests, sys, os, pickle
-import zipfile
+import multiprocessing, requests, sys
 from urllib.parse import urlparse
 from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
 import bs4
@@ -8,9 +7,8 @@ from bs4 import BeautifulSoup
 
 from rich import print
 
-from histdatacom.utils import get_query_string, create_full_path
-from histdatacom.utils import get_year_from_datemonth, get_month_from_datemonth, get_current_datemonth_GMTplus5, replace_date_punct
-from histdatacom.fx_enums import Timeframe, Platform, get_valid_platform_timeframes
+from histdatacom.utils import get_year_from_datemonth, get_month_from_datemonth, get_current_datemonth_gmt_plus5
+from histdatacom.fx_enums import Timeframe, get_valid_platform_timeframes
 from histdatacom.records import Record
 
 class _URLs:
@@ -47,7 +45,7 @@ class _URLs:
         global args
         args = args_
 
-    def populateInitialQueue(self, records_current, records_next):
+    def populate_initial_queue(self, records_current, records_next):
         for url in self.generate_form_urls(self.args["start_yearmonth"],
                                       self.args["end_yearmonth"],
                                       self.args['platforms'],
@@ -68,18 +66,17 @@ class _URLs:
             if record.status == "URL_NEW":
                 page_data = self.get_page_data(record.url)
                 self.fetch_form_values(page_data, record)
-                
+
                 if record.data_tk == "":
                     raise ValueError
-                else:
-                    record.status = f"URL_VALID"
-                    record.write_info_file(base_dir=args['default_download_dir'])
-                    records_next.put(record)
-            else:
-                records_next.put(record)
+
+                record.status = "URL_VALID"
+                record.write_info_file(base_dir=args['default_download_dir'])
+
+            records_next.put(record)
         except ValueError:
             print(f"No data in web repository for: {record.url}")
-            record.status = f"URL_NO_REPO_DATA"
+            record.status = "URL_NO_REPO_DATA"
             record.write_info_file(base_dir=args['default_download_dir'])
         except:
             print(f"Unknown Error for URL: {record.url}", sys.exc_info())
@@ -88,21 +85,21 @@ class _URLs:
         finally:
             records_current.task_done()
 
-    def validateURLs(self, records_current, records_next):
+    def validate_urls(self, records_current, records_next):
 
         records_count = records_current.qsize()
         with Progress(
-                TextColumn(text_format=f"[cyan]Validating {records_count} URLs..."),
-                BarColumn(),
-                "[progress.percentage]{task.percentage:>3.0f}%",
-                TimeElapsedColumn()) as progress:
+                        TextColumn(text_format=f"[cyan]Validating {records_count} URLs..."),
+                        BarColumn(),
+                        "[progress.percentage]{task.percentage:>3.0f}%",
+                        TimeElapsedColumn()) as progress:
 
-            task_id = progress.add_task(f"Validating URLs", total=records_count)
+            task_id = progress.add_task("Validating URLs", total=records_count)
             with ThreadPoolExecutor(max_workers=(multiprocessing.cpu_count() - 1) * 3,
-                                initializer=self.init_counters, 
-                                initargs=(records_current,
-                                    records_next,
-                                    self.args.copy())) as executor:
+                                        initializer=self.init_counters, 
+                                        initargs=(records_current,
+                                            records_next,
+                                            self.args.copy())) as executor:
                 futures = []
 
                 while not records_current.empty():
@@ -114,11 +111,9 @@ class _URLs:
                     future = executor.submit(self.validate_url, record)
                     progress.advance(task_id, 0.25)
                     futures.append(future)
-                
+
                 for future in as_completed(futures):
-                    progress.advance(task_id, 0.75)
-                    futures.remove(future)
-                    del future
+                    self.complete_future(progress, task_id, futures, future)
 
         records_current.join()
         records_next.dump_to_queue(records_current)
@@ -126,28 +121,14 @@ class _URLs:
     def download_zip(self, record):
         try:
             if ("URL_VALID" in record.status):
-                post_headers = args['post_headers'].copy()
-                post_headers["Referer"] = record.url
-                res = requests.post("http://www.histdata.com/get.php",
-                    data = {
-                        "tk": record.data_tk,
-                        "date": record.data_date,
-                        "datemonth": record.data_datemonth,
-                        "platform": record.data_platform,
-                        "timeframe": record.data_timeframe,
-                        "fxpair": record.data_fxpair},
-                    headers=post_headers)
+                res = self.request_file(record)
                 record.zip_filename = res.headers["Content-Disposition"].split(";")[1].split("=")[1]
+                self.write_file(record, res.content)
 
-                zip_path = record.data_dir + record.zip_filename
-                with open(zip_path, "wb") as zip_file:
-                    zip_file.write(res.content)
-
-                record.status = f"CSV_ZIP"
+                record.status = "CSV_ZIP"
                 record.write_info_file(base_dir=args['default_download_dir'])
-                records_next.put(record)
-            else:
-                records_next.put(record)  
+
+            records_next.put(record)
         except KeyError:
             print(f"Invalid Zip on Repository: {record.url}", sys.exc_info())
             record.delete_info_file()
@@ -157,22 +138,41 @@ class _URLs:
             raise
         finally:
             records_current.task_done()
+
+    def request_file(self, record):
+        post_headers = args['post_headers'].copy()
+        post_headers["Referer"] = record.url
+        return requests.post("http://www.histdata.com/get.php",
+            data = {
+                "tk": record.data_tk,
+                "date": record.data_date,
+                "datemonth": record.data_datemonth,
+                "platform": record.data_platform,
+                "timeframe": record.data_timeframe,
+                "fxpair": record.data_fxpair},
+            headers=post_headers)
+
+    def write_file(self, record, content):
+        zip_path = record.data_dir + record.zip_filename
+        with open(zip_path, "wb") as zip_file:
+            zip_file.write(content)
+
         
-    def downloadZIPs(self, records_current, records_next):
+    def download_zips(self, records_current, records_next):
 
         records_count = records_current.qsize()
         with Progress(
-                TextColumn(text_format=f"[cyan]Downloading {records_count} ZIPs..."),
-                BarColumn(),
-                "[progress.percentage]{task.percentage:>3.0f}%",
-                TimeElapsedColumn()) as progress:
+                        TextColumn(text_format=f"[cyan]Downloading {records_count} ZIPs..."),
+                        BarColumn(),
+                        "[progress.percentage]{task.percentage:>3.0f}%",
+                        TimeElapsedColumn()) as progress:
 
-            task_id = progress.add_task(f"[cyan]Downloading ZIPs", total=records_count)
+            task_id = progress.add_task("[cyan]Downloading ZIPs", total=records_count)
             with ThreadPoolExecutor(max_workers=(multiprocessing.cpu_count() - 1) * 3,
-                                initializer=self.init_counters, 
-                                initargs=(records_current,
-                                    records_next,
-                                    self.args.copy())) as executor:
+                                        initializer=self.init_counters, 
+                                        initargs=(records_current,
+                                            records_next,
+                                            self.args.copy())) as executor:
                 futures = []
 
                 while not records_current.empty():
@@ -186,13 +186,16 @@ class _URLs:
                     futures.append(future)
 
                 for future in as_completed(futures):
-                    progress.advance(task_id, 0.75)
-                    futures.remove(future)
-                    del future
-
+                    self.complete_future(progress, task_id, futures, future)
         records_current.join()
 
         records_next.dump_to_queue(records_current)
+
+    # TODO Rename this here and in `validateURLs` and `downloadZIPs`
+    def complete_future(self, progress, task_id, futures, future):
+        progress.advance(task_id, 0.75)
+        futures.remove(future)
+        del future
 
     @classmethod
     def get_page_data(cls, url):
@@ -203,19 +206,6 @@ class _URLs:
         bytes_length = dict(request.headers)['Content-Length']
         
         return {"page_content": page_content, "encoding": encoding, "bytes_length": bytes_length}
-
-    @classmethod
-    def get_page_links(cls, page_data, class_id, base_url):
-
-        html_data = page_data['page_content'].findAll('div', attrs={'class': class_id})
-
-        links = list()
-        for element in html_data:
-            for a_tag in element.findAll('a')[:-1]: # :-1 to trim the last for histdata.com
-                links.append(base_url + a_tag['href']) # hrefs from histdata.com are relative
-
-        page_data['links'] = links
-        return page_data
 
     @classmethod
     def get_base_url(cls, url):
@@ -230,86 +220,157 @@ class _URLs:
         for element in form:
             for e in element:
                 if type(e) is bs4.element.Tag:
-                    if e.get("id") == "tk":
-                        record.data_tk = e.get("value")
-
-                    if e.get("id") == "date":
-                        record.data_date = e.get("value")
-
-                    if e.get("id") == "datemonth":
-                        record.data_datemonth = e.get("value")
-
-                    if e.get("id") == "platform":
-                        record.data_platform = e.get("value")
-
-                    if e.get("id") == "timeframe":
-                        record.data_timeframe = e.get("value")
-
-                    if e.get("id") == "fxpair":
-                        record.data_fxpair = e.get("value")
+                    match e.get("id"):
+                        case "tk":
+                            record.data_tk = e.get("value")
+                        case "date":
+                            record.data_date = e.get("value")
+                        case "datemonth":
+                            record.data_datemonth = e.get("value")
+                        case "platform":
+                            record.data_platform = e.get("value")
+                        case "timeframe":
+                            record.data_timeframe = e.get("value")
+                        case "fxpair":
+                            record.data_fxpair = e.get("value")
         return record
 
-    @classmethod
-    def generate_form_urls(cls, sYearMonth, eYearMonth, platforms, pairs, timeframes, base_url):
-        
-        try:
-            if int(replace_date_punct(sYearMonth)) < 200000:
-                raise ValueError
-        except ValueError:
-            print(f"start date of {sYearMonth} is before 2000-00.")
-            print("setting start date to 2000-00")
-            sYearMonth = "200000"
-
-        current_yearmonth = get_current_datemonth_GMTplus5()
-
-        try:
-            if int(replace_date_punct(eYearMonth)) > int(current_yearmonth):
-                raise ValueError
-        except ValueError:
-            print(f"start date of {eYearMonth} is in the future.")
-            print(f"setting end date to {current_yearmonth}")
-            eYearMonth = current_yearmonth
-
-        start_year = int(get_year_from_datemonth(sYearMonth))
-        start_month = int(get_month_from_datemonth(sYearMonth))
-        end_year = int(get_year_from_datemonth(eYearMonth))
-        end_month = int(get_month_from_datemonth(eYearMonth))
-
+    @classmethod 
+    def valid_platform_timeframe_pair_urls(cls, platforms, timeframes, pairs):
         for platform in platforms:
             for timeframe in timeframes:
                 if timeframe in get_valid_platform_timeframes(platform):
                     for pair in pairs:
-                        form_url = f"{base_url}?/{platform}/{Timeframe[timeframe].value}/{pair}"
-                        for year in range(start_year,
-                                        end_year + 1):
-                            if timeframe in ("M1"):
-                                current_year = int(get_year_from_datemonth(str(current_yearmonth)))
+                        yield f"{platform}/{Timeframe[timeframe].value}/{pair}/", timeframe
 
-                                if year == current_year:
-                                    for month in range(1, end_month + 1):
-                                        yield f"{base_url}?/{platform}/{Timeframe[timeframe].value}/{pair}/{year}/{month}"
-                                else:
-                                    yield f"{base_url}?/{platform}/{Timeframe[timeframe].value}/{pair}/{year}/"   
-                            else:
-                                if year == start_year:
-                                    if start_month == 0:
-                                        start_month = 1
+    @classmethod
+    def correct_for_zero_month(cls, month):
+        if month == 0:
+            month = 1
+        return month
 
-                                    if year == end_year:
-                                        for month in range(start_month, end_month + 1):
-                                            yield f"{form_url}/{year}/{month}"
-                                    
-                                    else:
-                                        for month in range(start_month, 13):
-                                            yield f"{form_url}/{year}/{month}"
+    @classmethod
+    def generate_form_urls(cls, start_yearmonth, end_yearmonth, platforms, pairs, timeframes, base_url):
+        current_yearmonth = get_current_datemonth_gmt_plus5()
+        current_year = int(get_year_from_datemonth(current_yearmonth))
 
-                                elif year == end_year:
-                                    for month in range(1, end_month + 1):
-                                        yield f"{form_url}/{year}/{month}"
-                            
-                                else:
-                                    for month in range(1,13):
-                                        yield f"{form_url}/{year}/{month}"
-                else:
-                    # pass on else for "if timeframe in get_valid_platform_timeframes(platform)"
-                    pass
+        if start_yearmonth is None and end_yearmonth is None:
+            start_yearmonth, end_yearmonth = "200001", current_yearmonth
+
+        for sub_url, timeframe in cls.valid_platform_timeframe_pair_urls(platforms, timeframes, pairs):
+            form_url = f"{base_url}?/{sub_url}"
+
+            if end_yearmonth is None:
+                for date_url in cls.yield_single_year_or_month(timeframe, start_yearmonth):
+                    yield f"{form_url}{date_url}"
+            else:
+                start_year = int(get_year_from_datemonth(start_yearmonth))
+                start_month = int(get_month_from_datemonth(start_yearmonth))
+                end_year = int(get_year_from_datemonth(end_yearmonth))
+                end_month = int(get_month_from_datemonth(end_yearmonth))
+                
+                for year in range(start_year, end_year + 1):
+                    yield from cls.yield_range_of_yearmonths(year, timeframe, form_url,
+                                                            start_year, start_month,
+                                                            end_year, end_month, 
+                                                            current_year)
+            
+    
+    @classmethod
+    def yield_range_of_yearmonths(cls, year, timeframe, form_url, 
+                                        start_year, start_month, 
+                                        end_year, end_month, 
+                                        current_year):
+        
+        match year:
+            case _ if year == current_year:
+                for date_url in cls.yield_current_year(year, start_year,start_month, end_year, end_month):
+                    yield f"{form_url}{date_url}"
+
+            case _ if start_year == year == end_year:
+                for date_url in cls.yield_same_year(timeframe, year, start_month, end_month):
+                    yield f"{form_url}{date_url}"
+
+            case _ if year == start_year != end_year:
+                for date_url in cls.yield_start_year(timeframe, year, start_month):
+                    yield f"{form_url}{date_url}"
+
+            case _ if year == end_year != start_year:
+                for date_url in cls.yield_end_year(timeframe, year, end_month):
+                    yield f"{form_url}{date_url}"
+            case _:
+                for date_url in cls.yield_year(timeframe, year):
+                    yield f"{form_url}{date_url}"
+
+
+    @classmethod
+    def yield_current_year(cls, year, start_year, start_month, end_year, end_month):
+        if start_year == end_year:
+            for month in range(start_month, end_month +1):
+                yield f"{year}/{month}"
+        else:
+            for month in range(1, end_month +1):
+                yield f"{year}/{month}"
+
+    @classmethod
+    def yield_same_year(cls, timeframe, year, start_month, end_month):
+        match timeframe:
+            case "M1":
+                yield f"{year}"
+            case _:
+                for month in range(start_month, end_month + 1):
+                    yield f"{year}/{month}"
+
+    @classmethod
+    def yield_start_year(cls, timeframe, year, start_month):
+        match timeframe:
+            case "M1":
+                yield f"{year}"
+            case _:
+                for month in range(start_month, 12 + 1):
+                    yield f"{year}/{month}"
+
+    @classmethod
+    def yield_end_year(cls, timeframe, year, end_month):
+        match timeframe:
+            case "M1":
+                yield f"{year}"
+            case _:
+                for month in range(1, end_month + 1):
+                    yield f"{year}/{month}"
+
+    @classmethod
+    def yield_year(cls, timeframe, year):
+        match timeframe:
+            case "M1":
+                yield f"{year}"
+            case _:
+                for month in range(1, 12 + 1):
+                    yield f"{year}/{month}"
+
+    @classmethod
+    def yield_single_year_or_month(cls, timeframe, start_yearmonth):
+
+        current_yearmonth = get_current_datemonth_gmt_plus5()
+        current_year = int(get_year_from_datemonth(current_yearmonth))
+        current_month = int(get_month_from_datemonth(current_yearmonth))
+
+        start_year = int(get_year_from_datemonth(start_yearmonth))
+        start_month = int(get_month_from_datemonth(start_yearmonth))
+
+        if start_month == 0: # return the year's data
+            if start_year == current_year:
+                for month in range(1, current_month + 1):
+                    yield f"{start_year}/{month}"
+            else:
+                for date_url in cls.yield_year(timeframe, start_year):
+                    yield date_url
+        else:
+            if start_year == current_year:
+                yield f"{start_year}/{start_month}"
+            else:
+                match timeframe:
+                    case "M1":
+                        yield f"{start_year}"
+                    case _:
+                        yield f"{start_year}/{start_month}"
