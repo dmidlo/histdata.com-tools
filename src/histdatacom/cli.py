@@ -9,7 +9,7 @@ class ArgsNamespace:
     # writes user's cli args to it.  Preemptively creating here to hold default args; if the 
     # user enters args in the shell, these values will be respectively overwritten
     def __init__(self):
-        self.validate_urls = True
+        self.validate_urls = False
         self.download_data_archives = False
         self.extract_csvs = False
         self.import_to_influxdb = False
@@ -168,6 +168,14 @@ class ArgParser(argparse.ArgumentParser):
             args_namespace.validate_urls = True
             args_namespace.download_data_archives = True
             args_namespace.extract_csvs = True
+
+        if not args_namespace.download_data_archives \
+        and not args_namespace.extract_csvs \
+        and not args_namespace.import_to_influxdb:
+            args_namespace.validate_urls = True
+            args_namespace.download_data_archives = True
+            args_namespace.extract_csvs = True
+
 
     @classmethod
     def check_for_now_in_yearmonth(cls, args_namespace):
