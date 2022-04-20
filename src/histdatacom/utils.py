@@ -1,4 +1,4 @@
-import os, yaml, sys, pytz
+import os, yaml, sys, pytz, csv
 from datetime import datetime
 from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
 
@@ -44,3 +44,8 @@ def get_progress_bar(progress_string):
             BarColumn(),\
             "[progress.percentage]{task.percentage:>3.0f}%", \
             TimeElapsedColumn()
+
+def get_csv_dialect(csv_path):
+    with open(csv_path, "r") as srccsv:
+        dialect = csv.Sniffer().sniff(srccsv.read(), delimiters=",; ")
+    return dialect

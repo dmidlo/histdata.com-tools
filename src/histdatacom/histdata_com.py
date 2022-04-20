@@ -67,9 +67,6 @@ class _HistDataCom:
         if self.args["extract_csvs"]:
             self.csvs.extract_csvs(self.records_current, self.records_next)
 
-        if self.args["clean_data"] or self.args["import_to_influxdb"]:
-            self.csvs.clean_data(self.records_current, self.records_next)
-
         if self.args["import_to_influxdb"]:
             self.influx.import_data(self.records_current,
                                     self.records_next,
