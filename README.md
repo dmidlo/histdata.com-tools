@@ -47,7 +47,7 @@ options:
   -d DATA_DIRECTORY, --data-directory DATA_DIRECTORY
                         Not an Executable Search Path! This directory is used to perform work. default is "data" in the current directory
 ```
-
+## Examples
 ```sh
 # Download and extract the current month's 
 # available EURUSD data for metatrader 4/5
