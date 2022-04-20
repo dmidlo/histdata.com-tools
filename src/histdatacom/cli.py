@@ -45,7 +45,7 @@ class ArgParser(argparse.ArgumentParser):
         self.add_argument(
                 "-D","--download_data_archives", 
                 action='store_true',
-                help='download specified pairs/platforms/timeframe and create data files')
+                help='download specified pairs/formats/timeframe and create data files')
         self.add_argument(
                 "-X","--extract_csvs", 
                 action='store_true',
@@ -66,7 +66,7 @@ class ArgParser(argparse.ArgumentParser):
                 nargs='+',
                 type=str,
                 choices=Platform.list_values(), 
-                help='space separated Platforms. e.g. -P metatrader ascii ninjatrader metastock',
+                help='space separated formats. e.g. -P metatrader ascii ninjatrader metastock',
                 metavar='FORMAT')
         self.add_argument(
                 '-t','--timeframes',
