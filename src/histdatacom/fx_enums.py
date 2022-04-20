@@ -100,7 +100,7 @@ class Pairs(Enum):
     @classmethod
     def list_values(cls):
         return {member.value for _, member in cls.__members__.items()}
-class Platform(Enum):
+class Format(Enum):
     MT = "metatrader"
     NT = "ninjatrader"
     MS = "metastock"

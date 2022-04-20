@@ -2,7 +2,7 @@ import contextlib
 import queue, pickle, os, sys
 from rich import print
 from multiprocessing import current_process
-from histdatacom.fx_enums import Timeframe, Platform
+from histdatacom.fx_enums import Timeframe, Format
 from histdatacom.utils import get_month_from_datemonth, get_year_from_datemonth, get_query_string, create_full_path
 
 class Record:
@@ -37,7 +37,7 @@ class Record:
             query_string_args = get_query_string(self.url)
             length = len(query_string_args)
             
-            platform = Platform(query_string_args[1]).name
+            platform = Format(query_string_args[1]).name
             timeframe = Timeframe(query_string_args[2]).name
 
             record_data_dir = base_dir + platform + os.sep + timeframe + os.sep

@@ -1,5 +1,5 @@
 import argparse, sys, re
-from histdatacom.fx_enums import Pairs, Platform, Timeframe
+from histdatacom.fx_enums import Pairs, Format, Timeframe
 from histdatacom.utils import get_current_datemonth_gmt_plus5, get_month_from_datemonth, get_year_from_datemonth
 
 class ArgsNamespace:
@@ -14,7 +14,7 @@ class ArgsNamespace:
         self.extract_csvs = False
         self.import_to_influxdb = False
         self.pairs = Pairs.list_keys()
-        self.formats = Platform.list_values()
+        self.formats = Format.list_values()
         self.timeframes = Timeframe.list_keys()
         self.start_yearmonth = ""
         self.end_yearmonth = ""
@@ -65,7 +65,7 @@ class ArgParser(argparse.ArgumentParser):
                 '-f','--formats',
                 nargs='+',
                 type=str,
-                choices=Platform.list_values(), 
+                choices=Format.list_values(), 
                 help='space separated formats. e.g. -P metatrader ascii ninjatrader metastock',
                 metavar='FORMAT')
         self.add_argument(

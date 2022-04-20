@@ -1,5 +1,4 @@
 import os, sys, yaml, multiprocessing, io, rx, pytz
-from platform import platform
 from rx import operators as ops
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from influxdb_client import InfluxDBClient, WriteOptions, WritePrecision, Point
