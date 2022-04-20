@@ -234,12 +234,12 @@ class _URLs:
         return record
 
     @classmethod 
-    def valid_platform_timeframe_pair_urls(cls, platforms, timeframes, pairs):
-        for platform in platforms:
+    def valid_format_timeframe_pair_urls(cls, formats, timeframes, pairs):
+        for format in formats:
             for timeframe in timeframes:
-                if timeframe in get_valid_format_timeframes(platform):
+                if timeframe in get_valid_format_timeframes(format):
                     for pair in pairs:
-                        yield f"{platform}/{Timeframe[timeframe].value}/{pair}/", timeframe
+                        yield f"{format}/{Timeframe[timeframe].value}/{pair}/", timeframe
 
     @classmethod
     def correct_for_zero_month(cls, month):
@@ -248,14 +248,14 @@ class _URLs:
         return month
 
     @classmethod
-    def generate_form_urls(cls, start_yearmonth, end_yearmonth, platforms, pairs, timeframes, base_url):
+    def generate_form_urls(cls, start_yearmonth, end_yearmonth, formats, pairs, timeframes, base_url):
         current_yearmonth = get_current_datemonth_gmt_plus5()
         current_year = int(get_year_from_datemonth(current_yearmonth))
 
         if start_yearmonth is None and end_yearmonth is None:
             start_yearmonth, end_yearmonth = "200001", current_yearmonth
 
-        for sub_url, timeframe in cls.valid_platform_timeframe_pair_urls(platforms, timeframes, pairs):
+        for sub_url, timeframe in cls.valid_format_timeframe_pair_urls(formats, timeframes, pairs):
             form_url = f"{base_url}?/{sub_url}"
 
             if end_yearmonth is None:
