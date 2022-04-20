@@ -153,10 +153,17 @@ class ArgParser(argparse.ArgumentParser):
         cls.check_start_yearmonth_in_range(args_namespace)
         cls.check_end_yearmonth_in_range(args_namespace)
         cls.check_start_lessthan_end(args_namespace)
-        cls.fix_validate_and_download_when_influx(args_namespace)
+        cls.validate_prerequisites(args_namespace)
 
     @classmethod
-    def fix_validate_and_download_when_influx(cls, args_namespace):
+    def validate_prerequisites(cls, args_namespace):
+        if args_namespace.download_data_archives:
+            args_namespace.validate_urls = True
+
+        if args_namespace.extract_csvs:
+            args_namespace.validate_urls = True
+            args_namespace.download_data_archives = True
+
         if args_namespace.import_to_influxdb:
             args_namespace.validate_urls = True
             args_namespace.download_data_archives = True
