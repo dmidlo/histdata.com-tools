@@ -14,7 +14,7 @@ class ArgsNamespace:
         self.extract_csvs = False
         self.import_to_influxdb = False
         self.pairs = Pairs.list_keys()
-        self.platforms = Platform.list_values()
+        self.formats = Platform.list_values()
         self.timeframes = Timeframe.list_keys()
         self.start_yearmonth = ""
         self.end_yearmonth = ""
@@ -62,12 +62,12 @@ class ArgParser(argparse.ArgumentParser):
                 help='space separated currency pairs. e.g. -p eurusd usdjpy ...',
                 metavar='PAIR')
         self.add_argument(
-                '-P','--platforms',
+                '-f','--formats',
                 nargs='+',
                 type=str,
                 choices=Platform.list_values(), 
                 help='space separated Platforms. e.g. -P metatrader ascii ninjatrader metastock',
-                metavar='PLATFORM')
+                metavar='FORMAT')
         self.add_argument(
                 '-t','--timeframes',
                 nargs='+',
@@ -118,13 +118,13 @@ class ArgParser(argparse.ArgumentParser):
         try:
             err_text_influx_must_be_ascii = \
             f"""
-                ERROR on -f {args_namespace.platforms}           ERROR
+                ERROR on -f {args_namespace.formats}           ERROR
                     * format must be ASCII when importing to influxdb. eg. -f ascii
                       
             """
             if args_namespace.import_to_influxdb:
-                for platform in args_namespace.platforms:
-                    if str.lower(platform) != "ascii":
+                for format in args_namespace.formats:
+                    if str.lower(format) != "ascii":
                         raise ValueError(err_text_influx_must_be_ascii)
         except ValueError as err:
             print(err)
@@ -153,6 +153,14 @@ class ArgParser(argparse.ArgumentParser):
         cls.check_start_yearmonth_in_range(args_namespace)
         cls.check_end_yearmonth_in_range(args_namespace)
         cls.check_start_lessthan_end(args_namespace)
+        cls.fix_validate_and_download_when_influx(args_namespace)
+
+    @classmethod
+    def fix_validate_and_download_when_influx(cls, args_namespace):
+        if args_namespace.import_to_influxdb:
+            args_namespace.validate_urls = True
+            args_namespace.download_data_archives = True
+            args_namespace.extract_csvs = True
 
     @classmethod
     def check_for_now_in_yearmonth(cls, args_namespace):

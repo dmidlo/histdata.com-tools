@@ -48,7 +48,7 @@ class _URLs:
     def populate_initial_queue(self, records_current, records_next):
         for url in self.generate_form_urls(self.args["start_yearmonth"],
                                       self.args["end_yearmonth"],
-                                      self.args['platforms'],
+                                      self.args['formats'],
                                       self.args["pairs"],
                                       self.args['timeframes'],
                                       self.args["base_url"]):
