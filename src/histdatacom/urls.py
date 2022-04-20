@@ -147,7 +147,7 @@ class _URLs:
                 "tk": record.data_tk,
                 "date": record.data_date,
                 "datemonth": record.data_datemonth,
-                "platform": record.data_platform,
+                "platform": record.data_format,
                 "timeframe": record.data_timeframe,
                 "fxpair": record.data_fxpair},
             headers=post_headers)
@@ -226,7 +226,7 @@ class _URLs:
                         case "datemonth":
                             record.data_datemonth = e.get("value")
                         case "platform":
-                            record.data_platform = e.get("value")
+                            record.data_format = e.get("value")
                         case "timeframe":
                             record.data_timeframe = e.get("value")
                         case "fxpair":

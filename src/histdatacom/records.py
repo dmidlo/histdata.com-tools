@@ -15,7 +15,7 @@ class Record:
             self.data_year =      kwargs.get("data_year", "")
             self.data_month =     kwargs.get("data_month", "")
             self.data_datemonth = kwargs.get("data_datemonth", "")
-            self.data_platform =  kwargs.get("data_platform", "")
+            self.data_format =    kwargs.get("data_format", "")
             self.data_timeframe = kwargs.get("data_timeframe", "")
             self.data_fxpair =    kwargs.get("data_fxpair", "")
             self.data_dir =       kwargs.get("data_dir", "")
@@ -37,10 +37,10 @@ class Record:
             query_string_args = get_query_string(self.url)
             length = len(query_string_args)
             
-            platform = Format(query_string_args[1]).name
+            format = Format(query_string_args[1]).name
             timeframe = Timeframe(query_string_args[2]).name
 
-            record_data_dir = base_dir + platform + os.sep + timeframe + os.sep
+            record_data_dir = base_dir + format + os.sep + timeframe + os.sep
 
             if length == 3:
                 self.data_dir = record_data_dir
@@ -127,7 +127,7 @@ class Record:
                     'data_year': self.data_year,
                     'data_month': self.data_month,
                     'data_datemonth': self.data_datemonth,
-                    'data_platform': self.data_platform,
+                    'data_format': self.data_format,
                     'data_timeframe': self.data_timeframe,
                     'data_fxpair': self.data_fxpair,
                     'data_dir': self.data_dir,
@@ -139,7 +139,7 @@ class Record:
         def print_record(self, str="Updated"):
             print(f"{str}:",
                     self.status,
-                    self.data_platform,
+                    self.data_format,
                     self.data_timeframe,
                     self.data_fxpair,
                     self.data_year,

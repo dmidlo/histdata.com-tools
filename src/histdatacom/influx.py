@@ -65,8 +65,8 @@ class _Influx():
     def parse_row(self, row, record):
         #myMeasurement,tag1=value1,tag2=value2 fieldKey="fieldValue" 1556813561098000000
         measurement = f"{record.data_fxpair}"
-        tags = f"source=histdata.com,platform={record.data_platform},timeframe={record.data_timeframe}".replace(" ","")
-        time = self.convert_datetime_to_utc_timestamp(record.data_platform, record.data_timeframe, row)
+        tags = f"source=histdata.com,format={record.data_format},timeframe={record.data_timeframe}".replace(" ","")
+        time = self.convert_datetime_to_utc_timestamp(record.data_format, record.data_timeframe, row)
 
         match record.data_timeframe:
             case "M1":
@@ -88,7 +88,7 @@ class _Influx():
         try:
             if ("CSV" in record.status) \
             and ("ZIP" not in record.status) \
-            and str.lower(record.data_platform) == "ascii":
+            and str.lower(record.data_format) == "ascii":
                 self.import_csv(record)
             records_next.put(record)
         except:
@@ -112,7 +112,7 @@ class _Influx():
                                                             records_next,
                                                             self.args.copy())) as executor:
 
-                fieldnames = self.fieldnames_match(record.data_platform, record.data_timeframe)
+                fieldnames = self.fieldnames_match(record.data_format, record.data_timeframe)
                 dialect = get_csv_dialect(csv_path)
                 data = rx.from_iterable(DictReader(io_wrapper, fieldnames=fieldnames, dialect=dialect)
                                 ).pipe(
@@ -199,32 +199,32 @@ class _Influx():
             sys.exit()
 
     @classmethod
-    def fieldnames_match(cls, platform, timeframe):
+    def fieldnames_match(cls, format, timeframe):
         try:
-            match platform:
+            match format:
                 case "ASCII" if timeframe == "M1":
                     fieldnames = ["msSinceEpochUTC", "openBid", "highBid", "lowBid", "closeBid", "Volume"]
                 case "ASCII" if timeframe == "T":
                     fieldnames = ["msSinceEpochUTC","bidQuote","askQuote","Volume"]
                 case _:
-                    raise ValueError("Invalid platform for influx import")
+                    raise ValueError("Invalid format for influx import")
             return fieldnames
         except ValueError as err:
             print(err)
             sys.exit()
 
     @classmethod
-    def get_timeformat(cls, platform, timeframe):
+    def get_timeformat(cls, format, timeframe):
 
-        format_enum_key = f'{str(platform)}_{str(timeframe)}'
+        format_enum_key = f'{str(format)}_{str(timeframe)}'
 
         return TimeFormat[format_enum_key].value
 
     @classmethod
-    def convert_datetime_to_utc_timestamp(cls, platform, timeframe, row):
+    def convert_datetime_to_utc_timestamp(cls, format, timeframe, row):
         
         est_timestamp = row["msSinceEpochUTC"]
-        date_object = datetime.strptime(est_timestamp, cls.get_timeformat(platform, timeframe))
+        date_object = datetime.strptime(est_timestamp, cls.get_timeformat(format, timeframe))
         tz_date_object = date_object.replace(tzinfo=pytz.timezone("Etc/GMT+5"))
 
         timestamp = int(tz_date_object.timestamp() * 1000)
