@@ -156,7 +156,6 @@ class _URLs:
         zip_path = record.data_dir + record.zip_filename
         with open(zip_path, "wb") as zip_file:
             zip_file.write(content)
-
         
     def download_zips(self, records_current, records_next):
 
@@ -191,7 +190,6 @@ class _URLs:
 
         records_next.dump_to_queue(records_current)
 
-    # TODO Rename this here and in `validateURLs` and `downloadZIPs`
     def complete_future(self, progress, task_id, futures, future):
         progress.advance(task_id, 0.75)
         futures.remove(future)
@@ -275,7 +273,6 @@ class _URLs:
                                                             end_year, end_month, 
                                                             current_year)
             
-    
     @classmethod
     def yield_range_of_yearmonths(cls, year, timeframe, form_url, 
                                         start_year, start_month, 
@@ -301,7 +298,6 @@ class _URLs:
             case _:
                 for date_url in cls.yield_year(timeframe, year):
                     yield f"{form_url}{date_url}"
-
 
     @classmethod
     def yield_current_year(cls, year, start_year, start_month, end_year, end_month):

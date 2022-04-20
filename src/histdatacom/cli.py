@@ -12,7 +12,6 @@ class ArgsNamespace:
         self.validate_urls = True
         self.download_data_archives = False
         self.extract_csvs = False
-        self.clean_data = False
         self.import_to_influxdb = False
         self.pairs = Pairs.list_keys()
         self.platforms = Platform.list_values()
@@ -52,13 +51,9 @@ class ArgParser(argparse.ArgumentParser):
                 action='store_true',
                 help='histdata.com delivers zip files.  use the -X flag to extract them to .csv.')
         self.add_argument(
-                "-C","--clean_data", 
-                action='store_true',
-                help='{add data} headers to CSVs and convert EST(noDST) to UTC timestamp')
-        self.add_argument(
                 "-I","--import_to_influxdb", 
                 action='store_true',
-                help='import csv data to influxdb instance. Use influxdb.yaml to configure. Implies -C --clean_data')
+                help='import csv data to influxdb instance. Use influxdb.yaml to configure.')
         self.add_argument(
                 '-p','--pairs',
                 nargs='+',
@@ -102,6 +97,7 @@ class ArgParser(argparse.ArgumentParser):
         self.parse_args(namespace=self.arg_namespace)
 
         self.check_datetime_input(self.arg_namespace)
+        self.check_for_ascii_if_influx(self.arg_namespace)
 
 
     def __call__(self):
@@ -116,6 +112,23 @@ class ArgParser(argparse.ArgumentParser):
         for arg in args:
             if isinstance(args[arg], list): args[arg] = set(args[arg])
         return args
+
+    @classmethod
+    def check_for_ascii_if_influx(cls, args_namespace):
+        try:
+            err_text_influx_must_be_ascii = \
+            f"""
+                ERROR on -f {args_namespace.platforms}           ERROR
+                    * format must be ASCII when importing to influxdb. eg. -f ascii
+                      
+            """
+            if args_namespace.import_to_influxdb:
+                for platform in args_namespace.platforms:
+                    if str.lower(platform) != "ascii":
+                        raise ValueError(err_text_influx_must_be_ascii)
+        except ValueError as err:
+            print(err)
+            sys.exit(err)
 
     @classmethod
     def check_datetime_input(cls, args_namespace):        
