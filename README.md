@@ -2,20 +2,23 @@
 
 Multi-threaded/Multi-Process Downloader for Currency Exchange Rates from Histdata.com
 
-## Features
+## Usage
 
-- Multi-threaded for web requests/downloads
-- Multi-process for zip file extraction
-- Uses a queue and saves state to allow long running requests to be canceled and resumed at a later time.
-- preps csvs to give added information for future data providence
-- histdata.com foreign exchange data is provided in Eastern Standard Time with NO daylight savings time adjustments, and in varying time formats to support multiple trading platforms.  This application provides the ability to standardize time to UTC epoch timestamps.
-  
+```sh
+$histdatacom -h #shows help message
+```
+```sh
+histdatacom -
+```
 ## In Progress
 
 - Export data to InfluxDB
 - Consider converting initial csv to alternative format for more performant processing (feather, parquet, jay, pickle, hdf5)
 
-- ## Setup
+## Roadmap
+
+
+## Setup
 
 1. Create a virtual environment
    - `python -m venv venv`
@@ -45,21 +48,28 @@ Multi-threaded/Multi-Process Downloader for Currency Exchange Rates from Histdat
 ### CLI Help
 
 ```txt
-histdatacom
-usage: histdatacom [-h] [-p PAIR [PAIR ...]] [-P PLATFORM [PLATFORM ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-C [CLEAN_CSVS]] [-I [IMPORT_TO_INFLUXDB]] [-d DATA_DIRECTORY]
+histdatacom -h
+usage: histdatacom [-h] [-V] [-D] [-X] [-I] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH]
+                   [-d DATA_DIRECTORY]
 
 options:
   -h, --help            show this help message and exit
+  -V, --validate_urls   Check generated list of URLs as valid download locations
+  -D, --download_data_archives
+                        download specified pairs/formats/timeframe and create data files
+  -X, --extract_csvs    histdata.com delivers zip files. use the -X flag to extract them to .csv.
+  -I, --import_to_influxdb
+                        import csv data to influxdb instance. Use influxdb.yaml to configure.
   -p PAIR [PAIR ...], --pairs PAIR [PAIR ...]
                         space separated currency pairs. e.g. -p eurusd usdjpy ...
-  -P PLATFORM [PLATFORM ...], --platforms PLATFORM [PLATFORM ...]
-                        space separated Platforms. e.g. -P metatrader ascii ninjatrader metastock
+  -f FORMAT [FORMAT ...], --formats FORMAT [FORMAT ...]
+                        space separated formats. e.g. -P metatrader ascii ninjatrader metastock
   -t TIMEFRAME [TIMEFRAME ...], --timeframes TIMEFRAME [TIMEFRAME ...]
                         space separated Timeframes. e.g. -t tick-data-quotes 1-minute-bar-quotes ...
-  -C [CLEAN_CSVS], --clean_csvs [CLEAN_CSVS]
-                        add data headers to CSVs and convert EST(noDST) to UTC timestamp
-  -I [IMPORT_TO_INFLUXDB], --import_to_influxdb [IMPORT_TO_INFLUXDB]
-                        import csv data to influxdb instance. Use influxdb.yaml to configure. Implies -C --clean_csvs
+  -s START_YEARMONTH, --start_yearmonth START_YEARMONTH
+                        set a start year and month for data. e.g. -s 2000-04 or -s 2015-00
+  -e END_YEARMONTH, --end_yearmonth END_YEARMONTH
+                        set a start year and month for data. e.g. -s 2020-00 or -s 2022-04
   -d DATA_DIRECTORY, --data-directory DATA_DIRECTORY
                         Not an Executable Search Path! This directory is used to perform work. default is "data" in the current directory
 ```
