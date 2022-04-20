@@ -166,10 +166,10 @@ class TimePrecision(Enum):
     def list_values(cls):
         return {member.value for _, member in cls.__members__.items()}
 
-def get_valid_platform_timeframes(platform):
+def get_valid_format_timeframes(format):
     timeframes = list()
 
-    match platform:
+    match format:
         case "metatrader":
             timeframes.extend(["M1"])
         case "ninjatrader":

@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from rich import print
 
 from histdatacom.utils import get_year_from_datemonth, get_month_from_datemonth, get_current_datemonth_gmt_plus5
-from histdatacom.fx_enums import Timeframe, get_valid_platform_timeframes
+from histdatacom.fx_enums import Timeframe, get_valid_format_timeframes
 from histdatacom.records import Record
 
 class _URLs:
@@ -237,7 +237,7 @@ class _URLs:
     def valid_platform_timeframe_pair_urls(cls, platforms, timeframes, pairs):
         for platform in platforms:
             for timeframe in timeframes:
-                if timeframe in get_valid_platform_timeframes(platform):
+                if timeframe in get_valid_format_timeframes(platform):
                     for pair in pairs:
                         yield f"{platform}/{Timeframe[timeframe].value}/{pair}/", timeframe
 
