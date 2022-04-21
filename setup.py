@@ -1,9 +1,11 @@
-from setuptools import setup, find_packages
-import os, sys
+import os
+import sys
+from setuptools import setup
+from setuptools import find_packages
 
 try:
     import certifi
-except:
+except ImportError:
     print("Unexpected error:", sys.exc_info()[0])
     print("\n certifi not installed. Please run 'pip install certifi'")
     sys.exit()
@@ -12,21 +14,21 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 setup(
-    #basic package data
-    name = "histdatacom",
-    version= "0.1",
+    # basic package data
+    name="histdatacom",
+    version="0.1",
 
-    #package structure
+    # package structure
     packages=find_packages('src'),
-    package_dir={'':'src'},
+    package_dir={'': 'src'},
 
-    #install the RSReader executable
-    entry_points = {
-        'console_scripts' : [
+    # install the RSReader executable
+    entry_points={
+        'console_scripts': [
             'histdatacom = histdatacom.histdata_com:main'
         ]
     },
-    install_requires = [
+    install_requires=[
         'influxdb_client',
         'rich',
         'requests',

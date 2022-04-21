@@ -8,8 +8,8 @@ from rich.progress import Progress
 from rich.progress import TextColumn
 from rich.progress import BarColumn
 from rich.progress import TimeElapsedColumn
-
 from rich import print
+
 
 class _CSVs:
     def __init__(self, args_, records_current_, records_next_):
@@ -43,7 +43,7 @@ class _CSVs:
                 record.status = "CSV_FILE"
                 record.write_info_file(base_dir=args['default_download_dir'])
             records_next.put(record)
-        except:
+        except Exception:
             print("Unexpected error:", sys.exc_info())
             record.delete_info_file()
             raise
@@ -54,16 +54,16 @@ class _CSVs:
 
         records_count = records_current.qsize()
         with Progress(TextColumn(text_format=f"[cyan]Extracting {records_count} CSVs..."),
-                          BarColumn(),
-                          "[progress.percentage]{task.percentage:>3.0f}%",
-                          TimeElapsedColumn()) as progress:
+                      BarColumn(),
+                      "[progress.percentage]{task.percentage:>3.0f}%",
+                      TimeElapsedColumn()) as progress:
 
             task_id = progress.add_task("[cyan]Extracting CSVs", total=records_count)
             with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 1),
-                                                        initializer=self.init_counters,
-                                                        initargs=(records_current,
-                                                            records_next,
-                                                            self.args.copy())) as executor:
+                                     initializer=self.init_counters,
+                                     initargs=(records_current,
+                                     records_next,
+                                     self.args.copy())) as executor:
                 futures = []
 
                 while not records_current.empty():

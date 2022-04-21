@@ -10,10 +10,9 @@ venv/
 __pycache__
 .pytest_cache/
 data/
-mp_influx_samp.py
 test.py
 build/
 dist/
 *.egg-info
 influxdb.yaml
-__pycache__
+prospector_results.json

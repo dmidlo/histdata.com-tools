@@ -11,13 +11,12 @@ from rich.progress import BarColumn
 from rich.progress import TimeElapsedColumn
 import bs4
 from bs4 import BeautifulSoup
-
-
 from histdatacom.utils import get_year_from_datemonth
 from histdatacom.utils import get_month_from_datemonth
 from histdatacom.utils import get_current_datemonth_gmt_plus5
 from histdatacom.fx_enums import Timeframe, get_valid_format_timeframes
 from histdatacom.records import Record
+
 
 class _URLs:
     def __init__(self, args, records_current_, records_next_):
@@ -32,18 +31,18 @@ class _URLs:
 
         self.args["base_url"] = 'http://www.histdata.com/download-free-forex-data/'
         self.args["post_headers"] = {
-                "Host": "www.histdata.com",
-                "Connection": "keep-alive",
-                "Content-Length": "101",
-                "Cache-Control": "max-age=0",
-                "Origin": "http://www.histdata.com",
-                "Upgrade-Insecure-Requests": "1",
-                "DNT": "1",
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
-                "Referer": "",
-                "Accept-Encoding": "gzip, deflate",
-                "Accept-Language": "en-US,en;q=0.9"}
+            "Host": "www.histdata.com",
+            "Connection": "keep-alive",
+            "Content-Length": "101",
+            "Cache-Control": "max-age=0",
+            "Origin": "http://www.histdata.com",
+            "Upgrade-Insecure-Requests": "1",
+            "DNT": "1",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+            "Referer": "",
+            "Accept-Encoding": "gzip, deflate",
+            "Accept-Language": "en-US,en;q=0.9"}
 
     def init_counters(self, records_current_, records_next_, args_):
         global records_current
@@ -55,14 +54,15 @@ class _URLs:
 
     def populate_initial_queue(self, records_current, records_next):
         for url in self.generate_form_urls(self.args["start_yearmonth"],
-                                      self.args["end_yearmonth"],
-                                      self.args['formats'],
-                                      self.args["pairs"],
-                                      self.args['timeframes'],
-                                      self.args["base_url"]):
+                                           self.args["end_yearmonth"],
+                                           self.args['formats'],
+                                           self.args["pairs"],
+                                           self.args['timeframes'],
+                                           self.args["base_url"]):
             record = Record()
-            record( url = url, status = "URL_NEW")
+            record(url=url, status="URL_NEW")
             record.restore_momento(base_dir=self.args['default_download_dir'])
+
             if record.status != "URL_NO_REPO_DATA":
                 record.write_info_file(base_dir=self.args['default_download_dir'])
                 records_next.put(record)
@@ -86,7 +86,7 @@ class _URLs:
             print(f"No data in web repository for: {record.url}")
             record.status = "URL_NO_REPO_DATA"
             record.write_info_file(base_dir=args['default_download_dir'])
-        except:
+        except Exception:
             print(f"Unknown Error for URL: {record.url}", sys.exc_info())
             record.delete_info_file()
             raise
@@ -96,18 +96,17 @@ class _URLs:
     def validate_urls(self, records_current, records_next):
 
         records_count = records_current.qsize()
-        with Progress(
-                        TextColumn(text_format=f"[cyan]Validating {records_count} URLs..."),
-                        BarColumn(),
-                        "[progress.percentage]{task.percentage:>3.0f}%",
-                        TimeElapsedColumn()) as progress:
-
+        with Progress(TextColumn(text_format=f"[cyan]Validating {records_count} URLs..."),
+                      BarColumn(),
+                      "[progress.percentage]{task.percentage:>3.0f}%",
+                      TimeElapsedColumn()) as progress:
             task_id = progress.add_task("Validating URLs", total=records_count)
+
             with ThreadPoolExecutor(max_workers=(multiprocessing.cpu_count() - 1) * 3,
-                                        initializer=self.init_counters,
-                                        initargs=(records_current,
-                                            records_next,
-                                            self.args.copy())) as executor:
+                                    initializer=self.init_counters,
+                                    initargs=(records_current,
+                                              records_next,
+                                              self.args.copy())) as executor:
                 futures = []
 
                 while not records_current.empty():
@@ -140,7 +139,7 @@ class _URLs:
         except KeyError:
             print(f"Invalid Zip on Repository: {record.url}", sys.exc_info())
             record.delete_info_file()
-        except:
+        except Exception:
             print("Unexpected error:", sys.exc_info())
             record.delete_info_file()
             raise
@@ -151,14 +150,13 @@ class _URLs:
         post_headers = args['post_headers'].copy()
         post_headers["Referer"] = record.url
         return requests.post("http://www.histdata.com/get.php",
-            data = {
-                "tk": record.data_tk,
-                "date": record.data_date,
-                "datemonth": record.data_datemonth,
-                "platform": record.data_format,
-                "timeframe": record.data_timeframe,
-                "fxpair": record.data_fxpair},
-            headers=post_headers)
+                             data={"tk": record.data_tk,
+                                   "date": record.data_date,
+                                   "datemonth": record.data_datemonth,
+                                   "platform": record.data_format,
+                                   "timeframe": record.data_timeframe,
+                                   "fxpair": record.data_fxpair},
+                             headers=post_headers)
 
     def write_file(self, record, content):
         zip_path = record.data_dir + record.zip_filename
@@ -168,18 +166,17 @@ class _URLs:
     def download_zips(self, records_current, records_next):
 
         records_count = records_current.qsize()
-        with Progress(
-                        TextColumn(text_format=f"[cyan]Downloading {records_count} ZIPs..."),
-                        BarColumn(),
-                        "[progress.percentage]{task.percentage:>3.0f}%",
-                        TimeElapsedColumn()) as progress:
-
+        with Progress(TextColumn(text_format=f"[cyan]Downloading {records_count} ZIPs..."),
+                      BarColumn(),
+                      "[progress.percentage]{task.percentage:>3.0f}%",
+                      TimeElapsedColumn()) as progress:
             task_id = progress.add_task("[cyan]Downloading ZIPs", total=records_count)
+
             with ThreadPoolExecutor(max_workers=(multiprocessing.cpu_count() - 1) * 3,
-                                        initializer=self.init_counters,
-                                        initargs=(records_current,
-                                            records_next,
-                                            self.args.copy())) as executor:
+                                    initializer=self.init_counters,
+                                    initargs=(records_current,
+                                              records_next,
+                                              self.args.copy())) as executor:
                 futures = []
 
                 while not records_current.empty():
@@ -256,12 +253,13 @@ class _URLs:
         return month
 
     @classmethod
-    def generate_form_urls(cls, start_yearmonth,
-                                end_yearmonth,
-                                formats,
-                                pairs,
-                                timeframes,
-                                base_url):
+    def generate_form_urls(cls,
+                           start_yearmonth,
+                           end_yearmonth,
+                           formats,
+                           pairs,
+                           timeframes,
+                           base_url):
         current_yearmonth = get_current_datemonth_gmt_plus5()
         current_year = int(get_year_from_datemonth(current_yearmonth))
 
@@ -282,15 +280,15 @@ class _URLs:
 
                 for year in range(start_year, end_year + 1):
                     yield from cls.yield_range_of_yearmonths(year, timeframe, form_url,
-                                                            start_year, start_month,
-                                                            end_year, end_month,
-                                                            current_year)
+                                                             start_year, start_month,
+                                                             end_year, end_month,
+                                                             current_year)
 
     @classmethod
     def yield_range_of_yearmonths(cls, year, timeframe, form_url,
-                                        start_year, start_month,
-                                        end_year, end_month,
-                                        current_year):
+                                  start_year, start_month,
+                                  end_year, end_month,
+                                  current_year):
 
         match year:
             case _ if year == current_year:
@@ -319,10 +317,10 @@ class _URLs:
     @classmethod
     def yield_current_year(cls, year, start_year, start_month, end_year, end_month):
         if start_year == end_year:
-            for month in range(start_month, end_month +1):
+            for month in range(start_month, end_month + 1):
                 yield f"{year}/{month}"
         else:
-            for month in range(1, end_month +1):
+            for month in range(1, end_month + 1):
                 yield f"{year}/{month}"
 
     @classmethod
@@ -371,7 +369,7 @@ class _URLs:
         start_year = int(get_year_from_datemonth(start_yearmonth))
         start_month = int(get_month_from_datemonth(start_yearmonth))
 
-        if start_month == 0: # return the year's data
+        if start_month == 0:  # return the year's data
             if start_year == current_year:
                 for month in range(1, current_month + 1):
                     yield f"{start_year}/{month}"

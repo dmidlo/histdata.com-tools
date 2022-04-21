@@ -10,7 +10,7 @@
             "cwd": "${workspaceFolder}",
             "args": [
                 "-X",
-                "-p","audusd",
+                "-p","nzdusd",
                 "-f","ascii",
                 "-t","tick-data-quotes",//"1-minute-bar-quotes",//
                 "-s","2021-12",
@@ -24,6 +24,18 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "prospector",
+            "type": "python",
+            "request": "launch",
+            "module": "prospector",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                ">","prospector_results.json"
+            ],
+            "justMyCode": true
         }
     ]
 }

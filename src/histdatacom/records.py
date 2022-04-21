@@ -10,24 +10,25 @@ from histdatacom.utils import get_year_from_datemonth
 from histdatacom.utils import get_query_string
 from histdatacom.utils import create_full_path
 
+
 class Record:
     def __init__(self, **kwargs):
-        self.url =            kwargs.get("url", "")
-        self.status =         kwargs.get("status", "")
-        self.encoding =       kwargs.get("encoding", "")
-        self.bytes_length =   kwargs.get("bytes_length", "")
-        self.data_date =      kwargs.get("data_date", "")
-        self.data_year =      kwargs.get("data_year", "")
-        self.data_month =     kwargs.get("data_month", "")
+        self.url = kwargs.get("url", "")
+        self.status = kwargs.get("status", "")
+        self.encoding = kwargs.get("encoding", "")
+        self.bytes_length = kwargs.get("bytes_length", "")
+        self.data_date = kwargs.get("data_date", "")
+        self.data_year = kwargs.get("data_year", "")
+        self.data_month = kwargs.get("data_month", "")
         self.data_datemonth = kwargs.get("data_datemonth", "")
-        self.data_format =    kwargs.get("data_format", "")
+        self.data_format = kwargs.get("data_format", "")
         self.data_timeframe = kwargs.get("data_timeframe", "")
-        self.data_fxpair =    kwargs.get("data_fxpair", "")
-        self.data_dir =       kwargs.get("data_dir", "")
-        self.data_tk =        kwargs.get("data_tk", "")
-        self.zip_filename =   kwargs.get("zip_filename", "")
-        self.csv_filename =   kwargs.get("csv_filename", "")
-        self.csv_linecount =  kwargs.get("csv_linecount", "")
+        self.data_fxpair = kwargs.get("data_fxpair", "")
+        self.data_dir = kwargs.get("data_dir", "")
+        self.data_tk = kwargs.get("data_tk", "")
+        self.zip_filename = kwargs.get("zip_filename", "")
+        self.csv_filename = kwargs.get("csv_filename", "")
+        self.csv_linecount = kwargs.get("csv_linecount", "")
 
     def __call__(self, string="updated", **kwargs):
         for arg in kwargs:
@@ -143,14 +144,15 @@ class Record:
 
     def print_record(self, string="Updated"):
         print(f"{string}:",
-                self.status,
-                self.data_format,
-                self.data_timeframe,
-                self.data_fxpair,
-                self.data_year,
-                self.data_month,
-                "-",
-                self.data_dir)
+              self.status,
+              self.data_format,
+              self.data_timeframe,
+              self.data_fxpair,
+              self.data_year,
+              self.data_month,
+              "-",
+              self.data_dir)
+
 
 class Records(queue.Queue):
     def __init__(self, *args, **kwargs):

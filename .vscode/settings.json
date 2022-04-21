@@ -36,6 +36,8 @@
         "OHLC",
         "prereqs",
         "punct",
+        "pycodestyle",
+        "pydocstyle",
         "Roadmap",
         "sgdjpy",
         "srccsv",
@@ -49,6 +51,7 @@
         "usdmxn",
         "usdnok",
         "usdtry",
+        "veryhigh",
         "xauusd",
         "YEARMONTH"
     ]

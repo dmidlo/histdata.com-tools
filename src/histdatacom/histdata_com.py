@@ -12,15 +12,17 @@ from histdatacom.influx import _Influx
 # Improvements to the Manager / proxied shared values code
 # broke handling of proxied objects without a custom proxy type,
 # as the AutoProxy function was not updated.
-#! Will need to do this everytime venv is recreated.
+# !Will need to do this everytime venv is recreated.
+
 
 class _HistDataCom:
     """A module to pull market data from histdata.com and import it into influxDB"""
 
-    def __init__(self, records_current,
-                        records_next,
-                        csv_chunks_queue,
-                        **kwargs):
+    def __init__(self,
+                 records_current,
+                 records_next,
+                 csv_chunks_queue,
+                 **kwargs):
 
         """ Initialization for _HistDataCom Class"""
         # Set User () or Default Arguments respectively utilizing the self.ArgParser
@@ -53,9 +55,9 @@ class _HistDataCom:
         if self.args["import_to_influxdb"] == 1:
             self.csv_chunks_queue = csv_chunks_queue
             self.influx = _Influx(self.args,
-                                    self.records_current,
-                                    self.records_next,
-                                    self.csv_chunks_queue)
+                                  self.records_current,
+                                  self.records_next,
+                                  self.csv_chunks_queue)
 
     def run(self):
         self.urls.populate_initial_queue(self.records_current, self.records_next)
@@ -74,6 +76,7 @@ class _HistDataCom:
                                     self.records_next,
                                     self.csv_chunks_queue)
 
+
 class HistDataCom():
     # TODO: presently there is no execution api for calls from other programs.
     # TODO  **kwargs is staged here to pass an ArgsNamespace object into _HistDataCom
@@ -82,8 +85,8 @@ class HistDataCom():
         pass
 
     def __call__(self,
-        records_manager = managers.SyncManager(),
-        **kwargs):
+                 records_manager=managers.SyncManager(),
+                 **kwargs):
 
         records_manager.register("Records", Records)
         records_manager.start()
@@ -98,12 +101,14 @@ class HistDataCom():
         csv_chunks_queue = records_manager.Queue()
 
         scraper = _HistDataCom(records_current,
-                                records_next,
-                                csv_chunks_queue)
+                               records_next,
+                               csv_chunks_queue)
         scraper.run()
+
 
 def main():
     HistDataCom()()
+
 
 if __name__ == '__main__':
     sys.exit(main())

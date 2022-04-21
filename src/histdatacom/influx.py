@@ -22,19 +22,21 @@ from rich import print
 from histdatacom.fx_enums import TimeFormat
 from histdatacom.utils import get_csv_dialect
 
+
 class _InfluxDBWriter(multiprocessing.Process):
     def __init__(self, args, csv_chunks_queue):
         multiprocessing.Process.__init__(self)
         self.args = args
         self.csv_chunks_queue = csv_chunks_queue
         self.client = InfluxDBClient(url=self.args['INFLUX_URL'],
-                                    token=self.args['INFLUX_TOKEN'],
-                                    org=self.args['INFLUX_ORG'],
-                                    debug=False)
+                                     token=self.args['INFLUX_TOKEN'],
+                                     org=self.args['INFLUX_ORG'],
+                                     debug=False)
         self.write_api = self.client.write_api(write_options=WriteOptions(
-                                                                write_type=WriteType.batching,
-                                                                batch_size=25_000,
-                                                                flush_interval=12_000))
+                                               write_type=WriteType.batching,
+                                               batch_size=25_000,
+                                               flush_interval=12_000))
+
     def run(self):
         while True:
             chunk = self.csv_chunks_queue.get()
@@ -45,14 +47,15 @@ class _InfluxDBWriter(multiprocessing.Process):
                 break
 
             self.write_api.write(org=self.args['INFLUX_ORG'],
-                                bucket=self.args['INFLUX_BUCKET'],
-                                record=chunk,
-                                write_precision=WritePrecision.MS)
+                                 bucket=self.args['INFLUX_BUCKET'],
+                                 record=chunk,
+                                 write_precision=WritePrecision.MS)
             self.csv_chunks_queue.task_done()
 
     def terminate(self):
         self.write_api.__del__()
         self.client.__del__()
+
 
 class _Influx():
     def __init__(self, args, records_current_, records_next_, csv_chunks_queue_):
@@ -78,18 +81,18 @@ class _Influx():
         args = args_
 
     def parse_row(self, row, record):
-        #myMeasurement,tag1=value1,tag2=value2 fieldKey="fieldValue" 1556813561098000000
+        # line protocol example: myMeasurement,tag1=value1,tag2=value2 fieldKey="fieldValue" 1556813561098000000
         measurement = f"{record.data_fxpair}"
-        tags = f"source=histdata.com,format={record.data_format},timeframe={record.data_timeframe}".replace(" ","")
+        tags = f"source=histdata.com,format={record.data_format},timeframe={record.data_timeframe}".replace(" ", "")
         time = self.convert_datetime_to_utc_timestamp(record.data_format,
-                                                    record.data_timeframe,
-                                                    row)
+                                                      record.data_timeframe,
+                                                      row)
 
         match record.data_timeframe:
             case "M1":
-                fields = f"openbid={row['openBid']},highbid={row['highBid']},lowbid={row['lowBid']},closebid={row['closeBid']}".replace(" ","")
+                fields = f"openbid={row['openBid']},highbid={row['highBid']},lowbid={row['lowBid']},closebid={row['closeBid']}".replace(" ", "")
             case "T":
-                fields = f"bidquote={row['bidQuote']},askquote={row['askQuote']}".replace(" ","")
+                fields = f"bidquote={row['bidQuote']},askquote={row['askQuote']}".replace(" ", "")
 
         line_protocol = f"{measurement},{tags} {fields} {time}"
 
@@ -108,7 +111,7 @@ class _Influx():
             and str.lower(record.data_format) == "ascii":
                 self.import_csv(record)
             records_next.put(record)
-        except:
+        except Exception:
             print("Unexpected error from here:", sys.exc_info())
             record.delete_into_file()
             raise
@@ -123,22 +126,26 @@ class _Influx():
         io_wrapper = io.TextIOWrapper(res)
 
         with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 2),
-                                                initializer=self.init_counters,
-                                                initargs=(csv_chunks_queue,
-                                                            records_current,
-                                                            records_next,
-                                                            self.args.copy())) as executor:
+                                 initializer=self.init_counters,
+                                 initargs=(csv_chunks_queue,
+                                           records_current,
+                                           records_next,
+                                           self.args.copy())) as executor:
 
             fieldnames = self.fieldnames_match(record.data_format, record.data_timeframe)
             dialect = get_csv_dialect(csv_path)
-            data = rx.from_iterable(DictReader(io_wrapper, fieldnames=fieldnames, dialect=dialect)
-                            ).pipe(
-                                ops.buffer_with_count(25_000),
-                                ops.flat_map(
-                                    lambda rows: executor.submit(self.parse_rows, rows, record)))
+            data = rx.from_iterable(
+                DictReader(io_wrapper,
+                           fieldnames=fieldnames,
+                           dialect=dialect)) \
+                .pipe(
+                    ops.buffer_with_count(25_000),
+                    ops.flat_map(
+                        lambda rows: executor.submit(self.parse_rows, rows, record)))
+
             data.subscribe(
-            on_next=lambda x: None,
-            on_error=lambda er: print(f"Unexpected error: {er}"))
+                on_next=lambda x: None,
+                on_error=lambda er: print(f"Unexpected error: {er}"))
 
         os.remove(csv_path)
         record.status = "INFLUX_UPLOAD"
@@ -152,17 +159,17 @@ class _Influx():
 
         records_count = records_current.qsize()
         with Progress(TextColumn(text_format=f"[cyan]Adding {records_count} CSVs to influx queue..."),
-                        BarColumn(),
-                        "[progress.percentage]{task.percentage:>3.0f}%",
-                        TimeElapsedColumn()) as progress:
-
+                      BarColumn(),
+                      "[progress.percentage]{task.percentage:>3.0f}%",
+                      TimeElapsedColumn()) as progress:
             task_id = progress.add_task("influx", total=records_count)
+
             with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 2),
-                                                initializer=self.init_counters,
-                                                initargs=(csv_chunks_queue,
-                                                            records_current,
-                                                            records_next,
-                                                            self.args.copy())) as executor:
+                                     initializer=self.init_counters,
+                                     initargs=(csv_chunks_queue,
+                                               records_current,
+                                               records_next,
+                                               self.args.copy())) as executor:
                 futures = []
 
                 while not records_current.empty():
@@ -180,18 +187,15 @@ class _Influx():
                     futures.remove(future)
                     del future
 
-
         with Progress(TextColumn(text_format="[cyan]...finishing upload to influxdb"),
-            SpinnerColumn(),SpinnerColumn(),SpinnerColumn(),
-            TimeElapsedColumn()) as progress:
+                      SpinnerColumn(), SpinnerColumn(), SpinnerColumn(),
+                      TimeElapsedColumn()) as progress:
             task_id = progress.add_task("waiting", total=0)
-
 
             records_current.join()
             csv_chunks_queue.put(None)
-
             csv_chunks_queue.join()
-            progress.advance(task_id,0.75)
+            progress.advance(task_id, 0.75)
 
         print("[cyan] done.")
         records_next.dump_to_queue(records_current)
@@ -208,11 +212,11 @@ class _Influx():
                     sys.exit()
 
             return yamlfile
-        else:
-            print("\n ERROR: -I flag is used to import data to a influxdb instance...")
-            print("\n        there is no influxdb.yaml file in working directory.")
-            print("\n        did you forget to set it up?\n")
-            sys.exit()
+        
+        print("\n ERROR: -I flag is used to import data to a influxdb instance...")
+        print("\n        there is no influxdb.yaml file in working directory.")
+        print("\n        did you forget to set it up?\n")
+        sys.exit()
 
     @classmethod
     def fieldnames_match(cls, csv_format, timeframe):
@@ -221,7 +225,7 @@ class _Influx():
                 case "ASCII" if timeframe == "M1":
                     fieldnames = ["msSinceEpochUTC", "openBid", "highBid", "lowBid", "closeBid", "Volume"]
                 case "ASCII" if timeframe == "T":
-                    fieldnames = ["msSinceEpochUTC","bidQuote","askQuote","Volume"]
+                    fieldnames = ["msSinceEpochUTC", "bidQuote", "askQuote", "Volume"]
                 case _:
                     raise ValueError("Invalid format for influx import")
             return fieldnames
