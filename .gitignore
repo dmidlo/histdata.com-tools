@@ -16,3 +16,6 @@ dist/
 *.egg-info
 influxdb.yaml
 prospector_results.json
+output.pstats
+result.json
+out.gv
