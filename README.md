@@ -21,8 +21,11 @@ The number one rule when using this tool is to be **MORE** specific with your in
 
 **please submit feature requests and bug reports using this repository's issue tracker.*
 
-```txt
-histdatacom -h
+```sh
+# Show the help and options
+#
+$ histdatacom -h
+
 usage: histdatacom [-h] [-V] [-D] [-X] [-I] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH]
                    [-d DATA_DIRECTORY]
 
@@ -47,7 +50,9 @@ options:
   -d DATA_DIRECTORY, --data-directory DATA_DIRECTORY
                         Not an Executable Search Path! This directory is used to perform work. default is "data" in the current directory
 ```
+
 ## Examples
+
 ```sh
 # Download and extract the current month's 
 # available EURUSD data for metatrader 4/5
@@ -55,12 +60,14 @@ options:
 #
 $ histdatacom -p eurusd -f metatrader -s now
 ```
+
 ```sh
 # include the -D flag to download 
 # but NOT extract to csv.
 # 
 $ histdatacom -D -p usdcad -f metastock -s now
 ```
+
 ```sh
 # The formats available are:
 # metatrader, metastock, ninjatrader, excel, and ascii.
@@ -76,11 +83,13 @@ $ histdatacom -D -p usdcad -f metastock -s now
 #    tick-bid-quotes ------ ninjatrader
 #    tick-bid-quotes ------ ninjatrader
 ```
+
 ```sh
 # To download 1-minute-bar-quotes for both metastock and excel
 #
 $ histdatacom -p usdjpy -f metastock excel -s now 
 ```
+
 ```sh
 # date ranges are for year and month and can be specified
 # in the following ways [ -._]:
@@ -89,6 +98,7 @@ $ histdatacom -p usdjpy -f metastock excel -s now
 #    2202.04
 #    2202_04
 ```
+
 ```sh
 # to fetch a single year's data, do not use a month
 #    - note: unless you're fetching data for the current year,
@@ -98,6 +108,7 @@ $ histdatacom -p usdjpy -f metastock excel -s now
 #            
 $ histdatacom -p udxusd -f ascii -t tick-data-quotes -s 2011
 ```
+
 ```sh
 # to fetch a single month's data, include a month, but do not
 # use the -e, --end_yearmonth flag.
@@ -111,6 +122,7 @@ $ histdatacom -p udxusd -f ascii -t tick-data-quotes -s 2011
 #
 $ histdatacom -f metatrader -s 2012-07
 ```
+
 ```sh
 # multiple datasets can be requested in one command
 # 
@@ -182,10 +194,7 @@ $ histdatacom -p frxeur -f ninjatrader -s now
 $ histdatacom -p xagusd -f ascii -1-minute-bar-quotes -s 2019-04 -e now
 ```
 
-
-
 ## Roadmap
-
 
 ## Setup
 
@@ -210,6 +219,3 @@ $ histdatacom -p xagusd -f ascii -1-minute-bar-quotes -s 2019-04 -e now
    - `https://github.com/python/cpython/commit/8aa45de6c6d84397b772bad7e032744010bbd456`
   
 6. Run `histdatacom` to view help message and flags
-
-7. Test a run with `histdatacom -p eurusd -P ascii -t 1-minute-bar-quotes`
-    - Data is found in the `data/` directory unless otherwise specified with the -d flag
