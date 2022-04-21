@@ -66,7 +66,7 @@ class ArgParser(argparse.ArgumentParser):
                 nargs='+',
                 type=str,
                 choices=Format.list_values(), 
-                help='space separated formats. e.g. -P metatrader ascii ninjatrader metastock',
+                help='space separated formats. e.g. -f metatrader ascii ninjatrader metastock',
                 metavar='FORMAT')
         self.add_argument(
                 '-t','--timeframes',
