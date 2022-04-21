@@ -1,24 +1,36 @@
-import os, sys, yaml, multiprocessing, io, rx, pytz
-from rx import operators as ops
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from influxdb_client import InfluxDBClient, WriteOptions, WritePrecision, Point
-from influxdb_client.client.write_api import WriteType
+import os
+import sys
+import io
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import as_completed
 from urllib.request import urlopen
-from rich.progress import Progress
-from rich.progress import BarColumn, TextColumn, TimeElapsedColumn, SpinnerColumn
 from csv import DictReader
 from functools import partial
 from datetime import datetime
+import yaml
+import rx
+import pytz
+from rx import operators as ops
+from influxdb_client import InfluxDBClient
+from influxdb_client import WriteOptions
+from influxdb_client import WritePrecision
+from influxdb_client.client.write_api import WriteType
+from rich.progress import Progress
+from rich.progress import BarColumn, TextColumn, TimeElapsedColumn, SpinnerColumn
+from rich import print
 from histdatacom.fx_enums import TimeFormat
 from histdatacom.utils import get_csv_dialect
-from rich import print
 
 class _InfluxDBWriter(multiprocessing.Process):
     def __init__(self, args, csv_chunks_queue):
         multiprocessing.Process.__init__(self)
         self.args = args
         self.csv_chunks_queue = csv_chunks_queue
-        self.client = InfluxDBClient(url=self.args['INFLUX_URL'], token=self.args['INFLUX_TOKEN'], org=self.args['INFLUX_ORG'], debug=False)
+        self.client = InfluxDBClient(url=self.args['INFLUX_URL'],
+                                    token=self.args['INFLUX_TOKEN'],
+                                    org=self.args['INFLUX_ORG'],
+                                    debug=False)
         self.write_api = self.client.write_api(write_options=WriteOptions(
                                                                 write_type=WriteType.batching,
                                                                 batch_size=25_000,
@@ -32,7 +44,10 @@ class _InfluxDBWriter(multiprocessing.Process):
                 self.csv_chunks_queue.task_done()
                 break
 
-            self.write_api.write(org=self.args['INFLUX_ORG'], bucket=self.args['INFLUX_BUCKET'], record=chunk, write_precision=WritePrecision.MS)
+            self.write_api.write(org=self.args['INFLUX_ORG'],
+                                bucket=self.args['INFLUX_BUCKET'],
+                                record=chunk,
+                                write_precision=WritePrecision.MS)
             self.csv_chunks_queue.task_done()
 
     def terminate(self):
@@ -66,7 +81,9 @@ class _Influx():
         #myMeasurement,tag1=value1,tag2=value2 fieldKey="fieldValue" 1556813561098000000
         measurement = f"{record.data_fxpair}"
         tags = f"source=histdata.com,format={record.data_format},timeframe={record.data_timeframe}".replace(" ","")
-        time = self.convert_datetime_to_utc_timestamp(record.data_format, record.data_timeframe, row)
+        time = self.convert_datetime_to_utc_timestamp(record.data_format,
+                                                    record.data_timeframe,
+                                                    row)
 
         match record.data_timeframe:
             case "M1":
@@ -75,7 +92,7 @@ class _Influx():
                 fields = f"bidquote={row['bidQuote']},askquote={row['askQuote']}".replace(" ","")
 
         line_protocol = f"{measurement},{tags} {fields} {time}"
-        
+
         return line_protocol
 
     def parse_rows(self, rows, record):
@@ -106,28 +123,27 @@ class _Influx():
         io_wrapper = io.TextIOWrapper(res)
 
         with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 2),
-                                                initializer=self.init_counters, 
+                                                initializer=self.init_counters,
                                                 initargs=(csv_chunks_queue,
                                                             records_current,
                                                             records_next,
                                                             self.args.copy())) as executor:
 
-                fieldnames = self.fieldnames_match(record.data_format, record.data_timeframe)
-                dialect = get_csv_dialect(csv_path)
-                data = rx.from_iterable(DictReader(io_wrapper, fieldnames=fieldnames, dialect=dialect)
-                                ).pipe(
-                                    ops.buffer_with_count(25_000),
-                                    ops.flat_map(
-                                        lambda rows: executor.submit(self.parse_rows, rows, record)))
-                data.subscribe(
-                on_next=lambda x: None,
-                on_error=lambda er: print(f"Unexpected error: {er}")
-            )
+            fieldnames = self.fieldnames_match(record.data_format, record.data_timeframe)
+            dialect = get_csv_dialect(csv_path)
+            data = rx.from_iterable(DictReader(io_wrapper, fieldnames=fieldnames, dialect=dialect)
+                            ).pipe(
+                                ops.buffer_with_count(25_000),
+                                ops.flat_map(
+                                    lambda rows: executor.submit(self.parse_rows, rows, record)))
+            data.subscribe(
+            on_next=lambda x: None,
+            on_error=lambda er: print(f"Unexpected error: {er}"))
 
         os.remove(csv_path)
         record.status = "INFLUX_UPLOAD"
         record.write_info_file(base_dir=args['default_download_dir'])
-        
+
     def import_data(self, records_current, records_next, csv_chunks_queue):
         # cpu count -1: Manager, -1: DBWriter,
 
@@ -142,7 +158,7 @@ class _Influx():
 
             task_id = progress.add_task("influx", total=records_count)
             with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 2),
-                                                initializer=self.init_counters, 
+                                                initializer=self.init_counters,
                                                 initargs=(csv_chunks_queue,
                                                             records_current,
                                                             records_next,
@@ -169,7 +185,7 @@ class _Influx():
             SpinnerColumn(),SpinnerColumn(),SpinnerColumn(),
             TimeElapsedColumn()) as progress:
             task_id = progress.add_task("waiting", total=0)
-            
+
 
             records_current.join()
             csv_chunks_queue.put(None)
@@ -182,7 +198,7 @@ class _Influx():
 
     @classmethod
     def load_influx_yaml(cls):
-        
+
         if os.path.exists('influxdb.yaml'):
             with open('influxdb.yaml', 'r') as file:
                 try:
@@ -199,9 +215,9 @@ class _Influx():
             sys.exit()
 
     @classmethod
-    def fieldnames_match(cls, format, timeframe):
+    def fieldnames_match(cls, csv_format, timeframe):
         try:
-            match format:
+            match csv_format:
                 case "ASCII" if timeframe == "M1":
                     fieldnames = ["msSinceEpochUTC", "openBid", "highBid", "lowBid", "closeBid", "Volume"]
                 case "ASCII" if timeframe == "T":
@@ -214,19 +230,19 @@ class _Influx():
             sys.exit()
 
     @classmethod
-    def get_timeformat(cls, format, timeframe):
+    def get_timeformat(cls, csv_format, timeframe):
 
-        format_enum_key = f'{str(format)}_{str(timeframe)}'
+        format_enum_key = f'{str(csv_format)}_{str(timeframe)}'
 
         return TimeFormat[format_enum_key].value
 
     @classmethod
-    def convert_datetime_to_utc_timestamp(cls, format, timeframe, row):
-        
+    def convert_datetime_to_utc_timestamp(cls, csv_format, timeframe, row):
+
         est_timestamp = row["msSinceEpochUTC"]
-        date_object = datetime.strptime(est_timestamp, cls.get_timeformat(format, timeframe))
+        date_object = datetime.strptime(est_timestamp, cls.get_timeformat(csv_format, timeframe))
         tz_date_object = date_object.replace(tzinfo=pytz.timezone("Etc/GMT+5"))
 
         timestamp = int(tz_date_object.timestamp() * 1000)
-        
+
         return str(timestamp)

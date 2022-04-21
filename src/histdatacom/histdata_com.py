@@ -1,3 +1,4 @@
+import sys
 from multiprocessing import managers
 from histdatacom.cli import ArgParser
 from histdatacom.records import Records
@@ -5,7 +6,6 @@ from histdatacom.utils import set_working_data_dir, load_influx_yaml
 from histdatacom.urls import _URLs
 from histdatacom.csvs import _CSVs
 from histdatacom.influx import _Influx
-import sys
 
 # !Manually Applied Backport of:
 # https://github.com/python/cpython/commit/8aa45de6c6d84397b772bad7e032744010bbd456
@@ -20,21 +20,23 @@ class _HistDataCom:
     def __init__(self, records_current,
                         records_next,
                         csv_chunks_queue,
-                        **kwargs): 
+                        **kwargs):
 
         """ Initialization for _HistDataCom Class"""
-        # Set User () or Default Arguments respectively utilizing the self.ArgParser and self.ArgsNamespace classes.
+        # Set User () or Default Arguments respectively utilizing the self.ArgParser
+        # and self.ArgsNamespace classes.
         #   - ArgParser()():
         #       - ()(): use an IIFE to allow argparse to get garbage collected
         #       - ()(): ArgParser.__call__ returns updated ArgsNamespace object
         #       - vars(...): get the __dict__ representation of the object
         #       - ArgParser._arg_list_to_set(...)
-        #           - Normalize iterable user arguments whose values are lists and make them sets instead
+        #           - Normalize iterable user arguments whose values are lists and
+        #             make them sets instead
         #       - .copy(): decouple for GC using a hard copy of user args
         self.args = ArgParser._arg_list_to_set(vars(ArgParser()())).copy()
         self.args['default_download_dir'] = set_working_data_dir(self.args['data_directory'])
         self.args['queue_filename'] = ".queue"
-        
+
         if self.args["import_to_influxdb"] == 1:
             influx_yaml = load_influx_yaml()
             self.args['INFLUX_ORG'] = influx_yaml['influxdb']['org']
@@ -57,13 +59,13 @@ class _HistDataCom:
 
     def run(self):
         self.urls.populate_initial_queue(self.records_current, self.records_next)
-        
+
         if self.args["validate_urls"]:
             self.urls.validate_urls(self.records_current, self.records_next)
 
         if self.args["download_data_archives"]:
             self.urls.download_zips(self.records_current, self.records_next)
-            
+
         if self.args["extract_csvs"]:
             self.csvs.extract_csvs(self.records_current, self.records_next)
 
@@ -78,7 +80,7 @@ class HistDataCom():
     # TODO  for developers to configure
     def __init__(self, **kwargs):
         pass
-    
+
     def __call__(self,
         records_manager = managers.SyncManager(),
         **kwargs):
@@ -95,7 +97,7 @@ class HistDataCom():
         global csv_chunks_queue
         csv_chunks_queue = records_manager.Queue()
 
-        scraper = _HistDataCom(records_current, 
+        scraper = _HistDataCom(records_current,
                                 records_next,
                                 csv_chunks_queue)
         scraper.run()
@@ -103,5 +105,5 @@ class HistDataCom():
 def main():
     HistDataCom()()
 
-if __name__ == '__main__':    
+if __name__ == '__main__':
     sys.exit(main())

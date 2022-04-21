@@ -6,17 +6,16 @@ from influxdb_client import WritePrecision
 # eurusd usdjpy gbpusd usdcad usdchf audusd nzdusd
 
 # Minors 7
-# eurgbp euraud gbpchf audnzd audcad audchf gbpaud usdmxn 
+# eurgbp euraud gbpchf audnzd audcad audchf gbpaud usdmxn
 
 # Crosses 10
-# eurchf eurcad eurnzd eurjpy gbpjpy chfjpy cadjpy 
+# eurchf eurcad eurnzd eurjpy gbpjpy chfjpy cadjpy
 # audjpy nzdjpy gbpcad nzdcad sgdjpy gbpnzd cadchf
-# 
 
 # Exotics 7
-# eurtry usdtry usdsek usdnok usddkk usdzar usdhkd 
+# eurtry usdtry usdsek usdnok usddkk usdzar usdhkd
 # usdsgd eurpln eurhuf nadchf usdhuf usdpln eurczk
-# eursek usdczk zarjpy eurdkk eurnok usddkk 
+# eursek usdczk zarjpy eurdkk eurnok usddkk
 
 # metals/commodities
 # xauusd xauaud xauchf bcousd wtiusd xaueur xagusd xaugbp
@@ -166,10 +165,10 @@ class TimePrecision(Enum):
     def list_values(cls):
         return {member.value for _, member in cls.__members__.items()}
 
-def get_valid_format_timeframes(format):
+def get_valid_format_timeframes(csv_format):
     timeframes = list()
 
-    match format:
+    match csv_format:
         case "metatrader":
             timeframes.extend(["M1"])
         case "ninjatrader":

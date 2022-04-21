@@ -1,6 +1,12 @@
-import os, yaml, sys, pytz, csv
+import os
+import sys
+import csv
 from datetime import datetime
-from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
+import yaml
+import pytz
+from rich.progress import TextColumn
+from rich.progress import BarColumn
+from rich.progress import TimeElapsedColumn
 
 def get_month_from_datemonth(datemonth):
     return datemonth[-2:] if datemonth is not None and len(datemonth) > 4 else ""
@@ -19,7 +25,7 @@ def set_working_data_dir(data_dirname):
     return f"{os.getcwd()}{os.sep}{data_dirname}{os.sep}"
 
 def load_influx_yaml():
-    
+
     if os.path.exists('influxdb.yaml'):
         with open('influxdb.yaml', 'r') as file:
             try:
@@ -39,7 +45,7 @@ def get_current_datemonth_gmt_plus5():
     return f"{gmt_plus5.year}{gmt_plus5.strftime('%m')}"
 
 def get_progress_bar(progress_string):
-    
+
     return TextColumn(text_format=progress_string), \
             BarColumn(),\
             "[progress.percentage]{task.percentage:>3.0f}%", \

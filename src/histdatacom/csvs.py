@@ -1,20 +1,21 @@
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import multiprocessing, sys, os, zipfile
-from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
-import csv
-
-from datetime import datetime
-import pytz
-from histdatacom.fx_enums import TimeFormat
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import as_completed
+import multiprocessing
+import sys
+import os
+import zipfile
+from rich.progress import Progress
+from rich.progress import TextColumn
+from rich.progress import BarColumn
+from rich.progress import TimeElapsedColumn
 
 from rich import print
 
 class _CSVs:
-
-    def __init__(self, args, records_current_, records_next_):
+    def __init__(self, args_, records_current_, records_next_):
         # setting relationship to global outer parent
-        self.args = args
-        
+        self.args = args_
+
         global records_current
         records_current = records_current_
 
@@ -31,7 +32,7 @@ class _CSVs:
 
     def extract_csv(self, record):
         try:
-            if ("CSV_ZIP" in record.status):
+            if "CSV_ZIP" in record.status:
                 zip_path = record.data_dir + record.zip_filename
 
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:

@@ -9,11 +9,11 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "args": [
-                "-D",
-                "-p","usdjpy",
+                "-X",
+                "-p","audusd",
                 "-f","ascii",
                 "-t","tick-data-quotes",//"1-minute-bar-quotes",//
-                "-s","now",
+                "-s","2021-12",
                 "-e","now"
             ],
             "justMyCode": true
