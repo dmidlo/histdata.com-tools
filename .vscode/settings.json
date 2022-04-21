@@ -33,7 +33,10 @@
         "mtvolume",
         "nzdcad",
         "nzdusd",
+        "OHLC",
+        "prereqs",
         "punct",
+        "Roadmap",
         "sgdjpy",
         "srccsv",
         "TIMEFRAME",
@@ -46,6 +49,7 @@
         "usdmxn",
         "usdnok",
         "usdtry",
-        "xauusd"
+        "xauusd",
+        "YEARMONTH"
     ]
 }

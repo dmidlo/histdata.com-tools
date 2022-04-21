@@ -10,7 +10,7 @@ Multi-threaded/Multi-Process Downloader for Currency Exchange Rates from Histdat
 
 *If you find this tool helpful and would like to support future development, I'm in need of caffeine, feel free to [buy me coffee!](https://www.buymeacoffee.com/dmidlo)*
 
-## Usage:
+## Usage
 **Note #1**
 The number one rule when using this tool is to be **MORE** specific with your input to limit the size of your request.
 
@@ -40,7 +40,7 @@ options:
   -p PAIR [PAIR ...], --pairs PAIR [PAIR ...]
                         space separated currency pairs. e.g. -p eurusd usdjpy ...
   -f FORMAT [FORMAT ...], --formats FORMAT [FORMAT ...]
-                        space separated formats. e.g. -P metatrader ascii ninjatrader metastock
+                        space separated formats. e.g. -f metatrader ascii ninjatrader metastock
   -t TIMEFRAME [TIMEFRAME ...], --timeframes TIMEFRAME [TIMEFRAME ...]
                         space separated Timeframes. e.g. -t tick-data-quotes 1-minute-bar-quotes ...
   -s START_YEARMONTH, --start_yearmonth START_YEARMONTH
@@ -139,7 +139,7 @@ $ histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
 ```sh
 # To import data to an influxdb instance, use the -I flag
 # along with an influxdb.yaml file in the current working
-# directory (whereever you are running the command from).
+# directory (where ever you are running the command from).
 #
 #  - ascii is the only format accepted for influxdb import.
 #
@@ -209,13 +209,13 @@ $ histdatacom -p xagusd -f ascii -1-minute-bar-quotes -s 2019-04 -e now
 3. Install CA certificate (macOS)
    - `pip install certifi`
 
-4. Build and install the app
-   - `python setup.py build`
-   - `python setup.py install`
-
-5. Apply Backport if not already patched upstream
+4. Apply Backport if not already patched upstream
    - This seems to already be upstream, but you can verify if concerned
    - `lib/python3.XXX/multiprocessing/managers.py > AutoProxy`
    - `https://github.com/python/cpython/commit/8aa45de6c6d84397b772bad7e032744010bbd456`
   
+5. Build and install the app
+   - `python setup.py build`
+   - `python setup.py install`
+
 6. Run `histdatacom` to view help message and flags

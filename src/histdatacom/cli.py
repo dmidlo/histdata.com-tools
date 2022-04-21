@@ -1,12 +1,83 @@
-import argparse, sys, re
+"""_summary_
+CLI interface for histdatacom
+
+Raises:
+    ValueError: ERROR on -f {args_namespace.formats}           ERROR
+                    * format must be ASCII when importing to influxdb. eg. -f ascii
+    ValueError: ERROR on -e start           ERROR
+                                    * keyword 'start' cannot be used as -e start
+    ValueError: ERROR on -s start           ERROR
+                                    * keyword 'start' must also specify
+                                      an end year-month
+    ValueError: ERROR on -e {end_yearmonth}  ERROR
+                    * Malformed command:
+                        - cannot include `-e end_year-month` without
+                          specifying a start year-month.
+                            eg. -s year-month -e year-month
+    ValueError: ERROR on -e {get_year_from_datemonth(start_yearmonth)}  {end_yearmonth}  ERROR
+                    * Malformed command:
+                        - cannot include `-e end_year-month` when
+                          specifying a single year
+                          with -s {get_year_from_datemonth(start_yearmonth)}
+    ValueError: ERROR on -e {start_yearmonth}   ERROR
+                    start month cannot be zero.
+                        * valid inputs:
+                            a) just the year
+                                eg. -s 2022
+                            b) months 1-12:
+                                eg. -s 2022-04
+    ValueError: ERROR on -s {start_yearmonth}  ERROR
+                    * Malformed command:
+                        - start month is greater than 12.
+                          valid input is 01-12.
+    ValueError: ERROR on -e {end_yearmonth}           ERROR
+                            * You left out the end month.
+                                - valid input is -e year-month(1-12)
+                                    eg. -e 2022-03
+    ValueError: ERROR on -e {end_yearmonth}           ERROR
+                            * End month cannot be zero.
+                                - valid input is -e year-month(1-12)
+                                    eg. -e 2022-03
+    ValueError: ERROR on -e {end_yearmonth}  ERROR
+                            * Malformed command:
+                                - end month is greater than 12.
+                                valid input is 01-12.
+    ValueError: ERROR on -s {start_yearmonth} -e {end_yearmonth}  ERROR
+                    * start year-month and end year-month cannot be the same.
+    ValueError: ERROR on -s {start_yearmonth}      ERROR
+                            * bad year-month
+                                - no data available for dates
+                                prior to 2000y
+    ValueError: ERROR on -s {start_yearmonth}      ERROR
+                            * year-month cannot be in the future.
+    ValueError: ERROR on -e {end_yearmonth}     ERROR
+                            * bad year-month
+                                - no data available for dates
+                                prior to 2000y
+    ValueError: ERROR on -e {end_yearmonth}     ERROR
+                            * year-month cannot be in the future.
+    ValueError: ERROR on -s {start_yearmonth} -e {end_yearmonth}    ERROR
+                            * logic error: end year-month is before start year-month.
+    ValueError: ERROR on {yearmonth}    ERROR
+                            * invalid yearmonth format
+
+Returns:
+    _type_: self.arg_namespace
+"""
+
+import argparse
+import sys
+import re
 from histdatacom.fx_enums import Pairs, Format, Timeframe
-from histdatacom.utils import get_current_datemonth_gmt_plus5, get_month_from_datemonth, get_year_from_datemonth
+from histdatacom.utils import get_current_datemonth_gmt_plus5
+from histdatacom.utils import get_month_from_datemonth
+from histdatacom.utils import get_year_from_datemonth
 
 class ArgsNamespace:
     """ An intra-class DTO for Default Arguments for _HistDataCom class. """
     # argparse uses a thin class to create a namespace for cli/shell arguments to live in
-    # normally argparse.ArgumentParser.parse_args(namespace=...) creates this namespace and 
-    # writes user's cli args to it.  Preemptively creating here to hold default args; if the 
+    # normally argparse.ArgumentParser.parse_args(namespace=...) creates this namespace and
+    # writes user's cli args to it.  Preemptively creating here to hold default args; if the
     # user enters args in the shell, these values will be respectively overwritten
     def __init__(self):
         self.validate_urls = False
@@ -22,9 +93,9 @@ class ArgsNamespace:
 
 class ArgParser(argparse.ArgumentParser):
     """ Encapsulation class for argparse related operations """
-    
+
     def __init__(self, **kwargs):
-        """ set up argparse, bring in defaults DTO, setup cli params, receive 
+        """ set up argparse, bring in defaults DTO, setup cli params, receive
             and overwrite defaults with user cli args."""
 
         # init _HistDataCom.ArgParser to extend argparse.ArgumentParser
@@ -43,50 +114,50 @@ class ArgParser(argparse.ArgumentParser):
                 action='store_true',
                 help='Check generated list of URLs as valid download locations')
         self.add_argument(
-                "-D","--download_data_archives", 
+                "-D","--download_data_archives",
                 action='store_true',
                 help='download specified pairs/formats/timeframe and create data files')
         self.add_argument(
-                "-X","--extract_csvs", 
+                "-X","--extract_csvs",
                 action='store_true',
                 help='histdata.com delivers zip files.  use the -X flag to extract them to .csv.')
         self.add_argument(
-                "-I","--import_to_influxdb", 
+                "-I","--import_to_influxdb",
                 action='store_true',
                 help='import csv data to influxdb instance. Use influxdb.yaml to configure.')
         self.add_argument(
                 '-p','--pairs',
                 nargs='+',
                 type=str,
-                choices=Pairs.list_keys(), 
+                choices=Pairs.list_keys(),
                 help='space separated currency pairs. e.g. -p eurusd usdjpy ...',
                 metavar='PAIR')
         self.add_argument(
                 '-f','--formats',
                 nargs='+',
                 type=str,
-                choices=Format.list_values(), 
+                choices=Format.list_values(),
                 help='space separated formats. e.g. -f metatrader ascii ninjatrader metastock',
                 metavar='FORMAT')
         self.add_argument(
                 '-t','--timeframes',
                 nargs='+',
                 type=(lambda v : Timeframe(v).name), # convert long Timeframe .value to short .key
-                choices=Timeframe.list_keys(), 
+                choices=Timeframe.list_keys(),
                 help='space separated Timeframes. e.g. -t tick-data-quotes 1-minute-bar-quotes ...',
                 metavar='TIMEFRAME')
         self.add_argument(
-                "-s","--start_yearmonth", 
+                "-s","--start_yearmonth",
                 type=(lambda v : self.validate_yearmonth_format(v)),
                 help='set a start year and month for data. e.g. -s 2000-04 or -s 2015-00')
         self.add_argument(
-                "-e","--end_yearmonth", 
+                "-e","--end_yearmonth",
                 type=(lambda v : self.validate_yearmonth_format(v)),
                 help='set a start year and month for data. e.g. -s 2020-00 or -s 2022-04')
         self.add_argument(
                 '-d','--data-directory',
                 type=str,
-                help='Not an Executable Search Path! This directory is used to perform work. default is "data" in the current directory')
+                help='Directory Used to save data. default is "data" in the current directory')
 
         # prevent running from cli with no arguments
         if len(sys.argv)==1:
@@ -106,32 +177,34 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def _arg_list_to_set(cls, args):
-        """ Utility Method to search for list objects contained in args DTO and cast them as sets """
         # This is to standardize data types. If the user specifies a parameter,
-        # argparse returns a list, our defaults are sets, so . 
+        # argparse returns a list, our defaults are sets, so .
         for arg in args:
-            if isinstance(args[arg], list): args[arg] = set(args[arg])
+            if isinstance(args[arg], list):
+                args[arg] = set(args[arg])
         return args
 
     @classmethod
     def check_for_ascii_if_influx(cls, args_namespace):
+        """Verify ascii csv_format type for influxdb import"""
         try:
             err_text_influx_must_be_ascii = \
             f"""
                 ERROR on -f {args_namespace.formats}           ERROR
                     * format must be ASCII when importing to influxdb. eg. -f ascii
-                      
+
             """
             if args_namespace.import_to_influxdb:
-                for format in args_namespace.formats:
-                    if str.lower(format) != "ascii":
+                for csv_format in args_namespace.formats:
+                    if str.lower(csv_format) != "ascii":
                         raise ValueError(err_text_influx_must_be_ascii)
         except ValueError as err:
             print(err)
             sys.exit(err)
 
     @classmethod
-    def check_datetime_input(cls, args_namespace):        
+    def check_datetime_input(cls, args_namespace):
+        """Checks for invalid datetime input for -s and -e flags"""
         if args_namespace.start_yearmonth \
           or args_namespace.end_yearmonth:
             args_namespace.start_yearmonth, args_namespace.end_yearmonth = \
@@ -149,7 +222,7 @@ class ArgParser(argparse.ArgumentParser):
 
         args_namespace.start_yearmonth, args_namespace.end_yearmonth = \
             cls.replace_falsey_yearmonth_with_none(args_namespace)
-        
+
         cls.check_start_yearmonth_in_range(args_namespace)
         cls.check_end_yearmonth_in_range(args_namespace)
         cls.check_start_lessthan_end(args_namespace)
@@ -157,6 +230,10 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def validate_prerequisites(cls, args_namespace):
+        """Sets prereqs for behavior flags -V -D -X -I"""
+        if args_namespace.validate_urls:
+            return
+
         if args_namespace.download_data_archives:
             args_namespace.validate_urls = True
 
@@ -179,17 +256,19 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def check_for_now_in_yearmonth(cls, args_namespace):
+        """checks for now in -s or -e and adjusts it to current year-month"""
         if (start_yearmonth := args_namespace.start_yearmonth):
             if start_yearmonth == "now":
                 return get_current_datemonth_gmt_plus5(), None
             elif end_yearmonth := args_namespace.end_yearmonth:
                 if end_yearmonth == "now":
                     return start_yearmonth, get_current_datemonth_gmt_plus5()
-    
+
         return start_yearmonth, end_yearmonth
 
     @classmethod
     def check_for_start_in_yearmonth(cls, args_namespace):
+        """Checks for 'start' keyword in -s and sets -s yearmonth to 200001"""
         try:
             if (start_yearmonth := args_namespace.start_yearmonth):
                 if start_yearmonth == "start":
@@ -208,7 +287,7 @@ class ArgParser(argparse.ArgumentParser):
                                 ERROR on -s start           ERROR
                                     * keyword 'start' must also specify
                                       an end year-month
-                        """ 
+                        """
                         raise ValueError(err_text_start_must_have_end)
             return args_namespace.start_yearmonth, args_namespace.end_yearmonth
         except ValueError as err:
@@ -216,7 +295,7 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def check_cli_start_yearmonth(cls, args_namespace):
-
+        """Validations for -s start_yearmonth"""
         start_yearmonth = args_namespace.start_yearmonth
         start_year = get_year_from_datemonth(start_yearmonth)
         start_month = get_month_from_datemonth(start_yearmonth)
@@ -239,7 +318,8 @@ class ArgParser(argparse.ArgumentParser):
                 ERROR on -e {get_year_from_datemonth(start_yearmonth)}  {end_yearmonth}  ERROR
                     * Malformed command:
                         - cannot include `-e end_year-month` when
-                          specifying a single year with -s {get_year_from_datemonth(start_yearmonth)}
+                          specifying a single year
+                          with -s {get_year_from_datemonth(start_yearmonth)}
         """
 
         err_text_no_start_yearmonth = \
@@ -247,7 +327,7 @@ class ArgParser(argparse.ArgumentParser):
                 ERROR on -e {end_yearmonth}  ERROR
                     * Malformed command:
                         - cannot include `-e end_year-month` without
-                          specifying a start year-month. 
+                          specifying a start year-month.
                             eg. -s year-month -e year-month
         """
         err_text_start_month_greater_than_12 = \
@@ -276,6 +356,7 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def check_cli_end_yearmonth(cls, args_namespace):
+        """Validations for -e end_yearmonth"""
         try:
             if end_yearmonth := args_namespace.end_yearmonth:
                 end_year = get_year_from_datemonth(end_yearmonth)
@@ -312,10 +393,11 @@ class ArgParser(argparse.ArgumentParser):
                 elif int(end_month) > 12:
                     raise ValueError(err_text_end_month_greater_than_12)
         except ValueError as err:
-                cls.exit_on_datetime_error(err)
+            cls.exit_on_datetime_error(err)
 
     @classmethod
     def check_for_same_start_yearmonth(cls, args_namespace):
+        """Validates that -s start_yearmonth and -e end_yearmonth are not the same"""
         try:
             start_yearmonth = args_namespace.start_yearmonth
             start_year = get_year_from_datemonth(start_yearmonth)
@@ -338,6 +420,7 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def replace_falsey_yearmonth_with_none(cls, args_namespace):
+        """if no user input on -s or -e set value to None"""
         start_yearmonth = args_namespace.start_yearmonth
         end_yearmonth = args_namespace.end_yearmonth
 
@@ -350,12 +433,13 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def check_start_yearmonth_in_range(cls, args_namespace):
+        """Validate that -s is not earlier than 2000-01 or later than the current year-month"""
         try:
             if start_yearmonth := args_namespace.start_yearmonth:
                 err_text_date_prior_to_dataset = \
                 f"""
                         ERROR on -s {start_yearmonth}      ERROR
-                            * bad year-month 
+                            * bad year-month
                                 - no data available for dates
                                 prior to 2000y
                 """
@@ -373,12 +457,13 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def check_end_yearmonth_in_range(cls, args_namespace):
+        """checks if -e is not earlier than 200001 or later than current year-month"""
         try:
             if end_yearmonth := args_namespace.end_yearmonth:
                 err_text_date_prior_to_dataset = \
                 f"""
                         ERROR on -e {end_yearmonth}     ERROR
-                            * bad year-month 
+                            * bad year-month
                                 - no data available for dates
                                 prior to 2000y
                 """
@@ -396,6 +481,7 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def check_start_lessthan_end(cls, args_namespace):
+        """validats that -e is not a year-month earlier than -s"""
         try:
             if (start_yearmonth := args_namespace.start_yearmonth) \
               and (end_yearmonth := args_namespace.end_yearmonth):
@@ -412,6 +498,20 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def validate_yearmonth_format(cls, yearmonth):
+        """Initial user input validation.
+            checks year-month format for:
+                -  0000
+                -  0000-00
+                - "0000 00"
+                -  0000_00
+                -  0000.00
+                -  0000:00
+                -  000000
+                -  start
+                -  now
+
+            returns str("000000") or "now" or "start"
+        """
         try:
             err_text_bad_yearmonth_format = \
             f"""
@@ -433,9 +533,11 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def replace_date_punct(cls, datemonth_str):
+        """removes year-month punctuation and returns str("000000")"""
         return re.sub("[-_.: ]", "", datemonth_str) if datemonth_str is not None else ""
 
     @classmethod
     def exit_on_datetime_error(cls, err):
+        """standared exit on error for user input"""
         print(err)
         sys.exit(err)

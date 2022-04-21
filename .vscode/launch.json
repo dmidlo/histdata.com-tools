@@ -9,7 +9,7 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "args": [
-                "-I",
+                "-D",
                 "-p","usdjpy",
                 "-f","ascii",
                 "-t","tick-data-quotes",//"1-minute-bar-quotes",//
