@@ -16,12 +16,20 @@ def get_version(rel_path):
     else:
         raise RuntimeError("Unable to find version string.")
 
+with open("README.md", "r", encoding="utf-8") as file:
+    long_description = file.read()
+
 setup(
     # basic package data
     name="histdatacom",
     version=get_version("src/histdatacom/__init__.py"),
     description="A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks.",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
     url='https://github.com/dmidlo/histdata.com-tools',
+    project_urls={
+        "Bug Tracker": "https://github.com/dmidlo/histdata.com-tools/issues",
+    },
     author="David Midlo",
     author_email="dmidlo@gmail.com",
     license="MIT License",
