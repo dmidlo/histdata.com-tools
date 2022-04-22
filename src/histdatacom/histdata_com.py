@@ -10,13 +10,6 @@ from histdatacom.urls import _URLs
 from histdatacom.csvs import _CSVs
 from histdatacom.influx import _Influx
 
-# !Manually Applied Backport of:
-# https://github.com/python/cpython/commit/8aa45de6c6d84397b772bad7e032744010bbd456
-# Improvements to the Manager / proxied shared values code
-# broke handling of proxied objects without a custom proxy type,
-# as the AutoProxy function was not updated.
-# !Will need to do this everytime venv is recreated.
-
 
 class _HistDataCom:
     """A module to pull market data from histdata.com and import it into influxDB"""
