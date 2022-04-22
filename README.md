@@ -37,7 +37,7 @@ The number one rule when using this tool is to be **MORE** specific with your in
 **please submit feature requests and bug reports using this repository's issue tracker.*
 
 ##### Help
-```sh
+```txt
 # Show the help and options
 #
 $ histdatacom -h
