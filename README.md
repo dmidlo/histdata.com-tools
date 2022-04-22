@@ -1,21 +1,28 @@
 # histdata.com-tools
 
-A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks.
+A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks. Works on MacOS, Linux & Windows Systems.
+
+---
 
 - [histdata.com-tools](#histdatacom-tools)
 - [Disclaimer](#disclaimer)
 - [Setup](#setup)
+  - [TLDR for all platforms](#tldr-for-all-platforms)
+  - [MacOS and Linux](#macos-and-linux)
+  - [Windows Powershell](#windows-powershell)
 - [Usage](#usage)
-   - [Help](#help)
-   - [Basic Use](#basic-use)
-   - [Available Formats](#available-formats)
-   - [Date Ranges](#date-ranges)
-      - ['Start' & 'Now' Keywords](#start--now-keywords)
-   - [Multiple Datasets](#multiple-datasets)
-   - [Import to InfluxDB](#import-to-influxdb)
-      - [influxdb.yaml](#influxdbyaml)
-   - [Other Scripts, Modules, & Jupyter Support](#other-scripts-modules--jupyter-support)
+  - [Show the Help and Options](#show-the-help-and-options)
+  - [Basic Use](#basic-use)
+  - [Available Formats](#available-formats)
+  - [Date Ranges](#date-ranges)
+    - ['Start' & 'Now' Keywords](#start-now-keywords)
+  - [Multiple Datasets](#multiple-datasets)
+  - [Import to InfluxDB](#import-to-influxdb)
+    - [influxdb.yaml](#influxdbyaml)
+  - [Other Scripts, Modules, & Jupyter Support](#other-scripts-modules-jupyter-support)
 - [Roadmap](#roadmap)
+
+---
 
 ## Disclaimer
 
@@ -25,34 +32,107 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 *If you find this tool helpful and would like to support future development, I'm in need of caffeine, feel free to [buy me coffee!](https://www.buymeacoffee.com/dmidlo)*
 
-## Setup
+### Setup
 
-```bash
-#  Create a new project directory and change to it
-#
-$ mkdir myproject && cd myproject
+#### TLDR for all platforms
 
-#  Create a Python Virtual Environment and activate it
-#
-$ python -m venv venv && source venv/bin/activate
-
-#  Confirm Python Path and Verion
-#
-$ which python && python --version
-
-#  Install the histdata.com-tools package from github
-#
-$ pip install histdatacom
-
-# Run `histdatacom` to view help message and Options
-#
-$ histdatacom -h
-
+```sh
+pip install histdatacom
 ```
 
+---
 
+##### MacOS and Linux
 
-## Usage
+###### Create a new project directory and change to it
+
+```bash
+mkdir myproject && cd myproject && pwd
+```
+
+###### Create a Python Virtual Environment and activate it
+
+```bash
+python -m venv venv && source venv/bin/activate
+```
+
+###### Confirm Python Path and Verion
+
+```bash
+which python && python --version
+```
+
+###### Install the histdata.com-tools package from PyPi
+
+```bash
+pip install histdatacom
+```
+
+###### Run `histdatacom` to view help message and Options
+
+```bash
+$ histdatacom -h
+```
+
+#### Windows Powershell
+
+---
+
+###### Launch a Powershell Terminal.
+   - Run as Administrator (right-click on shortcut and click Run as Admin...)
+
+###### Make sure python3.10 is in your system's executable path.
+
+```powershell
+python --version
+```
+
+- should be already set if you clicked the checkbox when installing python 3.10
+- If not, you can run the following.
+  - you will need to relauch powershell as admin.
+
+```powershell
+[Environment]::SetEnvironmentVariable("Path", "$env:Path;C:\Program Files\Python310")
+```
+
+###### Change the Execution Policy to Unrestricted
+
+```powershell
+Set-ExecutionPolicy Unrestricted -Force
+```
+
+###### Create a new project directory and change to it
+
+```powershell
+New-Item -Path ".\" -Name "myproject" -ItemType "directory" -and Set-Location .\myproject\
+```
+
+###### Create a Python Virtual Environment and activate it
+
+```powershell
+python -m venv venv -and .\venv\Scripts\Activate.ps1
+```
+
+###### Confirm Python Path and Verion
+
+```powershell
+Get-Command python | select Source -and python --version
+```
+
+###### Install the histdata.com-tools package from github
+
+```powershell
+pip install histdatacom
+```
+
+###### Run `histdatacom` to view help message
+
+```powershell
+histdatacom -h
+```
+
+### Usage
+
 **Note #1**
 The number one rule when using this tool is to be **MORE** specific with your input to limit the size of your request.
 
@@ -63,11 +143,13 @@ The number one rule when using this tool is to be **MORE** specific with your in
 
 **please submit feature requests and bug reports using this repository's issue tracker.*
 
-##### Help
+###### Show the help and options
+
 ```txt
-# Show the help and options
-#
-$ histdatacom -h
+histdatacom -h
+```
+
+```txt
 usage: histdatacom [-h] [-V] [-D] [-X] [-I] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH]
                    [-d DATA_DIRECTORY]
 
@@ -95,148 +177,131 @@ options:
 
 ##### Basic Use
 
-```sh
-# Download and extract the current month's 
-# available EURUSD data for metatrader 4/5
-# into the default data directory ./data
-#
-$ histdatacom -p eurusd -f metatrader -s now
-```
+###### Download and extract the current month's available EURUSD data for metatrader 4/5into the default data directory ./data
 
 ```sh
-# include the -D flag to download 
-# but NOT extract to csv.
-# 
-$ histdatacom -D -p usdcad -f metastock -s now
+histdatacom -p eurusd -f metatrader -s now
+```
+
+###### include the `-D` flag to download but NOT extract to csv.
+
+```sh
+histdatacom -D -p usdcad -f metastock -s now
 ```
 
 ##### Available Formats
 
-```sh
-# The formats available are:
-# metatrader, metastock, ninjatrader, excel, and ascii.
-#
-# histdata.com provides different resolutions of time
-# depending on the format.
-#
-# The following format/timeframe combinations are available:
-#
-#    1-minute-bar-quotes -- all formats 
-#    tick-data-quotes ----- ascii
-#    tick-last-quotes ----- ninjatrader
-#    tick-bid-quotes ------ ninjatrader
-#    tick-ask-quotes ------ ninjatrader
-```
+The formats available are:
+
+||
+|-----------|
+|metatrader|
+|metastock|
+|ninjatrader|
+|excel|
+|ascii|
+
+ histdata.com provides different resolutions of time
+ depending on the format.
+
+ The following format/timeframe combinations are available:
+
+|||
+|------------------|:-----------:|
+|1-minute-bar-quotes|all formats|
+|tick-data-quotes |ascii|
+|tick-last-quotes|ninjatrader|
+|tick-bid-quotes|ninjatrader|
+|tick-ask-quotes|ninjatrader|
+
+
+###### To download 1-minute-bar-quotes for both metastock and excel
 
 ```sh
-# To download 1-minute-bar-quotes for both metastock and excel
-#
-$ histdatacom -p usdjpy -f metastock excel -s now 
+histdatacom -p usdjpy -f metastock excel -s now 
 ```
 
 ##### Date Ranges
 
-```sh
-# date ranges are for year and month and can be specified
-# in the following ways [ -._]:
-#    2022-04
-#   "2202 04"
-#    2202.04
-#    2202_04
+date ranges are for year and month and can be specified in the following ways:
+ | [ -._] |
+|-------|
+|2022-04|
+|"2202 04"|
+|2202.04|
+|2202_04|
+
+
+###### to fetch a single year's data, leave out the month
+
+- note: unless you're fetching data for the current year, tick data types will fetch 12 files for each month of the year, 1-minute-bar-quotes will fetch a single OHLC file with the whole year's data.
+
+```txt
+histdatacom -p udxusd -f ascii -t tick-data-quotes -s 2011
 ```
 
-```sh
-# to fetch a single year's data, do not use a month
-#    - note: unless you're fetching data for the current year,
-#            tick data types will fetch 12 files for each month
-#            of the year, 1-minute-bar-quotes will fetch a single
-#            OHLC file with the whole year's data.
-#            
-$ histdatacom -p udxusd -f ascii -t tick-data-quotes -s 2011
+###### to fetch a single month's data, include a month, but do not use the `-e, --end_yearmonth` flag.
+
+- if you're requesting 1-minute-bar-quotes for any
+    year except the current year, you will receive the
+    the whole year's data
+- this example leaves out the `-p --pair` flag, and will
+    fetch data for all 66 available instruments
+
+```txt
+histdatacom -f metatrader -s 2012-07
 ```
 
-```sh
-# to fetch a single month's data, include a month, but do not
-# use the -e, --end_yearmonth flag.
-#
-#   * if you're requesting 1-minute-bar-quotes for any
-#     year except the current year, you will receive the
-#     the whole year's data
-#
-#   * this example leaves out the -p --pair flag, and will
-#     fetch data for all 66 available instruments
-#
-$ histdatacom -f metatrader -s 2012-07
+##### `Start` & `Now` Keywords
+
+you may hav noticed that two special year-month keywords exist
+ `start` and `now`
+
+- `start` may only be used with the `-s --start_yearmonth`
+   flag and the `-e --end_yearmonth` flag **must** be specified
+   to indicate a range of data
+
+```txt
+histdatacom -p audusd -f metatrader -s start -e 2008-12
 ```
 
-###### 'Start' & 'Now' Keywords
+- `now` used alone will return the current year-month
+- when used with as `-s now` it will return the most current month's data
 
-```sh
-# you may hav noticed that two special year-month keywords exist
-#  'start' and 'now'
-#
-#  -'start' may only be used with the -s --start_yearmonth
-#    flag and the -e --end_yearmonth flag must be specified
-#    to indicate a range of data
-#
-$ histdatacom -p audusd -f metatrader -s start -e 2008-12
-#
-#  -'now' when used alone will return the current year-month
-#        - when used with as '-s now' it will return the
-#          most current month's data
-#
-$ histdatacom -p frxeur -f ninjatrader -s now
-#
-#   in the above example, no -t --timeframe flag was
-#   specified. This will return all time resolutions
-#   available for the specified format(s)
-#
-#   'now' when used with the -e --end_yearmonth flag
-#    is intended to be the end of a range. Rather,
-#    if the flags were to be -s 2019-04 -e now
-#    the request would return data from April 2019 
-#    to the present.
-#
-$ histdatacom -p xagusd -f ascii -1-minute-bar-quotes -s 2019-04 -e now
+```txt
+histdatacom -p frxeur -f ninjatrader -s now
 ```
 
-##### Multiple Datasets
+in the above example, no `-t --timeframe` flag was specified. This will return all time resolutions available for the specified format(s)
 
+`now` when used with the `-e --end_yearmonth` flag is intended to be the end of a range. Rather, if the flags were to be `-s 2019-04 -e now` the request would return data from April 2019-04 to the present.
 
-```sh
-# multiple datasets can be requested in one command
-# 
-# this example with use the -e --end_yearmonth flag
-# to request a range of data for multiple instruments
-#
-#  - note: Large requests like these are to be avoided.
-#          remember to sign up with histdata.com to help
-#          them pay for network costs
-#
-$ histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
+```txt
+histdatacom -p xagusd -f ascii -1-minute-bar-quotes -s 2019-04 -e now
+```
+
+###### Multiple Datasets
+
+###### multiple datasets can be requested in one command
+this example with use the `-e --end_yearmonth` flag to request a range of data for multiple instruments.
+
+- note: Large requests like these are to be avoided. remember to sign up with histdata.com to help them pay for network costs
+
+```txt
+histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
 ```
 
 ##### Import to InfluxDB
 
+To import data to an influxdb instance, use the `-I --import_to_influxdb` flag along with an `influxdb.yaml` file in the current working directory (where ever you are running the command from).
 
-```sh
-# To import data to an influxdb instance, use the -I flag
-# along with an influxdb.yaml file in the current working
-# directory (where ever you are running the command from).
-#
-#  - ascii is the only format accepted for influxdb import.
-#
-#  - all histdata.com datetime data is in EST (Eastern Standard Time)
-#    with no adjustments for daylight savings.
-#
-#  - Influxdb does not adjust for timezone and all datetime data
-#    is recorded as UTC epoch timestamps (nano-seconds since 
-#    midnight 00:00, January, 1st, 1970)
-#
-#  - this tool converts histdata.com ESTnoDST to UTC Epoch 
-#    milli-second timestamps as part of the import-to-influx process
-#
-$ histdatacom -I -p eurusd -f ascii -t tick-data-quotes -s start -e now
+- ascii is the only format accepted for influxdb import.
+- all histdata.com datetime data is in EST (Eastern Standard Time) with no adjustments for daylight savings.
+- Influxdb does not adjust for timezone and all datetime data is recorded as UTC epoch timestamps (nano-seconds since midnight 00:00, January, 1st, 1970)
+- this tool converts histdata.com ESTnoDST to UTC Epoch milli-second timestamps as part of the import-to-influx process
+
+```txt
+histdatacom -I -p eurusd -f ascii -t tick-data-quotes -s start -e now
 ```
 
 ###### influxdb.yaml
@@ -252,39 +317,44 @@ influxdb:
 
 ##### Other Scripts, Modules, & Jupyter Support
 
+Basic support for Jupyter notebooks and calling from another script/module
 
+- there is no return value from calling histdatacom, it functions only as far as the cli version does, that is, that it will validate, download, extract, and/or import to influxdb.
+- After that, It would be up the developer to work with the files on disk or to query influxdb.
+- for progress bars in jupyter you will need to install the ipywidgets package with `pip install ipywidgets`
+
+######  First import the required modules
 ```python
-# Basic support for Jupyter notebooks and calling from another script/module
-#  - there is no return value from calling histdatacom,
-#    it functions only as far as the cli version does, that is,
-#    that it will validate, download, extract, and/or import to influxdb.
-#    After that, It would be up the developer to work with the files on disk
-#    or to query influxdb.
-#
-#  - for progress bars in jupyter you will need to install the ipywidgets package
-#     sh 
-#        $ pip install ipywidgets
-#
-#  First import the required modules
 import histdatacom
 from histdatacom.cli import ArgsNamespace
+```
 
-# Create a new options object to pass parameters to histdatacom
+###### Create a new options object to pass parameters to histdatacom
+
+```python
 options = ArgsNamespace
+```
 
-# Configure
+###### Configure
+
+```python
 options.extract_csvs = True
 options.formats = {"ascii"}
 options.timeframes = {"tick-data-quotes"}
 options.pairs = {"audusd","udxusd","eurusd"}
 options.start_yearmonth = "2022-03"
 options.end_yearmonth = "2022-04"
+```
 
-# pass the options to histdatacom
+###### pass the options to histdatacom (Jupyter Notebooks)
+
+```python
 histdatacom(options)  # (Jupyter)
+```
 
-#  at present, calling from another script or module is limited
-#  to using the __name__=="__main__" idiom.
+at present, calling from another script or module is limited to using the `__name__=="__main__"` idiom.
+
+```python
 if __name__=="__main__": 
    histdatacom(options)
 ```

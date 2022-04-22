@@ -59,8 +59,13 @@ setup(
         'Intended Audience :: Science/Research',
         'License :: OSI Approved :: MIT License',
         'Environment :: MacOS X',
-        'Framework :: Jupyter',
+        'Operating System :: MacOS',
+        'Environment :: Win32 (MS Windows)',
+        'Operating System :: Microsoft :: Windows',
         'Programming Language :: Python :: 3.10',
+        'Topic :: Software Development :: Libraries :: Python Modules',
+        'Framework :: Jupyter',
+        'Topic :: Terminals',
     ]
 )
 
