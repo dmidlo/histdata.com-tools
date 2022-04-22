@@ -68,7 +68,6 @@ The number one rule when using this tool is to be **MORE** specific with your in
 # Show the help and options
 #
 $ histdatacom -h
-
 usage: histdatacom [-h] [-V] [-D] [-X] [-I] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH]
                    [-d DATA_DIRECTORY]
 
@@ -91,7 +90,7 @@ options:
   -e END_YEARMONTH, --end_yearmonth END_YEARMONTH
                         set a start year and month for data. e.g. -s 2020-00 or -s 2022-04
   -d DATA_DIRECTORY, --data-directory DATA_DIRECTORY
-                        Not an Executable Search Path! This directory is used to perform work. default is "data" in the current directory
+                        Directory Used to save data. default is "data" in the current directory
 ```
 
 ##### Basic Use
