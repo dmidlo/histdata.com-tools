@@ -1,6 +1,21 @@
 # histdata.com-tools
 
-Multi-threaded/Multi-Process Downloader for Currency Exchange Rates from Histdata.com
+A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks.
+
+- [histdata.com-tools](#histdatacom-tools)
+  - [Disclaimer](#disclaimer)
+  - [Usage](#usage)
+        - [Help](#help)
+        - [Basic Use](#basic-use)
+        - [Available Formats](#available-formats)
+        - [Date Ranges](#date-ranges)
+          - ['Start' & 'Now' Keywords](#start--now-keywords)
+        - [Multiple Datasets](#multiple-datasets)
+        - [Import to InfluxDB](#import-to-influxdb)
+          - [influxdb.yaml](#influxdbyaml)
+        - [Other Scripts, Modules, & Jupyter Support](#other-scripts-modules--jupyter-support)
+  - [Roadmap](#roadmap)
+  - [Setup](#setup)
 
 ## Disclaimer
 
@@ -21,6 +36,7 @@ The number one rule when using this tool is to be **MORE** specific with your in
 
 **please submit feature requests and bug reports using this repository's issue tracker.*
 
+##### Help
 ```sh
 # Show the help and options
 #
@@ -51,7 +67,7 @@ options:
                         Not an Executable Search Path! This directory is used to perform work. default is "data" in the current directory
 ```
 
-## Examples
+##### Basic Use
 
 ```sh
 # Download and extract the current month's 
@@ -67,6 +83,8 @@ $ histdatacom -p eurusd -f metatrader -s now
 # 
 $ histdatacom -D -p usdcad -f metastock -s now
 ```
+
+##### Available Formats
 
 ```sh
 # The formats available are:
@@ -89,6 +107,8 @@ $ histdatacom -D -p usdcad -f metastock -s now
 #
 $ histdatacom -p usdjpy -f metastock excel -s now 
 ```
+
+##### Date Ranges
 
 ```sh
 # date ranges are for year and month and can be specified
@@ -123,47 +143,7 @@ $ histdatacom -p udxusd -f ascii -t tick-data-quotes -s 2011
 $ histdatacom -f metatrader -s 2012-07
 ```
 
-```sh
-# multiple datasets can be requested in one command
-# 
-# this example with use the -e --end_yearmonth flag
-# to request a range of data for multiple instruments
-#
-#  - note: Large requests like these are to be avoided.
-#          remember to sign up with histdata.com to help
-#          them pay for network costs
-#
-$ histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
-```
-
-```sh
-# To import data to an influxdb instance, use the -I flag
-# along with an influxdb.yaml file in the current working
-# directory (where ever you are running the command from).
-#
-#  - ascii is the only format accepted for influxdb import.
-#
-#  - all histdata.com datetime data is in EST (Eastern Standard Time)
-#    with no adjustments for daylight savings.
-#
-#  - Influxdb does not adjust for timezone and all datetime data
-#    is recorded as UTC epoch timestamps (nano-seconds since 
-#    midnight 00:00, January, 1st, 1970)
-#
-#  - this tool converts histdata.com ESTnoDST to UTC Epoch 
-#    milli-second timestamps as part of the import-to-influx process
-#
-$ histdatacom -I -p eurusd -f ascii -t tick-data-quotes -s start -e now
-```
-
-```yaml
-# a sample influxdb.yaml file.
-influxdb:
-  org: influx_org
-  bucket: data_bucket
-  url: influx_server_api_url
-  token: influx_user_token
-```
+###### 'Start' & 'Now' Keywords
 
 ```sh
 # you may hav noticed that two special year-month keywords exist
@@ -193,6 +173,59 @@ $ histdatacom -p frxeur -f ninjatrader -s now
 #
 $ histdatacom -p xagusd -f ascii -1-minute-bar-quotes -s 2019-04 -e now
 ```
+
+##### Multiple Datasets
+
+
+```sh
+# multiple datasets can be requested in one command
+# 
+# this example with use the -e --end_yearmonth flag
+# to request a range of data for multiple instruments
+#
+#  - note: Large requests like these are to be avoided.
+#          remember to sign up with histdata.com to help
+#          them pay for network costs
+#
+$ histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
+```
+
+##### Import to InfluxDB
+
+
+```sh
+# To import data to an influxdb instance, use the -I flag
+# along with an influxdb.yaml file in the current working
+# directory (where ever you are running the command from).
+#
+#  - ascii is the only format accepted for influxdb import.
+#
+#  - all histdata.com datetime data is in EST (Eastern Standard Time)
+#    with no adjustments for daylight savings.
+#
+#  - Influxdb does not adjust for timezone and all datetime data
+#    is recorded as UTC epoch timestamps (nano-seconds since 
+#    midnight 00:00, January, 1st, 1970)
+#
+#  - this tool converts histdata.com ESTnoDST to UTC Epoch 
+#    milli-second timestamps as part of the import-to-influx process
+#
+$ histdatacom -I -p eurusd -f ascii -t tick-data-quotes -s start -e now
+```
+
+###### influxdb.yaml
+
+```yaml
+# a sample influxdb.yaml file.
+influxdb:
+  org: influx_org
+  bucket: data_bucket
+  url: influx_server_api_url
+  token: influx_user_token
+```
+
+##### Other Scripts, Modules, & Jupyter Support
+
 
 ```python
 # Basic support for Jupyter notebooks and calling from another script/module
