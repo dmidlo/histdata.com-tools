@@ -42,7 +42,7 @@ $ which python && python --version
 
 #  Install the histdata.com-tools package from github
 #
-$ pip install git+https://github.com/dmidlo/histdata.com-tools.git
+$ pip install histdatacom
 
 # Run `histdatacom` to view help message and Options
 #
