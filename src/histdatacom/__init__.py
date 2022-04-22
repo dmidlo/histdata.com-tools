@@ -1,12 +1,11 @@
 import sys
 from . import histdata_com
-
-from rich import print
+from contextlib import contextmanager
 
 
 class Options(sys.modules[__name__].__class__):
     def __call__(self, options):
-        sys.exit(histdata_com.main(options))
-        return 0
+        histdata_com.main(options)
+
 
 sys.modules[__name__].__class__ = Options

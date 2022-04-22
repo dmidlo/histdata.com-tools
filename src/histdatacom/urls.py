@@ -83,7 +83,7 @@ class _URLs:
 
             records_next.put(record)
         except ValueError:
-            print(f"No data in web repository for: {record.url}")
+            print(f"Info: Histdata.com does not have: {record.url}")
             record.status = "URL_NO_REPO_DATA"
             record.write_info_file(base_dir=args['default_download_dir'])
         except Exception:
@@ -137,7 +137,7 @@ class _URLs:
 
             records_next.put(record)
         except KeyError:
-            print(f"Invalid Zip on Repository: {record.url}", sys.exc_info())
+            print(f"Invalid Zip on histdata.com: {record.url}", sys.exc_info())
             record.delete_info_file()
         except Exception:
             print("Unexpected error:", sys.exc_info())

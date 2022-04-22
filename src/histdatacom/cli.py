@@ -99,12 +99,12 @@ class ArgsNamespace:
 class ArgParser(argparse.ArgumentParser):
     """ Encapsulation class for argparse related operations """
 
-    def __init__(self, options=ArgsNamespace() ,**kwargs):
+    def __init__(self, options=ArgsNamespace(), **kwargs):
         """ set up argparse, bring in defaults DTO, setup cli params, receive
             and overwrite defaults with user cli args."""
         
         # init _HistDataCom.ArgParser to extend argparse.ArgumentParser
-        argparse.ArgumentParser.__init__(self)
+        argparse.ArgumentParser.__init__(self, prog='histdatacom')
         # bring in the defaults arg DTO from outer class, use the
         # __dict__ representation of it to set argparse argument defaults.
         self.arg_namespace = options
@@ -163,13 +163,38 @@ class ArgParser(argparse.ArgumentParser):
             type=str,
             help='Directory Used to save data. default is "data" in the current directory')
 
+        if "histdatacom" not in sys.argv[0] and self.arg_namespace.from_api:
+
+            
+            args = []
+            args.extend(["-d", self.arg_namespace.data_directory])
+            args.extend(["-p", *self.arg_namespace.pairs])
+            args.extend(["-f", *self.arg_namespace.formats])
+            args.extend(["-t", *self.arg_namespace.timeframes])
+
+            if self.arg_namespace.start_yearmonth:
+                args.extend(["-s", self.arg_namespace.start_yearmonth])
+            if self.arg_namespace.end_yearmonth:
+                args.extend(["-e", self.arg_namespace.end_yearmonth])
+            if self.arg_namespace.validate_urls:
+                args.append("-V")
+            if self.arg_namespace.download_data_archives:
+                args.append("-D")
+            if self.arg_namespace.extract_csvs:
+                args.append("-X")
+            if self.arg_namespace.import_to_influxdb:
+                args.append("-I")
+
+            self.parse_args(args, namespace=self.arg_namespace)
+        else:
+            # Get the args from sys.argv
+            self.parse_args(namespace=self.arg_namespace)
+
         # prevent running from cli with no arguments
         if len(sys.argv) == 1 and not self.arg_namespace.from_api:
             self.print_help(sys.stderr)
             sys.exit(1)
 
-        # Get the args from sys.argv
-        self.parse_args(namespace=self.arg_namespace)
 
         self.check_datetime_input(self.arg_namespace)
         self.check_for_ascii_if_influx(self.arg_namespace)

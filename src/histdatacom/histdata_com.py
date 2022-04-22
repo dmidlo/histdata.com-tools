@@ -1,6 +1,6 @@
-from multiprocessing.dummy import freeze_support
 import sys
 from multiprocessing import managers
+from contextlib import contextmanager
 from histdatacom.cli import ArgParser
 from histdatacom.cli import ArgsNamespace
 from histdatacom.records import Records
@@ -86,27 +86,33 @@ class HistDataCom():
     # TODO  for developers to configure
     def __init__(self, options):
         self.options = options
+        self.records_manager=managers.SyncManager()
+        self.records_manager.register("Records", Records)
+    
+    @contextmanager
+    def __call__(self):
+        try:
+            self.records_manager.start()
 
-    def __call__(self,
-                 records_manager=managers.SyncManager()):
+            global records_current
+            records_current = self.records_manager.Records()
 
-        records_manager.register("Records", Records)
-        records_manager.start()
+            global records_next
+            records_next = self.records_manager.Records()
 
-        global records_current
-        records_current = records_manager.Records()
+            global csv_chunks_queue
+            csv_chunks_queue = self.records_manager.Queue()
 
-        global records_next
-        records_next = records_manager.Records()
+            scraper = _HistDataCom(records_current,
+                                    records_next,
+                                    csv_chunks_queue,
+                                    self.options)
+            scraper.run()
 
-        global csv_chunks_queue
-        csv_chunks_queue = records_manager.Queue()
-
-        scraper = _HistDataCom(records_current,
-                               records_next,
-                               csv_chunks_queue,
-                               self.options)
-        scraper.run()
+            #self.records_manager.shutdown()
+        finally:
+            pass
+        
 
 
 def main(options=None):

@@ -213,9 +213,10 @@ class _Influx():
 
             return yamlfile
         
-        print("\n ERROR: -I flag is used to import data to a influxdb instance...")
-        print("\n        there is no influxdb.yaml file in working directory.")
-        print("\n        did you forget to set it up?\n")
+        print(""" ERROR: -I flag is used to import data to a influxdb instance...
+                          there is no influxdb.yaml file in working directory.
+                          did you forget to set it up?
+              """)
         sys.exit()
 
     @classmethod

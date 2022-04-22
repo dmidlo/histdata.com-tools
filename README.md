@@ -194,7 +194,46 @@ $ histdatacom -p frxeur -f ninjatrader -s now
 $ histdatacom -p xagusd -f ascii -1-minute-bar-quotes -s 2019-04 -e now
 ```
 
+```python
+# Basic support for Jupyter notebooks and calling from another script/module
+#  - there is no return value from calling histdatacom,
+#    it functions only as far as the cli version does, that is,
+#    that it will validate, download, extract, and/or import to influxdb.
+#    After that, It would be up the developer to work with the files on disk
+#    or to query influxdb.
+#
+#  - for progress bars in jupyter you will need to install the ipywidgets package
+#     sh 
+#        $ pip install ipywidgets
+#
+#  First import the required modules
+import histdatacom
+from histdatacom.cli import ArgsNamespace
+
+# Create a new options object to pass parameters to histdatacom
+options = ArgsNamespace
+
+# Configure
+options.extract_csvs = True
+options.formats = {"ascii"}
+options.timeframes = {"tick-data-quotes"}
+options.pairs = {"audusd","udxusd","eurusd"}
+options.start_yearmonth = "2022-03"
+options.end_yearmonth = "2022-04"
+
+# pass the options to histdatacom
+histdatacom(options)  # (Jupyter)
+
+#  at present, calling from another script or module is limited
+#  to using the __name__=="__main__" idiom.
+if __name__=="__main__": 
+   histdatacom(options)
+```
+
+
 ## Roadmap
+
+- return datatable/pandas/dask dataframe when called from jupyter or another module
 
 ## Setup
 
