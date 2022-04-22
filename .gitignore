@@ -20,3 +20,4 @@ output.pstats
 result.json
 out.gv
 test.ipynb
+.pypirc
