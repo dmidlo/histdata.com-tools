@@ -126,7 +126,7 @@ $ histdatacom -D -p usdcad -f metastock -s now
 #    tick-data-quotes ----- ascii
 #    tick-last-quotes ----- ninjatrader
 #    tick-bid-quotes ------ ninjatrader
-#    tick-bid-quotes ------ ninjatrader
+#    tick-ask-quotes ------ ninjatrader
 ```
 
 ```sh
