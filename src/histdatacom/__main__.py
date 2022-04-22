@@ -5,5 +5,6 @@ as >>> python -m histdatacom
 import sys
 from . import histdata_com
 
-if __name__ == '__main__':
-    sys.exit(histdata_com.main())
+
+# if __name__ == '__main__':
+sys.exit(histdata_com.main())

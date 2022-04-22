@@ -68,6 +68,8 @@ Returns:
 import argparse
 import sys
 import re
+
+from click import option
 from histdatacom.fx_enums import Pairs, Format, Timeframe
 from histdatacom.utils import get_current_datemonth_gmt_plus5
 from histdatacom.utils import get_month_from_datemonth
@@ -91,21 +93,21 @@ class ArgsNamespace:
         self.start_yearmonth = ""
         self.end_yearmonth = ""
         self.data_directory = "data"
+        self.from_api = False
 
 
 class ArgParser(argparse.ArgumentParser):
     """ Encapsulation class for argparse related operations """
 
-    def __init__(self, **kwargs):
+    def __init__(self, options=ArgsNamespace() ,**kwargs):
         """ set up argparse, bring in defaults DTO, setup cli params, receive
             and overwrite defaults with user cli args."""
-
+        
         # init _HistDataCom.ArgParser to extend argparse.ArgumentParser
         argparse.ArgumentParser.__init__(self)
-
         # bring in the defaults arg DTO from outer class, use the
         # __dict__ representation of it to set argparse argument defaults.
-        self.arg_namespace = ArgsNamespace()
+        self.arg_namespace = options
         self._default_args = self.arg_namespace.__dict__
         self.set_defaults(**self._default_args)
 
@@ -162,7 +164,7 @@ class ArgParser(argparse.ArgumentParser):
             help='Directory Used to save data. default is "data" in the current directory')
 
         # prevent running from cli with no arguments
-        if len(sys.argv) == 1:
+        if len(sys.argv) == 1 and not self.arg_namespace.from_api:
             self.print_help(sys.stderr)
             sys.exit(1)
 

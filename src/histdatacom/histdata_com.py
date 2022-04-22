@@ -1,8 +1,11 @@
+from multiprocessing.dummy import freeze_support
 import sys
 from multiprocessing import managers
 from histdatacom.cli import ArgParser
+from histdatacom.cli import ArgsNamespace
 from histdatacom.records import Records
-from histdatacom.utils import set_working_data_dir, load_influx_yaml
+from histdatacom.utils import set_working_data_dir
+from histdatacom.utils import load_influx_yaml
 from histdatacom.urls import _URLs
 from histdatacom.csvs import _CSVs
 from histdatacom.influx import _Influx
@@ -22,7 +25,7 @@ class _HistDataCom:
                  records_current,
                  records_next,
                  csv_chunks_queue,
-                 **kwargs):
+                 options):
 
         """ Initialization for _HistDataCom Class"""
         # Set User () or Default Arguments respectively utilizing the self.ArgParser
@@ -35,7 +38,7 @@ class _HistDataCom:
         #           - Normalize iterable user arguments whose values are lists and
         #             make them sets instead
         #       - .copy(): decouple for GC using a hard copy of user args
-        self.args = ArgParser._arg_list_to_set(vars(ArgParser()())).copy()
+        self.args = ArgParser._arg_list_to_set(vars(ArgParser(options)())).copy()
         self.args['default_download_dir'] = set_working_data_dir(self.args['data_directory'])
         self.args['queue_filename'] = ".queue"
 
@@ -81,12 +84,11 @@ class HistDataCom():
     # TODO: presently there is no execution api for calls from other programs.
     # TODO  **kwargs is staged here to pass an ArgsNamespace object into _HistDataCom
     # TODO  for developers to configure
-    def __init__(self, **kwargs):
-        pass
+    def __init__(self, options):
+        self.options = options
 
     def __call__(self,
-                 records_manager=managers.SyncManager(),
-                 **kwargs):
+                 records_manager=managers.SyncManager()):
 
         records_manager.register("Records", Records)
         records_manager.start()
@@ -102,12 +104,18 @@ class HistDataCom():
 
         scraper = _HistDataCom(records_current,
                                records_next,
-                               csv_chunks_queue)
+                               csv_chunks_queue,
+                               self.options)
         scraper.run()
 
 
-def main():
-    HistDataCom()()
+def main(options=None):
+    if not options:
+        options = ArgsNamespace()
+    else:
+        options.from_api = True
+
+    HistDataCom(options)()
 
 
 if __name__ == '__main__':
