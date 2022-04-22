@@ -4,6 +4,7 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 - [histdata.com-tools](#histdatacom-tools)
 - [Disclaimer](#disclaimer)
+- [Setup](#setup)
    - [Usage](#usage)
       - [Help](#help)
       - [Basic Use](#basic-use)
@@ -15,7 +16,6 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
          - [influxdb.yaml](#influxdbyaml)
       - [Other Scripts, Modules, & Jupyter Support](#other-scripts-modules--jupyter-support)
 - [Roadmap](#roadmap)
-- [Setup](#setup)
 
 ## Disclaimer
 
@@ -24,6 +24,33 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 *If you choose to use this tool, it is **strongly** suggested that you head over to http://www.histdata.com/download-by-ftp/ and sign up to help support their traffic costs.*
 
 *If you find this tool helpful and would like to support future development, I'm in need of caffeine, feel free to [buy me coffee!](https://www.buymeacoffee.com/dmidlo)*
+
+## Setup
+
+```bash
+#  Create a new project directory and change to it
+#
+$ mkdir myproject && cd myproject
+
+#  Create a Python Virtual Environment and activate it
+#
+$ python -m venv venv && source venv/bin/activate
+
+#  Confirm Python Path and Verion
+#
+$ which python && python --version
+
+#  Install the histdata.com-tools package from github
+#
+$ pip install git+https://github.com/dmidlo/histdata.com-tools.git
+
+# Run `histdatacom` to view help message and Options
+#
+$ histdatacom -h
+
+```
+
+
 
 ## Usage
 **Note #1**
@@ -267,27 +294,3 @@ if __name__=="__main__":
 ## Roadmap
 
 - return datatable/pandas/dask dataframe when called from jupyter or another module
-
-## Setup
-
-1. Create a virtual environment
-   - `python -m venv venv`
-
-2. Activate the virtual environment
-   - `source venv/bin/activate`
-   - validate with `which python`
-     - result should be `.../histdata_com_tools/venv/bin/python`
-
-3. Install CA certificate (macOS)
-   - `pip install certifi`
-
-4. Apply Backport if not already patched upstream
-   - This seems to already be upstream, but you can verify if concerned
-   - `lib/python3.XXX/multiprocessing/managers.py > AutoProxy`
-   - `https://github.com/python/cpython/commit/8aa45de6c6d84397b772bad7e032744010bbd456`
-  
-5. Build and install the app
-   - `python setup.py build`
-   - `python setup.py install`
-
-6. Run `histdatacom` to view help message and flags
