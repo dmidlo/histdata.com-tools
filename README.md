@@ -3,19 +3,19 @@
 A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks.
 
 - [histdata.com-tools](#histdatacom-tools)
-  - [Disclaimer](#disclaimer)
-  - [Usage](#usage)
-        - [Help](#help)
-        - [Basic Use](#basic-use)
-        - [Available Formats](#available-formats)
-        - [Date Ranges](#date-ranges)
-          - ['Start' & 'Now' Keywords](#start--now-keywords)
-        - [Multiple Datasets](#multiple-datasets)
-        - [Import to InfluxDB](#import-to-influxdb)
-          - [influxdb.yaml](#influxdbyaml)
-        - [Other Scripts, Modules, & Jupyter Support](#other-scripts-modules--jupyter-support)
-  - [Roadmap](#roadmap)
-  - [Setup](#setup)
+- [Disclaimer](#disclaimer)
+   - [Usage](#usage)
+      - [Help](#help)
+      - [Basic Use](#basic-use)
+      - [Available Formats](#available-formats)
+      - [Date Ranges](#date-ranges)
+         - ['Start' & 'Now' Keywords](#start--now-keywords)
+      - [Multiple Datasets](#multiple-datasets)
+      - [Import to InfluxDB](#import-to-influxdb)
+         - [influxdb.yaml](#influxdbyaml)
+      - [Other Scripts, Modules, & Jupyter Support](#other-scripts-modules--jupyter-support)
+- [Roadmap](#roadmap)
+- [Setup](#setup)
 
 ## Disclaimer
 
