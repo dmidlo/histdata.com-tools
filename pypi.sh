@@ -24,12 +24,10 @@ then
 elif [[ $1 == "pypi" ]]
 then
     build
-    echo "pypi"
-    twine upload dist/* dist/*.asc
+    twine upload -r pypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
 elif [[ $1 == "testpypi" ]]
 then
     build
-    echo "testpypi"
     gpg --detach-sign -a dist/*.tar.gz
     twine upload -r testpypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
 fi
