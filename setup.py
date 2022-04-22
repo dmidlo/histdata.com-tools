@@ -1,22 +1,25 @@
-import os
-import sys
+import codecs
+import os.path
 from setuptools import setup
 from setuptools import find_packages
 
-# try:
-#     import certifi
-# except ImportError:
-#     print("Unexpected error:", sys.exc_info()[0])
-#     print("\n certifi not installed. Please run 'pip install certifi'")
-#     sys.exit()
+def read(rel_path):
+    here = os.path.abspath(os.path.dirname(__file__))
+    with codecs.open(os.path.join(here, rel_path), 'r') as fp:
+        return fp.read()
 
-# os.environ["SSL_CERT_FILE"] = certifi.where()
-# os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
+def get_version(rel_path):
+    for line in read(rel_path).splitlines():
+        if line.startswith('__version__'):
+            delim = '"' if '"' in line else "'"
+            return line.split(delim)[1]
+    else:
+        raise RuntimeError("Unable to find version string.")
 
 setup(
     # basic package data
     name="histdatacom",
-    version="0.75",
+    version=get_version("src/histdatacom/__init__.py"),
     description="A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks.",
     url='https://github.com/dmidlo/histdata.com-tools',
     author="David Midlo",
