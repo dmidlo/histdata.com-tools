@@ -68,8 +68,6 @@ Returns:
 import argparse
 import sys
 import re
-
-from click import option
 from histdatacom.fx_enums import Pairs, Format, Timeframe
 from histdatacom.utils import get_current_datemonth_gmt_plus5
 from histdatacom.utils import get_month_from_datemonth
@@ -164,27 +162,7 @@ class ArgParser(argparse.ArgumentParser):
             help='Directory Used to save data. default is "data" in the current directory')
 
         if "histdatacom" not in sys.argv[0] and self.arg_namespace.from_api:
-
-            
-            args = []
-            args.extend(["-d", self.arg_namespace.data_directory])
-            args.extend(["-p", *self.arg_namespace.pairs])
-            args.extend(["-f", *self.arg_namespace.formats])
-            args.extend(["-t", *self.arg_namespace.timeframes])
-
-            if self.arg_namespace.start_yearmonth:
-                args.extend(["-s", self.arg_namespace.start_yearmonth])
-            if self.arg_namespace.end_yearmonth:
-                args.extend(["-e", self.arg_namespace.end_yearmonth])
-            if self.arg_namespace.validate_urls:
-                args.append("-V")
-            if self.arg_namespace.download_data_archives:
-                args.append("-D")
-            if self.arg_namespace.extract_csvs:
-                args.append("-X")
-            if self.arg_namespace.import_to_influxdb:
-                args.append("-I")
-
+            args = self.clean_from_api_args(self.arg_namespace)
             self.parse_args(args, namespace=self.arg_namespace)
         else:
             # Get the args from sys.argv
@@ -195,13 +173,34 @@ class ArgParser(argparse.ArgumentParser):
             self.print_help(sys.stderr)
             sys.exit(1)
 
-
         self.check_datetime_input(self.arg_namespace)
         self.check_for_ascii_if_influx(self.arg_namespace)
 
     def __call__(self):
         """ simply return the completed args object """
         return self.arg_namespace
+
+    @classmethod
+    def clean_from_api_args(cls, args_namespace):
+        args = []
+        args.extend(["-d", args_namespace.data_directory])
+        args.extend(["-p", *args_namespace.pairs])
+        args.extend(["-f", *args_namespace.formats])
+        args.extend(["-t", *args_namespace.timeframes])
+
+        if args_namespace.start_yearmonth:
+            args.extend(["-s", args_namespace.start_yearmonth])
+        if args_namespace.end_yearmonth:
+            args.extend(["-e", args_namespace.end_yearmonth])
+        if args_namespace.validate_urls:
+            args.append("-V")
+        if args_namespace.download_data_archives:
+            args.append("-D")
+        if args_namespace.extract_csvs:
+            args.append("-X")
+        if args_namespace.import_to_influxdb:
+            args.append("-I")
+        return args
 
     @classmethod
     def _arg_list_to_set(cls, args):
