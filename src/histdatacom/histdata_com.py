@@ -64,6 +64,9 @@ class _HistDataCom:
         if self.args["download_data_archives"]:
             self.urls.download_zips(self.records_current, self.records_next)
 
+        if self.args["from_api"]:
+            print("return data to api call from histdata_com.run()")
+
         if self.args["extract_csvs"]:
             self.csvs.extract_csvs(self.records_current, self.records_next)
 
@@ -98,6 +101,9 @@ class HistDataCom():
                                     csv_chunks_queue,
                                     self.options)
             scraper.run()
+
+            if self.args["from_api"]:
+                print("return data to api call from histdata_com.HistDataCom()")
 
             #self.records_manager.shutdown()
         finally:
