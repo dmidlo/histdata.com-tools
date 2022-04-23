@@ -119,7 +119,7 @@ python -m venv venv -and .\venv\Scripts\Activate.ps1
 Get-Command python | select Source -and python --version
 ```
 
-###### Install the histdata.com-tools package from github
+###### Install the histdata.com-tools package from PyPi
 
 ```powershell
 pip install histdatacom

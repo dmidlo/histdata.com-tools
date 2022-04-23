@@ -125,7 +125,7 @@ class _Influx():
         res = urlopen(file_endpoint)
         io_wrapper = io.TextIOWrapper(res)
 
-        with ProcessPoolExecutor(max_workers=(len(os.sched_getaffinity(0))),
+        with ProcessPoolExecutor(max_workers=(1 + (multiprocessing.cpu_count() // 2)),
                                  initializer=self.init_counters,
                                  initargs=(csv_chunks_queue,
                                            records_current,
@@ -163,7 +163,8 @@ class _Influx():
                       TimeElapsedColumn()) as progress:
             task_id = progress.add_task("influx", total=records_count)
 
-            with ProcessPoolExecutor(max_workers=(len(os.sched_getaffinity(0))),
+            # cpu count -1: Manager, -1: DBWriter,
+            with ProcessPoolExecutor(max_workers=(1 + (multiprocessing.cpu_count() // 2)),
                                      initializer=self.init_counters,
                                      initargs=(csv_chunks_queue,
                                                records_current,

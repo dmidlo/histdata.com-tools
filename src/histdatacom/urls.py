@@ -1,3 +1,4 @@
+from os import sched_get_priority_max
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
@@ -102,7 +103,7 @@ class _URLs:
                       TimeElapsedColumn()) as progress:
             task_id = progress.add_task("Validating URLs", total=records_count)
 
-            with ThreadPoolExecutor(max_workers=(len(os.sched_getaffinity(0)) * 2,
+            with ThreadPoolExecutor(max_workers=(multiprocessing.cpu_count() * 3),
                                     initializer=self.init_counters,
                                     initargs=(records_current,
                                               records_next,
@@ -172,7 +173,7 @@ class _URLs:
                       TimeElapsedColumn()) as progress:
             task_id = progress.add_task("[cyan]Downloading ZIPs", total=records_count)
 
-            with ThreadPoolExecutor(max_workers=(len(os.sched_getaffinity(0)) * 2,
+            with ThreadPoolExecutor(max_workers=(multiprocessing.cpu_count() * 3),
                                     initializer=self.init_counters,
                                     initargs=(records_current,
                                               records_next,
