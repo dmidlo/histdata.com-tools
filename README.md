@@ -71,7 +71,7 @@ pip install histdatacom
 ###### Run `histdatacom` to view help message and Options
 
 ```bash
-$ histdatacom -h
+histdatacom -h
 ```
 
 #### Windows Powershell

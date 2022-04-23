@@ -59,7 +59,7 @@ class _CSVs:
                       TimeElapsedColumn()) as progress:
 
             task_id = progress.add_task("[cyan]Extracting CSVs", total=records_count)
-            with ProcessPoolExecutor(max_workers=(multiprocessing.cpu_count() - 1),
+            with ProcessPoolExecutor(max_workers=(len(os.sched_getaffinity(0))),
                                      initializer=self.init_counters,
                                      initargs=(records_current,
                                      records_next,

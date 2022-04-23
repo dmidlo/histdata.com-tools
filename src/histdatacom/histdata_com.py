@@ -74,9 +74,6 @@ class _HistDataCom:
 
 
 class HistDataCom():
-    # TODO: presently there is no execution api for calls from other programs.
-    # TODO  **kwargs is staged here to pass an ArgsNamespace object into _HistDataCom
-    # TODO  for developers to configure
     def __init__(self, options):
         self.options = options
         self.records_manager=managers.SyncManager()
