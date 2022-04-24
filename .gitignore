@@ -10,7 +10,6 @@ venv/
 __pycache__
 .pytest_cache/
 data/
-test.py
 build/
 dist/
 *.egg-info
@@ -19,4 +18,3 @@ prospector_results.json
 output.pstats
 result.json
 out.gv
-test.ipynb

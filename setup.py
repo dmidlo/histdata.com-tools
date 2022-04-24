@@ -52,7 +52,8 @@ setup(
         'pyyaml',
         'rx',
         'argparse',
-        'pytz'
+        'pytz',
+        'ipywidgets'
     ],
     classifiers=[
         'Development Status :: 4 - Beta',
@@ -68,6 +69,3 @@ setup(
         'Topic :: Terminals',
     ]
 )
-
-# os.environ.pop('SSL_CERT_FILE', None)
-# os.environ.pop('REQUESTS_CA_BUNDLE', None)

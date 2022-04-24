@@ -28,7 +28,12 @@ class Record:
         self.data_tk = kwargs.get("data_tk", "")
         self.zip_filename = kwargs.get("zip_filename", "")
         self.csv_filename = kwargs.get("csv_filename", "")
+        self.jay_filename = kwargs.get("jay_filename", "")
         self.csv_linecount = kwargs.get("csv_linecount", "")
+        self.jay_linecount = kwargs.get("jay_linecount", "")
+        self.jay_start = kwargs.get("jay_start", "")
+        self.jay_end = kwargs.get("jay_end", "")
+        self.zip_persist = kwargs.get("zip_persist", "")
 
     def __call__(self, string="updated", **kwargs):
         for arg in kwargs:
@@ -140,7 +145,12 @@ class Record:
                 'data_tk': self.data_tk,
                 'zip_filename': self.zip_filename,
                 'csv_filename': self.csv_filename,
-                'csv_linecount': self.csv_linecount}
+                'csv_linecount': self.csv_linecount,
+                'jay_linecount': self.jay_linecount,
+                'jay_start': self.jay_start,
+                'jay_end': self.jay_end,
+                'jay_filename': self.jay_filename,
+                'zip_persist': self.zip_persist}
 
     def print_record(self, string="Updated"):
         print(f"{string}:",

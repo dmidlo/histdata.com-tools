@@ -66,12 +66,14 @@ Returns:
 """
 
 import argparse
+from multiprocessing.sharedctypes import Value
 import sys
 import re
 from histdatacom.fx_enums import Pairs, Format, Timeframe
 from histdatacom.utils import get_current_datemonth_gmt_plus5
 from histdatacom.utils import get_month_from_datemonth
 from histdatacom.utils import get_year_from_datemonth
+from histdatacom.utils import replace_date_punct
 
 
 class ArgsNamespace:
@@ -92,6 +94,8 @@ class ArgsNamespace:
         self.end_yearmonth = ""
         self.data_directory = "data"
         self.from_api = False
+        self.api_return_type = "datatable"
+        self.reset_cache = False
 
 
 class ArgParser(argparse.ArgumentParser):
@@ -128,6 +132,18 @@ class ArgParser(argparse.ArgumentParser):
             action='store_true',
             help='import csv data to influxdb instance. Use influxdb.yaml to configure.')
         self.add_argument(
+            "-J", "--create_jays", 
+            action='store_true',
+            help='download specified pairs/platforms/timeframe and create data files')
+        self.add_argument(
+            "-Z", "--zip_persist", 
+            action='store_true',
+            help='do not delete zip files after use.  warning: increased disk usage.')
+        self.add_argument(
+            '-R', "--reset-cache",
+            action="store_true",
+            help="warn: removes cached data and metadata for specified pairs/formats/timeframes.")
+        self.add_argument(
             '-p', '--pairs',
             nargs='+',
             type=str,
@@ -160,9 +176,10 @@ class ArgParser(argparse.ArgumentParser):
             '-d', '--data-directory',
             type=str,
             help='Directory Used to save data. default is "data" in the current directory')
-
+        
         if "histdatacom" not in sys.argv[0] and self.arg_namespace.from_api:
             args = self.clean_from_api_args(self.arg_namespace)
+            self.false_from_api_if_behavior_flag(self.arg_namespace)
             self.parse_args(args, namespace=self.arg_namespace)
         else:
             # Get the args from sys.argv
@@ -175,6 +192,9 @@ class ArgParser(argparse.ArgumentParser):
 
         self.check_datetime_input(self.arg_namespace)
         self.check_for_ascii_if_influx(self.arg_namespace)
+        self.check_for_ascii_if_api(self.arg_namespace)
+
+
 
     def __call__(self):
         """ simply return the completed args object """
@@ -183,6 +203,7 @@ class ArgParser(argparse.ArgumentParser):
     @classmethod
     def clean_from_api_args(cls, args_namespace):
         args = []
+        
         args.extend(["-d", args_namespace.data_directory])
         args.extend(["-p", *args_namespace.pairs])
         args.extend(["-f", *args_namespace.formats])
@@ -210,7 +231,14 @@ class ArgParser(argparse.ArgumentParser):
             if isinstance(args[arg], list):
                 args[arg] = set(args[arg])
         return args
-
+    @classmethod
+    def false_from_api_if_behavior_flag(cls, args_namespace):
+        if args_namespace.validate_urls \
+        or args_namespace.download_data_archives \
+        or args_namespace.extract_csvs \
+        or args_namespace.import_to_influxdb:
+            args_namespace.from_api = False
+            
     @classmethod
     def check_for_ascii_if_influx(cls, args_namespace):
         """Verify ascii csv_format type for influxdb import"""
@@ -229,6 +257,35 @@ class ArgParser(argparse.ArgumentParser):
             print(err)
             sys.exit(err)
 
+    @classmethod
+    def check_for_ascii_if_api(cls, args_namespace):
+        try:
+            err_text_api_must_be_ascii = \
+            f"""
+                ERROR on -f {args_namespace.formats}           ERROR
+                    * format must be ASCII when calling from API 
+                        eg. 
+                            import histdatacom
+                            from histdatacom.cli import ArgsNamespace
+
+                            options = ArgsNamespace()
+                            options.formats = {{"ascii"}}
+            """
+            if args_namespace.from_api \
+            and not (
+                args_namespace.validate_urls 
+                or args_namespace.download_data_archives \
+                or args_namespace.extract_csvs \
+                or args_namespace.import_to_influxdb
+            ):
+                for csv_format in args_namespace.formats:
+                    if str.lower(csv_format) != "ascii":
+                        raise ValueError(err_text_api_must_be_ascii)
+        except ValueError as err:
+            print(err)
+            sys.exit()
+    
+    
     @classmethod
     def check_datetime_input(cls, args_namespace):
         """Checks for invalid datetime input for -s and -e flags"""
@@ -549,15 +606,10 @@ class ArgParser(argparse.ArgumentParser):
             or str.lower(yearmonth) == "now" \
             or str.lower(yearmonth) == "start" \
             or yearmonth == "":
-                return cls.replace_date_punct(yearmonth)
+                return replace_date_punct(yearmonth)
             raise ValueError(err_text_bad_yearmonth_format)
         except ValueError as err:
             cls.exit_on_datetime_error(err)
-
-    @classmethod
-    def replace_date_punct(cls, datemonth_str):
-        """removes year-month punctuation and returns str("000000")"""
-        return re.sub("[-_.: ]", "", datemonth_str) if datemonth_str is not None else ""
 
     @classmethod
     def exit_on_datetime_error(cls, err):

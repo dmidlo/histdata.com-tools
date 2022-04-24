@@ -1,4 +1,4 @@
-from os import sched_get_priority_max
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
@@ -128,12 +128,17 @@ class _URLs:
 
     def download_zip(self, record):
         try:
-            if "URL_VALID" in record.status:
+            if "URL_VALID" in record.status \
+            or (self.args['from_api']
+                and not (os.path.exists(record.data_dir + record.zip_filename)
+                         or os.path.exists(record.data_dir + record.csv_filename)
+                         or os.path.exists(record.data_dir + record.jay_filename))
+                ):
                 res = self.request_file(record)
                 record.zip_filename = res.headers["Content-Disposition"].split(";")[1].split("=")[1]
                 self.write_file(record, res.content)
 
-                record.status = "CSV_ZIP"
+                record.status = "CSV_ZIP" if record.status == "URL_VALID" else record.status
                 record.write_info_file(base_dir=args['default_download_dir'])
 
             records_next.put(record)

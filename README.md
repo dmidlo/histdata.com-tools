@@ -1,6 +1,7 @@
 # histdata.com-tools
 
-A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks. Works on MacOS, Linux & Windows Systems.
+A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks. Works on MacOS, Linux & Windows Systems. 
+**Requires Python3.10+**
 
 ---
 
@@ -38,6 +39,18 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 ```sh
 pip install histdatacom
+```
+
+if you're going to use the histdatacom API or in a Jupyter Notebook, you'll need to install the development version of datatable
+
+```sh
+pip install git+https://github.com/h2oai/datatable
+```
+
+to install latest development version
+
+```sh
+pip install git+https://github.com/dmidlo/histdata.com-tools.git
 ```
 
 ---
@@ -321,7 +334,6 @@ Basic support for Jupyter notebooks and calling from another script/module
 
 - there is no return value from calling histdatacom, it functions only as far as the cli version does, that is, that it will validate, download, extract, and/or import to influxdb.
 - After that, It would be up the developer to work with the files on disk or to query influxdb.
-- for progress bars in jupyter you will need to install the ipywidgets package with `pip install ipywidgets`
 
 ######  First import the required modules
 ```python
@@ -332,7 +344,7 @@ from histdatacom.cli import ArgsNamespace
 ###### Create a new options object to pass parameters to histdatacom
 
 ```python
-options = ArgsNamespace
+options = ArgsNamespace()
 ```
 
 ###### Configure

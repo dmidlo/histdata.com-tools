@@ -4,6 +4,7 @@ normal=$(tput sgr0)
 dev()
 {
     echo "${bold}pypi.sh: Setting Up Dev${normal}"
+    pip uninstall -y histdatacom
     python setup.py build
     python setup.py install
     python setup.py develop
