@@ -69,3 +69,5 @@ setup(
         'Topic :: Terminals',
     ]
 )
+
+#print("\n\n\n done............. pip install git+https://github.com/h2oai/datatable")

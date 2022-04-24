@@ -6,6 +6,7 @@ dev()
     echo "${bold}pypi.sh: Setting Up Dev${normal}"
     pip uninstall -y histdatacom
     pip install twine wheel
+    # pip install git+https://github.com/h2oai/datatable
     python setup.py build
     python setup.py install
     python setup.py develop
@@ -42,6 +43,14 @@ destroyenv()
     source venv/bin/activate
 }
 
+histdatacom_test()
+{
+    echo "${bold}testing histdatacom -h test pip environment${normal}"
+    histdatacom -h
+    echo "${bold}testing histdatacom -D test pip environment${normal}"
+    histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
+}
+
 if [[ $1 == "dev" ]]
 then
     dev
@@ -66,15 +75,13 @@ then
     buildenv
     echo "${bold}installing histdatacom from testpypi: https://test.pypi.org/simple/${normal}"
     python3 -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ histdatacom
-    echo "${bold}testing histdatacom -h test pip environment${normal}"
-    histdatacom -h
-    echo "${bold}testing histdatacom -D test pip environment${normal}"
-    histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
+    histdatacom_test
     destroyenv
 elif [[ $1 == "pypi_install" ]]
 then
     buildenv
     echo "${bold}installing histdatacom from pypi: https://pypi.org/${normal}"
     pip install histdatacom
+    histdatacom_test
     destroyenv
 fi
