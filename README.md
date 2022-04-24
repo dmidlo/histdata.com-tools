@@ -37,14 +37,16 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 #### TLDR for all platforms
 
-```sh
-pip install histdatacom
-```
+Install the latest version of datatable
 
-if you're going to use the histdatacom API or in a Jupyter Notebook, you'll need to install the development version of datatable
+- **this is a temporary fix until the datatable team updates PyPi. [See this issue](https://github.com/h2oai/datatable/issues/3268) for more details*
 
 ```sh
 pip install git+https://github.com/h2oai/datatable
+```
+
+```sh
+pip install histdatacom
 ```
 
 to install latest development version

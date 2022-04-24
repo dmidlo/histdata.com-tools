@@ -30,15 +30,12 @@ buildenv()
     python -m venv venv
     echo "${bold}activating test pip environment${normal}"
     source venv/bin/activate
+    pip install git+https://github.com/h2oai/datatable
     echo "${bold}test pip environment set up complete.${normal}"
 }
 
 destroyenv()
 {
-    echo "${bold}testing histdatacom -h test pip environment${normal}"
-    histdatacom -h
-    echo "${bold}testing histdatacom -D test pip environment${normal}"
-    histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
     cd ../histdata.com-tools
     rm -rf ../myproject
     echo "${bold}leaving test pip environment${normal}"
@@ -69,6 +66,10 @@ then
     buildenv
     echo "${bold}installing histdatacom from testpypi: https://test.pypi.org/simple/${normal}"
     python3 -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ histdatacom
+    echo "${bold}testing histdatacom -h test pip environment${normal}"
+    histdatacom -h
+    echo "${bold}testing histdatacom -D test pip environment${normal}"
+    histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
     destroyenv
 elif [[ $1 == "pypi_install" ]]
 then
