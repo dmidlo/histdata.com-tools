@@ -69,6 +69,9 @@ class _HistDataCom:
                 self.api.validate_jays(self.records_current, self.records_next)
                 return self.api.merge_jays(self.records_current, self.records_next)
 
+        if self.args["from_api"]:
+            print("return data to api call from histdata_com.run()")
+
         if self.args["extract_csvs"]:
             self.csvs.extract_csvs(self.records_current, self.records_next)
 
@@ -104,11 +107,8 @@ class HistDataCom():
         if self.options.from_api:
             return scraper.run()
         else:
-            data = scraper.run()
-            return data
-        
-
-
+            scraper.run()
+          
 def main(options=None):
     if not options:
         options = ArgsNamespace()
