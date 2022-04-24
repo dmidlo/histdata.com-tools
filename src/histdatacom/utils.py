@@ -1,6 +1,7 @@
 import os
 import sys
 import csv
+import re
 from datetime import datetime
 import pytz
 import yaml
@@ -67,3 +68,8 @@ def get_csv_dialect(csv_path):
     with open(csv_path, "r") as srccsv:
         dialect = csv.Sniffer().sniff(srccsv.read(), delimiters=",; ")
     return dialect
+
+
+def replace_date_punct(datemonth_str):
+    """removes year-month punctuation and returns str("000000")"""
+    return re.sub("[-_.: ]", "", datemonth_str) if datemonth_str is not None else ""

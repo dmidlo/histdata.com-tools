@@ -7,6 +7,7 @@ from histdatacom.records import Records
 from histdatacom.utils import set_working_data_dir
 from histdatacom.utils import load_influx_yaml
 from histdatacom.urls import _URLs
+from histdatacom.api import _API
 from histdatacom.csvs import _CSVs
 from histdatacom.influx import _Influx
 
@@ -47,6 +48,7 @@ class _HistDataCom:
 
         self.urls = _URLs(self.args, self.records_current, self.records_next)
         self.csvs = _CSVs(self.args, self.records_current, self.records_next)
+        self.api = _API(self.args, self.records_current, self.records_next)
 
         if self.args["import_to_influxdb"] == 1:
             self.csv_chunks_queue = csv_chunks_queue
@@ -63,6 +65,9 @@ class _HistDataCom:
 
         if self.args["download_data_archives"]:
             self.urls.download_zips(self.records_current, self.records_next)
+            if self.args["from_api"]:
+                self.api.validate_jays(self.records_current, self.records_next)
+                return self.api.merge_jays(self.records_current, self.records_next)
 
         if self.args["extract_csvs"]:
             self.csvs.extract_csvs(self.records_current, self.records_next)
@@ -78,40 +83,40 @@ class HistDataCom():
         self.options = options
         self.records_manager=managers.SyncManager()
         self.records_manager.register("Records", Records)
-    
-    @contextmanager
+
     def __call__(self):
-        try:
-            self.records_manager.start()
+        self.records_manager.start()
 
-            global records_current
-            records_current = self.records_manager.Records()
+        global records_current
+        records_current = self.records_manager.Records()
 
-            global records_next
-            records_next = self.records_manager.Records()
+        global records_next
+        records_next = self.records_manager.Records()
 
-            global csv_chunks_queue
-            csv_chunks_queue = self.records_manager.Queue()
+        global csv_chunks_queue
+        csv_chunks_queue = self.records_manager.Queue()
 
-            scraper = _HistDataCom(records_current,
-                                    records_next,
-                                    csv_chunks_queue,
-                                    self.options)
-            scraper.run()
+        scraper = _HistDataCom(records_current,
+                                records_next,
+                                csv_chunks_queue,
+                                self.options)
 
-            #self.records_manager.shutdown()
-        finally:
-            pass
+        if self.options.from_api:
+            return scraper.run()
+        else:
+            data = scraper.run()
+            return data
         
 
 
 def main(options=None):
     if not options:
         options = ArgsNamespace()
+        HistDataCom(options)()
     else:
         options.from_api = True
+        return HistDataCom(options)()
 
-    HistDataCom(options)()
 
 
 if __name__ == '__main__':

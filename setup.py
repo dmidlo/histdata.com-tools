@@ -52,7 +52,8 @@ setup(
         'pyyaml',
         'rx',
         'argparse',
-        'pytz'
+        'pytz',
+        'datatable @ git+https://github.com/h2oai/datatable'
     ],
     classifiers=[
         'Development Status :: 4 - Beta',

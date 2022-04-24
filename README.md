@@ -332,7 +332,7 @@ from histdatacom.cli import ArgsNamespace
 ###### Create a new options object to pass parameters to histdatacom
 
 ```python
-options = ArgsNamespace
+options = ArgsNamespace()
 ```
 
 ###### Configure
