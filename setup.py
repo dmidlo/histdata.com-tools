@@ -53,8 +53,7 @@ setup(
         'rx',
         'argparse',
         'pytz',
-        'ipywidgets',
-        'datatable @ git+https://github.com/h2oai/datatable'
+        'ipywidgets'
     ],
     classifiers=[
         'Development Status :: 4 - Beta',

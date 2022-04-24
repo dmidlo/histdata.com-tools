@@ -1,6 +1,7 @@
 # histdata.com-tools
 
-A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks. Works on MacOS, Linux & Windows Systems.
+A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks. Works on MacOS, Linux & Windows Systems. 
+**Requires Python3.10+**
 
 ---
 
@@ -38,6 +39,12 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 ```sh
 pip install histdatacom
+```
+
+if you're going to use the histdatacom API or in a Jupyter Notebook, you'll need to install the development version of datatable
+
+```sh
+pip install git+https://github.com/h2oai/datatable
 ```
 
 to install latest development version
