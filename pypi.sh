@@ -5,6 +5,7 @@ dev()
 {
     echo "${bold}pypi.sh: Setting Up Dev${normal}"
     pip uninstall -y histdatacom
+    pip install twine wheel
     python setup.py build
     python setup.py install
     python setup.py develop
