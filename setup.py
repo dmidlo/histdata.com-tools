@@ -53,7 +53,7 @@ setup(
         'rx',
         'argparse',
         'pytz',
-        'ipywidgets'
+        'ipywidgets',
         'datatable @ git+https://github.com/h2oai/datatable'
     ],
     classifiers=[
@@ -70,6 +70,3 @@ setup(
         'Topic :: Terminals',
     ]
 )
-
-# os.environ.pop('SSL_CERT_FILE', None)
-# os.environ.pop('REQUESTS_CA_BUNDLE', None)
