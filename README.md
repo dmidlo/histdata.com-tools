@@ -40,6 +40,12 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 pip install histdatacom
 ```
 
+to install latest development version
+
+```sh
+pip install git+https://github.com/dmidlo/histdata.com-tools.git
+```
+
 ---
 
 ##### MacOS and Linux
@@ -321,7 +327,6 @@ Basic support for Jupyter notebooks and calling from another script/module
 
 - there is no return value from calling histdatacom, it functions only as far as the cli version does, that is, that it will validate, download, extract, and/or import to influxdb.
 - After that, It would be up the developer to work with the files on disk or to query influxdb.
-- for progress bars in jupyter you will need to install the ipywidgets package with `pip install ipywidgets`
 
 ######  First import the required modules
 ```python

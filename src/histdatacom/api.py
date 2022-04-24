@@ -53,9 +53,6 @@ class _API():
                  or record.data_timeframe == "M1"):
                 if "CSV" in record.status:
                     self.create_jay(record)
-                else:
-                    pass
-
 
             records_next.put(record, self.args)
         except Exception:

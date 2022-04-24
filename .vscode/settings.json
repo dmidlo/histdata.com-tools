@@ -26,6 +26,7 @@
         "grxeur",
         "histdata",
         "histdatacom",
+        "ipywidgets",
         "milli",
         "mtclosebid",
         "mthighbid",
