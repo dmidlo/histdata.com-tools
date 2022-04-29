@@ -143,17 +143,25 @@ class _API():
                 merged = dt.Frame(names=["datetime", "open", "high", "low", "close", "vol"])
 
         tp_set_dict['records'].sort(key=lambda record: record.jay_start)
-        for m_record in tp_set_dict['records']:
-            jay_path = m_record.data_dir + m_record.jay_filename
-            jay_data = self.import_jay_data(jay_path)
-            merged.rbind(jay_data)
 
-        if self.args['api_return_type'] == "datatable":
-            tp_set_dict['data'] = merged
-        if self.args['api_return_type'] == "arrow":
-            tp_set_dict['data'] = merged.to_arrow()
-        if self.args['api_return_type'] == "pandas":
-            tp_set_dict['data'] = merged.to_pandas()
+        records_count = len(tp_set_dict)
+        with Progress(TextColumn(text_format=f"[cyan]Merging {records_count} records..."),
+                        BarColumn(),
+                        "[progress.percentage]{task.percentage:>3.0f}%",
+                        TimeElapsedColumn()) as progress:
+            task_id = progress.add_task("extract", total=records_count)
+
+            for m_record in tp_set_dict['records']:
+                jay_path = m_record.data_dir + m_record.jay_filename
+                jay_data = self.import_jay_data(jay_path)
+                merged.rbind(jay_data)
+
+            if self.args['api_return_type'] == "datatable":
+                tp_set_dict['data'] = merged
+            if self.args['api_return_type'] == "arrow":
+                tp_set_dict['data'] = merged.to_arrow()
+            if self.args['api_return_type'] == "pandas":
+                tp_set_dict['data'] = merged.to_pandas()
         
     @classmethod
     def extract_single_value_from_frame(cls, frame, row, column):

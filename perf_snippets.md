@@ -57,11 +57,11 @@ $ pip install pycallgraph2
 
 ```python
 import histdatacom
-from histdatacom.cli import ArgsNamespace
+from histdatacom.options import Options
 from pycallgraph2 import PyCallGraph
 from pycallgraph2.output import GraphvizOutput
 
-options = ArgsNamespace()
+options = Options()
 options.extract_csvs = True
 options.formats = {"ascii"}
 options.timeframes = {"T"}

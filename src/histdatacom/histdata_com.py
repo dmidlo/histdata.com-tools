@@ -1,8 +1,7 @@
 import sys
 from multiprocessing import managers
-from contextlib import contextmanager
 from histdatacom.cli import ArgParser
-from histdatacom.cli import ArgsNamespace
+from histdatacom.options import Options
 from histdatacom.records import Records
 from histdatacom.utils import set_working_data_dir
 from histdatacom.utils import load_influx_yaml
@@ -23,10 +22,10 @@ class _HistDataCom:
 
         """ Initialization for _HistDataCom Class"""
         # Set User () or Default Arguments respectively utilizing the self.ArgParser
-        # and self.ArgsNamespace classes.
+        # and self.Options classes.
         #   - ArgParser()():
         #       - ()(): use an IIFE to allow argparse to get garbage collected
-        #       - ()(): ArgParser.__call__ returns updated ArgsNamespace object
+        #       - ()(): ArgParser.__call__ returns updated Options object
         #       - vars(...): get the __dict__ representation of the object
         #       - ArgParser._arg_list_to_set(...)
         #           - Normalize iterable user arguments whose values are lists and
@@ -111,7 +110,7 @@ class HistDataCom():
           
 def main(options=None):
     if not options:
-        options = ArgsNamespace()
+        options = Options()
         HistDataCom(options)()
     else:
         options.from_api = True

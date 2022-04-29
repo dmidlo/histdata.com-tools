@@ -66,42 +66,22 @@ Returns:
 """
 
 import argparse
-from multiprocessing.sharedctypes import Value
 import sys
 import re
-from histdatacom.fx_enums import Pairs, Format, Timeframe
+from histdatacom.fx_enums import Pairs
+from histdatacom.fx_enums import Format
+from histdatacom.fx_enums import Timeframe
 from histdatacom.utils import get_current_datemonth_gmt_plus5
 from histdatacom.utils import get_month_from_datemonth
 from histdatacom.utils import get_year_from_datemonth
 from histdatacom.utils import replace_date_punct
-
-
-class ArgsNamespace:
-    """ An intra-class DTO for Default Arguments for _HistDataCom class. """
-    # argparse uses a thin class to create a namespace for cli/shell arguments to live in
-    # normally argparse.ArgumentParser.parse_args(namespace=...) creates this namespace and
-    # writes user's cli args to it.  Preemptively creating here to hold default args; if the
-    # user enters args in the shell, these values will be respectively overwritten
-    def __init__(self):
-        self.validate_urls = False
-        self.download_data_archives = False
-        self.extract_csvs = False
-        self.import_to_influxdb = False
-        self.pairs = Pairs.list_keys()
-        self.formats = Format.list_values()
-        self.timeframes = Timeframe.list_keys()
-        self.start_yearmonth = ""
-        self.end_yearmonth = ""
-        self.data_directory = "data"
-        self.from_api = False
-        self.api_return_type = "datatable"
-        self.reset_cache = False
+from histdatacom.options import Options
 
 
 class ArgParser(argparse.ArgumentParser):
     """ Encapsulation class for argparse related operations """
 
-    def __init__(self, options=ArgsNamespace(), **kwargs):
+    def __init__(self, options=Options(), **kwargs):
         """ set up argparse, bring in defaults DTO, setup cli params, receive
             and overwrite defaults with user cli args."""
         
@@ -131,18 +111,6 @@ class ArgParser(argparse.ArgumentParser):
             "-I", "--import_to_influxdb",
             action='store_true',
             help='import csv data to influxdb instance. Use influxdb.yaml to configure.')
-        self.add_argument(
-            "-J", "--create_jays", 
-            action='store_true',
-            help='download specified pairs/platforms/timeframe and create data files')
-        self.add_argument(
-            "-Z", "--zip_persist", 
-            action='store_true',
-            help='do not delete zip files after use.  warning: increased disk usage.')
-        self.add_argument(
-            '-R', "--reset-cache",
-            action="store_true",
-            help="warn: removes cached data and metadata for specified pairs/formats/timeframes.")
         self.add_argument(
             '-p', '--pairs',
             nargs='+',
@@ -266,9 +234,9 @@ class ArgParser(argparse.ArgumentParser):
                     * format must be ASCII when calling from API 
                         eg. 
                             import histdatacom
-                            from histdatacom.cli import ArgsNamespace
+                            from histdatacom.options import Options
 
-                            options = ArgsNamespace()
+                            options = Options()
                             options.formats = {{"ascii"}}
             """
             if args_namespace.from_api \

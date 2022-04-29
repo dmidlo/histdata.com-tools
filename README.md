@@ -1,7 +1,9 @@
 # histdata.com-tools
 
-A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks. Works on MacOS, Linux & Windows Systems. 
+A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks. Works on MacOS, Linux & Windows Systems.
 **Requires Python3.10+**
+
+**NEW:** Expanded API support!!!
 
 ---
 
@@ -20,14 +22,16 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
   - [Multiple Datasets](#multiple-datasets)
   - [Import to InfluxDB](#import-to-influxdb)
     - [influxdb.yaml](#influxdbyaml)
-  - [Other Scripts, Modules, & Jupyter Support](#other-scripts-modules-jupyter-support)
+  - [API - Other Scripts, Modules, & Jupyter Support](#api-other-scripts-modules-jupyter-support)
+    - [CLI Automation](#cli-automation)
+    - [Jupyter and External Scripts](#jupyter-and-external-scripts)
 - [Roadmap](#roadmap)
 
 ---
 
 ## Disclaimer
 
-*I am in no way affiliated with histdata.com or its maintainers. Please use this application in a way that respects the hard work and resources of histdata.com*
+**I am in no way affiliated with histdata.com or its maintainers. Please use this application in a way that respects the hard work and resources of histdata.com*
 
 *If you choose to use this tool, it is **strongly** suggested that you head over to http://www.histdata.com/download-by-ftp/ and sign up to help support their traffic costs.*
 
@@ -330,34 +334,47 @@ influxdb:
   token: influx_user_token
 ```
 
-##### Other Scripts, Modules, & Jupyter Support
+#### API - Other Scripts, Modules, & Jupyter Support
 
-Basic support for Jupyter notebooks and calling from another script/module
+histdatacom also has an API to allow developers and to integrate the package into their own projects.  It can be used in one of two ways; The first being a simple interface to automate CLI interaction. The second is as an interface to work with the data directly in a notebook environment like Jupyter Notebooks.
 
-- there is no return value from calling histdatacom, it functions only as far as the cli version does, that is, that it will validate, download, extract, and/or import to influxdb.
-- After that, It would be up the developer to work with the files on disk or to query influxdb.
+##### CLI Automation
 
-######  First import the required modules
+###### First import the required modules
+
 ```python
 import histdatacom
-from histdatacom.cli import ArgsNamespace
+from histdatacom.options import Options
 ```
 
-###### Create a new options object to pass parameters to histdatacom
+###### Create and Initialize a new options object to pass parameters to histdatacom
 
 ```python
-options = ArgsNamespace()
+options = Options()
 ```
 
-###### Configure
+###### Configure for CLI automation
+
+To automate the CLI, simply include one of the boolean behavior flags: `options.validate_urls`, `options.download_data_archives`, `options.extract_csvs`, and `options.import_to_influxdb`
+
+- Each behavior flag implies the use of the preceding flags.
+  - histdatacom is an ETL pipeline (extract, transform, load) and each step depends on the preceding steps in the pipeline.
+  - For the `CLI`, the order of operations are:
+    - validate urls
+    - download zip files from histdata.com
+    - extract the csv from the zip archive
+    - transform the ESTnoDST datetime to UTC Epoch `AND` upload to InfluxDB.
 
 ```python
-options.extract_csvs = True
+# options.validate_urls = True
+# options.download_data_archives = True  # implies validate
+options.extract_csvs = True  # implies validate and download
+# options.import_to_influxdb = True  # implies validate, download, and extract
 options.formats = {"ascii"}
 options.timeframes = {"tick-data-quotes"}
-options.pairs = {"audusd","udxusd","eurusd"}
-options.start_yearmonth = "2022-03"
-options.end_yearmonth = "2022-04"
+options.pairs = {"eurusd"}
+options.start_yearmonth = "2021-04"
+options.end_yearmonth = "now"
 ```
 
 ###### pass the options to histdatacom (Jupyter Notebooks)
@@ -366,6 +383,8 @@ options.end_yearmonth = "2022-04"
 histdatacom(options)  # (Jupyter)
 ```
 
+- when a behavior flag is included, `histdatacom` assumes it is being used for `CLI` automation **exclusively** and does **not** provide a return value.
+
 at present, calling from another script or module is limited to using the `__name__=="__main__"` idiom.
 
 ```python
@@ -373,7 +392,147 @@ if __name__=="__main__":
    histdatacom(options)
 ```
 
+##### Jupyter and External Scripts
+
+As opposed to the `CLI` interface, one may wish to load data from histdata.com and work with it interactively (e.g. in a Jupyter notebook), or as part of a larger pipeline.  To that end, histdatacom provides an option to specify a return type.
+- return types can be:
+
+  - A `datatable` Frame
+  - a `pandas` dataframe
+  - in Apache `arrow` in-memory format
+
+- *to use `pandas` or `arrow` formats you must install the required packages*
+  - `pip install pandas`
+  - `pip install pyarrow`
+
+###### Import the required modules
+
+```python
+import histdatacom
+from histdatacom.options import Options
+```
+
+###### Initialize a new options object to pass parameters to histdatacom
+
+```python
+options = Options()
+```
+
+###### Jupyter & External Script Options
+
+```python
+options.api_return_type = "pandas"  # "datatable", "pandas", or "arrow"
+options.formats = {"ascii"}  # Must be {"ascii"}
+options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
+options.pairs = {"eurusd"}
+options.start_yearmonth = "2021-04"
+options.end_yearmonth = "now"
+```
+
+- This example uses just one pair/instrument/symbol `eurusd` and just one timeframe `tick-data-quotes`.  When the api is called with this 'one-one` specificity, the api will directly return the requested data.
+- Regardless of the specified start_yearmonth and end_yearmonth, the resultant data will be sorted and merged into a single dataset.
+
+###### Pass the options to histdatacom and assign the return to a variable
+
+```python
+data = histdatacom(options)  # (Jupyter)
+
+print(data)
+print(type(data))
+```
+
+```text
+                    datetime      bid      ask  vol
+0         20210401 000000478  1.17243  1.17244    0
+1         20210401 000006261  1.17246  1.17248    0
+2         20210401 000006362  1.17247  1.17249    0
+3         20210401 000006946  1.17247  1.17250    0
+4         20210401 000007121  1.17249  1.17250    0
+...                      ...      ...      ...  ...
+18648493  20220422 165943081  1.07968  1.08042    0
+18648494  20220422 165943182  1.07968  1.08039    0
+18648495  20220422 165950108  1.07964  1.08032    0
+18648496  20220422 165950958  1.07947  1.08032    0
+18648497  20220422 165954462  1.07947  1.08032    0
+
+[18648498 rows x 4 columns]
+<class 'pandas.core.frame.DataFrame'>
+```
+
+- When specifying more than one pair/symbol/instrument or timeframe, the api will return an ***list of dictionaries*** with references to the timeframe, pair, records used to create the data, and the merged data itself.
+
+```python
+options.api_return_type = "pandas"
+options.formats = {"ascii"}
+options.timeframes = {"1-minute-bar-quotes"}
+options.pairs = {"eurusd","usdcad"}
+options.start_yearmonth = "2021-01"
+options.end_yearmonth = "now"
+```
+
+```python
+data = histdatacom(options)  # (Jupyter)
+
+print(data)
+print(type(data))
+```
+
+```txt
+[
+  {
+    'timeframe': 'M1', 
+    'pair': 'EURUSD', 
+    'records': [<histdatacom.records.Record object ...>, ...],
+    'data':    
+                    datetime     open     high      low    close  vol
+      0       20210103 170000  1.22396  1.22396  1.22373  1.22395    0
+      1       20210103 170100  1.22387  1.22420  1.22385  1.22395    0
+      2       20210103 170200  1.22396  1.22398  1.22382  1.22382    0
+      3       20210103 170300  1.22383  1.22396  1.22376  1.22378    0
+      4       20210103 170400  1.22378  1.22385  1.22296  1.22347    0
+      ...                 ...      ...      ...      ...      ...  ...
+      484172  20220422 165400  1.07976  1.08014  1.07976  1.08014    0
+      484173  20220422 165500  1.08013  1.08021  1.07997  1.08000    0
+      484174  20220422 165600  1.08000  1.08000  1.07956  1.07968    0
+      484175  20220422 165700  1.07980  1.07980  1.07958  1.07968    0
+      484176  20220422 165800  1.07980  1.07986  1.07963  1.07963    0
+
+      [484177 rows x 6 columns]
+  }, 
+  {
+    'timeframe': 'M1', 
+    'pair': 'USDCAD',
+    'records': [<histdatacom.records.Record object ...>, ...],
+    'data':                
+                    datetime     open     high      low    close  vol
+      0       20210103 170000  1.27136  1.27201  1.27136  1.27201    0
+      1       20210103 170100  1.27207  1.27241  1.27207  1.27220    0
+      2       20210103 170200  1.27211  1.27219  1.27211  1.27219    0
+      3       20210103 170300  1.27212  1.27261  1.27212  1.27261    0
+      4       20210103 170400  1.27268  1.27268  1.27261  1.27261    0
+      ...                 ...      ...      ...      ...      ...  ...
+      483946  20220422 165400  1.27121  1.27132  1.27114  1.27131    0
+      483947  20220422 165500  1.27129  1.27137  1.27102  1.27106    0
+      483948  20220422 165600  1.27107  1.27114  1.27098  1.27101    0
+      483949  20220422 165700  1.27105  1.27105  1.27091  1.27091    0
+      483950  20220422 165800  1.27091  1.27097  1.27073  1.27097    0
+
+      [483951 rows x 6 columns]
+  }
+]
+
+<class 'list'>
+```
+
+
+at present, calling from another script or module is limited to using the `__name__=="__main__"` idiom.
+
+```python
+if __name__=="__main__": 
+   data = histdatacom(options)
+```
 
 ## Roadmap
 
-- return datatable/pandas/dask dataframe when called from jupyter or another module
+- Add the ability to import an order book to influxdb
+- Add a --reset-cache flag to reset all or specified year-month range
