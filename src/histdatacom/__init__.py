@@ -1,7 +1,7 @@
 import sys
 from . import histdata_com
 
-__version__ = "0.75.9"
+__version__ = "0.76.0"
 __author__ = 'David Midlo'
 
 class Options(sys.modules[__name__].__class__):
