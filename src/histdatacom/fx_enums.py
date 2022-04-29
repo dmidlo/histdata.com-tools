@@ -60,7 +60,7 @@ class Pairs(Enum):
     eurpln = "EUR/PLN"
     frxeur = "FRX/EUR"
     hkxhkd = "HKX/HKD"
-    nadchf = "NZD/CHF"
+    nzdchf = "NZD/CHF"
     spxusd = "SPX/USD"
     usdhuf = "USD/HUF"
     usdpln = "USD/PLN"
