@@ -35,6 +35,7 @@
         "mtvolume",
         "nrows",
         "nzdcad",
+        "nzdchf",
         "nzdusd",
         "OHLC",
         "prereqs",
