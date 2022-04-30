@@ -170,6 +170,7 @@ histdatacom -h
 ```
 
 ```txt
+histdatacom -h
 usage: histdatacom [-h] [-V] [-D] [-X] [-I] [-c CPU_UTILIZATION] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH]
                    [-e END_YEARMONTH] [-d DATA_DIRECTORY]
 
@@ -182,7 +183,7 @@ options:
   -I, --import_to_influxdb
                         import csv data to influxdb instance. Use influxdb.yaml to configure.
   -c CPU_UTILIZATION, --cpu_utilization CPU_UTILIZATION
-                        "low", "medium", "high". High uses all available CPUs.
+                        "low", "medium", "high". High uses all available CPUs. OR integer percent 1-200
   -p PAIR [PAIR ...], --pairs PAIR [PAIR ...]
                         space separated currency pairs. e.g. -p eurusd usdjpy ...
   -f FORMAT [FORMAT ...], --formats FORMAT [FORMAT ...]
@@ -386,7 +387,7 @@ options.timeframes = {"tick-data-quotes"}
 options.pairs = {"eurusd"}
 options.start_yearmonth = "2021-04"
 options.end_yearmonth = "now"
-options.cpu_utilization = "medium"
+options.cpu_utilization = 100
 ```
 
 ###### pass the options to histdatacom (Jupyter Notebooks)
@@ -481,7 +482,7 @@ options.timeframes = {"1-minute-bar-quotes"}
 options.pairs = {"eurusd","usdcad"}
 options.start_yearmonth = "2021-01"
 options.end_yearmonth = "now"
-options.cpu_utilization = "high"
+options.cpu_utilization = "75"
 ```
 
 ```python

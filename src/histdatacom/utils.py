@@ -85,6 +85,13 @@ def get_pool_cpu_count(count=None):
         if count is None:
             count = real_vcpu_count
         else:
+            err_text_cpu_level_err = \
+            f"""
+                    ERROR on -c {count}  ERROR
+                        * Malformed command:
+                            - -c cpu must be str: low, medium, or high. or integer percent 1-200
+            """
+            count = str(count)
             match count:
                 case "low":
                     count = ceil(real_vcpu_count / 2.5)
@@ -93,13 +100,10 @@ def get_pool_cpu_count(count=None):
                 case "high":
                     count = real_vcpu_count
                 case _:
-                    err_text_cpu_level_err = \
-                    f"""
-                            ERROR on -c {count}  ERROR
-                                * Malformed command:
-                                    - -c cpu must be str: low, medium, or high.
-                    """
-                    raise ValueError(err_text_cpu_level_err)
+                    if count.isnumeric() and 1 <= int(count) <= 200:
+                        count =  ceil(real_vcpu_count * (int(count) / 100))
+                    else:
+                        raise ValueError(err_text_cpu_level_err)
 
         return count - 1 if count > 2 else ceil(count / 2)
     except ValueError as err:

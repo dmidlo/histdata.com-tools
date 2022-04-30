@@ -115,7 +115,7 @@ class ArgParser(argparse.ArgumentParser):
         self.add_argument(
             '-c', '--cpu_utilization',
             type=str,
-            help='"low", "medium", "high". High uses all available CPUs.'  )
+            help='"low", "medium", "high". High uses all available CPUs. OR integer percent 1-200'  )
         self.add_argument(
             '-p', '--pairs',
             nargs='+',
