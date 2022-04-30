@@ -104,7 +104,7 @@ class _URLs:
                       TimeElapsedColumn()) as progress:
             task_id = progress.add_task("Validating URLs", total=records_count)
 
-            with ThreadPoolExecutor(max_workers=(get_pool_cpu_count() * 3),
+            with ThreadPoolExecutor(max_workers=(get_pool_cpu_count(self.args['cpu_utilization']) * 3),
                                     initializer=self.init_counters,
                                     initargs=(records_current,
                                               records_next,
@@ -179,7 +179,7 @@ class _URLs:
                       TimeElapsedColumn()) as progress:
             task_id = progress.add_task("[cyan]Downloading ZIPs", total=records_count)
 
-            with ThreadPoolExecutor(max_workers=(get_pool_cpu_count() * 3),
+            with ThreadPoolExecutor(max_workers=(get_pool_cpu_count(self.args['cpu_utilization']) * 3),
                                     initializer=self.init_counters,
                                     initargs=(records_current,
                                               records_next,

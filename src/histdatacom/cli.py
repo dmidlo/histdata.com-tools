@@ -75,6 +75,7 @@ from histdatacom.utils import get_current_datemonth_gmt_plus5
 from histdatacom.utils import get_month_from_datemonth
 from histdatacom.utils import get_year_from_datemonth
 from histdatacom.utils import replace_date_punct
+from histdatacom.utils import get_pool_cpu_count
 from histdatacom.options import Options
 
 
@@ -111,6 +112,10 @@ class ArgParser(argparse.ArgumentParser):
             "-I", "--import_to_influxdb",
             action='store_true',
             help='import csv data to influxdb instance. Use influxdb.yaml to configure.')
+        self.add_argument(
+            '-c', '--cpu_utilization',
+            type=str,
+            help='"low", "medium", "high". High uses all available CPUs.'  )
         self.add_argument(
             '-p', '--pairs',
             nargs='+',
@@ -161,6 +166,7 @@ class ArgParser(argparse.ArgumentParser):
         self.check_datetime_input(self.arg_namespace)
         self.check_for_ascii_if_influx(self.arg_namespace)
         self.check_for_ascii_if_api(self.arg_namespace)
+        get_pool_cpu_count(self.arg_namespace.cpu_utilization)
 
 
 
@@ -176,6 +182,7 @@ class ArgParser(argparse.ArgumentParser):
         args.extend(["-p", *args_namespace.pairs])
         args.extend(["-f", *args_namespace.formats])
         args.extend(["-t", *args_namespace.timeframes])
+        args.extend(["-c", args_namespace.cpu_utilization])
 
         if args_namespace.start_yearmonth:
             args.extend(["-s", args_namespace.start_yearmonth])

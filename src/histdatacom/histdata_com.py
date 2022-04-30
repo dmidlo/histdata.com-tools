@@ -5,6 +5,7 @@ from histdatacom.options import Options
 from histdatacom.records import Records
 from histdatacom.utils import set_working_data_dir
 from histdatacom.utils import load_influx_yaml
+from histdatacom.utils import get_pool_cpu_count
 from histdatacom.urls import _URLs
 from histdatacom.api import _API
 from histdatacom.csvs import _CSVs

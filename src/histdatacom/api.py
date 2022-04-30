@@ -12,6 +12,7 @@ from rich.progress import BarColumn
 from rich.progress import TextColumn
 from rich.progress import TimeElapsedColumn
 from histdatacom.utils import get_pool_cpu_count
+from histdatacom.utils import replace_date_punct
 
 
 class _API():
@@ -71,7 +72,7 @@ class _API():
                           TimeElapsedColumn()) as progress:
                 task_id = progress.add_task("extract", total=records_count)
                 
-                with ProcessPoolExecutor(max_workers=get_pool_cpu_count(),
+                with ProcessPoolExecutor(max_workers=get_pool_cpu_count(self.args['cpu_utilization']),
                                          initializer=self.init_counters, 
                                          initargs=(records_current,
                                                    records_next,

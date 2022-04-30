@@ -61,7 +61,7 @@ class _CSVs:
 
             task_id = progress.add_task("[cyan]Extracting CSVs", total=records_count)
 
-            with ProcessPoolExecutor(max_workers=get_pool_cpu_count(),
+            with ProcessPoolExecutor(max_workers=get_pool_cpu_count(self.args['cpu_utilization']),
                                      initializer=self.init_counters,
                                      initargs=(records_current,
                                      records_next,

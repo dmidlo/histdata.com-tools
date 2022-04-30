@@ -165,7 +165,9 @@ class _Influx():
             task_id = progress.add_task("influx", total=records_count)
 
             # cpu count -1: Manager, -1: DBWriter,
-            with ProcessPoolExecutor(max_workers=get_pool_cpu_count() - 1 if get_pool_cpu_count() >= 2 else 1,
+            with ProcessPoolExecutor(max_workers=get_pool_cpu_count(self.args['cpu_utilization']) - 1 \
+                                                                    if get_pool_cpu_count(self.args['cpu_utilization']) >= 2 \
+                                                                    else 1,
                                      initializer=self.init_counters,
                                      initargs=(csv_chunks_queue,
                                                records_current,

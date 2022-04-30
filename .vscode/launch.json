@@ -14,7 +14,8 @@
                 "-f","ascii",
                 "-t","tick-data-quotes",//"1-minute-bar-quotes",//
                 "-s","2021-12",
-                "-e","now"
+                "-e","now",
+                "-c","high"
             ],
             "justMyCode": true
         },

@@ -20,6 +20,7 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
   - [Date Ranges](#date-ranges)
     - ['Start' & 'Now' Keywords](#start-now-keywords)
   - [Multiple Datasets](#multiple-datasets)
+  - [CPU Utilization](#cpu-utilization)
   - [Import to InfluxDB](#import-to-influxdb)
     - [influxdb.yaml](#influxdbyaml)
   - [API - Other Scripts, Modules, & Jupyter Support](#api-other-scripts-modules-jupyter-support)
@@ -169,8 +170,8 @@ histdatacom -h
 ```
 
 ```txt
-usage: histdatacom [-h] [-V] [-D] [-X] [-I] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH]
-                   [-d DATA_DIRECTORY]
+usage: histdatacom [-h] [-V] [-D] [-X] [-I] [-c CPU_UTILIZATION] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH]
+                   [-e END_YEARMONTH] [-d DATA_DIRECTORY]
 
 options:
   -h, --help            show this help message and exit
@@ -180,6 +181,8 @@ options:
   -X, --extract_csvs    histdata.com delivers zip files. use the -X flag to extract them to .csv.
   -I, --import_to_influxdb
                         import csv data to influxdb instance. Use influxdb.yaml to configure.
+  -c CPU_UTILIZATION, --cpu_utilization CPU_UTILIZATION
+                        "low", "medium", "high". High uses all available CPUs.
   -p PAIR [PAIR ...], --pairs PAIR [PAIR ...]
                         space separated currency pairs. e.g. -p eurusd usdjpy ...
   -f FORMAT [FORMAT ...], --formats FORMAT [FORMAT ...]
@@ -310,6 +313,14 @@ this example with use the `-e --end_yearmonth` flag to request a range of data f
 histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
 ```
 
+###### CPU Utilization
+One can set a cap on CPU Utilization with `-c --cpu_utlization`
+- available levels are, `"low"`,`"medium"`,`"high"`
+
+```sh
+histdatacom -c medium -p udxusd -f metatrader -s 2015-04 -e 2016-04
+```
+
 ##### Import to InfluxDB
 
 To import data to an influxdb instance, use the `-I --import_to_influxdb` flag along with an `influxdb.yaml` file in the current working directory (where ever you are running the command from).
@@ -375,6 +386,7 @@ options.timeframes = {"tick-data-quotes"}
 options.pairs = {"eurusd"}
 options.start_yearmonth = "2021-04"
 options.end_yearmonth = "now"
+options.cpu_utilization = "medium"
 ```
 
 ###### pass the options to histdatacom (Jupyter Notebooks)
@@ -427,6 +439,7 @@ options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or 1-minute
 options.pairs = {"eurusd"}
 options.start_yearmonth = "2021-04"
 options.end_yearmonth = "now"
+options.cpu_utilization = "high"
 ```
 
 - This example uses just one pair/instrument/symbol `eurusd` and just one timeframe `tick-data-quotes`.  When the api is called with this 'one-one` specificity, the api will directly return the requested data.
@@ -468,6 +481,7 @@ options.timeframes = {"1-minute-bar-quotes"}
 options.pairs = {"eurusd","usdcad"}
 options.start_yearmonth = "2021-01"
 options.end_yearmonth = "now"
+options.cpu_utilization = "high"
 ```
 
 ```python
@@ -524,6 +538,30 @@ print(type(data))
 <class 'list'>
 ```
 
+```python
+print(data[0]['timeframe'], data[0]['pair'])
+print(data[0]['data'])
+print(type(data[0]['data']))
+```
+
+```txt
+M1 EURUSD
+               datetime     open     high      low    close  vol
+0       20210103 170000  1.22396  1.22396  1.22373  1.22395    0
+1       20210103 170100  1.22387  1.22420  1.22385  1.22395    0
+2       20210103 170200  1.22396  1.22398  1.22382  1.22382    0
+3       20210103 170300  1.22383  1.22396  1.22376  1.22378    0
+4       20210103 170400  1.22378  1.22385  1.22296  1.22347    0
+...                 ...      ...      ...      ...      ...  ...
+484172  20220422 165400  1.07976  1.08014  1.07976  1.08014    0
+484173  20220422 165500  1.08013  1.08021  1.07997  1.08000    0
+484174  20220422 165600  1.08000  1.08000  1.07956  1.07968    0
+484175  20220422 165700  1.07980  1.07980  1.07958  1.07968    0
+484176  20220422 165800  1.07980  1.07986  1.07963  1.07963    0
+
+[484177 rows x 6 columns]
+<class 'pandas.core.frame.DataFrame'>
+```
 
 at present, calling from another script or module is limited to using the `__name__=="__main__"` idiom.
 

@@ -21,3 +21,4 @@ class Options:
         self.data_directory = "data"
         self.from_api = False
         self.api_return_type = "datatable"
+        self.cpu_utilization = "medium"
