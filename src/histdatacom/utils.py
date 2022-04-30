@@ -2,6 +2,8 @@ import os
 import sys
 import csv
 import re
+from math import ceil
+import multiprocessing
 from datetime import datetime
 import pytz
 import yaml
@@ -73,3 +75,23 @@ def get_csv_dialect(csv_path):
 def replace_date_punct(datemonth_str):
     """removes year-month punctuation and returns str("000000")"""
     return re.sub("[-_.: ]", "", datemonth_str) if datemonth_str is not None else ""
+
+
+def get_pool_cpu_count(count=None):
+
+    real_vcpu_count = multiprocessing.cpu_count()
+
+    if count is None:
+        count = real_vcpu_count
+    else:
+        match count:
+            case "low":
+                count = ceil(real_vcpu_count / 2.5)
+            case "medium":
+                count = ceil(real_vcpu_count / 1.5)
+            case "high":
+                count = real_vcpu_count
+            case _:
+                raise ValueError("\n -c cpu must be str: low, medium, or high. \n")
+
+    return count - 1 if count > 2 else ceil(count / 2)

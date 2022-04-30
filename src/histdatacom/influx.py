@@ -21,6 +21,7 @@ from rich.progress import BarColumn, TextColumn, TimeElapsedColumn, SpinnerColum
 from rich import print
 from histdatacom.fx_enums import TimeFormat
 from histdatacom.utils import get_csv_dialect
+from histdatacom.utils import get_pool_cpu_count
 
 
 class _InfluxDBWriter(multiprocessing.Process):
@@ -125,7 +126,7 @@ class _Influx():
         res = urlopen(file_endpoint)
         io_wrapper = io.TextIOWrapper(res)
 
-        with ProcessPoolExecutor(max_workers=(1 + (multiprocessing.cpu_count() // 2)),
+        with ProcessPoolExecutor(max_workers=2,
                                  initializer=self.init_counters,
                                  initargs=(csv_chunks_queue,
                                            records_current,
@@ -164,7 +165,7 @@ class _Influx():
             task_id = progress.add_task("influx", total=records_count)
 
             # cpu count -1: Manager, -1: DBWriter,
-            with ProcessPoolExecutor(max_workers=(1 + (multiprocessing.cpu_count() // 2)),
+            with ProcessPoolExecutor(max_workers=get_pool_cpu_count() - 1 if get_pool_cpu_count() >= 2 else 1,
                                      initializer=self.init_counters,
                                      initargs=(csv_chunks_queue,
                                                records_current,

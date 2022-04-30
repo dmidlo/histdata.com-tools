@@ -44,3 +44,30 @@
 # histdatacom -I -p xauusd xauaud xauchf bcousd wtiusd xaueur xagusd xaugbp -f ascii -t tick-data-quotes -s start -e now
 # histdatacom -I -p grxeur auxaud frxeur hkxhkd spxusd jpxjpy udxusd -f ascii -t tick-data-quotes -s start -e now
 # histdatacom -I -p nsxusd ukxgbp etxeur -f ascii -t tick-data-quotes -s start -e now
+
+from math import ceil
+import multiprocessing
+
+def get_pool_cpu_count(count=None):
+
+    real_vcpu_count = multiprocessing.cpu_count()
+
+    if count is None:
+        count = real_vcpu_count
+    else:
+        match count:
+            case "low":
+                count = ceil(real_vcpu_count / 2.5)
+            case "medium":
+                count = ceil(real_vcpu_count / 1.5)
+            case "high":
+                count = real_vcpu_count
+            case _:
+                raise ValueError("\n -c cpu must be str: low, medium, or high. \n")
+
+    return count - 1 if count > 2 else ceil(count / 2)
+
+print(get_pool_cpu_count())
+print(get_pool_cpu_count("low"))
+print(get_pool_cpu_count("medium"))
+print(get_pool_cpu_count("high"))

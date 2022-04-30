@@ -14,7 +14,7 @@ from influxdb_client import WritePrecision
 
 # Exotics 7
 # eurtry usdtry usdsek usdnok usddkk usdzar usdhkd
-# usdsgd eurpln eurhuf nadchf usdhuf usdpln eurczk
+# usdsgd eurpln eurhuf nzdchf usdhuf usdpln eurczk
 # eursek usdczk zarjpy eurdkk eurnok usddkk
 
 # metals/commodities

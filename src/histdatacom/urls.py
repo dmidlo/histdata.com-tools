@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 from histdatacom.utils import get_year_from_datemonth
 from histdatacom.utils import get_month_from_datemonth
 from histdatacom.utils import get_current_datemonth_gmt_plus5
+from histdatacom.utils import get_pool_cpu_count
 from histdatacom.fx_enums import Timeframe, get_valid_format_timeframes
 from histdatacom.records import Record
 
@@ -103,7 +104,7 @@ class _URLs:
                       TimeElapsedColumn()) as progress:
             task_id = progress.add_task("Validating URLs", total=records_count)
 
-            with ThreadPoolExecutor(max_workers=(multiprocessing.cpu_count() * 3),
+            with ThreadPoolExecutor(max_workers=(get_pool_cpu_count() * 3),
                                     initializer=self.init_counters,
                                     initargs=(records_current,
                                               records_next,
@@ -178,7 +179,7 @@ class _URLs:
                       TimeElapsedColumn()) as progress:
             task_id = progress.add_task("[cyan]Downloading ZIPs", total=records_count)
 
-            with ThreadPoolExecutor(max_workers=(multiprocessing.cpu_count() * 3),
+            with ThreadPoolExecutor(max_workers=(get_pool_cpu_count() * 3),
                                     initializer=self.init_counters,
                                     initargs=(records_current,
                                               records_next,
