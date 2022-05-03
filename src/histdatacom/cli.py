@@ -303,7 +303,7 @@ class ArgParser(argparse.ArgumentParser):
         if args_namespace.import_to_influxdb:
             args_namespace.validate_urls = True
             args_namespace.download_data_archives = True
-            args_namespace.extract_csvs = True
+            #args_namespace.extract_csvs = True
 
         if not args_namespace.download_data_archives \
         and not args_namespace.extract_csvs \

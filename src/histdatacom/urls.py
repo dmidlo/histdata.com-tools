@@ -117,7 +117,8 @@ class _URLs:
         finally:
             records_current.task_done()
 
-    def request_file(self, record, args):
+    @classmethod
+    def request_file(cls, record, args):
         post_headers = args['post_headers'].copy()
         post_headers["Referer"] = record.url
         return requests.post("http://www.histdata.com/get.php",
@@ -129,7 +130,8 @@ class _URLs:
                                    "fxpair": record.data_fxpair},
                              headers=post_headers)
 
-    def write_file(self, record, content):
+    @classmethod
+    def write_file(cls, record, content):
         zip_path = record.data_dir + record.zip_filename
         with open(zip_path, "wb") as zip_file:
             zip_file.write(content)
