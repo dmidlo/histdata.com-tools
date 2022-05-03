@@ -1,23 +1,18 @@
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import as_completed
-import multiprocessing
 from urllib.parse import urlparse
 import requests
 from rich import print
-from rich.progress import Progress
-from rich.progress import TextColumn
-from rich.progress import BarColumn
-from rich.progress import TimeElapsedColumn
 import bs4
 from bs4 import BeautifulSoup
 from histdatacom.utils import get_year_from_datemonth
 from histdatacom.utils import get_month_from_datemonth
-from histdatacom.utils import get_current_datemonth_gmt_plus5
-from histdatacom.utils import get_pool_cpu_count
-from histdatacom.fx_enums import Timeframe, get_valid_format_timeframes
+from histdatacom.utils import get_current_datemonth_gmt_minus5
+from histdatacom.fx_enums import Timeframe
+from histdatacom.fx_enums import get_valid_format_timeframes
 from histdatacom.records import Record
+from histdatacom.concurrency import get_pool_cpu_count
+from histdatacom.concurrency import ThreadPool
 
 
 class _URLs:
@@ -46,14 +41,6 @@ class _URLs:
             "Accept-Encoding": "gzip, deflate",
             "Accept-Language": "en-US,en;q=0.9"}
 
-    def init_counters(self, records_current_, records_next_, args_):
-        global records_current
-        records_current = records_current_
-        global records_next
-        records_next = records_next_
-        global args
-        args = args_
-
     def populate_initial_queue(self, records_current, records_next):
         for url in self.generate_form_urls(self.args["start_yearmonth"],
                                            self.args["end_yearmonth"],
@@ -71,7 +58,7 @@ class _URLs:
 
         records_next.dump_to_queue(records_current)
 
-    def validate_url(self, record):
+    def validate_url(self, record, args):
         try:
             if record.status == "URL_NEW":
                 page_data = self.get_page_data(record.url)
@@ -97,45 +84,22 @@ class _URLs:
 
     def validate_urls(self, records_current, records_next):
 
-        records_count = records_current.qsize()
-        with Progress(TextColumn(text_format=f"[cyan]Validating {records_count} URLs..."),
-                      BarColumn(),
-                      "[progress.percentage]{task.percentage:>3.0f}%",
-                      TimeElapsedColumn()) as progress:
-            task_id = progress.add_task("Validating URLs", total=records_count)
+        pool = ThreadPool(self.validate_url,
+                          self.args,
+                          "Validating", "URLs...",
+                          get_pool_cpu_count(self.args['cpu_utilization']) * 3)
 
-            with ThreadPoolExecutor(max_workers=(get_pool_cpu_count(self.args['cpu_utilization']) * 3),
-                                    initializer=self.init_counters,
-                                    initargs=(records_current,
-                                              records_next,
-                                              self.args.copy())) as executor:
-                futures = []
+        pool(records_current, records_next)
 
-                while not records_current.empty():
-                    record = records_current.get()
-
-                    if record is None:
-                        return
-
-                    future = executor.submit(self.validate_url, record)
-                    progress.advance(task_id, 0.25)
-                    futures.append(future)
-
-                for future in as_completed(futures):
-                    self.complete_future(progress, task_id, futures, future)
-
-        records_current.join()
-        records_next.dump_to_queue(records_current)
-
-    def download_zip(self, record):
+    def download_zip(self, record, args):
         try:
             if "URL_VALID" in record.status \
-            or (self.args['from_api']
+            or (args['from_api']
                 and not (os.path.exists(record.data_dir + record.zip_filename)
                          or os.path.exists(record.data_dir + record.csv_filename)
                          or os.path.exists(record.data_dir + record.jay_filename))
                 ):
-                res = self.request_file(record)
+                res = self.request_file(record, args)
                 record.zip_filename = res.headers["Content-Disposition"].split(";")[1].split("=")[1]
                 self.write_file(record, res.content)
 
@@ -153,7 +117,7 @@ class _URLs:
         finally:
             records_current.task_done()
 
-    def request_file(self, record):
+    def request_file(self, record, args):
         post_headers = args['post_headers'].copy()
         post_headers["Referer"] = record.url
         return requests.post("http://www.histdata.com/get.php",
@@ -172,40 +136,12 @@ class _URLs:
 
     def download_zips(self, records_current, records_next):
 
-        records_count = records_current.qsize()
-        with Progress(TextColumn(text_format=f"[cyan]Downloading {records_count} ZIPs..."),
-                      BarColumn(),
-                      "[progress.percentage]{task.percentage:>3.0f}%",
-                      TimeElapsedColumn()) as progress:
-            task_id = progress.add_task("[cyan]Downloading ZIPs", total=records_count)
+        pool = ThreadPool(self.download_zip,
+                          self.args,
+                          "Downloading", "ZIPs...",
+                          get_pool_cpu_count(self.args['cpu_utilization']) * 3)
 
-            with ThreadPoolExecutor(max_workers=(get_pool_cpu_count(self.args['cpu_utilization']) * 3),
-                                    initializer=self.init_counters,
-                                    initargs=(records_current,
-                                              records_next,
-                                              self.args.copy())) as executor:
-                futures = []
-
-                while not records_current.empty():
-                    record = records_current.get()
-
-                    if record is None:
-                        return
-
-                    future = executor.submit(self.download_zip, record)
-                    progress.advance(task_id, 0.25)
-                    futures.append(future)
-
-                for future in as_completed(futures):
-                    self.complete_future(progress, task_id, futures, future)
-        records_current.join()
-
-        records_next.dump_to_queue(records_current)
-
-    def complete_future(self, progress, task_id, futures, future):
-        progress.advance(task_id, 0.75)
-        futures.remove(future)
-        del future
+        pool(records_current, records_next)
 
     @classmethod
     def get_page_data(cls, url):
@@ -267,7 +203,7 @@ class _URLs:
                            pairs,
                            timeframes,
                            base_url):
-        current_yearmonth = get_current_datemonth_gmt_plus5()
+        current_yearmonth = get_current_datemonth_gmt_minus5()
         current_year = int(get_year_from_datemonth(current_yearmonth))
 
         if start_yearmonth is None and end_yearmonth is None:
@@ -369,7 +305,7 @@ class _URLs:
     @classmethod
     def yield_single_year_or_month(cls, timeframe, start_yearmonth):
 
-        current_yearmonth = get_current_datemonth_gmt_plus5()
+        current_yearmonth = get_current_datemonth_gmt_minus5()
         current_year = int(get_year_from_datemonth(current_yearmonth))
         current_month = int(get_month_from_datemonth(current_yearmonth))
 

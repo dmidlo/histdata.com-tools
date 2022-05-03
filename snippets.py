@@ -46,61 +46,17 @@
 #  0 | 1648771212839
 # [1 row x 1 column]
 
+# histdatacom -I -p eurusd -f ascii -tick-data-quotes -s now -c 100
 # histdatacom -I -p usdjpy gbpusd usdcad usdchf audusd nzdusd -f ascii -t tick-data-quotes -s start -e now
-# histdatacom -I -p eurgbp euraud gbpchf audnzd audcad audchf gbpaud usdmxn -f ascii -t tick-data-quotes -s start -e now
-# histdatacom -I -p eurchf eurcad eurnzd eurjpy gbpjpy chfjpy cadjpy -f ascii -t tick-data-quotes -s start -e now
-# histdatacom -I -p audjpy nzdjpy gbpcad nzdcad sgdjpy gbpnzd cadchf -f ascii -t tick-data-quotes -s start -e now
-# histdatacom -I -p eurtry usdtry usdsek usdnok usddkk usdzar usdhkd -f ascii -t tick-data-quotes -s start -e now
-# histdatacom -I -p usdsgd eurpln eurhuf nzdchf usdhuf usdpln eurczk -f ascii -t tick-data-quotes -s start -e now
-# histdatacom -I -p eursek usdczk zarjpy eurdkk eurnok usddkk-f ascii -t tick-data-quotes -s start -e now
-# histdatacom -I -p xauusd xauaud xauchf bcousd wtiusd xaueur xagusd xaugbp -f ascii -t tick-data-quotes -s start -e now
-# histdatacom -I -p grxeur auxaud frxeur hkxhkd spxusd jpxjpy udxusd -f ascii -t tick-data-quotes -s start -e now
-# histdatacom -I -p nsxusd ukxgbp etxeur -f ascii -t tick-data-quotes -s start -e now
 
-from math import ceil
-import multiprocessing
-import sys
+# histdatacom -I -p eurgbp euraud gbpchf audnzd -f ascii -t tick-data-quotes -s start -e now -c 80
+# histdatacom -I -p audcad audchf gbpaud usdmxn -f ascii -t tick-data-quotes -s start -e now -c medium
+# histdatacom -I -p eurchf eurcad eurnzd eurjpy gbpjpy chfjpy cadjpy -f ascii -t tick-data-quotes -s start -e now -c medium
+# histdatacom -I -p audjpy nzdjpy gbpcad nzdcad sgdjpy gbpnzd cadchf -f ascii -t tick-data-quotes -s start -e now -c medium
+# histdatacom -I -p eurtry usdtry usdsek usdnok usddkk usdzar usdhkd -f ascii -t tick-data-quotes -s start -e now -c medium
+# histdatacom -I -p usdsgd eurpln eurhuf nzdchf usdhuf usdpln eurczk -f ascii -t tick-data-quotes -s start -e now -c medium
+# histdatacom -I -p eursek usdczk zarjpy eurdkk eurnok usddkk-f ascii -t tick-data-quotes -s start -e now -c medium
+# histdatacom -I -p xauusd xauaud xauchf bcousd wtiusd xaueur xagusd xaugbp -f ascii -t tick-data-quotes -s start -e now -c medium
+# histdatacom -I -p grxeur auxaud frxeur hkxhkd spxusd jpxjpy udxusd -f ascii -t tick-data-quotes -s start -e now -c medium
+# histdatacom -I -p nsxusd ukxgbp etxeur -f ascii -t tick-data-quotes -s start -e now -c medium
 
-def get_pool_cpu_count(count=None):
-
-    try:
-        real_vcpu_count = multiprocessing.cpu_count()
-
-        if count is None:
-            count = real_vcpu_count
-        else:
-            err_text_cpu_level_err = \
-            f"""
-                    ERROR on -c {count}  ERROR
-                        * Malformed command:
-                            - -c cpu must be str: low, medium, or high. or integer percent 1-200
-            """
-            count = str(count)
-            match count:
-                case "low":
-                    count = ceil(real_vcpu_count / 2.5)
-                case "medium":
-                    count = ceil(real_vcpu_count / 1.5)
-                case "high":
-                    count = real_vcpu_count
-                case _:
-                    if count.isnumeric() and 1 <= int(count) <= 200:
-                        count =  ceil(real_vcpu_count * (int(count) / 100))
-                    else:
-                        raise ValueError(err_text_cpu_level_err)
-
-        return count - 1 if count > 2 else ceil(count / 2)
-    except ValueError as err:
-        print(err)
-        sys.exit(err)
-
-
-print("  call:", get_pool_cpu_count())
-print("   low:", get_pool_cpu_count("low"))
-print("medium:", get_pool_cpu_count("medium"))
-print("  high:", get_pool_cpu_count("high"))
-print("  percent   1:", get_pool_cpu_count("1"))
-print("  percent  50:", get_pool_cpu_count("50"))
-print("  percent 100:", get_pool_cpu_count(100))
-print("  percent 150:", get_pool_cpu_count("150"))
-print("  percent 200:", get_pool_cpu_count(200))

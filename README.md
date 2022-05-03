@@ -317,6 +317,9 @@ histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
 ###### CPU Utilization
 One can set a cap on CPU Utilization with `-c --cpu_utlization`
 - available levels are, `"low"`,`"medium"`,`"high"`
+- **OR**
+- integer percent 1-200
+  eg. `-c 100` is equal to `-c high`
 
 ```sh
 histdatacom -c medium -p udxusd -f metatrader -s 2015-04 -e 2016-04

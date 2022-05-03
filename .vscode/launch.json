@@ -9,11 +9,10 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "args": [
-                "-X",
-                "-p","nzdusd",
+                "-p","cadchf",
                 "-f","ascii",
                 "-t","tick-data-quotes",//"1-minute-bar-quotes",//
-                "-s","2021-12",
+                "-s","2022-04",
                 "-e","now",
                 "-c","100"
             ],

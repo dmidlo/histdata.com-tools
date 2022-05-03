@@ -1,15 +1,13 @@
 import sys
-from multiprocessing import managers
 from histdatacom.cli import ArgParser
 from histdatacom.options import Options
-from histdatacom.records import Records
 from histdatacom.utils import set_working_data_dir
 from histdatacom.utils import load_influx_yaml
-from histdatacom.utils import get_pool_cpu_count
 from histdatacom.urls import _URLs
 from histdatacom.api import _API
 from histdatacom.csvs import _CSVs
 from histdatacom.influx import _Influx
+from histdatacom.concurrency import QueueManager
 
 
 class _HistDataCom:
@@ -69,9 +67,6 @@ class _HistDataCom:
                 self.api.validate_jays(self.records_current, self.records_next)
                 return self.api.merge_jays(self.records_current, self.records_next)
 
-        if self.args["from_api"]:
-            print("return data to api call from histdata_com.run()")
-
         if self.args["extract_csvs"]:
             self.csvs.extract_csvs(self.records_current, self.records_next)
 
@@ -81,42 +76,13 @@ class _HistDataCom:
                                     self.csv_chunks_queue)
 
 
-class HistDataCom():
-    def __init__(self, options):
-        self.options = options
-        self.records_manager=managers.SyncManager()
-        self.records_manager.register("Records", Records)
-
-    def __call__(self):
-        self.records_manager.start()
-
-        global records_current
-        records_current = self.records_manager.Records()
-
-        global records_next
-        records_next = self.records_manager.Records()
-
-        global csv_chunks_queue
-        csv_chunks_queue = self.records_manager.Queue()
-
-        scraper = _HistDataCom(records_current,
-                                records_next,
-                                csv_chunks_queue,
-                                self.options)
-
-        if self.options.from_api:
-            return scraper.run()
-        else:
-            scraper.run()
-          
 def main(options=None):
     if not options:
         options = Options()
-        HistDataCom(options)()
+        QueueManager(options)(_HistDataCom)
     else:
         options.from_api = True
-        return HistDataCom(options)()
-
+        return QueueManager(options)(_HistDataCom)
 
 
 if __name__ == '__main__':

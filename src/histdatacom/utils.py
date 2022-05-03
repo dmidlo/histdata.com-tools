@@ -51,10 +51,10 @@ def load_influx_yaml():
     sys.exit()
 
 
-def get_current_datemonth_gmt_plus5():
+def get_current_datemonth_gmt_minus5():
     now = datetime.now().astimezone()
-    gmt_plus5 = now.astimezone(pytz.timezone("Etc/GMT+5"))
-    return f"{gmt_plus5.year}{gmt_plus5.strftime('%m')}"
+    gmt_minus5 = now.astimezone(pytz.timezone("Etc/GMT-5"))
+    return f"{gmt_minus5.year}{gmt_minus5.strftime('%m')}"
 
 
 def get_progress_bar(progress_string):
@@ -75,37 +75,3 @@ def get_csv_dialect(csv_path):
 def replace_date_punct(datemonth_str):
     """removes year-month punctuation and returns str("000000")"""
     return re.sub("[-_.: ]", "", datemonth_str) if datemonth_str is not None else ""
-
-
-def get_pool_cpu_count(count=None):
-
-    try:
-        real_vcpu_count = multiprocessing.cpu_count()
-
-        if count is None:
-            count = real_vcpu_count
-        else:
-            err_text_cpu_level_err = \
-            f"""
-                    ERROR on -c {count}  ERROR
-                        * Malformed command:
-                            - -c cpu must be str: low, medium, or high. or integer percent 1-200
-            """
-            count = str(count)
-            match count:
-                case "low":
-                    count = ceil(real_vcpu_count / 2.5)
-                case "medium":
-                    count = ceil(real_vcpu_count / 1.5)
-                case "high":
-                    count = real_vcpu_count
-                case _:
-                    if count.isnumeric() and 1 <= int(count) <= 200:
-                        count =  ceil(real_vcpu_count * (int(count) / 100))
-                    else:
-                        raise ValueError(err_text_cpu_level_err)
-
-        return count - 1 if count > 2 else ceil(count / 2)
-    except ValueError as err:
-        print(err)
-        sys.exit(err)
