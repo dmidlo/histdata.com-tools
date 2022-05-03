@@ -1,19 +1,17 @@
 import itertools
 import sys
 import os
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor
-from concurrent.futures import as_completed
 import datatable as dt
 from datatable import f
+from datatable import update
 dt.options.progress.enabled = False
 from rich.progress import Progress
 from rich.progress import BarColumn
 from rich.progress import TextColumn
 from rich.progress import TimeElapsedColumn
-from histdatacom.utils import get_pool_cpu_count
 from histdatacom.utils import replace_date_punct
-
+from histdatacom.concurrency import get_pool_cpu_count
+from histdatacom.concurrency import ProcessPool
 
 class _API():
     def __init__(self, args_, records_current_, records_next_):
@@ -26,15 +24,7 @@ class _API():
         global records_next
         records_next = records_next_
 
-    def init_counters(self, records_current_, records_next_, args_):
-        global records_current
-        records_current = records_current_
-        global records_next
-        records_next = records_next_
-        global args
-        args = args_
-
-    def create_jay(self, record):
+    def create_jay(self, record, args):
         zip_path = record.data_dir + record.zip_filename
         zip_data = self.import_file_to_datatable(record, zip_path)
 
@@ -45,15 +35,15 @@ class _API():
         record.jay_linecount = zip_data.nrows
         record.jay_start = self.extract_single_value_from_frame(zip_data, 0, "datetime")
         record.jay_end = self.extract_single_value_from_frame(zip_data, zip_data.nrows - 1, "datetime")
-        record.write_info_file(base_dir=self.args['default_download_dir'])
+        record.write_info_file(base_dir=args['default_download_dir'])
 
-    def validate_jay(self, record):
+    def validate_jay(self, record, args, records_current, records_next):
         try:
             if str.lower(record.data_format) == "ascii" \
             and (record.data_timeframe == "T"
                  or record.data_timeframe == "M1"):
                 if "CSV" in record.status:
-                    self.create_jay(record)
+                    self.create_jay(record, args)
 
             records_next.put(record, self.args)
         except Exception:
@@ -64,38 +54,11 @@ class _API():
                 records_current.task_done()
 
     def validate_jays(self, records_current, records_next):
-            
-            records_count = records_current.qsize()
-            with Progress(TextColumn(text_format=f"[cyan]Staging {records_count} datafiles..."),
-                          BarColumn(),
-                          "[progress.percentage]{task.percentage:>3.0f}%",
-                          TimeElapsedColumn()) as progress:
-                task_id = progress.add_task("extract", total=records_count)
-                
-                with ProcessPoolExecutor(max_workers=get_pool_cpu_count(self.args['cpu_utilization']),
-                                         initializer=self.init_counters, 
-                                         initargs=(records_current,
-                                                   records_next,
-                                                   self.args.copy())) as executor:
-                    futures = []
-
-                    while not records_current.empty():
-                        record = records_current.get()
-
-                        if record is None:
-                            return
-
-                        future = executor.submit(self.validate_jay, record)
-                        progress.advance(task_id, 0.25)
-                        futures.append(future)
-                    
-                    for future in as_completed(futures):
-                        progress.advance(task_id, 0.75)
-                        futures.remove(future)
-                        del future
-
-            records_current.join()
-            records_next.dump_to_queue(records_current)
+        pool = ProcessPool(self.validate_jay,
+                            self.args,
+                            "Staging", "datafiles...",
+                            get_pool_cpu_count(self.args['cpu_utilization']))
+        pool(records_current, records_next)
 
     def merge_jays(self, records_current, records_next):
 
@@ -166,7 +129,7 @@ class _API():
         
     @classmethod
     def extract_single_value_from_frame(cls, frame, row, column):
-        return int(replace_date_punct(frame[row, column]))
+        return int(frame[row, column])
 
     @classmethod
     def import_file_to_datatable(cls, record, zip_path):
@@ -177,11 +140,32 @@ class _API():
                                     header=False,
                                     columns=["datetime", "open", "high", "low", "close", "vol"],
                                     multiple_sources="ignore")
+
+                    ascii_m1_str_splitter = (dt.time.ymdt(f.datetime[0:4].as_type(int), \
+                                             f.datetime[4:6].as_type(int), \
+                                             f.datetime[6:8].as_type(int), \
+                                             f.datetime[9:11].as_type(int), \
+                                             f.datetime[11:13].as_type(int), \
+                                             f.datetime[13:15].as_type(int)))
+                    ascii_m1_etc_ms_timestamp = (ascii_m1_str_splitter.as_type(int)//10**6)
+                    ascii_m1_utc_ms_timestamp = (ascii_m1_etc_ms_timestamp + 18000000)
+                    data[:, update(datetime = ascii_m1_utc_ms_timestamp)]
                 case "T":
                     data = dt.fread(zip_path,
                                     header=False,
                                     columns=["datetime", "bid", "ask", "vol"],
                                     multiple_sources="ignore")
+
+                    ascii_t_str_splitter = (dt.time.ymdt(f.datetime[0:4].as_type(int), \
+                                            f.datetime[4:6].as_type(int), \
+                                            f.datetime[6:8].as_type(int), \
+                                            f.datetime[9:11].as_type(int), \
+                                            f.datetime[11:13].as_type(int), \
+                                            f.datetime[13:15].as_type(int), \
+                                            10**6 * f.datetime[15:18].as_type(int)))
+                    ascii_t_etc_ms_timestamp = (ascii_t_str_splitter.as_type(int)//10**6)
+                    ascii_t_utc_ms_timestamp = (ascii_t_etc_ms_timestamp + 18000000)
+                    data[:, update(datetime = ascii_t_utc_ms_timestamp)]
                 case _:
                     raise ValueError("Error creating jay")
 

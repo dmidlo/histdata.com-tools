@@ -17,11 +17,12 @@ from influxdb_client import WriteOptions
 from influxdb_client import WritePrecision
 from influxdb_client.client.write_api import WriteType
 from rich.progress import Progress
-from rich.progress import BarColumn, TextColumn, TimeElapsedColumn, SpinnerColumn
+from rich.progress import TextColumn, TimeElapsedColumn, SpinnerColumn
 from rich import print
 from histdatacom.fx_enums import TimeFormat
 from histdatacom.utils import get_csv_dialect
-from histdatacom.utils import get_pool_cpu_count
+from histdatacom.concurrency import get_pool_cpu_count
+from histdatacom.concurrency import ProcessPool
 
 
 class _InfluxDBWriter(multiprocessing.Process):
@@ -105,12 +106,12 @@ class _Influx():
 
         csv_chunks_queue.put(_parsed_rows)
 
-    def import_file(self, record):
+    def import_file(self, record, args, records_current, records_next, csv_chunks_queue):
         try:
             if ("CSV" in record.status) \
             and ("ZIP" not in record.status) \
             and str.lower(record.data_format) == "ascii":
-                self.import_csv(record)
+                self.import_csv(record, args, records_current, records_next, csv_chunks_queue)
             records_next.put(record)
         except Exception:
             print("Unexpected error from here:", sys.exc_info())
@@ -119,7 +120,7 @@ class _Influx():
         finally:
             records_current.task_done()
 
-    def import_csv(self, record):
+    def import_csv(self, record, args, records_current, records_next, csv_chunks_queue):
         csv_path = record.data_dir + record.csv_filename
         file_endpoint = f"file://{record.data_dir}{record.csv_filename}"
 
@@ -157,38 +158,16 @@ class _Influx():
         writer = _InfluxDBWriter(self.args, csv_chunks_queue)
         writer.start()
 
-        records_count = records_current.qsize()
-        with Progress(TextColumn(text_format=f"[cyan]Adding {records_count} CSVs to influx queue..."),
-                      BarColumn(),
-                      "[progress.percentage]{task.percentage:>3.0f}%",
-                      TimeElapsedColumn()) as progress:
-            task_id = progress.add_task("influx", total=records_count)
+        pool = ProcessPool(self.import_file,
+                           self.args,
+                           "Adding", "CSVs to influx queue...",
+                           get_pool_cpu_count(self.args['cpu_utilization']) - 1\
+                                              if get_pool_cpu_count(self.args['cpu_utilization']) >= 2 \
+                                              else 1,
+                           join=False,
+                           dump=False)
 
-            # cpu count -1: Manager, -1: DBWriter,
-            with ProcessPoolExecutor(max_workers=get_pool_cpu_count(self.args['cpu_utilization']) - 1 \
-                                                                    if get_pool_cpu_count(self.args['cpu_utilization']) >= 2 \
-                                                                    else 1,
-                                     initializer=self.init_counters,
-                                     initargs=(csv_chunks_queue,
-                                               records_current,
-                                               records_next,
-                                               self.args.copy())) as executor:
-                futures = []
-
-                while not records_current.empty():
-                    record = records_current.get()
-
-                    if record is None:
-                        break
-
-                    future = executor.submit(self.import_file, record)
-                    progress.advance(task_id, 0.25)
-                    futures.append(future)
-
-                for future in as_completed(futures):
-                    progress.advance(task_id, 0.75)
-                    futures.remove(future)
-                    del future
+        pool(records_current, records_next, csv_chunks_queue)
 
         with Progress(TextColumn(text_format="[cyan]...finishing upload to influxdb"),
                       SpinnerColumn(), SpinnerColumn(), SpinnerColumn(),
@@ -249,7 +228,7 @@ class _Influx():
 
         est_timestamp = row["msSinceEpochUTC"]
         date_object = datetime.strptime(est_timestamp, cls.get_timeformat(csv_format, timeframe))
-        tz_date_object = date_object.replace(tzinfo=pytz.timezone("Etc/GMT+5"))
+        tz_date_object = date_object.replace(tzinfo=pytz.timezone("Etc/GMT-5"))
 
         timestamp = int(tz_date_object.timestamp() * 1000)
 

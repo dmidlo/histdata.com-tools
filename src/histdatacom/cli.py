@@ -71,11 +71,11 @@ import re
 from histdatacom.fx_enums import Pairs
 from histdatacom.fx_enums import Format
 from histdatacom.fx_enums import Timeframe
-from histdatacom.utils import get_current_datemonth_gmt_plus5
+from histdatacom.utils import get_current_datemonth_gmt_minus5
 from histdatacom.utils import get_month_from_datemonth
 from histdatacom.utils import get_year_from_datemonth
 from histdatacom.utils import replace_date_punct
-from histdatacom.utils import get_pool_cpu_count
+from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.options import Options
 
 
@@ -317,10 +317,10 @@ class ArgParser(argparse.ArgumentParser):
         """checks for now in -s or -e and adjusts it to current year-month"""
         if (start_yearmonth := args_namespace.start_yearmonth):
             if start_yearmonth == "now":
-                return get_current_datemonth_gmt_plus5(), None
+                return get_current_datemonth_gmt_minus5(), None
             if end_yearmonth := args_namespace.end_yearmonth:
                 if end_yearmonth == "now":
-                    return start_yearmonth, get_current_datemonth_gmt_plus5()
+                    return start_yearmonth, get_current_datemonth_gmt_minus5()
 
         return start_yearmonth, end_yearmonth
 
@@ -506,7 +506,7 @@ class ArgParser(argparse.ArgumentParser):
                 """
                 if int(start_yearmonth) < 200000:
                     raise ValueError(err_text_date_prior_to_dataset)
-                if int(start_yearmonth) > int(get_current_datemonth_gmt_plus5()):
+                if int(start_yearmonth) > int(get_current_datemonth_gmt_minus5()):
                     raise ValueError(err_text_date_is_in_future)
         except ValueError as err:
             cls.exit_on_datetime_error(err)
@@ -530,7 +530,7 @@ class ArgParser(argparse.ArgumentParser):
                 """
                 if int(end_yearmonth) < 200000:
                     raise ValueError(err_text_date_prior_to_dataset)
-                if int(end_yearmonth) > int(get_current_datemonth_gmt_plus5()):
+                if int(end_yearmonth) > int(get_current_datemonth_gmt_minus5()):
                     raise ValueError(err_text_date_is_in_future)
         except ValueError as err:
             cls.exit_on_datetime_error(err)
