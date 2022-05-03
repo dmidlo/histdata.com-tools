@@ -9,10 +9,11 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "args": [
-                "-p","cadchf",
+                "-I"
+                "-p","eurcad",
                 "-f","ascii",
-                "-t","tick-data-quotes",//"1-minute-bar-quotes",//
-                "-s","2022-04",
+                "-t","1-minute-bar-quotes",//"tick-data-quotes",//
+                "-s","2022-01",
                 "-e","now",
                 "-c","100"
             ],

@@ -9,7 +9,7 @@ from rich.progress import Progress
 from rich.progress import BarColumn
 from rich.progress import TextColumn
 from rich.progress import TimeElapsedColumn
-from histdatacom.utils import replace_date_punct
+from histdatacom.urls import _URLs
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.concurrency import ProcessPool
 
@@ -24,28 +24,48 @@ class _API():
         global records_next
         records_next = records_next_
 
-    def create_jay(self, record, args):
+    @classmethod
+    def create_jay(cls, record, args):
+    
         zip_path = record.data_dir + record.zip_filename
-        zip_data = self.import_file_to_datatable(record, zip_path)
+        csv_path = record.data_dir + record.csv_filename
+        if os.path.exists(zip_path):
+            file_data = cls.import_file_to_datatable(record, zip_path)
+        elif os.path.exists(csv_path):
+            file_data = cls.import_file_to_datatable(record, csv_path)
 
         record.jay_filename = ".data"
         jay_path = record.data_dir + record.jay_filename
-        self.export_datatable_to_jay(zip_data, jay_path)
+        cls.export_datatable_to_jay(file_data, jay_path)
 
-        record.jay_linecount = zip_data.nrows
-        record.jay_start = self.extract_single_value_from_frame(zip_data, 0, "datetime")
-        record.jay_end = self.extract_single_value_from_frame(zip_data, zip_data.nrows - 1, "datetime")
+        record.jay_linecount = file_data.nrows
+        record.jay_start = cls.extract_single_value_from_frame(file_data, 0, "datetime")
+        record.jay_end = cls.extract_single_value_from_frame(file_data, file_data.nrows - 1, "datetime")
         record.write_info_file(base_dir=args['default_download_dir'])
 
-    def validate_jay(self, record, args, records_current, records_next):
-        try:
-            if str.lower(record.data_format) == "ascii" \
+    @classmethod
+    def test_for_jay_or_create(cls, record, args):
+        if str.lower(record.data_format) == "ascii" \
             and (record.data_timeframe == "T"
                  or record.data_timeframe == "M1"):
-                if "CSV" in record.status:
-                    self.create_jay(record, args)
 
-            records_next.put(record, self.args)
+                jay_path = record.data_dir + ".data"
+                if os.path.exists(jay_path):
+                    pass
+                elif "CSV" in record.status:
+                    cls.create_jay(record, args)
+                else:
+                    res = _URLs.request_file(record, args)
+                    record.zip_filename = res.headers["Content-Disposition"].split(";")[1].split("=")[1]
+                    _URLs.write_file(record, res.content)
+
+                    cls.create_jay(record, args)
+
+    @classmethod
+    def validate_jay(cls, record, args, records_current, records_next):
+        try:
+            cls.test_for_jay_or_create(record, args)
+            records_next.put(record)
         except Exception:
                 print("Unexpected error:", sys.exc_info())
                 record.delete_info_file()

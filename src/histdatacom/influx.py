@@ -7,7 +7,9 @@ from concurrent.futures import as_completed
 from urllib.request import urlopen
 from csv import DictReader
 from functools import partial
+from collections import namedtuple
 from datetime import datetime
+from numpy import rec
 import pytz
 import yaml
 import rx
@@ -23,6 +25,7 @@ from histdatacom.fx_enums import TimeFormat
 from histdatacom.utils import get_csv_dialect
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.concurrency import ProcessPool
+from histdatacom.api import _API
 
 
 class _InfluxDBWriter(multiprocessing.Process):
@@ -82,7 +85,7 @@ class _Influx():
         global args
         args = args_
 
-    def parse_row(self, row, record):
+    def parse_csv_row(self, row, record):
         # line protocol example: myMeasurement,tag1=value1,tag2=value2 fieldKey="fieldValue" 1556813561098000000
         measurement = f"{record.data_fxpair}"
         tags = f"source=histdata.com,format={record.data_format},timeframe={record.data_timeframe}".replace(" ", "")
@@ -100,18 +103,53 @@ class _Influx():
 
         return line_protocol
 
-    def parse_rows(self, rows, record):
-        mapfunc = partial(self.parse_row, record=record)
+    def parse_csv_rows(self, rows, record):
+        mapfunc = partial(self.parse_csv_row, record=record)
         _parsed_rows = list(map(mapfunc, rows))
+
+        csv_chunks_queue.put(_parsed_rows)
+
+    def parse_jay_row(self, row, record):
+        measurement = f"{record.data_fxpair}"
+        tags = f"source=histdata.com,format={record.data_format},timeframe={record.data_timeframe}".replace(" ", "")
+
+        match record.data_timeframe:
+            case "M1":
+                Row = namedtuple('Row', ['datetime', 'open', 'high', 'low', 'close', 'vol'])
+                named_row = Row(row[0], row[1], row[2], row[3], row[4], row[5])
+
+                fields = f"openbid={named_row.open},highbid={named_row.high},lowbid={named_row.low},closebid={named_row.close}".replace(" ", "")
+                time = str(named_row.datetime)
+            case "T":
+                Row = namedtuple('Row', ['datetime','bid','ask','vol'])
+                named_row = Row(row[0], row[1], row[2], row[3])
+
+                fields = f"bidquote={named_row.bid},askquote={named_row.ask}".replace(" ", "")
+                time = str(named_row.datetime)
+        
+        line_protocol = f"{measurement},{tags} {fields} {time}"
+
+        return line_protocol
+
+    def parse_jay_rows(self, iterable, record):
+        mapfunc = partial(self.parse_jay_row, record=record)
+        _parsed_rows = list(map(mapfunc, iterable))
 
         csv_chunks_queue.put(_parsed_rows)
 
     def import_file(self, record, args, records_current, records_next, csv_chunks_queue):
         try:
-            if ("CSV" in record.status) \
-            and ("ZIP" not in record.status) \
-            and str.lower(record.data_format) == "ascii":
-                self.import_csv(record, args, records_current, records_next, csv_chunks_queue)
+            if str.lower(record.data_format) == "ascii":
+                jay_path = record.data_dir + ".data"
+                if os.path.exists(jay_path):
+                    self.import_jay(record, args, records_current, records_next, csv_chunks_queue)
+                elif ("CSV" in record.status):
+                    if ("ZIP" in record.status):
+                        _API.test_for_jay_or_create(record, args)
+                        self.import_jay(record, args, records_current, records_next, csv_chunks_queue)
+                    else:
+                        self.import_csv(record, args, records_current, records_next, csv_chunks_queue)
+            
             records_next.put(record)
         except Exception:
             print("Unexpected error from here:", sys.exc_info())
@@ -119,6 +157,33 @@ class _Influx():
             raise
         finally:
             records_current.task_done()
+
+    def import_jay(self, record, args, records_current, records_next, csv_chunks_queue):
+
+        jay = _API.import_jay_data(record.data_dir + record.jay_filename)
+
+        with ProcessPoolExecutor(max_workers=2,
+                                 initializer=self.init_counters,
+                                 initargs=(csv_chunks_queue,
+                                           records_current,
+                                           records_next,
+                                           self.args.copy())) as executor:
+
+            data = rx.from_iterable(jay.to_tuples()) \
+                .pipe(ops.buffer_with_count(25_000),
+                      ops.flat_map(
+                        lambda rows: executor.submit(self.parse_jay_rows, rows, record)))
+
+            data.subscribe(
+                on_next=lambda x: None,
+                on_error=lambda er: print(f"Unexpected error: {er}"))
+
+
+
+
+
+        record.status = "INFLUX_UPLOAD"
+        record.write_info_file(base_dir=args['default_download_dir'])
 
     def import_csv(self, record, args, records_current, records_next, csv_chunks_queue):
         csv_path = record.data_dir + record.csv_filename
@@ -143,7 +208,7 @@ class _Influx():
                 .pipe(
                     ops.buffer_with_count(25_000),
                     ops.flat_map(
-                        lambda rows: executor.submit(self.parse_rows, rows, record)))
+                        lambda rows: executor.submit(self.parse_csv_rows, rows, record)))
 
             data.subscribe(
                 on_next=lambda x: None,
