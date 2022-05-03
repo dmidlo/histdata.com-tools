@@ -49,7 +49,7 @@
 # histdatacom -I -p eurusd -f ascii -tick-data-quotes -s now -c 100
 # histdatacom -I -p usdjpy gbpusd usdcad usdchf audusd nzdusd -f ascii -t tick-data-quotes -s start -e now
 
-# histdatacom -I -p eurgbp euraud gbpchf audnzd -f ascii -t tick-data-quotes -s start -e now -c 80
+# histdatacom -I -p eurgbp euraud gbpchf audnzd -f ascii -t tick-data-quotes -s start -e now -c medium
 # histdatacom -I -p audcad audchf gbpaud usdmxn -f ascii -t tick-data-quotes -s start -e now -c medium
 # histdatacom -I -p eurchf eurcad eurnzd eurjpy gbpjpy chfjpy cadjpy -f ascii -t tick-data-quotes -s start -e now -c medium
 # histdatacom -I -p audjpy nzdjpy gbpcad nzdcad sgdjpy gbpnzd cadchf -f ascii -t tick-data-quotes -s start -e now -c medium

@@ -8,9 +8,9 @@ from urllib.request import urlopen
 from csv import DictReader
 from functools import partial
 from datetime import datetime
+import pytz
 import yaml
 import rx
-import pytz
 from rx import operators as ops
 from influxdb_client import InfluxDBClient
 from influxdb_client import WriteOptions
