@@ -8,7 +8,6 @@ from datetime import datetime
 import rx
 from rx import operators as ops
 
-import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
 from urllib.request import urlopen
@@ -16,11 +15,6 @@ from csv import DictReader
 
 from functools import partial
 from collections import namedtuple
-
-from influxdb_client import InfluxDBClient
-from influxdb_client import WriteOptions
-from influxdb_client import WritePrecision
-from influxdb_client.client.write_api import WriteType
 
 from rich import print
 from rich.progress import Progress
