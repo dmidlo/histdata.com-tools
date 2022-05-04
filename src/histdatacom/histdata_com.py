@@ -65,7 +65,7 @@ class _HistDataCom:
             self.urls.download_zips(self.records_current, self.records_next)
             if self.args["from_api"]:
                 self.api.validate_jays(self.records_current, self.records_next)
-                return self.api.merge_jays(self.records_current, self.records_next)
+                return self.api.merge_jays(self.records_current)
 
         if self.args["extract_csvs"]:
             self.csvs.extract_csvs(self.records_current, self.records_next)
