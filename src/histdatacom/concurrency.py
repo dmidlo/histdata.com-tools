@@ -204,7 +204,7 @@ class QueueManager():
 
 class InfluxDBWriter(Process):
     def __init__(self, args, csv_chunks_queue):
-        multiprocessing.Process.__init__(self)
+        Process.__init__(self)
         self.args = args
         self.csv_chunks_queue = csv_chunks_queue
         self.client = InfluxDBClient(url=self.args['INFLUX_URL'],
