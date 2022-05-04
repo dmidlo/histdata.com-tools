@@ -1,64 +1,37 @@
 import os
 import sys
 import io
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor
-from urllib.request import urlopen
-from csv import DictReader
-from functools import partial
-from collections import namedtuple
-from datetime import datetime
 import pytz
 import yaml
+from datetime import datetime
+
 import rx
 from rx import operators as ops
+
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
+
+from urllib.request import urlopen
+from csv import DictReader
+
+from functools import partial
+from collections import namedtuple
+
 from influxdb_client import InfluxDBClient
 from influxdb_client import WriteOptions
 from influxdb_client import WritePrecision
 from influxdb_client.client.write_api import WriteType
+
+from rich import print
 from rich.progress import Progress
 from rich.progress import TextColumn, TimeElapsedColumn, SpinnerColumn
-from rich import print
+
 from histdatacom.fx_enums import TimeFormat
 from histdatacom.utils import get_csv_dialect
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.concurrency import ProcessPool
+from histdatacom.concurrency import InfluxDBWriter
 from histdatacom.api import _API
-
-
-class _InfluxDBWriter(multiprocessing.Process):
-    def __init__(self, args, csv_chunks_queue):
-        multiprocessing.Process.__init__(self)
-        self.args = args
-        self.csv_chunks_queue = csv_chunks_queue
-        self.client = InfluxDBClient(url=self.args['INFLUX_URL'],
-                                     token=self.args['INFLUX_TOKEN'],
-                                     org=self.args['INFLUX_ORG'],
-                                     debug=False)
-        self.write_api = self.client.write_api(write_options=WriteOptions(
-                                               write_type=WriteType.batching,
-                                               batch_size=25_000,
-                                               flush_interval=12_000))
-
-    def run(self):
-        while True:
-            chunk = self.csv_chunks_queue.get()
-
-            if chunk is None:
-                self.terminate()
-                self.csv_chunks_queue.task_done()
-                break
-
-            self.write_api.write(org=self.args['INFLUX_ORG'],
-                                 bucket=self.args['INFLUX_BUCKET'],
-                                 record=chunk,
-                                 write_precision=WritePrecision.MS)
-            self.csv_chunks_queue.task_done()
-
-    def terminate(self):
-        self.write_api.__del__()
-        self.client.__del__()
-
 
 class _Influx():
     def __init__(self, args, records_current_, records_next_, csv_chunks_queue_):
@@ -222,7 +195,7 @@ class _Influx():
 
     def import_data(self, records_current, records_next, csv_chunks_queue):
 
-        writer = _InfluxDBWriter(self.args, csv_chunks_queue)
+        writer = InfluxDBWriter(self.args, csv_chunks_queue)
         writer.start()
 
         pool = ProcessPool(self.import_file,

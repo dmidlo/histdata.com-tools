@@ -4,8 +4,8 @@
 # Try something like this
 # DT = dt.Frame(["20220401 001612839"])
 # print(DT)
-#    | C0                
-#    | str32             
+#    | C0
+#    | str32
 # -- + ------------------
 #  0 | 20220401 000012839
 
@@ -19,8 +19,8 @@
 #                         f[:][13:15].as_type(int), \
 #                         10**6 * f[:][15:18].as_type(int))]
 
-# # >    | C0                     
-# # >    | time64                 
+# # >    | C0
+# # >    | time64
 # # > -- + -----------------------
 # # >  0 | 2022-04-01T00:00:12.839
 # # > [1 row x 1 column]
@@ -46,17 +46,14 @@
 #  0 | 1648771212839
 # [1 row x 1 column]
 
-# histdatacom -I -p eurusd -f ascii -tick-data-quotes -s now -c 100
-# histdatacom -I -p usdjpy gbpusd usdcad usdchf audusd nzdusd -f ascii -t tick-data-quotes -s start -e now
+# histdatacom -I -p eurusd usdjpy gbpusd usdcad usdchf audusd nzdusd -f ascii -t tick-data-quotes -s start -e now
+# histdatacom -I -p eurgbp euraud gbpchf audnzd audcad audchf gbpaud usdmxn -f ascii -t tick-data-quotes -s start -e now -c low
 
-# histdatacom -I -p eurgbp euraud gbpchf audnzd -f ascii -t tick-data-quotes -s start -e now -c medium
-# histdatacom -I -p audcad audchf gbpaud usdmxn -f ascii -t tick-data-quotes -s start -e now -c medium
-# histdatacom -I -p eurchf eurcad eurnzd eurjpy gbpjpy chfjpy cadjpy -f ascii -t tick-data-quotes -s start -e now -c medium
-# histdatacom -I -p audjpy nzdjpy gbpcad nzdcad sgdjpy gbpnzd cadchf -f ascii -t tick-data-quotes -s start -e now -c medium
-# histdatacom -I -p eurtry usdtry usdsek usdnok usddkk usdzar usdhkd -f ascii -t tick-data-quotes -s start -e now -c medium
-# histdatacom -I -p usdsgd eurpln eurhuf nzdchf usdhuf usdpln eurczk -f ascii -t tick-data-quotes -s start -e now -c medium
-# histdatacom -I -p eursek usdczk zarjpy eurdkk eurnok usddkk-f ascii -t tick-data-quotes -s start -e now -c medium
-# histdatacom -I -p xauusd xauaud xauchf bcousd wtiusd xaueur xagusd xaugbp -f ascii -t tick-data-quotes -s start -e now -c medium
-# histdatacom -I -p grxeur auxaud frxeur hkxhkd spxusd jpxjpy udxusd -f ascii -t tick-data-quotes -s start -e now -c medium
-# histdatacom -I -p nsxusd ukxgbp etxeur -f ascii -t tick-data-quotes -s start -e now -c medium
-
+# histdatacom -I -p eurchf eurcad eurnzd eurjpy gbpjpy chfjpy cadjpy -f ascii -t tick-data-quotes -s start -e now -c low
+# histdatacom -I -p audjpy nzdjpy gbpcad nzdcad sgdjpy gbpnzd cadchf -f ascii -t tick-data-quotes -s start -e now -c low
+# histdatacom -I -p eurtry usdtry usdsek usdnok usddkk usdzar usdhkd -f ascii -t tick-data-quotes -s start -e now -c low
+# histdatacom -I -p usdsgd eurpln eurhuf nzdchf usdhuf usdpln eurczk -f ascii -t tick-data-quotes -s start -e now -c low
+# histdatacom -I -p eursek usdczk zarjpy eurdkk eurnok usddkk-f ascii -t tick-data-quotes -s start -e now -c low
+# histdatacom -I -p xauusd xauaud xauchf bcousd wtiusd xaueur xagusd xaugbp -f ascii -t tick-data-quotes -s start -e now -c low
+# histdatacom -I -p grxeur auxaud frxeur hkxhkd spxusd jpxjpy udxusd -f ascii -t tick-data-quotes -s start -e now -c low
+# histdatacom -I -p nsxusd ukxgbp etxeur -f ascii -t tick-data-quotes -s start -e now -c low

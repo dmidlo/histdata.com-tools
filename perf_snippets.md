@@ -1,4 +1,4 @@
-# Call Graph Visualization using gprof2dot
+## Call Graph Visualization using gprof2dot
 
 - https://github.com/jrfonseca/gprof2dot
 ```sh
@@ -11,7 +11,7 @@ $ python -m cProfile -o output.pstats src/histdatacom/histdata_com.py -X -p euru
 $ gprof2dot -f pstats output.pstats | dot -Tpng -o output.png
 ```
 
-# Visualization using SnakeViz
+## Visualization using SnakeViz
 
 ```
 $ pip install snakeviz
@@ -21,7 +21,7 @@ $ python -m cProfile -o output.pstats src/histdatacom/histdata_com.py -X -p euru
 $ snakeviz output.pstats
 ```
 
-# Multiprocess using Vistracer
+## Multiprocess using Vistracer
 
 ```sh
 $ pip install viztracer
@@ -33,7 +33,7 @@ $ vizviewer /Users/davidmidlo/projects/histdata_com_tools/result.json
 $ vizviewer --flamegraph /Users/davidmidlo/projects/histdata_com_tools/result.json
 ```
 
-# code2flow
+## code2flow
 
 ```sh
 $ pip install code2flow
@@ -41,7 +41,7 @@ $ pip install code2flow
 $ code2flow src/
 ```
 
-# vprof
+## vprof
 
 ```sh
 $ pip install vprof
@@ -49,7 +49,7 @@ $ pip install vprof
 $ vprof -c cpmh "src/histdatacom/histdata_com.py -X -p eurusd -f ascii -t tick-data-quotes -s 2022-01 -e 2022-02"
 ```
 
-# pycallgraph2
+## pycallgraph2
 
 ```sh
 $ pip install pycallgraph2
@@ -80,4 +80,17 @@ if __name__=="__main__":
 
 ```sh
 $ dot -Tsvg histdatacom.dot > histdatacom.svg
+```
+
+## pyreverse
+
+```sh
+pip install pylint
+pyreverse -o svg src/histdatacom
+```
+
+## gource
+
+```sh
+gource
 ```
