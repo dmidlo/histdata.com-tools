@@ -2,8 +2,6 @@ import os
 import sys
 import csv
 import re
-from math import ceil
-import multiprocessing
 from datetime import datetime
 import pytz
 import yaml

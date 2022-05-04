@@ -3,13 +3,11 @@ import sys
 import io
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
-from concurrent.futures import as_completed
 from urllib.request import urlopen
 from csv import DictReader
 from functools import partial
 from collections import namedtuple
 from datetime import datetime
-from numpy import rec
 import pytz
 import yaml
 import rx
@@ -115,18 +113,18 @@ class _Influx():
 
         match record.data_timeframe:
             case "M1":
-                Row = namedtuple('Row', ['datetime', 'open', 'high', 'low', 'close', 'vol'])
-                named_row = Row(row[0], row[1], row[2], row[3], row[4], row[5])
+                _row = namedtuple('_row', ['datetime', 'open', 'high', 'low', 'close', 'vol'])
+                named_row = _row(row[0], row[1], row[2], row[3], row[4], row[5])
 
                 fields = f"openbid={named_row.open},highbid={named_row.high},lowbid={named_row.low},closebid={named_row.close}".replace(" ", "")
                 time = str(named_row.datetime)
             case "T":
-                Row = namedtuple('Row', ['datetime','bid','ask','vol'])
-                named_row = Row(row[0], row[1], row[2], row[3])
+                _row = namedtuple('_row', ['datetime','bid','ask','vol'])
+                named_row = _row(row[0], row[1], row[2], row[3])
 
                 fields = f"bidquote={named_row.bid},askquote={named_row.ask}".replace(" ", "")
                 time = str(named_row.datetime)
-        
+
         line_protocol = f"{measurement},{tags} {fields} {time}"
 
         return line_protocol
@@ -140,16 +138,20 @@ class _Influx():
     def import_file(self, record, args, records_current, records_next, csv_chunks_queue):
         try:
             if str.lower(record.data_format) == "ascii":
-                jay_path = record.data_dir + ".data"
+                jay_path = f"{record.data_dir}.data"
                 if os.path.exists(jay_path):
                     self.import_jay(record, args, records_current, records_next, csv_chunks_queue)
-                elif ("CSV" in record.status):
-                    if ("ZIP" in record.status):
+                elif "CSV" in record.status:
+                    if "ZIP" in record.status:
                         _API.test_for_jay_or_create(record, args)
-                        self.import_jay(record, args, records_current, records_next, csv_chunks_queue)
+                        self.import_jay(record, args,
+                                        records_current, records_next,
+                                        csv_chunks_queue)
                     else:
-                        self.import_csv(record, args, records_current, records_next, csv_chunks_queue)
-            
+                        self.import_csv(record, args,
+                                        records_current, records_next,
+                                        csv_chunks_queue)
+
             records_next.put(record)
         except Exception:
             print("Unexpected error from here:", sys.exc_info())
@@ -259,7 +261,7 @@ class _Influx():
                     sys.exit()
 
             return yamlfile
-        
+
         print(""" ERROR: -I flag is used to import data to a influxdb instance...
                           there is no influxdb.yaml file in working directory.
                           did you forget to set it up?

@@ -1,8 +1,8 @@
-from histdatacom.concurrency import get_pool_cpu_count
-from histdatacom.concurrency import ProcessPool
 import sys
 import os
 import zipfile
+from histdatacom.concurrency import get_pool_cpu_count
+from histdatacom.concurrency import ProcessPool
 from rich import print
 
 
@@ -43,5 +43,5 @@ class _CSVs:
                            self.args,
                            "Extracting", "CSVs...",
                            get_pool_cpu_count(self.args['cpu_utilization']))
-        
+
         pool(records_current, records_next)

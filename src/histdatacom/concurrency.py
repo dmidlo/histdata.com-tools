@@ -1,4 +1,3 @@
-import imp
 import sys
 from math import ceil
 from multiprocessing import managers
@@ -22,7 +21,7 @@ def init_counters(records_current_, records_next_, args_, csv_chunks_queue_=None
 
     if csv_chunks_queue_ != None:
         global csv_chunks_queue
-        csv_chunks_queue = csv_chunks_queue_          
+        csv_chunks_queue = csv_chunks_queue_
 
 def complete_future(progress, task_id, futures, future):
     progress.advance(task_id, 0.75)
@@ -31,7 +30,7 @@ def complete_future(progress, task_id, futures, future):
 
 class ThreadPool():
     def __init__(self, exec_func,
-                 args, 
+                 args,
                  progress_pre_text, progress_post_text, cpu_count):
 
         self.exec_func = exec_func
@@ -114,7 +113,7 @@ class ProcessPool():
                     if record is None:
                         return
 
-                    if csv_chunks_queue == None:
+                    if csv_chunks_queue is None:
                         future = executor.submit(self.exec_func,
                                                  record,
                                                  self.args,

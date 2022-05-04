@@ -85,7 +85,7 @@ class ArgParser(argparse.ArgumentParser):
     def __init__(self, options=Options(), **kwargs):
         """ set up argparse, bring in defaults DTO, setup cli params, receive
             and overwrite defaults with user cli args."""
-        
+
         # init _HistDataCom.ArgParser to extend argparse.ArgumentParser
         argparse.ArgumentParser.__init__(self, prog='histdatacom')
         # bring in the defaults arg DTO from outer class, use the
@@ -115,7 +115,7 @@ class ArgParser(argparse.ArgumentParser):
         self.add_argument(
             '-c', '--cpu_utilization',
             type=str,
-            help='"low", "medium", "high". High uses all available CPUs. OR integer percent 1-200'  )
+            help='"low", "medium", "high". High uses all available CPUs. OR integer percent 1-200')
         self.add_argument(
             '-p', '--pairs',
             nargs='+',
@@ -149,7 +149,7 @@ class ArgParser(argparse.ArgumentParser):
             '-d', '--data-directory',
             type=str,
             help='Directory Used to save data. default is "data" in the current directory')
-        
+
         if "histdatacom" not in sys.argv[0] and self.arg_namespace.from_api:
             args = self.clean_from_api_args(self.arg_namespace)
             self.false_from_api_if_behavior_flag(self.arg_namespace)
@@ -177,7 +177,7 @@ class ArgParser(argparse.ArgumentParser):
     @classmethod
     def clean_from_api_args(cls, args_namespace):
         args = []
-        
+
         args.extend(["-d", args_namespace.data_directory])
         args.extend(["-p", *args_namespace.pairs])
         args.extend(["-f", *args_namespace.formats])
@@ -213,7 +213,7 @@ class ArgParser(argparse.ArgumentParser):
         or args_namespace.extract_csvs \
         or args_namespace.import_to_influxdb:
             args_namespace.from_api = False
-            
+
     @classmethod
     def check_for_ascii_if_influx(cls, args_namespace):
         """Verify ascii csv_format type for influxdb import"""
@@ -238,8 +238,8 @@ class ArgParser(argparse.ArgumentParser):
             err_text_api_must_be_ascii = \
             f"""
                 ERROR on -f {args_namespace.formats}           ERROR
-                    * format must be ASCII when calling from API 
-                        eg. 
+                    * format must be ASCII when calling from API
+                        eg.
                             import histdatacom
                             from histdatacom.options import Options
 
@@ -248,7 +248,7 @@ class ArgParser(argparse.ArgumentParser):
             """
             if args_namespace.from_api \
             and not (
-                args_namespace.validate_urls 
+                args_namespace.validate_urls
                 or args_namespace.download_data_archives \
                 or args_namespace.extract_csvs \
                 or args_namespace.import_to_influxdb
@@ -259,8 +259,7 @@ class ArgParser(argparse.ArgumentParser):
         except ValueError as err:
             print(err)
             sys.exit()
-    
-    
+
     @classmethod
     def check_datetime_input(cls, args_namespace):
         """Checks for invalid datetime input for -s and -e flags"""

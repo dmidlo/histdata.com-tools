@@ -1,17 +1,17 @@
 import itertools
 import sys
 import os
-import datatable as dt
-from datatable import f
-from datatable import update
-dt.options.progress.enabled = False
 from rich.progress import Progress
 from rich.progress import BarColumn
 from rich.progress import TextColumn
 from rich.progress import TimeElapsedColumn
+import datatable as dt
+from datatable import f
+from datatable import update
 from histdatacom.urls import _URLs
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.concurrency import ProcessPool
+dt.options.progress.enabled = False
 
 class _API():
     def __init__(self, args_, records_current_, records_next_):
@@ -26,7 +26,7 @@ class _API():
 
     @classmethod
     def create_jay(cls, record, args):
-    
+
         zip_path = record.data_dir + record.zip_filename
         csv_path = record.data_dir + record.csv_filename
         if os.path.exists(zip_path):
@@ -40,26 +40,25 @@ class _API():
 
         record.jay_linecount = file_data.nrows
         record.jay_start = cls.extract_single_value_from_frame(file_data, 0, "datetime")
-        record.jay_end = cls.extract_single_value_from_frame(file_data, file_data.nrows - 1, "datetime")
+        record.jay_end = cls.extract_single_value_from_frame(file_data,
+                                                             file_data.nrows - 1,
+                                                             "datetime")
         record.write_info_file(base_dir=args['default_download_dir'])
 
     @classmethod
     def test_for_jay_or_create(cls, record, args):
-        if str.lower(record.data_format) == "ascii" \
-            and (record.data_timeframe == "T"
-                 or record.data_timeframe == "M1"):
+        if str.lower(record.data_format) == "ascii" and record.data_timeframe in ["T", "M1"]:
+            jay_path = f"{record.data_dir}.data"
+            if os.path.exists(jay_path):
+                pass
+            elif "CSV" in record.status:
+                cls.create_jay(record, args)
+            else:
+                res = _URLs.request_file(record, args)
+                record.zip_filename = res.headers["Content-Disposition"].split(";")[1].split("=")[1]
+                _URLs.write_file(record, res.content)
 
-                jay_path = record.data_dir + ".data"
-                if os.path.exists(jay_path):
-                    pass
-                elif "CSV" in record.status:
-                    cls.create_jay(record, args)
-                else:
-                    res = _URLs.request_file(record, args)
-                    record.zip_filename = res.headers["Content-Disposition"].split(";")[1].split("=")[1]
-                    _URLs.write_file(record, res.content)
-
-                    cls.create_jay(record, args)
+                cls.create_jay(record, args)
 
     @classmethod
     def validate_jay(cls, record, args, records_current, records_next):
@@ -67,11 +66,11 @@ class _API():
             cls.test_for_jay_or_create(record, args)
             records_next.put(record)
         except Exception:
-                print("Unexpected error:", sys.exc_info())
-                record.delete_info_file()
-                raise
+            print("Unexpected error:", sys.exc_info())
+            record.delete_info_file()
+            raise
         finally:
-                records_current.task_done()
+            records_current.task_done()
 
     def validate_jays(self, records_current, records_next):
         pool = ProcessPool(self.validate_jay,
@@ -80,7 +79,7 @@ class _API():
                             get_pool_cpu_count(self.args['cpu_utilization']))
         pool(records_current, records_next)
 
-    def merge_jays(self, records_current, records_next):
+    def merge_jays(self, records_current):
 
         records_to_merge = []
         pairs = []
@@ -91,7 +90,7 @@ class _API():
             if record is None:
                 return
 
-            if (record.jay_filename == ".data" 
+            if (record.jay_filename == ".data"
             and os.path.exists(record.data_dir + record.jay_filename)):
                 pairs.append(record.data_fxpair)
                 timeframes.append(record.data_timeframe)
@@ -110,7 +109,7 @@ class _API():
                 and m_record.data_fxpair == pair:
                     tp_set_dict['records'].append(m_record)
             sets_to_merge.append(tp_set_dict)
-        
+
 
         for tp_set in sets_to_merge:
             self.merge_records(tp_set)
@@ -146,7 +145,7 @@ class _API():
                 tp_set_dict['data'] = merged.to_arrow()
             if self.args['api_return_type'] == "pandas":
                 tp_set_dict['data'] = merged.to_pandas()
-        
+
     @classmethod
     def extract_single_value_from_frame(cls, frame, row, column):
         return int(frame[row, column])
@@ -156,7 +155,7 @@ class _API():
         try:
             match record.data_timeframe:
                 case "M1":
-                    data = dt.fread(zip_path, 
+                    data = dt.fread(zip_path,
                                     header=False,
                                     columns=["datetime", "open", "high", "low", "close", "vol"],
                                     multiple_sources="ignore")

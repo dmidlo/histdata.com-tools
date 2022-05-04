@@ -1,4 +1,4 @@
-"""_summary_
+"""histdatacom
 Allows histdatacom to be run as a module with
 as >>> python -m histdatacom
 """
