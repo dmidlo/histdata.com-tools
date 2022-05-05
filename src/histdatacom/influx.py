@@ -147,10 +147,6 @@ class _Influx():
                 on_next=lambda x: None,
                 on_error=lambda er: print(f"Unexpected error: {er}"))
 
-
-
-
-
         record.status = "INFLUX_UPLOAD"
         record.write_info_file(base_dir=args['default_download_dir'])
 
