@@ -12,25 +12,25 @@
 <!-- histdatacom -->
 <g id="node1" class="node">
 <title>histdatacom</title>
-<polygon fill="none" stroke="black" points="83,-36 0,-36 0,0 83,0 83,-36"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="83,-36 0,-36 0,0 83,0 83,-36"/>
 <text text-anchor="middle" x="41.5" y="-14.3" font-family="Times,serif" font-size="14.00">histdatacom</text>
 </g>
 <!-- histdatacom.__main__ -->
 <g id="node2" class="node">
 <title>histdatacom.__main__</title>
-<polygon fill="none" stroke="black" points="242,-36 101,-36 101,0 242,0 242,-36"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="242,-36 101,-36 101,0 242,0 242,-36"/>
 <text text-anchor="middle" x="171.5" y="-14.3" font-family="Times,serif" font-size="14.00">histdatacom.__main__</text>
 </g>
 <!-- histdatacom.api -->
 <g id="node3" class="node">
 <title>histdatacom.api</title>
-<polygon fill="none" stroke="black" points="444,-180 341,-180 341,-144 444,-144 444,-180"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="444,-180 341,-180 341,-144 444,-144 444,-180"/>
 <text text-anchor="middle" x="392.5" y="-158.3" font-family="Times,serif" font-size="14.00">histdatacom.api</text>
 </g>
 <!-- histdatacom.concurrency -->
 <g id="node5" class="node">
 <title>histdatacom.concurrency</title>
-<polygon fill="none" stroke="black" points="461,-324 308,-324 308,-288 461,-288 461,-324"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="461,-324 308,-324 308,-288 461,-288 461,-324"/>
 <text text-anchor="middle" x="384.5" y="-302.3" font-family="Times,serif" font-size="14.00">histdatacom.concurrency</text>
 </g>
 <!-- histdatacom.api&#45;&gt;histdatacom.concurrency -->
@@ -42,7 +42,7 @@
 <!-- histdatacom.urls -->
 <g id="node12" class="node">
 <title>histdatacom.urls</title>
-<polygon fill="none" stroke="black" points="625,-252 518,-252 518,-216 625,-216 625,-252"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="625,-252 518,-252 518,-216 625,-216 625,-252"/>
 <text text-anchor="middle" x="571.5" y="-230.3" font-family="Times,serif" font-size="14.00">histdatacom.urls</text>
 </g>
 <!-- histdatacom.api&#45;&gt;histdatacom.urls -->
@@ -54,7 +54,7 @@
 <!-- histdatacom.cli -->
 <g id="node4" class="node">
 <title>histdatacom.cli</title>
-<polygon fill="none" stroke="black" points="246.5,-252 146.5,-252 146.5,-216 246.5,-216 246.5,-252"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="246.5,-252 146.5,-252 146.5,-216 246.5,-216 246.5,-252"/>
 <text text-anchor="middle" x="196.5" y="-230.3" font-family="Times,serif" font-size="14.00">histdatacom.cli</text>
 </g>
 <!-- histdatacom.cli&#45;&gt;histdatacom.concurrency -->
@@ -66,7 +66,7 @@
 <!-- histdatacom.fx_enums -->
 <g id="node7" class="node">
 <title>histdatacom.fx_enums</title>
-<polygon fill="none" stroke="black" points="419.5,-468 279.5,-468 279.5,-432 419.5,-432 419.5,-468"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="419.5,-468 279.5,-468 279.5,-432 419.5,-432 419.5,-468"/>
 <text text-anchor="middle" x="349.5" y="-446.3" font-family="Times,serif" font-size="14.00">histdatacom.fx_enums</text>
 </g>
 <!-- histdatacom.cli&#45;&gt;histdatacom.fx_enums -->
@@ -78,7 +78,7 @@
 <!-- histdatacom.options -->
 <g id="node10" class="node">
 <title>histdatacom.options</title>
-<polygon fill="none" stroke="black" points="213.5,-324 87.5,-324 87.5,-288 213.5,-288 213.5,-324"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="213.5,-324 87.5,-324 87.5,-288 213.5,-288 213.5,-324"/>
 <text text-anchor="middle" x="150.5" y="-302.3" font-family="Times,serif" font-size="14.00">histdatacom.options</text>
 </g>
 <!-- histdatacom.cli&#45;&gt;histdatacom.options -->
@@ -90,7 +90,7 @@
 <!-- histdatacom.utils -->
 <g id="node13" class="node">
 <title>histdatacom.utils</title>
-<polygon fill="none" stroke="black" points="662.5,-468 552.5,-468 552.5,-432 662.5,-432 662.5,-468"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="662.5,-468 552.5,-468 552.5,-432 662.5,-432 662.5,-468"/>
 <text text-anchor="middle" x="607.5" y="-446.3" font-family="Times,serif" font-size="14.00">histdatacom.utils</text>
 </g>
 <!-- histdatacom.cli&#45;&gt;histdatacom.utils -->
@@ -102,7 +102,7 @@
 <!-- histdatacom.records -->
 <g id="node11" class="node">
 <title>histdatacom.records</title>
-<polygon fill="none" stroke="black" points="541.5,-396 415.5,-396 415.5,-360 541.5,-360 541.5,-396"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="541.5,-396 415.5,-396 415.5,-360 541.5,-360 541.5,-396"/>
 <text text-anchor="middle" x="478.5" y="-374.3" font-family="Times,serif" font-size="14.00">histdatacom.records</text>
 </g>
 <!-- histdatacom.concurrency&#45;&gt;histdatacom.records -->
@@ -114,7 +114,7 @@
 <!-- histdatacom.csvs -->
 <g id="node6" class="node">
 <title>histdatacom.csvs</title>
-<polygon fill="none" stroke="black" points="284.5,-180 174.5,-180 174.5,-144 284.5,-144 284.5,-180"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="284.5,-180 174.5,-180 174.5,-144 284.5,-144 284.5,-180"/>
 <text text-anchor="middle" x="229.5" y="-158.3" font-family="Times,serif" font-size="14.00">histdatacom.csvs</text>
 </g>
 <!-- histdatacom.csvs&#45;&gt;histdatacom.concurrency -->
@@ -126,7 +126,7 @@
 <!-- histdatacom.histdata_com -->
 <g id="node8" class="node">
 <title>histdatacom.histdata_com</title>
-<polygon fill="none" stroke="black" points="419,-36 260,-36 260,0 419,0 419,-36"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="419,-36 260,-36 260,0 419,0 419,-36"/>
 <text text-anchor="middle" x="339.5" y="-14.3" font-family="Times,serif" font-size="14.00">histdatacom.histdata_com</text>
 </g>
 <!-- histdatacom.histdata_com&#45;&gt;histdatacom.api -->
@@ -156,7 +156,7 @@
 <!-- histdatacom.influx -->
 <g id="node9" class="node">
 <title>histdatacom.influx</title>
-<polygon fill="none" stroke="black" points="532,-108 413,-108 413,-72 532,-72 532,-108"/>
+<polygon fill="aliceblue" stroke="aliceblue" points="532,-108 413,-108 413,-72 532,-72 532,-108"/>
 <text text-anchor="middle" x="472.5" y="-86.3" font-family="Times,serif" font-size="14.00">histdatacom.influx</text>
 </g>
 <!-- histdatacom.histdata_com&#45;&gt;histdatacom.influx -->
