@@ -11,8 +11,12 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 - [Disclaimer](#disclaimer)
 - [Setup](#setup)
   - [TLDR for all platforms](#tldr-for-all-platforms)
-  - [MacOS and Linux](#macos-and-linux)
-  - [Windows Powershell](#windows-powershell)
+  - [Vanilla Python Setup](#vanilla-python-setup)
+    - [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
+    - [Vanilla Windows Powershell](#vanilla-windows-powershell)
+  - [Anaconda Setup](#anaconda-setup)
+    - [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
+    - [Anaconda Windows Powershell](#anaconda-windows-powershell)
 - [Usage](#usage)
   - [Show the Help and Options](#show-the-help-and-options)
   - [Basic Use](#basic-use)
@@ -34,13 +38,13 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 **I am in no way affiliated with histdata.com or its maintainers. Please use this application in a way that respects the hard work and resources of histdata.com*
 
-*If you choose to use this tool, it is **strongly** suggested that you head over to http://www.histdata.com/download-by-ftp/ and sign up to help support their traffic costs.*
+*If you choose to use this tool, it is **strongly** suggested that you head over to [http://www.histdata.com/download-by-ftp/](http://www.histdata.com/download-by-ftp/) and sign up to help support their traffic costs.*
 
 *If you find this tool helpful and would like to support future development, I'm in need of caffeine, feel free to [buy me coffee!](https://www.buymeacoffee.com/dmidlo)*
 
-### Setup
+## Setup
 
-#### TLDR for all platforms
+### TLDR for all platforms
 
 Install the latest version of datatable
 
@@ -62,46 +66,47 @@ pip install git+https://github.com/dmidlo/histdata.com-tools.git
 
 ---
 
-##### MacOS and Linux
+#### Vanilla MacOS and Linux
 
-###### Create a new project directory and change to it
+##### Create a new project directory and change to it
 
 ```bash
 mkdir myproject && cd myproject && pwd
 ```
 
-###### Create a Python Virtual Environment and activate it
+##### Create a Python Virtual Environment and activate it
 
 ```bash
 python -m venv venv && source venv/bin/activate
 ```
 
-###### Confirm Python Path and Verion
+##### Confirm Python Path and Version
 
 ```bash
 which python && python --version
 ```
 
-###### Install the histdata.com-tools package from PyPi
+##### Install the histdata.com-tools package from PyPi
 
 ```bash
 pip install histdatacom
 ```
 
-###### Run `histdatacom` to view help message and Options
+##### Run `histdatacom` to view help message and Options
 
 ```bash
 histdatacom -h
 ```
 
-#### Windows Powershell
+#### Vanilla Windows Powershell
 
 ---
 
-###### Launch a Powershell Terminal.
-   - Run as Administrator (right-click on shortcut and click Run as Admin...)
+##### Launch a Powershell Terminal
 
-###### Make sure python3.10 is in your system's executable path.
+- Run as Administrator (right-click on shortcut and click Run as Admin...)
+
+##### Make sure python3.10 is in your system's executable path
 
 ```powershell
 python --version
@@ -109,47 +114,84 @@ python --version
 
 - should be already set if you clicked the checkbox when installing python 3.10
 - If not, you can run the following.
-  - you will need to relauch powershell as admin.
+  - you will need to relaunch powershell as admin.
 
 ```powershell
 [Environment]::SetEnvironmentVariable("Path", "$env:Path;C:\Program Files\Python310")
 ```
 
-###### Change the Execution Policy to Unrestricted
+##### Change the Execution Policy to Unrestricted
 
 ```powershell
 Set-ExecutionPolicy Unrestricted -Force
 ```
 
-###### Create a new project directory and change to it
+##### Create a new directory and change to it
 
 ```powershell
-New-Item -Path ".\" -Name "myproject" -ItemType "directory"; Set-Location .\myproject\
+New-Item -Path ".\" -Name "myproject" -ItemType "directory" -and Set-Location .\myproject\
 ```
 
-###### Create a Python Virtual Environment and activate it
+##### Create a Virtual Environment and activate it
 
 ```powershell
-python -m venv venv; .\venv\Scripts\Activate.ps1
+python -m venv venv -and .\venv\Scripts\Activate.ps1
 ```
 
-###### Confirm Python Path and Verion
+##### Confirm Path and Version
 
 ```powershell
-Get-Command python | select Source; python --version
+Get-Command python | select Source -and python --version
 ```
 
-###### Install the histdata.com-tools package from PyPi
+##### Install histdata.com-tools package from PyPi
 
 ```powershell
 pip install histdatacom
 ```
 
-###### Run `histdatacom` to view help message
+##### Run `histdatacom` to view help message
 
 ```powershell
 histdatacom -h
 ```
+
+
+#### Anaconda Setup
+
+##### Anaconda MacOS and Linux
+
+###### Create a Project Directory and Change to it
+
+```shell
+mkdir myproject && cd myproject && pwd
+```
+
+###### Create a `Python 3.10` Anaconda environment with `conda` and activate it
+
+```shell
+conda create -n venv python=3.10 && conda activate venv
+```
+
+###### Check Python Path and Version
+
+```shell
+which python && python --version
+```
+
+###### Install histdatacom package from PyPi
+
+```shell
+pip install histdatacom
+```
+
+###### Run histdatacom package to view help message
+
+```shell
+histdatacom -h
+```
+
+##### Anaconda Windows Powershell
 
 ### Usage
 
@@ -163,7 +205,7 @@ The number one rule when using this tool is to be **MORE** specific with your in
 
 **please submit feature requests and bug reports using this repository's issue tracker.*
 
-###### Show the help and options
+#### Show the help and options
 
 ```txt
 histdatacom -h
@@ -198,15 +240,15 @@ options:
                         Directory Used to save data. default is "data" in the current directory
 ```
 
-##### Basic Use
+#### Basic Use
 
-###### Download and extract the current month's available EURUSD data for metatrader 4/5into the default data directory ./data
+##### Download and extract the current month's available EURUSD data for metatrader 4/5into the default data directory ./data
 
 ```sh
 histdatacom -p eurusd -f metatrader -s now
 ```
 
-###### include the `-D` flag to download but NOT extract to csv.
+##### include the `-D` flag to download but NOT extract to csv
 
 ```sh
 histdatacom -D -p usdcad -f metastock -s now
@@ -237,7 +279,6 @@ The formats available are:
 |tick-bid-quotes|ninjatrader|
 |tick-ask-quotes|ninjatrader|
 
-
 ###### To download 1-minute-bar-quotes for both metastock and excel
 
 ```sh
@@ -254,7 +295,6 @@ date ranges are for year and month and can be specified in the following ways:
 |2202.04|
 |2202_04|
 
-
 ###### to fetch a single year's data, leave out the month
 
 - note: unless you're fetching data for the current year, tick data types will fetch 12 files for each month of the year, 1-minute-bar-quotes will fetch a single OHLC file with the whole year's data.
@@ -263,7 +303,7 @@ date ranges are for year and month and can be specified in the following ways:
 histdatacom -p udxusd -f ascii -t tick-data-quotes -s 2011
 ```
 
-###### to fetch a single month's data, include a month, but do not use the `-e, --end_yearmonth` flag.
+###### to fetch a single month's data, include a month, but do not use the `-e, --end_yearmonth` flag
 
 - if you're requesting 1-minute-bar-quotes for any
     year except the current year, you will receive the
@@ -277,7 +317,7 @@ histdatacom -f metatrader -s 2012-07
 
 ##### `Start` & `Now` Keywords
 
-you may hav noticed that two special year-month keywords exist
+you may have noticed that two special year-month keywords exist
  `start` and `now`
 
 - `start` may only be used with the `-s --start_yearmonth`
@@ -306,6 +346,7 @@ histdatacom -p xagusd -f ascii -1-minute-bar-quotes -s 2019-04 -e now
 ###### Multiple Datasets
 
 ###### multiple datasets can be requested in one command
+
 this example with use the `-e --end_yearmonth` flag to request a range of data for multiple instruments.
 
 - note: Large requests like these are to be avoided. remember to sign up with histdata.com to help them pay for network costs
@@ -315,7 +356,9 @@ histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
 ```
 
 ###### CPU Utilization
-One can set a cap on CPU Utilization with `-c --cpu_utlization`
+
+One can set a cap on CPU Utilization with `-c --cpu_utilization`
+
 - available levels are, `"low"`,`"medium"`,`"high"`
 - **OR**
 - integer percent 1-200
@@ -411,6 +454,7 @@ if __name__=="__main__":
 ##### Jupyter and External Scripts
 
 As opposed to the `CLI` interface, one may wish to load data from histdata.com and work with it interactively (e.g. in a Jupyter notebook), or as part of a larger pipeline.  To that end, histdatacom provides an option to specify a return type.
+
 - return types can be:
 
   - A `datatable` Frame
