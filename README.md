@@ -161,6 +161,24 @@ histdatacom -h
 
 ##### Anaconda MacOS and Linux
 
+###### Create a Project Directory and Change to it
+
+```shell
+mkdir myproject && cd myproject && pwd
+```
+
+###### Create a `Python 3.10` Anaconda environment with `conda` and activate it
+
+```shell
+conda create -n venv python=3.10 && conda activate venv
+```
+
+###### Check Python Path and Version
+
+```shell
+which python && python --version
+```
+
 ##### Anaconda Windows Powershell
 
 ### Usage
@@ -287,7 +305,7 @@ histdatacom -f metatrader -s 2012-07
 
 ##### `Start` & `Now` Keywords
 
-you may hav noticed that two special year-month keywords exist
+you may have noticed that two special year-month keywords exist
  `start` and `now`
 
 - `start` may only be used with the `-s --start_yearmonth`
