@@ -124,19 +124,19 @@ Set-ExecutionPolicy Unrestricted -Force
 ###### Create a new project directory and change to it
 
 ```powershell
-New-Item -Path ".\" -Name "myproject" -ItemType "directory" -and Set-Location .\myproject\
+New-Item -Path ".\" -Name "myproject" -ItemType "directory"; Set-Location .\myproject\
 ```
 
 ###### Create a Python Virtual Environment and activate it
 
 ```powershell
-python -m venv venv -and .\venv\Scripts\Activate.ps1
+python -m venv venv; .\venv\Scripts\Activate.ps1
 ```
 
 ###### Confirm Python Path and Verion
 
 ```powershell
-Get-Command python | select Source -and python --version
+Get-Command python | select Source; python --version
 ```
 
 ###### Install the histdata.com-tools package from PyPi
