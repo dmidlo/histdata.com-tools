@@ -16,7 +16,7 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
     - [Vanilla Windows Powershell](#vanilla-windows-powershell)
   - [Anaconda Setup](#anaconda-setup)
     - [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
-    - [Anaconda Windows Powershell](#anaconda-windows-powershell)
+    - [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
 - [Usage](#usage)
   - [Show the Help and Options](#show-the-help-and-options)
   - [Basic Use](#basic-use)
@@ -46,13 +46,60 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 ### TLDR for all platforms
 
-Install the latest version of datatable
+#### Install the latest version of datatable
 
 - **this is a temporary fix until the datatable team updates PyPi. [See this issue](https://github.com/h2oai/datatable/issues/3268) for more details*
 
-```sh
+- You will need a C++ compiler installed to build datatable from source
+
+##### MacOS XCode Command Line Tools
+
+- For **MacOS**, run `xcode-select --install` from your terminal and confirm the prompts for download and installation of the xcode command-line tools.
+
+##### Windows MSVC C++ Compiler
+
+- For **Windows**, you need to download and install the [Visual Studio Community Edition](https://visualstudio.microsoft.com/vs/community/) and choose the option `Desktop Development with C++`, then select install.
+
+###### Launch the Visual Studio command line environment (for Windows only)
+
+- Open either a `powershell`, `cmd`, or `Anaconda Prompt` terminal
+  - the setup scripts for the VS CLI environments are located in the `.\Common7\Tools\` directory of your Visual Studio installation directory
+    - e.g. `"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\"`
+- Run the VS CLI environment setup script
+  - for **Powershell**:
+    - `PS> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1"`
+  - for **CMD** and **Anaconda Prompt**:
+    - `> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\LaunchDevCmd.bat"`
+
+###### Tell the datatable setup where to find the MSVC C++ compiler
+
+- for **Powershell**:
+  - `PS> $env:DT_MSVC_PATH="$env:VSINSTALLDIR"+"VC\Tools\MSVC\"`
+- for **CMD** and **Anaconda Prompt**:
+  - `set DT_MSVC_PATH=%VSINSTALLDIR%VC\Tools\MSVC\`
+
+###### Return to Your Project's Directory
+
+The Visual Studio command line environment setup scripts change your directory, you'll need to find your way back to your project's directory.  I like to use the variable `%USERPROFILE%` to save myself some typing:
+
+*e.g.* `> cd %USERPROFILE%\Documents\projects\myproject`
+
+#### Activate Python Environment if you're using one
+
+refer to the **Create a Python Virtual Environment and activate it** steps outlined for your platform
+
+- [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
+- [Vanilla Windows Powershell](#vanilla-windows-powershell)
+- [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
+- [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
+
+#### Install datatable
+
+```shell
 pip install git+https://github.com/h2oai/datatable
 ```
+
+#### Install histdatacom
 
 ```sh
 pip install histdatacom
@@ -85,6 +132,10 @@ python -m venv venv && source venv/bin/activate
 ```bash
 which python && python --version
 ```
+
+##### Build the latest version of datatable
+
+follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
 
 ##### Install the histdata.com-tools package from PyPi
 
@@ -144,6 +195,10 @@ python -m venv venv; .\venv\Scripts\Activate.ps1
 Get-Command python | select Source; python --version
 ```
 
+##### Build the latest version of datatable
+
+follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
+
 ##### Install histdata.com-tools package from PyPi
 
 ```powershell
@@ -155,7 +210,6 @@ pip install histdatacom
 ```powershell
 histdatacom -h
 ```
-
 
 #### Anaconda Setup
 
@@ -170,7 +224,7 @@ mkdir myproject && cd myproject && pwd
 ###### Create a `Python 3.10` Anaconda environment with `conda` and activate it
 
 ```shell
-conda create -n venv python=3.10 && conda activate venv
+conda create -n py310 python=3.10 && conda activate py310
 ```
 
 ###### Check Python Path and Version
@@ -178,6 +232,10 @@ conda create -n venv python=3.10 && conda activate venv
 ```shell
 which python && python --version
 ```
+
+###### Build the latest version of datatable
+
+follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
 
 ###### Install histdatacom package from PyPi
 
@@ -191,9 +249,43 @@ pip install histdatacom
 histdatacom -h
 ```
 
-##### Anaconda Windows Powershell
+##### Anaconda Windows using the Anaconda Prompt
 
-### Usage
+###### Create a Directory and Change to it
+
+```shell
+mkdir myproject && cd myproject && echo %cd%
+```
+
+###### Create a `Python 3.10` Anaconda environment with `conda` and activate it
+
+```shell
+conda create -n py310 python=3.10 && conda activate py310
+```
+
+###### Check Python Path and Version
+
+```shell
+where python && python --version
+```
+
+###### Build the latest version of datatable
+
+follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
+
+###### Install histdatacom package from PyPi
+
+```shell
+pip install histdatacom
+```
+
+###### Run histdatacom package to view help message
+
+```shell
+histdatacom -h
+```
+
+## Usage
 
 **Note #1**
 The number one rule when using this tool is to be **MORE** specific with your input to limit the size of your request.
@@ -205,7 +297,7 @@ The number one rule when using this tool is to be **MORE** specific with your in
 
 **please submit feature requests and bug reports using this repository's issue tracker.*
 
-#### Show the help and options
+### Show the help and options
 
 ```txt
 histdatacom -h
@@ -240,21 +332,21 @@ options:
                         Directory Used to save data. default is "data" in the current directory
 ```
 
-#### Basic Use
+### Basic Use
 
-##### Download and extract the current month's available EURUSD data for metatrader 4/5into the default data directory ./data
+#### Download and extract the current month's available EURUSD data for metatrader 4/5into the default data directory ./data
 
 ```sh
 histdatacom -p eurusd -f metatrader -s now
 ```
 
-##### include the `-D` flag to download but NOT extract to csv
+#### include the `-D` flag to download but NOT extract to csv
 
 ```sh
 histdatacom -D -p usdcad -f metastock -s now
 ```
 
-##### Available Formats
+#### Available Formats
 
 The formats available are:
 
@@ -279,13 +371,13 @@ The formats available are:
 |tick-bid-quotes|ninjatrader|
 |tick-ask-quotes|ninjatrader|
 
-###### To download 1-minute-bar-quotes for both metastock and excel
+##### To download 1-minute-bar-quotes for both metastock and excel
 
 ```sh
 histdatacom -p usdjpy -f metastock excel -s now 
 ```
 
-##### Date Ranges
+#### Date Ranges
 
 date ranges are for year and month and can be specified in the following ways:
  | [ -._] |
@@ -295,7 +387,7 @@ date ranges are for year and month and can be specified in the following ways:
 |2202.04|
 |2202_04|
 
-###### to fetch a single year's data, leave out the month
+##### to fetch a single year's data, leave out the month
 
 - note: unless you're fetching data for the current year, tick data types will fetch 12 files for each month of the year, 1-minute-bar-quotes will fetch a single OHLC file with the whole year's data.
 
@@ -303,7 +395,7 @@ date ranges are for year and month and can be specified in the following ways:
 histdatacom -p udxusd -f ascii -t tick-data-quotes -s 2011
 ```
 
-###### to fetch a single month's data, include a month, but do not use the `-e, --end_yearmonth` flag
+##### to fetch a single month's data, include a month, but do not use the `-e, --end_yearmonth` flag
 
 - if you're requesting 1-minute-bar-quotes for any
     year except the current year, you will receive the
@@ -315,7 +407,7 @@ histdatacom -p udxusd -f ascii -t tick-data-quotes -s 2011
 histdatacom -f metatrader -s 2012-07
 ```
 
-##### `Start` & `Now` Keywords
+#### `Start` & `Now` Keywords
 
 you may have noticed that two special year-month keywords exist
  `start` and `now`
@@ -343,9 +435,9 @@ in the above example, no `-t --timeframe` flag was specified. This will return a
 histdatacom -p xagusd -f ascii -1-minute-bar-quotes -s 2019-04 -e now
 ```
 
-###### Multiple Datasets
+##### Multiple Datasets
 
-###### multiple datasets can be requested in one command
+##### multiple datasets can be requested in one command
 
 this example with use the `-e --end_yearmonth` flag to request a range of data for multiple instruments.
 
@@ -355,7 +447,7 @@ this example with use the `-e --end_yearmonth` flag to request a range of data f
 histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
 ```
 
-###### CPU Utilization
+##### CPU Utilization
 
 One can set a cap on CPU Utilization with `-c --cpu_utilization`
 
@@ -368,7 +460,7 @@ One can set a cap on CPU Utilization with `-c --cpu_utilization`
 histdatacom -c medium -p udxusd -f metatrader -s 2015-04 -e 2016-04
 ```
 
-##### Import to InfluxDB
+### Import to InfluxDB
 
 To import data to an influxdb instance, use the `-I --import_to_influxdb` flag along with an `influxdb.yaml` file in the current working directory (where ever you are running the command from).
 
@@ -381,7 +473,7 @@ To import data to an influxdb instance, use the `-I --import_to_influxdb` flag a
 histdatacom -I -p eurusd -f ascii -t tick-data-quotes -s start -e now
 ```
 
-###### influxdb.yaml
+#### influxdb.yaml
 
 ```yaml
 # a sample influxdb.yaml file.
@@ -392,26 +484,26 @@ influxdb:
   token: influx_user_token
 ```
 
-#### API - Other Scripts, Modules, & Jupyter Support
+### API - Other Scripts, Modules, & Jupyter Support
 
 histdatacom also has an API to allow developers and to integrate the package into their own projects.  It can be used in one of two ways; The first being a simple interface to automate CLI interaction. The second is as an interface to work with the data directly in a notebook environment like Jupyter Notebooks.
 
-##### CLI Automation
+#### CLI Automation
 
-###### First import the required modules
+##### First import the required modules
 
 ```python
 import histdatacom
 from histdatacom.options import Options
 ```
 
-###### Create and Initialize a new options object to pass parameters to histdatacom
+##### Create and Initialize a new options object to pass parameters to histdatacom
 
 ```python
 options = Options()
 ```
 
-###### Configure for CLI automation
+##### Configure for CLI automation
 
 To automate the CLI, simply include one of the boolean behavior flags: `options.validate_urls`, `options.download_data_archives`, `options.extract_csvs`, and `options.import_to_influxdb`
 
@@ -436,7 +528,7 @@ options.end_yearmonth = "now"
 options.cpu_utilization = 100
 ```
 
-###### pass the options to histdatacom (Jupyter Notebooks)
+##### pass the options to histdatacom (Jupyter Notebooks)
 
 ```python
 histdatacom(options)  # (Jupyter)
@@ -451,7 +543,7 @@ if __name__=="__main__":
    histdatacom(options)
 ```
 
-##### Jupyter and External Scripts
+#### Jupyter and External Scripts
 
 As opposed to the `CLI` interface, one may wish to load data from histdata.com and work with it interactively (e.g. in a Jupyter notebook), or as part of a larger pipeline.  To that end, histdatacom provides an option to specify a return type.
 
@@ -467,20 +559,20 @@ As opposed to the `CLI` interface, one may wish to load data from histdata.com a
 
 - ***All datetime is returned as milliseconds since January 1, 1970 (midnight UTC/GMT)***
 
-###### Import the required modules
+##### Import the required modules
 
 ```python
 import histdatacom
 from histdatacom.options import Options
 ```
 
-###### Initialize a new options object to pass parameters to histdatacom
+##### Initialize a new options object to pass parameters to histdatacom
 
 ```python
 options = Options()
 ```
 
-###### Jupyter & External Script Options
+##### Jupyter & External Script Options
 
 ```python
 options.api_return_type = "pandas"  # "datatable", "pandas", or "arrow"
@@ -495,7 +587,7 @@ options.cpu_utilization = "high"
 - This example uses just one pair/instrument/symbol `eurusd` and just one timeframe `tick-data-quotes`.  When the api is called with this 'one-one` specificity, the api will directly return the requested data.
 - Regardless of the specified start_yearmonth and end_yearmonth, the resultant data will be sorted and merged into a single dataset.
 
-###### Pass the options to histdatacom and assign the return to a variable
+##### Pass the options to histdatacom and assign the return to a variable
 
 ```python
 data = histdatacom(options)  # (Jupyter)
