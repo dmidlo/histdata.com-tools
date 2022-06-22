@@ -179,6 +179,18 @@ conda create -n venv python=3.10 && conda activate venv
 which python && python --version
 ```
 
+###### Install histdatacom package from PyPi
+
+```shell
+pip install histdatacom
+```
+
+###### Run histdatacom package to view help message
+
+```shell
+histdatacom -h
+```
+
 ##### Anaconda Windows Powershell
 
 ### Usage
