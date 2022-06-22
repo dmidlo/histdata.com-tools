@@ -6,7 +6,7 @@ dev()
     echo "${bold}pypi.sh: Setting Up Dev${normal}"
     pip uninstall -y histdatacom
     pip install twine wheel
-    # pip install git+https://github.com/h2oai/datatable
+    pip install git+https://github.com/h2oai/datatable
     python setup.py build
     python setup.py install
     python setup.py develop
