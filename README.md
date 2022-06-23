@@ -50,54 +50,10 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 - **this is a temporary fix until the datatable team updates PyPi. [See this issue](https://github.com/h2oai/datatable/issues/3268) for more details*
 
-- You will need a C++ compiler installed to build datatable from source
+check out the appendix: [Data Table Installation Options](#datatable-installation-options) to either:
 
-##### MacOS XCode Command Line Tools
-
-- For **MacOS**, run `xcode-select --install` from your terminal and confirm the prompts for download and installation of the xcode command-line tools.
-
-##### Windows MSVC C++ Compiler
-
-- For **Windows**, you need to download and install the [Visual Studio Community Edition](https://visualstudio.microsoft.com/vs/community/) and choose the option `Desktop Development with C++`, then select install.
-
-###### Launch the Visual Studio command line environment (for Windows only)
-
-- Open either a `powershell`, `cmd`, or `Anaconda Prompt` terminal
-  - the setup scripts for the VS CLI environments are located in the `.\Common7\Tools\` directory of your Visual Studio installation directory
-    - e.g. `"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\"`
-- Run the VS CLI environment setup script
-  - for **Powershell**:
-    - `PS> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1"`
-  - for **CMD** and **Anaconda Prompt**:
-    - `> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\LaunchDevCmd.bat"`
-
-###### Tell the datatable setup where to find the MSVC C++ compiler
-
-- for **Powershell**:
-  - `PS> $env:DT_MSVC_PATH="$env:VSINSTALLDIR"+"VC\Tools\MSVC\"`
-- for **CMD** and **Anaconda Prompt**:
-  - `set DT_MSVC_PATH=%VSINSTALLDIR%VC\Tools\MSVC\`
-
-###### Return to Your Project's Directory
-
-The Visual Studio command line environment setup scripts change your directory, you'll need to find your way back to your project's directory.  I like to use the variable `%USERPROFILE%` to save myself some typing:
-
-*e.g.* `> cd %USERPROFILE%\Documents\projects\myproject`
-
-#### Activate Python Environment if you're using one
-
-refer to the **Create a Python Virtual Environment and activate it** steps outlined for your platform
-
-- [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
-- [Vanilla Windows Powershell](#vanilla-windows-powershell)
-- [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
-- [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
-
-#### Install datatable
-
-```shell
-pip install git+https://github.com/h2oai/datatable
-```
+- [install a build wheel from Datatable's Appveyor CI/CD pipeline](#install-from-appveyor), or;
+- [build from source](#build-from-source)
 
 #### Install histdatacom
 
@@ -716,3 +672,82 @@ if __name__=="__main__":
 
 - Add the ability to import an order book to influxdb
 - Add a --reset-cache flag to reset all or specified year-month range
+
+## Datatable Installation Options
+
+### Install from Appveyor
+
+Build wheels are precompiled versions of datatable, and would easily be the prefered route of installation while we wait for the datatable team to provide an official Python 3.10 package on PyPi.  The only drawback is documenting the proceedure as the wheel's URL expires monthly thus this documentation could go out of date rather quickly...
+
+
+#### Activate Python Environment if you're using one
+
+refer to the **Create a Python Virtual Environment and activate it** steps outlined for your platform
+
+- [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
+- [Vanilla Windows Powershell](#vanilla-windows-powershell)
+- [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
+- [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
+
+#### Get the Build Wheel's URL for your platform:
+
+To find the latest build wheels for datatable, go to dataable's [Appveyor CI/CD Instance](https://ci.appveyor.com/project/h2oops/datatable):
+
+- Select the Platform you're installing for:
+- Select `"Artifacts"` and right/option-click on the filename that contains `cp310`. e.g. `dist\datatable-1.1.0a2157-cp310-cp310-win_amd64.whl`
+- Select `"Copy Link Address"` from your browser's context menu to copy the wheel's URL
+
+#### Install datatable using pip with the wheel's URL from Appveyor:
+
+e.g. `pip install {https://APPVEYOR DATATABLE BUILD WHEEL URL.whl}`
+
+### Build from Source
+
+- You will need a C++ compiler installed to build datatable from source
+
+##### MacOS XCode Command Line Tools
+
+- For **MacOS**, run `xcode-select --install` from your terminal and confirm the prompts for download and installation of the xcode command-line tools.
+
+##### Windows MSVC C++ Compiler
+
+- For **Windows**, you need to download and install the [Visual Studio Community Edition](https://visualstudio.microsoft.com/vs/community/) and choose the option `Desktop Development with C++`, then select install.
+
+###### Launch the Visual Studio command line environment (for Windows only)
+
+- Open either a `powershell`, `cmd`, or `Anaconda Prompt` terminal
+  - the setup scripts for the VS CLI environments are located in the `.\Common7\Tools\` directory of your Visual Studio installation directory
+    - e.g. `"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\"`
+- Run the VS CLI environment setup script
+  - for **Powershell**:
+    - `PS> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1"`
+  - for **CMD** and **Anaconda Prompt**:
+    - `> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\LaunchDevCmd.bat"`
+
+###### Tell the datatable setup where to find the MSVC C++ compiler
+
+- for **Powershell**:
+  - `PS> $env:DT_MSVC_PATH="$env:VSINSTALLDIR"+"VC\Tools\MSVC\"`
+- for **CMD** and **Anaconda Prompt**:
+  - `set DT_MSVC_PATH=%VSINSTALLDIR%VC\Tools\MSVC\`
+
+###### Return to Your Project's Directory
+
+The Visual Studio command line environment setup scripts change your directory, you'll need to find your way back to your project's directory.  I like to use the variable `%USERPROFILE%` to save myself some typing:
+
+*e.g.* `> cd %USERPROFILE%\Documents\projects\myproject`
+
+#### Activate Python Environment if you're using one
+
+refer to the **Create a Python Virtual Environment and activate it** steps outlined for your platform
+
+- [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
+- [Vanilla Windows Powershell](#vanilla-windows-powershell)
+- [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
+- [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
+
+#### Install datatable
+
+```shell
+pip install git+https://github.com/h2oai/datatable
+```
