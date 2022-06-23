@@ -13,6 +13,7 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
   - [Show the Help and Options](#show-the-help-and-options)
   - [Basic Use](#basic-use)
   - [Available Formats](#available-formats)
+    - [CSV Dialect and Format Specifications](#csv-dialect-and-format-specifications)
   - [Date Ranges](#date-ranges)
     - ['Start' & 'Now' Keywords](#start-now-keywords)
   - [Multiple Datasets](#multiple-datasets)
@@ -128,6 +129,10 @@ The formats available are:
 |tick-last-quotes|ninjatrader|
 |tick-bid-quotes|ninjatrader|
 |tick-ask-quotes|ninjatrader|
+
+##### CSV Dialect and Format Specifications
+
+Detailed specifications for the CSVs that the histdata.com repo provides see [histdata.com_data_specs.md](https://github.com/dmidlo/histdata.com-tools/blob/main/histdata.com_data_specs.md)
 
 ##### To download 1-minute-bar-quotes for both metastock and excel
 
