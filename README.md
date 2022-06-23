@@ -53,7 +53,7 @@ The number one rule when using this tool is to be **MORE** specific with your in
 
 *It is likely the default behavior will be modified from its current state to discourage unnecessarily large requests.*
 
-**please submit feature requests and bug reports using this repository's issue tracker.*
+**please submit feature requests and bug reports using this repository's [issue tracker](https://github.com/dmidlo/histdata.com-tools/issues).*
 
 ### Show the help and options
 
