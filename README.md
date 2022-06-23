@@ -44,6 +44,8 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 *If you find this tool helpful and would like to support future development, I'm in need of caffeine, feel free to [buy me coffee!](https://www.buymeacoffee.com/dmidlo)*
 
+---
+
 ## Usage
 
 **Note #1**
@@ -91,6 +93,8 @@ options:
                         Directory Used to save data. default is "data" in the current directory
 ```
 
+---
+
 ### Basic Use
 
 #### Download and extract the current month's available EURUSD data for metatrader 4/5into the default data directory ./data
@@ -104,6 +108,8 @@ histdatacom -p eurusd -f metatrader -s now
 ```sh
 histdatacom -D -p usdcad -f metastock -s now
 ```
+
+---
 
 #### Available Formats
 
@@ -139,6 +145,8 @@ The formats available are:
 ```sh
 histdatacom -p usdjpy -f metastock excel -s now 
 ```
+
+---
 
 #### Date Ranges
 
@@ -198,6 +206,8 @@ in the above example, no `-t --timeframe` flag was specified. This will return a
 histdatacom -p xagusd -f ascii -1-minute-bar-quotes -s 2019-04 -e now
 ```
 
+---
+
 ##### Multiple Datasets
 
 ##### multiple datasets can be requested in one command
@@ -209,6 +219,8 @@ this example with use the `-e --end_yearmonth` flag to request a range of data f
 ```txt
 histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
 ```
+
+---
 
 ##### CPU Utilization
 
@@ -222,6 +234,8 @@ One can set a cap on CPU Utilization with `-c --cpu_utilization`
 ```sh
 histdatacom -c medium -p udxusd -f metatrader -s 2015-04 -e 2016-04
 ```
+
+---
 
 ### Import to InfluxDB
 
@@ -247,9 +261,13 @@ influxdb:
   token: influx_user_token
 ```
 
+---
+
 ### API - Other Scripts, Modules, & Jupyter Support
 
 histdatacom also has an API to allow developers and to integrate the package into their own projects.  It can be used in one of two ways; The first being a simple interface to automate CLI interaction. The second is as an interface to work with the data directly in a notebook environment like Jupyter Notebooks.
+
+---
 
 #### CLI Automation
 
@@ -305,6 +323,8 @@ if __name__=="__main__":
 ```python
 histdatacom(options)  # (Jupyter)
 ```
+
+---
 
 #### Jupyter and External Scripts
 
@@ -481,9 +501,13 @@ if __name__=="__main__":
 histdatacom(options)  # (Jupyter)
 ```
 
+---
+
 ## Setup
 
 ### TLDR for all platforms
+
+---
 
 #### Install the latest version of datatable
 
@@ -493,6 +517,8 @@ check out the section: [Data Table Installation Options](#datatable-installation
 
 - [install a build wheel from Datatable's Appveyor CI/CD pipeline](#install-from-appveyor), or;
 - [build from source](#build-from-source)
+
+---
 
 #### Install histdatacom
 
@@ -544,9 +570,9 @@ pip install histdatacom
 histdatacom -h
 ```
 
-#### Vanilla Windows Powershell
-
 ---
+
+#### Vanilla Windows Powershell
 
 ##### Launch a Powershell Terminal
 
@@ -606,7 +632,11 @@ pip install histdatacom
 histdatacom -h
 ```
 
+---
+
 #### Anaconda Setup
+
+---
 
 ##### Anaconda MacOS and Linux
 
@@ -644,6 +674,9 @@ pip install histdatacom
 histdatacom -h
 ```
 
+---
+
+
 ##### Anaconda Windows using the Anaconda Prompt
 
 ###### Create a Directory and Change to it
@@ -680,7 +713,11 @@ pip install histdatacom
 histdatacom -h
 ```
 
+---
+
 ### Datatable Installation Options
+
+---
 
 #### Install from Appveyor
 
@@ -709,17 +746,25 @@ To find the latest build wheels for datatable, go to dataable's [Appveyor CI/CD 
 
 e.g. `pip install {https://APPVEYOR DATATABLE BUILD WHEEL URL.whl}`
 
+---
+
 #### Build from Source
 
 - You will need a C++ compiler installed to build datatable from source
+
+---
 
 ##### MacOS XCode Command Line Tools
 
 - For **MacOS**, run `xcode-select --install` from your terminal and confirm the prompts for download and installation of the xcode command-line tools.
 
+---
+
 ##### Windows MSVC C++ Compiler
 
 - For **Windows**, you need to download and install the [Visual Studio Community Edition](https://visualstudio.microsoft.com/vs/community/) and choose the option `Desktop Development with C++`, then select install.
+
+---
 
 ###### Launch the Visual Studio command line environment (for Windows only)
 
@@ -732,6 +777,8 @@ e.g. `pip install {https://APPVEYOR DATATABLE BUILD WHEEL URL.whl}`
   - for **CMD** and **Anaconda Prompt**:
     - `> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\LaunchDevCmd.bat"`
 
+---
+
 ###### Tell the datatable setup where to find the MSVC C++ compiler
 
 - for **Powershell**:
@@ -739,11 +786,15 @@ e.g. `pip install {https://APPVEYOR DATATABLE BUILD WHEEL URL.whl}`
 - for **CMD** and **Anaconda Prompt**:
   - `set DT_MSVC_PATH=%VSINSTALLDIR%VC\Tools\MSVC\`
 
+---
+
 ###### Return to Your Project's Directory
 
 The Visual Studio command line environment setup scripts change your directory, you'll need to find your way back to your project's directory.  I like to use the variable `%USERPROFILE%` to save myself some typing:
 
 *e.g.* `> cd %USERPROFILE%\Documents\projects\myproject`
+
+---
 
 ##### Activate Python Environment if you're using one
 
@@ -754,11 +805,15 @@ refer to the **Create a Python Virtual Environment and activate it** steps outli
 - [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
 - [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
 
+---
+
 ##### Install datatable
 
 ```shell
 pip install git+https://github.com/h2oai/datatable
 ```
+
+---
 
 ## Roadmap
 
