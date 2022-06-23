@@ -694,8 +694,10 @@ refer to the **Create a Python Virtual Environment and activate it** steps outli
 To find the latest build wheels for datatable, go to dataable's [Appveyor CI/CD Instance](https://ci.appveyor.com/project/h2oops/datatable):
 
 - Select the Platform you're installing for:
+  - ![image](https://user-images.githubusercontent.com/1161295/175226383-5211e4f9-9718-4f0b-9c00-713067f62f02.png)
 - Select `"Artifacts"` and right/option-click on the filename that contains `cp310`. e.g. `dist\datatable-1.1.0a2157-cp310-cp310-win_amd64.whl`
 - Select `"Copy Link Address"` from your browser's context menu to copy the wheel's URL
+  - ![image](https://user-images.githubusercontent.com/1161295/175226442-ffcf8370-31bb-426c-a8e9-09ab29db91e0.png)
 
 #### Install datatable using pip with the wheel's URL from Appveyor:
 
