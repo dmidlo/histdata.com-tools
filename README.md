@@ -132,7 +132,7 @@ The formats available are:
 
 ##### CSV Dialect and Format Specifications
 
-Detailed specifications for the CSVs that the histdata.com repo provides see [histdata.com_data_specs.md](https://github.com/dmidlo/histdata.com-tools/blob/main/histdata.com_data_specs.md)
+- *For Detailed specifications for the CSVs that the histdata.com repo provides see [histdata.com_data_specs.md](https://github.com/dmidlo/histdata.com-tools/blob/main/histdata.com_data_specs.md)*
 
 ##### To download 1-minute-bar-quotes for both metastock and excel
 
