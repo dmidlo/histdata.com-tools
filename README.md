@@ -286,12 +286,6 @@ options.end_yearmonth = "now"
 options.cpu_utilization = 100
 ```
 
-##### pass the options to histdatacom (Jupyter Notebooks)
-
-```python
-histdatacom(options)  # (Jupyter)
-```
-
 - when a behavior flag is included, `histdatacom` assumes it is being used for `CLI` automation **exclusively** and does **not** provide a return value.
 
 at present, calling from another script or module is limited to using the `__name__=="__main__"` idiom.
@@ -299,6 +293,12 @@ at present, calling from another script or module is limited to using the `__nam
 ```python
 if __name__=="__main__": 
    histdatacom(options)
+```
+
+***Jupyter may be used normally***
+
+```python
+histdatacom(options)  # (Jupyter)
 ```
 
 #### Jupyter and External Scripts
@@ -467,7 +467,13 @@ at present, calling from another script or module is limited to using the `__nam
 
 ```python
 if __name__=="__main__": 
-   data = histdatacom(options)
+   histdatacom(options)
+```
+
+***Jupyter may be used normally***
+
+```python
+histdatacom(options)  # (Jupyter)
 ```
 
 ## Setup
