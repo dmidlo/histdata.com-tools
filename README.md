@@ -757,5 +757,22 @@ pip install git+https://github.com/h2oai/datatable
 
 ## Roadmap
 
+- [~~Add Support for Anaconda~~](#28)
+- [Implement MyPy static typing checking](#16)
+- [Implement UnitTesting with PyTest](#9)
+- [Create Binary Distributions](#10)
+  - See about packaging for different operating systems
+    - deb/rpm packaging
+    - NuGet/Chocolatey
+    - MacPorts/Homebrew
+- [docker image](#11)
+- [Create Down-sampling to Standard Candlestick Timeframes](#18)
+- [Fix terminate on ctrl-c multiprocessing KeyboardInterupt](#15)
+- [Look at replacing beautifulsoup with html parser](#19)
+- [Refactor to make use of globals more readable](#14)
+- [add -v -vv and -vvv flags](#13)
+- [Change Record statuses to Enum](#20)
+- [Add -S —set-status flag](#21)
+- [Create a central place for exceptions](#22)
 - Add the ability to import an order book to influxdb
 - Add a --reset-cache flag to reset all or specified year-month range
