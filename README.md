@@ -484,7 +484,7 @@ histdatacom(options)  # (Jupyter)
 
 - **this is a temporary fix until the datatable team updates PyPi. [See this issue](https://github.com/h2oai/datatable/issues/3268) for more details*
 
-check out the appendix: [Data Table Installation Options](#datatable-installation-options) to either:
+check out the section: [Data Table Installation Options](#datatable-installation-options) to either:
 
 - [install a build wheel from Datatable's Appveyor CI/CD pipeline](#install-from-appveyor), or;
 - [build from source](#build-from-source)
