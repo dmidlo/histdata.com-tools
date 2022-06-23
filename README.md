@@ -9,18 +9,11 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 - [histdata.com-tools](#histdatacom-tools)
 - [Disclaimer](#disclaimer)
-- [Setup](#setup)
-  - [TLDR for all platforms](#tldr-for-all-platforms)
-  - [Vanilla Python Setup](#vanilla-python-setup)
-    - [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
-    - [Vanilla Windows Powershell](#vanilla-windows-powershell)
-  - [Anaconda Setup](#anaconda-setup)
-    - [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
-    - [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
 - [Usage](#usage)
   - [Show the Help and Options](#show-the-help-and-options)
   - [Basic Use](#basic-use)
   - [Available Formats](#available-formats)
+    - [CSV Dialect and Format Specifications](#csv-dialect-and-format-specifications)
   - [Date Ranges](#date-ranges)
     - ['Start' & 'Now' Keywords](#start-now-keywords)
   - [Multiple Datasets](#multiple-datasets)
@@ -30,6 +23,15 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
   - [API - Other Scripts, Modules, & Jupyter Support](#api-other-scripts-modules-jupyter-support)
     - [CLI Automation](#cli-automation)
     - [Jupyter and External Scripts](#jupyter-and-external-scripts)
+- [Setup](#setup)
+  - [TLDR for all platforms](#tldr-for-all-platforms)
+  - [Vanilla Python Setup](#vanilla-python-setup)
+    - [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
+    - [Vanilla Windows Powershell](#vanilla-windows-powershell)
+  - [Anaconda Setup](#anaconda-setup)
+    - [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
+    - [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
+  - [Data Table Installation Options](#datatable-installation-options)
 - [Roadmap](#roadmap)
 
 ---
@@ -42,244 +44,7 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 *If you find this tool helpful and would like to support future development, I'm in need of caffeine, feel free to [buy me coffee!](https://www.buymeacoffee.com/dmidlo)*
 
-## Setup
-
-### TLDR for all platforms
-
-#### Install the latest version of datatable
-
-- **this is a temporary fix until the datatable team updates PyPi. [See this issue](https://github.com/h2oai/datatable/issues/3268) for more details*
-
-- You will need a C++ compiler installed to build datatable from source
-
-##### MacOS XCode Command Line Tools
-
-- For **MacOS**, run `xcode-select --install` from your terminal and confirm the prompts for download and installation of the xcode command-line tools.
-
-##### Windows MSVC C++ Compiler
-
-- For **Windows**, you need to download and install the [Visual Studio Community Edition](https://visualstudio.microsoft.com/vs/community/) and choose the option `Desktop Development with C++`, then select install.
-
-###### Launch the Visual Studio command line environment (for Windows only)
-
-- Open either a `powershell`, `cmd`, or `Anaconda Prompt` terminal
-  - the setup scripts for the VS CLI environments are located in the `.\Common7\Tools\` directory of your Visual Studio installation directory
-    - e.g. `"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\"`
-- Run the VS CLI environment setup script
-  - for **Powershell**:
-    - `PS> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1"`
-  - for **CMD** and **Anaconda Prompt**:
-    - `> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\LaunchDevCmd.bat"`
-
-###### Tell the datatable setup where to find the MSVC C++ compiler
-
-- for **Powershell**:
-  - `PS> $env:DT_MSVC_PATH="$env:VSINSTALLDIR"+"VC\Tools\MSVC\"`
-- for **CMD** and **Anaconda Prompt**:
-  - `set DT_MSVC_PATH=%VSINSTALLDIR%VC\Tools\MSVC\`
-
-###### Return to Your Project's Directory
-
-The Visual Studio command line environment setup scripts change your directory, you'll need to find your way back to your project's directory.  I like to use the variable `%USERPROFILE%` to save myself some typing:
-
-*e.g.* `> cd %USERPROFILE%\Documents\projects\myproject`
-
-#### Activate Python Environment if you're using one
-
-refer to the **Create a Python Virtual Environment and activate it** steps outlined for your platform
-
-- [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
-- [Vanilla Windows Powershell](#vanilla-windows-powershell)
-- [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
-- [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
-
-#### Install datatable
-
-```shell
-pip install git+https://github.com/h2oai/datatable
-```
-
-#### Install histdatacom
-
-```sh
-pip install histdatacom
-```
-
-to install latest development version
-
-```sh
-pip install git+https://github.com/dmidlo/histdata.com-tools.git
-```
-
 ---
-
-#### Vanilla MacOS and Linux
-
-##### Create a new project directory and change to it
-
-```bash
-mkdir myproject && cd myproject && pwd
-```
-
-##### Create a Python Virtual Environment and activate it
-
-```bash
-python -m venv venv && source venv/bin/activate
-```
-
-##### Confirm Python Path and Version
-
-```bash
-which python && python --version
-```
-
-##### Build the latest version of datatable
-
-follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
-
-##### Install the histdata.com-tools package from PyPi
-
-```bash
-pip install histdatacom
-```
-
-##### Run `histdatacom` to view help message and Options
-
-```bash
-histdatacom -h
-```
-
-#### Vanilla Windows Powershell
-
----
-
-##### Launch a Powershell Terminal
-
-- Run as Administrator (right-click on shortcut and click Run as Admin...)
-
-##### Make sure python3.10 is in your system's executable path
-
-```powershell
-python --version
-```
-
-- should be already set if you clicked the checkbox when installing python 3.10
-- If not, you can run the following.
-  - you will need to relaunch powershell as admin.
-
-```powershell
-[Environment]::SetEnvironmentVariable("Path", "$env:Path;C:\Program Files\Python310")
-```
-
-##### Change the Execution Policy to Unrestricted
-
-```powershell
-Set-ExecutionPolicy Unrestricted -Force
-```
-
-##### Create a new directory and change to it
-
-```powershell
-New-Item -Path ".\" -Name "myproject" -ItemType "directory"; Set-Location .\myproject\
-```
-
-##### Create a Virtual Environment and activate it
-
-```powershell
-python -m venv venv; .\venv\Scripts\Activate.ps1
-```
-
-##### Confirm Path and Version
-
-```powershell
-Get-Command python | select Source; python --version
-```
-
-##### Install histdata.com-tools package from PyPi
-
-```powershell
-pip install histdatacom
-```
-
-##### Run `histdatacom` to view help message
-
-```powershell
-histdatacom -h
-```
-
-#### Anaconda Setup
-
-##### Anaconda MacOS and Linux
-
-###### Create a Project Directory and Change to it
-
-```shell
-mkdir myproject && cd myproject && pwd
-```
-
-###### Create a `Python 3.10` Anaconda environment with `conda` and activate it
-
-```shell
-conda create -n py310 python=3.10 && conda activate py310
-```
-
-###### Check Python Path and Version
-
-```shell
-which python && python --version
-```
-
-###### Build the latest version of datatable
-
-follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
-
-###### Install histdatacom package from PyPi
-
-```shell
-pip install histdatacom
-```
-
-###### Run histdatacom package to view help message
-
-```shell
-histdatacom -h
-```
-
-##### Anaconda Windows using the Anaconda Prompt
-
-###### Create a Directory and Change to it
-
-```shell
-mkdir myproject && cd myproject && echo %cd%
-```
-
-###### Create a `Python 3.10` Anaconda environment with `conda` and activate it
-
-```shell
-conda create -n py310 python=3.10 && conda activate py310
-```
-
-###### Check Python Path and Version
-
-```shell
-where python && python --version
-```
-
-###### Build the latest version of datatable
-
-follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
-
-###### Install histdatacom package from PyPi
-
-```shell
-pip install histdatacom
-```
-
-###### Run histdatacom package to view help message
-
-```shell
-histdatacom -h
-```
 
 ## Usage
 
@@ -291,7 +56,7 @@ The number one rule when using this tool is to be **MORE** specific with your in
 
 *It is likely the default behavior will be modified from its current state to discourage unnecessarily large requests.*
 
-**please submit feature requests and bug reports using this repository's issue tracker.*
+**please submit feature requests and bug reports using this repository's [issue tracker](https://github.com/dmidlo/histdata.com-tools/issues).*
 
 ### Show the help and options
 
@@ -328,6 +93,8 @@ options:
                         Directory Used to save data. default is "data" in the current directory
 ```
 
+---
+
 ### Basic Use
 
 #### Download and extract the current month's available EURUSD data for metatrader 4/5into the default data directory ./data
@@ -341,6 +108,8 @@ histdatacom -p eurusd -f metatrader -s now
 ```sh
 histdatacom -D -p usdcad -f metastock -s now
 ```
+
+---
 
 #### Available Formats
 
@@ -367,11 +136,17 @@ The formats available are:
 |tick-bid-quotes|ninjatrader|
 |tick-ask-quotes|ninjatrader|
 
+##### CSV Dialect and Format Specifications
+
+- *For Detailed specifications for the CSVs that the histdata.com repo provides see [histdata.com_data_specs.md](https://github.com/dmidlo/histdata.com-tools/blob/main/histdata.com_data_specs.md)*
+
 ##### To download 1-minute-bar-quotes for both metastock and excel
 
 ```sh
 histdatacom -p usdjpy -f metastock excel -s now 
 ```
+
+---
 
 #### Date Ranges
 
@@ -431,6 +206,8 @@ in the above example, no `-t --timeframe` flag was specified. This will return a
 histdatacom -p xagusd -f ascii -1-minute-bar-quotes -s 2019-04 -e now
 ```
 
+---
+
 ##### Multiple Datasets
 
 ##### multiple datasets can be requested in one command
@@ -442,6 +219,8 @@ this example with use the `-e --end_yearmonth` flag to request a range of data f
 ```txt
 histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
 ```
+
+---
 
 ##### CPU Utilization
 
@@ -455,6 +234,8 @@ One can set a cap on CPU Utilization with `-c --cpu_utilization`
 ```sh
 histdatacom -c medium -p udxusd -f metatrader -s 2015-04 -e 2016-04
 ```
+
+---
 
 ### Import to InfluxDB
 
@@ -480,9 +261,19 @@ influxdb:
   token: influx_user_token
 ```
 
+##### Download influxdb.yaml to your project's directory
+
+```shell
+curl "https://raw.githubusercontent.com/dmidlo/histdata.com-tools/main/influxdb.sample.yaml" --output influxdb.yaml
+```
+
+---
+
 ### API - Other Scripts, Modules, & Jupyter Support
 
 histdatacom also has an API to allow developers and to integrate the package into their own projects.  It can be used in one of two ways; The first being a simple interface to automate CLI interaction. The second is as an interface to work with the data directly in a notebook environment like Jupyter Notebooks.
+
+---
 
 #### CLI Automation
 
@@ -524,12 +315,6 @@ options.end_yearmonth = "now"
 options.cpu_utilization = 100
 ```
 
-##### pass the options to histdatacom (Jupyter Notebooks)
-
-```python
-histdatacom(options)  # (Jupyter)
-```
-
 - when a behavior flag is included, `histdatacom` assumes it is being used for `CLI` automation **exclusively** and does **not** provide a return value.
 
 at present, calling from another script or module is limited to using the `__name__=="__main__"` idiom.
@@ -538,6 +323,14 @@ at present, calling from another script or module is limited to using the `__nam
 if __name__=="__main__": 
    histdatacom(options)
 ```
+
+***Jupyter may be used normally***
+
+```python
+histdatacom(options)  # (Jupyter)
+```
+
+---
 
 #### Jupyter and External Scripts
 
@@ -705,10 +498,347 @@ at present, calling from another script or module is limited to using the `__nam
 
 ```python
 if __name__=="__main__": 
-   data = histdatacom(options)
+   histdatacom(options)
 ```
+
+***Jupyter may be used normally***
+
+```python
+histdatacom(options)  # (Jupyter)
+```
+
+---
+
+## Setup
+
+### TLDR for all platforms
+
+---
+
+#### Install the latest version of datatable
+
+- **this is a temporary fix until the datatable team updates PyPi. [See this issue](https://github.com/h2oai/datatable/issues/3268) for more details*
+
+check out the section: [Data Table Installation Options](#datatable-installation-options) to either:
+
+- [install a build wheel from Datatable's Appveyor CI/CD pipeline](#install-from-appveyor), or;
+- [build from source](#build-from-source)
+
+---
+
+#### Install histdatacom
+
+```sh
+pip install histdatacom
+```
+
+to install latest development version
+
+```sh
+pip install git+https://github.com/dmidlo/histdata.com-tools.git
+```
+
+---
+
+#### Vanilla MacOS and Linux
+
+##### Create a new project directory and change to it
+
+```bash
+mkdir myproject && cd myproject && pwd
+```
+
+##### Create a Python Virtual Environment and activate it
+
+```bash
+python -m venv venv && source venv/bin/activate
+```
+
+##### Confirm Python Path and Version
+
+```bash
+which python && python --version
+```
+
+##### Build the latest version of datatable
+
+follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
+
+##### Install the histdata.com-tools package from PyPi
+
+```bash
+pip install histdatacom
+```
+
+##### Run `histdatacom` to view help message and Options
+
+```bash
+histdatacom -h
+```
+
+---
+
+#### Vanilla Windows Powershell
+
+##### Launch a Powershell Terminal
+
+- Run as Administrator (right-click on shortcut and click Run as Admin...)
+
+##### Make sure python3.10 is in your system's executable path
+
+```powershell
+python --version
+```
+
+- should be already set if you clicked the checkbox when installing python 3.10
+- If not, you can run the following.
+  - you will need to relaunch powershell as admin.
+
+```powershell
+[Environment]::SetEnvironmentVariable("Path", "$env:Path;C:\Program Files\Python310")
+```
+
+##### Change the Execution Policy to Unrestricted
+
+```powershell
+Set-ExecutionPolicy Unrestricted -Force
+```
+
+##### Create a new directory and change to it
+
+```powershell
+New-Item -Path ".\" -Name "myproject" -ItemType "directory"; Set-Location .\myproject\
+```
+
+##### Create a Virtual Environment and activate it
+
+```powershell
+python -m venv venv; .\venv\Scripts\Activate.ps1
+```
+
+##### Confirm Path and Version
+
+```powershell
+Get-Command python | select Source; python --version
+```
+
+##### Build the latest version of datatable
+
+follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
+
+##### Install histdata.com-tools package from PyPi
+
+```powershell
+pip install histdatacom
+```
+
+##### Run `histdatacom` to view help message
+
+```powershell
+histdatacom -h
+```
+
+---
+
+#### Anaconda Setup
+
+---
+
+##### Anaconda MacOS and Linux
+
+###### Create a Project Directory and Change to it
+
+```shell
+mkdir myproject && cd myproject && pwd
+```
+
+###### Create a `Python 3.10` Anaconda environment with `conda` and activate it
+
+```shell
+conda create -n py310 python=3.10 && conda activate py310
+```
+
+###### Check Python Path and Version
+
+```shell
+which python && python --version
+```
+
+###### Build the latest version of datatable
+
+follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
+
+###### Install histdatacom package from PyPi
+
+```shell
+pip install histdatacom
+```
+
+###### Run histdatacom package to view help message
+
+```shell
+histdatacom -h
+```
+
+---
+
+
+##### Anaconda Windows using the Anaconda Prompt
+
+###### Create a Directory and Change to it
+
+```shell
+mkdir myproject && cd myproject && echo %cd%
+```
+
+###### Create a `Python 3.10` Anaconda environment with `conda` and activate it
+
+```shell
+conda create -n py310 python=3.10 && conda activate py310
+```
+
+###### Check Python Path and Version
+
+```shell
+where python && python --version
+```
+
+###### Build the latest version of datatable
+
+follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
+
+###### Install histdatacom package from PyPi
+
+```shell
+pip install histdatacom
+```
+
+###### Run histdatacom package to view help message
+
+```shell
+histdatacom -h
+```
+
+---
+
+### Datatable Installation Options
+
+---
+
+#### Install from Appveyor
+
+Build wheels are pre-compiled versions of datatable, and would easily be the preferred route of installation while we wait for the datatable team to provide an official Python 3.10 package on PyPi.  The only drawback is documenting the procedure as the wheel's URL expires monthly thus this documentation could go out of date rather quickly...
+
+##### Activate Python Environment if you're using one
+
+refer to the **Create a Python Virtual Environment and activate it** steps outlined for your platform
+
+- [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
+- [Vanilla Windows Powershell](#vanilla-windows-powershell)
+- [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
+- [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
+
+##### Get the Build Wheel's URL for your platform
+
+To find the latest build wheels for datatable, go to dataable's [Appveyor CI/CD Instance](https://ci.appveyor.com/project/h2oops/datatable):
+
+- Select the Platform you're installing for:
+  - ![image](https://user-images.githubusercontent.com/1161295/175226383-5211e4f9-9718-4f0b-9c00-713067f62f02.png)
+- Select `"Artifacts"` and right/option-click on the filename that contains `cp310`. e.g. `dist\datatable-1.1.0a2157-cp310-cp310-win_amd64.whl`
+- Select `"Copy Link Address"` from your browser's context menu to copy the wheel's URL
+  - ![image](https://user-images.githubusercontent.com/1161295/175226442-ffcf8370-31bb-426c-a8e9-09ab29db91e0.png)
+
+##### Install datatable using pip with the wheel's URL from Appveyor
+
+e.g. `pip install {https://APPVEYOR DATATABLE BUILD WHEEL URL.whl}`
+
+---
+
+#### Build from Source
+
+- You will need a C++ compiler installed to build datatable from source
+
+---
+
+##### MacOS XCode Command Line Tools
+
+- For **MacOS**, run `xcode-select --install` from your terminal and confirm the prompts for download and installation of the xcode command-line tools.
+
+---
+
+##### Windows MSVC C++ Compiler
+
+- For **Windows**, you need to download and install the [Visual Studio Community Edition](https://visualstudio.microsoft.com/vs/community/) and choose the option `Desktop Development with C++`, then select install.
+
+---
+
+###### Launch the Visual Studio command line environment (for Windows only)
+
+- Open either a `powershell`, `cmd`, or `Anaconda Prompt` terminal
+  - the setup scripts for the VS CLI environments are located in the `.\Common7\Tools\` directory of your Visual Studio installation directory
+    - e.g. `"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\"`
+- Run the VS CLI environment setup script
+  - for **Powershell**:
+    - `PS> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1"`
+  - for **CMD** and **Anaconda Prompt**:
+    - `> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\LaunchDevCmd.bat"`
+
+---
+
+###### Tell the datatable setup where to find the MSVC C++ compiler
+
+- for **Powershell**:
+  - `PS> $env:DT_MSVC_PATH="$env:VSINSTALLDIR"+"VC\Tools\MSVC\"`
+- for **CMD** and **Anaconda Prompt**:
+  - `set DT_MSVC_PATH=%VSINSTALLDIR%VC\Tools\MSVC\`
+
+---
+
+###### Return to Your Project's Directory
+
+The Visual Studio command line environment setup scripts change your directory, you'll need to find your way back to your project's directory.  I like to use the variable `%USERPROFILE%` to save myself some typing:
+
+*e.g.* `> cd %USERPROFILE%\Documents\projects\myproject`
+
+---
+
+##### Activate Python Environment if you're using one
+
+refer to the **Create a Python Virtual Environment and activate it** steps outlined for your platform
+
+- [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
+- [Vanilla Windows Powershell](#vanilla-windows-powershell)
+- [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
+- [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
+
+---
+
+##### Install datatable
+
+```shell
+pip install git+https://github.com/h2oai/datatable
+```
+
+---
 
 ## Roadmap
 
+- [~~Add Support for Anaconda~~](https://github.com/dmidlo/histdata.com-tools/issues/28)
+- [Implement MyPy static typing checking](https://github.com/dmidlo/histdata.com-tools/issues/16)
+- [Implement UnitTesting with PyTest](https://github.com/dmidlo/histdata.com-tools/issues/9)
+- [Create Binary Distributions](https://github.com/dmidlo/histdata.com-tools/issues/10)
+  - See about packaging for different operating systems
+    - deb/rpm packaging
+    - NuGet/Chocolatey
+    - MacPorts/Homebrew
+- [docker image](https://github.com/dmidlo/histdata.com-tools/issues/11)
+- [Create Down-sampling to Standard Candlestick Timeframes](https://github.com/dmidlo/histdata.com-tools/issues/18)
+- [Fix terminate on ctrl-c multiprocessing KeyboardInterupt](https://github.com/dmidlo/histdata.com-tools/issues/15)
+- [Look at replacing beautifulsoup with html parser](https://github.com/dmidlo/histdata.com-tools/issues/19)
+- [Refactor to make use of globals more readable](https://github.com/dmidlo/histdata.com-tools/issues/14)
+- [add -v -vv and -vvv flags](https://github.com/dmidlo/histdata.com-tools/issues/13)
+- [Change Record statuses to Enum](https://github.com/dmidlo/histdata.com-tools/issues/20)
+- [Add -S —set-status flag](https://github.com/dmidlo/histdata.com-tools/issues/21)
+- [Create a central place for exceptions](https://github.com/dmidlo/histdata.com-tools/issues/22)
 - Add the ability to import an order book to influxdb
 - Add a --reset-cache flag to reset all or specified year-month range
