@@ -261,6 +261,12 @@ influxdb:
   token: influx_user_token
 ```
 
+##### Download influxdb.yaml to your project's directory
+
+```shell
+curl "https://raw.githubusercontent.com/dmidlo/histdata.com-tools/main/influxdb.sample.yaml" --output influxdb.yaml
+```
+
 ---
 
 ### API - Other Scripts, Modules, & Jupyter Support
