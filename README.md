@@ -757,22 +757,22 @@ pip install git+https://github.com/h2oai/datatable
 
 ## Roadmap
 
-- [~~Add Support for Anaconda~~](#28)
-- [Implement MyPy static typing checking](#16)
-- [Implement UnitTesting with PyTest](#9)
-- [Create Binary Distributions](#10)
+- [~~Add Support for Anaconda~~](https://github.com/dmidlo/histdata.com-tools/issues/28)
+- [Implement MyPy static typing checking](https://github.com/dmidlo/histdata.com-tools/issues/16)
+- [Implement UnitTesting with PyTest](https://github.com/dmidlo/histdata.com-tools/issues/9)
+- [Create Binary Distributions](https://github.com/dmidlo/histdata.com-tools/issues/10)
   - See about packaging for different operating systems
     - deb/rpm packaging
     - NuGet/Chocolatey
     - MacPorts/Homebrew
-- [docker image](#11)
-- [Create Down-sampling to Standard Candlestick Timeframes](#18)
-- [Fix terminate on ctrl-c multiprocessing KeyboardInterupt](#15)
-- [Look at replacing beautifulsoup with html parser](#19)
-- [Refactor to make use of globals more readable](#14)
-- [add -v -vv and -vvv flags](#13)
-- [Change Record statuses to Enum](#20)
-- [Add -S —set-status flag](#21)
-- [Create a central place for exceptions](#22)
+- [docker image](https://github.com/dmidlo/histdata.com-tools/issues/11)
+- [Create Down-sampling to Standard Candlestick Timeframes](https://github.com/dmidlo/histdata.com-tools/issues/18)
+- [Fix terminate on ctrl-c multiprocessing KeyboardInterupt](https://github.com/dmidlo/histdata.com-tools/issues/15)
+- [Look at replacing beautifulsoup with html parser](https://github.com/dmidlo/histdata.com-tools/issues/19)
+- [Refactor to make use of globals more readable](https://github.com/dmidlo/histdata.com-tools/issues/14)
+- [add -v -vv and -vvv flags](https://github.com/dmidlo/histdata.com-tools/issues/13)
+- [Change Record statuses to Enum](https://github.com/dmidlo/histdata.com-tools/issues/20)
+- [Add -S —set-status flag](https://github.com/dmidlo/histdata.com-tools/issues/21)
+- [Create a central place for exceptions](https://github.com/dmidlo/histdata.com-tools/issues/22)
 - Add the ability to import an order book to influxdb
 - Add a --reset-cache flag to reset all or specified year-month range
