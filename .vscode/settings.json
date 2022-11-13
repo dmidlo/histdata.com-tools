@@ -75,5 +75,31 @@
         "xauusd",
         "YEARMONTH",
         "ymdt"
+    ],
+    "jupyter.kernels.filter": [
+        {
+            "path": "/Users/davidmidlo/opt/anaconda3/bin/python",
+            "type": "pythonEnvironment"
+        },
+        {
+            "path": "/opt/local/bin/python",
+            "type": "pythonEnvironment"
+        },
+        {
+            "path": "/usr/local/bin/python3",
+            "type": "pythonEnvironment"
+        },
+        {
+            "path": "/usr/local/bin/python3.9",
+            "type": "pythonEnvironment"
+        },
+        {
+            "path": "/usr/bin/python3",
+            "type": "pythonEnvironment"
+        },
+        {
+            "path": "/Users/davidmidlo/opt/anaconda3/envs/venv/bin/python",
+            "type": "pythonEnvironment"
+        }
     ]
 }

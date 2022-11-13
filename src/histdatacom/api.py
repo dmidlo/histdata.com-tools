@@ -1,3 +1,5 @@
+"""histdatacom.api
+"""
 import itertools
 import sys
 import os
@@ -8,6 +10,7 @@ from rich.progress import TimeElapsedColumn
 import datatable as dt
 from datatable import f
 from datatable import update
+from histdatacom.records import Record
 from histdatacom.urls import _URLs
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.concurrency import ProcessPool
@@ -25,7 +28,14 @@ class _API():
         records_next = records_next_
 
     @classmethod
-    def create_jay(cls, record, args):
+    def create_jay(cls, record: Record, args: dict) -> None:
+        """creates a datatable file, saves it in dt's native jay format
+           using and updating relevant information in a Record of work.
+
+        Args:
+            record (Record): a histdatacom.records.Record
+            args (dict): args received from argparse
+        """
 
         zip_path = record.data_dir + record.zip_filename
         csv_path = record.data_dir + record.csv_filename
@@ -38,7 +48,7 @@ class _API():
         jay_path = record.data_dir + record.jay_filename
         cls.export_datatable_to_jay(file_data, jay_path)
 
-        record.jay_linecount = file_data.nrows
+        record.jay_line_count = file_data.nrows
         record.jay_start = cls.extract_single_value_from_frame(file_data, 0, "datetime")
         record.jay_end = cls.extract_single_value_from_frame(file_data,
                                                              file_data.nrows - 1,
@@ -46,22 +56,36 @@ class _API():
         record.write_info_file(base_dir=args['default_download_dir'])
 
     @classmethod
-    def test_for_jay_or_create(cls, record, args):
+    def test_for_jay_or_create(cls, record: Record, args: dict) -> None:
+        """a helper method to ensure the existence of a Record's jay file
+           prior to further processing from the API or Influx classes
+
+        Args:
+            record (Record): a histdatacom.records.Record
+            args (dict): args received from argparse
+        """
+
         if str.lower(record.data_format) == "ascii" and record.data_timeframe in ["T", "M1"]:
             jay_path = f"{record.data_dir}.data"
-            if os.path.exists(jay_path):
-                pass
-            elif "CSV" in record.status:
-                cls.create_jay(record, args)
-            else:
-                res = _URLs.request_file(record, args)
-                record.zip_filename = res.headers["Content-Disposition"].split(";")[1].split("=")[1]
-                _URLs.write_file(record, res.content)
-
+            if not os.path.exists(jay_path):
+                if "CSV" not in record.status:
+                    _URLs.get_zip_file(record, args)
                 cls.create_jay(record, args)
 
     @classmethod
-    def validate_jay(cls, record, args, records_current, records_next):
+    def validate_jay(cls, record: Record, args: dict, records_current, records_next) -> None:
+        """A Wrapper to be passed to an individual process within the process pool
+           to test for or create a datatable jay file based on a Record of Work's
+           information.  Receives a unit of work from the pool, performs validation,
+           readies the Record for further processing, and marks the current work as
+           complete.
+
+        Args:
+            record (Record): a Histdatacom.records.Record
+            args (dict): arguments received from argparse
+            records_current (multiprocessing.managers.AutoProxy[Record]): Current Work Queue
+            records_next (multiprocessing.managers.AutoProxy[Record]): Queue for Further Work
+        """
         try:
             cls.test_for_jay_or_create(record, args)
             records_next.put(record)
@@ -75,7 +99,7 @@ class _API():
     def validate_jays(self, records_current, records_next):
         pool = ProcessPool(self.validate_jay,
                             self.args,
-                            "Staging", "datafiles...",
+                            "Staging", "data files...",
                             get_pool_cpu_count(self.args['cpu_utilization']))
         pool(records_current, records_next)
 
@@ -114,9 +138,7 @@ class _API():
         for tp_set in sets_to_merge:
             self.merge_records(tp_set)
 
-        if len(sets_to_merge) == 1:
-            return sets_to_merge[0]["data"]
-        return sets_to_merge
+        return sets_to_merge[0]["data"] if len(sets_to_merge) == 1 else sets_to_merge
 
     def merge_records(self, tp_set_dict):
         match tp_set_dict['timeframe']:
@@ -128,11 +150,11 @@ class _API():
         tp_set_dict['records'].sort(key=lambda record: record.jay_start)
 
         records_count = len(tp_set_dict)
-        with Progress(TextColumn(text_format=f"[cyan]Merging {records_count} records..."),
+        with Progress(TextColumn(text_format="[cyan]Merging records..."),
                         BarColumn(),
                         "[progress.percentage]{task.percentage:>3.0f}%",
                         TimeElapsedColumn()) as progress:
-            task_id = progress.add_task("extract", total=records_count)
+            progress.add_task("merge", total=records_count)
 
             for m_record in tp_set_dict['records']:
                 jay_path = m_record.data_dir + m_record.jay_filename
