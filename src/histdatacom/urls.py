@@ -99,10 +99,8 @@ class _URLs:
                          or os.path.exists(record.data_dir + record.csv_filename)
                          or os.path.exists(record.data_dir + record.jay_filename))
                 ):
-                res = self.request_file(record, args)
-                record.zip_filename = res.headers["Content-Disposition"].split(";")[1].split("=")[1]
-                self.write_file(record, res.content)
 
+                self.get_zip_file(record, args)
                 record.status = "CSV_ZIP" if record.status == "URL_VALID" else record.status
                 record.write_info_file(base_dir=args['default_download_dir'])
 
@@ -196,6 +194,18 @@ class _URLs:
         if month == 0:
             month = 1
         return month
+
+    @classmethod
+    def get_zip_file_name(cls, response):
+        return response.headers["Content-Disposition"]\
+            .split(";")[1]\
+            .split("=")[1]
+
+    @classmethod
+    def get_zip_file(cls, record, args):
+        res = cls.request_file(record, args)
+        record.zip_filename = cls.get_zip_file_name(res)
+        cls.write_file(record, res.content)
 
     @classmethod
     def generate_form_urls(cls,
