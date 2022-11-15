@@ -116,7 +116,7 @@ class _URLs:
             records_current.task_done()
 
     @classmethod
-    def request_file(cls, record, args):
+    def request_file(cls, record: Record, args: dict) -> requests.Response:
         post_headers = args['post_headers'].copy()
         post_headers["Referer"] = record.url
         return requests.post("http://www.histdata.com/get.php",
@@ -129,7 +129,7 @@ class _URLs:
                              headers=post_headers)
 
     @classmethod
-    def write_file(cls, record, content):
+    def write_file(cls, record: Record, content: bytes) -> None:
         zip_path = record.data_dir + record.zip_filename
         with open(zip_path, "wb") as zip_file:
             zip_file.write(content)
@@ -196,13 +196,14 @@ class _URLs:
         return month
 
     @classmethod
-    def get_zip_file_name(cls, response):
-        return response.headers["Content-Disposition"]\
+    def get_zip_file_name(cls, response: requests.Response) -> str:
+        zip_file_name: str = response.headers["Content-Disposition"]\
             .split(";")[1]\
             .split("=")[1]
+        return zip_file_name
 
     @classmethod
-    def get_zip_file(cls, record, args):
+    def get_zip_file(cls, record: Record, args: dict) -> None:
         res = cls.request_file(record, args)
         record.zip_filename = cls.get_zip_file_name(res)
         cls.write_file(record, res.content)
