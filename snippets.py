@@ -57,3 +57,33 @@
 # histdatacom -I -p xauusd xauaud xauchf bcousd wtiusd xaueur xagusd xaugbp -f ascii -t tick-data-quotes -s start -e now -c low
 # histdatacom -I -p grxeur auxaud frxeur hkxhkd spxusd jpxjpy udxusd -f ascii -t tick-data-quotes -s start -e now -c low
 # histdatacom -I -p nsxusd ukxgbp etxeur -f ascii -t tick-data-quotes -s start -e now -c low
+
+import histdatacom
+from histdatacom.options import Options
+from multiprocessing import freeze_support
+options = Options()
+
+options.api_return_type = "datatable"  # "datatable", "pandas", or "arrow"
+options.formats = {"ascii"}  # Must be {"ascii"}
+options.timeframes = {"1-minute-bar-quotes",}  # can be tick-data-quotes or 1-minute-bar-quotes
+options.pairs = {"eurusd"}
+options.start_yearmonth = "2020-01"
+options.end_yearmonth = "now"
+options.cpu_utilization = "high"
+
+
+def main():
+    data = histdatacom(options)  # (Jupyter)
+
+
+    print(data)
+
+    # list
+    # pandas.core.frame.DataFrame
+    # datatable.Frame
+    # pyarrow.lib.Table
+
+
+
+if __name__ == '__main__':
+    main()
