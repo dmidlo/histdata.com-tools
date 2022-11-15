@@ -81,7 +81,9 @@ setup(
         'rx',
         'argparse',
         'pytz',
-        'ipywidgets'
+        'ipywidgets',
+        'pyarrow',
+        'pandas'
     ],
     extras_require={
         'dev': [
