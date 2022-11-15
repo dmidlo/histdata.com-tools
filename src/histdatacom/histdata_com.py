@@ -1,4 +1,7 @@
 import sys
+from pyarrow import Table
+from datatable import Frame
+from pandas import DataFrame
 from histdatacom.cli import ArgParser
 from histdatacom.options import Options
 from histdatacom.utils import set_working_data_dir
@@ -76,7 +79,7 @@ class _HistDataCom:
                                     self.csv_chunks_queue)
 
 
-def main(options=None):
+def main(options: Options | None=None) -> list | Frame | DataFrame | Table:
     if not options:
         options = Options()
         QueueManager(options)(_HistDataCom)
