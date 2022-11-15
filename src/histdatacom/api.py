@@ -10,22 +10,26 @@ from rich.progress import TimeElapsedColumn
 import datatable as dt
 from datatable import f
 from datatable import update
+from datatable import Frame
+from pandas.core.frame import DataFrame
+from pyarrow import Table
 from histdatacom.records import Record
+from histdatacom.records import Records
 from histdatacom.urls import _URLs
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.concurrency import ProcessPool
 dt.options.progress.enabled = False
 
 class _API():
-    def __init__(self, args_, records_current_, records_next_):
+    def __init__(self, args_: dict, records_current_: Records, records_next_: Records):
         # setting relationship to global outer parent
         self.args = args_
 
         global records_current
-        records_current = records_current_
+        records_current = records_current_ # type: ignore
 
         global records_next
-        records_next = records_next_
+        records_next = records_next_ # type: ignore
 
     @classmethod
     def create_jay(cls, record: Record, args: dict) -> None:
@@ -73,7 +77,10 @@ class _API():
                 cls.create_jay(record, args)
 
     @classmethod
-    def validate_jay(cls, record: Record, args: dict, records_current, records_next) -> None:
+    def validate_jay(cls, record: Record,
+                          args: dict,
+                          records_current: Records,
+                          records_next: Records) -> None:
         """A Wrapper to be passed to an individual process within the process pool
            to test for or create a datatable jay file based on a Record of Work's
            information.  Receives a unit of work from the pool, performs validation,
@@ -83,8 +90,10 @@ class _API():
         Args:
             record (Record): a Histdatacom.records.Record
             args (dict): arguments received from argparse
-            records_current (multiprocessing.managers.AutoProxy[Record]): Current Work Queue
-            records_next (multiprocessing.managers.AutoProxy[Record]): Queue for Further Work
+            records_current (multiprocessing.managers.AutoProxy[Record]):
+                Current Work Records Queue
+            records_next (multiprocessing.managers.AutoProxy[Record]):
+                Records Queue for Further Work
         """
         try:
             cls.test_for_jay_or_create(record, args)
@@ -96,14 +105,23 @@ class _API():
         finally:
             records_current.task_done()
 
-    def validate_jays(self, records_current, records_next):
+    def validate_jays(self, records_current: Records, records_next: Records) -> None:
+        """Initializes a process pool and calls self.validate_jay against
+           a Queue of records.
+
+        Args:
+            records_current (multiprocessing.managers.AutoProxy[Record]):
+                Current Work Records Queue
+            records_next (multiprocessing.managers.AutoProxy[Record]):
+                Records Queue for Further Work
+        """
         pool = ProcessPool(self.validate_jay,
                             self.args,
                             "Staging", "data files...",
                             get_pool_cpu_count(self.args['cpu_utilization']))
         pool(records_current, records_next)
 
-    def merge_jays(self, records_current):
+    def merge_jays(self, records_current: Records) -> list | Frame | DataFrame | Table:
 
         records_to_merge = []
         pairs = []
@@ -112,7 +130,7 @@ class _API():
             record = records_current.get()
 
             if record is None:
-                return
+                break
 
             if (record.jay_filename == ".data"
             and os.path.exists(record.data_dir + record.jay_filename)):
@@ -140,7 +158,7 @@ class _API():
 
         return sets_to_merge[0]["data"] if len(sets_to_merge) == 1 else sets_to_merge
 
-    def merge_records(self, tp_set_dict):
+    def merge_records(self, tp_set_dict: dict) -> None:
         match tp_set_dict['timeframe']:
             case "T":
                 merged = dt.Frame(names=["datetime", "bid", "ask", "vol"])
@@ -169,11 +187,11 @@ class _API():
                 tp_set_dict['data'] = merged.to_pandas()
 
     @classmethod
-    def extract_single_value_from_frame(cls, frame, row, column):
+    def extract_single_value_from_frame(cls, frame: DataFrame, row: int, column: str) -> int:
         return int(frame[row, column])
 
     @classmethod
-    def import_file_to_datatable(cls, record, zip_path):
+    def import_file_to_datatable(cls, record: Record, zip_path: str) -> Frame:
         try:
             match record.data_timeframe:
                 case "M1":
@@ -217,11 +235,10 @@ class _API():
             sys.exit(err)
 
     @classmethod
-    def export_datatable_to_jay(cls, data_frame, file_path):
+    def export_datatable_to_jay(cls, data_frame: DataFrame, file_path: str) -> None:
         data_path = file_path
         data_frame.to_jay(data_path)
-        return 0
 
     @classmethod
-    def import_jay_data(cls, jay_path):
+    def import_jay_data(cls, jay_path: str) -> Frame:
         return dt.fread(jay_path)

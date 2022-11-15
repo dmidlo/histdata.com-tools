@@ -15,6 +15,7 @@ from rich.progress import TextColumn
 from rich.progress import BarColumn
 from rich.progress import TimeElapsedColumn
 from histdatacom.records import Records
+from typing import Callable
 
 def init_counters(records_current_, records_next_, args_, csv_chunks_queue_=None):
     global records_current
@@ -79,12 +80,12 @@ class ThreadPool():
 
 
 class ProcessPool():
-    def __init__(self, exec_func, 
-                 args,
-                 progress_pre_text, progress_post_text,
-                 cpu_count,
-                 join=True,
-                 dump=True):
+    def __init__(self, exec_func: Callable,
+                 args: dict,
+                 progress_pre_text: str, progress_post_text: str,
+                 cpu_count: int,
+                 join: bool=True,
+                 dump: bool=True) -> None:
 
         self.exec_func = exec_func
         self.args = args
@@ -95,7 +96,9 @@ class ProcessPool():
         self.dump = dump
 
 
-    def __call__(self, records_current, records_next, csv_chunks_queue=None):
+    def __call__(self, records_current: Records,
+                       records_next: Records,
+                       csv_chunks_queue: Records=None) -> None:
 
         records_count = records_current.qsize()
         with Progress(TextColumn(text_format=f"[cyan]{self.progress_pre_text} {records_count} {self.progress_post_text}."),
@@ -144,7 +147,7 @@ class ProcessPool():
         if self.dump:
             records_next.dump_to_queue(records_current)
 
-def get_pool_cpu_count(count=None):
+def get_pool_cpu_count(count: str | int | None=None) -> int:
 
     try:
         real_vcpu_count = cpu_count()

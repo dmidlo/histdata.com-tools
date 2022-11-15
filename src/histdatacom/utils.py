@@ -22,7 +22,7 @@ def get_query_string(url):
     return url.split('?')[1].split('/')
 
 
-def create_full_path(path_str):
+def create_full_path(path_str: str) -> None:
     if not os.path.exists(path_str):
         os.makedirs(path_str)
 
