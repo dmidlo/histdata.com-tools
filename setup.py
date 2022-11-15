@@ -11,7 +11,7 @@ import os.path
 from setuptools import setup
 from setuptools import find_packages
 
-def read(rel_path: str) -> codecs.StreamReaderWriter:
+def read(rel_path: str) -> str:
     """reads the contents of a file
 
     Args:
@@ -85,7 +85,12 @@ setup(
     ],
     extras_require={
         'dev': [
-            'pytest'
+            'pytest',
+            'mypy',
+            'types-setuptools',
+            'pandas-stubs',
+            'types-beautifulsoup4',
+            'influxdb-pytest-plugin'
         ]
     },
     classifiers=[
