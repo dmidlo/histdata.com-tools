@@ -12,7 +12,7 @@ from histdatacom.utils import create_full_path
 
 
 class Record:
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         self.url = kwargs.get("url", "")
         self.status = kwargs.get("status", "")
         self.encoding = kwargs.get("encoding", "")
@@ -89,7 +89,7 @@ class Record:
             print(err)
             sys.exit()
 
-    def write_info_file(self, base_dir=""):
+    def write_info_file(self, base_dir: str="") -> None:
         try:
             if self.data_dir == "":
                 if base_dir != "":
@@ -108,7 +108,7 @@ class Record:
             print(err)
             sys.exit()
 
-    def delete_info_file(self):
+    def delete_info_file(self) -> None:
         if os.path.exists(f"{self.data_dir}.info"):
             os.remove(f"{self.data_dir}.info")
 
