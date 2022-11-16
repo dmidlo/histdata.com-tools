@@ -64,6 +64,7 @@ from multiprocessing import freeze_support
 options = Options()
 
 options.api_return_type = "datatable"  # "datatable", "pandas", or "arrow"
+#options.extract_csvs = True
 options.formats = {"ascii"}  # Must be {"ascii"}
 options.timeframes = {"1-minute-bar-quotes",}  # can be tick-data-quotes or 1-minute-bar-quotes
 options.pairs = {"eurusd"}

@@ -13,12 +13,12 @@ from histdatacom.fx_enums import get_valid_format_timeframes
 from histdatacom.records import Record
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.concurrency import ThreadPool
+from histdatacom import config
 
 
 class _URLs:
-    def __init__(self, args, records_current_, records_next_):
+    def __init__(self, records_current_, records_next_):
         # setting relationship to global outer parent
-        self.args = args
 
         global records_current
         records_current = records_current_
@@ -26,8 +26,8 @@ class _URLs:
         global records_next
         records_next = records_next_
 
-        self.args["base_url"] = 'http://www.histdata.com/download-free-forex-data/'
-        self.args["post_headers"] = {
+        config.args["base_url"] = 'http://www.histdata.com/download-free-forex-data/'
+        config.args["post_headers"] = {
             "Host": "www.histdata.com",
             "Connection": "keep-alive",
             "Content-Length": "101",
@@ -42,18 +42,18 @@ class _URLs:
             "Accept-Language": "en-US,en;q=0.9"}
 
     def populate_initial_queue(self, records_current, records_next):
-        for url in self.generate_form_urls(self.args["start_yearmonth"],
-                                           self.args["end_yearmonth"],
-                                           self.args['formats'],
-                                           self.args["pairs"],
-                                           self.args['timeframes'],
-                                           self.args["base_url"]):
+        for url in self.generate_form_urls(config.args["start_yearmonth"],
+                                           config.args["end_yearmonth"],
+                                           config.args['formats'],
+                                           config.args["pairs"],
+                                           config.args['timeframes'],
+                                           config.args["base_url"]):
             record = Record()
             record(url=url, status="URL_NEW")
-            record.restore_momento(base_dir=self.args['default_download_dir'])
+            record.restore_momento(base_dir=config.args['default_download_dir'])
 
             if record.status != "URL_NO_REPO_DATA":
-                record.write_info_file(base_dir=self.args['default_download_dir'])
+                record.write_info_file(base_dir=config.args['default_download_dir'])
                 records_next.put(record)
 
         records_next.dump_to_queue(records_current)
@@ -85,9 +85,9 @@ class _URLs:
     def validate_urls(self, records_current, records_next):
 
         pool = ThreadPool(self.validate_url,
-                          self.args,
+                          config.args,
                           "Validating", "URLs...",
-                          get_pool_cpu_count(self.args['cpu_utilization']) * 3)
+                          get_pool_cpu_count(config.args['cpu_utilization']) * 3)
 
         pool(records_current, records_next)
 
@@ -137,9 +137,9 @@ class _URLs:
     def download_zips(self, records_current, records_next):
 
         pool = ThreadPool(self.download_zip,
-                          self.args,
+                          config.args,
                           "Downloading", "ZIPs...",
-                          get_pool_cpu_count(self.args['cpu_utilization']) * 3)
+                          get_pool_cpu_count(config.args['cpu_utilization']) * 3)
 
         pool(records_current, records_next)
 

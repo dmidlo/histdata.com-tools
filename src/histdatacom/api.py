@@ -18,12 +18,12 @@ from histdatacom.records import Records
 from histdatacom.urls import _URLs
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.concurrency import ProcessPool
+from histdatacom import config
 dt.options.progress.enabled = False
 
 class _API():
-    def __init__(self, args_: dict, records_current_: Records, records_next_: Records):
+    def __init__(self, records_current_: Records, records_next_: Records):
         # setting relationship to global outer parent
-        self.args = args_
 
         global records_current
         records_current = records_current_ # type: ignore
@@ -116,9 +116,9 @@ class _API():
                 Records Queue for Further Work
         """
         pool = ProcessPool(self.validate_jay,
-                            self.args,
+                            config.args,
                             "Staging", "data files...",
-                            get_pool_cpu_count(self.args['cpu_utilization']))
+                            get_pool_cpu_count(config.args['cpu_utilization']))
         pool(records_current, records_next)
 
     def merge_jays(self, records_current: Records) -> list | Frame | DataFrame | Table:
@@ -179,12 +179,13 @@ class _API():
                 jay_data = self.import_jay_data(jay_path)
                 merged.rbind(jay_data)
 
-            if self.args['api_return_type'] == "datatable":
-                tp_set_dict['data'] = merged
-            if self.args['api_return_type'] == "arrow":
-                tp_set_dict['data'] = merged.to_arrow()
-            if self.args['api_return_type'] == "pandas":
-                tp_set_dict['data'] = merged.to_pandas()
+            match config.args['api_return_type']:
+                case "datatable":
+                    tp_set_dict['data'] = merged
+                case "arrow":
+                    tp_set_dict['data'] = merged.to_arrow()
+                case "pandas":
+                    tp_set_dict['data'] = merged.to_pandas()
 
     @classmethod
     def extract_single_value_from_frame(cls, frame: DataFrame, row: int, column: str) -> int:

@@ -4,13 +4,12 @@ import zipfile
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.concurrency import ProcessPool
 from rich import print
+from histdatacom import config
 
 
 class _CSVs:
-    def __init__(self, args_, records_current_, records_next_):
+    def __init__(self, records_current_, records_next_):
         # setting relationship to global outer parent
-        self.args = args_
-
         global records_current
         records_current = records_current_
 
@@ -40,8 +39,8 @@ class _CSVs:
     def extract_csvs(self, records_current, records_next):
 
         pool = ProcessPool(self.extract_csv,
-                           self.args,
+                           config.args,
                            "Extracting", "CSVs...",
-                           get_pool_cpu_count(self.args['cpu_utilization']))
+                           get_pool_cpu_count(config.args['cpu_utilization']))
 
         pool(records_current, records_next)
