@@ -8,14 +8,6 @@ from histdatacom import config
 
 
 class _CSVs:
-    def __init__(self, records_current_, records_next_):
-        # setting relationship to global outer parent
-        global records_current
-        records_current = records_current_
-
-        global records_next
-        records_next = records_next_
-
     def extract_csv(self, record, args, records_current, records_next):
         try:
             if "CSV_ZIP" in record.status:
@@ -36,11 +28,11 @@ class _CSVs:
         finally:
             records_current.task_done()
 
-    def extract_csvs(self, records_current, records_next):
+    def extract_csvs(self):
 
         pool = ProcessPool(self.extract_csv,
                            config.args,
                            "Extracting", "CSVs...",
                            get_pool_cpu_count(config.args['cpu_utilization']))
 
-        pool(records_current, records_next)
+        pool(config.current_queue, config.next_queue)

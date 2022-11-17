@@ -22,15 +22,6 @@ from histdatacom import config
 dt.options.progress.enabled = False
 
 class _API():
-    def __init__(self, records_current_: Records, records_next_: Records):
-        # setting relationship to global outer parent
-
-        global records_current
-        records_current = records_current_ # type: ignore
-
-        global records_next
-        records_next = records_next_ # type: ignore
-
     @classmethod
     def create_jay(cls, record: Record, args: dict) -> None:
         """creates a datatable file, saves it in dt's native jay format
@@ -105,7 +96,7 @@ class _API():
         finally:
             records_current.task_done()
 
-    def validate_jays(self, records_current: Records, records_next: Records) -> None:
+    def validate_jays(self) -> None:
         """Initializes a process pool and calls self.validate_jay against
            a Queue of records.
 
@@ -119,15 +110,15 @@ class _API():
                             config.args,
                             "Staging", "data files...",
                             get_pool_cpu_count(config.args['cpu_utilization']))
-        pool(records_current, records_next)
+        pool(config.current_queue, config.next_queue)
 
-    def merge_jays(self, records_current: Records) -> list | Frame | DataFrame | Table:
+    def merge_jays(self) -> list | Frame | DataFrame | Table:
 
         records_to_merge = []
         pairs = []
         timeframes = []
-        while not records_current.empty():
-            record = records_current.get()
+        while not config.current_queue.empty():
+            record = config.current_queue.get()
 
             if record is None:
                 break

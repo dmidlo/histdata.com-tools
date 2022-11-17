@@ -17,11 +17,7 @@ from histdatacom import config
 class _HistDataCom:
     """A module to pull market data from histdata.com and import it into influxDB"""
 
-    def __init__(self,
-                 records_current,
-                 records_next,
-                 csv_chunks_queue,
-                 options):
+    def __init__(self, options):
 
         """ Initialization for _HistDataCom Class"""
         # Set User () or Default Arguments respectively utilizing the self.ArgParser
@@ -45,38 +41,30 @@ class _HistDataCom:
             config.args['INFLUX_URL'] = influx_yaml['influxdb']['url']
             config.args['INFLUX_TOKEN'] = influx_yaml['influxdb']['token']
 
-        self.records_current = records_current
-        self.records_next = records_next
-
-        self.urls = _URLs(self.records_current, self.records_next)
-        self.csvs = _CSVs(self.records_current, self.records_next)
-        self.api = _API(self.records_current, self.records_next)
+        self.urls = _URLs()
+        self.csvs = _CSVs()
+        self.api = _API()
 
         if config.args["import_to_influxdb"] == 1:
-            self.csv_chunks_queue = csv_chunks_queue
-            self.influx = _Influx(self.records_current,
-                                  self.records_next,
-                                  self.csv_chunks_queue)
+            self.influx = _Influx()
 
     def run(self):
-        self.urls.populate_initial_queue(self.records_current, self.records_next)
+        self.urls.populate_initial_queue()
 
         if config.args["validate_urls"]:
-            self.urls.validate_urls(self.records_current, self.records_next)
+            self.urls.validate_urls()
 
         if config.args["download_data_archives"]:
-            self.urls.download_zips(self.records_current, self.records_next)
+            self.urls.download_zips()
             if config.args["from_api"]:
-                self.api.validate_jays(self.records_current, self.records_next)
-                return self.api.merge_jays(self.records_current)
+                self.api.validate_jays()
+                return self.api.merge_jays()
 
         if config.args["extract_csvs"]:
-            self.csvs.extract_csvs(self.records_current, self.records_next)
+            self.csvs.extract_csvs()
 
         if config.args["import_to_influxdb"]:
-            self.influx.import_data(self.records_current,
-                                    self.records_next,
-                                    self.csv_chunks_queue)
+            self.influx.import_data()
 
 
 def main(options: Options | None=None) -> list | Frame | DataFrame | Table:

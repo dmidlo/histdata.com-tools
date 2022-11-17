@@ -17,15 +17,7 @@ from histdatacom import config
 
 
 class _URLs:
-    def __init__(self, records_current_, records_next_):
-        # setting relationship to global outer parent
-
-        global records_current
-        records_current = records_current_
-
-        global records_next
-        records_next = records_next_
-
+    def __init__(self):
         config.args["base_url"] = 'http://www.histdata.com/download-free-forex-data/'
         config.args["post_headers"] = {
             "Host": "www.histdata.com",
@@ -41,7 +33,7 @@ class _URLs:
             "Accept-Encoding": "gzip, deflate",
             "Accept-Language": "en-US,en;q=0.9"}
 
-    def populate_initial_queue(self, records_current, records_next):
+    def populate_initial_queue(self):
         for url in self.generate_form_urls(config.args["start_yearmonth"],
                                            config.args["end_yearmonth"],
                                            config.args['formats'],
@@ -54,9 +46,9 @@ class _URLs:
 
             if record.status != "URL_NO_REPO_DATA":
                 record.write_info_file(base_dir=config.args['default_download_dir'])
-                records_next.put(record)
+                config.next_queue.put(record)
 
-        records_next.dump_to_queue(records_current)
+        config.next_queue.dump_to_queue(config.current_queue)
 
     def validate_url(self, record, args):
         try:
@@ -70,7 +62,7 @@ class _URLs:
                 record.status = "URL_VALID"
                 record.write_info_file(base_dir=args['default_download_dir'])
 
-            records_next.put(record)
+            config.next_queue.put(record)
         except ValueError:
             print(f"Info: Histdata.com does not have: {record.url}")
             record.status = "URL_NO_REPO_DATA"
@@ -80,16 +72,16 @@ class _URLs:
             record.delete_info_file()
             raise
         finally:
-            records_current.task_done()
+            config.current_queue.task_done()
 
-    def validate_urls(self, records_current, records_next):
+    def validate_urls(self):
 
         pool = ThreadPool(self.validate_url,
                           config.args,
                           "Validating", "URLs...",
                           get_pool_cpu_count(config.args['cpu_utilization']) * 3)
 
-        pool(records_current, records_next)
+        pool(config.current_queue, config.next_queue)
 
     def download_zip(self, record, args):
         try:
@@ -104,7 +96,7 @@ class _URLs:
                 record.status = "CSV_ZIP" if record.status == "URL_VALID" else record.status
                 record.write_info_file(base_dir=args['default_download_dir'])
 
-            records_next.put(record)
+            config.next_queue.put(record)
         except KeyError:
             print(f"Invalid Zip on histdata.com: {record.url}", sys.exc_info())
             record.delete_info_file()
@@ -113,7 +105,7 @@ class _URLs:
             record.delete_info_file()
             raise
         finally:
-            records_current.task_done()
+            config.current_queue.task_done()
 
     @classmethod
     def request_file(cls, record: Record, args: dict) -> requests.Response:
@@ -134,14 +126,14 @@ class _URLs:
         with open(zip_path, "wb") as zip_file:
             zip_file.write(content)
 
-    def download_zips(self, records_current, records_next):
+    def download_zips(self):
 
         pool = ThreadPool(self.download_zip,
                           config.args,
                           "Downloading", "ZIPs...",
                           get_pool_cpu_count(config.args['cpu_utilization']) * 3)
 
-        pool(records_current, records_next)
+        pool(config.current_queue, config.next_queue)
 
     @classmethod
     def get_page_data(cls, url):

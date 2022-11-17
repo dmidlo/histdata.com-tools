@@ -85,7 +85,6 @@ class ArgParser(argparse.ArgumentParser):
     def __init__(self, options=Options(), **kwargs):
         """ set up argparse, bring in defaults DTO, setup cli params, receive
             and overwrite defaults with user cli args."""
-
         # init _HistDataCom.ArgParser to extend argparse.ArgumentParser
         argparse.ArgumentParser.__init__(self, prog='histdatacom')
         # bring in the defaults arg DTO from outer class, use the
@@ -144,11 +143,16 @@ class ArgParser(argparse.ArgumentParser):
         self.add_argument(
             "-e", "--end_yearmonth",
             type=(lambda v: self.validate_yearmonth_format(v)),
-            help='set a start year and month for data. e.g. -s 2020-00 or -s 2022-04')
+            help='set a start year and month for data. e.g. -e 2020-00 or -e 2022-04')
         self.add_argument(
             '-d', '--data-directory',
             type=str,
             help='Directory Used to save data. default is "data" in the current directory')
+
+        # prevent running from cli with no arguments
+        if len(sys.argv) == 1 and not self.arg_namespace.from_api:
+            self.print_help(sys.stderr)
+            sys.exit(1)
 
         if "histdatacom" not in sys.argv[0] and self.arg_namespace.from_api:
             args = self.clean_from_api_args(self.arg_namespace)
@@ -157,11 +161,6 @@ class ArgParser(argparse.ArgumentParser):
         else:
             # Get the args from sys.argv
             self.parse_args(namespace=self.arg_namespace)
-
-        # prevent running from cli with no arguments
-        if len(sys.argv) == 1 and not self.arg_namespace.from_api:
-            self.print_help(sys.stderr)
-            sys.exit(1)
 
         self.check_datetime_input(self.arg_namespace)
         self.check_for_ascii_if_influx(self.arg_namespace)
