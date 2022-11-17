@@ -12,7 +12,7 @@ from pandas import DataFrame
 from histdatacom.options import Options
 from . import histdata_com
 
-__version__ = "0.76.10"
+__version__ = "0.76.11"
 __author__ = 'David Midlo'
 
 class APICaller(sys.modules[__name__].__class__): # type: ignore
