@@ -18,19 +18,10 @@ from histdatacom.records import Records
 from histdatacom.urls import _URLs
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.concurrency import ProcessPool
+from histdatacom import config
 dt.options.progress.enabled = False
 
 class _API():
-    def __init__(self, args_: dict, records_current_: Records, records_next_: Records):
-        # setting relationship to global outer parent
-        self.args = args_
-
-        global records_current
-        records_current = records_current_ # type: ignore
-
-        global records_next
-        records_next = records_next_ # type: ignore
-
     @classmethod
     def create_jay(cls, record: Record, args: dict) -> None:
         """creates a datatable file, saves it in dt's native jay format
@@ -105,7 +96,7 @@ class _API():
         finally:
             records_current.task_done()
 
-    def validate_jays(self, records_current: Records, records_next: Records) -> None:
+    def validate_jays(self) -> None:
         """Initializes a process pool and calls self.validate_jay against
            a Queue of records.
 
@@ -116,18 +107,18 @@ class _API():
                 Records Queue for Further Work
         """
         pool = ProcessPool(self.validate_jay,
-                            self.args,
+                            config.args,
                             "Staging", "data files...",
-                            get_pool_cpu_count(self.args['cpu_utilization']))
-        pool(records_current, records_next)
+                            get_pool_cpu_count(config.args['cpu_utilization']))
+        pool(config.current_queue, config.next_queue)
 
-    def merge_jays(self, records_current: Records) -> list | Frame | DataFrame | Table:
+    def merge_jays(self) -> list | Frame | DataFrame | Table:
 
         records_to_merge = []
         pairs = []
         timeframes = []
-        while not records_current.empty():
-            record = records_current.get()
+        while not config.current_queue.empty():
+            record = config.current_queue.get()
 
             if record is None:
                 break
@@ -179,12 +170,13 @@ class _API():
                 jay_data = self.import_jay_data(jay_path)
                 merged.rbind(jay_data)
 
-            if self.args['api_return_type'] == "datatable":
-                tp_set_dict['data'] = merged
-            if self.args['api_return_type'] == "arrow":
-                tp_set_dict['data'] = merged.to_arrow()
-            if self.args['api_return_type'] == "pandas":
-                tp_set_dict['data'] = merged.to_pandas()
+            match config.args['api_return_type']:
+                case "datatable":
+                    tp_set_dict['data'] = merged
+                case "arrow":
+                    tp_set_dict['data'] = merged.to_arrow()
+                case "pandas":
+                    tp_set_dict['data'] = merged.to_pandas()
 
     @classmethod
     def extract_single_value_from_frame(cls, frame: DataFrame, row: int, column: str) -> int:

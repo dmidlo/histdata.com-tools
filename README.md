@@ -88,7 +88,7 @@ options:
   -s START_YEARMONTH, --start_yearmonth START_YEARMONTH
                         set a start year and month for data. e.g. -s 2000-04 or -s 2015-00
   -e END_YEARMONTH, --end_yearmonth END_YEARMONTH
-                        set a start year and month for data. e.g. -s 2020-00 or -s 2022-04
+                        set a start year and month for data. e.g. -e 2020-00 or -e 2022-04
   -d DATA_DIRECTORY, --data-directory DATA_DIRECTORY
                         Directory Used to save data. default is "data" in the current directory
 ```

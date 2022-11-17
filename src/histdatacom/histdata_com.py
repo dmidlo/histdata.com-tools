@@ -11,16 +11,13 @@ from histdatacom.api import _API
 from histdatacom.csvs import _CSVs
 from histdatacom.influx import _Influx
 from histdatacom.concurrency import QueueManager
+from histdatacom import config
 
 
 class _HistDataCom:
     """A module to pull market data from histdata.com and import it into influxDB"""
 
-    def __init__(self,
-                 records_current,
-                 records_next,
-                 csv_chunks_queue,
-                 options):
+    def __init__(self, options):
 
         """ Initialization for _HistDataCom Class"""
         # Set User () or Default Arguments respectively utilizing the self.ArgParser
@@ -33,50 +30,41 @@ class _HistDataCom:
         #           - Normalize iterable user arguments whose values are lists and
         #             make them sets instead
         #       - .copy(): decouple for GC using a hard copy of user args
-        self.args = ArgParser._arg_list_to_set(vars(ArgParser(options)())).copy()
-        self.args['default_download_dir'] = set_working_data_dir(self.args['data_directory'])
-        self.args['queue_filename'] = ".queue"
+        config.args = ArgParser._arg_list_to_set(vars(ArgParser(options)())).copy()
+        config.args['default_download_dir'] = set_working_data_dir(config.args['data_directory'])
+        config.args['queue_filename'] = ".queue"
 
-        if self.args["import_to_influxdb"] == 1:
+        if config.args["import_to_influxdb"] == 1:
             influx_yaml = load_influx_yaml()
-            self.args['INFLUX_ORG'] = influx_yaml['influxdb']['org']
-            self.args['INFLUX_BUCKET'] = influx_yaml['influxdb']['bucket']
-            self.args['INFLUX_URL'] = influx_yaml['influxdb']['url']
-            self.args['INFLUX_TOKEN'] = influx_yaml['influxdb']['token']
+            config.args['INFLUX_ORG'] = influx_yaml['influxdb']['org']
+            config.args['INFLUX_BUCKET'] = influx_yaml['influxdb']['bucket']
+            config.args['INFLUX_URL'] = influx_yaml['influxdb']['url']
+            config.args['INFLUX_TOKEN'] = influx_yaml['influxdb']['token']
 
-        self.records_current = records_current
-        self.records_next = records_next
+        self.urls = _URLs()
+        self.csvs = _CSVs()
+        self.api = _API()
 
-        self.urls = _URLs(self.args, self.records_current, self.records_next)
-        self.csvs = _CSVs(self.args, self.records_current, self.records_next)
-        self.api = _API(self.args, self.records_current, self.records_next)
-
-        if self.args["import_to_influxdb"] == 1:
-            self.csv_chunks_queue = csv_chunks_queue
-            self.influx = _Influx(self.args,
-                                  self.records_current,
-                                  self.records_next,
-                                  self.csv_chunks_queue)
+        if config.args["import_to_influxdb"] == 1:
+            self.influx = _Influx()
 
     def run(self):
-        self.urls.populate_initial_queue(self.records_current, self.records_next)
+        self.urls.populate_initial_queue()
 
-        if self.args["validate_urls"]:
-            self.urls.validate_urls(self.records_current, self.records_next)
+        if config.args["validate_urls"]:
+            self.urls.validate_urls()
 
-        if self.args["download_data_archives"]:
-            self.urls.download_zips(self.records_current, self.records_next)
-            if self.args["from_api"]:
-                self.api.validate_jays(self.records_current, self.records_next)
-                return self.api.merge_jays(self.records_current)
+        if config.args["download_data_archives"]:
+            self.urls.download_zips()
+            if config.args["from_api"]:
+                self.api.validate_jays()
+                return self.api.merge_jays()
 
-        if self.args["extract_csvs"]:
-            self.csvs.extract_csvs(self.records_current, self.records_next)
+        if config.args["extract_csvs"]:
+            self.csvs.extract_csvs()
 
-        if self.args["import_to_influxdb"]:
-            self.influx.import_data(self.records_current,
-                                    self.records_next,
-                                    self.csv_chunks_queue)
+        if config.args["import_to_influxdb"]:
+            self.influx.import_data()
 
 
 def main(options: Options | None=None) -> list | Frame | DataFrame | Table:

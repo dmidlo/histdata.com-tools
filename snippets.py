@@ -58,17 +58,170 @@
 # histdatacom -I -p grxeur auxaud frxeur hkxhkd spxusd jpxjpy udxusd -f ascii -t tick-data-quotes -s start -e now -c low
 # histdatacom -I -p nsxusd ukxgbp etxeur -f ascii -t tick-data-quotes -s start -e now -c low
 
+histdata_symbs = {"eurusd",
+"eurchf",
+"eurgbp",
+"eurjpy",
+"euraud",
+"usdcad",
+"usdchf",
+"usdjpy",
+"usdmxn",
+"gbpchf",
+"gbpjpy",
+"gbpusd",
+"audjpy",
+"audusd",
+"chfjpy",
+"nzdjpy",
+"nzdusd",
+"xauusd",
+"eurcad",
+"audcad",
+"cadjpy",
+"eurnzd",
+"grxeur",
+"nzdcad",
+"sgdjpy",
+"usdhkd",
+"usdnok",
+"usdtry",
+"xauaud",
+"audchf",
+"auxaud",
+"eurhuf",
+"eurpln",
+"frxeur",
+"hkxhkd",
+"nzdchf",
+"spxusd",
+"usdhuf",
+"usdpln",
+"usdzar",
+"xauchf",
+"zarjpy",
+"bcousd",
+"etxeur",
+"eurczk",
+"eursek",
+"gbpaud",
+"gbpnzd",
+"jpxjpy",
+"udxusd",
+"usdczk",
+"usdsek",
+"wtiusd",
+"xaueur",
+"audnzd",
+"cadchf",
+"eurdkk",
+"eurnok",
+"eurtry",
+"gbpcad",
+"nsxusd",
+"ukxgbp",
+"usddkk",
+"usdsgd",
+"xagusd",
+"xaugbp"}
+
+
+
+# Oanda Symbols:
+oanda_symbs = {"audcad",
+"audchf",
+"audhkd",
+"audjpy",
+"audsgd",
+"audusd",
+"cadhkd",
+"cadjpy",
+"cadsgd",
+"chfhkd",
+"chfjpy",
+"euraud",
+"eurcad",
+"eurchf",
+"eurgbp",
+"eurhkd",
+"eurjpy",
+"eursgd",
+"eurusd",
+"gbpaud",
+"gbpcad",
+"gbpchf",
+"gbphkd",
+"gbpjpy",
+"gbpsgd",
+"gbpusd",
+"hkdjpy",
+"sgdchf",
+"sgdhkd",
+"sgdjpy",
+"usdcad",
+"usdchf",
+"usdhkd",
+"usdjpy",
+"usdsgd",
+"audnzd",
+"cadchf",
+"chfzar",
+"eurczk",
+"eurdkk",
+"eurhuf",
+"eurnok",
+"eurnzd",
+"eurpln",
+"eursek",
+"eurtry",
+"eurzar",
+"gbpnzd",
+"gbppln",
+"gbpzar",
+"nzdcad",
+"nzdchf",
+"nzdhkd",
+"nzdjpy",
+"nzdsgd",
+"nzdusd",
+"tryjpy",
+"usdcnh",
+"usdczk",
+"usddkk",
+"usdhuf",
+"usdmxn",
+"usdnok",
+"usdpln",
+"usdsar",
+"usdsek",
+"usdthb",
+"usdtry",
+"usdzar",
+"zarjpy"}
+
+histdata_and_oanda_intersect_symbs = histdata_symbs & oanda_symbs
+
+
 import histdatacom
 from histdatacom.options import Options
-from multiprocessing import freeze_support
+from rich import print
 options = Options()
 
-options.api_return_type = "datatable"  # "datatable", "pandas", or "arrow"
+
+# options.validate_urls = True
+# options.download_data_archives = True  # implies validate
+# options.extract_csvs = True  # implies validate and download
+options.import_to_influxdb = True  # implies validate, download, and extract
+
+# options.api_return_type = "datatable"  # "datatable", "pandas", or "arrow"
+
 options.formats = {"ascii"}  # Must be {"ascii"}
-options.timeframes = {"1-minute-bar-quotes",}  # can be tick-data-quotes or 1-minute-bar-quotes
-options.pairs = {"eurusd"}
-options.start_yearmonth = "2020-01"
-options.end_yearmonth = "now"
+options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
+options.pairs = histdata_and_oanda_intersect_symbs # {"eurusd"}
+options.start_yearmonth = "2001-01"
+options.end_yearmonth = "2005-12"
+# options.start_yearmonth = "2005-01"
+# options.end_yearmonth = "2006-12"
 options.cpu_utilization = "high"
 
 

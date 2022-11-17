@@ -15,6 +15,7 @@ from rich.progress import TextColumn
 from rich.progress import BarColumn
 from rich.progress import TimeElapsedColumn
 from histdatacom.records import Records
+from histdatacom import config
 from typing import Callable
 
 def init_counters(records_current_, records_next_, args_, csv_chunks_queue_=None):
@@ -77,7 +78,6 @@ class ThreadPool():
 
         records_current.join()
         records_next.dump_to_queue(records_current)
-
 
 class ProcessPool():
     def __init__(self, exec_func: Callable,
@@ -180,34 +180,25 @@ def get_pool_cpu_count(count: str | int | None=None) -> int:
         print(err)
         sys.exit(err)
 
-
 class QueueManager():
     def __init__(self, options):
         self.options = options
         self.records_manager=managers.SyncManager()
         self.records_manager.register("Records", Records)
 
-    def __call__(self, scraper_):
+    def __call__(self, runner_):
         self.records_manager.start()
 
-        global records_current
-        records_current = self.records_manager.Records()
+        config.current_queue = self.records_manager.Records()
+        config.next_queue = self.records_manager.Records()
+        config.csv_chunks_queue = self.records_manager.Queue()
 
-        global records_next
-        records_next = self.records_manager.Records()
-
-        global csv_chunks_queue
-        csv_chunks_queue = self.records_manager.Queue()
-
-        scraper = scraper_(records_current,
-                                records_next,
-                                csv_chunks_queue,
-                                self.options)
+        histdatacom_runner = runner_(self.options)
 
         if self.options.from_api:
-            return scraper.run()
+            return histdatacom_runner.run()
         else:
-            scraper.run()
+            histdatacom_runner.run()
 
 class InfluxDBWriter(Process):
     def __init__(self, args, csv_chunks_queue):
