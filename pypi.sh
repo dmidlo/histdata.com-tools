@@ -14,6 +14,7 @@ dev()
 build()
 {
     rm -rf ./dist
+    pip install twine wheel
     python setup.py check
     python setup.py sdist
     python setup.py bdist_wheel --universal
