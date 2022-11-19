@@ -128,7 +128,7 @@ class _Influx():
                                            config.args)) as executor:
 
             data = rx.from_iterable(jay.to_tuples()) \
-                .pipe(ops.buffer_with_count(25_000),
+                .pipe(ops.buffer_with_count(config.batch_size * 2),
                       ops.flat_map(
                         lambda rows: executor.submit(self.parse_jay_rows, rows, record)))
 
@@ -160,7 +160,7 @@ class _Influx():
                            fieldnames=fieldnames,
                            dialect=dialect)) \
                 .pipe(
-                    ops.buffer_with_count(25_000),
+                    ops.buffer_with_count(config.batch_size * 2),
                     ops.flat_map(
                         lambda rows: executor.submit(self.parse_csv_rows, rows, record)))
 

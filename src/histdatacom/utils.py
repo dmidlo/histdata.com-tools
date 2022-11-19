@@ -17,7 +17,9 @@ def get_month_from_datemonth(datemonth):
 def get_year_from_datemonth(datemonth):
     return datemonth[:4] if datemonth is not None else ""
 
-
+def force_datemonth_if_only_year(datemonth):
+    return f"{datemonth}01" if len(datemonth) == 4 else datemonth
+        
 def get_query_string(url):
     return url.split('?')[1].split('/')
 

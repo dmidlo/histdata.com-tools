@@ -13,6 +13,8 @@ from histdatacom.influx import _Influx
 from histdatacom.concurrency import QueueManager
 from histdatacom import config
 
+from rich import print
+
 
 class _HistDataCom:
     """A module to pull market data from histdata.com and import it into influxDB"""
@@ -45,10 +47,16 @@ class _HistDataCom:
         self.csvs = _CSVs()
         self.api = _API()
 
+        if config.args['available_remote_data'] and self.urls.test_for_repo_data_file():
+            self.urls.read_repo_data_file()
+
         if config.args["import_to_influxdb"] == 1:
             self.influx = _Influx()
 
     def run(self):
+        if config.args['available_remote_data'] or config.args['update_remote_data']:
+            return self.urls.get_available_repo_data()
+
         self.urls.populate_initial_queue()
 
         if config.args["validate_urls"]:

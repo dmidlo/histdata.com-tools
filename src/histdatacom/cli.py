@@ -100,6 +100,18 @@ class ArgParser(argparse.ArgumentParser):
             action='store_true',
             help='Check generated list of URLs as valid download locations')
         self.add_argument(
+            "-A", "--available_remote_data",
+            action='store_true',
+            help='list data retrievable from histdata.com')
+        self.add_argument(
+            "-U", "--update_remote_data",
+            action='store_true',
+            help='update list of data retrievable from histdata.com')
+        self.add_argument(
+            '--by',
+            type=str,
+            help='for use with -A and -U, to sort output --by [pair_asc, pair_dsc, start_asc, start_dsc]')
+        self.add_argument(
             "-D", "--download_data_archives",
             action='store_true',
             help='download specified pairs/formats/timeframe and create data files')
@@ -154,6 +166,8 @@ class ArgParser(argparse.ArgumentParser):
             self.print_help(sys.stderr)
             sys.exit(1)
 
+        self.adjust_for_repo_data_request(self.arg_namespace)
+
         if "histdatacom" not in sys.argv[0] and self.arg_namespace.from_api:
             args = self.clean_from_api_args(self.arg_namespace)
             self.false_from_api_if_behavior_flag(self.arg_namespace)
@@ -174,6 +188,19 @@ class ArgParser(argparse.ArgumentParser):
         return self.arg_namespace
 
     @classmethod
+    def adjust_for_repo_data_request(cls, args_namespace):
+        if args_namespace.available_remote_data \
+        or args_namespace.update_remote_data:
+            args_namespace.start_yearmonth = None
+            args_namespace.end_yearmonth = None
+            args_namespace.validate_urls = False
+            args_namespace.download_data_archives = False
+            args_namespace.extract_csvs = False
+            args_namespace.import_to_influxdb = False
+            args_namespace.formats = {"ascii"}
+            args_namespace.timeframes = {"tick-data-quotes"}
+
+    @classmethod
     def clean_from_api_args(cls, args_namespace):
         args = []
 
@@ -187,6 +214,10 @@ class ArgParser(argparse.ArgumentParser):
             args.extend(["-s", args_namespace.start_yearmonth])
         if args_namespace.end_yearmonth:
             args.extend(["-e", args_namespace.end_yearmonth])
+        if args_namespace.available_remote_data:
+            args.append("-A")
+        if args_namespace.update_remote_data:
+            args.append("-U")
         if args_namespace.validate_urls:
             args.append("-V")
         if args_namespace.download_data_archives:
@@ -212,6 +243,7 @@ class ArgParser(argparse.ArgumentParser):
         or args_namespace.extract_csvs \
         or args_namespace.import_to_influxdb:
             args_namespace.from_api = False
+
 
     @classmethod
     def check_for_ascii_if_influx(cls, args_namespace):

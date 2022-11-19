@@ -1,13 +1,21 @@
 import os
 import sys
+import pickle
+import contextlib
 from urllib.parse import urlparse
 import requests
 from rich import print
+from rich.progress import Progress
+from rich.progress import TextColumn, TimeElapsedColumn, SpinnerColumn
+from rich.table import Table
+from rich import box
 import bs4
 from bs4 import BeautifulSoup
 from histdatacom.utils import get_year_from_datemonth
 from histdatacom.utils import get_month_from_datemonth
 from histdatacom.utils import get_current_datemonth_gmt_minus5
+from histdatacom.utils import force_datemonth_if_only_year
+from histdatacom.utils import create_full_path
 from histdatacom.fx_enums import Timeframe
 from histdatacom.fx_enums import get_valid_format_timeframes
 from histdatacom.records import Record
@@ -33,22 +41,32 @@ class _URLs:
             "Accept-Encoding": "gzip, deflate",
             "Accept-Language": "en-US,en;q=0.9"}
 
+
     def populate_initial_queue(self):
-        for url in self.generate_form_urls(config.args["start_yearmonth"],
-                                           config.args["end_yearmonth"],
-                                           config.args['formats'],
-                                           config.args["pairs"],
-                                           config.args['timeframes'],
-                                           config.args["base_url"]):
-            record = Record()
-            record(url=url, status="URL_NEW")
-            record.restore_momento(base_dir=config.args['default_download_dir'])
+        with Progress(TextColumn(text_format="[cyan] Generating API Requests"),
+                      SpinnerColumn(), SpinnerColumn(), SpinnerColumn(),
+                      TimeElapsedColumn()) as progress:
+            task_id = progress.add_task("waiting", total=0)
 
-            if record.status != "URL_NO_REPO_DATA":
-                record.write_info_file(base_dir=config.args['default_download_dir'])
-                config.next_queue.put(record)
+            for url in self.generate_form_urls(config.args["start_yearmonth"],
+                                            config.args["end_yearmonth"],
+                                            config.args['formats'],
+                                            config.args["pairs"],
+                                            config.args['timeframes'],
+                                            config.args["base_url"]):
+                record = Record()
+                record(url=url, status="URL_NEW")
+                record.restore_momento(base_dir=config.args['default_download_dir'])
 
-        config.next_queue.dump_to_queue(config.current_queue)
+                if record.status != "URL_NO_REPO_DATA":
+                    record.write_info_file(base_dir=config.args['default_download_dir'])
+                    if (config.args['update_remote_data'] or\
+                    (config.args['available_remote_data'] and not config.repo_data_file_exists))\
+                    and record.status != "URL_NEW":
+                        self.set_available_data(record)
+                    config.next_queue.put(record)
+
+            config.next_queue.dump_to_queue(config.current_queue)
 
     def validate_url(self, record, args):
         try:
@@ -59,12 +77,17 @@ class _URLs:
                 if record.data_tk == "":
                     raise ValueError
 
+                if config.args['update_remote_data'] or \
+                  (config.args['available_remote_data'] and not config.repo_data_file_exists):
+                    self.set_available_data(record)
+
                 record.status = "URL_VALID"
                 record.write_info_file(base_dir=args['default_download_dir'])
 
             config.next_queue.put(record)
         except ValueError:
-            print(f"Info: Histdata.com does not have: {record.url}")
+            if (not config.args['available_remote_data']) and (not config.args['update_remote_data']):
+                print(f"Info: Histdata.com does not have: {record.url}")
             record.status = "URL_NO_REPO_DATA"
             record.write_info_file(base_dir=args['default_download_dir'])
         except Exception:
@@ -199,6 +222,92 @@ class _URLs:
         res = cls.request_file(record, args)
         record.zip_filename = cls.get_zip_file_name(res)
         cls.write_file(record, res.content)
+
+    @classmethod
+    def set_available_data(cls, record):
+        datemonth = force_datemonth_if_only_year(record.data_datemonth)
+        pair = record.data_fxpair.lower()
+
+        if pair not in config.available_remote_data:
+            config.available_remote_data[pair] = {"start": datemonth,
+                                                                "end": datemonth}
+        else:
+            if int(datemonth) < int(config.available_remote_data[pair]["start"]):
+                config.available_remote_data[pair]["start"] = datemonth
+            if int(datemonth) > int(config.available_remote_data[pair]["end"]):
+                config.available_remote_data[pair]["end"] = datemonth
+
+    @classmethod
+    def test_for_repo_data_file(cls):
+        if os.path.exists(f"{config.args['default_download_dir']}{os.sep}.repo"):
+            config.repo_data_file_exists = True
+            return True
+        config.repo_data_file_exists = False
+        return False
+
+    @classmethod
+    def write_repo_data_file(cls):
+        try:
+            path = config.args['default_download_dir']
+            create_full_path(path)
+
+            with open(f"{path}.repo", 'wb') as filepath:
+                pickle.dump(config.available_remote_data, filepath)
+        except ValueError as err:
+            print(err)
+            sys.exit()
+
+    @classmethod
+    def read_repo_data_file(cls):
+        with open(f"{config.args['default_download_dir']}{os.sep}.repo", 'rb') as fileread:
+            with contextlib.suppress(Exception):
+                while True:
+                    config.available_remote_data.update(pickle.load(fileread))
+
+    def print_repo_data_table(self):
+        table = Table(title="Data and date ranges available from HistData.com",
+                      box=box.MARKDOWN)
+        table.add_column("Pair -p")
+        table.add_column("Start -s")
+        table.add_column("End -e")
+
+        for row in self.sort_repo_dict_by(config.available_remote_data.copy()):
+            start = config.available_remote_data[row]['start']
+            end = config.available_remote_data[row]['end']
+            table.add_row(row.lower(), 
+                          f"{get_year_from_datemonth(start)}-{get_month_from_datemonth(start)}",
+                          f"{get_year_from_datemonth(end)}-{get_month_from_datemonth(end)}")
+
+        print(table)
+
+    def get_available_repo_data(self):
+        if (not config.repo_data_file_exists and config.args['available_remote_data'])\
+            or config.args['update_remote_data']:
+            self.populate_initial_queue()
+
+        if config.args['available_remote_data'] or config.args['update_remote_data']:
+            if config.args['update_remote_data'] or not config.repo_data_file_exists:
+                self.validate_urls()
+                self.write_repo_data_file()
+
+            if config.args["from_api"]:
+                return self.sort_repo_dict_by(config.available_remote_data.copy())
+            else:
+                self.print_repo_data_table()
+                sys.exit(0)
+
+    @classmethod
+    def sort_repo_dict_by(cls, repo_dict_copy):
+        match config.args['by']:
+            case "pair_asc":
+                return dict(sorted(repo_dict_copy.items()))
+            case "pair_dsc":
+                return dict(sorted(repo_dict_copy.items(), reverse=True))
+            case "start_asc":
+                return dict(sorted(repo_dict_copy.items(), key=lambda pair: pair[1]['start']))
+            case "start_dsc":
+                return dict(sorted(repo_dict_copy.items(), key=lambda pair: pair[1]['start'], reverse=True))
+
 
     @classmethod
     def generate_form_urls(cls,

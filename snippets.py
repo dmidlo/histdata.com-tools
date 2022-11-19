@@ -205,31 +205,42 @@ histdata_and_oanda_intersect_symbs = histdata_symbs & oanda_symbs
 import histdatacom
 from histdatacom.options import Options
 from rich import print
-options = Options()
+
 
 
 # options.validate_urls = True
 # options.download_data_archives = True  # implies validate
 # options.extract_csvs = True  # implies validate and download
-options.import_to_influxdb = True  # implies validate, download, and extract
+# options.available_remote_data = True
 
-# options.api_return_type = "datatable"  # "datatable", "pandas", or "arrow"
 
-options.formats = {"ascii"}  # Must be {"ascii"}
-options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
-options.pairs = histdata_and_oanda_intersect_symbs # {"eurusd"}
-options.start_yearmonth = "2001-01"
-options.end_yearmonth = "2005-12"
 # options.start_yearmonth = "2005-01"
 # options.end_yearmonth = "2006-12"
-options.cpu_utilization = "high"
 
 
 def main():
-    data = histdatacom(options)  # (Jupyter)
+    # pairs = {"usdmxn", "eurusd", "gbpusd", "audusd"}
 
+    # range_options = Options()
+    # range_options.pairs = pairs
+    # range_options.update_remote_data = True
+    # range_options.by = "start_asc"
+    # range_data = histdatacom(range_options)  # (Jupyter)
+    # print(range_data)
 
-    print(data)
+    data_options = Options()
+    # data_options.pairs = pairs
+    # data_options.api_return_type = "datatable"  # "datatable", "pandas", or "arrow"
+
+    data_options.pairs = histdata_and_oanda_intersect_symbs
+    data_options.start_yearmonth = "2011-01"
+    data_options.end_yearmonth = "2011-12"
+    data_options.import_to_influxdb = True  # implies validate, download, and extract
+    data_options.formats = {"ascii"}  # Must be {"ascii"}
+    data_options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
+    data_options.cpu_utilization = "high"
+    data = histdatacom(data_options)
+
 
     # list
     # pandas.core.frame.DataFrame

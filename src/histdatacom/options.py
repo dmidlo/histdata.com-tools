@@ -9,6 +9,9 @@ class Options:
     # writes user's cli args to it.  Preemptively creating here to hold default args; if the
     # user enters args in the shell, these values will be respectively overwritten
     def __init__(self):
+        self.available_remote_data = False
+        self.update_remote_data = False
+        self.by = "pair_asc"
         self.validate_urls = False
         self.download_data_archives = False
         self.extract_csvs = False

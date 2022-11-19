@@ -211,8 +211,8 @@ class InfluxDBWriter(Process):
                                      debug=False)
         self.write_api = self.client.write_api(write_options=WriteOptions(
                                                write_type=WriteType.batching,
-                                               batch_size=25_000,
-                                               flush_interval=12_000))
+                                               batch_size=config.batch_size,
+                                               flush_interval=config.batch_size * 1.01))
 
     def run(self):
         while True:
