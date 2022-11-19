@@ -1,15 +1,10 @@
 import sys
 from math import ceil
-from multiprocessing import Process
 from multiprocessing import managers
 from multiprocessing import cpu_count
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import as_completed
-from influxdb_client import InfluxDBClient
-from influxdb_client import WriteOptions
-from influxdb_client import WritePrecision
-from influxdb_client.client.write_api import WriteType
 from rich.progress import Progress
 from rich.progress import TextColumn
 from rich.progress import BarColumn
@@ -18,7 +13,7 @@ from histdatacom.records import Records
 from histdatacom import config
 from typing import Callable
 
-def init_counters(records_current_, records_next_, args_, csv_chunks_queue_=None):
+def init_counters(records_current_, records_next_, args_, influx_chunks_queue_=None):
     global records_current
     records_current = records_current_
     global records_next
@@ -26,9 +21,9 @@ def init_counters(records_current_, records_next_, args_, csv_chunks_queue_=None
     global args
     args = args_
 
-    if csv_chunks_queue_ != None:
-        global csv_chunks_queue
-        csv_chunks_queue = csv_chunks_queue_
+    if influx_chunks_queue_ != None:
+        global influx_chunks_queue
+        influx_chunks_queue = influx_chunks_queue_
 
 def complete_future(progress, task_id, futures, future):
     progress.advance(task_id, 0.75)
@@ -98,7 +93,7 @@ class ProcessPool():
 
     def __call__(self, records_current: Records,
                        records_next: Records,
-                       csv_chunks_queue: Records=None) -> None:
+                       influx_chunks_queue: Records=None) -> None:
 
         records_count = records_current.qsize()
         with Progress(TextColumn(text_format=f"[cyan]{self.progress_pre_text} {records_count} {self.progress_post_text}."),
@@ -112,7 +107,7 @@ class ProcessPool():
                                     initargs=(records_current,
                                               records_next,
                                               self.args.copy(),
-                                              csv_chunks_queue)) as executor:
+                                              influx_chunks_queue)) as executor:
                 futures = []
 
                 while not records_current.empty():
@@ -121,7 +116,7 @@ class ProcessPool():
                     if record is None:
                         return
 
-                    if csv_chunks_queue is None:
+                    if influx_chunks_queue is None:
                         future = executor.submit(self.exec_func,
                                                  record,
                                                  self.args,
@@ -133,7 +128,7 @@ class ProcessPool():
                                                  self.args,
                                                  records_current,
                                                  records_next,
-                                                 csv_chunks_queue)
+                                                 influx_chunks_queue)
 
                     progress.advance(task_id, 0.25)
                     futures.append(future)
@@ -183,15 +178,15 @@ def get_pool_cpu_count(count: str | int | None=None) -> int:
 class QueueManager():
     def __init__(self, options):
         self.options = options
-        self.records_manager=managers.SyncManager()
-        self.records_manager.register("Records", Records)
+        config.queue_manager = managers.SyncManager()
+        config.queue_manager.register("Records", Records)
 
     def __call__(self, runner_):
-        self.records_manager.start()
+        config.queue_manager.start()
 
-        config.current_queue = self.records_manager.Records()
-        config.next_queue = self.records_manager.Records()
-        config.csv_chunks_queue = self.records_manager.Queue()
+        config.current_queue = config.queue_manager.Records()
+        config.next_queue = config.queue_manager.Records()
+        config.influx_chunks_queue = config.queue_manager.Queue()
 
         histdatacom_runner = runner_(self.options)
 
@@ -199,36 +194,3 @@ class QueueManager():
             return histdatacom_runner.run()
         else:
             histdatacom_runner.run()
-
-class InfluxDBWriter(Process):
-    def __init__(self, args, csv_chunks_queue):
-        Process.__init__(self)
-        self.args = args
-        self.csv_chunks_queue = csv_chunks_queue
-        self.client = InfluxDBClient(url=self.args['INFLUX_URL'],
-                                     token=self.args['INFLUX_TOKEN'],
-                                     org=self.args['INFLUX_ORG'],
-                                     debug=False)
-        self.write_api = self.client.write_api(write_options=WriteOptions(
-                                               write_type=WriteType.batching,
-                                               batch_size=config.batch_size,
-                                               flush_interval=config.batch_size * 1.01))
-
-    def run(self):
-        while True:
-            chunk = self.csv_chunks_queue.get()
-
-            if chunk is None:
-                self.terminate()
-                self.csv_chunks_queue.task_done()
-                break
-
-            self.write_api.write(org=self.args['INFLUX_ORG'],
-                                 bucket=self.args['INFLUX_BUCKET'],
-                                 record=chunk,
-                                 write_precision=WritePrecision.MS)
-            self.csv_chunks_queue.task_done()
-
-    def terminate(self):
-        self.write_api.__del__()
-        self.client.__del__()

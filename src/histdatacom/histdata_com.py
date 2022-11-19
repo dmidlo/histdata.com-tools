@@ -72,6 +72,7 @@ class _HistDataCom:
             self.csvs.extract_csvs()
 
         if config.args["import_to_influxdb"]:
+            config.args['batch_size'] = config.batch_size
             self.influx.import_data()
 
 

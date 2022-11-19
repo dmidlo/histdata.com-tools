@@ -598,14 +598,14 @@
 <polyline fill="none" stroke="aliceblue" points="3366.5,-842.5 3755.5,-842.5 "/>
 <text text-anchor="start" x="3374.5" y="-827.3" font-family="Times,serif" font-size="14.00">api</text>
 <text text-anchor="start" x="3374.5" y="-812.3" font-family="Times,serif" font-size="14.00">args</text>
-<text text-anchor="start" x="3374.5" y="-797.3" font-family="Times,serif" font-size="14.00">csv_chunks_queue</text>
+<text text-anchor="start" x="3374.5" y="-797.3" font-family="Times,serif" font-size="14.00">influx_chunks_queue</text>
 <text text-anchor="start" x="3374.5" y="-782.3" font-family="Times,serif" font-size="14.00">csvs</text>
 <text text-anchor="start" x="3374.5" y="-767.3" font-family="Times,serif" font-size="14.00">influx</text>
 <text text-anchor="start" x="3374.5" y="-752.3" font-family="Times,serif" font-size="14.00">records_current</text>
 <text text-anchor="start" x="3374.5" y="-737.3" font-family="Times,serif" font-size="14.00">records_next</text>
 <text text-anchor="start" x="3374.5" y="-722.3" font-family="Times,serif" font-size="14.00">urls</text>
 <polyline fill="none" stroke="aliceblue" points="3366.5,-714.5 3755.5,-714.5 "/>
-<text text-anchor="start" x="3374.5" y="-699.3" font-family="Times,serif" font-size="14.00">__init__(records_current, records_next, csv_chunks_queue, options)</text>
+<text text-anchor="start" x="3374.5" y="-699.3" font-family="Times,serif" font-size="14.00">__init__(records_current, records_next, influx_chunks_queue, options)</text>
 <text text-anchor="start" x="3374.5" y="-684.3" font-family="Times,serif" font-size="14.00">run()</text>
 </g>
 <!-- histdatacom.api._API&#45;&gt;histdatacom.histdata_com._HistDataCom -->
@@ -653,10 +653,10 @@
 <polyline fill="none" stroke="aliceblue" points="591.5,-5339.5 834.5,-5339.5 "/>
 <text text-anchor="start" x="599.5" y="-5324.3" font-family="Times,serif" font-size="14.00">args</text>
 <text text-anchor="start" x="599.5" y="-5309.3" font-family="Times,serif" font-size="14.00">client</text>
-<text text-anchor="start" x="599.5" y="-5294.3" font-family="Times,serif" font-size="14.00">csv_chunks_queue</text>
+<text text-anchor="start" x="599.5" y="-5294.3" font-family="Times,serif" font-size="14.00">influx_chunks_queue</text>
 <text text-anchor="start" x="599.5" y="-5279.3" font-family="Times,serif" font-size="14.00">write_api</text>
 <polyline fill="none" stroke="aliceblue" points="591.5,-5271.5 834.5,-5271.5 "/>
-<text text-anchor="start" x="599.5" y="-5256.3" font-family="Times,serif" font-size="14.00">__init__(args, csv_chunks_queue)</text>
+<text text-anchor="start" x="599.5" y="-5256.3" font-family="Times,serif" font-size="14.00">__init__(args, influx_chunks_queue)</text>
 <text text-anchor="start" x="599.5" y="-5241.3" font-family="Times,serif" font-size="14.00">run()</text>
 <text text-anchor="start" x="599.5" y="-5226.3" font-family="Times,serif" font-size="14.00">terminate()</text>
 </g>
@@ -674,7 +674,7 @@
 <text text-anchor="start" x="4877.5" y="-241.3" font-family="Times,serif" font-size="14.00">progress_post_text</text>
 <text text-anchor="start" x="4877.5" y="-226.3" font-family="Times,serif" font-size="14.00">progress_pre_text</text>
 <polyline fill="none" stroke="aliceblue" points="4869.5,-218.5 5370.5,-218.5 "/>
-<text text-anchor="start" x="4877.5" y="-203.3" font-family="Times,serif" font-size="14.00">__call__(records_current, records_next, csv_chunks_queue)</text>
+<text text-anchor="start" x="4877.5" y="-203.3" font-family="Times,serif" font-size="14.00">__call__(records_current, records_next, influx_chunks_queue)</text>
 <text text-anchor="start" x="4877.5" y="-188.3" font-family="Times,serif" font-size="14.00">__init__(exec_func, args, progress_pre_text, progress_post_text, cpu_count, join, dump)</text>
 </g>
 <!-- histdatacom.concurrency.QueueManager -->
@@ -786,15 +786,15 @@
 <polyline fill="none" stroke="aliceblue" points="3542.5,-376.5 3973.5,-376.5 "/>
 <text text-anchor="start" x="3550.5" y="-361.3" font-family="Times,serif" font-size="14.00">args</text>
 <polyline fill="none" stroke="aliceblue" points="3542.5,-353.5 3973.5,-353.5 "/>
-<text text-anchor="start" x="3550.5" y="-338.3" font-family="Times,serif" font-size="14.00">__init__(args, records_current_, records_next_, csv_chunks_queue_)</text>
+<text text-anchor="start" x="3550.5" y="-338.3" font-family="Times,serif" font-size="14.00">__init__(args, records_current_, records_next_, influx_chunks_queue_)</text>
 <text text-anchor="start" x="3550.5" y="-323.3" font-family="Times,serif" font-size="14.00">convert_datetime_to_utc_timestamp(csv_format, timeframe, row)</text>
 <text text-anchor="start" x="3550.5" y="-308.3" font-family="Times,serif" font-size="14.00">fieldnames_match(csv_format, timeframe)</text>
 <text text-anchor="start" x="3550.5" y="-293.3" font-family="Times,serif" font-size="14.00">get_timeformat(csv_format, timeframe)</text>
-<text text-anchor="start" x="3550.5" y="-278.3" font-family="Times,serif" font-size="14.00">import_csv(record, args, records_current, records_next, csv_chunks_queue)</text>
-<text text-anchor="start" x="3550.5" y="-263.3" font-family="Times,serif" font-size="14.00">import_data(records_current, records_next, csv_chunks_queue)</text>
-<text text-anchor="start" x="3550.5" y="-248.3" font-family="Times,serif" font-size="14.00">import_file(record, args, records_current, records_next, csv_chunks_queue)</text>
-<text text-anchor="start" x="3550.5" y="-233.3" font-family="Times,serif" font-size="14.00">import_jay(record, args, records_current, records_next, csv_chunks_queue)</text>
-<text text-anchor="start" x="3550.5" y="-218.3" font-family="Times,serif" font-size="14.00">init_counters(csv_chunks_queue_, records_current_, records_next_, args_)</text>
+<text text-anchor="start" x="3550.5" y="-278.3" font-family="Times,serif" font-size="14.00">import_csv(record, args, records_current, records_next, influx_chunks_queue)</text>
+<text text-anchor="start" x="3550.5" y="-263.3" font-family="Times,serif" font-size="14.00">import_data(records_current, records_next, influx_chunks_queue)</text>
+<text text-anchor="start" x="3550.5" y="-248.3" font-family="Times,serif" font-size="14.00">import_file(record, args, records_current, records_next, influx_chunks_queue)</text>
+<text text-anchor="start" x="3550.5" y="-233.3" font-family="Times,serif" font-size="14.00">import_jay(record, args, records_current, records_next, influx_chunks_queue)</text>
+<text text-anchor="start" x="3550.5" y="-218.3" font-family="Times,serif" font-size="14.00">init_counters(influx_chunks_queue_, records_current_, records_next_, args_)</text>
 <text text-anchor="start" x="3550.5" y="-203.3" font-family="Times,serif" font-size="14.00">load_influx_yaml()</text>
 <text text-anchor="start" x="3550.5" y="-188.3" font-family="Times,serif" font-size="14.00">parse_csv_row(row, record)</text>
 <text text-anchor="start" x="3550.5" y="-173.3" font-family="Times,serif" font-size="14.00">parse_csv_rows(rows, record)</text>
