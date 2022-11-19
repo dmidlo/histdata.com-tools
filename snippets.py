@@ -187,6 +187,7 @@ def main():
         start = pairs_data[pair]['start']
         end = pairs_data[pair]['end']
         
+        print(pair, start, end)
         import_pair_to_influx(pair, start, end)
 
 if __name__ == '__main__':

@@ -5,6 +5,8 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 **NEW:** Expanded API support!!!
 
+[![Downloads](https://pepy.tech/badge/histdatacom)](https://pepy.tech/project/histdatacom) [![Downloads](https://pepy.tech/badge/histdatacom/month)](https://pepy.tech/project/histdatacom)
+
 ---
 
 - [histdata.com-tools](#histdatacom-tools)
