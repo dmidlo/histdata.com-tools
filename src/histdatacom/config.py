@@ -12,4 +12,3 @@ current_queue = None
 next_queue = None
 influx_chunks_queue = None
 
-batch_size = 5_000

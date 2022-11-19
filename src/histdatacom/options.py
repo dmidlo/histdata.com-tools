@@ -25,3 +25,6 @@ class Options:
         self.from_api = False
         self.api_return_type = "datatable"
         self.cpu_utilization = "medium"
+        self.batch_size = "5000"
+        self.delete_after_influx = False
+        self.zip_persist = False

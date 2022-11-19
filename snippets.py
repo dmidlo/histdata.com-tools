@@ -58,196 +58,136 @@
 # histdatacom -I -p grxeur auxaud frxeur hkxhkd spxusd jpxjpy udxusd -f ascii -t tick-data-quotes -s start -e now -c low
 # histdatacom -I -p nsxusd ukxgbp etxeur -f ascii -t tick-data-quotes -s start -e now -c low
 
-histdata_symbs = {"eurusd",
-"eurchf",
-"eurgbp",
-"eurjpy",
-"euraud",
-"usdcad",
-"usdchf",
-"usdjpy",
-"usdmxn",
-"gbpchf",
-"gbpjpy",
-"gbpusd",
-"audjpy",
-"audusd",
-"chfjpy",
-"nzdjpy",
-"nzdusd",
-"xauusd",
-"eurcad",
-"audcad",
-"cadjpy",
-"eurnzd",
-"grxeur",
-"nzdcad",
-"sgdjpy",
-"usdhkd",
-"usdnok",
-"usdtry",
-"xauaud",
-"audchf",
-"auxaud",
-"eurhuf",
-"eurpln",
-"frxeur",
-"hkxhkd",
-"nzdchf",
-"spxusd",
-"usdhuf",
-"usdpln",
-"usdzar",
-"xauchf",
-"zarjpy",
-"bcousd",
-"etxeur",
-"eurczk",
-"eursek",
-"gbpaud",
-"gbpnzd",
-"jpxjpy",
-"udxusd",
-"usdczk",
-"usdsek",
-"wtiusd",
-"xaueur",
-"audnzd",
-"cadchf",
-"eurdkk",
-"eurnok",
-"eurtry",
-"gbpcad",
-"nsxusd",
-"ukxgbp",
-"usddkk",
-"usdsgd",
-"xagusd",
-"xaugbp"}
+# histdata = {"eurusd",
+# "eurchf",
+# "eurgbp",
+# "eurjpy",
+# "euraud",
+# "usdcad",
+# "usdchf",
+# "usdjpy",
+# "usdmxn",
+# "gbpchf",
+# "gbpjpy",
+# "gbpusd",
+# "audjpy",
+# "audusd",
+# "chfjpy",
+# "nzdjpy",
+# "nzdusd",
+# "xauusd",
+# "eurcad",
+# "audcad",
+# "cadjpy",
+# "eurnzd",
+# "grxeur",
+# "nzdcad",
+# "sgdjpy",
+# "usdhkd",
+# "usdnok",
+# "usdtry",
+# "xauaud",
+# "audchf",
+# "auxaud",
+# "eurhuf",
+# "eurpln",
+# "frxeur",
+# "hkxhkd",
+# "nzdchf",
+# "spxusd",
+# "usdhuf",
+# "usdpln",
+# "usdzar",
+# "xauchf",
+# "zarjpy",
+# "bcousd",
+# "etxeur",
+# "eurczk",
+# "eursek",
+# "gbpaud",
+# "gbpnzd",
+# "jpxjpy",
+# "udxusd",
+# "usdczk",
+# "usdsek",
+# "wtiusd",
+# "xaueur",
+# "audnzd",
+# "cadchf",
+# "eurdkk",
+# "eurnok",
+# "eurtry",
+# "gbpcad",
+# "nsxusd",
+# "ukxgbp",
+# "usddkk",
+# "usdsgd",
+# "xagusd",
+# "xaugbp"}
 
 
 
-# Oanda Symbols:
-oanda_symbs = {"audcad",
-"audchf",
-"audhkd",
-"audjpy",
-"audsgd",
-"audusd",
-"cadhkd",
-"cadjpy",
-"cadsgd",
-"chfhkd",
-"chfjpy",
-"euraud",
-"eurcad",
-"eurchf",
-"eurgbp",
-"eurhkd",
-"eurjpy",
-"eursgd",
-"eurusd",
-"gbpaud",
-"gbpcad",
-"gbpchf",
-"gbphkd",
-"gbpjpy",
-"gbpsgd",
-"gbpusd",
-"hkdjpy",
-"sgdchf",
-"sgdhkd",
-"sgdjpy",
-"usdcad",
-"usdchf",
-"usdhkd",
-"usdjpy",
-"usdsgd",
-"audnzd",
-"cadchf",
-"chfzar",
-"eurczk",
-"eurdkk",
-"eurhuf",
-"eurnok",
-"eurnzd",
-"eurpln",
-"eursek",
-"eurtry",
-"eurzar",
-"gbpnzd",
-"gbppln",
-"gbpzar",
-"nzdcad",
-"nzdchf",
-"nzdhkd",
-"nzdjpy",
-"nzdsgd",
-"nzdusd",
-"tryjpy",
-"usdcnh",
-"usdczk",
-"usddkk",
-"usdhuf",
-"usdmxn",
-"usdnok",
-"usdpln",
-"usdsar",
-"usdsek",
-"usdthb",
-"usdtry",
-"usdzar",
-"zarjpy"}
 
-histdata_and_oanda_intersect_symbs = histdata_symbs & oanda_symbs
+
+# histdata_and_oanda_intersect_symbs = histdata_symbs & oanda_symbs
 
 
 import histdatacom
 from histdatacom.options import Options
-from rich import print
+from histdatacom.fx_enums import Pairs
 
-
-
-# options.validate_urls = True
-# options.download_data_archives = True  # implies validate
-# options.extract_csvs = True  # implies validate and download
-# options.available_remote_data = True
-
-
-# options.start_yearmonth = "2005-01"
-# options.end_yearmonth = "2006-12"
-
-
-def main():
-    # pairs = {"usdmxn", "eurusd", "gbpusd", "audusd"}
-
-    # range_options = Options()
-    # range_options.pairs = pairs
-    # range_options.update_remote_data = True
-    # range_options.by = "start_asc"
-    # range_data = histdatacom(range_options)  # (Jupyter)
-    # print(range_data)
-
+def import_pair_to_influx(pair, start, end):
     data_options = Options()
-    # data_options.pairs = pairs
-    # data_options.api_return_type = "datatable"  # "datatable", "pandas", or "arrow"
 
-    data_options.pairs = histdata_and_oanda_intersect_symbs
-    data_options.start_yearmonth = "2011-01"
-    data_options.end_yearmonth = "2011-12"
     data_options.import_to_influxdb = True  # implies validate, download, and extract
+    data_options.delete_after_influx = True
+    data_options.batch_size = "2000"
+    data_options.cpu_utilization = "high"
+
+    data_options.pairs = {f"{pair}"}# histdata_and_oanda_intersect_symbs
+    data_options.start_yearmonth = f"{start}"
+    data_options.end_yearmonth = f"{end}"
     data_options.formats = {"ascii"}  # Must be {"ascii"}
     data_options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
-    data_options.cpu_utilization = "high"
-    data = histdatacom(data_options)
+    histdatacom(data_options)
 
+def get_available_range_data(pairs):
+    range_options = Options()
+    range_options.pairs = pairs
+    range_options.available_remote_data = True
+    range_options.by = "start_dsc"
+    range_data = histdatacom(range_options)  # (Jupyter)
+    return range_data
 
-    # list
-    # pandas.core.frame.DataFrame
-    # datatable.Frame
-    # pyarrow.lib.Table
+def print_one_datatable_frame(pair, start=None, end=None):
+    options = Options()
+    options.api_return_type = "datatable"
+    options.pairs = {f"{pair}"}
+    options.start_yearmonth = "201501"
+    options.formats = {"ascii"}
+    options.timeframes = {"tick-data-quotes"}
+    return histdatacom(options)
 
+def main():
+    histdata_symbs = Pairs.list_keys()
+    
+    # Oanda Symbols:
+    oanda_symbs = {"audcad","audchf","audhkd","audjpy","audsgd","audusd","cadhkd","cadjpy","cadsgd",
+    "chfhkd","chfjpy","euraud","eurcad","eurchf","eurgbp","eurhkd","eurjpy","eursgd","eurusd","gbpaud",
+    "gbpcad","gbpchf","gbphkd","gbpjpy","gbpsgd","gbpusd","hkdjpy","sgdchf","sgdhkd","sgdjpy","usdcad",
+    "usdchf","usdhkd","usdjpy","usdsgd","audnzd","cadchf","chfzar","eurczk","eurdkk","eurhuf","eurnok",
+    "eurnzd","eurpln","eursek","eurtry","eurzar","gbpnzd","gbppln","gbpzar","nzdcad","nzdchf","nzdhkd",
+    "nzdjpy","nzdsgd","nzdusd","tryjpy","usdcnh","usdczk","usddkk","usdhuf","usdmxn","usdnok","usdpln",
+    "usdsar","usdsek","usdthb","usdtry","usdzar","zarjpy"}
 
+    histdata_and_oanda_intersect_symbs = histdata_symbs & oanda_symbs
+
+    pairs_data = get_available_range_data(histdata_and_oanda_intersect_symbs)
+    for pair in pairs_data:
+        start = pairs_data[pair]['start']
+        end = pairs_data[pair]['end']
+        
+        import_pair_to_influx(pair, start, end)
 
 if __name__ == '__main__':
     main()

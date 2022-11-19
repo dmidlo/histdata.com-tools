@@ -75,3 +75,5 @@ def get_csv_dialect(csv_path):
 def replace_date_punct(datemonth_str):
     """removes year-month punctuation and returns str("000000")"""
     return re.sub("[-_.: ]", "", datemonth_str) if datemonth_str is not None else ""
+
+

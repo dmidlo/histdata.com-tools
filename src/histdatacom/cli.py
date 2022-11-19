@@ -157,7 +157,15 @@ class ArgParser(argparse.ArgumentParser):
             type=(lambda v: self.validate_yearmonth_format(v)),
             help='set a start year and month for data. e.g. -e 2020-00 or -e 2022-04')
         self.add_argument(
-            '-d', '--data-directory',
+            '-b', '--batch_size',
+            type=int,
+            help='(integer) influxdb write_api batch size. defaults to 5000')
+        self.add_argument(
+            '-d', '--delete_after_influx',
+            action='store_true',
+            help='delete data files after upload to influxdb')
+        self.add_argument(
+            '--data-directory',
             type=str,
             help='Directory Used to save data. default is "data" in the current directory')
 
@@ -204,11 +212,12 @@ class ArgParser(argparse.ArgumentParser):
     def clean_from_api_args(cls, args_namespace):
         args = []
 
-        args.extend(["-d", args_namespace.data_directory])
+        args.extend(["--data-directory", args_namespace.data_directory])
         args.extend(["-p", *args_namespace.pairs])
         args.extend(["-f", *args_namespace.formats])
         args.extend(["-t", *args_namespace.timeframes])
         args.extend(["-c", args_namespace.cpu_utilization])
+        args.extend(["-b", args_namespace.batch_size])
 
         if args_namespace.start_yearmonth:
             args.extend(["-s", args_namespace.start_yearmonth])
@@ -226,6 +235,8 @@ class ArgParser(argparse.ArgumentParser):
             args.append("-X")
         if args_namespace.import_to_influxdb:
             args.append("-I")
+        if args_namespace.delete_after_influx:
+            args.append("-d")
         return args
 
     @classmethod

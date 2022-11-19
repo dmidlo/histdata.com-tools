@@ -69,7 +69,7 @@ class _Influx():
 
     def import_file(self, record, args, records_current, records_next, influx_chunks_queue):
         try:
-            if str.lower(record.data_format) == "ascii":
+            if record.status != "INFLUX_UPLOAD" and str.lower(record.data_format) == "ascii":
                 jay_path = f"{record.data_dir}.data"
                 if os.path.exists(jay_path):
                     self.import_jay(record, args, records_current, records_next, influx_chunks_queue)
@@ -77,9 +77,15 @@ class _Influx():
                     _API.test_for_jay_or_create(record, args)
                     self.import_jay(record, args, records_current, records_next, influx_chunks_queue)
 
+            record.status = "INFLUX_UPLOAD"
+            record.write_info_file(base_dir=args['default_download_dir'])
+
+            if args['delete_after_influx']:
+                os.remove(f"{record.data_dir}{record.zip_filename}")
+                os.remove(f"{record.data_dir}{record.jay_filename}")
             records_next.put(record)
-        except Exception:
-            print("Unexpected error from here:", sys.exc_info())
+        except Exception as e:
+            print("Unexpected error from here:", sys.exc_info(e))
             record.delete_into_file()
             raise
         finally:
@@ -104,9 +110,6 @@ class _Influx():
             data.subscribe(
                 on_next=lambda x: None,
                 on_error=lambda er: print(f"Unexpected error: {er}"))
-
-        record.status = "INFLUX_UPLOAD"
-        record.write_info_file(base_dir=args['default_download_dir'])
 
     def parse_jay_rows(self, iterable, record):
         mapfunc = partial(self.parse_jay_row, record=record)
@@ -182,7 +185,6 @@ class InfluxDBWriter(Process):
                 chunk = self.influx_chunks_queue.get()
             except EOFError:
                 break
-
 
             if chunk is None:
                 self.terminate()
