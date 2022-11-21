@@ -3,6 +3,7 @@ import sys
 import pickle
 import contextlib
 from urllib.parse import urlparse
+from urllib.request import urlopen
 import requests
 from rich import print
 from rich.progress import Progress
@@ -42,6 +43,7 @@ class _URLs:
             "Referer": "",
             "Accept-Encoding": "gzip, deflate",
             "Accept-Language": "en-US,en;q=0.9"}
+        config.args["repo_url"] = "https://github.com/dmidlo/histdata.com-tools/blob/main/data/.repo?raw=true"
 
     def populate_initial_queue(self):
         with Progress(TextColumn(text_format="[cyan] Generating API Requests"),
@@ -247,7 +249,7 @@ class _URLs:
     def test_for_repo_data_file(cls):
         if os.path.exists(f"{config.args['default_download_dir']}{os.sep}.repo"):
             config.repo_data_file_exists = True
-            return True
+
         config.repo_data_file_exists = False
         return False
 
@@ -281,15 +283,29 @@ class _URLs:
                 while True:
                     config.available_remote_data.update(pickle.load(fileread))
 
-        old_hash = config.available_remote_data['hash']
-        old_time = config.available_remote_data['hash_utc']
-        print(old_hash, old_time)
 
-        cls.hash_repo()
+    @classmethod
+    def update_repo_from_github(cls):
+        try:
+            remote_repo = pickle.load(urlopen(config.args["repo_url"]))
+            remote_hash = remote_repo['hash']
+            remote_time = remote_repo['hash_utc']
 
-        new_hash = config.available_remote_data['hash']
-        new_time = config.available_remote_data['hash_utc']
-        print(new_hash, new_time)
+            if config.repo_data_file_exists:
+                old_hash = config.available_remote_data['hash']
+                old_time = config.available_remote_data['hash_utc']
+
+                if old_hash != remote_hash and old_time < remote_time:
+                    config.available_remote_data = remote_repo
+            else:
+                config.available_remote_data = remote_repo
+                print(config.available_remote_data)
+                config.repo_data_file_exists = True
+                cls.write_repo_data_file()
+        except Exception as e:
+            print(f"Unable to fetch repo list from github: {record.url}", sys.exc_info(e))
+       
+
 
     def print_repo_data_table(self):
         table = Table(title="Data and date ranges available from HistData.com",
