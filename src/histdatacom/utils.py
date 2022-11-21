@@ -5,6 +5,8 @@ import re
 from datetime import datetime
 import pytz
 import yaml
+import hashlib
+import json
 from rich.progress import TextColumn
 from rich.progress import BarColumn
 from rich.progress import TimeElapsedColumn
@@ -77,3 +79,11 @@ def replace_date_punct(datemonth_str):
     return re.sub("[-_.: ]", "", datemonth_str) if datemonth_str is not None else ""
 
 
+def hash_dict(data_dict):
+    dict_hash = hashlib.md5()
+    encoded = json.dumps(data_dict, sort_keys=True).encode()
+    dict_hash.update(encoded)
+    return dict_hash.hexdigest()
+
+def get_now_UTC_timestamp():
+    return datetime.utcnow().timestamp()

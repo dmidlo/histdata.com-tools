@@ -9,7 +9,9 @@ venv/
 .DS_Store
 __pycache__
 .pytest_cache/
-data/
+!data/
+data/*
+!data/.repo
 build/
 dist/
 *.egg-info

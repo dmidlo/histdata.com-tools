@@ -5,6 +5,7 @@ args = None
 
 available_remote_data = dict()
 repo_data_file_exists = False
+filter_pairs = None
 
 queue_manager = None
 

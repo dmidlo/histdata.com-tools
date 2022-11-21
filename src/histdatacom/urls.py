@@ -16,6 +16,8 @@ from histdatacom.utils import get_month_from_datemonth
 from histdatacom.utils import get_current_datemonth_gmt_minus5
 from histdatacom.utils import force_datemonth_if_only_year
 from histdatacom.utils import create_full_path
+from histdatacom.utils import hash_dict
+from histdatacom.utils import get_now_UTC_timestamp
 from histdatacom.fx_enums import Timeframe
 from histdatacom.fx_enums import get_valid_format_timeframes
 from histdatacom.records import Record
@@ -41,17 +43,21 @@ class _URLs:
             "Accept-Encoding": "gzip, deflate",
             "Accept-Language": "en-US,en;q=0.9"}
 
-
     def populate_initial_queue(self):
         with Progress(TextColumn(text_format="[cyan] Generating API Requests"),
                       SpinnerColumn(), SpinnerColumn(), SpinnerColumn(),
                       TimeElapsedColumn()) as progress:
             task_id = progress.add_task("waiting", total=0)
 
+            if config.filter_pairs is None\
+            and not (config.args['update_remote_data']\
+            and config.args['available_remote_data']):
+                config.filter_pairs = config.args["pairs"]
+
             for url in self.generate_form_urls(config.args["start_yearmonth"],
                                             config.args["end_yearmonth"],
                                             config.args['formats'],
-                                            config.args["pairs"],
+                                            config.filter_pairs,
                                             config.args['timeframes'],
                                             config.args["base_url"]):
                 record = Record()
@@ -60,7 +66,7 @@ class _URLs:
 
                 if record.status != "URL_NO_REPO_DATA":
                     record.write_info_file(base_dir=config.args['default_download_dir'])
-                    if (config.args['update_remote_data'] or\
+                    if (config.args['update_remote_data'] or config.filter_pairs or\
                     (config.args['available_remote_data'] and not config.repo_data_file_exists))\
                     and record.status != "URL_NEW":
                         self.set_available_data(record)
@@ -77,7 +83,7 @@ class _URLs:
                 if record.data_tk == "":
                     raise ValueError
 
-                if config.args['update_remote_data'] or \
+                if config.args['update_remote_data'] or len(config.filter_pairs) > 0 or\
                   (config.args['available_remote_data'] and not config.repo_data_file_exists):
                     self.set_available_data(record)
 
@@ -90,8 +96,8 @@ class _URLs:
                 print(f"Info: Histdata.com does not have: {record.url}")
             record.status = "URL_NO_REPO_DATA"
             record.write_info_file(base_dir=args['default_download_dir'])
-        except Exception:
-            print(f"Unknown Error for URL: {record.url}", sys.exc_info())
+        except Exception as e:
+            print(f"Unknown Error for URL: {record.url}", sys.exc_info(e))
             record.delete_info_file()
             raise
         finally:
@@ -246,8 +252,19 @@ class _URLs:
         return False
 
     @classmethod
+    def hash_repo(cls):
+        if 'hash' in config.available_remote_data:
+                del config.available_remote_data['hash']
+        if 'hash_utc' in config.available_remote_data:
+            del config.available_remote_data['hash_utc']
+        config.available_remote_data['hash'] = hash_dict(config.available_remote_data)
+        config.available_remote_data['hash_utc'] = get_now_UTC_timestamp()
+
+    @classmethod
     def write_repo_data_file(cls):
         try:
+            cls.hash_repo()            
+
             path = config.args['default_download_dir']
             create_full_path(path)
 
@@ -263,6 +280,16 @@ class _URLs:
             with contextlib.suppress(Exception):
                 while True:
                     config.available_remote_data.update(pickle.load(fileread))
+
+        old_hash = config.available_remote_data['hash']
+        old_time = config.available_remote_data['hash_utc']
+        print(old_hash, old_time)
+
+        cls.hash_repo()
+
+        new_hash = config.available_remote_data['hash']
+        new_time = config.available_remote_data['hash_utc']
+        print(new_hash, new_time)
 
     def print_repo_data_table(self):
         table = Table(title="Data and date ranges available from HistData.com",
@@ -281,12 +308,17 @@ class _URLs:
         print(table)
 
     def get_available_repo_data(self):
+        filter_pairs = config.args['pairs'] - set(config.available_remote_data)
+        config.filter_pairs = None if len(filter_pairs) == 0 else filter_pairs
+
         if (not config.repo_data_file_exists and config.args['available_remote_data'])\
-            or config.args['update_remote_data']:
+            or config.args['update_remote_data']\
+            or config.filter_pairs:
             self.populate_initial_queue()
 
         if config.args['available_remote_data'] or config.args['update_remote_data']:
-            if config.args['update_remote_data'] or not config.repo_data_file_exists:
+            if config.args['update_remote_data'] or not config.repo_data_file_exists\
+                or config.filter_pairs:
                 self.validate_urls()
                 self.write_repo_data_file()
 
@@ -298,12 +330,8 @@ class _URLs:
 
     @classmethod
     def filter_repo_dict_by_pairs(cls, repo_dict_copy, filter_pairs):
-        filtered = dict()
-        for x in repo_dict_copy:
-            for y in filter_pairs:
-                if x == y:
-                    filtered.update({x: {"start": repo_dict_copy[x]['start'], "end": repo_dict_copy[x]['end']}})
-
+        filtered = {x: {"start": repo_dict_copy[x]['start'], "end": repo_dict_copy[x]['end']}
+                    for x in set(repo_dict_copy) & filter_pairs}
 
         return filtered if len(filter_pairs) > 0 else repo_dict_copy
 

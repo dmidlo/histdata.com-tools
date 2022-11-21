@@ -47,8 +47,11 @@ class _HistDataCom:
         self.csvs = _CSVs()
         self.api = _API()
 
-        if config.args['available_remote_data'] and self.urls.test_for_repo_data_file():
-            self.urls.read_repo_data_file()
+        if (config.args['available_remote_data'] or config.args['update_remote_data'])\
+            and self.urls.test_for_repo_data_file():
+                self.urls.read_repo_data_file()
+
+        
 
         if config.args["import_to_influxdb"] == 1:
             self.influx = _Influx()
