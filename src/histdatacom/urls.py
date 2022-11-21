@@ -249,6 +249,7 @@ class _URLs:
     def test_for_repo_data_file(cls):
         if os.path.exists(f"{config.args['default_download_dir']}{os.sep}.repo"):
             config.repo_data_file_exists = True
+            return True
 
         config.repo_data_file_exists = False
         return False
