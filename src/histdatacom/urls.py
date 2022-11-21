@@ -271,7 +271,7 @@ class _URLs:
         table.add_column("Start -s")
         table.add_column("End -e")
 
-        for row in self.sort_repo_dict_by(config.available_remote_data.copy()):
+        for row in self.sort_repo_dict_by(config.available_remote_data.copy(), config.args['pairs']):
             start = config.available_remote_data[row]['start']
             end = config.available_remote_data[row]['end']
             table.add_row(row.lower(), 
@@ -291,22 +291,35 @@ class _URLs:
                 self.write_repo_data_file()
 
             if config.args["from_api"]:
-                return self.sort_repo_dict_by(config.available_remote_data.copy())
+                return self.sort_repo_dict_by(config.available_remote_data.copy(), config.args['pairs'])
             else:
                 self.print_repo_data_table()
                 sys.exit(0)
 
     @classmethod
-    def sort_repo_dict_by(cls, repo_dict_copy):
+    def filter_repo_dict_by_pairs(cls, repo_dict_copy, filter_pairs):
+        filtered = dict()
+        for x in repo_dict_copy:
+            for y in filter_pairs:
+                if x == y:
+                    filtered.update({x: {"start": repo_dict_copy[x]['start'], "end": repo_dict_copy[x]['end']}})
+
+
+        return filtered if len(filter_pairs) > 0 else repo_dict_copy
+
+    @classmethod
+    def sort_repo_dict_by(cls, repo_dict_copy, filter_pairs):
+        filtered_pairs = cls.filter_repo_dict_by_pairs(repo_dict_copy, filter_pairs)
+
         match config.args['by']:
             case "pair_asc":
-                return dict(sorted(repo_dict_copy.items()))
+                return dict(sorted(filtered_pairs.items()))
             case "pair_dsc":
-                return dict(sorted(repo_dict_copy.items(), reverse=True))
+                return dict(sorted(filtered_pairs.items(), reverse=True))
             case "start_asc":
-                return dict(sorted(repo_dict_copy.items(), key=lambda pair: pair[1]['start']))
+                return dict(sorted(filtered_pairs.items(), key=lambda pair: pair[1]['start']))
             case "start_dsc":
-                return dict(sorted(repo_dict_copy.items(), key=lambda pair: pair[1]['start'], reverse=True))
+                return dict(sorted(filtered_pairs.items(), key=lambda pair: pair[1]['start'], reverse=True))
 
 
     @classmethod

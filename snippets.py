@@ -142,7 +142,7 @@ def import_pair_to_influx(pair, start, end):
     data_options.import_to_influxdb = True  # implies validate, download, and extract
     data_options.delete_after_influx = True
     data_options.batch_size = "2000"
-    data_options.cpu_utilization = "high"
+    data_options.cpu_utilization = "low"
 
     data_options.pairs = {f"{pair}"}# histdata_and_oanda_intersect_symbs
     data_options.start_yearmonth = f"{start}"
