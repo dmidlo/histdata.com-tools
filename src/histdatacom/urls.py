@@ -28,7 +28,7 @@ from histdatacom import config
 
 
 class _URLs:
-    def __init__(self):
+    def __init__(self) -> None:
         config.args["base_url"] = 'http://www.histdata.com/download-free-forex-data/'
         config.args["post_headers"] = {
             "Host": "www.histdata.com",
@@ -45,7 +45,7 @@ class _URLs:
             "Accept-Language": "en-US,en;q=0.9"}
         config.args["repo_url"] = "https://github.com/dmidlo/histdata.com-tools/blob/main/data/.repo?raw=true"
 
-    def populate_initial_queue(self):
+    def populate_initial_queue(self) -> None:
         with Progress(TextColumn(text_format="[cyan] Generating API Requests"),
                       SpinnerColumn(), SpinnerColumn(), SpinnerColumn(),
                       TimeElapsedColumn()) as progress:
@@ -105,7 +105,7 @@ class _URLs:
         finally:
             config.current_queue.task_done()
 
-    def validate_urls(self):
+    def validate_urls(self) -> None:
 
         pool = ThreadPool(self.validate_url,
                           config.args,
@@ -157,7 +157,7 @@ class _URLs:
         with open(zip_path, "wb") as zip_file:
             zip_file.write(content)
 
-    def download_zips(self):
+    def download_zips(self) -> None:
 
         pool = ThreadPool(self.download_zip,
                           config.args,
@@ -246,11 +246,10 @@ class _URLs:
                 config.available_remote_data[pair]["end"] = datemonth
 
     @classmethod
-    def test_for_repo_data_file(cls):
+    def test_for_repo_data_file(cls) -> bool:
         if os.path.exists(f"{config.args['default_download_dir']}{os.sep}.repo"):
             config.repo_data_file_exists = True
             return True
-
         config.repo_data_file_exists = False
         return False
 
@@ -278,14 +277,14 @@ class _URLs:
             sys.exit()
 
     @classmethod
-    def read_repo_data_file(cls):
+    def read_repo_data_file(cls) -> None:
         with open(f"{config.args['default_download_dir']}{os.sep}.repo", 'rb') as fileread:
             with contextlib.suppress(Exception):
                 while True:
                     config.available_remote_data.update(pickle.load(fileread))
 
     @classmethod
-    def update_repo_from_github(cls):
+    def update_repo_from_github(cls) -> None:
         try:
             remote_repo = pickle.load(urlopen(config.args["repo_url"]))
             remote_hash = remote_repo['hash']
@@ -321,7 +320,7 @@ class _URLs:
 
         print(table)
 
-    def get_available_repo_data(self):
+    def get_available_repo_data(self) -> dict:
         filter_pairs = config.args['pairs'] - set(config.available_remote_data)
         config.filter_pairs = None if len(filter_pairs) == 0 else filter_pairs
 

@@ -28,7 +28,7 @@ class _CSVs:
         finally:
             records_current.task_done()
 
-    def extract_csvs(self):
+    def extract_csvs(self) -> None:
 
         pool = ProcessPool(self.extract_csv,
                            config.args,

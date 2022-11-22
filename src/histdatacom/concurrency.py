@@ -1,3 +1,4 @@
+from __future__ import annotations
 import sys
 from math import ceil
 from multiprocessing import managers
@@ -14,9 +15,13 @@ from rich.progress import BarColumn
 from rich.progress import TimeElapsedColumn
 from histdatacom.records import Records
 from histdatacom.options import Options
-from histdatacom.histdata_com import _HistDataCom
 from histdatacom import config
 from typing import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from histdatacom.histdata_com import _HistDataCom
+
 
 def init_counters(records_current_, records_next_, args_, influx_chunks_queue_=None):
     global records_current

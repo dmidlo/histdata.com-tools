@@ -77,12 +77,13 @@ from histdatacom.utils import get_year_from_datemonth
 from histdatacom.utils import replace_date_punct
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.options import Options
+from rich import print
 
 
 class ArgParser(argparse.ArgumentParser):
     """ Encapsulation class for argparse related operations """
 
-    def __init__(self, options=Options(), **kwargs):
+    def __init__(self, options: Options=Options()):
         """ set up argparse, bring in defaults DTO, setup cli params, receive
             and overwrite defaults with user cli args."""
         # init _HistDataCom.ArgParser to extend argparse.ArgumentParser
@@ -189,9 +190,7 @@ class ArgParser(argparse.ArgumentParser):
         self.check_for_ascii_if_api(self.arg_namespace)
         get_pool_cpu_count(self.arg_namespace.cpu_utilization)
 
-
-
-    def __call__(self):
+    def __call__(self) -> Options:
         """ simply return the completed args object """
         return self.arg_namespace
 
@@ -240,13 +239,14 @@ class ArgParser(argparse.ArgumentParser):
         return args
 
     @classmethod
-    def _arg_list_to_set(cls, args):
+    def _arg_list_to_set(cls, args: dict) -> dict:
         # This is to standardize data types. If the user specifies a parameter,
         # argparse returns a list, our defaults are sets, so .
         for arg in args:
             if isinstance(args[arg], list):
                 args[arg] = set(args[arg])
         return args
+
     @classmethod
     def false_from_api_if_behavior_flag(cls, args_namespace):
         if args_namespace.validate_urls \

@@ -37,7 +37,7 @@ class _Influx():
         global args
         args = args_
 
-    def import_data(self):
+    def import_data(self) -> None:
 
         for cpu in range(1, get_pool_cpu_count(config.args['cpu_utilization']) + 1):
             writer = InfluxDBWriter(config.args, config.influx_chunks_queue)

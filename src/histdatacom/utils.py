@@ -31,11 +31,11 @@ def create_full_path(path_str: str) -> None:
         os.makedirs(path_str)
 
 
-def set_working_data_dir(data_dirname):
+def set_working_data_dir(data_dirname: str) -> str:
     return f"{os.getcwd()}{os.sep}{data_dirname}{os.sep}"
 
 
-def load_influx_yaml():
+def load_influx_yaml() -> dict:
 
     if os.path.exists('influxdb.yaml'):
         with open('influxdb.yaml', 'r') as file:

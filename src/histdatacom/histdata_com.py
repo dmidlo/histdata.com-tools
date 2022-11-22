@@ -1,4 +1,3 @@
-import sys
 from pyarrow import Table
 from datatable import Frame
 from pandas import DataFrame
@@ -11,16 +10,13 @@ from histdatacom.api import _API
 from histdatacom.csvs import _CSVs
 from histdatacom.influx import _Influx
 from histdatacom.concurrency import QueueManager
-from typing import Callable
 from histdatacom import config
-
-from rich import print
 
 
 class _HistDataCom:
     """A module to pull market data from histdata.com and import it into influxDB"""
 
-    def __init__(self, options) -> None:
+    def __init__(self, options: Options) -> None:
 
         """ Initialization for _HistDataCom Class"""
         # Set User () or Default Arguments respectively utilizing the self.ArgParser
@@ -56,7 +52,7 @@ class _HistDataCom:
         if config.args["import_to_influxdb"] == 1:
             self.influx = _Influx()
 
-    def run(self) -> list | dict | Frame | DataFrame | Table:
+    def run(self) -> list | dict | Frame | DataFrame | Table | None:
         if config.args['available_remote_data'] or config.args['update_remote_data']:
             return self.urls.get_available_repo_data()
 
@@ -77,15 +73,18 @@ class _HistDataCom:
         if config.args["import_to_influxdb"]:
             self.influx.import_data()
 
+        return None
+
 
 def main(options: Options | None=None) -> list | dict | Frame | DataFrame | Table:
     if not options:
         options = Options()
-        QueueManager(options)(_HistDataCom)
+        QueueManager(options)(_HistDataCom) # type: ignore
+        return None
     else:
         options.from_api = True
-        return QueueManager(options)(_HistDataCom)
+        return QueueManager(options)(_HistDataCom) # type: ignore
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    raise SystemExit(main())
