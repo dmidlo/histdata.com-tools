@@ -93,11 +93,11 @@ class Pairs(Enum):
     xaugbp = "XAU_GBP"
 
     @classmethod
-    def list_keys(cls):
+    def list_keys(cls) -> set:
         return set(cls.__members__.keys())
 
     @classmethod
-    def list_values(cls):
+    def list_values(cls) -> set:
         return {member.value for _, member in cls.__members__.items()}
 
 
@@ -109,11 +109,11 @@ class Format(Enum):
     XLSX = "excel"
 
     @classmethod
-    def list_keys(cls):
+    def list_keys(cls) -> set:
         return set(cls.__members__.keys())
 
     @classmethod
-    def list_values(cls):
+    def list_values(cls) -> set:
         return {member.value for _, member in cls.__members__.items()}
 
 
@@ -125,11 +125,11 @@ class Timeframe(Enum):
     T_ASK = "tick-ask-quotes"
 
     @classmethod
-    def list_keys(cls):
+    def list_keys(cls) -> set:
         return set(cls.__members__.keys())
 
     @classmethod
-    def list_values(cls):
+    def list_values(cls) -> set:
         return {member.value for _, member in cls.__members__.items()}
 
 

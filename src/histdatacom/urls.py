@@ -284,7 +284,6 @@ class _URLs:
                 while True:
                     config.available_remote_data.update(pickle.load(fileread))
 
-
     @classmethod
     def update_repo_from_github(cls):
         try:
@@ -305,8 +304,6 @@ class _URLs:
                 cls.write_repo_data_file()
         except Exception as e:
             print(f"Unable to fetch repo list from github: {record.url}", sys.exc_info(e))
-       
-
 
     def print_repo_data_table(self):
         table = Table(title="Data and date ranges available from HistData.com",

@@ -8,23 +8,23 @@ class Options:
     # normally argparse.ArgumentParser.parse_args(namespace=...) creates this namespace and
     # writes user's cli args to it.  Preemptively creating here to hold default args; if the
     # user enters args in the shell, these values will be respectively overwritten
-    def __init__(self):
-        self.available_remote_data = False
-        self.update_remote_data = False
-        self.by = "pair_asc"
-        self.validate_urls = False
-        self.download_data_archives = False
-        self.extract_csvs = False
-        self.import_to_influxdb = False
-        self.pairs = Pairs.list_keys()
-        self.formats = Format.list_values()
-        self.timeframes = Timeframe.list_keys()
-        self.start_yearmonth = ""
-        self.end_yearmonth = ""
-        self.data_directory = "data"
-        self.from_api = False
-        self.api_return_type = "datatable"
-        self.cpu_utilization = "medium"
-        self.batch_size = "5000"
-        self.delete_after_influx = False
-        self.zip_persist = False
+    def __init__(self) -> None:
+        self.available_remote_data: bool = False
+        self.update_remote_data: bool = False
+        self.by: str = "pair_asc"
+        self.validate_urls: bool = False
+        self.download_data_archives: bool = False
+        self.extract_csvs: bool = False
+        self.import_to_influxdb: bool = False
+        self.pairs: set = Pairs.list_keys()
+        self.formats: set = Format.list_values()
+        self.timeframes: set= Timeframe.list_keys()
+        self.start_yearmonth: str = ""
+        self.end_yearmonth: str = ""
+        self.data_directory: str = "data"
+        self.from_api: bool = False
+        self.api_return_type: str = "datatable"
+        self.cpu_utilization: str = "medium"
+        self.batch_size: str = "5000"
+        self.delete_after_influx: bool = False
+        self.zip_persist: bool = False

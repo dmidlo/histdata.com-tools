@@ -11,6 +11,7 @@ from histdatacom.api import _API
 from histdatacom.csvs import _CSVs
 from histdatacom.influx import _Influx
 from histdatacom.concurrency import QueueManager
+from typing import Callable
 from histdatacom import config
 
 from rich import print
@@ -19,7 +20,7 @@ from rich import print
 class _HistDataCom:
     """A module to pull market data from histdata.com and import it into influxDB"""
 
-    def __init__(self, options):
+    def __init__(self, options) -> None:
 
         """ Initialization for _HistDataCom Class"""
         # Set User () or Default Arguments respectively utilizing the self.ArgParser
@@ -55,7 +56,7 @@ class _HistDataCom:
         if config.args["import_to_influxdb"] == 1:
             self.influx = _Influx()
 
-    def run(self):
+    def run(self) -> list | dict | Frame | DataFrame | Table:
         if config.args['available_remote_data'] or config.args['update_remote_data']:
             return self.urls.get_available_repo_data()
 
@@ -77,7 +78,7 @@ class _HistDataCom:
             self.influx.import_data()
 
 
-def main(options: Options | None=None) -> list | Frame | DataFrame | Table:
+def main(options: Options | None=None) -> list | dict | Frame | DataFrame | Table:
     if not options:
         options = Options()
         QueueManager(options)(_HistDataCom)

@@ -2,6 +2,9 @@ import sys
 from math import ceil
 from multiprocessing import managers
 from multiprocessing import cpu_count
+from pyarrow import Table
+from datatable import Frame
+from pandas import DataFrame
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import as_completed
@@ -10,6 +13,8 @@ from rich.progress import TextColumn
 from rich.progress import BarColumn
 from rich.progress import TimeElapsedColumn
 from histdatacom.records import Records
+from histdatacom.options import Options
+from histdatacom.histdata_com import _HistDataCom
 from histdatacom import config
 from typing import Callable
 
@@ -176,19 +181,20 @@ def get_pool_cpu_count(count: str | int | None=None) -> int:
         sys.exit(err)
 
 class QueueManager():
-    def __init__(self, options):
+    def __init__(self, options: Options):
         self.options = options
         config.queue_manager = managers.SyncManager()
-        config.queue_manager.register("Records", Records)
+        config.queue_manager.register("Records", Records) # pylint: disable=no-member
 
-    def __call__(self, runner_):
-        config.queue_manager.start()
+    # pylint: disable-next=inconsistent-return-statements
+    def __call__(self, runner_: _HistDataCom) -> list | dict | Frame | DataFrame | Table: # type: ignore
+        config.queue_manager.start() # type: ignore
 
-        config.current_queue = config.queue_manager.Records()
-        config.next_queue = config.queue_manager.Records()
-        config.influx_chunks_queue = config.queue_manager.Queue()
+        config.current_queue = config.queue_manager.Records() # type: ignore
+        config.next_queue = config.queue_manager.Records() # type: ignore
+        config.influx_chunks_queue = config.queue_manager.Queue() # type: ignore
 
-        histdatacom_runner = runner_(self.options)
+        histdatacom_runner = runner_(self.options) # type: ignore #NOSONAR
 
         if self.options.from_api:
             return histdatacom_runner.run()
