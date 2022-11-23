@@ -1,6 +1,5 @@
 import os
 import sys
-import csv
 import re
 import hashlib
 import json
@@ -8,24 +7,17 @@ from datetime import datetime
 
 from typing import Optional
 from typing import Union
-from typing import Tuple
-from typing import Type
 from typing import Any
 from os import PathLike
-from csv import Dialect
 
 import pytz
 import yaml
-
-from rich.progress import TextColumn
-from rich.progress import BarColumn
-from rich.progress import TimeElapsedColumn
 
 
 class Utils:
     @staticmethod
     def get_month_from_datemonth(datemonth: Optional[str] | Optional[int]) -> str:
-        return datemonth[-2:] if datemonth is not None and len(datemonth) > 4 else ""  # type: ignore
+        return datemonth[-2:] if datemonth is not None and len(datemonth) > 4 else ""  # type: ignore # noqa: E501
 
     @staticmethod
     def get_year_from_datemonth(datemonth: Optional[str] | Optional[int]) -> str:
@@ -75,24 +67,6 @@ class Utils:
         now: datetime = datetime.now().astimezone()
         gmt_minus5: datetime = now.astimezone(pytz.timezone("Etc/GMT-5"))
         return f"{gmt_minus5.year}{gmt_minus5.strftime('%m')}"
-
-    @staticmethod
-    def get_progress_bar(
-        progress_string: str,
-    ) -> Tuple[TextColumn, BarColumn, str, TimeElapsedColumn]:
-
-        return (
-            TextColumn(text_format=progress_string),
-            BarColumn(),
-            "[progress.percentage]{task.percentage:>3.0f}%",
-            TimeElapsedColumn(),
-        )
-
-    @staticmethod
-    def get_csv_dialect(csv_path: str) -> Type[Dialect]:
-        with open(csv_path, "r", encoding="utf-8") as srccsv:
-            dialect = csv.Sniffer().sniff(srccsv.read(), delimiters=",; ")
-        return dialect
 
     @staticmethod
     def replace_date_punct(datemonth_str: Optional[str]) -> str:

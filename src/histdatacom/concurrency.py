@@ -84,7 +84,7 @@ class ThreadPool:
         records_count = records_current.qsize()  # type: ignore
         with Progress(
             TextColumn(
-                text_format=f"[cyan]{self.progress_pre_text} {records_count} {self.progress_post_text}."
+                text_format=f"[cyan]{self.progress_pre_text} {records_count} {self.progress_post_text}."  # noqa: E501
             ),
             BarColumn(),
             "[progress.percentage]{task.percentage:>3.0f}%",
@@ -146,7 +146,7 @@ class ProcessPool:
         records_count = records_current.qsize()  # type: ignore
         with Progress(
             TextColumn(
-                text_format=f"[cyan]{self.progress_pre_text} {records_count} {self.progress_post_text}."
+                text_format=f"[cyan]{self.progress_pre_text} {records_count} {self.progress_post_text}."  # noqa: E501
             ),
             BarColumn(),
             "[progress.percentage]{task.percentage:>3.0f}%",
@@ -214,7 +214,8 @@ def get_pool_cpu_count(count: str | int | None = None) -> int:
             err_text_cpu_level_err = f"""
                     ERROR on -c {count}  ERROR
                         * Malformed command:
-                            - -c cpu must be str: low, medium, or high. or integer percent 1-200
+                            - -c cpu must be str:
+                                low, medium, or high. or integer percent 1-200
             """
             count = str(count)
             match count:
@@ -237,6 +238,7 @@ def get_pool_cpu_count(count: str | int | None = None) -> int:
 
 
 class QueueManager:
+    # pylint: disable=no-member
     def __init__(self, options: Options):
         self.options = options
         config.QUEUE_MANAGER = managers.SyncManager()
@@ -248,8 +250,8 @@ class QueueManager:
     ) -> list | dict | Frame | DataFrame | Table:
         config.QUEUE_MANAGER.start()  # type: ignore
 
-        config.CURRENT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore # pylint: disable=no-member
-        config.NEXT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore # pylint: disable=no-member
+        config.CURRENT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore
+        config.NEXT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore
         config.INFLUX_CHUNKS_QUEUE = config.QUEUE_MANAGER.Queue()  # type: ignore
 
         histdatacom_runner = runner_(self.options)

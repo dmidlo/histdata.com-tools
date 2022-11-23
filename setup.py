@@ -1,60 +1,63 @@
-"""setup.py
+"""Setup the setuptools version of histdatacom.
 
 Raises:
-    RuntimeError: Unable to find version string
+    RuntimeError: When unable to find __version__ string
 
 Returns:
-    None: setuptools definition
+    None
 """
 import codecs
-import os.path
-from setuptools import setup
-from setuptools import find_packages
+from pathlib import Path, PurePath
+from setuptools import find_packages, setup
 
 
-def read(rel_path: str) -> str:
-    """reads the contents of a file
+def read_init_file(rel_path: str) -> str:
+    """Read the contents of a file.
 
     Args:
         rel_path (str): a relative file path
 
     Returns:
-        StreamReaderWriter: contents of file
+        str: contents of file
     """
-    here = os.path.abspath(os.path.dirname(__file__))
-    with codecs.open(os.path.join(here, rel_path), "r") as file_path:
+    init_file_path = PurePath(__file__).parent / rel_path
+    with codecs.open(str(init_file_path), "r") as file_path:
         return file_path.read()
 
 
 def get_version(rel_path: str) -> str:
-    """gets the version number from file by looking at  "__version__ = 'x.x.x'"
+    """Get the version number from file by looking at  "__version__ = 'x.x.x'".
 
     Args:
         rel_path (str): a relative file path
 
     Raises:
-        RuntimeError: Unable to find version string
+        ErrCantFindVersionString: Unable to find version string
 
     Returns:
         str: string in file after line __version__ delimited by " or '
     """
-    for line in read(rel_path).splitlines():
+    for line in read_init_file(rel_path).splitlines():
         if line.startswith("__version__"):
-            delim = '"' if '"' in line else "'"
-            return line.split(delim)[1]
-    raise RuntimeError("Unable to find version string.")
+            deliminator = '"' if '"' in line else "'"
+            return line.split(deliminator)[1]
+    raise ErrCantFindVersionString(rel_path)
 
 
-with open("README.md", "r", encoding="utf-8") as file:
-    long_description = file.read()
+readme = Path("README.md")
+with readme.open("r", encoding="utf-8") as readme_content:
+    long_description = readme_content.read()
 
 setup(
     # basic package data
     name="histdatacom",
-    version=get_version("src/histdatacom/__init__.py"),
-    description="A Multi-threaded/Multi-Process command-line utility and \
-        python package that downloads currency exchange rates from \
-        Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks.",
+    version=get_version(str(PurePath("src", "histdatacom", "__init__.py"))),
+    description=(
+        "A Multi-threaded/Multi-Process command-line utility and "  # noqa: NIC002,WPS326
+        "python package that downloads currency exchange rates from "  # noqa: NIC002,WPS326
+        "Histdata.com. Imports to InfluxDB. Can be used in Jupyter "  # noqa: NIC002,WPS326
+        "Notebooks."  # noqa: NIC002,WPS326
+    ),
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/dmidlo/histdata.com-tools",
@@ -86,12 +89,53 @@ setup(
         "dev": [
             "pytest",
             "mypy",
+            "flake8",
             "black",
+            "flake8-black",
+            "pylint",
+            "flake8-pylint",
+            "bandit",
+            "flake8-bandit",
+            "flake8-comprehensions",
+            "flake8-class-attributes-order",
+            "dlint",
+            "flake8-bugbear",
+            "pyflakes",
+            "pre-commit",
             "types-setuptools",
             "pandas-stubs",
             "types-beautifulsoup4",
             "influxdb-pytest-plugin",
-        ]
+            "wemake-python-styleguide",
+            "flake8-simplify",
+            "flake8-pie",
+            "flake8-use-pathlib",
+            "flake8-use-fstring",
+            "flake8-print",
+            "flake8-no-implicit-concat",
+            "pycodestyle",
+            "flake8-awesome",
+            "flake8-pytest-style",
+            "Flake8-AAA",
+            "flake8-spellcheck",
+            "flake8-docstring-checker",
+            "flake8-docstrings",
+            "flake8-coding",
+            "flake8-length",
+            "flake8-functions",
+            "flake8-expression-complexity",
+            "flake8-cognitive-complexity",
+            "flake8-annotations-complexity",
+            "cohesion",
+            "Darglint",
+            "tryceratops",
+            "radon",
+            "dodgy",
+            "pyroma",
+            "vulture",
+            "isort",
+            "flake8-type-checking",
+        ],
     },
     classifiers=[
         "Development Status :: 4 - Beta",
@@ -106,4 +150,21 @@ setup(
         "Framework :: Jupyter",
         "Topic :: Terminals",
     ],
+    keywords=["finance","data","datascience","HistData.com","scraper",
+        "influxdb","currency exchange","forex","fx","etl"],
 )
+
+class ErrCantFindVersionString(RuntimeError):
+    """RuntimeError when version string is not found.
+
+    Args:
+        path (str): tested path of __version__ string
+    """
+
+    def __init__(self, path: str) -> None:
+        """Call when the version is not found.
+
+        Args:
+            path (str): tested path of __version__ string
+        """
+        super().__init__(f"Unable to find __version__ string in:   \n {path}")

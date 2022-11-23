@@ -17,13 +17,7 @@ class Urls:
             for timeframe in timeframes:
                 if timeframe in get_valid_format_timeframes(csv_format):
                     for pair in pairs:  # type: ignore
-                        yield f"{csv_format}/{Timeframe[timeframe].value}/{pair}/", timeframe
-
-    @staticmethod
-    def correct_for_zero_month(month: int) -> int:
-        if month == 0:
-            month = 1
-        return month
+                        yield f"{csv_format}/{Timeframe[timeframe].value}/{pair}/", timeframe  # noqa: E501
 
     @staticmethod
     def generate_form_urls(
@@ -56,8 +50,9 @@ class Urls:
                 end_year = int(Utils.get_year_from_datemonth(end_yearmonth))
                 end_month = int(Utils.get_month_from_datemonth(end_yearmonth))
 
+                # pylint: disable=not-an-iterable
                 for year in range(start_year, end_year + 1):
-                    yield from Urls.yield_range_of_yearmonths(  # pylint: disable=not-an-iterable
+                    yield from Urls.yield_range_of_yearmonths(
                         year,
                         timeframe,
                         form_url,

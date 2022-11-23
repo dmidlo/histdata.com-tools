@@ -24,6 +24,7 @@ class Repo:
 
     @staticmethod
     def test_for_repo_data_file() -> bool:
+        """"""
         if os.path.exists(f"{config.ARGS['default_download_dir']}{os.sep}.repo"):
             config.REPO_DATA_FILE_EXISTS = True
             return True
@@ -61,7 +62,7 @@ class Repo:
             # pylint: disable=anomalous-backslash-in-string
             print(
                 """[red]Unable to fetch repo list from github.
-                            - You can manually update using `-U \[pair(s)]`"""
+                        - You can manually update using `-U \[pair(s)]`"""  # noqa: W605
             )
 
     @staticmethod
@@ -119,7 +120,7 @@ class Repo:
         return None
 
     @staticmethod
-    def sort_repo_dict_by(repo_dict_copy: dict, filter_pairs: set) -> dict:  # type: ignore
+    def sort_repo_dict_by(repo_dict_copy: dict, filter_pairs: set) -> dict:
         filtered_pairs: dict = Repo.filter_repo_dict_by_pairs(
             repo_dict_copy, filter_pairs
         )
@@ -131,7 +132,9 @@ class Repo:
                 return dict(sorted(filtered_pairs.items(), reverse=True))
             case "start_asc":
                 return dict(
-                    sorted(filtered_pairs.items(), key=lambda pair: pair[1]["start"])  # type: ignore
+                    sorted(
+                        filtered_pairs.items(), key=lambda pair: pair[1]["start"]  # type: ignore # noqa: E501
+                    )
                 )
             case "start_dsc":
                 return dict(
@@ -141,6 +144,8 @@ class Repo:
                         reverse=True,
                     )
                 )
+            case _:
+                return filtered_pairs
 
     @staticmethod
     def print_repo_data_table() -> None:
@@ -156,11 +161,15 @@ class Repo:
             config.ARGS["pairs"],
         ):
             start = config.REPO_DATA[row]["start"]
+            start_year = Utils.get_year_from_datemonth(start)
+            start_month = Utils.get_month_from_datemonth(start)
             end = config.REPO_DATA[row]["end"]
+            end_year = Utils.get_year_from_datemonth(end)
+            end_month = Utils.get_month_from_datemonth(end)
             table.add_row(
                 row.lower(),
-                f"{Utils.get_year_from_datemonth(start)}-{Utils.get_month_from_datemonth(start)}",
-                f"{Utils.get_year_from_datemonth(end)}-{Utils.get_month_from_datemonth(end)}",
+                f"{start_year}-{start_month}",
+                f"{end_year}-{end_month}",
             )
         print(table)
 

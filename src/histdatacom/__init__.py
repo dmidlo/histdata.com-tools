@@ -17,11 +17,11 @@ from histdatacom.cli import ArgParser
 from histdatacom.csvs import Csv
 from histdatacom.api import Api
 from histdatacom.influx import Influx
+from histdatacom import exceptions
 
-__all__ = ["Options", "QueueManager", "ArgParser", "Csv", "Api", "Influx"]
+__all__ = ["Options", "QueueManager", "ArgParser", "Csv", "Api", "Influx", "exceptions"]
 
 from . import histdata_com
-
 
 __version__ = "0.77.03"
 __author__ = "David Midlo"

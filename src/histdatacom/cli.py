@@ -14,7 +14,8 @@ Raises:
                         - cannot include `-e end_year-month` without
                           specifying a start year-month.
                             eg. -s year-month -e year-month
-    ValueError: ERROR on -e {get_year_from_datemonth(start_yearmonth)}  {end_yearmonth}  ERROR
+    ValueError: ERROR on:
+                -e {get_year_from_datemonth(start_yearmonth)}  {end_yearmonth}  ERROR
                     * Malformed command:
                         - cannot include `-e end_year-month` when
                           specifying a single year
@@ -123,7 +124,7 @@ class ArgParser(argparse.ArgumentParser):
         self.add_argument(
             "--by",
             type=str,
-            help="Use with -A or -U, to sort --by [pair_asc, pair_dsc, start_asc, start_dsc]",
+            help="With -A, -U, to sort --by [pair_asc, pair_dsc, start_asc, start_dsc]",
         )
         self.add_argument(
             "-D",
@@ -135,19 +136,19 @@ class ArgParser(argparse.ArgumentParser):
             "-X",
             "--extract_csvs",
             action="store_true",
-            help="histdata.com delivers zip files.  use the -X flag to extract them to .csv.",
+            help="histdata.com delivers zip files. Use the -X flag to extract them.",
         )
         self.add_argument(
             "-I",
             "--import_to_influxdb",
             action="store_true",
-            help="import csv data to influxdb instance. Use influxdb.yaml to configure.",
+            help="import data to influxdb instance. Use influxdb.yaml to configure.",
         )
         self.add_argument(
             "-c",
             "--cpu_utilization",
             type=str,
-            help='"low", "medium", "high". High uses all available CPUs. OR integer percent 1-200',
+            help='"low", "medium", "high". High uses all available CPUs OR integer percent 1-200',  # noqa: E501
         )
         self.add_argument(
             "-p",
@@ -164,7 +165,7 @@ class ArgParser(argparse.ArgumentParser):
             nargs="+",
             type=str,
             choices=Format.list_values(),
-            help="space separated formats. e.g. -f metatrader ascii ninjatrader metastock",
+            help="space separated formats. -f metatrader ascii ninjatrader metastock",
             metavar="FORMAT",
         )
         self.add_argument(
@@ -175,7 +176,7 @@ class ArgParser(argparse.ArgumentParser):
                 lambda v: Timeframe(v).name
             ),  # convert long Timeframe .value to short .key
             choices=Timeframe.list_keys(),
-            help="space separated Timeframes. e.g. -t tick-data-quotes 1-minute-bar-quotes ...",
+            help="space separated Timeframes. -t tick-data-quotes 1-minute-bar-quotes",
             metavar="TIMEFRAME",
         )
         self.add_argument(
@@ -205,7 +206,7 @@ class ArgParser(argparse.ArgumentParser):
         self.add_argument(
             "--data-directory",
             type=str,
-            help='Directory Used to save data. default is "data" in the current directory',
+            help='Directory Used to save data. default is "./data/"',
         )
 
         # prevent running from cli with no arguments
@@ -461,7 +462,7 @@ class ArgParser(argparse.ArgumentParser):
         end_yearmonth = args_namespace.end_yearmonth
 
         err_text_no_end_yearmonth = f"""
-                ERROR on -e {Utils.get_year_from_datemonth(start_yearmonth)}  {end_yearmonth}  ERROR
+           ERROR on -e {Utils.get_year_from_datemonth(start_yearmonth)} {end_yearmonth}
                     * Malformed command:
                         - cannot include `-e end_year-month` when
                           specifying a single year
@@ -574,7 +575,8 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def check_start_yearmonth_in_range(cls, args_namespace: Options) -> None:
-        """Validate that -s is not earlier than 2000-01 or later than the current year-month"""
+        """Validate that -s is not earlier than 2000-01 or later than
+        the current year-month"""
         try:
             if start_yearmonth := args_namespace.start_yearmonth:
                 err_text_date_prior_to_dataset = f"""
@@ -657,9 +659,9 @@ class ArgParser(argparse.ArgumentParser):
             """
 
             if (
-                re.match("^\d{4}[-_.: ]\d{2}$", yearmonth)
-                or re.match("^\d{6}$", yearmonth)
-                or re.match("^\d{4}$", yearmonth)
+                re.match("^\d{4}[-_.: ]\d{2}$", yearmonth)  # noqa: W605
+                or re.match("^\d{6}$", yearmonth)  # noqa: W605
+                or re.match("^\d{4}$", yearmonth)  # noqa: W605
                 or str.lower(yearmonth) == "now"
                 or str.lower(yearmonth) == "start"
                 or yearmonth == ""

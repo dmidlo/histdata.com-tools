@@ -4,9 +4,6 @@ import os
 import sys
 import traceback
 
-from urllib.parse import urlparse
-from urllib.parse import ParseResult
-
 import requests
 import bs4
 from bs4 import BeautifulSoup
@@ -43,7 +40,7 @@ class Scraper:
             "Upgrade-Insecure-Requests": "1",
             "DNT": "1",
             "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",  # noqa: E501
             "Referer": "",
             "Accept-Encoding": "gzip, deflate",
             "Accept-Language": "en-US,en;q=0.9",
@@ -227,11 +224,6 @@ class Scraper:
             "encoding": encoding,
             "bytes_length": bytes_length,
         }
-
-    @staticmethod
-    def get_base_url(url: str) -> str:
-        parsed_url: ParseResult = urlparse(url)
-        return f"{parsed_url.scheme}://{parsed_url.netloc}"
 
     @staticmethod
     def fetch_form_values(page_data: dict, record: Record) -> Record:

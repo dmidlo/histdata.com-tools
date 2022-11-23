@@ -163,7 +163,7 @@ class Influx:
     def parse_jay_row(self, row: Tuple[Any], record: Record) -> str:
         # pylint: disable=line-too-long
         measurement = f"{record.data_fxpair}"
-        tags = f"source=histdata.com,format={record.data_format},timeframe={record.data_timeframe}".replace(
+        tags = f"source=histdata.com,format={record.data_format},timeframe={record.data_timeframe}".replace(  # noqa: E501
             " ", ""
         )
 
@@ -172,17 +172,17 @@ class Influx:
                 _row = namedtuple(
                     "_row", ["datetime", "open", "high", "low", "close", "vol"]
                 )
-                named_row = _row(row[0], row[1], row[2], row[3], row[4], row[5])  # type: ignore
+                named_row = _row(row[0], row[1], row[2], row[3], row[4], row[5])  # type: ignore # noqa: E501
 
-                fields = f"openbid={named_row.open},highbid={named_row.high},lowbid={named_row.low},closebid={named_row.close}".replace(
+                fields = f"openbid={named_row.open},highbid={named_row.high},lowbid={named_row.low},closebid={named_row.close}".replace(  # noqa: E501
                     " ", ""
                 )
                 time = str(named_row.datetime)
             case "T":
-                _row = namedtuple("_row", ["datetime", "bid", "ask", "vol"])  # type: ignore
+                _row = namedtuple("_row", ["datetime", "bid", "ask", "vol"])  # type: ignore # noqa: E501
                 named_row = _row(row[0], row[1], row[2], row[3])  # type: ignore
 
-                fields = f"bidquote={named_row.bid},askquote={named_row.ask}".replace(" ", "")  # type: ignore
+                fields = f"bidquote={named_row.bid},askquote={named_row.ask}".replace(" ", "")  # type: ignore # noqa: E501
                 time = str(named_row.datetime)
 
         line_protocol = f"{measurement},{tags} {fields} {time}"

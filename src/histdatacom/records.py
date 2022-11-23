@@ -37,14 +37,10 @@ class Record:
         self.jay_end = kwargs.get("jay_end", "")
         self.zip_persist = kwargs.get("zip_persist", "")
 
-    def __call__(self, string: str = "updated", **kwargs: str) -> Any:
+    def __call__(self, **kwargs: str) -> Any:
         for arg in kwargs:
             setattr(self, arg, kwargs[arg])
         return self
-
-    def set_datetime_attrs(self) -> None:
-        self.data_year = Utils.get_year_from_datemonth(self.data_datemonth)
-        self.data_month = Utils.get_month_from_datemonth(self.data_datemonth)
 
     def set_record_data_dir(self, base_dir: Optional[str]) -> str:  # type: ignore
         query_string_args = Utils.get_query_string(self.url)
@@ -53,7 +49,7 @@ class Record:
         csv_format = Format(query_string_args[1]).name
         timeframe = Timeframe(query_string_args[2]).name
 
-        record_data_dir = base_dir + csv_format + os.sep + timeframe + os.sep  # type: ignore
+        record_data_dir = f"{base_dir}{csv_format}{os.sep}{timeframe}{os.sep}"
 
         if length == 3:
             self.data_dir = record_data_dir
@@ -152,62 +148,10 @@ class Record:
             "zip_persist": self.zip_persist,
         }
 
-    def print_record(self, string: str = "Updated") -> None:
-        print(
-            f"{string}:",
-            self.status,
-            self.data_format,
-            self.data_timeframe,
-            self.data_fxpair,
-            self.data_year,
-            self.data_month,
-            "-",
-            self.data_dir,
-        )
-
 
 class Records(Queue):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         Queue.__init__(self, *args, **kwargs)
-
-    def print(self) -> None:
-        printable = []
-
-        while not self.empty():
-            record = self.get()
-            if record is None:
-                break
-
-            printable.append(record.to_dict())
-
-        for p_record in printable:
-            new_record = Record(**p_record)
-            print(new_record.to_dict())
-            self.put(new_record)
-
-    def write_pickle(self, path: str) -> None:
-        picklable = []
-
-        while not self.empty():
-            record = self.get()
-            if record is None:
-                break
-
-            picklable.append(record.to_dict())
-
-        with open(path, "wb") as filepath:
-            pickle.dump(picklable, filepath)
-
-        for p_record in picklable:
-            new_record = Record(**p_record)
-            self.put(new_record)
-
-    def __contains__(self, item: Any) -> Any:
-        with self.mutex:
-            return item in self.queue
-
-    def __len__(self) -> int:
-        return len(self.queue)
 
     def dump_to_queue(self, dst_queue: Queue, count: int = 0) -> None:
         if count == 0:
