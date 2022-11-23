@@ -1,18 +1,21 @@
-import contextlib
-import queue
-import pickle
+from typing import Optional
+from typing import Any
+
 import os
 import sys
-from rich import print
-from histdatacom.fx_enums import Timeframe, Format
-from histdatacom.utils import get_month_from_datemonth
-from histdatacom.utils import get_year_from_datemonth
-from histdatacom.utils import get_query_string
-from histdatacom.utils import create_full_path
+import contextlib
+import pickle
+from queue import Queue
+
+from rich import print  # pylint: disable=redefined-builtin
+
+from histdatacom.utils import Utils
+from histdatacom.fx_enums import Format
+from histdatacom.fx_enums import Timeframe
 
 
 class Record:
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: str) -> None:
         self.url = kwargs.get("url", "")
         self.status = kwargs.get("status", "")
         self.encoding = kwargs.get("encoding", "")
@@ -34,23 +37,23 @@ class Record:
         self.jay_end = kwargs.get("jay_end", "")
         self.zip_persist = kwargs.get("zip_persist", "")
 
-    def __call__(self, string="updated", **kwargs):
+    def __call__(self, string: str = "updated", **kwargs: str) -> Any:
         for arg in kwargs:
             setattr(self, arg, kwargs[arg])
         return self
 
-    def set_datetime_attrs(self):
-        self.data_year = get_year_from_datemonth(self.data_datemonth)
-        self.data_month = get_month_from_datemonth(self.data_datemonth)
+    def set_datetime_attrs(self) -> None:
+        self.data_year = Utils.get_year_from_datemonth(self.data_datemonth)
+        self.data_month = Utils.get_month_from_datemonth(self.data_datemonth)
 
-    def set_record_data_dir(self, base_dir):
-        query_string_args = get_query_string(self.url)
+    def set_record_data_dir(self, base_dir: Optional[str]) -> str:  # type: ignore
+        query_string_args = Utils.get_query_string(self.url)
         length = len(query_string_args)
 
         csv_format = Format(query_string_args[1]).name
         timeframe = Timeframe(query_string_args[2]).name
 
-        record_data_dir = base_dir + csv_format + os.sep + timeframe + os.sep
+        record_data_dir = base_dir + csv_format + os.sep + timeframe + os.sep  # type: ignore
 
         if length == 3:
             self.data_dir = record_data_dir
@@ -77,32 +80,33 @@ class Record:
             self.data_dir = record_data_dir
             return self.data_dir
 
-    def create_record_data_dir(self, base_dir=""):
+    def create_record_data_dir(self, base_dir: str = "") -> None:
         try:
             if self.data_dir != "":
-                create_full_path(self.data_dir)
+                Utils.create_full_path(self.data_dir)
             elif base_dir != "":
-                create_full_path(self.set_record_data_dir(base_dir))
+                Utils.create_full_path(self.set_record_data_dir(base_dir))
             else:
                 raise ValueError("Error: create_record_data_dir not provided base_dir=")
         except ValueError as err:
-            print(err)
-            sys.exit()
+            raise SystemExit from err
 
-    def write_info_file(self, base_dir: str="") -> None:
+    def write_info_file(self, base_dir: str = "") -> None:
         try:
             if self.data_dir == "":
-                if base_dir != "":
+                if base_dir:
                     self.create_record_data_dir(base_dir=base_dir)
                 else:
-                    raise ValueError("Error: create_record_data_dir not provided base_dir=")
+                    raise ValueError(
+                        "Error: create_record_data_dir not provided base_dir="
+                    )
 
             if not os.path.exists(self.data_dir):
-                create_full_path(self.data_dir)
+                Utils.create_full_path(self.data_dir)
 
-            path = f'{self.data_dir}.info'
+            path = f"{self.data_dir}.info"
 
-            with open(path, 'wb') as filepath:
+            with open(path, "wb") as filepath:
                 pickle.dump(self.to_dict(), filepath)
         except ValueError as err:
             print(err)
@@ -112,56 +116,61 @@ class Record:
         if os.path.exists(f"{self.data_dir}.info"):
             os.remove(f"{self.data_dir}.info")
 
-    def restore_momento(self, base_dir):
+    def restore_momento(self, base_dir: str) -> bool:
         self.set_record_data_dir(base_dir)
         if not os.path.exists(f"{self.data_dir}.info"):
             return False
-        record_dict = {}
-        with open(f"{self.data_dir}.info", 'rb') as fileread:
+        record_dict: dict = {}
+        with open(f"{self.data_dir}.info", "rb") as file_read:
             with contextlib.suppress(Exception):
                 while True:
-                    record_dict.update(pickle.load(fileread))
+                    record_dict |= pickle.load(file_read)
         self(**record_dict)
         return True
 
-    def to_dict(self):
-        return {'url': self.url,
-                'status': self.status,
-                'encoding': self.encoding,
-                'bytes_length': self.bytes_length,
-                'data_date': self.data_date,
-                'data_year': self.data_year,
-                'data_month': self.data_month,
-                'data_datemonth': self.data_datemonth,
-                'data_format': self.data_format,
-                'data_timeframe': self.data_timeframe,
-                'data_fxpair': self.data_fxpair,
-                'data_dir': self.data_dir,
-                'data_tk': self.data_tk,
-                'zip_filename': self.zip_filename,
-                'csv_filename': self.csv_filename,
-                'jay_line_count': self.jay_line_count,
-                'jay_start': self.jay_start,
-                'jay_end': self.jay_end,
-                'jay_filename': self.jay_filename,
-                'zip_persist': self.zip_persist}
+    def to_dict(self) -> dict:
+        return {
+            "url": self.url,
+            "status": self.status,
+            "encoding": self.encoding,
+            "bytes_length": self.bytes_length,
+            "data_date": self.data_date,
+            "data_year": self.data_year,
+            "data_month": self.data_month,
+            "data_datemonth": self.data_datemonth,
+            "data_format": self.data_format,
+            "data_timeframe": self.data_timeframe,
+            "data_fxpair": self.data_fxpair,
+            "data_dir": self.data_dir,
+            "data_tk": self.data_tk,
+            "zip_filename": self.zip_filename,
+            "csv_filename": self.csv_filename,
+            "jay_line_count": self.jay_line_count,
+            "jay_start": self.jay_start,
+            "jay_end": self.jay_end,
+            "jay_filename": self.jay_filename,
+            "zip_persist": self.zip_persist,
+        }
 
-    def print_record(self, string="Updated"):
-        print(f"{string}:",
-              self.status,
-              self.data_format,
-              self.data_timeframe,
-              self.data_fxpair,
-              self.data_year,
-              self.data_month,
-              "-",
-              self.data_dir)
+    def print_record(self, string: str = "Updated") -> None:
+        print(
+            f"{string}:",
+            self.status,
+            self.data_format,
+            self.data_timeframe,
+            self.data_fxpair,
+            self.data_year,
+            self.data_month,
+            "-",
+            self.data_dir,
+        )
 
-class Records(queue.Queue):
-    def __init__(self, *args, **kwargs):
-        queue.Queue.__init__(self, *args, **kwargs)
 
-    def print(self):
+class Records(Queue):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        Queue.__init__(self, *args, **kwargs)
+
+    def print(self) -> None:
         printable = []
 
         while not self.empty():
@@ -176,7 +185,7 @@ class Records(queue.Queue):
             print(new_record.to_dict())
             self.put(new_record)
 
-    def write_pickle(self, path):
+    def write_pickle(self, path: str) -> None:
         picklable = []
 
         while not self.empty():
@@ -186,21 +195,21 @@ class Records(queue.Queue):
 
             picklable.append(record.to_dict())
 
-        with open(path, 'wb') as filepath:
+        with open(path, "wb") as filepath:
             pickle.dump(picklable, filepath)
 
         for p_record in picklable:
             new_record = Record(**p_record)
             self.put(new_record)
 
-    def __contains__(self, item):
+    def __contains__(self, item: Any) -> Any:
         with self.mutex:
             return item in self.queue
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.queue)
 
-    def dump_to_queue(self, dst_queue, count=0):
+    def dump_to_queue(self, dst_queue: Queue, count: int = 0) -> None:
         if count == 0:
             _count = None
         else:

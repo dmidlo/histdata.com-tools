@@ -7,7 +7,7 @@ dev()
     pip uninstall -y histdatacom
     pip install twine wheel
     # pip install git+https://github.com/h2oai/datatable
-    pip install .[dev]
+    pip install -e .[dev]
     echo "${bold}pypi.sh: Dev Ready.${normal}"
 }
 

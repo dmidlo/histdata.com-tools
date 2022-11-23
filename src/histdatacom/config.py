@@ -1,16 +1,16 @@
+from multiprocessing.managers import SyncManager
 from histdatacom.records import Records
-from multiprocessing import Queue
-from typing import cast
 
-args: dict = {}
 
-available_remote_data: dict = dict()
-repo_data_file_exists = False
-filter_pairs = None
+ARGS: dict = {}
+REPO_DATA: dict = {}
+REPO_DATA_FILE_EXISTS: bool = False
+FILTER_PAIRS: set | None = None
 
-queue_manager = None
+QUEUE_MANAGER: SyncManager | None = None
 
-current_queue = None
-next_queue = None
-influx_chunks_queue = None
+CURRENT_QUEUE: Records | None = None
+NEXT_QUEUE: Records | None = None
+INFLUX_CHUNKS_QUEUE: None = None
 
+REQUESTS_TIMEOUT = 10

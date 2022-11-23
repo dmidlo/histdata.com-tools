@@ -1,16 +1,19 @@
 from pyarrow import Table
 from datatable import Frame
 from pandas import DataFrame
-from histdatacom.cli import ArgParser
-from histdatacom.options import Options
-from histdatacom.utils import set_working_data_dir
-from histdatacom.utils import load_influx_yaml
-from histdatacom.urls import _URLs
-from histdatacom.api import _API
-from histdatacom.csvs import _CSVs
-from histdatacom.influx import _Influx
-from histdatacom.concurrency import QueueManager
+
 from histdatacom import config
+from histdatacom import Options
+from histdatacom import QueueManager
+from histdatacom import ArgParser
+from histdatacom import Csv
+from histdatacom import Api
+from histdatacom import Influx
+
+from histdatacom.scraper.repo import Repo
+from histdatacom.scraper.scraper import Scraper
+
+from histdatacom.utils import Utils
 
 
 class _HistDataCom:
@@ -18,7 +21,7 @@ class _HistDataCom:
 
     def __init__(self, options: Options) -> None:
 
-        """ Initialization for _HistDataCom Class"""
+        """Initialization for _HistDataCom Class"""
         # Set User () or Default Arguments respectively utilizing the self.ArgParser
         # and self.Options classes.
         #   - ArgParser()():
@@ -29,62 +32,66 @@ class _HistDataCom:
         #           - Normalize iterable user arguments whose values are lists and
         #             make them sets instead
         #       - .copy(): decouple for GC using a hard copy of user args
-        config.args = ArgParser._arg_list_to_set(vars(ArgParser(options)())).copy()
-        config.args['default_download_dir'] = set_working_data_dir(config.args['data_directory'])
-        config.args['queue_filename'] = ".queue"
+        config.ARGS = ArgParser._arg_list_to_set(vars(ArgParser(options)())).copy()
+        config.ARGS["default_download_dir"] = Utils.set_working_data_dir(
+            config.ARGS["data_directory"]
+        )
 
-        if config.args["import_to_influxdb"] == 1:
-            influx_yaml = load_influx_yaml()
-            config.args['INFLUX_ORG'] = influx_yaml['influxdb']['org']
-            config.args['INFLUX_BUCKET'] = influx_yaml['influxdb']['bucket']
-            config.args['INFLUX_URL'] = influx_yaml['influxdb']['url']
-            config.args['INFLUX_TOKEN'] = influx_yaml['influxdb']['token']
+        Repo.set_repo_url()
+        Scraper.set_base_url()
+        Scraper.set_post_headers()
 
-        self.urls = _URLs()
-        self.csvs = _CSVs()
-        self.api = _API()
+        if config.ARGS["import_to_influxdb"] == 1:
+            influx_yaml = Utils.load_influx_yaml()
+            config.ARGS["INFLUX_ORG"] = influx_yaml["influxdb"]["org"]
+            config.ARGS["INFLUX_BUCKET"] = influx_yaml["influxdb"]["bucket"]
+            config.ARGS["INFLUX_URL"] = influx_yaml["influxdb"]["url"]
+            config.ARGS["INFLUX_TOKEN"] = influx_yaml["influxdb"]["token"]
 
-        if (config.args['available_remote_data'] or config.args['update_remote_data']):
-            if self.urls.test_for_repo_data_file():
-                self.urls.read_repo_data_file()
-            self.urls.update_repo_from_github()
+        self.csvs = Csv()
+        self.api = Api()
 
-        if config.args["import_to_influxdb"] == 1:
-            self.influx = _Influx()
+        if config.ARGS["available_remote_data"] or config.ARGS["update_remote_data"]:
+            if Repo.test_for_repo_data_file():
+                Repo.read_repo_data_file()
+            Repo.update_repo_from_github()
+
+        if config.ARGS["import_to_influxdb"] == 1:
+            self.influx = Influx()
 
     def run(self) -> list | dict | Frame | DataFrame | Table | None:
-        if config.args['available_remote_data'] or config.args['update_remote_data']:
-            return self.urls.get_available_repo_data()
+        if config.ARGS["available_remote_data"] or config.ARGS["update_remote_data"]:
+            return Repo.get_available_repo_data()
 
-        self.urls.populate_initial_queue()
+        Scraper.populate_initial_queue()
 
-        if config.args["validate_urls"]:
-            self.urls.validate_urls()
+        if config.ARGS["validate_urls"]:
+            Scraper.validate_urls()
 
-        if config.args["download_data_archives"]:
-            self.urls.download_zips()
-            if config.args["from_api"]:
+        if config.ARGS["download_data_archives"]:
+            Scraper.download_zips()
+            if config.ARGS["from_api"]:
                 self.api.validate_jays()
                 return self.api.merge_jays()
 
-        if config.args["extract_csvs"]:
+        if config.ARGS["extract_csvs"]:
             self.csvs.extract_csvs()
 
-        if config.args["import_to_influxdb"]:
+        if config.ARGS["import_to_influxdb"]:
             self.influx.import_data()
 
         return None
 
 
-def main(options: Options | None=None) -> list | dict | Frame | DataFrame | Table:
+def main(options: Options | None = None) -> list | dict | Frame | DataFrame | Table:
     if not options:
         options = Options()
-        QueueManager(options)(_HistDataCom) # type: ignore
+        QueueManager(options)(_HistDataCom)
         return None
     else:
         options.from_api = True
-        return QueueManager(options)(_HistDataCom) # type: ignore
+        return QueueManager(options)(_HistDataCom)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

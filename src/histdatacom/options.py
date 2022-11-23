@@ -2,8 +2,10 @@ from histdatacom.fx_enums import Pairs
 from histdatacom.fx_enums import Format
 from histdatacom.fx_enums import Timeframe
 
+
 class Options:
-    """ An intra-class DTO for Default Arguments for _HistDataCom class. """
+    """An intra-class DTO for Default Arguments for _HistDataCom class."""
+
     # argparse uses a thin class to create a namespace for cli/shell arguments to live in
     # normally argparse.ArgumentParser.parse_args(namespace=...) creates this namespace and
     # writes user's cli args to it.  Preemptively creating here to hold default args; if the
@@ -18,9 +20,9 @@ class Options:
         self.import_to_influxdb: bool = False
         self.pairs: set = Pairs.list_keys()
         self.formats: set = Format.list_values()
-        self.timeframes: set= Timeframe.list_keys()
-        self.start_yearmonth: str = ""
-        self.end_yearmonth: str = ""
+        self.timeframes: set = Timeframe.list_keys()
+        self.start_yearmonth: str | None = ""
+        self.end_yearmonth: str | None = ""
         self.data_directory: str = "data"
         self.from_api: bool = False
         self.api_return_type: str = "datatable"

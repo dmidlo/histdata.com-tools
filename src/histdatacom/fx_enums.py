@@ -1,3 +1,4 @@
+# pylint: disable=invalid-name
 from enum import Enum
 from influxdb_client import WritePrecision
 
@@ -23,6 +24,7 @@ from influxdb_client import WritePrecision
 # indices
 # grxeur auxaud frxeur hkxhkd spxusd jpxjpy udxusd
 # nsxusd ukxgbp etxeur
+
 
 class Pairs(Enum):
     eurusd = "EUR_USD"
@@ -144,11 +146,11 @@ class TimeFormat(Enum):
     MS_M1 = "%Y%m%d%H%M"
 
     @classmethod
-    def list_keys(cls):
+    def list_keys(cls) -> set:
         return set(cls.__members__.keys())
 
     @classmethod
-    def list_values(cls):
+    def list_values(cls) -> set:
         return {member.value for _, member in cls.__members__.items()}
 
 
@@ -163,15 +165,15 @@ class TimePrecision(Enum):
     MS_M1 = WritePrecision.S
 
     @classmethod
-    def list_keys(cls):
+    def list_keys(cls) -> set:
         return set(cls.__members__.keys())
 
     @classmethod
-    def list_values(cls):
+    def list_values(cls) -> set:
         return {member.value for _, member in cls.__members__.items()}
 
 
-def get_valid_format_timeframes(csv_format):
+def get_valid_format_timeframes(csv_format: str) -> list:
     timeframes = []
 
     match csv_format:
