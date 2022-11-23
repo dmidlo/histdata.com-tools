@@ -23,7 +23,7 @@ __all__ = ["Options", "QueueManager", "ArgParser", "Csv", "Api", "Influx"]
 from . import histdata_com
 
 
-__version__ = "0.77.02"
+__version__ = "0.77.03"
 __author__ = "David Midlo"
 
 
