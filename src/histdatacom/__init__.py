@@ -19,7 +19,15 @@ from histdatacom.api import Api
 from histdatacom.influx import Influx
 from histdatacom import exceptions
 
-__all__ = ["Options", "QueueManager", "ArgParser", "Csv", "Api", "Influx", "exceptions"]
+__all__ = [
+    "Options",
+    "QueueManager",
+    "ArgParser",
+    "Csv",
+    "Api",
+    "Influx",
+    "exceptions",
+]
 
 from . import histdata_com
 

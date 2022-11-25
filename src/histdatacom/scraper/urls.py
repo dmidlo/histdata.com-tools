@@ -10,16 +10,6 @@ from histdatacom.fx_enums import get_valid_format_timeframes
 
 class Urls:
     @staticmethod
-    def valid_format_timeframe_pair_urls(
-        formats: set, timeframes: set, pairs: Optional[Set[Any]]
-    ) -> Generator[tuple[str, Any], None, None]:
-        for csv_format in formats:
-            for timeframe in timeframes:
-                if timeframe in get_valid_format_timeframes(csv_format):
-                    for pair in pairs:  # type: ignore
-                        yield f"{csv_format}/{Timeframe[timeframe].value}/{pair}/", timeframe  # noqa: E501
-
-    @staticmethod
     def generate_form_urls(
         start_yearmonth: str,
         end_yearmonth: str,
@@ -62,6 +52,16 @@ class Urls:
                         end_month,
                         current_year,
                     )
+
+    @staticmethod
+    def valid_format_timeframe_pair_urls(
+        formats: set, timeframes: set, pairs: Optional[Set[Any]]
+    ) -> Generator[tuple[str, Any], None, None]:
+        for csv_format in formats:
+            for timeframe in timeframes:
+                if timeframe in get_valid_format_timeframes(csv_format):
+                    for pair in pairs:  # type: ignore
+                        yield f"{csv_format}/{Timeframe[timeframe].value}/{pair}/", timeframe  # noqa: E501
 
     @staticmethod
     def yield_range_of_yearmonths(
@@ -109,7 +109,11 @@ class Urls:
 
     @staticmethod
     def yield_current_year(
-        year: int, start_year: int, start_month: int, end_year: int, end_month: int
+        year: int,
+        start_year: int,
+        start_month: int,
+        end_year: int,
+        end_month: int,
     ) -> Generator[str, None, None]:
         if start_year == end_year:
             for month in range(start_month, end_month + 1):

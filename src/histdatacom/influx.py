@@ -39,16 +39,10 @@ class Influx:
     def init_counters(
         self,
         influx_chunks_queue_: Queue,
-        records_current_: Records,
-        records_next_: Records,
         args_: dict,
     ) -> None:
         global INFLUX_CHUNKS_QUEUE  # pylint: disable=global-variable-undefined
         INFLUX_CHUNKS_QUEUE = influx_chunks_queue_  # type: ignore
-        global RECORDS_CURRENT  # pylint: disable=global-variable-undefined
-        RECORDS_CURRENT = records_current_  # type: ignore
-        global RECORDS_NEXT  # pylint: disable=global-variable-undefined
-        RECORDS_NEXT = records_next_  # type: ignore
         global ARGS  # pylint: disable=global-variable-undefined
         ARGS = args_  # type: ignore
 
@@ -103,12 +97,20 @@ class Influx:
                 jay_path = f"{record.data_dir}.data"
                 if os.path.exists(jay_path):
                     self.import_jay(
-                        record, args, records_current, records_next, influx_chunks_queue
+                        record,
+                        args,
+                        records_current,
+                        records_next,
+                        influx_chunks_queue,
                     )
                 elif "CSV" in record.status:
                     Api.test_for_jay_or_create(record, args)
                     self.import_jay(
-                        record, args, records_current, records_next, influx_chunks_queue
+                        record,
+                        args,
+                        records_current,
+                        records_next,
+                        influx_chunks_queue,
                     )
 
             record.status = "INFLUX_UPLOAD"
@@ -139,7 +141,7 @@ class Influx:
         with ProcessPoolExecutor(
             max_workers=1,
             initializer=self.init_counters,
-            initargs=(influx_chunks_queue, records_current, records_next, config.ARGS),
+            initargs=(influx_chunks_queue, config.ARGS),
         ) as executor:
 
             data = rx.from_iterable(jay.to_tuples()).pipe(

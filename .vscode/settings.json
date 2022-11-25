@@ -21,6 +21,7 @@
         "dataable's",
         "dataclasses",
         "dataframe",
+        "datascience",
         "datatable",
         "datemonth",
         "destcsv",

@@ -89,11 +89,12 @@ setup(
         "dev": [
             "pytest",
             "mypy",
+            "keyring",
+            "sh",
             "flake8",
             "black",
             "flake8-black",
             "pylint",
-            "flake8-pylint",
             "bandit",
             "flake8-bandit",
             "flake8-comprehensions",
@@ -150,11 +151,22 @@ setup(
         "Framework :: Jupyter",
         "Topic :: Terminals",
     ],
-    keywords=["finance","data","datascience","HistData.com","scraper",
-        "influxdb","currency exchange","forex","fx","etl"],
+    keywords=[
+        "finance",
+        "data",
+        "datascience",
+        "HistData.com",
+        "scraper",
+        "influxdb",
+        "currency exchange",
+        "forex",
+        "fx",
+        "etl",
+    ],
 )
 
-class ErrCantFindVersionString(RuntimeError):
+
+class ErrCantFindVersionString(RuntimeError):  # noqa: H601
     """RuntimeError when version string is not found.
 
     Args:

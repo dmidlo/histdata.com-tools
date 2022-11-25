@@ -83,7 +83,9 @@ class _HistDataCom:
         return None
 
 
-def main(options: Options | None = None) -> list | dict | Frame | DataFrame | Table:
+def main(
+    options: Options | None = None,
+) -> list | dict | Frame | DataFrame | Table:
     if not options:
         options = Options()
         QueueManager(options)(_HistDataCom)

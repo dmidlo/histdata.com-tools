@@ -140,7 +140,11 @@ class Scraper:
             record.status = "URL_NO_REPO_DATA"
             record.write_info_file(base_dir=args["default_download_dir"])
         except Exception as err:
-            print(f"Unknown Error for URL: {record.url}", err, traceback.format_exc())
+            print(
+                f"Unknown Error for URL: {record.url}",
+                err,
+                traceback.format_exc(),
+            )
             record.delete_info_file()
             raise SystemExit from err
         finally:

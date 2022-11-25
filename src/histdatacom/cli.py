@@ -408,7 +408,10 @@ class ArgParser(argparse.ArgumentParser):
                 return Utils.get_current_datemonth_gmt_minus5(), None
             if end_yearmonth := args_namespace.end_yearmonth:
                 if end_yearmonth == "now":
-                    return start_yearmonth, Utils.get_current_datemonth_gmt_minus5()
+                    return (
+                        start_yearmonth,
+                        Utils.get_current_datemonth_gmt_minus5(),
+                    )
 
         return start_yearmonth, end_yearmonth
 

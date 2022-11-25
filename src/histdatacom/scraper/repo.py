@@ -150,7 +150,8 @@ class Repo:
     @staticmethod
     def print_repo_data_table() -> None:
         table = Table(
-            title="Data and date ranges available from HistData.com", box=box.MARKDOWN
+            title="Data and date ranges available from HistData.com",
+            box=box.MARKDOWN,
         )
         table.add_column("Pair -p")
         table.add_column("Start -s")
@@ -176,7 +177,10 @@ class Repo:
     @staticmethod
     def filter_repo_dict_by_pairs(repo_dict_copy: dict, filter_pairs: set) -> dict:
         filtered: dict = {
-            x: {"start": repo_dict_copy[x]["start"], "end": repo_dict_copy[x]["end"]}
+            x: {
+                "start": repo_dict_copy[x]["start"],
+                "end": repo_dict_copy[x]["end"],
+            }
             for x in set(repo_dict_copy) & filter_pairs
         }
 

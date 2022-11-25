@@ -77,7 +77,11 @@ class Api:
 
     @classmethod
     def validate_jay(
-        cls, record: Record, args: dict, records_current: Records, records_next: Records
+        cls,
+        record: Record,
+        args: dict,
+        records_current: Records,
+        records_next: Records,
     ) -> None:
         """A Wrapper to be passed to an individual process within the process pool
            to test for or create a datatable jay file based on a Record of Work's
@@ -209,7 +213,14 @@ class Api:
                     data = dt.fread(
                         zip_path,
                         header=False,
-                        columns=["datetime", "open", "high", "low", "close", "vol"],
+                        columns=[
+                            "datetime",
+                            "open",
+                            "high",
+                            "low",
+                            "close",
+                            "vol",
+                        ],
                         multiple_sources="ignore",
                     )
 

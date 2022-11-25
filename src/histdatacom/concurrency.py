@@ -40,16 +40,10 @@ def init_counters(
     influx_chunks_queue_: Queue | None = None,
 ) -> None:
     # pylint: disable=global-variable-undefined
-
-    global RECORDS_CURRENT
-    RECORDS_CURRENT = records_current_  # type: ignore
-    global RECORDS_NEXT
-    RECORDS_NEXT = records_next_  # type: ignore
-    global ARGS
-    ARGS = args_  # type: ignore
+    args = args_  # type: ignore
 
     if influx_chunks_queue_ is not None:
-        global INFLUX_CHUNKS_QUEUE  # pylint: disable=global-variable-undefined
+        global INFLUX_CHUNKS_QUEUE
         INFLUX_CHUNKS_QUEUE = influx_chunks_queue_  # type: ignore
 
 
@@ -78,7 +72,9 @@ class ThreadPool:
         self.cpu_count = cpu_count
 
     def __call__(
-        self, records_current: Optional[Records], records_next: Optional[Records]
+        self,
+        records_current: Optional[Records],
+        records_next: Optional[Records],
     ) -> None:
 
         records_count = records_current.qsize()  # type: ignore

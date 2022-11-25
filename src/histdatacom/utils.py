@@ -16,11 +16,15 @@ import yaml
 
 class Utils:
     @staticmethod
-    def get_month_from_datemonth(datemonth: Optional[str] | Optional[int]) -> str:
+    def get_month_from_datemonth(
+        datemonth: Optional[str] | Optional[int],
+    ) -> str:
         return datemonth[-2:] if datemonth is not None and len(datemonth) > 4 else ""  # type: ignore # noqa: E501
 
     @staticmethod
-    def get_year_from_datemonth(datemonth: Optional[str] | Optional[int]) -> str:
+    def get_year_from_datemonth(
+        datemonth: Optional[str] | Optional[int],
+    ) -> str:
         return datemonth[:4] if datemonth is not None else ""  # type: ignore
 
     @staticmethod
