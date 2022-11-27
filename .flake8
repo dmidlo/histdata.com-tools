@@ -10,4 +10,6 @@ ignore =
     C101,
     Q000,
     WPS305,
-    IF100
+    IF100,
+    NIC002,
+    WPS326

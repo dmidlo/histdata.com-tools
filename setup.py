@@ -53,10 +53,10 @@ setup(
     name="histdatacom",
     version=get_version(str(PurePath("src", "histdatacom", "__init__.py"))),
     description=(
-        "A Multi-threaded/Multi-Process command-line utility and "  # noqa: NIC002,WPS326
-        "python package that downloads currency exchange rates from "  # noqa: NIC002,WPS326
-        "Histdata.com. Imports to InfluxDB. Can be used in Jupyter "  # noqa: NIC002,WPS326
-        "Notebooks."  # noqa: NIC002,WPS326
+        "A Multi-threaded/Multi-Process command-line utility and "
+        "python package that downloads currency exchange rates from "
+        "Histdata.com. Imports to InfluxDB. Can be used in Jupyter "
+        "Notebooks."
     ),
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -71,7 +71,9 @@ setup(
     packages=find_packages("src"),
     package_dir={"": "src"},
     # install the RSReader executable
-    entry_points={"console_scripts": ["histdatacom = histdatacom.histdata_com:main"]},
+    entry_points={
+        "console_scripts": ["histdatacom = histdatacom.histdata_com:main"],
+    },  # pylint: disable=line-too-long
     install_requires=[
         "influxdb_client",
         "rich",

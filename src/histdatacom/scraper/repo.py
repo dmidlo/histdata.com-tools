@@ -1,3 +1,11 @@
+"""
+
+Raises:
+    SystemExit: [description]
+
+Returns:
+    [type]: [description]
+"""
 import os
 import sys
 import contextlib
@@ -16,14 +24,10 @@ from histdatacom.scraper.scraper import Scraper
 
 
 class Repo:
-    @staticmethod
-    def set_repo_url() -> None:
-        config.ARGS[
-            "repo_url"
-        ] = "https://github.com/dmidlo/histdata.com-tools/blob/main/data/.repo?raw=true"
+    def __init__(self) -> None:
+        self.repo_url = "https://github.com/dmidlo/histdata.com-tools/blob/main/data/.repo?raw=true"
 
-    @staticmethod
-    def test_for_repo_data_file() -> bool:
+    def test_for_repo_data_file(self) -> bool:
         """"""
         if os.path.exists(f"{config.ARGS['default_download_dir']}{os.sep}.repo"):
             config.REPO_DATA_FILE_EXISTS = True
@@ -31,8 +35,7 @@ class Repo:
         config.REPO_DATA_FILE_EXISTS = False
         return False
 
-    @staticmethod
-    def read_repo_data_file() -> None:
+    def read_repo_data_file(self) -> None:
         with open(
             f"{config.ARGS['default_download_dir']}{os.sep}.repo", "rb"
         ) as pickle_read:
@@ -40,10 +43,9 @@ class Repo:
                 while True:
                     config.REPO_DATA.update(pickle.load(pickle_read))
 
-    @staticmethod
-    def update_repo_from_github() -> None:
+    def update_repo_from_github(self) -> None:
         try:
-            data = urlopen(config.ARGS["repo_url"])
+            data = urlopen(self.repo_url)
             remote_repo = pickle.load(data)
             if config.REPO_DATA_FILE_EXISTS:
                 old_hash = config.REPO_DATA["hash"]
@@ -57,7 +59,7 @@ class Repo:
             else:
                 config.REPO_DATA = remote_repo
                 config.REPO_DATA_FILE_EXISTS = True
-                Repo.write_repo_data_file()
+                self.write_repo_data_file()
         except URLError:
             # pylint: disable=anomalous-backslash-in-string
             print(
@@ -65,10 +67,9 @@ class Repo:
                         - You can manually update using `-U \[pair(s)]`"""  # noqa: W605
             )
 
-    @staticmethod
-    def write_repo_data_file() -> None:
+    def write_repo_data_file(self) -> None:
         try:
-            Repo.hash_repo()
+            self.hash_repo()
 
             path = config.ARGS["default_download_dir"]
             Utils.create_full_path(path)
@@ -79,8 +80,7 @@ class Repo:
             print(err)
             sys.exit()
 
-    @staticmethod
-    def hash_repo() -> None:
+    def hash_repo(self) -> None:
         if "hash" in config.REPO_DATA:
             del config.REPO_DATA["hash"]
         if "hash_utc" in config.REPO_DATA:
@@ -88,8 +88,7 @@ class Repo:
         config.REPO_DATA["hash"] = Utils.hash_dict(config.REPO_DATA)
         config.REPO_DATA["hash_utc"] = Utils.get_now_utc_timestamp()
 
-    @staticmethod
-    def get_available_repo_data() -> dict | None:
+    def get_available_repo_data(self) -> dict | None:
         filter_pairs = config.ARGS["pairs"] - set(config.REPO_DATA)
         config.FILTER_PAIRS = None if len(filter_pairs) == 0 else filter_pairs
 
@@ -107,21 +106,20 @@ class Repo:
                 or config.FILTER_PAIRS
             ):
                 Scraper.validate_urls()
-                Repo.write_repo_data_file()
+                self.write_repo_data_file()
 
             if config.ARGS["from_api"]:
-                return Repo.sort_repo_dict_by(
+                return self.sort_repo_dict_by(
                     config.REPO_DATA.copy(), config.ARGS["pairs"]
                 )
 
-            Repo.print_repo_data_table()
+            self.print_repo_data_table()
             raise SystemExit(0)
 
         return None
 
-    @staticmethod
-    def sort_repo_dict_by(repo_dict_copy: dict, filter_pairs: set) -> dict:
-        filtered_pairs: dict = Repo.filter_repo_dict_by_pairs(
+    def sort_repo_dict_by(self, repo_dict_copy: dict, filter_pairs: set) -> dict:
+        filtered_pairs: dict = self.filter_repo_dict_by_pairs(
             repo_dict_copy, filter_pairs
         )
 
@@ -147,8 +145,7 @@ class Repo:
             case _:
                 return filtered_pairs
 
-    @staticmethod
-    def print_repo_data_table() -> None:
+    def print_repo_data_table(self) -> None:
         table = Table(
             title="Data and date ranges available from HistData.com",
             box=box.MARKDOWN,
@@ -157,7 +154,7 @@ class Repo:
         table.add_column("Start -s")
         table.add_column("End -e")
 
-        for row in Repo.sort_repo_dict_by(  # pylint: disable=not-an-iterable
+        for row in self.sort_repo_dict_by(  # pylint: disable=not-an-iterable
             config.REPO_DATA.copy(),
             config.ARGS["pairs"],
         ):
@@ -174,8 +171,7 @@ class Repo:
             )
         print(table)
 
-    @staticmethod
-    def filter_repo_dict_by_pairs(repo_dict_copy: dict, filter_pairs: set) -> dict:
+    def filter_repo_dict_by_pairs(self, repo_dict_copy: dict, filter_pairs: set) -> dict:
         filtered: dict = {
             x: {
                 "start": repo_dict_copy[x]["start"],

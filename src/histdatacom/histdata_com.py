@@ -37,7 +37,6 @@ class _HistDataCom:
             config.ARGS["data_directory"]
         )
 
-        Repo.set_repo_url()
         Scraper.set_base_url()
         Scraper.set_post_headers()
 
@@ -47,21 +46,22 @@ class _HistDataCom:
             config.ARGS["INFLUX_BUCKET"] = influx_yaml["influxdb"]["bucket"]
             config.ARGS["INFLUX_URL"] = influx_yaml["influxdb"]["url"]
             config.ARGS["INFLUX_TOKEN"] = influx_yaml["influxdb"]["token"]
-
+        
+        self.repo = Repo()
         self.csvs = Csv()
         self.api = Api()
 
         if config.ARGS["available_remote_data"] or config.ARGS["update_remote_data"]:
-            if Repo.test_for_repo_data_file():
-                Repo.read_repo_data_file()
-            Repo.update_repo_from_github()
+            if self.repo.test_for_repo_data_file():
+                self.repo.read_repo_data_file()
+            self.repo.update_repo_from_github()
 
         if config.ARGS["import_to_influxdb"] == 1:
             self.influx = Influx()
 
     def run(self) -> list | dict | Frame | DataFrame | Table | None:
         if config.ARGS["available_remote_data"] or config.ARGS["update_remote_data"]:
-            return Repo.get_available_repo_data()
+            return self.repo.get_available_repo_data()
 
         Scraper.populate_initial_queue()
 
