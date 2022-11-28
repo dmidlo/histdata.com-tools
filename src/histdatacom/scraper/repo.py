@@ -7,9 +7,7 @@ Returns:
     _type_: _description_
 """
 import os
-import sys
 import contextlib
-import pickle
 import json
 from urllib.request import urlopen
 from pathlib import Path
@@ -31,7 +29,7 @@ from histdatacom.scraper.scraper import Scraper
 class Repo:
     def __init__(self) -> None:
         self.repo_url = (
-            "https://github.com/dmidlo/histdata.com-tools/blob/main/data/.repo?raw=true"
+            "https://raw.githubusercontent.com/dmidlo/histdata.com-tools/9-implement-testing/data/.repo"
         )
 
     def test_for_repo_data_file(self) -> bool:
@@ -44,10 +42,10 @@ class Repo:
     def read_repo_data_file(self) -> None:
         with open(
             f"{config.ARGS['default_download_dir']}{os.sep}.repo", "rb"
-        ) as pickle_read:
+        ) as json_read:
             with contextlib.suppress(Exception):
                 while True:
-                    config.REPO_DATA.update(pickle.load(pickle_read))
+                    config.REPO_DATA.update(json.load(json_read))
 
     def update_repo_from_github(self) -> None:
         try:
@@ -55,7 +53,9 @@ class Repo:
                 self.repo_url,
                 context=ssl.create_default_context(cafile=certifi.where()),
             )
-            remote_repo = pickle.load(data)
+            remote_repo = json.load(data)
+
+            print(remote_repo)
 
             if config.REPO_DATA_FILE_EXISTS:
                 old_hash = config.REPO_DATA["hash"]
@@ -70,7 +70,6 @@ class Repo:
                 config.REPO_DATA = remote_repo
                 config.REPO_DATA_FILE_EXISTS = True
                 self._write_repo_data_file()
-            self._write_repo_json_file()
         except SSLCertVerificationError:
             print(
                 """[red]Unable to fetch repo list from github.
@@ -85,26 +84,12 @@ class Repo:
             )
 
     def _write_repo_data_file(self) -> None:
-        try:
-            self._hash_repo()
-
-            path = config.ARGS["default_download_dir"]
-            Utils.create_full_path(path)
-
-            with open(f"{path}.repo", "wb") as filepath:
-                pickle.dump(config.REPO_DATA, filepath)
-        except ValueError as err:
-            print(err)
-            sys.exit()
-
-    def _write_repo_json_file(self) -> None:
         self._hash_repo()
 
         path = Path(config.ARGS["default_download_dir"])
         Utils.create_full_path(path)
 
-        file_path = path / ".jsonrepo"
-        print(file_path)
+        file_path = path / ".repo"
 
         with file_path.open("w", encoding="UTF-8") as target:
             json.dump(config.REPO_DATA, target)
