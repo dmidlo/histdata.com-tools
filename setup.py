@@ -86,6 +86,7 @@ setup(
         "ipywidgets",
         "pyarrow",
         "pandas",
+        "certifi",
     ],
     extras_require={
         "dev": [
@@ -136,7 +137,6 @@ setup(
             "dodgy",
             "pyroma",
             "vulture",
-            "isort",
             "flake8-type-checking",
         ],
     },

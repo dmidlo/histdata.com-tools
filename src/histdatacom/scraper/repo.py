@@ -1,18 +1,13 @@
-"""
-
-Raises:
-    SystemExit: [description]
-
-Returns:
-    [type]: [description]
-"""
 import os
 import sys
 import contextlib
 import pickle
 from urllib.request import urlopen
+import ssl
+import certifi
 
 from urllib.error import URLError
+from ssl import SSLCertVerificationError
 
 from rich import box
 from rich.table import Table
@@ -25,10 +20,11 @@ from histdatacom.scraper.scraper import Scraper
 
 class Repo:
     def __init__(self) -> None:
-        self.repo_url = "https://github.com/dmidlo/histdata.com-tools/blob/main/data/.repo?raw=true"
+        self.repo_url = (
+            "https://github.com/dmidlo/histdata.com-tools/blob/main/data/.repo?raw=true"
+        )
 
     def test_for_repo_data_file(self) -> bool:
-        """"""
         if os.path.exists(f"{config.ARGS['default_download_dir']}{os.sep}.repo"):
             config.REPO_DATA_FILE_EXISTS = True
             return True
@@ -45,8 +41,9 @@ class Repo:
 
     def update_repo_from_github(self) -> None:
         try:
-            data = urlopen(self.repo_url)
+            data = urlopen(self.repo_url, context=ssl.create_default_context(cafile=certifi.where()))
             remote_repo = pickle.load(data)
+            print(remote_repo)
             if config.REPO_DATA_FILE_EXISTS:
                 old_hash = config.REPO_DATA["hash"]
                 old_time = config.REPO_DATA["hash_utc"]
@@ -60,12 +57,19 @@ class Repo:
                 config.REPO_DATA = remote_repo
                 config.REPO_DATA_FILE_EXISTS = True
                 self.write_repo_data_file()
+        except SSLCertVerificationError:
+            print(
+                """[red]Unable to fetch repo list from github.
+                        - Please install certifi package with:
+                            pip install certifi`"""  # noqa: W605
+            )
         except URLError:
             # pylint: disable=anomalous-backslash-in-string
             print(
                 """[red]Unable to fetch repo list from github.
                         - You can manually update using `-U \[pair(s)]`"""  # noqa: W605
             )
+
 
     def write_repo_data_file(self) -> None:
         try:
@@ -171,7 +175,9 @@ class Repo:
             )
         print(table)
 
-    def filter_repo_dict_by_pairs(self, repo_dict_copy: dict, filter_pairs: set) -> dict:
+    def filter_repo_dict_by_pairs(
+        self, repo_dict_copy: dict, filter_pairs: set
+    ) -> dict:
         filtered: dict = {
             x: {
                 "start": repo_dict_copy[x]["start"],

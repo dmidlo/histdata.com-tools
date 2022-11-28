@@ -2,6 +2,7 @@ venv/
 *.pkl
 *.csv
 *.txt
+!whitelist.txt
 *.zip
 .info
 .queue

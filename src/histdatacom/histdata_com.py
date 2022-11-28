@@ -15,6 +15,8 @@ from histdatacom.scraper.scraper import Scraper
 
 from histdatacom.utils import Utils
 
+import sys
+
 
 class _HistDataCom:
     """A module to pull market data from histdata.com and import it into influxDB"""
@@ -46,7 +48,7 @@ class _HistDataCom:
             config.ARGS["INFLUX_BUCKET"] = influx_yaml["influxdb"]["bucket"]
             config.ARGS["INFLUX_URL"] = influx_yaml["influxdb"]["url"]
             config.ARGS["INFLUX_TOKEN"] = influx_yaml["influxdb"]["token"]
-        
+
         self.repo = Repo()
         self.csvs = Csv()
         self.api = Api()
