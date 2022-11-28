@@ -1,2 +1,9 @@
+histdatacom
 codecs
 pylint
+certifi
+utils
+repo
+cafile
+filepath
+datemonth

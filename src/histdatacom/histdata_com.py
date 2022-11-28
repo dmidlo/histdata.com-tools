@@ -57,6 +57,7 @@ class _HistDataCom:
             if self.repo.test_for_repo_data_file():
                 self.repo.read_repo_data_file()
             self.repo.update_repo_from_github()
+            sys.exit()
 
         if config.ARGS["import_to_influxdb"] == 1:
             self.influx = Influx()

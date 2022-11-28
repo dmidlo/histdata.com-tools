@@ -1,8 +1,18 @@
+"""Check for or generate a list date ranges for instruments available.
+
+Raises:
+    SystemExit: _description_
+
+Returns:
+    _type_: _description_
+"""
 import os
 import sys
 import contextlib
 import pickle
+import json
 from urllib.request import urlopen
+from pathlib import Path
 import ssl
 import certifi
 
@@ -41,9 +51,12 @@ class Repo:
 
     def update_repo_from_github(self) -> None:
         try:
-            data = urlopen(self.repo_url, context=ssl.create_default_context(cafile=certifi.where()))
+            data = urlopen(
+                self.repo_url,
+                context=ssl.create_default_context(cafile=certifi.where()),
+            )
             remote_repo = pickle.load(data)
-            print(remote_repo)
+
             if config.REPO_DATA_FILE_EXISTS:
                 old_hash = config.REPO_DATA["hash"]
                 old_time = config.REPO_DATA["hash_utc"]
@@ -56,7 +69,8 @@ class Repo:
             else:
                 config.REPO_DATA = remote_repo
                 config.REPO_DATA_FILE_EXISTS = True
-                self.write_repo_data_file()
+                self._write_repo_data_file()
+            self._write_repo_json_file()
         except SSLCertVerificationError:
             print(
                 """[red]Unable to fetch repo list from github.
@@ -70,10 +84,9 @@ class Repo:
                         - You can manually update using `-U \[pair(s)]`"""  # noqa: W605
             )
 
-
-    def write_repo_data_file(self) -> None:
+    def _write_repo_data_file(self) -> None:
         try:
-            self.hash_repo()
+            self._hash_repo()
 
             path = config.ARGS["default_download_dir"]
             Utils.create_full_path(path)
@@ -84,7 +97,19 @@ class Repo:
             print(err)
             sys.exit()
 
-    def hash_repo(self) -> None:
+    def _write_repo_json_file(self) -> None:
+        self._hash_repo()
+
+        path = Path(config.ARGS["default_download_dir"])
+        Utils.create_full_path(path)
+
+        file_path = path / ".jsonrepo"
+        print(file_path)
+
+        with file_path.open("w", encoding="UTF-8") as target:
+            json.dump(config.REPO_DATA, target)
+
+    def _hash_repo(self) -> None:
         if "hash" in config.REPO_DATA:
             del config.REPO_DATA["hash"]
         if "hash_utc" in config.REPO_DATA:
@@ -110,20 +135,20 @@ class Repo:
                 or config.FILTER_PAIRS
             ):
                 Scraper.validate_urls()
-                self.write_repo_data_file()
+                self._write_repo_data_file()
 
             if config.ARGS["from_api"]:
-                return self.sort_repo_dict_by(
+                return self._sort_repo_dict_by(
                     config.REPO_DATA.copy(), config.ARGS["pairs"]
                 )
 
-            self.print_repo_data_table()
+            self._print_repo_data_table()
             raise SystemExit(0)
 
         return None
 
-    def sort_repo_dict_by(self, repo_dict_copy: dict, filter_pairs: set) -> dict:
-        filtered_pairs: dict = self.filter_repo_dict_by_pairs(
+    def _sort_repo_dict_by(self, repo_dict_copy: dict, filter_pairs: set) -> dict:
+        filtered_pairs: dict = self._filter_repo_dict_by_pairs(
             repo_dict_copy, filter_pairs
         )
 
@@ -149,7 +174,7 @@ class Repo:
             case _:
                 return filtered_pairs
 
-    def print_repo_data_table(self) -> None:
+    def _print_repo_data_table(self) -> None:
         table = Table(
             title="Data and date ranges available from HistData.com",
             box=box.MARKDOWN,
@@ -158,7 +183,7 @@ class Repo:
         table.add_column("Start -s")
         table.add_column("End -e")
 
-        for row in self.sort_repo_dict_by(  # pylint: disable=not-an-iterable
+        for row in self._sort_repo_dict_by(  # pylint: disable=not-an-iterable
             config.REPO_DATA.copy(),
             config.ARGS["pairs"],
         ):
@@ -175,7 +200,7 @@ class Repo:
             )
         print(table)
 
-    def filter_repo_dict_by_pairs(
+    def _filter_repo_dict_by_pairs(
         self, repo_dict_copy: dict, filter_pairs: set
     ) -> dict:
         filtered: dict = {

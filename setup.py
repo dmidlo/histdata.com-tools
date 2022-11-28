@@ -8,6 +8,7 @@ Returns:
 """
 import codecs
 from pathlib import Path, PurePath
+
 from setuptools import find_packages, setup
 
 
@@ -138,6 +139,8 @@ setup(
             "pyroma",
             "vulture",
             "flake8-type-checking",
+            "isort",
+            "sourcery-cli",
         ],
     },
     classifiers=[

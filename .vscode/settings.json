@@ -71,6 +71,7 @@
         "nzdusd",
         "OHLC",
         "openbid",
+        "pathlib",
         "prereqs",
         "punct",
         "pyarrow",
@@ -78,11 +79,14 @@
         "pydocstyle",
         "pyflakes",
         "pylint",
+        "pylintrc",
         "pyroma",
         "rbind",
+        "rcfile",
         "reactivex",
         "Roadmap",
         "sgdjpy",
+        "sourcery",
         "srccsv",
         "styleguide",
         "TIMEFRAME",
@@ -132,5 +136,6 @@
             "path": "/Users/davidmidlo/opt/anaconda3/envs/venv/bin/python",
             "type": "pythonEnvironment"
         }
-    ]
+    ],
+    "docwriter.style": "Google"
 }
