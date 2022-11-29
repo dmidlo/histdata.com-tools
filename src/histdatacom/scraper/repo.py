@@ -37,7 +37,7 @@ class Repo:  # noqa: H601
         """Initialize repo class with remote url."""
         self.repo_url = (
             "https://raw.githubusercontent.com/dmidlo/"
-            "histdata.com-tools/9-implement-testing/data/.repo"
+            "histdata.com-tools/main/data/.repo"
         )
         self.repo_local_path = Path(
             config.ARGS["default_download_dir"], ".repo"
