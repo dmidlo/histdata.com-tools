@@ -62,7 +62,11 @@ class Influx:
             dump=False,
         )
 
-        pool(config.CURRENT_QUEUE, config.NEXT_QUEUE, config.INFLUX_CHUNKS_QUEUE)
+        pool(
+            config.CURRENT_QUEUE,
+            config.NEXT_QUEUE,
+            config.INFLUX_CHUNKS_QUEUE,
+        )
 
         with Progress(
             TextColumn(text_format="[cyan]...finishing upload to influxdb"),
@@ -172,7 +176,8 @@ class Influx:
         match record.data_timeframe:
             case "M1":
                 _row = namedtuple(
-                    "_row", ["datetime", "open", "high", "low", "close", "vol"]
+                    "_row",
+                    ["datetime", "open", "high", "low", "close", "vol"],
                 )
                 named_row = _row(row[0], row[1], row[2], row[3], row[4], row[5])  # type: ignore # noqa: E501
 

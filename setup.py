@@ -52,6 +52,7 @@ with readme.open("r", encoding="utf-8") as readme_content:
 setup(
     # basic package data
     name="histdatacom",
+    python_requires=">=3.10.0",
     version=get_version(str(PurePath("src", "histdatacom", "__init__.py"))),
     description=(
         "A Multi-threaded/Multi-Process command-line utility and "
@@ -103,7 +104,6 @@ setup(
             "flake8-bandit",
             "flake8-comprehensions",
             "flake8-class-attributes-order",
-            "dlint",
             "flake8-bugbear",
             "pyflakes",
             "pre-commit",
@@ -119,7 +119,6 @@ setup(
             "flake8-print",
             "flake8-no-implicit-concat",
             "pycodestyle",
-            "flake8-awesome",
             "flake8-pytest-style",
             "Flake8-AAA",
             "flake8-spellcheck",
@@ -135,7 +134,6 @@ setup(
             "Darglint",
             "tryceratops",
             "radon",
-            "dodgy",
             "pyroma",
             "vulture",
             "flake8-type-checking",

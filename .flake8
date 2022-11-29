@@ -1,15 +1,17 @@
 [flake8]
 max-complexity = 10
-max-line-length = 80
+max-line-length = 81
 extend-ignore =
     E501,
-    W505
-radon-max-cc = 10
-
-ignore =
+    W505,
     C101,
     Q000,
     WPS305,
     IF100,
     NIC002,
-    WPS326
+    WPS326,
+    W503
+radon-max-cc = 10
+
+ignore =
+    

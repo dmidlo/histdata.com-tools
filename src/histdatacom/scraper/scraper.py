@@ -182,7 +182,10 @@ class Scraper:
 
             config.NEXT_QUEUE.put(record)  # type: ignore
         except KeyError:
-            print(f"Invalid Zip on histdata.com: {record.url}", sys.exc_info())
+            print(
+                f"Invalid Zip on histdata.com: {record.url}",
+                sys.exc_info(),
+            )
             record.delete_info_file()
         except Exception:
             print("Unexpected error:", sys.exc_info())

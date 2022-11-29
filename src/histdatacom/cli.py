@@ -439,7 +439,10 @@ class ArgParser(argparse.ArgumentParser):
                                 an end year-month
                 """
                 raise ValueError(err_text_start_must_have_end)
-            return args_namespace.start_yearmonth, args_namespace.end_yearmonth
+            return (
+                args_namespace.start_yearmonth,
+                args_namespace.end_yearmonth,
+            )
         except ValueError as err:
             return cls.exit_on_datetime_error(err)
 

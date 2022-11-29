@@ -171,7 +171,14 @@ class Api:
                 merged = dt.Frame(names=["datetime", "bid", "ask", "vol"])
             case "M1":
                 merged = dt.Frame(
-                    names=["datetime", "open", "high", "low", "close", "vol"]
+                    names=[
+                        "datetime",
+                        "open",
+                        "high",
+                        "low",
+                        "close",
+                        "vol",
+                    ]
                 )
 
         tp_set_dict["records"].sort(key=lambda record: record.jay_start)

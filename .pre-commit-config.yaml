@@ -5,11 +5,6 @@ repos:
     hooks:
       - id: black
         args: [--line-length, "80"]
-      - id: black-jupyter
-        # It is recommended to specify the latest version of Python
-        # supported by your project here, or alternatively use
-        # pre-commit's default_language_version, see
-        # https://pre-commit.com/#top_level-default_language_version
         language_version: python3.10
   - repo: https://github.com/pycqa/flake8
     rev: '6.0.0'  # pick a git hash / tag to point to
@@ -17,38 +12,36 @@ repos:
     -   id: flake8
         additional_dependencies:
           - bandit
-          # - flake8-bandit
-          # - black
-          # - flake8-black
-          # - flake8-comprehensions
-          # - flake8-class-attributes-order
-          # - mccabe
-          # - dlint
-          # - flake8-bugbear
-          # - pyflakes
-          # - wemake-python-styleguide
-          # - flake8-simplify
-          # - flake8-pie
-          # - flake8-use-pathlib
-          # - flake8-use-fstring
-          # - flake8-print
-          # - flake8-no-implicit-concat
-          # - pycodestyle
-          # - flake8-awesome
-          # - flake8-pytest-style
-          # - Flake8-AAA
-          # - flake8-spellcheck
-          # - flake8-docstring-checker
-          # - flake8-docstrings
-          # - flake8-length
-          # - flake8-functions
-          # - flake8-expression-complexity
-          # - flake8-cognitive-complexity
-          # - flake8-annotations-complexity
-          # - cohesion
-          # - Darglint
-          # - radon
-          # - flake8-type-checking
+          - flake8-bandit
+          - black
+          - flake8-black
+          - flake8-comprehensions
+          - flake8-class-attributes-order
+          - mccabe
+          - flake8-bugbear
+          - pyflakes
+          - wemake-python-styleguide
+          - flake8-simplify
+          - flake8-pie
+          - flake8-use-pathlib
+          - flake8-use-fstring
+          - flake8-print
+          - flake8-no-implicit-concat
+          - pycodestyle
+          - flake8-pytest-style
+          - Flake8-AAA
+          - flake8-spellcheck
+          - flake8-docstring-checker
+          - flake8-docstrings
+          - flake8-length
+          - flake8-functions
+          - flake8-expression-complexity
+          - flake8-cognitive-complexity
+          - flake8-annotations-complexity
+          - flake8-type-checking
+          - cohesion
+          - Darglint
+          - radon
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.4.0  # Use the ref you want to point at
     hooks:
