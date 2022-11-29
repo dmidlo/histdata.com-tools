@@ -1,7 +1,6 @@
 from multiprocessing.managers import SyncManager
 from histdatacom.records import Records
 
-
 ARGS: dict = {}
 REPO_DATA: dict = {}
 REPO_DATA_FILE_EXISTS: bool = False

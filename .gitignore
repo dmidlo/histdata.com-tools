@@ -2,6 +2,7 @@ venv/
 *.pkl
 *.csv
 *.txt
+!whitelist.txt
 *.zip
 .info
 .queue
@@ -12,6 +13,7 @@ __pycache__
 !data/
 data/*
 !data/.repo
+!data/.jsonrepo
 build/
 dist/
 *.egg-info

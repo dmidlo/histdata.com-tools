@@ -8,6 +8,8 @@ dev()
     pip install twine wheel
     # pip install git+https://github.com/h2oai/datatable
     pip install -e .[dev]
+    pre-commit install
+    pre-commit autoupdate
     echo "${bold}pypi.sh: Dev Ready.${normal}"
 }
 

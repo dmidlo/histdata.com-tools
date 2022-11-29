@@ -40,16 +40,10 @@ def init_counters(
     influx_chunks_queue_: Queue | None = None,
 ) -> None:
     # pylint: disable=global-variable-undefined
-
-    global RECORDS_CURRENT
-    RECORDS_CURRENT = records_current_  # type: ignore
-    global RECORDS_NEXT
-    RECORDS_NEXT = records_next_  # type: ignore
-    global ARGS
-    ARGS = args_  # type: ignore
+    args = args_  # type: ignore
 
     if influx_chunks_queue_ is not None:
-        global INFLUX_CHUNKS_QUEUE  # pylint: disable=global-variable-undefined
+        global INFLUX_CHUNKS_QUEUE
         INFLUX_CHUNKS_QUEUE = influx_chunks_queue_  # type: ignore
 
 
@@ -78,13 +72,15 @@ class ThreadPool:
         self.cpu_count = cpu_count
 
     def __call__(
-        self, records_current: Optional[Records], records_next: Optional[Records]
+        self,
+        records_current: Optional[Records],
+        records_next: Optional[Records],
     ) -> None:
 
         records_count = records_current.qsize()  # type: ignore
         with Progress(
             TextColumn(
-                text_format=f"[cyan]{self.progress_pre_text} {records_count} {self.progress_post_text}."
+                text_format=f"[cyan]{self.progress_pre_text} {records_count} {self.progress_post_text}."  # noqa: E501
             ),
             BarColumn(),
             "[progress.percentage]{task.percentage:>3.0f}%",
@@ -146,7 +142,7 @@ class ProcessPool:
         records_count = records_current.qsize()  # type: ignore
         with Progress(
             TextColumn(
-                text_format=f"[cyan]{self.progress_pre_text} {records_count} {self.progress_post_text}."
+                text_format=f"[cyan]{self.progress_pre_text} {records_count} {self.progress_post_text}."  # noqa: E501
             ),
             BarColumn(),
             "[progress.percentage]{task.percentage:>3.0f}%",
@@ -214,7 +210,8 @@ def get_pool_cpu_count(count: str | int | None = None) -> int:
             err_text_cpu_level_err = f"""
                     ERROR on -c {count}  ERROR
                         * Malformed command:
-                            - -c cpu must be str: low, medium, or high. or integer percent 1-200
+                            - -c cpu must be str:
+                                low, medium, or high. or integer percent 1-200
             """
             count = str(count)
             match count:
@@ -237,6 +234,7 @@ def get_pool_cpu_count(count: str | int | None = None) -> int:
 
 
 class QueueManager:
+    # pylint: disable=no-member
     def __init__(self, options: Options):
         self.options = options
         config.QUEUE_MANAGER = managers.SyncManager()
@@ -248,8 +246,8 @@ class QueueManager:
     ) -> list | dict | Frame | DataFrame | Table:
         config.QUEUE_MANAGER.start()  # type: ignore
 
-        config.CURRENT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore # pylint: disable=no-member
-        config.NEXT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore # pylint: disable=no-member
+        config.CURRENT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore
+        config.NEXT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore
         config.INFLUX_CHUNKS_QUEUE = config.QUEUE_MANAGER.Queue()  # type: ignore
 
         histdatacom_runner = runner_(self.options)

@@ -2,7 +2,6 @@
 from enum import Enum
 from influxdb_client import WritePrecision
 
-
 # Majors 7
 # eurusd usdjpy gbpusd usdcad usdchf audusd nzdusd
 

@@ -6,14 +6,15 @@ from histdatacom.fx_enums import Timeframe
 class Options:
     """An intra-class DTO for Default Arguments for _HistDataCom class."""
 
-    # argparse uses a thin class to create a namespace for cli/shell arguments to live in
-    # normally argparse.ArgumentParser.parse_args(namespace=...) creates this namespace and
-    # writes user's cli args to it.  Preemptively creating here to hold default args; if the
-    # user enters args in the shell, these values will be respectively overwritten
+    # argparse uses a thin class to create a namespace for cli/shell arguments to live
+    # in normally argparse.ArgumentParser.parse_args(namespace=...) creates this
+    # namespace and writes user's cli args to it.  Preemptively creating here to hold
+    # default args; if the user enters args in the shell, these values will be
+    # respectively overwritten
     def __init__(self) -> None:
         self.available_remote_data: bool = False
         self.update_remote_data: bool = False
-        self.by: str = "pair_asc"
+        self.by: str = "pair_asc"  # pylint: disable=invalid-name
         self.validate_urls: bool = False
         self.download_data_archives: bool = False
         self.extract_csvs: bool = False

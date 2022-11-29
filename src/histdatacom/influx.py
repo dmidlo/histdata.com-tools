@@ -39,16 +39,10 @@ class Influx:
     def init_counters(
         self,
         influx_chunks_queue_: Queue,
-        records_current_: Records,
-        records_next_: Records,
         args_: dict,
     ) -> None:
         global INFLUX_CHUNKS_QUEUE  # pylint: disable=global-variable-undefined
         INFLUX_CHUNKS_QUEUE = influx_chunks_queue_  # type: ignore
-        global RECORDS_CURRENT  # pylint: disable=global-variable-undefined
-        RECORDS_CURRENT = records_current_  # type: ignore
-        global RECORDS_NEXT  # pylint: disable=global-variable-undefined
-        RECORDS_NEXT = records_next_  # type: ignore
         global ARGS  # pylint: disable=global-variable-undefined
         ARGS = args_  # type: ignore
 
@@ -68,7 +62,11 @@ class Influx:
             dump=False,
         )
 
-        pool(config.CURRENT_QUEUE, config.NEXT_QUEUE, config.INFLUX_CHUNKS_QUEUE)
+        pool(
+            config.CURRENT_QUEUE,
+            config.NEXT_QUEUE,
+            config.INFLUX_CHUNKS_QUEUE,
+        )
 
         with Progress(
             TextColumn(text_format="[cyan]...finishing upload to influxdb"),
@@ -103,12 +101,20 @@ class Influx:
                 jay_path = f"{record.data_dir}.data"
                 if os.path.exists(jay_path):
                     self.import_jay(
-                        record, args, records_current, records_next, influx_chunks_queue
+                        record,
+                        args,
+                        records_current,
+                        records_next,
+                        influx_chunks_queue,
                     )
                 elif "CSV" in record.status:
                     Api.test_for_jay_or_create(record, args)
                     self.import_jay(
-                        record, args, records_current, records_next, influx_chunks_queue
+                        record,
+                        args,
+                        records_current,
+                        records_next,
+                        influx_chunks_queue,
                     )
 
             record.status = "INFLUX_UPLOAD"
@@ -139,7 +145,7 @@ class Influx:
         with ProcessPoolExecutor(
             max_workers=1,
             initializer=self.init_counters,
-            initargs=(influx_chunks_queue, records_current, records_next, config.ARGS),
+            initargs=(influx_chunks_queue, config.ARGS),
         ) as executor:
 
             data = rx.from_iterable(jay.to_tuples()).pipe(
@@ -163,26 +169,27 @@ class Influx:
     def parse_jay_row(self, row: Tuple[Any], record: Record) -> str:
         # pylint: disable=line-too-long
         measurement = f"{record.data_fxpair}"
-        tags = f"source=histdata.com,format={record.data_format},timeframe={record.data_timeframe}".replace(
+        tags = f"source=histdata.com,format={record.data_format},timeframe={record.data_timeframe}".replace(  # noqa: E501
             " ", ""
         )
 
         match record.data_timeframe:
             case "M1":
                 _row = namedtuple(
-                    "_row", ["datetime", "open", "high", "low", "close", "vol"]
+                    "_row",
+                    ["datetime", "open", "high", "low", "close", "vol"],
                 )
-                named_row = _row(row[0], row[1], row[2], row[3], row[4], row[5])  # type: ignore
+                named_row = _row(row[0], row[1], row[2], row[3], row[4], row[5])  # type: ignore # noqa: E501
 
-                fields = f"openbid={named_row.open},highbid={named_row.high},lowbid={named_row.low},closebid={named_row.close}".replace(
+                fields = f"openbid={named_row.open},highbid={named_row.high},lowbid={named_row.low},closebid={named_row.close}".replace(  # noqa: E501
                     " ", ""
                 )
                 time = str(named_row.datetime)
             case "T":
-                _row = namedtuple("_row", ["datetime", "bid", "ask", "vol"])  # type: ignore
+                _row = namedtuple("_row", ["datetime", "bid", "ask", "vol"])  # type: ignore # noqa: E501
                 named_row = _row(row[0], row[1], row[2], row[3])  # type: ignore
 
-                fields = f"bidquote={named_row.bid},askquote={named_row.ask}".replace(" ", "")  # type: ignore
+                fields = f"bidquote={named_row.bid},askquote={named_row.ask}".replace(" ", "")  # type: ignore # noqa: E501
                 time = str(named_row.datetime)
 
         line_protocol = f"{measurement},{tags} {fields} {time}"
