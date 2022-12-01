@@ -34,13 +34,12 @@ class _HistDataCom:
         #           - Normalize iterable user arguments whose values are lists and
         #             make them sets instead
         #       - .copy(): decouple for GC using a hard copy of user args
-        config.ARGS = ArgParser._arg_list_to_set(vars(ArgParser(options)())).copy()
+        config.ARGS = ArgParser._arg_list_to_set(
+            vars(ArgParser(options)())
+        ).copy()
         config.ARGS["default_download_dir"] = Utils.set_working_data_dir(
             config.ARGS["data_directory"]
         )
-
-        Scraper.set_base_url()
-        Scraper.set_post_headers()
 
         if config.ARGS["import_to_influxdb"] == 1:
             influx_yaml = Utils.load_influx_yaml()
@@ -50,10 +49,14 @@ class _HistDataCom:
             config.ARGS["INFLUX_TOKEN"] = influx_yaml["influxdb"]["token"]
 
         self.repo = Repo()
+        self.scraper = Scraper()
         self.csvs = Csv()
         self.api = Api()
 
-        if config.ARGS["available_remote_data"] or config.ARGS["update_remote_data"]:
+        if (
+            config.ARGS["available_remote_data"]
+            or config.ARGS["update_remote_data"]
+        ):
             if self.repo.test_for_repo_data_file():
                 self.repo.read_repo_data_file()
             self.repo.update_repo_from_github()
@@ -62,16 +65,19 @@ class _HistDataCom:
             self.influx = Influx()
 
     def run(self) -> list | dict | Frame | DataFrame | Table | None:
-        if config.ARGS["available_remote_data"] or config.ARGS["update_remote_data"]:
+        if (
+            config.ARGS["available_remote_data"]
+            or config.ARGS["update_remote_data"]
+        ):
             return self.repo.get_available_repo_data()
 
-        Scraper.populate_initial_queue()
+        self.scraper.populate_initial_queue()
 
         if config.ARGS["validate_urls"]:
-            Scraper.validate_urls()
+            self.scraper.validate_urls()
 
         if config.ARGS["download_data_archives"]:
-            Scraper.download_zips()
+            self.scraper.download_zips()
             if config.ARGS["from_api"]:
                 self.api.validate_jays()
                 return self.api.merge_jays()

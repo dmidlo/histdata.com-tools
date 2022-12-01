@@ -1,7 +1,7 @@
 from pathlib import Path
 from shutil import rmtree
 import sh
-
+import random
 
 import histdatacom
 from histdatacom import Options
@@ -11,23 +11,17 @@ from histdatacom.fx_enums import Timeframe
 
 class Testhistdatacom():
     def __init__(self):
+        self.number_of_pairs = random.randint(1,4)
+
         self.options = Options()
-        self.options.available_remote_data: bool = False #
-        self.options.update_remote_data: bool = False #
-        self.options.by: str = "pair_asc"  # pylint: disable=invalid-name
-        self.options.validate_urls: bool = False #
-        self.options.download_data_archives: bool = False #
-        self.options.extract_csvs: bool = False #
-        self.options.import_to_influxdb: bool = False
-        self.options.pairs: set = Pairs.list_keys() #
-        self.options.formats: set = Format.list_values() #
-        self.options.timeframes: set = Timeframe.list_keys() #
-        self.options.start_yearmonth: str | None = "" #
-        self.options.end_yearmonth: str | None = "" #
+        self.options.by: str = "start_asc"  # pylint: disable=invalid-name
+        self.options.pairs: set = set(random.sample(list(Pairs.list_keys()), 1))
+        self.options.formats: set = {"ascii"}
+        self.options.timeframes: set = {"tick-data-quotes"}
         self.options.data_directory: str = "data" 
         self.options.from_api: bool = False #
         self.options.api_return_type: str = "datatable"
-        self.options.cpu_utilization: str = "medium"
+        self.options.cpu_utilization: str = "high"
         self.options.batch_size: str = "5000"
         self.options.delete_after_influx: bool = False
         self.options.zip_persist: bool = False
@@ -36,58 +30,40 @@ class Testhistdatacom():
 
     def test_py_api_available_remote_data(self):
         self.options.available_remote_data = True
+        self.options.pairs = Pairs.list_keys()
         self.result = histdatacom(self.options)
         return self.result
 
     def test_py_api_update_and_validate_remote_data(self):
         self.options.update_remote_data = True
-        self.options.pairs = {"usdmxn"}
-        self.options.formats = {"ascii"}
-        self.options.timeframes = {"tick-data-quotes"}
         self.result = histdatacom(self.options)
         return self.result
 
     def test_py_api_download_data(self):
         self.options.download_data_archives = True
-        self.options.pairs = {"usdmxn"}
-        self.options.formats = {"ascii"}
-        self.options.timeframes = {"tick-data-quotes"}
         self.options.start_yearmonth = "2011-06"
         self.options.end_yearmonth = "2011-12"
-        self.options.cpu_utilization = "high"
         self.result = histdatacom(self.options)
         return self.result
 
     def test_py_api_extract_data(self):
         self.options.extract_csvs = True
-        self.options.pairs = {"usdmxn"}
-        self.options.formats = {"ascii"}
-        self.options.timeframes = {"tick-data-quotes"}
         self.options.start_yearmonth = "2011-06"
         self.options.end_yearmonth = "2011-07"
-        self.options.cpu_utilization = "high"
         self.result = histdatacom(self.options)
         return self.result
 
     def test_py_api_import_to_influx(self):
         self.options.import_to_influxdb = True
-        self.options.pairs = {"usdmxn"}
-        self.options.formats = {"ascii"}
-        self.options.timeframes = {"tick-data-quotes"}
         self.options.start_yearmonth = "2011-05"
         self.options.end_yearmonth = "2011-06"
-        self.options.cpu_utilization = "high"
         self.result = histdatacom(self.options)
         return self.result
 
     def test_py_api_api_return(self):
         self.options.api_return_type = "datatable"
-        self.options.pairs = {"usdmxn"}
-        self.options.formats = {"ascii"}
-        self.options.timeframes = {"tick-data-quotes"}
         self.options.start_yearmonth = "2011-05"
         self.options.end_yearmonth = "2012-01"
-        self.options.cpu_utilization = "high"
         self.result = histdatacom(self.options)
         return self.result
 
@@ -104,43 +80,43 @@ class Testhistdatacom():
         rmtree(path)
 
     def test_cli_available_remote_data(self):
-        sh.histdatacom(A=True, _fg=True)    
+        sh.histdatacom(A=True, by="start_asc", _fg=True)    
 
     def test_cli_update_and_validate_remote_data(self):
         sh.histdatacom(U=True,
-                       p="usdmxn",
-                       f="ascii",
-                       t="tick-data-quotes",
+                       p=" ".join(self.options.pairs),
+                       f=" ".join(self.options.formats),
+                       t=" ".join(self.options.timeframes),
                        _fg=True)
 
     def test_cli_download_data(self):
         sh.histdatacom(D=True,
-                       p="usdmxn",
-                       f="ascii",
-                       t="tick-data-quotes",
+                       p=" ".join(self.options.pairs),
+                       f=" ".join(self.options.formats),
+                       t=" ".join(self.options.timeframes),
                        s="2011-06",
                        e="2011-12",
-                       c="high",
+                       c=self.options.cpu_utilization,
                        _fg=True)
 
     def test_cli_extract_data(self):
         sh.histdatacom(X=True,
-                       p="usdmxn",
-                       f="ascii",
-                       t="tick-data-quotes",
+                       p=" ".join(self.options.pairs),
+                       f=" ".join(self.options.formats),
+                       t=" ".join(self.options.timeframes),
                        s="2011-06",
                        e="2011-07",
-                       c="high",
+                       c=self.options.cpu_utilization,
                        _fg=True)
 
     def test_cli_import_to_influx(self):
         sh.histdatacom(I=True,
-                       p="usdmxn",
-                       f="ascii",
-                       t="tick-data-quotes",
+                       p=" ".join(self.options.pairs),
+                       f=" ".join(self.options.formats),
+                       t=" ".join(self.options.timeframes),
                        s="2011-05",
                        e="2011-06",
-                       c="high",
+                       c=self.options.cpu_utilization,
                        _fg=True)
     
     @staticmethod

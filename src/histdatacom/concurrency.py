@@ -238,7 +238,9 @@ class QueueManager:
     def __init__(self, options: Options):
         self.options = options
         config.QUEUE_MANAGER = managers.SyncManager()
-        config.QUEUE_MANAGER.register("Records", Records)  # pylint: disable=no-member
+        config.QUEUE_MANAGER.register(
+            "Records", Records
+        )  # pylint: disable=no-member
 
     # pylint: disable-next=inconsistent-return-statements
     def __call__(  # type: ignore

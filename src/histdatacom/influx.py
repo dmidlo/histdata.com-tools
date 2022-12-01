@@ -48,7 +48,9 @@ class Influx:
 
     def import_data(self) -> None:
 
-        for _ in range(1, get_pool_cpu_count(config.ARGS["cpu_utilization"]) + 1):
+        for _ in range(
+            1, get_pool_cpu_count(config.ARGS["cpu_utilization"]) + 1
+        ):
             writer = InfluxDBWriter(config.ARGS, config.INFLUX_CHUNKS_QUEUE)
             writer.start()
 
@@ -151,7 +153,9 @@ class Influx:
             data = rx.from_iterable(jay.to_tuples()).pipe(
                 ops.buffer_with_count(args["batch_size"]),
                 ops.flat_map(
-                    lambda rows: executor.submit(self.parse_jay_rows, rows, record)
+                    lambda rows: executor.submit(
+                        self.parse_jay_rows, rows, record
+                    )
                 ),
             )
 

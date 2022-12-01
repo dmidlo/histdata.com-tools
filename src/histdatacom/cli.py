@@ -235,7 +235,10 @@ class ArgParser(argparse.ArgumentParser):
 
     @classmethod
     def adjust_for_repo_data_request(cls, args_namespace: Options) -> None:
-        if args_namespace.available_remote_data or args_namespace.update_remote_data:
+        if (
+            args_namespace.available_remote_data
+            or args_namespace.update_remote_data
+        ):
             args_namespace.start_yearmonth = None
             args_namespace.end_yearmonth = None
             args_namespace.validate_urls = False
@@ -597,7 +600,9 @@ class ArgParser(argparse.ArgumentParser):
                 """
                 if int(start_yearmonth) < 200000:
                     raise ValueError(err_text_date_prior_to_dataset)
-                if int(start_yearmonth) > int(Utils.get_current_datemonth_gmt_minus5()):
+                if int(start_yearmonth) > int(
+                    Utils.get_current_datemonth_gmt_minus5()
+                ):
                     raise ValueError(err_text_date_is_in_future)
         except ValueError as err:
             cls.exit_on_datetime_error(err)
@@ -619,7 +624,9 @@ class ArgParser(argparse.ArgumentParser):
                 """
                 if int(end_yearmonth) < 200000:
                     raise ValueError(err_text_date_prior_to_dataset)
-                if int(end_yearmonth) > int(Utils.get_current_datemonth_gmt_minus5()):
+                if int(end_yearmonth) > int(
+                    Utils.get_current_datemonth_gmt_minus5()
+                ):
                     raise ValueError(err_text_date_is_in_future)
         except ValueError as err:
             cls.exit_on_datetime_error(err)

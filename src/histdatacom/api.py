@@ -65,14 +65,16 @@ class Api:
             args (dict): args received from argparse
         """
 
-        if str.lower(record.data_format) == "ascii" and record.data_timeframe in [
+        if str.lower(
+            record.data_format
+        ) == "ascii" and record.data_timeframe in [
             "T",
             "M1",
         ]:
             jay_path = f"{record.data_dir}.data"
             if not os.path.exists(jay_path):
                 if "CSV" not in record.status:
-                    Scraper.get_zip_file(record, args)
+                    Scraper.get_zip_file(record)
                 cls.create_jay(record, args)
 
     @classmethod
@@ -163,7 +165,11 @@ class Api:
         for tp_set in sets_to_merge:
             self.merge_records(tp_set)
 
-        return sets_to_merge[0]["data"] if len(sets_to_merge) == 1 else sets_to_merge
+        return (
+            sets_to_merge[0]["data"]
+            if len(sets_to_merge) == 1
+            else sets_to_merge
+        )
 
     def merge_records(self, tp_set_dict: dict) -> None:
         match tp_set_dict["timeframe"]:
@@ -242,7 +248,9 @@ class Api:
                     ascii_m1_etc_ms_timestamp = (
                         ascii_m1_str_splitter.as_type(int) // 10**6
                     )
-                    ascii_m1_utc_ms_timestamp = ascii_m1_etc_ms_timestamp + 18000000
+                    ascii_m1_utc_ms_timestamp = (
+                        ascii_m1_etc_ms_timestamp + 18000000
+                    )
                     data[:, update(datetime=ascii_m1_utc_ms_timestamp)]
                 case "T":
                     data = dt.fread(
@@ -264,7 +272,9 @@ class Api:
                     ascii_t_etc_ms_timestamp = (
                         ascii_t_str_splitter.as_type(int) // 10**6
                     )
-                    ascii_t_utc_ms_timestamp = ascii_t_etc_ms_timestamp + 18000000
+                    ascii_t_utc_ms_timestamp = (
+                        ascii_t_etc_ms_timestamp + 18000000
+                    )
                     data[:, update(datetime=ascii_t_utc_ms_timestamp)]
                 case _:
                     raise ValueError("Error creating jay")
@@ -275,7 +285,9 @@ class Api:
             raise SystemExit from err
 
     @classmethod
-    def export_datatable_to_jay(cls, data_frame: DataFrame, file_path: str) -> None:
+    def export_datatable_to_jay(
+        cls, data_frame: DataFrame, file_path: str
+    ) -> None:
         data_path = file_path
         data_frame.to_jay(data_path)
 

@@ -27,7 +27,9 @@ class Csv:
 
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:
                     [record.csv_filename] = [
-                        x for x in zip_ref.namelist() if (".csv" or ".xlsx") in x
+                        x
+                        for x in zip_ref.namelist()
+                        if (".csv" or ".xlsx") in x
                     ]
                     zip_ref.extract(record.csv_filename, path=record.data_dir)
 

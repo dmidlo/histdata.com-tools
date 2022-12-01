@@ -8,3 +8,17 @@ cafile
 filepath
 datemonth
 LN002
+bs4
+K100
+momento
+T201
+exc
+tk
+fxpair
+W605
+csv
+timeframe
+H601
+S131
+I001
+toplevel

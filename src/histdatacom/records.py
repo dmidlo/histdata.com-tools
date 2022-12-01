@@ -83,7 +83,9 @@ class Record:
             elif base_dir != "":
                 Utils.create_full_path(self.set_record_data_dir(base_dir))
             else:
-                raise ValueError("Error: create_record_data_dir not provided base_dir=")
+                raise ValueError(
+                    "Error: create_record_data_dir not provided base_dir="
+                )
         except ValueError as err:
             raise SystemExit from err
 

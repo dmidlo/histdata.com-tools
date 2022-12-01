@@ -36,7 +36,9 @@ class Urls:
                     yield f"{form_url}{date_url}"
             else:
                 start_year = int(Utils.get_year_from_datemonth(start_yearmonth))
-                start_month = int(Utils.get_month_from_datemonth(start_yearmonth))
+                start_month = int(
+                    Utils.get_month_from_datemonth(start_yearmonth)
+                )
                 end_year = int(Utils.get_year_from_datemonth(end_yearmonth))
                 end_month = int(Utils.get_month_from_datemonth(end_yearmonth))
 
@@ -83,7 +85,9 @@ class Urls:
                     yield f"{form_url}{date_url}"
 
             case _ if start_year == year == end_year:
-                for date_url in Urls.yield_same_year(  # pylint: disable=not-an-iterable
+                for (
+                    date_url
+                ) in Urls.yield_same_year(  # pylint: disable=not-an-iterable
                     timeframe, year, start_month, end_month
                 ):
                     yield f"{form_url}{date_url}"
@@ -97,12 +101,16 @@ class Urls:
                     yield f"{form_url}{date_url}"
 
             case _ if year == end_year != start_year:
-                for date_url in Urls.yield_end_year(  # pylint: disable=not-an-iterable
+                for (
+                    date_url
+                ) in Urls.yield_end_year(  # pylint: disable=not-an-iterable
                     timeframe, year, end_month
                 ):
                     yield f"{form_url}{date_url}"
             case _:
-                for date_url in Urls.yield_year(  # pylint: disable=not-an-iterable
+                for (
+                    date_url
+                ) in Urls.yield_year(  # pylint: disable=not-an-iterable
                     timeframe, year
                 ):
                     yield f"{form_url}{date_url}"
@@ -181,7 +189,9 @@ class Urls:
                 for month in range(1, current_month + 1):
                     yield f"{start_year}/{month}"
             else:
-                for date_url in Urls.yield_year(  # pylint: disable=not-an-iterable
+                for (
+                    date_url
+                ) in Urls.yield_year(  # pylint: disable=not-an-iterable
                     timeframe, start_year
                 ):
                     yield date_url

@@ -75,7 +75,11 @@ class Utils:
     @staticmethod
     def replace_date_punct(datemonth_str: Optional[str]) -> str:
         """removes year-month punctuation and returns str("000000")"""
-        return re.sub("[-_.: ]", "", datemonth_str) if datemonth_str is not None else ""
+        return (
+            re.sub("[-_.: ]", "", datemonth_str)
+            if datemonth_str is not None
+            else ""
+        )
 
     @staticmethod
     def hash_dict(data_dict: dict) -> str:
