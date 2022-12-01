@@ -26,7 +26,7 @@ from rich.progress import Progress
 from rich.progress import TextColumn, TimeElapsedColumn, SpinnerColumn
 
 from histdatacom import config
-from histdatacom import Api
+from histdatacom.api import Api
 
 from histdatacom.records import Record
 from histdatacom.records import Records

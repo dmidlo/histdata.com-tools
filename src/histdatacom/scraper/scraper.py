@@ -27,7 +27,6 @@ class Scraper:  # noqa:H601
     """Scrape histdata.com website for pairs data.
 
     Attributes:
-        base_url (str): base histdata.com url
         post_headers (dict): headers for requests
         set_repo_datum: static method from scraper.repo.Repo
 
@@ -38,7 +37,6 @@ class Scraper:  # noqa:H601
 
     def __init__(self) -> None:
         """Initialize parameters for requests."""
-        self.base_url: str = "http://www.histdata.com/download-free-forex-data/"
         self.post_headers: dict = {
             "Host": "www.histdata.com",
             "Connection": "keep-alive",
@@ -69,6 +67,7 @@ class Scraper:  # noqa:H601
         self.check_for_repo_action: Callable = Repo.check_for_repo_action
 
         # Setup
+        self.urls = Urls()
         self._ensure_pairs()
 
     def populate_initial_queue(self) -> None:
@@ -82,13 +81,12 @@ class Scraper:  # noqa:H601
         ) as progress:
             progress.add_task("waiting", total=0)
 
-            for url in Urls.generate_form_urls(
+            for url in self.urls.generate_form_urls(
                 config.ARGS["start_yearmonth"],
                 config.ARGS["end_yearmonth"],
                 config.ARGS["formats"],
                 config.FILTER_PAIRS,
                 config.ARGS["timeframes"],
-                self.base_url,
             ):
                 record = self._init_record(url)
 

@@ -4,11 +4,11 @@ from pandas import DataFrame
 
 from histdatacom import config
 from histdatacom import Options
-from histdatacom import QueueManager
-from histdatacom import ArgParser
-from histdatacom import Csv
-from histdatacom import Api
-from histdatacom import Influx
+from histdatacom.concurrency import QueueManager
+from histdatacom.cli import ArgParser
+from histdatacom.csvs import Csv
+from histdatacom.api import Api
+from histdatacom.influx import Influx
 
 from histdatacom.scraper.repo import Repo
 from histdatacom.scraper.scraper import Scraper

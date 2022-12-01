@@ -101,3 +101,10 @@ repos:
           [
             "--rcfile=pylintrc", # Link to your config file
           ]
+      - id: histdatacom
+        name: histdatacom
+        entry: histdatacom
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: ["-A"]
