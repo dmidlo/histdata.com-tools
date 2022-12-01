@@ -37,28 +37,6 @@ class Scraper:  # noqa:H601
 
     def __init__(self) -> None:
         """Initialize parameters for requests."""
-        self.post_headers: dict = {
-            "Host": "www.histdata.com",
-            "Connection": "keep-alive",
-            "Content-Length": "101",
-            "Cache-Control": "max-age=0",
-            "Origin": "http://www.histdata.com",
-            "Upgrade-Insecure-Requests": "1",
-            "DNT": "1",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": (
-                "text/html,application/xhtml+xml,application/xml;"
-                "q=0.9,image/avif,image/webp,image/apng,*/*;"
-                "q=0.8,application/signed-exchange;"
-                "v=b3;"
-                "q=0.9"
-            ),
-            "Referer": "",
-            "Accept-Encoding": "gzip, deflate",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-        self.requests_timeout: int = 10
-
         # pylint: disable-next=import-outside-toplevel
         from histdatacom.scraper.repo import Repo  # noqa:WPS131
 
@@ -69,6 +47,68 @@ class Scraper:  # noqa:H601
         # Setup
         self.urls = Urls()
         self._ensure_pairs()
+
+    @classmethod
+    def get_zip_file(cls, record: Record) -> None:
+        """Download and write zip file to disk.
+
+        Args:
+            record (Record): a record from the work queue
+        """
+        res = cls._request_file(record, config.REQUESTS_TIMEOUT)
+        record.zip_filename = cls._get_zip_file_name(res)
+        cls._write_file(record, res.content)
+
+    @classmethod
+    def _get_zip_file_name(cls, response: requests.Response) -> str:
+        """Parse the content-disposition header and return the zip file name.
+
+        Args:
+            response (requests.Response): Response
+
+        Returns:
+            str: *.zip file name
+        """
+        content_disposition_header = response.headers["Content-Disposition"]
+        return str(content_disposition_header.split(";")[1].split("=")[1])
+
+    @classmethod
+    def _write_file(cls, record: Record, zip_content: bytes) -> None:
+        """Write binary zip data to disk.
+
+        Args:
+            record (Record): a record from the work queue.
+            zip_content (bytes): binary zip data
+        """
+        zip_path = Path(record.data_dir, record.zip_filename)
+        zip_path.write_bytes(zip_content)
+
+    @classmethod
+    def _request_file(cls, record: Record, timeout: int) -> requests.Response:
+        """Place a POST request for zip file to http://www.histdata.com/get.php.
+
+        Args:
+            record (Record): a record from the work queue
+            timeout (int): retry timeout for POST
+
+        Returns:
+            requests.Response: zip file response
+        """
+        post_headers = config.POST_HEADERS
+        post_headers["Referer"] = record.url
+        return requests.post(
+            "http://www.histdata.com/get.php",
+            data={
+                "tk": record.data_tk,
+                "date": record.data_date,
+                "datemonth": record.data_datemonth,
+                "platform": record.data_format,
+                "timeframe": record.data_timeframe,
+                "fxpair": record.data_fxpair,
+            },
+            headers=post_headers,
+            timeout=timeout,
+        )
 
     def populate_initial_queue(self) -> None:
         """Fill Current Queue with records to be acted on."""
@@ -126,16 +166,6 @@ class Scraper:  # noqa:H601
         )
 
         pool(config.CURRENT_QUEUE, config.NEXT_QUEUE)
-
-    def get_zip_file(self, record: Record) -> None:
-        """Download and write zip file to disk.
-
-        Args:
-            record (Record): a record from the work queue
-        """
-        res = self._request_file(record, self.requests_timeout)
-        record.zip_filename = self._get_zip_file_name(res)
-        self._write_file(record, res.content)
 
     def _init_record(self, url: str) -> Record:
         """Create a new record for processing.
@@ -217,7 +247,9 @@ class Scraper:  # noqa:H601
         Returns:
             Record: a record for the work queue.
         """
-        page_data: dict = self._get_page_data(record.url, self.requests_timeout)
+        page_data: dict = self._get_page_data(  # noqa:BLK001
+            record.url, config.REQUESTS_TIMEOUT
+        )
         self._fetch_form_values(page_data, record)
         return record
 
@@ -287,32 +319,6 @@ class Scraper:  # noqa:H601
             or os.path.exists(record.data_dir + record.jay_filename)
         )
 
-    def _request_file(self, record: Record, timeout: int) -> requests.Response:
-        """Place a POST request for zip file to http://www.histdata.com/get.php.
-
-        Args:
-            record (Record): a record from the work queue
-            timeout (int): retry timeout for POST
-
-        Returns:
-            requests.Response: zip file response
-        """
-        post_headers = self.post_headers
-        post_headers["Referer"] = record.url
-        return requests.post(
-            "http://www.histdata.com/get.php",
-            data={
-                "tk": record.data_tk,
-                "date": record.data_date,
-                "datemonth": record.data_datemonth,
-                "platform": record.data_format,
-                "timeframe": record.data_timeframe,
-                "fxpair": record.data_fxpair,
-            },
-            headers=post_headers,
-            timeout=timeout,
-        )
-
     def _get_page_data(self, url: str, timeout: int) -> dict:
         """Get the whole page's html.
 
@@ -368,25 +374,3 @@ class Scraper:  # noqa:H601
                         case "fxpair":
                             record.data_fxpair = form_value.get("value")
         return record
-
-    def _get_zip_file_name(self, response: requests.Response) -> str:
-        """Parse the content-disposition header and return the zip file name.
-
-        Args:
-            response (requests.Response): Response
-
-        Returns:
-            str: *.zip file name
-        """
-        content_disposition_header = response.headers["Content-Disposition"]
-        return str(content_disposition_header.split(";")[1].split("=")[1])
-
-    def _write_file(self, record: Record, zip_content: bytes) -> None:
-        """Write binary zip data to disk.
-
-        Args:
-            record (Record): a record from the work queue.
-            zip_content (bytes): binary zip data
-        """
-        zip_path = Path(record.data_dir, record.zip_filename)
-        zip_path.write_bytes(zip_content)
