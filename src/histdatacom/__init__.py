@@ -51,7 +51,11 @@ class APICaller(sys.modules[__name__].__class__):  # type: ignore # noqa:H601
             options (Options): a histdatacom Options object.
 
         Returns:
-            "list" | "Frame" | "DataFrame" | "Table": _description_
+            "list" | "Frame" | "DataFrame" | "Table":
+                - (list) if called with -A or -U
+                - (Frame) if options.api_return_type = "datatable"
+                - (DataFrame) if options.api_return_type = "pandas"
+                - (Table) if options.api_return_type = "arrow"
         """
         return histdata_com.main(options)
 
