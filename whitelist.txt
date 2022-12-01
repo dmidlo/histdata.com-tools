@@ -54,3 +54,16 @@ fexpr
 expr
 C300
 R504
+Q001
+prog
+DTO
+csvs
+influxdb
+falsey
+lessthan
+M102
+C301
+endmonth
+dataset
+punct
+metavar

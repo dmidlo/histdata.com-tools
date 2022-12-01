@@ -2,7 +2,6 @@ from histdatacom.fx_enums import Pairs
 from histdatacom.fx_enums import Format
 from histdatacom.fx_enums import Timeframe
 
-
 class Options:
     """An intra-class DTO for Default Arguments for _HistDataCom class."""
 

@@ -34,7 +34,7 @@ class _HistDataCom:
         #           - Normalize iterable user arguments whose values are lists and
         #             make them sets instead
         #       - .copy(): decouple for GC using a hard copy of user args
-        config.ARGS = ArgParser._arg_list_to_set(
+        config.ARGS = ArgParser.arg_list_to_set(
             vars(ArgParser(options)())
         ).copy()
         config.ARGS["default_download_dir"] = Utils.set_working_data_dir(
