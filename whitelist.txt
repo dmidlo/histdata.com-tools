@@ -67,3 +67,13 @@ endmonth
 dataset
 punct
 metavar
+multi
+F841
+func
+qsize
+initializer
+initargs
+vcpu
+isnumeric
+R503
+S100

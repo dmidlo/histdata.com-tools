@@ -27,8 +27,9 @@ class Scraper:  # noqa:H601
     """Scrape histdata.com website for pairs data.
 
     Attributes:
-        post_headers (dict): headers for requests
         set_repo_datum: static method from scraper.repo.Repo
+        check_if_queue_is_needed: static method from scraper.repo.Repo
+        check_for_repo_action: static method from scraper.repo.Repo
 
     Raises:
         ValueError: On stale download url

@@ -1,61 +1,85 @@
+"""Provide multi-threading and multi-processes facilities.
+
+Raises:
+    ValueError: -c cpu must be str:
+                    low, medium, or high. or integer percent 1-200
+    SystemExit: exit on error
+"""
 # pylint: disable=redefined-outer-name
 from __future__ import annotations
-from typing import Callable
-from typing import Optional
-from typing import Type
-from typing import TYPE_CHECKING
 
+from concurrent.futures import (
+    Future,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+)
 from math import ceil
+from multiprocessing import Queue, cpu_count, managers
+from typing import TYPE_CHECKING, Callable, Optional, Type
 
-from multiprocessing import managers
-from multiprocessing import cpu_count
-from multiprocessing import Queue
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import ProcessPoolExecutor
-from concurrent.futures import as_completed
-from concurrent.futures import Future
-
-from pyarrow import Table
-from datatable import Frame
-from pandas import DataFrame
-
-from rich.progress import Progress
-from rich.progress import TextColumn
-from rich.progress import BarColumn
-from rich.progress import TimeElapsedColumn
-from rich.progress import TaskID
+from rich.progress import (
+    BarColumn,
+    Progress,
+    TaskID,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
 from histdatacom import config
 from histdatacom.records import Records
 
 if TYPE_CHECKING:
-    from histdatacom.options import Options
+    from datatable import Frame  # noqa:I900
+    from pandas import DataFrame
+    from pyarrow import Table
+
     from histdatacom.histdata_com import _HistDataCom
+    from histdatacom.options import Options
 
 
 def init_counters(
+    # pylint: disable=unused-argument,unused-variable
     records_current_: Records,
     records_next_: Records,
     args_: dict,
     influx_chunks_queue_: Queue | None = None,
 ) -> None:
+    """Initialize pool with access to these global variables.
+
+    Args:
+        records_current_ (Records): config.CURRENT_QUEUE
+        records_next_ (Records): config.NEXT_QUEUE
+        args_ (dict): config.ARGS
+        influx_chunks_queue_ (Queue | None, optional): config.INFLUX_CHUNKS_QUEUE
+    """
     # pylint: disable=global-variable-undefined
-    args = args_  # type: ignore
+    args = args_  # noqa:F841
 
     if influx_chunks_queue_ is not None:
-        global INFLUX_CHUNKS_QUEUE
+        global INFLUX_CHUNKS_QUEUE  # noqa:WPS100
         INFLUX_CHUNKS_QUEUE = influx_chunks_queue_  # type: ignore
 
 
 def complete_future(
     progress: Progress, task_id: TaskID, futures: list, future: Future
 ) -> None:
+    """Finalize future and rich.Progress task.
+
+    Args:
+        progress (Progress): progress bar instance.
+        task_id (TaskID): progress instance task id.
+        futures (list): list of futures.
+        future (Future): future from pool.
+    """
     progress.advance(task_id, 0.75)
     futures.remove(future)
-    del future
+    del future  # noqa:WPS100
 
 
 class ThreadPool:
+    """Standardize thread pool execution for histdatacom."""
+
     def __init__(
         self,
         exec_func: Callable,
@@ -64,7 +88,15 @@ class ThreadPool:
         progress_post_text: str,
         cpu_count: int,
     ) -> None:
+        """Initialize attributes for thread pool.
 
+        Args:
+            exec_func (Callable): function to be executed by pool.
+            args (dict): global args from config.ARGS
+            progress_pre_text (str): display for rich.Progress
+            progress_post_text (str): display for rich.Progress
+            cpu_count (int): CPU count to use for pool.
+        """
         self.exec_func = exec_func
         self.args = args
         self.progress_pre_text = progress_pre_text
@@ -76,11 +108,20 @@ class ThreadPool:
         records_current: Optional[Records],
         records_next: Optional[Records],
     ) -> None:
+        """Execute Thread pool with rich.Progress bar.
 
+        Args:
+            records_current (Optional[Records]): from config.CURRENT_QUEUE
+            records_next (Optional[Records]): from config.NEXT_QUEUE
+        """
         records_count = records_current.qsize()  # type: ignore
         with Progress(
             TextColumn(
-                text_format=f"[cyan]{self.progress_pre_text} {records_count} {self.progress_post_text}."  # noqa: E501
+                text_format=(
+                    f"[cyan]{self.progress_pre_text} "
+                    f"{records_count} "
+                    f"{self.progress_post_text}."
+                )
             ),
             BarColumn(),
             "[progress.percentage]{task.percentage:>3.0f}%",
@@ -113,7 +154,9 @@ class ThreadPool:
 
 
 class ProcessPool:
-    def __init__(
+    """Standardize process pool execution for histdatacom."""
+
+    def __init__(  # noqa:CFQ002
         self,
         exec_func: Callable,
         args: dict,
@@ -123,7 +166,17 @@ class ProcessPool:
         join: bool = True,
         dump: bool = True,
     ) -> None:
+        """Initialize attributes for process pool.
 
+        Args:
+            exec_func (Callable): function to be executed by pool.
+            args (dict): global args from config.ARGS
+            progress_pre_text (str): display for rich.Progress
+            progress_post_text (str): display for rich.Progress
+            cpu_count (int): CPU count to use for pool.
+            join (bool): disable join waits. Defaults to True.
+            dump (bool): enable queue dumps. Defaults to True.
+        """
         self.exec_func = exec_func
         self.args = args
         self.progress_pre_text = progress_pre_text
@@ -132,17 +185,28 @@ class ProcessPool:
         self.join = join
         self.dump = dump
 
-    def __call__(
+    def __call__(  # noqa:CCR001
         self,
         records_current: Optional[Records],
         records_next: Optional[Records],
         influx_chunks_queue: Optional[Queue] = None,
     ) -> None:
+        """Execute Process pool with rich.Progress bar.
 
+        Args:
+            records_current (Optional[Records]): _description_
+            records_next (Optional[Records]): _description_
+            influx_chunks_queue (Optional[Queue], optional):
+                                    used for RxPY queue. Defaults to None.
+        """
         records_count = records_current.qsize()  # type: ignore
         with Progress(
             TextColumn(
-                text_format=f"[cyan]{self.progress_pre_text} {records_count} {self.progress_post_text}."  # noqa: E501
+                text_format=(
+                    f"[cyan]{self.progress_pre_text} "
+                    f"{records_count} "
+                    f"{self.progress_post_text}."
+                )
             ),
             BarColumn(),
             "[progress.percentage]{task.percentage:>3.0f}%",
@@ -199,8 +263,22 @@ class ProcessPool:
             records_next.dump_to_queue(records_current)  # type: ignore
 
 
-def get_pool_cpu_count(count: str | int | None = None) -> int:
+def get_pool_cpu_count(count: str | int | None = None) -> int:  # noqa:CCR001
+    """Set cpu_count.  Adjusted by -c config.ARGS["cpu_utilization"].
 
+    Args:
+        count (str | int | None, optional):
+                Defaults to multiprocessing.cpu_count().
+
+    # noqa: DAR402
+
+    Raises:
+        ValueError: malformed command, bad -c cpu_count
+        SystemExit: exit on error.
+
+    Returns:
+        int: cpu_count for thread & process pool.
+    """
     try:
         real_vcpu_count = cpu_count()
 
@@ -227,18 +305,24 @@ def get_pool_cpu_count(count: str | int | None = None) -> int:
                     else:
                         raise ValueError(err_text_cpu_level_err)
 
-        return count - 1 if count > 2 else ceil(count / 2)
+        return count - 1 if count > 2 else ceil(count / 2)  # noqa:TC300
     except ValueError as err:
-        print(err)
         raise SystemExit from err
 
 
 class QueueManager:
+    """Configure SyncManager with Queues and Callable: histdatacom."""
+
     # pylint: disable=no-member
     def __init__(self, options: Options):
+        """Initialize SyncManager and register custom queue class 'Records'.
+
+        Args:
+            options (Options): a histdatacom.options Options object.
+        """
         self.options = options
         config.QUEUE_MANAGER = managers.SyncManager()
-        config.QUEUE_MANAGER.register(
+        config.QUEUE_MANAGER.register(  # noqa:BLK100
             "Records", Records
         )  # pylint: disable=no-member
 
@@ -246,15 +330,23 @@ class QueueManager:
     def __call__(  # type: ignore
         self, runner_: Type[_HistDataCom]
     ) -> list | dict | Frame | DataFrame | Table:
-        config.QUEUE_MANAGER.start()  # type: ignore
+        """Configure global queues and execute.
 
-        config.CURRENT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore
-        config.NEXT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore
-        config.INFLUX_CHUNKS_QUEUE = config.QUEUE_MANAGER.Queue()  # type: ignore
+        Args:
+            runner_ (Type[_HistDataCom]): _description_
+
+        Returns:
+            list | dict | Frame | DataFrame | Table: _description_
+        """
+        config.QUEUE_MANAGER.start()  # pylint: disable=consider-using-with
+
+        config.CURRENT_QUEUE = config.QUEUE_MANAGER.Records()
+        config.NEXT_QUEUE = config.QUEUE_MANAGER.Records()
+        config.INFLUX_CHUNKS_QUEUE = config.QUEUE_MANAGER.Queue()
 
         histdatacom_runner = runner_(self.options)
 
         if self.options.from_api:
             return histdatacom_runner.run()
-        else:
-            histdatacom_runner.run()
+
+        histdatacom_runner.run()  # noqa:R503
