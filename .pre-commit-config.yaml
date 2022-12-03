@@ -1,110 +1,118 @@
-files: "src/"
+files: src/
 repos:
-  - repo: https://github.com/psf/black
-    rev: 22.10.0
-    hooks:
-      - id: black
-        args: [--line-length, "80"]
-        language_version: python3.10
-  - repo: https://github.com/pycqa/flake8
-    rev: '6.0.0'  # pick a git hash / tag to point to
-    hooks:
-    -   id: flake8
-        additional_dependencies:
-          - bandit
-          - flake8-bandit
-          - black
-          - pycodestyle
-          - mccabe
-          - pyflakes
-          - flake8-black
-          - flake8-comprehensions
-          - flake8-class-attributes-order
-          - flake8-bugbear
-          - wemake-python-styleguide
-          - flake8-simplify
-          - flake8-pie
-          - flake8-use-pathlib
-          - flake8-use-fstring
-          - flake8-print
-          - flake8-no-implicit-concat
-          - flake8-pytest-style
-          - Flake8-AAA
-          - flake8-spellcheck
-          - flake8-docstring-checker
-          - flake8-docstrings
-          - flake8-length
-          - flake8-functions
-          - flake8-expression-complexity
-          - flake8-cognitive-complexity
-          - flake8-annotations-complexity
-          - flake8-type-checking
-          # - radon
-          # - Darglint
-          # - cohesion
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0  # Use the ref you want to point at
-    hooks:
-      - id: trailing-whitespace
-      - id: check-ast
-      - id: check-builtin-literals
-      - id: check-case-conflict
-      - id: check-docstring-first
-      - id: check-executables-have-shebangs
-      - id: check-json
-      - id: check-symlinks
-      - id: check-toml
-      - id: check-yaml
-      - id: name-tests-test
-        args: [--pytest-test-first]
-      - id: no-commit-to-branch
-        args: [--branch, main]
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v0.991
-    hooks:
-      - id: mypy
-        additional_dependencies:
-          - types-dataclasses
-          - types-PyYAML
-          - pytest
-          - pandas-stubs
-          - types-beautifulsoup4
-  - repo: https://github.com/terrencepreilly/darglint
-    rev: v1.8.1
-    hooks:
-    - id: darglint
-  - repo: https://github.com/guilatrova/tryceratops
-    rev: v1.1.0
-    hooks:
-      - id: tryceratops
-  - repo: https://github.com/regebro/pyroma
-    rev: "4.1"
-    hooks:
-    - id: pyroma
-  - repo: https://github.com/jendrikseipp/vulture
-    rev: 'v2.6'  # or any later Vulture version
-    hooks:
-      - id: vulture
-        args: [src, setup.py, .vulture.py ,--min-confidence, "59"]
-  - repo: https://github.com/sourcery-ai/sourcery
-    rev: v1.0.1
-    hooks:
-      - id: sourcery
-  - repo: local
-    hooks:
-      - id: pylint
-        name: pylint
-        entry: pylint
-        language: system
-        types: [python]
-        args:
-          [
-            "--rcfile=pylintrc", # Link to your config file
-          ]
-      - id: histdatacom
-        name: histdatacom
-        entry: histdatacom
-        language: system
-        types: [python]
-        pass_filenames: false
-        args: ["-A"]
+- hooks:
+  - args:
+    - --line-length
+    - '80'
+    id: black
+    language_version: python3.10
+  repo: https://github.com/psf/black
+  rev: 22.10.0
+- hooks:
+  - additional_dependencies:
+    - bandit
+    - flake8-bandit
+    - black
+    - pycodestyle
+    - mccabe
+    - pyflakes
+    - flake8-black
+    - flake8-comprehensions
+    - flake8-class-attributes-order
+    - flake8-bugbear
+    - wemake-python-styleguide
+    - flake8-simplify
+    - flake8-pie
+    - flake8-use-pathlib
+    - flake8-use-fstring
+    - flake8-print
+    - flake8-no-implicit-concat
+    - flake8-pytest-style
+    - Flake8-AAA
+    - flake8-spellcheck
+    - flake8-docstring-checker
+    - flake8-docstrings
+    - flake8-length
+    - flake8-functions
+    - flake8-expression-complexity
+    - flake8-cognitive-complexity
+    - flake8-annotations-complexity
+    - flake8-type-checking
+    id: flake8
+  repo: https://github.com/pycqa/flake8
+  rev: 6.0.0
+- hooks:
+  - id: trailing-whitespace
+  - id: check-ast
+  - id: check-builtin-literals
+  - id: check-case-conflict
+  - id: check-docstring-first
+  - id: check-executables-have-shebangs
+  - id: check-json
+  - id: check-symlinks
+  - id: check-toml
+  - id: check-yaml
+  - args:
+    - --pytest-test-first
+    id: name-tests-test
+  - args:
+    - --branch
+    - main
+    id: no-commit-to-branch
+  repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v4.4.0
+- hooks:
+  - additional_dependencies:
+    - types-dataclasses
+    - types-PyYAML
+    - pytest
+    - pandas-stubs
+    - types-beautifulsoup4
+    id: mypy
+  repo: https://github.com/pre-commit/mirrors-mypy
+  rev: v0.991
+- hooks:
+  - id: darglint
+  repo: https://github.com/terrencepreilly/darglint
+  rev: v1.8.1
+- hooks:
+  - id: tryceratops
+  repo: https://github.com/guilatrova/tryceratops
+  rev: v1.1.0
+- hooks:
+  - id: pyroma
+  repo: https://github.com/regebro/pyroma
+  rev: '4.1'
+- hooks:
+  - args:
+    - src
+    - setup.py
+    - .vulture.py
+    - --min-confidence
+    - '59'
+    id: vulture
+  repo: https://github.com/jendrikseipp/vulture
+  rev: v2.6
+- hooks:
+  - id: sourcery
+  repo: https://github.com/sourcery-ai/sourcery
+  rev: v1.0.1
+- hooks:
+  - args:
+    - --rcfile=pylintrc
+    entry: pylint
+    id: pylint
+    language: system
+    name: pylint
+    types:
+    - python
+  - args:
+    - -A
+    entry: histdatacom
+    id: histdatacom
+    language: system
+    name: histdatacom
+    pass_filenames: false
+    types:
+    - python
+  repo: local
