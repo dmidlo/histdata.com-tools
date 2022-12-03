@@ -38,45 +38,6 @@ if TYPE_CHECKING:
     from histdatacom.options import Options
 
 
-def init_counters(
-    # pylint: disable=unused-argument,unused-variable
-    records_current_: Records,
-    records_next_: Records,
-    args_: dict,
-    influx_chunks_queue_: Queue | None = None,
-) -> None:
-    """Initialize pool with access to these global variables.
-
-    Args:
-        records_current_ (Records): config.CURRENT_QUEUE
-        records_next_ (Records): config.NEXT_QUEUE
-        args_ (dict): config.ARGS
-        influx_chunks_queue_ (Queue | None, optional): config.INFLUX_CHUNKS_QUEUE
-    """
-    # pylint: disable=global-variable-undefined
-    args = args_  # noqa:F841
-
-    if influx_chunks_queue_ is not None:
-        global INFLUX_CHUNKS_QUEUE  # noqa:WPS100
-        INFLUX_CHUNKS_QUEUE = influx_chunks_queue_  # type: ignore
-
-
-def complete_future(
-    progress: Progress, task_id: TaskID, futures: list, future: Future
-) -> None:
-    """Finalize future and rich.Progress task.
-
-    Args:
-        progress (Progress): progress bar instance.
-        task_id (TaskID): progress instance task id.
-        futures (list): list of futures.
-        future (Future): future from pool.
-    """
-    progress.advance(task_id, 0.75)
-    futures.remove(future)
-    del future  # noqa:WPS100
-
-
 class ThreadPool:
     """Standardize thread pool execution for histdatacom."""
 
@@ -131,7 +92,7 @@ class ThreadPool:
 
             with ThreadPoolExecutor(
                 max_workers=self.cpu_count,
-                initializer=init_counters,
+                initializer=_init_counters,
                 initargs=(records_current, records_next, self.args.copy()),
             ) as executor:
                 futures = []
@@ -147,7 +108,7 @@ class ThreadPool:
                     futures.append(future)
 
                 for future in as_completed(futures):
-                    complete_future(progress, task_id, futures, future)
+                    _complete_future(progress, task_id, futures, future)
 
         records_current.join()  # type: ignore
         records_next.dump_to_queue(records_current)  # type: ignore
@@ -216,7 +177,7 @@ class ProcessPool:
 
             with ProcessPoolExecutor(
                 max_workers=self.cpu_count,
-                initializer=init_counters,
+                initializer=_init_counters,
                 initargs=(
                     records_current,
                     records_next,
@@ -254,7 +215,7 @@ class ProcessPool:
                     futures.append(future)
 
                 for future in as_completed(futures):
-                    complete_future(progress, task_id, futures, future)
+                    _complete_future(progress, task_id, futures, future)
 
         if self.join:
             records_current.join()  # type: ignore
@@ -350,3 +311,42 @@ class QueueManager:
             return histdatacom_runner.run()
 
         histdatacom_runner.run()  # noqa:R503
+
+
+def _init_counters(
+    # pylint: disable=unused-argument,unused-variable
+    records_current_: Records,
+    records_next_: Records,
+    args_: dict,
+    influx_chunks_queue_: Queue | None = None,
+) -> None:
+    """Initialize pool with access to these global variables.
+
+    Args:
+        records_current_ (Records): config.CURRENT_QUEUE
+        records_next_ (Records): config.NEXT_QUEUE
+        args_ (dict): config.ARGS
+        influx_chunks_queue_ (Queue | None, optional): config.INFLUX_CHUNKS_QUEUE
+    """
+    # pylint: disable=global-variable-undefined
+    args = args_  # noqa:F841
+
+    if influx_chunks_queue_ is not None:
+        global INFLUX_CHUNKS_QUEUE  # noqa:WPS100
+        INFLUX_CHUNKS_QUEUE = influx_chunks_queue_  # type: ignore
+
+
+def _complete_future(
+    progress: Progress, task_id: TaskID, futures: list, future: Future
+) -> None:
+    """Finalize future and rich.Progress task.
+
+    Args:
+        progress (Progress): progress bar instance.
+        task_id (TaskID): progress instance task id.
+        futures (list): list of futures.
+        future (Future): future from pool.
+    """
+    progress.advance(task_id, 0.75)
+    futures.remove(future)
+    del future  # noqa:WPS100

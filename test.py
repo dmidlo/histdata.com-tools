@@ -3,6 +3,8 @@ from shutil import rmtree
 import sh
 import random
 
+from rich import print
+
 import histdatacom
 from histdatacom import Options
 from histdatacom.fx_enums import Pairs
@@ -29,17 +31,20 @@ class Testhistdatacom():
 
 
     def test_py_api_available_remote_data(self):
+        print("Testing histdatacom -A from api.")
         self.options.available_remote_data = True
         self.options.pairs = Pairs.list_keys()
         self.result = histdatacom(self.options)
         return self.result
 
     def test_py_api_update_and_validate_remote_data(self):
+        print("Testing histdatacom -U from api.")
         self.options.update_remote_data = True
         self.result = histdatacom(self.options)
         return self.result
 
     def test_py_api_download_data(self):
+        print("Testing histdatacom -D from api.")
         self.options.download_data_archives = True
         self.options.start_yearmonth = "2011-06"
         self.options.end_yearmonth = "2011-12"
@@ -47,6 +52,7 @@ class Testhistdatacom():
         return self.result
 
     def test_py_api_extract_data(self):
+        print("Testing histdatacom -X from api.")
         self.options.extract_csvs = True
         self.options.start_yearmonth = "2011-06"
         self.options.end_yearmonth = "2011-07"
@@ -54,6 +60,7 @@ class Testhistdatacom():
         return self.result
 
     def test_py_api_import_to_influx(self):
+        print("Testing histdatacom -I from api.")
         self.options.import_to_influxdb = True
         self.options.start_yearmonth = "2011-05"
         self.options.end_yearmonth = "2011-06"
@@ -61,6 +68,7 @@ class Testhistdatacom():
         return self.result
 
     def test_py_api_api_return(self):
+        print("Testing histdatacom api from api.")
         self.options.api_return_type = "datatable"
         self.options.start_yearmonth = "2011-05"
         self.options.end_yearmonth = "2012-01"
@@ -71,7 +79,6 @@ class Testhistdatacom():
         data_path = Path(__file__).parent / self.options.data_directory
 
         if data_path.exists():
-            print(f"{data_path} exists.")
             return data_path
         raise FileExistsError(f"{data_path} does not exist. Something went wrong")
 
@@ -80,9 +87,11 @@ class Testhistdatacom():
         rmtree(path)
 
     def test_cli_available_remote_data(self):
+        print("Testing histdatacom -A from cli.")
         sh.histdatacom(A=True, by="start_asc", _fg=True)    
 
     def test_cli_update_and_validate_remote_data(self):
+        print("Testing histdatacom -U and -V from cli.")
         sh.histdatacom(U=True,
                        p=" ".join(self.options.pairs),
                        f=" ".join(self.options.formats),
@@ -90,6 +99,7 @@ class Testhistdatacom():
                        _fg=True)
 
     def test_cli_download_data(self):
+        print("Testing histdatacom -D from cli.")
         sh.histdatacom(D=True,
                        p=" ".join(self.options.pairs),
                        f=" ".join(self.options.formats),
@@ -100,6 +110,7 @@ class Testhistdatacom():
                        _fg=True)
 
     def test_cli_extract_data(self):
+        print("Testing histdatacom -X from cli.")
         sh.histdatacom(X=True,
                        p=" ".join(self.options.pairs),
                        f=" ".join(self.options.formats),
@@ -110,6 +121,7 @@ class Testhistdatacom():
                        _fg=True)
 
     def test_cli_import_to_influx(self):
+        print("Testing histdatacom -I from cli.")
         sh.histdatacom(I=True,
                        p=" ".join(self.options.pairs),
                        f=" ".join(self.options.formats),
@@ -127,7 +139,7 @@ class Testhistdatacom():
         tester.test_cli_download_data()
         tester.test_cli_extract_data()
         tester.test_cli_import_to_influx()
-        print(tester.delete_data_directory())
+        tester.delete_data_directory()
         del tester
 
     @staticmethod
@@ -157,7 +169,7 @@ class Testhistdatacom():
         del tester
 
         tester = Testhistdatacom()
-        print(tester.delete_data_directory())
+        tester.delete_data_directory()
         del tester
 
     @staticmethod
