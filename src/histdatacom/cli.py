@@ -77,7 +77,12 @@ from rich import print  # pylint: disable=redefined-builtin
 from histdatacom import Options
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.fx_enums import Format, Pairs, Timeframe
-from histdatacom.utils import Utils
+from histdatacom.utils import (
+    get_current_datemonth_gmt_minus5,
+    get_year_from_datemonth,
+    get_month_from_datemonth,
+    replace_date_punct,
+)
 
 default_options = Options()
 
@@ -307,12 +312,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         """
         if start_yearmonth := self.arg_namespace.start_yearmonth:
             if start_yearmonth == "now":
-                return Utils.get_current_datemonth_gmt_minus5(), None
+                return get_current_datemonth_gmt_minus5(), None
             if end_yearmonth := self.arg_namespace.end_yearmonth:  # noqa:SIM102
                 if end_yearmonth == "now":
                     return (
                         start_yearmonth,
-                        Utils.get_current_datemonth_gmt_minus5(),
+                        get_current_datemonth_gmt_minus5(),
                     )
 
         return start_yearmonth, end_yearmonth
@@ -377,8 +382,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             Tuple[Optional[str], Optional[str]]: _description_
         """
         start_yearmonth = self.arg_namespace.start_yearmonth
-        start_year = Utils.get_year_from_datemonth(start_yearmonth)
-        start_month = Utils.get_month_from_datemonth(start_yearmonth)
+        start_year = get_year_from_datemonth(start_yearmonth)
+        start_month = get_month_from_datemonth(str(start_yearmonth))
 
         err_text_start_month = f"""
                 ERROR on -e {start_yearmonth}   ERROR
@@ -393,11 +398,11 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         end_yearmonth = self.arg_namespace.end_yearmonth
 
         err_text_no_end_yearmonth = f"""
-        ERROR on -e {Utils.get_year_from_datemonth(start_yearmonth)} {end_yearmonth}
+        ERROR on -e {get_year_from_datemonth(start_yearmonth)} {end_yearmonth}
             * Malformed command:
                 - cannot include `-e end_year-month` when
                     specifying a single year
-                    with -s {Utils.get_year_from_datemonth(start_yearmonth)}
+                    with -s {get_year_from_datemonth(start_yearmonth)}
         """
 
         err_text_no_start_yearmonth = f"""
@@ -444,8 +449,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         """
         try:
             if end_yearmonth := self.arg_namespace.end_yearmonth:
-                end_year = Utils.get_year_from_datemonth(end_yearmonth)
-                end_month = Utils.get_month_from_datemonth(end_yearmonth)
+                end_year = get_year_from_datemonth(end_yearmonth)
+                end_month = get_month_from_datemonth(end_yearmonth)
 
                 err_text_no_endmonth = f"""
                         ERROR on -e {end_yearmonth}           ERROR
@@ -488,12 +493,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         """
         try:
             start_yearmonth = self.arg_namespace.start_yearmonth
-            start_year = Utils.get_year_from_datemonth(start_yearmonth)
-            start_month = Utils.get_month_from_datemonth(start_yearmonth)
+            start_year = get_year_from_datemonth(start_yearmonth)
+            start_month = get_month_from_datemonth(str(start_yearmonth))
 
             end_yearmonth = self.arg_namespace.end_yearmonth
-            end_year = Utils.get_year_from_datemonth(end_yearmonth)
-            end_month = Utils.get_month_from_datemonth(end_yearmonth)
+            end_year = get_year_from_datemonth(end_yearmonth)
+            end_month = get_month_from_datemonth(str(end_yearmonth))
 
             err_text_start_and_end_cannot_be_the_same = f"""
                 ERROR on -s {start_yearmonth} -e {end_yearmonth}  ERROR
@@ -546,7 +551,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 if int(start_yearmonth) < 200000:
                     raise ValueError(err_text_date_prior_to_dataset)
                 if int(start_yearmonth) > int(  # noqa:BLK100
-                    Utils.get_current_datemonth_gmt_minus5()
+                    get_current_datemonth_gmt_minus5()
                 ):
                     raise ValueError(err_text_date_is_in_future)
         except ValueError as err:
@@ -573,7 +578,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 if int(end_yearmonth) < 200000:
                     raise ValueError(err_text_date_prior_to_dataset)
                 if int(end_yearmonth) > int(  # noqa:BLK100
-                    Utils.get_current_datemonth_gmt_minus5()
+                    get_current_datemonth_gmt_minus5()
                 ):
                     raise ValueError(err_text_date_is_in_future)
         except ValueError as err:
@@ -635,7 +640,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 or str.lower(yearmonth) == "start"
                 or not yearmonth
             ):
-                return Utils.replace_date_punct(yearmonth)
+                return replace_date_punct(yearmonth)
             err_text_bad_yearmonth_format = f"""
                         ERROR on {yearmonth}    ERROR
                             * invalid yearmonth format

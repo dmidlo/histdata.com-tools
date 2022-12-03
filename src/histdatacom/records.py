@@ -9,7 +9,10 @@ from typing import Any, Optional
 from rich import print  # pylint: disable=redefined-builtin
 
 from histdatacom.fx_enums import Format, Timeframe
-from histdatacom.utils import Utils
+from histdatacom.utils import (
+    create_full_path,
+    get_query_string,
+)
 
 
 class Record:  # noqa:H601
@@ -62,7 +65,7 @@ class Record:  # noqa:H601
                     raise ValueError
 
             if not Path(self.data_dir).exists():
-                Utils.create_full_path(self.data_dir)
+                create_full_path(self.data_dir)
 
             momento_path = Path(self.data_dir, ".meta")
 
@@ -149,7 +152,7 @@ class Record:  # noqa:H601
         Returns:
             str: self.data_dir  # record's data.
         """
-        query_string_args = Utils.get_query_string(self.url)
+        query_string_args = get_query_string(self.url)
         length = len(query_string_args)
 
         csv_format = Format(query_string_args[1]).name
@@ -198,9 +201,9 @@ class Record:  # noqa:H601
         """
         try:
             if self.data_dir != "":
-                Utils.create_full_path(self.data_dir)
+                create_full_path(self.data_dir)
             elif base_dir != "":
-                Utils.create_full_path(self._set_record_data_dir(base_dir))
+                create_full_path(self._set_record_data_dir(base_dir))
             else:
                 raise ValueError
         except ValueError as err:

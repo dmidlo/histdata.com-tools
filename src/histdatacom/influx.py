@@ -65,13 +65,13 @@ class Influx:  # noqa:H601
         ) as progress:
             task_id = progress.add_task("waiting", total=0)
 
-            config.CURRENT_QUEUE.join()
-            config.INFLUX_CHUNKS_QUEUE.put(None)
-            config.INFLUX_CHUNKS_QUEUE.join()
+            config.CURRENT_QUEUE.join()  # type: ignore
+            config.INFLUX_CHUNKS_QUEUE.put(None)  # type: ignore
+            config.INFLUX_CHUNKS_QUEUE.join()  # type: ignore
             progress.advance(task_id, 0.75)
 
         print("[cyan] done.")  # noqa:T201
-        config.NEXT_QUEUE.dump_to_queue(config.CURRENT_QUEUE)
+        config.NEXT_QUEUE.dump_to_queue(config.CURRENT_QUEUE)  # type: ignore
 
     def _init_counters(
         self,

@@ -140,9 +140,9 @@ class Scraper:  # noqa:H601
                         and record.status != "URL_NEW"
                     ):
                         self.set_repo_datum(record)
-                    config.NEXT_QUEUE.put(record)
+                    config.NEXT_QUEUE.put(record)  # type: ignore
 
-            config.NEXT_QUEUE.dump_to_queue(config.CURRENT_QUEUE)
+            config.NEXT_QUEUE.dump_to_queue(config.CURRENT_QUEUE)  # type: ignore
 
     def validate_urls(self) -> None:
         """Initialize and Execute a thread pool to validate generated URLs."""
@@ -219,7 +219,7 @@ class Scraper:  # noqa:H601
                 record.status = "URL_VALID"
                 record.write_memento_file(base_dir=args["default_download_dir"])
 
-            config.NEXT_QUEUE.put(record)
+            config.NEXT_QUEUE.put(record)  # type: ignore
         except ValueError:
             if not self.check_for_repo_action():
                 print(  # noqa:T201,BLK100
@@ -237,7 +237,7 @@ class Scraper:  # noqa:H601
             record.delete_momento_file()
             raise SystemExit from err
         finally:
-            config.CURRENT_QUEUE.task_done()
+            config.CURRENT_QUEUE.task_done()  # type: ignore
 
     def _scrape_record_info(self, record: Record) -> Record:
         """Scrape page for archive meta data and populate record with info.
@@ -291,7 +291,7 @@ class Scraper:  # noqa:H601
                 )
                 record.write_memento_file(base_dir=args["default_download_dir"])
 
-            config.NEXT_QUEUE.put(record)
+            config.NEXT_QUEUE.put(record)  # type: ignore
         except KeyError:
             print(  # noqa:T201
                 f"Invalid Zip on histdata.com: {record.url}",
@@ -303,7 +303,7 @@ class Scraper:  # noqa:H601
             record.delete_momento_file()
             raise
         finally:
-            config.CURRENT_QUEUE.task_done()
+            config.CURRENT_QUEUE.task_done()  # type: ignore
 
     def _check_for_existing_archives_on_disk(self, record: Record) -> bool:
         """Check for zip, csv, or jay file.

@@ -299,11 +299,12 @@ class QueueManager:
         Returns:
             list | dict | Frame | DataFrame | Table: _description_
         """
-        config.QUEUE_MANAGER.start()  # pylint: disable=consider-using-with
+        # pylint: disable-next=consider-using-with
+        config.QUEUE_MANAGER.start()  # type: ignore
 
-        config.CURRENT_QUEUE = config.QUEUE_MANAGER.Records()
-        config.NEXT_QUEUE = config.QUEUE_MANAGER.Records()
-        config.INFLUX_CHUNKS_QUEUE = config.QUEUE_MANAGER.Queue()
+        config.CURRENT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore
+        config.NEXT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore
+        config.INFLUX_CHUNKS_QUEUE = config.QUEUE_MANAGER.Queue()  # type: ignore
 
         histdatacom_runner = runner_(self.options)
 

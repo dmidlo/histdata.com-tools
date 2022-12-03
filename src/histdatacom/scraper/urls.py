@@ -6,7 +6,11 @@ Yields:
 from typing import Any, Generator, Optional, Set
 
 from histdatacom.fx_enums import Timeframe, get_valid_format_timeframes
-from histdatacom.utils import Utils
+from histdatacom.utils import (
+    get_current_datemonth_gmt_minus5,
+    get_year_from_datemonth,
+    get_month_from_datemonth,
+)
 
 
 class Urls:  # noqa:H601
@@ -43,8 +47,8 @@ class Urls:  # noqa:H601
         Yields:
             Generator[str, None, None]: _description_
         """
-        current_yearmonth = Utils.get_current_datemonth_gmt_minus5()
-        current_year = int(Utils.get_year_from_datemonth(current_yearmonth))
+        current_yearmonth = get_current_datemonth_gmt_minus5()
+        current_year = int(get_year_from_datemonth(current_yearmonth))
 
         if start_yearmonth is None and end_yearmonth is None:  # type: ignore
             # pylint: disable-next=line-too-long
@@ -61,12 +65,12 @@ class Urls:  # noqa:H601
                 ):
                     yield f"{form_url}{date_url}"
             else:
-                start_year = int(Utils.get_year_from_datemonth(start_yearmonth))
+                start_year = int(get_year_from_datemonth(start_yearmonth))
                 start_month = int(  # noqa:BLK100
-                    Utils.get_month_from_datemonth(start_yearmonth)
+                    get_month_from_datemonth(start_yearmonth)
                 )
-                end_year = int(Utils.get_year_from_datemonth(end_yearmonth))
-                end_month = int(Utils.get_month_from_datemonth(end_yearmonth))
+                end_year = int(get_year_from_datemonth(end_yearmonth))
+                end_month = int(get_month_from_datemonth(end_yearmonth))
 
                 # pylint: disable=not-an-iterable
                 for year in range(start_year, end_year + 1):
@@ -308,12 +312,12 @@ class Urls:  # noqa:H601
                 - M1: {year}
                 - Tick:{year}/{month}
         """
-        current_yearmonth = Utils.get_current_datemonth_gmt_minus5()
-        current_year = int(Utils.get_year_from_datemonth(current_yearmonth))
-        current_month = int(Utils.get_month_from_datemonth(current_yearmonth))
+        current_yearmonth = get_current_datemonth_gmt_minus5()
+        current_year = int(get_year_from_datemonth(current_yearmonth))
+        current_month = int(get_month_from_datemonth(current_yearmonth))
 
-        start_year = int(Utils.get_year_from_datemonth(start_yearmonth))
-        start_month = int(Utils.get_month_from_datemonth(start_yearmonth))
+        start_year = int(get_year_from_datemonth(start_yearmonth))
+        start_month = int(get_month_from_datemonth(start_yearmonth))
 
         if start_month == 0:  # sourcery skip:merge-else-if-into-elif
             if start_year == current_year:

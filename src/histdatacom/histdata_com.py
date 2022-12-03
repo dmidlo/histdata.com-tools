@@ -32,7 +32,10 @@ from histdatacom.csvs import Csv
 from histdatacom.influx import Influx
 from histdatacom.scraper.repo import Repo
 from histdatacom.scraper.scraper import Scraper
-from histdatacom.utils import Utils
+from histdatacom.utils import (
+    load_influx_yaml,
+    set_working_data_dir,
+)
 
 if TYPE_CHECKING:
     from datatable import Frame  # noqa:I900
@@ -63,12 +66,12 @@ class _HistDataCom:
         config.ARGS = ArgParser.arg_list_to_set(  # noqa:BLK100
             vars(ArgParser(options)())  # noqa:WPS110
         ).copy()
-        config.ARGS["default_download_dir"] = Utils.set_working_data_dir(
+        config.ARGS["default_download_dir"] = set_working_data_dir(
             config.ARGS["data_directory"]
         )
 
         if config.ARGS["import_to_influxdb"] == 1:
-            influx_yaml = Utils.load_influx_yaml()
+            influx_yaml = load_influx_yaml()
             config.ARGS["INFLUX_ORG"] = influx_yaml["influxdb"]["org"]
             config.ARGS["INFLUX_BUCKET"] = influx_yaml["influxdb"]["bucket"]
             config.ARGS["INFLUX_URL"] = influx_yaml["influxdb"]["url"]

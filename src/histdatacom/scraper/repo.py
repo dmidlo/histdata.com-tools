@@ -23,7 +23,14 @@ from rich.table import Table
 
 from histdatacom import config
 from histdatacom.scraper.scraper import Scraper
-from histdatacom.utils import Utils
+from histdatacom.utils import (
+    force_datemonth_if_only_year,
+    create_full_path,
+    hash_dict,
+    get_now_utc_timestamp,
+    get_year_from_datemonth,
+    get_month_from_datemonth,
+)
 
 if TYPE_CHECKING:
     from histdatacom.records import Record
@@ -85,7 +92,7 @@ class Repo:  # noqa: H601
             record (Record): a single downloadable record
                              of pair, year, and month
         """
-        datemonth: str = Utils.force_datemonth_if_only_year(  # noqa:BLK100
+        datemonth: str = force_datemonth_if_only_year(  # noqa:BLK100
             record.data_datemonth
         )
         pair = record.data_fxpair.lower()
@@ -204,7 +211,7 @@ class Repo:  # noqa: H601
         """Write repository data file with hash. Create directories if needed."""
         self._hash_repo()
 
-        Utils.create_full_path(self.repo_local_path.parent)
+        create_full_path(self.repo_local_path.parent)
 
         with self.repo_local_path.open("w", encoding="UTF-8") as target:
             json.dump(config.REPO_DATA, target)
@@ -215,8 +222,8 @@ class Repo:  # noqa: H601
             config.REPO_DATA.pop("hash", None)
         if "hash_utc" in config.REPO_DATA:
             config.REPO_DATA.pop("hash_utc", None)
-        config.REPO_DATA["hash"] = Utils.hash_dict(config.REPO_DATA)
-        config.REPO_DATA["hash_utc"] = Utils.get_now_utc_timestamp()
+        config.REPO_DATA["hash"] = hash_dict(config.REPO_DATA)
+        config.REPO_DATA["hash_utc"] = get_now_utc_timestamp()
 
     def _sort_repo_dict_by(
         self, repo_dict_copy: dict, filter_pairs: set
@@ -306,11 +313,11 @@ class Repo:  # noqa: H601
             config.ARGS["pairs"],
         ):
             start = config.REPO_DATA[row]["start"]
-            start_year = Utils.get_year_from_datemonth(start)
-            start_month = Utils.get_month_from_datemonth(start)
+            start_year = get_year_from_datemonth(start)
+            start_month = get_month_from_datemonth(start)
             end = config.REPO_DATA[row]["end"]
-            end_year = Utils.get_year_from_datemonth(end)
-            end_month = Utils.get_month_from_datemonth(end)
+            end_year = get_year_from_datemonth(end)
+            end_month = get_month_from_datemonth(end)
             table.add_row(
                 row.lower(),
                 f"{start_year}-{start_month}",

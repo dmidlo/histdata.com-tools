@@ -73,11 +73,13 @@ class Api:  # noqa:H601
         cls._export_datatable_to_jay(file_data, jay_path)
 
         record.jay_line_count = file_data.nrows
-        record.jay_start = cls._extract_single_value_from_frame(
-            file_data, 0, "datetime"
+        record.jay_start = str(
+            cls._extract_single_value_from_frame(file_data, 0, "datetime")
         )
-        record.jay_end = cls._extract_single_value_from_frame(
-            file_data, file_data.nrows - 1, "datetime"
+        record.jay_end = str(
+            cls._extract_single_value_from_frame(
+                file_data, file_data.nrows - 1, "datetime"
+            )
         )
         record.write_memento_file(base_dir=args["default_download_dir"])
 
@@ -434,8 +436,8 @@ class Api:  # noqa:H601
         records_to_merge: list = []
         pairs: list = []
         timeframes: list = []
-        while not config.CURRENT_QUEUE.empty():
-            record = config.CURRENT_QUEUE.get()
+        while not config.CURRENT_QUEUE.empty():  # type: ignore
+            record = config.CURRENT_QUEUE.get()  # type: ignore
 
             if record is None:
                 break
