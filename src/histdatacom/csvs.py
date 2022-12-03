@@ -65,11 +65,11 @@ class Csv:  # noqa:H601
 
                 zip_path.unlink()
                 record.status = "CSV_FILE"
-                record.write_info_file(base_dir=args["default_download_dir"])
+                record.write_memento_file(base_dir=args["default_download_dir"])
             records_next.put(record)
         except OSError as err:
             print("Unexpected error:", sys.exc_info())  # noqa:T201
-            record.delete_info_file()
+            record.delete_momento_file()
             raise SystemExit from err
         finally:
             records_current.task_done()

@@ -136,7 +136,7 @@ class Influx:  # noqa:H601
                     )
 
             record.status = "INFLUX_UPLOAD"
-            record.write_info_file(base_dir=args["default_download_dir"])
+            record.write_memento_file(base_dir=args["default_download_dir"])
 
             if args["delete_after_influx"]:
                 Path(record.data_dir, record.zip_filename).unlink()
@@ -146,7 +146,7 @@ class Influx:  # noqa:H601
             print(  # noqa:T201
                 "Unexpected error from here:", sys.exc_info(), err
             )  # noqa:T201
-            record.delete_info_file()
+            record.delete_momento_file()
             raise
         finally:
             records_current.task_done()

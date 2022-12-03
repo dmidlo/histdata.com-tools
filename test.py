@@ -153,15 +153,15 @@ class Testhistdatacom():
         del tester
 
         tester = Testhistdatacom()
-        print(tester.test_py_api_download_data())
+        tester.test_py_api_download_data()
         del tester
 
         tester = Testhistdatacom()
-        print(tester.test_py_api_extract_data())
+        tester.test_py_api_extract_data()
         del tester
 
         tester = Testhistdatacom()
-        print(tester.test_py_api_import_to_influx())
+        tester.test_py_api_import_to_influx()
         del tester
 
         tester = Testhistdatacom()

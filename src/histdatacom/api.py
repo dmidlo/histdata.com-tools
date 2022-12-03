@@ -79,7 +79,7 @@ class Api:  # noqa:H601
         record.jay_end = cls._extract_single_value_from_frame(
             file_data, file_data.nrows - 1, "datetime"
         )
-        record.write_info_file(base_dir=args["default_download_dir"])
+        record.write_memento_file(base_dir=args["default_download_dir"])
 
     @classmethod
     def test_for_jay_or_create(cls, record: Record, args: dict) -> None:
@@ -136,7 +136,7 @@ class Api:  # noqa:H601
             records_next.put(record)
         except Exception:
             print("Unexpected error:", sys.exc_info())  # noqa:T201
-            record.delete_info_file()
+            record.delete_momento_file()
             raise
         finally:
             records_current.task_done()

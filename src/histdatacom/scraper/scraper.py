@@ -132,7 +132,7 @@ class Scraper:  # noqa:H601
                 record = self._init_record(url)
 
                 if record.status != "URL_NO_REPO_DATA":
-                    record.write_info_file(  # noqa:BLK100
+                    record.write_memento_file(  # noqa:BLK100
                         base_dir=config.ARGS["default_download_dir"]
                     )
                     if (  # noqa:BLK100
@@ -217,7 +217,7 @@ class Scraper:  # noqa:H601
                     self.set_repo_datum(record)
 
                 record.status = "URL_VALID"
-                record.write_info_file(base_dir=args["default_download_dir"])
+                record.write_memento_file(base_dir=args["default_download_dir"])
 
             config.NEXT_QUEUE.put(record)
         except ValueError:
@@ -227,14 +227,14 @@ class Scraper:  # noqa:H601
                 )
 
             record.status = "URL_NO_REPO_DATA"
-            record.write_info_file(base_dir=args["default_download_dir"])
+            record.write_memento_file(base_dir=args["default_download_dir"])
         except Exception as err:
             print(  # noqa:T201
                 f"Unknown Error for URL: {record.url}",
                 err,
                 traceback.format_exc(),
             )
-            record.delete_info_file()
+            record.delete_momento_file()
             raise SystemExit from err
         finally:
             config.CURRENT_QUEUE.task_done()
@@ -289,7 +289,7 @@ class Scraper:  # noqa:H601
                 record.status = (
                     "CSV_ZIP" if record.status == "URL_VALID" else record.status
                 )
-                record.write_info_file(base_dir=args["default_download_dir"])
+                record.write_memento_file(base_dir=args["default_download_dir"])
 
             config.NEXT_QUEUE.put(record)
         except KeyError:
@@ -297,10 +297,10 @@ class Scraper:  # noqa:H601
                 f"Invalid Zip on histdata.com: {record.url}",
                 sys.exc_info(),
             )
-            record.delete_info_file()
+            record.delete_momento_file()
         except Exception:
             print("Unexpected error:", sys.exc_info())  # noqa:T201
-            record.delete_info_file()
+            record.delete_momento_file()
             raise
         finally:
             config.CURRENT_QUEUE.task_done()
