@@ -5,6 +5,7 @@ venv/
 !whitelist.txt
 *.zip
 .info
+.meta
 .queue
 *.profile
 .DS_Store

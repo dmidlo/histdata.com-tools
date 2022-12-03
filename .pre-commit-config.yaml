@@ -14,12 +14,13 @@ repos:
           - bandit
           - flake8-bandit
           - black
+          - pycodestyle
+          - mccabe
+          - pyflakes
           - flake8-black
           - flake8-comprehensions
           - flake8-class-attributes-order
-          - mccabe
           - flake8-bugbear
-          - pyflakes
           - wemake-python-styleguide
           - flake8-simplify
           - flake8-pie
@@ -27,7 +28,6 @@ repos:
           - flake8-use-fstring
           - flake8-print
           - flake8-no-implicit-concat
-          - pycodestyle
           - flake8-pytest-style
           - Flake8-AAA
           - flake8-spellcheck
@@ -39,9 +39,9 @@ repos:
           - flake8-cognitive-complexity
           - flake8-annotations-complexity
           - flake8-type-checking
-          - cohesion
-          - Darglint
-          - radon
+          # - radon
+          # - Darglint
+          # - cohesion
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.4.0  # Use the ref you want to point at
     hooks:
@@ -69,7 +69,6 @@ repos:
           - pytest
           - pandas-stubs
           - types-beautifulsoup4
-          - influxdb-pytest-plugin
   - repo: https://github.com/terrencepreilly/darglint
     rev: v1.8.1
     hooks:
@@ -102,3 +101,10 @@ repos:
           [
             "--rcfile=pylintrc", # Link to your config file
           ]
+      - id: histdatacom
+        name: histdatacom
+        entry: histdatacom
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: ["-A"]

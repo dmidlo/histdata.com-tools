@@ -1,5 +1,7 @@
+"""Configure Enums used by histdatacom."""
 # pylint: disable=invalid-name
 from enum import Enum
+
 from influxdb_client import WritePrecision
 
 # Majors 7
@@ -25,7 +27,18 @@ from influxdb_client import WritePrecision
 # nsxusd ukxgbp etxeur
 
 
-class Pairs(Enum):
+class Pairs(Enum):  # noqa:H601
+    """Enumerate list of public pairs published on histdata.com.
+
+    Args:
+        Enum (Enum): Parent Class
+
+    Returns:
+        (set): set of keys or values with:
+                Pairs.list_keys()
+                Pairs.list_values()
+    """
+
     eurusd = "EUR_USD"
     eurchf = "EUR_CHF"
     eurgbp = "EUR_GBP"
@@ -95,14 +108,35 @@ class Pairs(Enum):
 
     @classmethod
     def list_keys(cls) -> set:
+        """Return a set containing the keys of the Pairs enum.
+
+        Returns:
+            Pairs (set): set of str(keys)
+        """
         return set(cls.__members__.keys())
 
     @classmethod
     def list_values(cls) -> set:
+        """Return a set containing the values of the Pairs enum.
+
+        Returns:
+            Pairs (set): set of str(values)
+        """
         return {member.value for _, member in cls.__members__.items()}
 
 
-class Format(Enum):
+class Format(Enum):  # noqa:H601
+    """Enumerate list of public formats published on histdata.com.
+
+    Args:
+        Enum (Enum): Parent Class
+
+    Returns:
+        (set): set of keys or values with:
+                Format.list_keys()
+                Format.list_values()
+    """
+
     MT = "metatrader"
     NT = "ninjatrader"
     MS = "metastock"
@@ -111,49 +145,114 @@ class Format(Enum):
 
     @classmethod
     def list_keys(cls) -> set:
+        """Return a set containing the keys of the Format enum.
+
+        Returns:
+            Pairs (set): set of str(keys)
+        """
         return set(cls.__members__.keys())
 
     @classmethod
     def list_values(cls) -> set:
+        """Return a set containing the values of the Format enum.
+
+        Returns:
+            Format (set): set of str(values)
+        """
         return {member.value for _, member in cls.__members__.items()}
 
 
-class Timeframe(Enum):
+class Timeframe(Enum):  # noqa:H601
+    """Enumerate list of public Timeframes published on histdata.com.
+
+    Args:
+        Enum (Enum): Parent Class
+
+    Returns:
+        (set): set of keys or values with:
+                Timeframe.list_keys()
+                Timeframe.list_values()
+    """
+
     M1 = "1-minute-bar-quotes"
-    T = "tick-data-quotes"
+    T = "tick-data-quotes"  # noqa:WPS121
     T_LAST = "tick-last-quotes"
     T_BID = "tick-bid-quotes"
     T_ASK = "tick-ask-quotes"
 
     @classmethod
     def list_keys(cls) -> set:
+        """Return a set containing the keys of the Timeframe enum.
+
+        Returns:
+            Pairs (set): set of str(keys)
+        """
         return set(cls.__members__.keys())
 
     @classmethod
     def list_values(cls) -> set:
+        """Return a set containing the values of the Timeframe enum.
+
+        Returns:
+            Format (set): set of str(values)
+        """
         return {member.value for _, member in cls.__members__.items()}
 
 
-class TimeFormat(Enum):
+class TimeFormat(Enum):  # noqa:H601
+    """Enumerate list of public Timeformats for strptime histdata.com.
+
+        from histdata.com csv sources.
+
+    Args:
+        Enum (Enum): Parent Class
+
+    Returns:
+        (set): set of keys or values with:
+                TimeFormat.list_keys()
+                TimeFormat.list_values()
+    """
+
     MT_M1 = "%Y.%m.%d %H:%M"
     ASCII_M1 = "%Y%m%d %H%M%S"
     ASCII_T = "%Y%m%d %H%M%S%f"
-    NT_M1 = "%Y%m%d %H%M%S"
-    NT_T_LAST = "%Y%m%d %H%M%S"
-    NT_T_BID = "%Y%m%d %H%M%S"
-    NT_T_ASK = "%Y%m%d %H%M%S"
+    NT_M1 = "%Y%m%d %H%M%S"  # noqa:PIE796
+    NT_T_LAST = "%Y%m%d %H%M%S"  # noqa:PIE796
+    NT_T_BID = "%Y%m%d %H%M%S"  # noqa:PIE796
+    NT_T_ASK = "%Y%m%d %H%M%S"  # noqa:PIE796
     MS_M1 = "%Y%m%d%H%M"
 
     @classmethod
     def list_keys(cls) -> set:
+        """Return a set containing the keys of the TimeFormat enum.
+
+        Returns:
+            Pairs (set): set of str(keys)
+        """
         return set(cls.__members__.keys())
 
     @classmethod
     def list_values(cls) -> set:
+        """Return a set containing the values of the TimeFormat enum.
+
+        Returns:
+            Format (set): set of str(values)
+        """
         return {member.value for _, member in cls.__members__.items()}
 
 
-class TimePrecision(Enum):
+class TimePrecision(Enum):  # noqa:H601
+    """Enumerate list of public TimePrecisions for influxdb writer.
+
+    Args:
+        Enum (Enum): Parent Class
+
+    Returns:
+        (set): set of keys or values with:
+                TimePrecision.list_keys()
+                TimePrecision.list_values()
+    """
+
     MT_M1 = WritePrecision.S
     ASCII_M1 = WritePrecision.S
     ASCII_T = WritePrecision.MS
@@ -165,17 +264,35 @@ class TimePrecision(Enum):
 
     @classmethod
     def list_keys(cls) -> set:
+        """Return a set containing the keys of the TimePrecision enum.
+
+        Returns:
+            Pairs (set): set of str(keys)
+        """
         return set(cls.__members__.keys())
 
     @classmethod
     def list_values(cls) -> set:
+        """Return a set containing the values of the TimePrecision enum.
+
+        Returns:
+            Format (set): set of str(values)
+        """
         return {member.value for _, member in cls.__members__.items()}
 
 
-def get_valid_format_timeframes(csv_format: str) -> list:
+def get_valid_format_timeframes(file_format: str) -> list:
+    """Return a list of format and timeframe combinations.
+
+    Args:
+        file_format (str): _description_
+
+    Returns:
+        list: _description_
+    """
     timeframes = []
 
-    match csv_format:
+    match file_format:
         case "metatrader":
             timeframes.extend(["M1"])
         case "ninjatrader":

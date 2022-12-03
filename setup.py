@@ -110,7 +110,6 @@ setup(
             "types-setuptools",
             "pandas-stubs",
             "types-beautifulsoup4",
-            "influxdb-pytest-plugin",
             "wemake-python-styleguide",
             "flake8-simplify",
             "flake8-pie",

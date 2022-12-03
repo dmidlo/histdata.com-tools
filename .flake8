@@ -10,8 +10,8 @@ extend-ignore =
     IF100,
     NIC002,
     WPS326,
-    W503
+    W503,
+    I001,
+    I005
 radon-max-cc = 10
-
-ignore =
     

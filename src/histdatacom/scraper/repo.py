@@ -6,11 +6,13 @@ Raises:
 Returns:
     dict: _description_
 """
+
 import contextlib
 import json
 import ssl
 from pathlib import Path
 from ssl import SSLCertVerificationError
+from typing import TYPE_CHECKING
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -21,7 +23,17 @@ from rich.table import Table
 
 from histdatacom import config
 from histdatacom.scraper.scraper import Scraper
-from histdatacom.utils import Utils
+from histdatacom.utils import (
+    force_datemonth_if_only_year,
+    create_full_path,
+    hash_dict,
+    get_now_utc_timestamp,
+    get_year_from_datemonth,
+    get_month_from_datemonth,
+)
+
+if TYPE_CHECKING:
+    from histdatacom.records import Record
 
 
 class Repo:  # noqa: H601
@@ -39,9 +51,59 @@ class Repo:  # noqa: H601
             "https://raw.githubusercontent.com/dmidlo/"
             "histdata.com-tools/main/data/.repo"
         )
-        self.repo_local_path = Path(
+        self.repo_local_path = Path(  # noqa:BLK100
             config.ARGS["default_download_dir"], ".repo"
         )
+
+    @staticmethod
+    def check_if_queue_is_needed() -> bool:
+        # pylint: disable=line-too-long
+        """Conditions to populate queue for renewing repo data.
+
+        Returns:
+            bool: conditonal filter
+        """
+        return bool(
+            (  # noqa:BLK100
+                not config.REPO_DATA_FILE_EXISTS
+                and config.ARGS["available_remote_data"]
+            )
+            or config.ARGS["update_remote_data"]
+            or config.FILTER_PAIRS
+        )
+
+    @staticmethod
+    def check_for_repo_action() -> bool:
+        """Check to see if -A or -U has been used.
+
+        Returns:
+            bool: general truth case for repo actions
+        """
+        return bool(
+            config.ARGS["available_remote_data"]  # noqa:BLK100
+            or config.ARGS["update_remote_data"]
+        )
+
+    @staticmethod
+    def set_repo_datum(record: "Record") -> None:
+        """Create and sort individual date ranges for repo.
+
+        Args:
+            record (Record): a single downloadable record
+                             of pair, year, and month
+        """
+        datemonth: str = force_datemonth_if_only_year(  # noqa:BLK100
+            record.data_datemonth
+        )
+        pair = record.data_fxpair.lower()
+
+        if pair not in config.REPO_DATA:
+            config.REPO_DATA[pair] = {"start": datemonth, "end": datemonth}
+        else:
+            if int(datemonth) < int(config.REPO_DATA[pair]["start"]):
+                config.REPO_DATA[pair]["start"] = datemonth
+            if int(datemonth) > int(config.REPO_DATA[pair]["end"]):
+                config.REPO_DATA[pair]["end"] = datemonth
 
     def test_for_repo_data_file(self) -> bool:
         """Test for repo data file and update global boolean.
@@ -98,10 +160,9 @@ class Repo:  # noqa: H601
             )
         except URLError:
             # pylint: disable=anomalous-backslash-in-string
-            # flake8: noqa: T201,W605
-            print(
+            print(  # noqa:T201
                 """[red]Unable to fetch repo list from github.
-                    - You can manually update using `-U \[pair(s)]`"""
+                - You can manually update using `-U \[pair(s)]`"""  # noqa:W605
             )
 
     def get_available_repo_data(self) -> dict | None:
@@ -118,11 +179,12 @@ class Repo:  # noqa: H601
         filter_pairs = config.ARGS["pairs"] - set(config.REPO_DATA)
         config.FILTER_PAIRS = None if len(filter_pairs) == 0 else filter_pairs
 
-        if self._check_if_queue_is_needed():
-            Scraper.populate_initial_queue()
+        if self.check_if_queue_is_needed():
+            scraper = Scraper()
+            scraper.populate_initial_queue()
 
         if self._check_for_create_or_update():
-            Scraper.validate_urls()
+            scraper.validate_urls()
             self._write_repo_data_file()
 
         if config.ARGS["from_api"]:
@@ -132,22 +194,6 @@ class Repo:  # noqa: H601
 
         self._print_repo_data_table()
         raise SystemExit(0)
-
-    def _check_if_queue_is_needed(self) -> bool:
-        # pylint: disable=line-too-long
-        """Conditions to populate queue for renewing repo data.
-
-        Returns:
-            bool: conditonal filter
-        """
-        return bool(
-            (
-                not config.REPO_DATA_FILE_EXISTS
-                and config.ARGS["available_remote_data"]
-            )
-            or config.ARGS["update_remote_data"]
-            or config.FILTER_PAIRS
-        )
 
     def _check_for_create_or_update(self) -> bool:
         """Conditions for creating or updating repo data.
@@ -165,7 +211,7 @@ class Repo:  # noqa: H601
         """Write repository data file with hash. Create directories if needed."""
         self._hash_repo()
 
-        Utils.create_full_path(self.repo_local_path.parent)
+        create_full_path(self.repo_local_path.parent)
 
         with self.repo_local_path.open("w", encoding="UTF-8") as target:
             json.dump(config.REPO_DATA, target)
@@ -176,8 +222,8 @@ class Repo:  # noqa: H601
             config.REPO_DATA.pop("hash", None)
         if "hash_utc" in config.REPO_DATA:
             config.REPO_DATA.pop("hash_utc", None)
-        config.REPO_DATA["hash"] = Utils.hash_dict(config.REPO_DATA)
-        config.REPO_DATA["hash_utc"] = Utils.get_now_utc_timestamp()
+        config.REPO_DATA["hash"] = hash_dict(config.REPO_DATA)
+        config.REPO_DATA["hash_utc"] = get_now_utc_timestamp()
 
     def _sort_repo_dict_by(
         self, repo_dict_copy: dict, filter_pairs: set
@@ -208,7 +254,7 @@ class Repo:  # noqa: H601
             case "pair_asc":
                 filtered_pairs = dict(sorted(filtered_pairs.items()))
             case "pair_dsc":
-                filtered_pairs = dict(
+                filtered_pairs = dict(  # noqa:BLK100
                     sorted(filtered_pairs.items(), reverse=True)
                 )
             case "start_asc":
@@ -267,11 +313,11 @@ class Repo:  # noqa: H601
             config.ARGS["pairs"],
         ):
             start = config.REPO_DATA[row]["start"]
-            start_year = Utils.get_year_from_datemonth(start)
-            start_month = Utils.get_month_from_datemonth(start)
+            start_year = get_year_from_datemonth(start)
+            start_month = get_month_from_datemonth(start)
             end = config.REPO_DATA[row]["end"]
-            end_year = Utils.get_year_from_datemonth(end)
-            end_month = Utils.get_month_from_datemonth(end)
+            end_year = get_year_from_datemonth(end)
+            end_month = get_month_from_datemonth(end)
             table.add_row(
                 row.lower(),
                 f"{start_year}-{start_month}",
