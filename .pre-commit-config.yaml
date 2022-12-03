@@ -108,3 +108,9 @@ repos:
         types: [python]
         pass_filenames: false
         args: ["-A"]
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: master
+    hooks:
+      - id: commitizen
+      - id: commitizen-branch
+        stages: [push]
