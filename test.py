@@ -177,5 +177,17 @@ class Testhistdatacom():
         Testhistdatacom.test_py_api()
         Testhistdatacom.test_cli()
 
+    @staticmethod
+    def pycallgraph():
+        from pycallgraph2 import PyCallGraph
+        from pycallgraph2.output import GraphvizOutput
+
+        graphviz = GraphvizOutput()
+        graphviz.output_type = "dot"
+        graphviz.output_file = "histdatacom.dot"
+
+        with PyCallGraph(output=graphviz):
+            Testhistdatacom.test_py_api()
+
 if __name__ == "__main__":
     Testhistdatacom.main()
