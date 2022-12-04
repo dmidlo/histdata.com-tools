@@ -8,7 +8,7 @@ $ pip install gprof2dot
 
 $ python -m cProfile -o output.pstats src/histdatacom/histdata_com.py -X -p eurusd -f ascii -t tick-data-quotes -s 2021-01 -e now
 
-$ gprof2dot -f pstats output.pstats | dot -Tpng -o output.png
+$ gprof2dot -f pstats output.pstats | dot -Tpng -o gprof2dot.png
 ```
 
 ## Visualization using SnakeViz
@@ -79,7 +79,7 @@ if __name__=="__main__":
 ```
 
 ```sh
-$ dot -Tsvg histdatacom.dot > histdatacom.svg
+$ dot -Tsvg histdatacom.dot > pycallgraph2.svg
 ```
 
 ## pyreverse
