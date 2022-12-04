@@ -157,3 +157,4 @@ ArgumentParser
 Q004
 astimezone
 usedforsecurity
+S101
