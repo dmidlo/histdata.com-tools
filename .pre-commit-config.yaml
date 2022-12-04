@@ -1,4 +1,4 @@
-files: src/
+files: (src/|tests/)
 default_stages: [commit-msg, commit, push]
 repos:
 - hooks:
@@ -99,23 +99,32 @@ repos:
   repo: https://github.com/sourcery-ai/sourcery
   rev: v1.0.1
 - hooks:
-  - args:
-    - --rcfile=pylintrc
+  - id: pylint
     entry: pylint
-    id: pylint
-    language: system
     name: pylint
+    language: system
     types:
-    - python
-  - args:
-    - -A
+      - python
+    args:
+      - --rcfile=pylintrc
+  - id: histdatacom
     entry: histdatacom
-    id: histdatacom
     language: system
     name: histdatacom
     pass_filenames: false
     types:
-    - python
+      - python
+    args:
+      - -A
+  - id: pytest
+    name: pytest
+    entry: pytest
+    language: system
+    pass_filenames: false
+    always_run: True
+    types:
+      - python
+  
   repo: local
 - repo: https://github.com/commitizen-tools/commitizen
   rev: v2.37.1
