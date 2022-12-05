@@ -103,6 +103,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         argparse.ArgumentParser.__init__(self, prog="histdatacom")
         # bring in the defaults arg DTO from outer class, use the
         # __dict__ representation of it to set argparse argument defaults.
+
         self.arg_namespace = options
         self._default_args = self.arg_namespace.__dict__
         self.set_defaults(**self._default_args)
@@ -146,9 +147,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         Returns:
             list: args
         """
+        self.arg_namespace.timeframes = Timeframe.convert_to_values(
+            self.arg_namespace.timeframes
+        )
+
         args = [
-            "--data-directory",
-            self.arg_namespace.data_directory,
+            *["--data-directory", self.arg_namespace.data_directory],
             *["-p", *self.arg_namespace.pairs],
             *["-f", *self.arg_namespace.formats],
             *["-t", *self.arg_namespace.timeframes],
@@ -785,13 +789,18 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             type=str,
             help='Directory Used to save data. default is "./data/"',
         )
+        self.add_argument(
+            "--version",
+            action="store_true",
+            help="return current version of histdatacom.",
+        )
 
     def _sanitize_input(self) -> None:
         """Clean user-input before run."""
         # prevent running from cli with no arguments
         if len(sys.argv) == 1 and not self.arg_namespace.from_api:
-            self.print_help(sys.stderr)
-            sys.exit(1)
+            self.print_help(sys.stdout)
+            sys.exit(0)
 
         self._adjust_for_repo_data_request()
 

@@ -198,6 +198,25 @@ class Timeframe(Enum):  # noqa:H601
         """
         return {member.value for _, member in cls.__members__.items()}
 
+    @classmethod
+    def convert_to_values(cls, timeframe_set: set) -> set:
+        """Convert a mixed set of timeframe keys and values to values only.
+
+        Args:
+            timeframe_set (set): mixed set of keys and values.
+
+        Returns:
+            set: timeframe values.
+        """
+        timeframes = timeframe_set
+        if intersect := timeframe_set & Timeframe.list_keys():
+            timeframes = timeframe_set | {
+                Timeframe[timeframe].value
+                for timeframe in intersect
+                if timeframe in Timeframe.list_keys()
+            }
+        return timeframes & Timeframe.list_values()
+
 
 class TimeFormat(Enum):  # noqa:H601
     """Enumerate list of public Timeformats for strptime histdata.com.

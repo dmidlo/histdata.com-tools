@@ -99,6 +99,8 @@ setup(
             "flake8",
             "black",
             "flake8-black",
+            "coverage",
+            "pytest-cov",
             "pylint",
             "bandit",
             "flake8-bandit",

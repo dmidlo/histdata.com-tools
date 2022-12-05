@@ -12,6 +12,7 @@ extend-ignore =
     WPS326,
     W503,
     I001,
-    I005
+    I005,
+    S101
 radon-max-cc = 10
     
