@@ -30,7 +30,7 @@ class Options:
         self.end_yearmonth: str | None = ""
         self.data_directory: str = "data"
         self.from_api: bool = False
-        self.api_return_type: str = "datatable"
+        self.api_return_type: str | None = None
         self.cpu_utilization: str = "medium"
         self.batch_size: str = "5000"
         self.delete_after_influx: bool = False

@@ -20,9 +20,7 @@ class Testhistdatacom():
         self.options.pairs: set = set(random.sample(list(Pairs.list_keys()), 1))
         self.options.formats: set = {"ascii"}
         self.options.timeframes: set = {"tick-data-quotes"}
-        self.options.data_directory: str = "data" 
-        self.options.from_api: bool = False #
-        self.options.api_return_type: str = "datatable"
+        self.options.data_directory: str = "data"
         self.options.cpu_utilization: str = "high"
         self.options.batch_size: str = "5000"
         self.options.delete_after_influx: bool = False
@@ -69,7 +67,7 @@ class Testhistdatacom():
 
     def test_py_api_api_return(self):
         print("Testing histdatacom api from api.")
-        self.options.api_return_type = "datatable"
+        self.options.api_return_type = "arrow"
         self.options.start_yearmonth = "2011-05"
         self.options.end_yearmonth = "2012-01"
         self.result = histdatacom(self.options)
@@ -144,25 +142,25 @@ class Testhistdatacom():
 
     @staticmethod
     def test_py_api():
-        tester = Testhistdatacom()
-        print(tester.test_py_api_available_remote_data())
-        del tester
+        # tester = Testhistdatacom()
+        # print(tester.test_py_api_available_remote_data())
+        # del tester
 
-        tester = Testhistdatacom()
-        print(tester.test_py_api_update_and_validate_remote_data())
-        del tester
+        # tester = Testhistdatacom()
+        # print(tester.test_py_api_update_and_validate_remote_data())
+        # del tester
 
-        tester = Testhistdatacom()
-        tester.test_py_api_download_data()
-        del tester
+        # tester = Testhistdatacom()
+        # tester.test_py_api_download_data()
+        # del tester
 
-        tester = Testhistdatacom()
-        tester.test_py_api_extract_data()
-        del tester
+        # tester = Testhistdatacom()
+        # tester.test_py_api_extract_data()
+        # del tester
 
-        tester = Testhistdatacom()
-        tester.test_py_api_import_to_influx()
-        del tester
+        # tester = Testhistdatacom()
+        # tester.test_py_api_import_to_influx()
+        # del tester
 
         tester = Testhistdatacom()
         print(tester.test_py_api_api_return())
@@ -175,7 +173,7 @@ class Testhistdatacom():
     @staticmethod
     def main():
         Testhistdatacom.test_py_api()
-        Testhistdatacom.test_cli()
+        # Testhistdatacom.test_cli()
 
     @staticmethod
     def pycallgraph():

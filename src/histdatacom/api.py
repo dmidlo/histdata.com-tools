@@ -24,6 +24,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from histdatacom import config
 from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
 from histdatacom.scraper.scraper import Scraper
+from histdatacom.utils import check_installed_module
 
 if TYPE_CHECKING:
     from datatable import FExpr  # noqa:I900
@@ -419,8 +420,10 @@ class Api:  # noqa:H601
                 case "datatable":
                     tp_set_dict["data"] = merged
                 case "arrow":
+                    check_installed_module("arrow", True)
                     tp_set_dict["data"] = merged.to_arrow()
                 case "pandas":
+                    check_installed_module("pandas", True)
                     tp_set_dict["data"] = merged.to_pandas()
 
     def _dequeue_records_for_merge(self) -> Tuple[list, list, list]:

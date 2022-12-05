@@ -50,6 +50,8 @@ histdatacom_test()
     histdatacom -h
     echo "${bold}testing histdatacom -D test pip environment${normal}"
     histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
+    echo "${bold}testing histdatacom --version test pip environment${normal}"
+    histdatacom --version
 }
 
 if [[ $1 == "dev" ]]

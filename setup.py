@@ -85,12 +85,19 @@ setup(
         "rx",
         "argparse",
         "pytz",
-        "ipywidgets",
-        "pyarrow",
-        "pandas",
         "certifi",
     ],
     extras_require={
+        "arrow": [
+            "pyarrow",
+        ],
+        "pandas": [
+            "pandas",
+        ],
+        "jupyter": [
+            "jupyter",
+            "ipywidgets",
+        ],
         "dev": [
             "pytest",
             "mypy",

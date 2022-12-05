@@ -26,16 +26,15 @@ from typing import TYPE_CHECKING
 
 import histdatacom
 from histdatacom import Options, config
-from histdatacom.api import Api
 from histdatacom.cli import ArgParser
 from histdatacom.concurrency import QueueManager
 from histdatacom.csvs import Csv
-from histdatacom.influx import Influx
 from histdatacom.scraper.repo import Repo
 from histdatacom.scraper.scraper import Scraper
 from histdatacom.utils import (
     load_influx_yaml,
     set_working_data_dir,
+    check_installed_module,
 )
 
 if TYPE_CHECKING:
@@ -44,10 +43,11 @@ if TYPE_CHECKING:
     from pyarrow import Table
 
 
-class _HistDataCom:
+class _HistDataCom:  # noqa:R701
     """Pull market data from histdata.com and import it into influxDB."""
 
-    def __init__(self, options: Options) -> None:
+    def __init__(self, options: Options) -> None:  # noqa:CCR001
+        # pylint: disable=import-outside-toplevel
         """Initialize _HistDataCom Class.
 
         Args:
@@ -71,7 +71,7 @@ class _HistDataCom:
             config.ARGS["data_directory"]
         )
 
-        if config.ARGS["import_to_influxdb"] == 1:
+        if config.ARGS["import_to_influxdb"]:
             influx_yaml = load_influx_yaml()
             config.ARGS["INFLUX_ORG"] = influx_yaml["influxdb"]["org"]
             config.ARGS["INFLUX_BUCKET"] = influx_yaml["influxdb"]["bucket"]
@@ -81,7 +81,19 @@ class _HistDataCom:
         self.repo = Repo()
         self.scraper = Scraper()
         self.csvs = Csv()
-        self.api = Api()
+
+        if config.ARGS["from_api"] and config.ARGS["api_return_type"]:
+            from histdatacom.api import Api
+
+            check_installed_module(config.ARGS["api_return_type"])
+            self.api = Api()
+
+        if config.ARGS["import_to_influxdb"]:
+            config.ARGS["api_return_type"] = "datatable"
+            check_installed_module(config.ARGS["api_return_type"])
+            from histdatacom.influx import Influx
+
+            self.influx = Influx()
 
         if (  # noqa:BLK100
             config.ARGS["available_remote_data"]  # noqa:BLK100
@@ -91,10 +103,7 @@ class _HistDataCom:
                 self.repo.read_repo_data_file()
             self.repo.update_repo_from_github()
 
-        if config.ARGS["import_to_influxdb"] == 1:
-            self.influx = Influx()
-
-    def run(  # noqa:CCR001,CFQ004
+    def run(  # noqa:CCR001,CFQ004,CCR001,R701
         self,
     ) -> list | dict | Frame | DataFrame | Table | None:  # noqa:CCR001
         """Execute. histdatacom's execution order.
@@ -137,10 +146,9 @@ class _HistDataCom:
         if config.ARGS["download_data_archives"]:
             self.scraper.download_zips()
             del self.scraper  # noqa:WPS100
-            if config.ARGS["from_api"]:
+            if config.ARGS["from_api"] and config.ARGS["api_return_type"]:
                 self.api.validate_jays()
                 return self.api.merge_jays()
-        del self.api  # noqa:WPS100
 
         if config.ARGS["extract_csvs"]:
             self.csvs.extract_csvs()
