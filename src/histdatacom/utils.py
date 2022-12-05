@@ -8,9 +8,12 @@ from pathlib import Path
 import re
 from datetime import datetime
 from typing import Any, Optional
+import sys
+import importlib
 
 import pytz
 import yaml
+from rich import print  # pylint: disable=redefined-builtin
 
 
 def get_month_from_datemonth(
@@ -173,3 +176,55 @@ def get_now_utc_timestamp() -> float:
         float: UTC timestamp
     """
     return datetime.utcnow().timestamp()  # sourcery skip
+
+
+def check_installed_module(  # noqa:CCR001,BLK100
+    module_name: str, load: bool = False
+) -> bool:
+    """Check to see if module is installed.
+
+    Args:
+        module_name (str): a module name
+        load (bool): load module into sys.modules
+
+    Raises:
+        SystemExit: exit on error
+        SystemExit: exit on error
+
+    Returns:
+        bool: True module is installed and available
+    """
+    if module_name == "arrow":
+        module_name = "pyarrow"
+
+    if module_name in sys.modules:  # noqa:R505
+        return True
+    elif (  # noqa:BLK100
+        spec := importlib.util.find_spec(module_name)  # type: ignore
+    ) is not None:
+        module = importlib.util.module_from_spec(spec)  # type: ignore
+        if load:
+            sys.modules[module] = module
+            spec.loader.exec_module(module)  # type: ignore
+        return True
+    else:
+        if module_name == "datatable":
+            err_text = (
+                "datatable not installed. please visit "
+                "https://github.com/dmidlo/histdata.com-tools"
+                "#datatable-installation-options "
+                "for installation instructions."
+            )
+            raise SystemExit(err_text)
+
+        if module_name == "pyarrow":
+            module_name = "arrow"
+
+        err_text = (
+            f"{module_name} format not installed. "
+            "please run:\n\n  "
+            f"pip install histdatacom[{module_name}]"
+            "\n\n to install."
+        )
+
+        raise SystemExit(err_text)

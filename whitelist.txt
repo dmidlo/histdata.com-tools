@@ -158,3 +158,6 @@ Q004
 astimezone
 usedforsecurity
 S101
+R505
+util
+R701

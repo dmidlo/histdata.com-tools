@@ -1,6 +1,6 @@
 commitizen:
   name: cz_conventional_commits
   tag_format: $version
-  version: 0.78.0
+  version: 0.78.1
   version_files:
   - src/histdatacom/__init__.py

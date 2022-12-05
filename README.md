@@ -69,8 +69,9 @@ histdatacom -h
 
 ```txt
 histdatacom -h
-usage: histdatacom [-h] [-V] [-A] [-U] [--by BY] [-D] [-X] [-I] [-c CPU_UTILIZATION] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]]
-                   [-s START_YEARMONTH] [-e END_YEARMONTH] [-b BATCH_SIZE] [-d] [--data-directory DATA_DIRECTORY]
+usage: histdatacom [-h] [-V] [-A] [-U] [--by BY] [-D] [-X] [-I] [-c CPU_UTILIZATION] [-p PAIR [PAIR ...]]
+                   [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH]
+                   [-b BATCH_SIZE] [-d] [--data-directory DATA_DIRECTORY] [--version]
 
 options:
   -h, --help            show this help message and exit
@@ -79,20 +80,20 @@ options:
                         list data retrievable from histdata.com
   -U, --update_remote_data
                         update list of data retrievable from histdata.com
-  --by BY               for use with -A and -U, to sort output --by [pair_asc, pair_dsc, start_asc, start_dsc]
+  --by BY               With -A, -U, to sort --by [pair_asc, pair_dsc, start_asc, start_dsc]
   -D, --download_data_archives
                         download specified pairs/formats/timeframe and create data files
-  -X, --extract_csvs    histdata.com delivers zip files. use the -X flag to extract them to .csv.
+  -X, --extract_csvs    histdata.com delivers zip files. Use the -X flag to extract them.
   -I, --import_to_influxdb
-                        import csv data to influxdb instance. Use influxdb.yaml to configure.
+                        import data to influxdb instance. Use influxdb.yaml to configure.
   -c CPU_UTILIZATION, --cpu_utilization CPU_UTILIZATION
-                        "low", "medium", "high". High uses all available CPUs. OR integer percent 1-200
+                        "low", "medium", "high". High uses all available CPUs OR integer percent 1-200
   -p PAIR [PAIR ...], --pairs PAIR [PAIR ...]
                         space separated currency pairs. e.g. -p eurusd usdjpy ...
   -f FORMAT [FORMAT ...], --formats FORMAT [FORMAT ...]
-                        space separated formats. e.g. -f metatrader ascii ninjatrader metastock
+                        space separated formats. -f metatrader ascii ninjatrader metastock
   -t TIMEFRAME [TIMEFRAME ...], --timeframes TIMEFRAME [TIMEFRAME ...]
-                        space separated Timeframes. e.g. -t tick-data-quotes 1-minute-bar-quotes ...
+                        space separated Timeframes. -t tick-data-quotes 1-minute-bar-quotes
   -s START_YEARMONTH, --start_yearmonth START_YEARMONTH
                         set a start year and month for data. e.g. -s 2000-04 or -s 2015-00
   -e END_YEARMONTH, --end_yearmonth END_YEARMONTH
@@ -102,7 +103,8 @@ options:
   -d, --delete_after_influx
                         delete data files after upload to influxdb
   --data-directory DATA_DIRECTORY
-                        Directory Used to save data. default is "data" in the current directory
+                        Directory Used to save data. default is "./data/"
+  --version             return current version of histdatacom.
 ```
 
 ---
