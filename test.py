@@ -67,7 +67,7 @@ class Testhistdatacom():
 
     def test_py_api_api_return(self):
         print("Testing histdatacom api from api.")
-        self.options.api_return_type = "arrow"
+        self.options.api_return_type = "datatable"
         self.options.start_yearmonth = "2011-05"
         self.options.end_yearmonth = "2012-01"
         self.result = histdatacom(self.options)
@@ -142,25 +142,25 @@ class Testhistdatacom():
 
     @staticmethod
     def test_py_api():
-        # tester = Testhistdatacom()
-        # print(tester.test_py_api_available_remote_data())
-        # del tester
+        tester = Testhistdatacom()
+        print(tester.test_py_api_available_remote_data())
+        del tester
 
-        # tester = Testhistdatacom()
-        # print(tester.test_py_api_update_and_validate_remote_data())
-        # del tester
+        tester = Testhistdatacom()
+        print(tester.test_py_api_update_and_validate_remote_data())
+        del tester
 
-        # tester = Testhistdatacom()
-        # tester.test_py_api_download_data()
-        # del tester
+        tester = Testhistdatacom()
+        tester.test_py_api_download_data()
+        del tester
 
-        # tester = Testhistdatacom()
-        # tester.test_py_api_extract_data()
-        # del tester
+        tester = Testhistdatacom()
+        tester.test_py_api_extract_data()
+        del tester
 
-        # tester = Testhistdatacom()
-        # tester.test_py_api_import_to_influx()
-        # del tester
+        tester = Testhistdatacom()
+        tester.test_py_api_import_to_influx()
+        del tester
 
         tester = Testhistdatacom()
         print(tester.test_py_api_api_return())

@@ -5,7 +5,7 @@ A Multi-threaded/Multi-Process command-line utility and python package that down
 
 **NEW:** Expanded API support!!!
 
-[![Downloads](https://pepy.tech/badge/histdatacom)](https://pepy.tech/project/histdatacom) [![Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Downloads](https://pepy.tech/badge/histdatacom)](https://pepy.tech/project/histdatacom) ![PyPI - License](https://img.shields.io/pypi/l/histdatacom) ![PyPI - License](https://img.shields.io/pypi/l/histdatacom) ![PyPI](https://img.shields.io/pypi/v/histdatacom) ![PyPI - Status](https://img.shields.io/pypi/status/histdatacom)
 
 ---
 
