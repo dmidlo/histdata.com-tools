@@ -20,6 +20,7 @@ output.pstats
 result.json
 out.gv
 htmlcov/
+.coverage
 
 !data/
 data/*
