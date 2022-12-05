@@ -69,25 +69,19 @@ histdatacom -h
 
 ```txt
 histdatacom -h
-usage: histdatacom [-h] [-V] [-A] [-U] [--by BY] [-D] [-X] [-I] [-c CPU_UTILIZATION] [-p PAIR [PAIR ...]]
-                   [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH]
-                   [-b BATCH_SIZE] [-d] [--data-directory DATA_DIRECTORY] [--version]
+usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION]
+                   [--data-directory DATA_DIRECTORY]
 
 options:
   -h, --help            show this help message and exit
+
+Mode:
   -V, --validate_urls   Check generated list of URLs as valid download locations
-  -A, --available_remote_data
-                        list data retrievable from histdata.com
-  -U, --update_remote_data
-                        update list of data retrievable from histdata.com
-  --by BY               With -A, -U, to sort --by [pair_asc, pair_dsc, start_asc, start_dsc]
   -D, --download_data_archives
                         download specified pairs/formats/timeframe and create data files
   -X, --extract_csvs    histdata.com delivers zip files. Use the -X flag to extract them.
-  -I, --import_to_influxdb
-                        import data to influxdb instance. Use influxdb.yaml to configure.
-  -c CPU_UTILIZATION, --cpu_utilization CPU_UTILIZATION
-                        "low", "medium", "high". High uses all available CPUs OR integer percent 1-200
+
+Config:
   -p PAIR [PAIR ...], --pairs PAIR [PAIR ...]
                         space separated currency pairs. e.g. -p eurusd usdjpy ...
   -f FORMAT [FORMAT ...], --formats FORMAT [FORMAT ...]
@@ -98,12 +92,27 @@ options:
                         set a start year and month for data. e.g. -s 2000-04 or -s 2015-00
   -e END_YEARMONTH, --end_yearmonth END_YEARMONTH
                         set a start year and month for data. e.g. -e 2020-00 or -e 2022-04
-  -b BATCH_SIZE, --batch_size BATCH_SIZE
-                        (integer) influxdb write_api batch size. defaults to 5000
+
+Influxdb:
+  -I, --import_to_influxdb
+                        import data to influxdb instance. Use influxdb.yaml to configure.
   -d, --delete_after_influx
                         delete data files after upload to influxdb
+  -b BATCH_SIZE, --batch_size BATCH_SIZE
+                        (integer) influxdb write_api batch size. defaults to 5000
+
+System:
+  -c CPU_UTILIZATION, --cpu_utilization CPU_UTILIZATION
+                        "low", "medium", "high". High uses all available CPUs OR integer percent 1-200
   --data-directory DATA_DIRECTORY
                         Directory Used to save data. default is "./data/"
+
+Info:
+  -A, --available_remote_data
+                        list data retrievable from histdata.com
+  -U, --update_remote_data
+                        update list of data retrievable from histdata.com
+  --by BY               With -A, -U, to sort --by [pair_asc, pair_dsc, start_asc, start_dsc]
   --version             return current version of histdatacom.
 ```
 

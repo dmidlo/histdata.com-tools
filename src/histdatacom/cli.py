@@ -657,25 +657,25 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
     def _set_args(self) -> None:  # noqa:CFQ001
         # pylint: disable=unnecessary-lambda
         """Config CLI arguments and default values."""
-        self.add_argument(
-            "-V",
-            "--validate_urls",
-            action="store_true",
-            help="Check generated list of URLs as valid download locations",
-        )
-        self.add_argument(
+        mode_args = self.add_argument_group("Mode")
+        config_args = self.add_argument_group("Config")
+        influx_args = self.add_argument_group("Influxdb")
+        system_args = self.add_argument_group("System")
+        info_args = self.add_argument_group("Info")
+
+        info_args.add_argument(
             "-A",
             "--available_remote_data",
             action="store_true",
             help="list data retrievable from histdata.com",
         )
-        self.add_argument(
+        info_args.add_argument(
             "-U",
             "--update_remote_data",
             action="store_true",
             help="update list of data retrievable from histdata.com",
         )
-        self.add_argument(
+        info_args.add_argument(
             "--by",
             type=str,
             help=(
@@ -683,7 +683,18 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 " [pair_asc, pair_dsc, start_asc, start_dsc]"
             ),
         )
-        self.add_argument(
+        info_args.add_argument(
+            "--version",
+            action="store_true",
+            help="return current version of histdatacom.",
+        )
+        mode_args.add_argument(
+            "-V",
+            "--validate_urls",
+            action="store_true",
+            help="Check generated list of URLs as valid download locations",
+        )
+        mode_args.add_argument(
             "-D",
             "--download_data_archives",
             action="store_true",
@@ -692,7 +703,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 " create data files"
             ),
         )
-        self.add_argument(
+        mode_args.add_argument(
             "-X",
             "--extract_csvs",
             action="store_true",
@@ -701,25 +712,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 " Use the -X flag to extract them."
             ),
         )
-        self.add_argument(
-            "-I",
-            "--import_to_influxdb",
-            action="store_true",
-            help=(
-                "import data to influxdb instance."  # noqa:BLK100
-                " Use influxdb.yaml to configure."
-            ),
-        )
-        self.add_argument(
-            "-c",
-            "--cpu_utilization",
-            type=str,
-            help=(
-                '"low", "medium", "high". High uses all'
-                " available CPUs OR integer percent 1-200"
-            ),  # noqa: E501
-        )
-        self.add_argument(
+        config_args.add_argument(
             "-p",
             "--pairs",
             nargs="+",
@@ -728,7 +721,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help="space separated currency pairs. e.g. -p eurusd usdjpy ...",
             metavar="PAIR",
         )
-        self.add_argument(
+        config_args.add_argument(
             "-f",
             "--formats",
             nargs="+",
@@ -740,7 +733,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             ),
             metavar="FORMAT",
         )
-        self.add_argument(
+        config_args.add_argument(
             "-t",
             "--timeframes",
             nargs="+",
@@ -754,7 +747,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             ),
             metavar="TIMEFRAME",
         )
-        self.add_argument(
+        config_args.add_argument(
             "-s",
             "--start_yearmonth",
             type=(lambda v: self._validate_yearmonth_format(v)),
@@ -763,7 +756,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 " e.g. -s 2000-04 or -s 2015-00"
             ),
         )
-        self.add_argument(
+        config_args.add_argument(
             "-e",
             "--end_yearmonth",
             type=(lambda v: self._validate_yearmonth_format(v)),
@@ -772,27 +765,40 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 " e.g. -e 2020-00 or -e 2022-04"
             ),
         )
-        self.add_argument(
-            "-b",
-            "--batch_size",
-            type=int,
-            help="(integer) influxdb write_api batch size. defaults to 5000",
+        influx_args.add_argument(
+            "-I",
+            "--import_to_influxdb",
+            action="store_true",
+            help=(
+                "import data to influxdb instance."  # noqa:BLK100
+                " Use influxdb.yaml to configure."
+            ),
         )
-        self.add_argument(
+        influx_args.add_argument(
             "-d",
             "--delete_after_influx",
             action="store_true",
             help="delete data files after upload to influxdb",
         )
-        self.add_argument(
+        influx_args.add_argument(
+            "-b",
+            "--batch_size",
+            type=int,
+            help="(integer) influxdb write_api batch size. defaults to 5000",
+        )
+        system_args.add_argument(
+            "-c",
+            "--cpu_utilization",
+            type=str,
+            help=(
+                '"low", "medium", "high". High uses all'
+                " available CPUs OR integer percent 1-200"
+            ),  # noqa: E501
+        )
+        system_args.add_argument(
             "--data-directory",
             type=str,
             help='Directory Used to save data. default is "./data/"',
-        )
-        self.add_argument(
-            "--version",
-            action="store_true",
-            help="return current version of histdatacom.",
         )
 
     def _sanitize_input(self) -> None:
