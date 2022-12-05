@@ -1,3 +1,9 @@
+## 0.78.2 (2022-12-05)
+
+### Fix
+
+- **cli.py**: sort arguments into logical groups
+
 ## 0.78.1 (2022-12-05)
 
 ### Fix
