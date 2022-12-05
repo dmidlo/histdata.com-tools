@@ -72,15 +72,15 @@ setup(
     # package structure
     packages=find_packages("src"),
     package_dir={"": "src"},
-    # install the RSReader executable
+    # install the histdatacom executable
     entry_points={
         "console_scripts": ["histdatacom = histdatacom.histdata_com:main"],
-    },  # pylint: disable=line-too-long
+    },
     install_requires=[
         "influxdb_client",
         "rich",
         "requests",
-        "bs4",
+        "beautifulsoup4",
         "pyyaml",
         "rx",
         "argparse",
@@ -99,6 +99,10 @@ setup(
             "ipywidgets",
         ],
         "dev": [
+            "pyarrow",
+            "pandas",
+            "jupyter",
+            "ipywidgets",
             "pytest",
             "mypy",
             "keyring",
