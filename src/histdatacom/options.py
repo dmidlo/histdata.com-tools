@@ -15,6 +15,7 @@ class Options:
     # these values will be respectively overwritten
     def __init__(self) -> None:
         """Initialize attributes with default values."""
+        self.version: bool = False
         self.available_remote_data: bool = False
         self.update_remote_data: bool = False
         self.by: str = "pair_asc"  # pylint: disable=invalid-name

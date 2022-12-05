@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import histdatacom
 from histdatacom import Options, config
 from histdatacom.api import Api
 from histdatacom.cli import ArgParser
@@ -93,7 +94,7 @@ class _HistDataCom:
         if config.ARGS["import_to_influxdb"] == 1:
             self.influx = Influx()
 
-    def run(  # noqa:CCR001
+    def run(  # noqa:CCR001,CFQ004
         self,
     ) -> list | dict | Frame | DataFrame | Table | None:  # noqa:CCR001
         """Execute. histdatacom's execution order.
@@ -116,6 +117,11 @@ class _HistDataCom:
 
 
         """
+        if config.ARGS["version"]:
+            if not config.ARGS["from_api"]:
+                print(histdatacom.__version__)  # noqa:T201
+            return histdatacom.__version__
+
         if (  # noqa:BLK100
             config.ARGS["available_remote_data"]  # noqa:BLK100
             or config.ARGS["update_remote_data"]
