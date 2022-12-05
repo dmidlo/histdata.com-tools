@@ -1,3 +1,9 @@
+## 0.78.3 (2022-12-05)
+
+### Fix
+
+- **package**: removed bs4 proxy dependency
+
 ## 0.78.2 (2022-12-05)
 
 ### Fix
