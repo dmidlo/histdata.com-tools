@@ -112,16 +112,38 @@ repos:
     language: system
     name: histdatacom
     pass_filenames: false
+    always_run: True
+    verbose: True
     types:
       - python
     args:
       - -A
-  - id: pytest
-    name: pytest
-    entry: pytest
+  - id: coverage-run
+    name: coverage-run
+    entry: coverage
     language: system
+    args: ["run"]
     pass_filenames: false
     always_run: True
+    types:
+      - python
+  - id: coverage-combine
+    name: coverage-combine
+    entry: coverage
+    language: system
+    args: ["combine"]
+    pass_filenames: false
+    always_run: True
+    types:
+      - python
+  - id: coverage-report
+    name: coverage-report
+    entry: coverage
+    language: system
+    args: ["report"]
+    pass_filenames: false
+    always_run: True
+    verbose: True
     types:
       - python
   

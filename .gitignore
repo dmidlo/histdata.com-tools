@@ -11,10 +11,6 @@ venv/
 .DS_Store
 __pycache__
 .pytest_cache/
-!data/
-data/*
-!data/.repo
-!data/.jsonrepo
 build/
 dist/
 *.egg-info
@@ -23,3 +19,8 @@ prospector_results.json
 output.pstats
 result.json
 out.gv
+htmlcov/
+
+!data/
+data/*
+!data/.repo
