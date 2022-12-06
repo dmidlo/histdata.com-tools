@@ -11,9 +11,10 @@ from histdatacom.fx_enums import Pairs
 from histdatacom.fx_enums import Format
 from histdatacom.fx_enums import Timeframe
 
-class Testhistdatacom():
+
+class Testhistdatacom:
     def __init__(self):
-        self.number_of_pairs = random.randint(1,4)
+        self.number_of_pairs = random.randint(1, 4)
 
         self.options = Options()
         self.options.by: str = "start_asc"  # pylint: disable=invalid-name
@@ -26,7 +27,6 @@ class Testhistdatacom():
         self.options.delete_after_influx: bool = False
         self.options.zip_persist: bool = False
         self.result = None
-
 
     def test_py_api_available_remote_data(self):
         print("Testing histdatacom -A from api.")
@@ -86,49 +86,154 @@ class Testhistdatacom():
 
     def test_cli_available_remote_data(self):
         print("Testing histdatacom -A from cli.")
-        sh.histdatacom(A=True, by="start_asc", _fg=True)    
+        sh.histdatacom(A=True, by="start_asc", _fg=True)
 
     def test_cli_update_and_validate_remote_data(self):
         print("Testing histdatacom -U and -V from cli.")
-        sh.histdatacom(U=True,
-                       p=" ".join(self.options.pairs),
-                       f=" ".join(self.options.formats),
-                       t=" ".join(self.options.timeframes),
-                       _fg=True)
+        sh.histdatacom(
+            U=True,
+            p=" ".join(set(random.sample(list(Pairs.list_keys()), 1))),
+            f=" ".join(self.options.formats),
+            t=" ".join(self.options.timeframes),
+            _fg=True,
+        )
 
     def test_cli_download_data(self):
         print("Testing histdatacom -D from cli.")
-        sh.histdatacom(D=True,
-                       p=" ".join(self.options.pairs),
-                       f=" ".join(self.options.formats),
-                       t=" ".join(self.options.timeframes),
-                       s="2011-06",
-                       e="2011-12",
-                       c=self.options.cpu_utilization,
-                       _fg=True)
+        sh.histdatacom(
+            D=True,
+            p=" ".join(set(random.sample(list(Pairs.list_keys()), 1))),
+            f=" ".join(self.options.formats),
+            t=" ".join(self.options.timeframes),
+            s="2011-06",
+            e="2011-12",
+            c=self.options.cpu_utilization,
+            _fg=True,
+        )
 
     def test_cli_extract_data(self):
         print("Testing histdatacom -X from cli.")
-        sh.histdatacom(X=True,
-                       p=" ".join(self.options.pairs),
-                       f=" ".join(self.options.formats),
-                       t=" ".join(self.options.timeframes),
-                       s="2011-06",
-                       e="2011-07",
-                       c=self.options.cpu_utilization,
-                       _fg=True)
+        sh.histdatacom(
+            X=True,
+            p=" ".join(set(random.sample(list(Pairs.list_keys()), 1))),
+            f=" ".join(self.options.formats),
+            t=" ".join(self.options.timeframes),
+            s="2011-06",
+            e="2011-07",
+            c=self.options.cpu_utilization,
+            _fg=True,
+        )
 
     def test_cli_import_to_influx(self):
         print("Testing histdatacom -I from cli.")
-        sh.histdatacom(I=True,
-                       p=" ".join(self.options.pairs),
-                       f=" ".join(self.options.formats),
-                       t=" ".join(self.options.timeframes),
-                       s="2011-05",
-                       e="2011-06",
-                       c=self.options.cpu_utilization,
-                       _fg=True)
-    
+        sh.histdatacom(
+            I=True,
+            p=" ".join(set(random.sample(list(Pairs.list_keys()), 1))),
+            f=" ".join(self.options.formats),
+            t=" ".join(self.options.timeframes),
+            s="2011-05",
+            e="2011-06",
+            c=self.options.cpu_utilization,
+            _fg=True,
+        )
+
+    ##############################################################################
+
+    def test_module_available_remote_data(self):
+        print("Testing histdatacom -A as module.")
+        sh.python("-m", "histdatacom", "-A", "--by", "start_asc", _fg=True)
+
+    def test_module_update_and_validate_remote_data(self):
+        print("Testing histdatacom -U and -V as module")
+        sh.python(
+            "-m",
+            "histdatacom",
+            "-U",
+            "-p",
+            " ".join(set(random.sample(list(Pairs.list_keys()), 1))),
+            "-f",
+            " ".join(self.options.formats),
+            "-t",
+            " ".join(self.options.timeframes),
+            _fg=True,
+        )
+
+    def test_module_download_data(self):
+        print("Testing histdatacom -D as module.")
+        sh.python(
+            "-m",
+            "histdatacom",
+            "-D",
+            "-p",
+            " ".join(set(random.sample(list(Pairs.list_keys()), 1))),
+            "-f",
+            " ".join(self.options.formats),
+            "-t",
+            " ".join(self.options.timeframes),
+            "-s",
+            "2011-06",
+            "-e",
+            "2011-12",
+            "-c",
+            self.options.cpu_utilization,
+            _fg=True,
+        )
+
+    def test_module_extract_data(self):
+        print("Testing histdatacom -X as module.")
+        sh.python(
+            "-m",
+            "histdatacom",
+            "-X",
+            "-p",
+            " ".join(set(random.sample(list(Pairs.list_keys()), 1))),
+            "-f",
+            " ".join(self.options.formats),
+            "-t",
+            " ".join(self.options.timeframes),
+            "-s",
+            "2011-06",
+            "-e",
+            "2011-07",
+            "-c",
+            self.options.cpu_utilization,
+            _fg=True,
+
+        )
+
+    def test_module_import_to_influx(self):
+        print("Testing histdatacom -I as module.")
+        sh.python(
+            "-m",
+            "histdatacom",
+            "-I",
+            "-p",
+            " ".join(set(random.sample(list(Pairs.list_keys()), 1))),
+            "-f",
+            " ".join(self.options.formats),
+            "-t",
+            " ".join(self.options.timeframes),
+            "-s",
+            "2011-05",
+            "-e",
+            "2011-06",
+            "-c",
+            self.options.cpu_utilization,
+            _fg=True,
+        )
+
+    ##############################################################################
+
+    @staticmethod
+    def test_module():
+        tester = Testhistdatacom()
+        tester.test_module_available_remote_data()
+        tester.test_module_update_and_validate_remote_data()
+        tester.test_module_download_data()
+        tester.test_module_extract_data()
+        tester.test_module_import_to_influx()
+        tester.delete_data_directory()
+
     @staticmethod
     def test_cli():
         tester = Testhistdatacom()
@@ -172,8 +277,9 @@ class Testhistdatacom():
 
     @staticmethod
     def main():
-        Testhistdatacom.test_py_api()
+        # Testhistdatacom.test_py_api()
         # Testhistdatacom.test_cli()
+        Testhistdatacom.test_module()
 
     @staticmethod
     def pycallgraph():
@@ -186,6 +292,7 @@ class Testhistdatacom():
 
         with PyCallGraph(output=graphviz):
             Testhistdatacom.test_py_api()
+
 
 if __name__ == "__main__":
     Testhistdatacom.main()

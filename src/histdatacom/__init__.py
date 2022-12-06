@@ -17,7 +17,7 @@ from . import histdata_com  # noqa:WPS130
 
 if TYPE_CHECKING:
     from datatable import Frame  # noqa:I900
-    from pandas import DataFrame
+    from pandas import DataFrame  # type: ignore
     from pyarrow import Table
 
 __all__ = [

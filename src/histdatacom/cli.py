@@ -801,12 +801,16 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help='Directory Used to save data. default is "./data/"',
         )
 
-    def _sanitize_input(self) -> None:
-        """Clean user-input before run."""
+    def _sanitize_input(self) -> None:  # noqa:DAR401
+        """Clean user-input before run.
+
+        Raises:
+            SystemExit: Exit on no input args.
+        """
         # prevent running from cli with no arguments
         if len(sys.argv) == 1 and not self.arg_namespace.from_api:
             self.print_help(sys.stdout)
-            sys.exit(0)
+            raise SystemExit(0)
 
         self._adjust_for_repo_data_request()
 
