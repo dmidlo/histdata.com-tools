@@ -137,8 +137,6 @@ class Testhistdatacom:
             _fg=True,
         )
 
-    ##############################################################################
-
     def test_module_available_remote_data(self):
         print("Testing histdatacom -A as module.")
         sh.python("-m", "histdatacom", "-A", "--by", "start_asc", _fg=True)
@@ -222,8 +220,6 @@ class Testhistdatacom:
             _fg=True,
         )
 
-    ##############################################################################
-
     @staticmethod
     def test_module():
         tester = Testhistdatacom()
@@ -277,22 +273,9 @@ class Testhistdatacom:
 
     @staticmethod
     def main():
-        # Testhistdatacom.test_py_api()
+        Testhistdatacom.test_py_api()
         # Testhistdatacom.test_cli()
-        Testhistdatacom.test_module()
-
-    @staticmethod
-    def pycallgraph():
-        from pycallgraph2 import PyCallGraph
-        from pycallgraph2.output import GraphvizOutput
-
-        graphviz = GraphvizOutput()
-        graphviz.output_type = "dot"
-        graphviz.output_file = "histdatacom.dot"
-
-        with PyCallGraph(output=graphviz):
-            Testhistdatacom.test_py_api()
-
+        # Testhistdatacom.test_module()
 
 if __name__ == "__main__":
     Testhistdatacom.main()
