@@ -53,13 +53,10 @@ repos:
   - id: check-symlinks
   - id: check-toml
   - id: check-yaml
-  - args:
-    - --pytest-test-first
-    id: name-tests-test
-  - args:
-    - --branch
-    - main
-    id: no-commit-to-branch
+  - id: no-commit-to-branch
+    args:
+      - --branch
+      - main
   repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v4.4.0
 - hooks:
@@ -146,7 +143,13 @@ repos:
     verbose: True
     types:
       - python
-  
+  - id: coverage-rm
+    name: coverage-rm
+    entry: rm
+    language: system
+    args: ["-f", ".coverage"]
+    pass_filenames: false
+    always_run: True
   repo: local
 - repo: https://github.com/commitizen-tools/commitizen
   rev: v2.37.1

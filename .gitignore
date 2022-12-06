@@ -21,6 +21,7 @@ result.json
 out.gv
 htmlcov/
 .coverage
+.coverage.*
 
 !data/
 data/*
