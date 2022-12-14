@@ -1,3 +1,9 @@
+## 0.78.4 (2022-12-13)
+
+### Fix
+
+- **histdatacom**: address keyboard inturrupt for all but import to influx stages
+
 ## 0.78.3 (2022-12-05)
 
 ### Fix
