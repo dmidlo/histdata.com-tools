@@ -60,8 +60,8 @@ class Testhistdatacom:
     def test_py_api_import_to_influx(self):
         print("Testing histdatacom -I from api.")
         self.options.import_to_influxdb = True
-        self.options.start_yearmonth = "2011-05"
-        self.options.end_yearmonth = "2011-06"
+        self.options.start_yearmonth = "2021-01"
+        self.options.end_yearmonth = "2021-12"
         self.result = histdatacom(self.options)
         return self.result
 
@@ -243,29 +243,29 @@ class Testhistdatacom:
 
     @staticmethod
     def test_py_api():
-        tester = Testhistdatacom()
-        print(tester.test_py_api_available_remote_data())
-        del tester
+        # tester = Testhistdatacom()
+        # print(tester.test_py_api_available_remote_data())
+        # del tester
 
-        tester = Testhistdatacom()
-        print(tester.test_py_api_update_and_validate_remote_data())
-        del tester
+        # tester = Testhistdatacom()
+        # print(tester.test_py_api_update_and_validate_remote_data())
+        # del tester
 
-        tester = Testhistdatacom()
-        tester.test_py_api_download_data()
-        del tester
+        # tester = Testhistdatacom()
+        # tester.test_py_api_download_data()
+        # del tester
 
-        tester = Testhistdatacom()
-        tester.test_py_api_extract_data()
-        del tester
+        # tester = Testhistdatacom()
+        # tester.test_py_api_extract_data()
+        # del tester
 
         tester = Testhistdatacom()
         tester.test_py_api_import_to_influx()
         del tester
 
-        tester = Testhistdatacom()
-        print(tester.test_py_api_api_return())
-        del tester
+        # tester = Testhistdatacom()
+        # print(tester.test_py_api_api_return())
+        # del tester
 
         tester = Testhistdatacom()
         tester.delete_data_directory()

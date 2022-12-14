@@ -34,11 +34,8 @@ class Influx:  # noqa:H601
 
         processes pool with a progress bar.
         """
-        for _ in range(  # noqa:BLK100
-            1, get_pool_cpu_count(config.ARGS["cpu_utilization"]) + 1
-        ):
-            writer = InfluxDBWriter(config.ARGS, config.INFLUX_CHUNKS_QUEUE)
-            writer.start()
+        writer = InfluxDBWriter(config.ARGS, config.INFLUX_CHUNKS_QUEUE)
+        writer.start()
 
         pool = ProcessPool(
             self._import_file,
@@ -299,26 +296,30 @@ class InfluxDBWriter(Process):
 
     def run(self) -> None:
         """Process chunks from config.INFLUX_CHUNKS_QUEUE."""
-        while True:
-            try:
-                chunk = self.influx_chunks_queue.get()  # type: ignore
-            except EOFError:
-                break
+        try:
+            while True:
+                try:
+                    chunk = self.influx_chunks_queue.get()  # type: ignore
+                except EOFError:
+                    break
 
-            if chunk is None:
-                self._terminate()
+                if chunk is None:
+                    self.terminate()
+                    self.influx_chunks_queue.task_done()  # type: ignore
+                    break
+
+                self.write_api.write(
+                    org=self.args["INFLUX_ORG"],
+                    bucket=self.args["INFLUX_BUCKET"],
+                    record=chunk,
+                    write_precision=WritePrecision.MS,
+                )
                 self.influx_chunks_queue.task_done()  # type: ignore
-                break
+        except KeyboardInterrupt:
+            self.terminate()
 
-            self.write_api.write(
-                org=self.args["INFLUX_ORG"],
-                bucket=self.args["INFLUX_BUCKET"],
-                record=chunk,
-                write_precision=WritePrecision.MS,
-            )
-            self.influx_chunks_queue.task_done()  # type: ignore
-
-    def _terminate(self) -> None:
+    def terminate(self) -> None:
         """Terminate the influxdb subprocess."""
-        del self.write_api  # noqa:WPS100
-        del self.client  # noqa:WPS100
+        self.write_api.close()
+        self.client.close()
+        self.close()
