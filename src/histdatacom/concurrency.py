@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from pyarrow import Table
 
     from histdatacom.histdata_com import _HistDataCom
+    from histdatacom.influx import InfluxDBWriter
     from histdatacom.options import Options
 
 
@@ -90,25 +91,30 @@ class ThreadPool:
         ) as progress:
             task_id = progress.add_task("Validating URLs", total=records_count)
 
-            with ThreadPoolExecutor(
-                max_workers=self.cpu_count,
-                initializer=_init_counters,
-                initargs=(records_current, records_next, self.args.copy()),
-            ) as executor:
-                futures = []
+            try:
+                with ThreadPoolExecutor(
+                    max_workers=self.cpu_count,
+                    initializer=_init_counters,
+                    initargs=(records_current, records_next, self.args.copy()),
+                ) as executor:
+                    futures = []
 
-                while not records_current.empty():  # type: ignore
-                    record = records_current.get()  # type: ignore
+                    while not records_current.empty():  # type: ignore
+                        record = records_current.get()  # type: ignore
 
-                    if record is None:
-                        return
+                        if record is None:
+                            return
 
-                    future = executor.submit(self.exec_func, record, self.args)
-                    progress.advance(task_id, 0.25)
-                    futures.append(future)
+                        future = executor.submit(  # noqa:BLK100
+                            self.exec_func, record, self.args
+                        )
+                        progress.advance(task_id, 0.25)
+                        futures.append(future)
 
-                for future in as_completed(futures):
-                    _complete_future(progress, task_id, futures, future)
+                    for future in as_completed(futures):
+                        _complete_future(progress, task_id, futures, future)
+            except KeyboardInterrupt as exc_info:
+                _on_keyboard_interrupt(executor, progress, exc_info)
 
         records_current.join()  # type: ignore
         records_next.dump_to_queue(records_current)  # type: ignore
@@ -151,6 +157,7 @@ class ProcessPool:
         records_current: Optional[Records],
         records_next: Optional[Records],
         influx_chunks_queue: Optional[Queue] = None,
+        writer: InfluxDBWriter | None = None,
     ) -> None:
         """Execute Process pool with rich.Progress bar.
 
@@ -159,6 +166,7 @@ class ProcessPool:
             records_next (Optional[Records]): _description_
             influx_chunks_queue (Optional[Queue], optional):
                                     used for RxPY queue. Defaults to None.
+            writer (InfluxDBWriter | None): influxdb writer process.
         """
         records_count = records_current.qsize()  # type: ignore
         with Progress(
@@ -173,49 +181,55 @@ class ProcessPool:
             "[progress.percentage]{task.percentage:>3.0f}%",
             TimeElapsedColumn(),
         ) as progress:
-            task_id = progress.add_task("Validating URLs", total=records_count)
+            task_id = progress.add_task(  # noqa:BLK100
+                "Validating URLs", total=records_count
+            )
 
-            with ProcessPoolExecutor(
-                max_workers=self.cpu_count,
-                initializer=_init_counters,
-                initargs=(
-                    records_current,
-                    records_next,
-                    self.args.copy(),
-                    influx_chunks_queue,
-                ),
-            ) as executor:
-                futures = []
+            try:
+                with ProcessPoolExecutor(
+                    max_workers=self.cpu_count,
+                    initializer=_init_counters,
+                    initargs=(
+                        records_current,
+                        records_next,
+                        self.args.copy(),
+                        influx_chunks_queue,
+                    ),
+                ) as executor:
+                    futures = []
 
-                while not records_current.empty():  # type: ignore
-                    record = records_current.get()  # type: ignore
+                    while not records_current.empty():  # type: ignore
+                        record = records_current.get()  # type: ignore
 
-                    if record is None:
-                        return
+                        if record is None:
+                            return
 
-                    if influx_chunks_queue is None:
-                        future = executor.submit(
-                            self.exec_func,
-                            record,
-                            self.args,
-                            records_current,
-                            records_next,
-                        )
-                    else:
-                        future = executor.submit(
-                            self.exec_func,
-                            record,
-                            self.args,
-                            records_current,
-                            records_next,
-                            influx_chunks_queue,
-                        )
+                        if influx_chunks_queue is None:
+                            future = executor.submit(
+                                self.exec_func,
+                                record,
+                                self.args,
+                                records_current,
+                                records_next,
+                            )
+                        else:
+                            future = executor.submit(
+                                self.exec_func,
+                                record,
+                                self.args,
+                                records_current,
+                                records_next,
+                                influx_chunks_queue,
+                            )
 
-                    progress.advance(task_id, 0.25)
-                    futures.append(future)
+                        progress.advance(task_id, 0.25)
+                        futures.append(future)
 
-                for future in as_completed(futures):
-                    _complete_future(progress, task_id, futures, future)
+                    for future in as_completed(futures):
+                        _complete_future(progress, task_id, futures, future)
+
+            except KeyboardInterrupt as exc_info:
+                _on_keyboard_interrupt(executor, progress, exc_info, writer)
 
         if self.join:
             records_current.join()  # type: ignore
@@ -351,3 +365,33 @@ def _complete_future(
     progress.advance(task_id, 0.75)
     futures.remove(future)
     del future  # noqa:WPS100
+
+
+def _on_keyboard_interrupt(
+    executor: ThreadPoolExecutor | ProcessPoolExecutor,  # noqa:BLK100
+    progress: Progress,
+    exc_info: KeyboardInterrupt,
+    writer: InfluxDBWriter | None = None,
+) -> None:
+    """Exit Handler for user exit during concurrency.
+
+    Args:
+        executor (ThreadPoolExecutor | ProcessPoolExecutor):
+            current pool executor
+        progress (Progress): active rich.Progress bar to terminate.
+        exc_info (KeyboardInterrupt): Keyboard Interrupt err info
+        writer (InfluxDBWriter | None, optional):
+            InfluxDBWriter. Defaults to None.
+
+    Raises:
+        SystemExit: User Exit.
+    """
+    progress.stop()
+    with Progress(
+        TextColumn(text_format="[cyan]...Exiting. Please wait..."),
+    ) as exit_progress:
+        if writer:
+            writer.terminate()
+        exit_progress.add_task("exiting", total=0)
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise SystemExit from exc_info

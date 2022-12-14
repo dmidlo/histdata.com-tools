@@ -196,8 +196,8 @@ class Scraper:  # noqa:H601
         ):
             config.FILTER_PAIRS = config.ARGS["pairs"]
 
-    def _validate_url(self, record: Record, args: dict) -> None:
-        """Scrape url for the presence of downloadable zips and related metadata.
+    def _validate_url(self, record: Record, args: dict) -> None:  # noqa:CCR001
+        """Scrape url for presence of downloadable zips and related metadata.
 
         executed by the validate_urls thread pool.
 
@@ -206,6 +206,7 @@ class Scraper:  # noqa:H601
             args (dict): a global config.ARGS dict.
 
         Raises:
+            KeyboardInterrupt: User Exit.
             SystemExit: On any undefined error from scraping
         """
         try:
@@ -228,6 +229,9 @@ class Scraper:  # noqa:H601
 
             record.status = "URL_NO_REPO_DATA"
             record.write_memento_file(base_dir=args["default_download_dir"])
+        except KeyboardInterrupt as exc_info:
+            print("keyboard from _validate_url.")  # noqa:T201
+            raise KeyboardInterrupt from exc_info
         except Exception as err:
             print(  # noqa:T201
                 f"Unknown Error for URL: {record.url}",
@@ -266,7 +270,7 @@ class Scraper:  # noqa:H601
         if record.data_tk == "":
             raise ValueError
 
-    def _download_zip(self, record: Record, args: dict) -> None:
+    def _download_zip(self, record: Record, args: dict) -> None:  # noqa:CCR001
         """Download zip from record.url.
 
         Executed by the download_zips thread pool.
@@ -278,13 +282,13 @@ class Scraper:  # noqa:H601
         Raises:
             KeyError: Invalid Zip from remote. # noqa:DAR402
             Exception: Unknown error.
+            KeyboardInterrupt: User Exit.
         """
         try:
             if "URL_VALID" in record.status or (
                 args["from_api"]
                 and not self._check_for_existing_archives_on_disk(record)
             ):
-
                 self.get_zip_file(record)
                 record.status = (
                     "CSV_ZIP" if record.status == "URL_VALID" else record.status
@@ -298,6 +302,9 @@ class Scraper:  # noqa:H601
                 sys.exc_info(),
             )
             record.delete_momento_file()
+        except KeyboardInterrupt as exc_info:
+            print("keyboard from _download_zip.")  # noqa:T201
+            raise KeyboardInterrupt from exc_info
         except Exception:
             print("Unexpected error:", sys.exc_info())  # noqa:T201
             record.delete_momento_file()

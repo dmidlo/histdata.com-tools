@@ -30,7 +30,6 @@ repos:
     - flake8-no-implicit-concat
     - flake8-pytest-style
     - Flake8-AAA
-    - flake8-spellcheck
     - flake8-docstring-checker
     - flake8-docstrings
     - flake8-length
