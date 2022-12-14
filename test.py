@@ -274,8 +274,8 @@ class Testhistdatacom:
     @staticmethod
     def main():
         Testhistdatacom.test_py_api()
-        # Testhistdatacom.test_cli()
-        # Testhistdatacom.test_module()
+        Testhistdatacom.test_cli()
+        Testhistdatacom.test_module()
 
 if __name__ == "__main__":
     Testhistdatacom.main()
