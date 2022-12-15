@@ -151,6 +151,7 @@ setup(
             "flake8-type-checking",
             "isort",
             "sourcery-cli",
+            "flask",
         ],
     },
     classifiers=[
