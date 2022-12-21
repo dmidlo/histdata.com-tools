@@ -9,12 +9,13 @@ if TYPE_CHECKING:
     from histdatacom.records import Records
 
 ARGS: dict = {}
+INFO_FILE_NAME = ".meta"
+
 REPO_DATA: dict = {}
 REPO_DATA_FILE_EXISTS: bool = False
 FILTER_PAIRS: set | None = None
 
 QUEUE_MANAGER: SyncManager | None = None
-
 CURRENT_QUEUE: Records | None = None
 NEXT_QUEUE: Records | None = None
 INFLUX_CHUNKS_QUEUE: None = None

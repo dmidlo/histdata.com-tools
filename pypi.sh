@@ -9,6 +9,7 @@ dev()
     pip install git+https://github.com/h2oai/datatable
     pip install -e .[dev]
     pre-commit install
+    pre-commit install --hook-type commit-msg --hook-type pre-push
     pre-commit autoupdate
     echo "${bold}pypi.sh: Dev Ready.${normal}"
 }

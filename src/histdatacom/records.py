@@ -1,5 +1,6 @@
 """Records queue and Record work object for queue."""
 import contextlib
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Any, Optional
 
 from rich import print  # pylint: disable=redefined-builtin
 
+from histdatacom import config
 from histdatacom.fx_enums import Format, Timeframe
 from histdatacom.utils import (
     create_full_path,
@@ -15,35 +17,30 @@ from histdatacom.utils import (
 )
 
 
+@dataclass
 class Record:  # noqa:H601
     """A work record for the queue."""
 
-    def __init__(self, **kwargs: str) -> None:
-        """Initialize record attributes.
-
-        Args:
-            kwargs (str): record attributes
-        """
-        self.url = kwargs.get("url", "")
-        self.status = kwargs.get("status", "")
-        self.encoding = kwargs.get("encoding", "")
-        self.bytes_length = kwargs.get("bytes_length", "")
-        self.data_date = kwargs.get("data_date", "")
-        self.data_year = kwargs.get("data_year", "")
-        self.data_month = kwargs.get("data_month", "")
-        self.data_datemonth = kwargs.get("data_datemonth", "")
-        self.data_format = kwargs.get("data_format", "")
-        self.data_timeframe = kwargs.get("data_timeframe", "")
-        self.data_fxpair = kwargs.get("data_fxpair", "")
-        self.data_dir = kwargs.get("data_dir", "")
-        self.data_tk = kwargs.get("data_tk", "")
-        self.zip_filename = kwargs.get("zip_filename", "")
-        self.csv_filename = kwargs.get("csv_filename", "")
-        self.jay_filename = kwargs.get("jay_filename", "")
-        self.jay_line_count = kwargs.get("jay_line_count", "")
-        self.jay_start = kwargs.get("jay_start", "")
-        self.jay_end = kwargs.get("jay_end", "")
-        self.zip_persist = kwargs.get("zip_persist", "")
+    url: str = ""
+    status: str = ""
+    encoding: str = ""
+    bytes_length: str = ""
+    data_date: str = ""
+    data_year: str = ""
+    data_month: str = ""
+    data_datemonth: str = ""
+    data_format: str = ""
+    data_timeframe: str = ""
+    data_fxpair: str = ""
+    data_dir: str = ""
+    data_tk: str = ""
+    zip_filename: str = ""
+    csv_filename: str = ""
+    jay_filename: str = ""
+    jay_line_count: str = ""
+    jay_start: str = ""
+    jay_end: str = ""
+    zip_persist: str = ""
 
     def write_memento_file(self, base_dir: str = "") -> None:
         """Write record to disk.
@@ -67,7 +64,7 @@ class Record:  # noqa:H601
             if not Path(self.data_dir).exists():
                 create_full_path(self.data_dir)
 
-            momento_path = Path(self.data_dir, ".meta")
+            momento_path = Path(self.data_dir, config.INFO_FILE_NAME)
 
             with momento_path.open("w", encoding="UTF-8") as target:
                 json.dump(self._to_dict(), target)
@@ -80,12 +77,12 @@ class Record:  # noqa:H601
 
     def delete_momento_file(self) -> None:
         """Delete memento file."""
-        momento_path = Path(self.data_dir, ".meta")
+        momento_path = Path(self.data_dir, config.INFO_FILE_NAME)
         if momento_path.exists():
             momento_path.unlink()
 
     def restore_momento(self, base_dir: str) -> bool:
-        """Restore momento from .meta file.
+        """Restore momento from file.
 
         Args:
             base_dir (str): base data directory
@@ -95,7 +92,7 @@ class Record:  # noqa:H601
         """
         self._set_record_data_dir(base_dir)
 
-        momento_path = Path(self.data_dir, ".meta")
+        momento_path = Path(self.data_dir, config.INFO_FILE_NAME)
         if not momento_path.exists():
             return False
         record_dict: dict = {}
