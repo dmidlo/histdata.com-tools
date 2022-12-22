@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 ARGS: dict = {}
 INFO_FILE_NAME = ".meta"
+JAY_FILE_NAME = ".data"
 
 REPO_DATA: dict = {}
 REPO_DATA_FILE_EXISTS: bool = False

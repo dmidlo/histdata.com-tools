@@ -13,6 +13,29 @@ from histdatacom.utils import (
 )
 
 
+# Testing order todo.
+#
+# Leaf Functions - Test these first
+#   - These functions call nothing else
+#   - single-unit tests.
+#
+# TODO: _yield_year()
+# TODO: _yield_same_year()
+# TODO: _yield_end_year()
+# TODO: _yield_current_year()
+# TODO: _yield_start_year()
+# TODO: __init__()
+
+# Regular Functions
+#   - These functions call other functions
+#   - single-unit and integration/multi-unit tests
+#
+# TODO: _valid_format_timeframe_pair_urls()
+# TODO: _yield_range_of_yearmonths()
+# TODO: _yield_single_year_or_month()
+# TODO: generate_form_urls()
+
+
 class Urls:  # noqa:H601
     """Generate histdata.com archive urls.
 

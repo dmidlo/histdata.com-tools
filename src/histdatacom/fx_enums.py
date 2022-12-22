@@ -27,6 +27,35 @@ from influxdb_client import WritePrecision
 # nsxusd ukxgbp etxeur
 
 
+# Testing order todo.
+#
+# Leaf Functions - Test these first
+#   - These functions call nothing else
+#   - single-unit tests.
+#
+# TODO: Pairs list_values()
+# TODO: Pairs list_keys()
+# TODO: Format list_values()
+# TODO: Format list_keys()
+# TODO: Timeframe list_values()
+# TODO: Timeframe list_keys()
+# TODO: TimeFormat list_values()
+# TODO: TimeFormat list_keys()
+# TODO: TimePrecision list_values()
+# TODO: TimePrecision list_keys()
+# TODO: get_valid_format_timeframes()
+
+# Trunk Functions
+#  - These are called by nothing else
+#        - or -
+#  - These are called by a concurrency pool
+#
+#  Either way, they represent larger integrations of
+#  multi-unit and unit-level functionality.
+#
+# TODO: Timeframe convert_to_values()
+
+
 class Pairs(Enum):  # noqa:H601
     """Enumerate list of public pairs published on histdata.com.
 

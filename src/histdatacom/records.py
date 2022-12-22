@@ -16,6 +16,28 @@ from histdatacom.utils import (
     get_query_string,
 )
 
+# Testing order todo.
+#
+# Leaf Functions - Test these first
+#   - These functions call nothing else
+#   - single-unit tests.
+#
+# TODO: Record __init__()
+# TODO: Record _to_dict()
+# TODO: Record delete_momento_file()
+# TODO: Records __init__()
+# TODO: Records dump_to_queue()
+
+# Regular Functions
+#   - These functions call other functions
+#   - single-unit and integration/multi-unit tests
+#
+# TODO: Record _set_record_data_dir()
+# TODO: Record _create_record_data_dir()
+# TODO: Record restore_momento()
+# TODO: Record write_memento_file()
+# TODO: Record __call__()
+
 
 @dataclass
 class Record:  # noqa:H601

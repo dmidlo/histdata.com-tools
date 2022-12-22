@@ -15,6 +15,39 @@ import pytz
 import yaml
 from rich import print  # pylint: disable=redefined-builtin
 
+# Testing order todo.
+#
+# Leaf Functions - Test these first
+#   - These functions call nothing else
+#   - single-unit tests.
+#
+# TODO: get_month_from_datemonth()
+# TODO: get_year_from_datemonth()
+# TODO: force_datemonth_if_only_year()
+# TODO: get_query_string()
+# TODO: create_full_path()
+# TODO: set_working_data_dir()
+# TODO: load_influx_yaml()
+# TODO: get_current_datemonth_gmt_minus5()
+# TODO: replace_date_punct()
+# TODO: hash_dict()
+# TODO: get_now_utc_timestamp()
+# TODO: check_installed_module()
+
+# Regular Functions
+#   - These functions call other functions
+#   - single-unit and integration/multi-unit tests
+#
+
+# Trunk Functions
+#  - These are called by nothing else
+#        - or -
+#  - These are called by a concurrency pool
+#
+#  Either way, they represent larger integrations of
+#  multi-unit and unit-level functionality.
+#
+
 
 def get_month_from_datemonth(
     datemonth: str | int,

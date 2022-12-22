@@ -43,6 +43,28 @@ if TYPE_CHECKING:
     from pyarrow import Table
 
 
+# Testing order todo.
+#
+
+# Regular Functions
+#   - These functions call other functions
+#   - single-unit and integration/multi-unit tests
+#
+# TODO: main()
+
+# Trunk Functions
+#  - These are called by nothing else
+#        - or -
+#  - These are called by a concurrency pool
+#
+#  Either way, they represent larger integrations of
+#  multi-unit and unit-level functionality.
+#
+# TODO: (global)()
+# TODO: _HistDataCom run()
+# TODO: _HistDataCom __init__()
+
+
 class _HistDataCom:  # noqa:R701
     """Pull market data from histdata.com and import it into influxDB."""
 

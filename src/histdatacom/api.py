@@ -36,6 +36,43 @@ if TYPE_CHECKING:
 dt.options.progress.enabled = False
 
 
+# Testing order todo.
+#
+# Leaf Functions - Test these first
+#   - These functions call nothing else
+#   - single-unit tests.
+#
+# TODO: _adjust_est_timestamp_to_utc()
+# TODO: _strptime_fexpr_for_frame()
+# TODO: _import_frame_with_headers()
+# TODO: _extract_single_value_from_frame()
+# TODO: _export_datatable_to_jay()
+# TODO: import_jay_data()
+# TODO: _collate_sets_to_merge()
+# TODO: _dequeue_records_for_merge()
+
+# Regular Functions
+#   - These functions call other functions
+#   - single-unit and integration/multi-unit tests
+#
+# TODO: _import_file_to_datatable()
+# TODO: _create_jay()
+# TODO: _merge_records()
+# TODO: test_for_jay_or_create()
+# TODO: merge_jays()
+# TODO: validate_jays()
+
+# Trunk Functions
+#  - These are called by nothing else
+#        - or -
+#  - These are called by a concurrency pool
+#
+#  Either way, they represent larger integrations of
+#  multi-unit and unit-level functionality.
+#
+# TODO: _validate_jay()
+
+
 class Api:  # noqa:H601
     """Api functions for histdatacom.
 
@@ -69,7 +106,7 @@ class Api:  # noqa:H601
         elif csv_path.exists():
             file_data = cls._import_file_to_datatable(record, csv_path)
 
-        record.jay_filename = ".data"
+        record.jay_filename = config.JAY_FILE_NAME
         jay_path = record.data_dir + record.jay_filename
         cls._export_datatable_to_jay(file_data, jay_path)
 
@@ -101,7 +138,7 @@ class Api:  # noqa:H601
             "T",
             "M1",
         ]:
-            jay_path = Path(record.data_dir, ".data")
+            jay_path = Path(record.data_dir, config.JAY_FILE_NAME)
             if not jay_path.exists():
                 if "CSV" not in record.status:
                     Scraper.get_zip_file(record)
@@ -446,7 +483,7 @@ class Api:  # noqa:H601
                 break
 
             if (
-                record.jay_filename == ".data"
+                record.jay_filename == config.JAY_FILE_NAME
                 and Path(record.data_dir, record.jay_filename).exists()
             ):
                 pairs.append(record.data_fxpair)

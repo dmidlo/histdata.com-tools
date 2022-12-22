@@ -39,6 +39,32 @@ if TYPE_CHECKING:
     from histdatacom.options import Options
 
 
+# Testing order todo.
+#
+# Leaf Functions - Test these first
+#   - These functions call nothing else
+#   - single-unit tests.
+#
+# TODO: get_pool_cpu_count()
+# TODO: QueueManager __init__()
+# TODO: ProcessPool  __init__()
+# TODO: ThreadPool __init__()
+# TODO: _complete_future()
+# TODO: _on_keyboard_interrupt()
+
+# Trunk Functions
+#  - These are called by nothing else
+#        - or -
+#  - These are called by a concurrency pool
+#
+#  Either way, they represent larger integrations of
+#  multi-unit and unit-level functionality.
+#
+# TODO: QueueManager __call__()
+# TODO: ProcessPool  __call__()
+# TODO: ThreadPool  __call__()
+
+
 class ThreadPool:
     """Standardize thread pool execution for histdatacom."""
 

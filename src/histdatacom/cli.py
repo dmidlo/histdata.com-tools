@@ -84,6 +84,51 @@ from histdatacom.utils import (
     replace_date_punct,
 )
 
+
+# Testing order todo.
+#
+# Leaf Functions - Test these first
+#   - These functions call nothing else
+#   - single-unit tests.
+#
+# TODO: _validate_prerequisites()
+# TODO: _replace_falsey_yearmonth_with_none()
+# TODO: _check_start_lessthan_end()
+# TODO: _check_for_start_in_yearmonth()
+# TODO: _check_for_ascii_if_api()
+# TODO: _adjust_for_repo_data_request()
+# TODO: _false_from_api_if_behavior_flag()
+# TODO: _clean_from_api_args()
+# TODO: _check_for_ascii_if_influx()
+# TODO: __init__()
+
+# Regular Functions
+#   - These functions call other functions
+#   - single-unit and integration/multi-unit tests
+#
+# TODO: _check_end_yearmonth_in_range()
+# TODO: _check_cli_start_yearmonth()
+# TODO: _check_start_yearmonth_in_range()
+# TODO: _check_for_now_in_yearmonth()
+# TODO: _check_cli_end_yearmonth()
+# TODO: _check_for_same_start_yearmonth()
+# TODO: _check_datetime_input()
+# TODO: _validate_yearmonth_format()
+# TODO: _sanitize_input()
+# TODO:  _set_args()
+# TODO: arg_list_to_set()
+
+# Trunk Functions
+#  - These are called by nothing else
+#        - or -
+#  - These are called by a concurrency pool
+#
+#  Either way, they represent larger integrations of
+#  multi-unit and unit-level functionality.
+#
+# TODO: __call__()
+# TODO: (global)()
+
 default_options = Options()
 
 

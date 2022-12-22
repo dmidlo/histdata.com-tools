@@ -14,6 +14,22 @@ from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
 if TYPE_CHECKING:
     from histdatacom.records import Record, Records
 
+# Regular Functions
+#   - These functions call other functions
+#   - single-unit and integration/multi-unit tests
+#
+# TODO: extract_csvs()
+
+# Trunk Functions
+#  - These are called by nothing else
+#        - or -
+#  - These are called by a concurrency pool
+#
+#  Either way, they represent larger integrations of
+#  multi-unit and unit-level functionality.
+#
+# TODO: _extract_csv()
+
 
 class Csv:  # noqa:H601
     """Extract CSV documents from zip archives."""

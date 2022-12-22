@@ -22,6 +22,44 @@ from histdatacom.concurrency import ThreadPool, get_pool_cpu_count
 from histdatacom.records import Record
 from histdatacom.scraper.urls import Urls
 
+# Testing order todo.
+#
+# Leaf Functions - Test these first
+#   - These functions call nothing else
+#   - single-unit tests.
+#
+# TODO: _get_zip_file_name()
+# TODO: _write_file()
+# TODO: _request_file()
+# TODO: _get_page_data()
+# TODO: _fetch_form_values()
+# TODO: _ensure_pairs()
+# TODO: _check_for_valid_download()
+# TODO: _check_for_existing_archives_on_disk()
+
+# Regular Functions
+#   - These functions call other functions
+#   - single-unit and integration/multi-unit tests
+#
+# TODO: _init_record()
+# TODO: _scrape_record_info()
+# TODO: get_zip_file()
+# TODO: __init__()
+# TODO: populate_initial_queue()
+# TODO: validate_urls()
+# TODO: download_zips()
+
+# Trunk Functions
+#  - These are called by nothing else
+#        - or -
+#  - These are called by a concurrency pool
+#
+#  Either way, they represent larger integrations of
+#  multi-unit and unit-level functionality.
+#
+# TODO: _validate_url()
+# TODO: _download_zip()
+
 
 class Scraper:  # noqa:H601
     """Scrape histdata.com website for pairs data.

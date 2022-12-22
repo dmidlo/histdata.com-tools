@@ -35,6 +35,33 @@ from histdatacom.utils import (
 if TYPE_CHECKING:
     from histdatacom.records import Record
 
+# Testing order todo.
+#
+# Leaf Functions - Test these first
+#   - These functions call nothing else
+#   - single-unit tests.
+#
+# TODO: test_for_repo_data_file()
+# TODO: __init__()
+# TODO: read_repo_data_file()
+# TODO: check_for_repo_action()
+# TODO: check_if_queue_is_needed()
+# TODO: _check_for_create_or_update()
+# TODO: _filter_repo_dict_by_pairs()
+
+
+# Regular Functions
+#   - These functions call other functions
+#   - single-unit and integration/multi-unit tests
+#
+# TODO: set_repo_datum()
+# TODO: update_repo_from_github()
+# TODO: get_available_repo_data()
+# TODO: _write_repo_data_file()
+# TODO: _print_repo_data_table()
+# TODO: _hash_repo()
+# TODO: _sort_repo_dict_by()
+
 
 class Repo:  # noqa: H601
     """Creates, updates, or retrieves date ranges for histdata.com pairs.

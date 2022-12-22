@@ -25,6 +25,36 @@ from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
 if TYPE_CHECKING:
     from histdatacom.records import Record, Records
 
+# Testing order todo.
+#
+# Leaf Functions - Test these first
+#   - These functions call nothing else
+#   - single-unit tests.
+#
+# TODO: Influx _parse_jay_row()
+# TODO: Influx _init_counters()
+# TODO: InfluxDBWriter _terminate()
+
+# Regular Functions
+#   - These functions call other functions
+#   - single-unit and integration/multi-unit tests
+#
+# TODO: Influx _import_jay()
+# TODO: Influx _parse_jay_rows()
+# TODO: Influx import_data()
+# TODO: InfluxDBWriter __init__()
+
+# Trunk Functions
+#  - These are called by nothing else
+#        - or -
+#  - These are called by a concurrency pool
+#
+#  Either way, they represent larger integrations of
+#  multi-unit and unit-level functionality.
+#
+# TODO: Influx _import_file()
+# TODO: InfluxDBWriter run()
+
 
 class Influx:  # noqa:H601
     """Download (if needed), format, and import data to influxdb."""
