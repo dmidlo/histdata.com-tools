@@ -127,31 +127,13 @@
         "yearmonths",
         "ymdt"
     ],
-    "jupyter.kernels.filter": [
-        {
-            "path": "/Users/davidmidlo/opt/anaconda3/bin/python",
-            "type": "pythonEnvironment"
-        },
-        {
-            "path": "/opt/local/bin/python",
-            "type": "pythonEnvironment"
-        },
-        {
-            "path": "/usr/local/bin/python3",
-            "type": "pythonEnvironment"
-        },
-        {
-            "path": "/usr/local/bin/python3.9",
-            "type": "pythonEnvironment"
-        },
-        {
-            "path": "/usr/bin/python3",
-            "type": "pythonEnvironment"
-        },
-        {
-            "path": "/Users/davidmidlo/opt/anaconda3/envs/venv/bin/python",
-            "type": "pythonEnvironment"
-        }
-    ],
-    "docwriter.style": "Google"
+    "docwriter.style": "Google",
+    "jupyter.kernels.excludePythonEnvironments": [
+        "/Users/davidmidlo/opt/anaconda3/bin/python",
+        "/opt/local/bin/python",
+        "/usr/local/bin/python3",
+        "/usr/local/bin/python3.9",
+        "/usr/bin/python3",
+        "/Users/davidmidlo/opt/anaconda3/envs/venv/bin/python"
+    ]
 }
