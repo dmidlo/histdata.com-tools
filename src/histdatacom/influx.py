@@ -10,13 +10,11 @@ from multiprocessing import Process, Queue
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Optional, Tuple
 
-import rx
 from influxdb_client import InfluxDBClient, WriteOptions, WritePrecision
 from influxdb_client.client.write_api import WriteType
 from reactivex.scheduler import ThreadPoolScheduler  # noqa:I900
 from rich import print  # pylint: disable=redefined-builtin
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
-from rx import operators as ops
 
 from histdatacom import config
 from histdatacom.api import Api
@@ -25,6 +23,29 @@ from histdatacom.histdata_ascii import CACHE_FILENAME
 
 if TYPE_CHECKING:
     from histdatacom.records import Record, Records
+
+
+def _coerce_batch_size(batch_size: Any) -> int:
+    """Return a positive integer batch size."""
+    try:
+        normalized = int(batch_size)
+    except (TypeError, ValueError) as err:
+        raise ValueError("batch_size must be a positive integer") from err
+
+    if normalized < 1:
+        raise ValueError("batch_size must be a positive integer")
+
+    return normalized
+
+
+def _iter_polars_row_batches(
+    frame: Any, batch_size: int
+) -> Iterable[list[tuple[Any, ...]]]:
+    """Yield bounded row batches from a Polars dataframe."""
+    for frame_slice in frame.iter_slices(n_rows=batch_size):
+        rows = list(frame_slice.iter_rows())
+        if rows:
+            yield rows
 
 
 class Influx:  # noqa:H601
@@ -167,28 +188,15 @@ class Influx:  # noqa:H601
             influx_chunks_queue (Queue): config.INFLUX_CHUNKS_QUEUE
         """
         jay = Api.import_jay_data(record.data_dir + record.jay_filename)
+        batch_size = _coerce_batch_size(args["batch_size"])
 
         with ProcessPoolExecutor(
             max_workers=1,
             initializer=self._init_counters,
-            initargs=(influx_chunks_queue, config.ARGS),
+            initargs=(influx_chunks_queue, args),
         ) as executor:
-
-            rx_data_queue = rx.from_iterable(jay.iter_rows()).pipe(
-                ops.buffer_with_count(args["batch_size"]),
-                ops.flat_map(
-                    lambda rows: executor.submit(  # noqa:BLK100
-                        self._parse_jay_rows, rows, record
-                    )
-                ),
-            )
-
-            rx_data_queue.subscribe(
-                on_next=lambda x: None,
-                on_error=lambda er: print(  # noqa:T201
-                    f"Unexpected error: {er}"
-                ),  # noqa:T201
-            )
+            for rows in _iter_polars_row_batches(jay, batch_size):
+                executor.submit(self._parse_jay_rows, rows, record).result()
 
     def _parse_jay_rows(self, iterable: Iterable, record: Record) -> None:
         """Create a list by mapping row-by-row from a cached dataframe.
@@ -277,6 +285,7 @@ class InfluxDBWriter(Process):
         Process.__init__(self)
         self.args = args
         self.influx_chunks_queue = influx_chunks_queue
+        batch_size = _coerce_batch_size(args["batch_size"])
         self.client = InfluxDBClient(
             url=self.args["INFLUX_URL"],
             token=self.args["INFLUX_TOKEN"],
@@ -287,8 +296,8 @@ class InfluxDBWriter(Process):
         self.write_api = self.client.write_api(
             write_options=WriteOptions(
                 write_type=WriteType.batching,
-                batch_size=args["batch_size"],
-                flush_interval=args["batch_size"],
+                batch_size=batch_size,
+                flush_interval=batch_size,
             ),
             write_scheduler=ThreadPoolScheduler(
                 max_workers=get_pool_cpu_count(config.ARGS["cpu_utilization"])
