@@ -1,5 +1,6 @@
 """Test --version argument from API and CLI."""
-import sh
+import subprocess
+import sys
 
 import histdatacom
 from histdatacom import Options
@@ -16,6 +17,11 @@ def test_api_version() -> None:
 
 def test_cli_version() -> None:
     """Test --version from CLI."""
-    cli_output = sh.histdatacom(version=True)
+    cli_output = subprocess.run(
+        [sys.executable, "-m", "histdatacom", "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
 
     assert cli_output.strip() == histdatacom.__version__  # act
