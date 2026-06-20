@@ -1,4 +1,5 @@
 """Extract CSVs from zip archive."""
+
 from __future__ import annotations
 
 import sys
@@ -56,20 +57,25 @@ class Csv:  # noqa:H601
                 zip_path = Path(record.data_dir, record.zip_filename)
 
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                    [record.csv_filename] = [
+                    data_members = [
                         name
                         for name in zip_ref.namelist()
-                        if (".csv" or ".xlsx") in name
+                        if name.lower().endswith((".csv", ".xlsx"))
                     ]
+                    if len(data_members) != 1:
+                        raise ValueError(
+                            "expected ZIP archive to contain one CSV/XLSX file"
+                        )
+                    [record.csv_filename] = data_members
                     zip_ref.extract(record.csv_filename, path=record.data_dir)
 
                 zip_path.unlink()
                 record.status = "CSV_FILE"
                 record.write_memento_file(base_dir=args["default_download_dir"])
             records_next.put(record)
-        except OSError as err:
+        except (OSError, ValueError) as err:
             print("Unexpected error:", sys.exc_info())  # noqa:T201
             record.delete_momento_file()
-            raise SystemExit from err
+            raise SystemExit(1) from err
         finally:
             records_current.task_done()

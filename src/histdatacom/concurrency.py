@@ -5,6 +5,7 @@ Raises:
                     low, medium, or high. or integer percent 1-200
     SystemExit: exit on error
 """
+
 # pylint: disable=redefined-outer-name
 from __future__ import annotations
 
@@ -30,8 +31,8 @@ from histdatacom import config
 from histdatacom.records import Records
 
 if TYPE_CHECKING:
-    from datatable import Frame  # noqa:I900
     from pandas import DataFrame
+    from polars import DataFrame as PolarsDataFrame
     from pyarrow import Table
 
     from histdatacom.histdata_com import _HistDataCom
@@ -282,7 +283,7 @@ def get_pool_cpu_count(count: str | int | None = None) -> int:  # noqa:CCR001
 
         return count - 1 if count > 2 else ceil(count / 2)  # noqa:TC300
     except ValueError as err:
-        raise SystemExit from err
+        raise SystemExit(1) from err
 
 
 class QueueManager:
@@ -304,14 +305,15 @@ class QueueManager:
     # pylint: disable-next=inconsistent-return-statements
     def __call__(  # type: ignore
         self, runner_: Type[_HistDataCom]
-    ) -> list | dict | Frame | DataFrame | Table:
+    ) -> list | dict | PolarsDataFrame | DataFrame | Table:
         """Configure global queues and execute.
 
         Args:
             runner_ (Type[_HistDataCom]): _description_
 
         Returns:
-            list | dict | Frame | DataFrame | Table: _description_
+            list | dict | PolarsDataFrame | DataFrame | Table:
+                API data or repository metadata from the runner.
         """
         # pylint: disable-next=consider-using-with
         config.QUEUE_MANAGER.start()  # type: ignore
@@ -362,9 +364,12 @@ def _complete_future(
         futures (list): list of futures.
         future (Future): future from pool.
     """
-    progress.advance(task_id, 0.75)
-    futures.remove(future)
-    del future  # noqa:WPS100
+    try:
+        future.result()
+    finally:
+        progress.advance(task_id, 0.75)
+        futures.remove(future)
+        del future  # noqa:WPS100
 
 
 def _on_keyboard_interrupt(

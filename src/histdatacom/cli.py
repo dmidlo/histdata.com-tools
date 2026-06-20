@@ -76,7 +76,12 @@ from rich import print  # pylint: disable=redefined-builtin
 
 from histdatacom import Options
 from histdatacom.concurrency import get_pool_cpu_count
-from histdatacom.fx_enums import Format, Pairs, Timeframe
+from histdatacom.fx_enums import (
+    Format,
+    Pairs,
+    Timeframe,
+    get_valid_format_timeframes,
+)
 from histdatacom.utils import (
     get_current_datemonth_gmt_minus5,
     get_year_from_datemonth,
@@ -211,7 +216,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                         raise ValueError(err_text_influx_must_be_ascii)
         except ValueError as err:
             print(err)  # noqa:T201
-            raise SystemExit from err
+            raise SystemExit(1) from err
 
     def _check_for_ascii_if_api(self) -> None:  # noqa:CCR001
         """Verify ascii csv_format type for api use.
@@ -244,7 +249,37 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                         raise ValueError(err_text_api_must_be_ascii)
         except ValueError as err:
             print(err)  # noqa:T201
-            raise SystemExit from err
+            raise SystemExit(1) from err
+
+    def _check_for_supported_format_timeframe_combination(self) -> None:
+        """Reject format/timeframe selections that generate no work."""
+        formats = self.arg_namespace.formats or set()
+        timeframes = self.arg_namespace.timeframes or set()
+        has_supported_combination = any(
+            timeframe in get_valid_format_timeframes(csv_format)
+            for csv_format in formats
+            for timeframe in timeframes
+        )
+
+        if has_supported_combination:
+            return
+
+        requested = ", ".join(
+            f"{csv_format}/{timeframe}"
+            for csv_format in sorted(formats)
+            for timeframe in sorted(timeframes)
+        )
+        supported = ", ".join(
+            f"{csv_format}/{timeframe}"
+            for csv_format in sorted(Format.list_values())
+            for timeframe in get_valid_format_timeframes(csv_format)
+        )
+        print(  # noqa:T201
+            "ERROR: no supported format/timeframe combinations requested.\n"
+            f"Requested: {requested}\n"
+            f"Supported: {supported}"
+        )
+        raise SystemExit(1)
 
     def _check_datetime_input(self) -> None:
         """Check for invalid datetime input for -s and -e flags."""
@@ -366,7 +401,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 self.arg_namespace.end_yearmonth,
             )
         except ValueError as err:
-            raise SystemExit from err
+            raise SystemExit(1) from err
 
     def _check_cli_start_yearmonth(  # noqa:CCR001
         self,
@@ -438,7 +473,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 )
             return start_yearmonth, end_yearmonth  # noqa:TC300
         except ValueError as err:
-            raise SystemExit from err
+            raise SystemExit(1) from err
 
     def _check_cli_end_yearmonth(self) -> None:  # noqa:CCR001
         """Validate for -e end_yearmonth.
@@ -484,7 +519,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 if int(end_month) > 12:
                     raise ValueError(err_text_end_month_greater_than_12)
         except ValueError as err:
-            raise SystemExit from err
+            raise SystemExit(1) from err
 
     def _check_for_same_start_yearmonth(self) -> None:
         """Validate -s start_yearmonth and -e end_yearmonth are not the same.
@@ -514,7 +549,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     err_text_start_and_end_cannot_be_the_same
                 )
         except ValueError as err:
-            raise SystemExit from err
+            raise SystemExit(1) from err
 
     def _replace_falsey_yearmonth_with_none(
         self,
@@ -559,7 +594,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 ):
                     raise ValueError(err_text_date_is_in_future)
         except ValueError as err:
-            raise SystemExit from err
+            raise SystemExit(1) from err
 
     def _check_end_yearmonth_in_range(self) -> None:
         """Check -e is not earlier than 200001 or later than current year-month.
@@ -586,7 +621,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 ):
                     raise ValueError(err_text_date_is_in_future)
         except ValueError as err:
-            raise SystemExit from err
+            raise SystemExit(1) from err
 
     def _check_start_lessthan_end(self) -> None:
         """Validate -e is not a year-month earlier than -s.
@@ -606,7 +641,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 if int(start_yearmonth) > int(end_yearmonth):
                     raise ValueError(err_text_start_date_after_end_date)
         except ValueError as err:
-            raise SystemExit from err
+            raise SystemExit(1) from err
 
     def _validate_yearmonth_format(self, yearmonth: str) -> str | Any:
         # pylint: disable=anomalous-backslash-in-string
@@ -637,9 +672,9 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         """
         try:
             if (
-                re.match("^\d{4}[-_.: ]\d{2}$", yearmonth)  # noqa:W605
-                or re.match("^\d{6}$", yearmonth)  # noqa:W605
-                or re.match("^\d{4}$", yearmonth)  # noqa:W605
+                re.match(r"^\d{4}[-_.: ]\d{2}$", yearmonth)
+                or re.match(r"^\d{6}$", yearmonth)
+                or re.match(r"^\d{4}$", yearmonth)
                 or str.lower(yearmonth) == "now"
                 or str.lower(yearmonth) == "start"
                 or not yearmonth
@@ -652,7 +687,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
             raise ValueError(err_text_bad_yearmonth_format)  # noqa:TC301
         except ValueError as err:
-            raise SystemExit from err
+            raise SystemExit(1) from err
 
     def _set_args(self) -> None:  # noqa:CFQ001
         # pylint: disable=unnecessary-lambda
@@ -825,6 +860,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         self._check_datetime_input()
         self._check_for_ascii_if_influx()
         self._check_for_ascii_if_api()
+        self._check_for_supported_format_timeframe_combination()
         get_pool_cpu_count(self.arg_namespace.cpu_utilization)
 
     def __call__(self) -> Options:

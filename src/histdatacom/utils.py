@@ -1,4 +1,5 @@
 """Utilities for histdatacom."""
+
 from __future__ import annotations
 
 import hashlib
@@ -14,6 +15,14 @@ import importlib
 import pytz
 import yaml
 from rich import print  # pylint: disable=redefined-builtin
+
+API_RETURN_TYPE_MODULES = {
+    "arrow": "pyarrow",
+    "pandas": "pandas",
+    "polars": "polars",
+}
+
+SUPPORTED_API_RETURN_TYPES = frozenset(API_RETURN_TYPE_MODULES)
 
 
 def get_month_from_datemonth(
@@ -92,7 +101,11 @@ def set_working_data_dir(data_dir_name: str) -> str:
     Returns:
         str: working dir string
     """
-    return f"{Path.cwd()}{os.sep}{data_dir_name}{os.sep}"
+    data_dir = Path(data_dir_name).expanduser()
+    if not data_dir.is_absolute():
+        data_dir = Path.cwd() / data_dir
+
+    return f"{data_dir}{os.sep}"
 
 
 def load_influx_yaml() -> dict | Any:
@@ -114,17 +127,17 @@ def load_influx_yaml() -> dict | Any:
             try:
                 yaml_file = yaml.safe_load(file)
             except yaml.YAMLError as exc:
-                raise SystemExit from exc
+                raise SystemExit(1) from exc
 
         return yaml_file
 
-    print(  # noqa:T201
+    print(
         """ ERROR: -I flag is used to import data to a influxdb instance...
                         there is no influxdb.yaml file in working directory.
                         did you forget to set it up?
             """
-    )
-    raise SystemExit
+    )  # noqa:T201
+    raise SystemExit(1)
 
 
 def get_current_datemonth_gmt_minus5() -> str:
@@ -178,10 +191,29 @@ def get_now_utc_timestamp() -> float:
     return datetime.utcnow().timestamp()  # sourcery skip
 
 
+def normalize_api_return_type(return_type: Optional[str]) -> Optional[str]:
+    """Normalize and validate public API dataframe return type names."""
+    if not return_type:
+        return None
+
+    normalized = return_type.strip().lower()
+    if normalized == "pyarrow":
+        normalized = "arrow"
+
+    if normalized not in SUPPORTED_API_RETURN_TYPES:
+        supported = ", ".join(sorted(SUPPORTED_API_RETURN_TYPES))
+        raise ValueError(
+            f"unsupported api_return_type '{return_type}'. "
+            f"Supported values are: {supported}."
+        )
+
+    return normalized
+
+
 def check_installed_module(  # noqa:CCR001,BLK100
     module_name: str, load: bool = False
 ) -> bool:
-    """Check to see if module is installed.
+    """Check to see if module or API return backend is installed.
 
     Args:
         module_name (str): a module name
@@ -194,8 +226,8 @@ def check_installed_module(  # noqa:CCR001,BLK100
     Returns:
         bool: True module is installed and available
     """
-    if module_name == "arrow":
-        module_name = "pyarrow"
+    if module_name in API_RETURN_TYPE_MODULES:
+        module_name = API_RETURN_TYPE_MODULES[module_name]
 
     if module_name in sys.modules:  # noqa:R505
         return True
@@ -204,19 +236,10 @@ def check_installed_module(  # noqa:CCR001,BLK100
     ) is not None:
         module = importlib.util.module_from_spec(spec)  # type: ignore
         if load:
-            sys.modules[module] = module
+            sys.modules[module_name] = module
             spec.loader.exec_module(module)  # type: ignore
         return True
     else:
-        if module_name == "datatable":
-            err_text = (
-                "datatable not installed. please visit "
-                "https://github.com/dmidlo/histdata.com-tools"
-                "#datatable-installation-options "
-                "for installation instructions."
-            )
-            raise SystemExit(err_text)
-
         if module_name == "pyarrow":
             module_name = "arrow"
 

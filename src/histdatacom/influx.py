@@ -10,20 +10,42 @@ from multiprocessing import Process, Queue
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Optional, Tuple
 
-import rx
 from influxdb_client import InfluxDBClient, WriteOptions, WritePrecision
 from influxdb_client.client.write_api import WriteType
 from reactivex.scheduler import ThreadPoolScheduler  # noqa:I900
 from rich import print  # pylint: disable=redefined-builtin
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
-from rx import operators as ops
 
 from histdatacom import config
 from histdatacom.api import Api
 from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
+from histdatacom.histdata_ascii import CACHE_FILENAME
 
 if TYPE_CHECKING:
     from histdatacom.records import Record, Records
+
+
+def _coerce_batch_size(batch_size: Any) -> int:
+    """Return a positive integer batch size."""
+    try:
+        normalized = int(batch_size)
+    except (TypeError, ValueError) as err:
+        raise ValueError("batch_size must be a positive integer") from err
+
+    if normalized < 1:
+        raise ValueError("batch_size must be a positive integer")
+
+    return normalized
+
+
+def _iter_polars_row_batches(
+    frame: Any, batch_size: int
+) -> Iterable[list[tuple[Any, ...]]]:
+    """Yield bounded row batches from a Polars dataframe."""
+    for frame_slice in frame.iter_slices(n_rows=batch_size):
+        rows = list(frame_slice.iter_rows())
+        if rows:
+            yield rows
 
 
 class Influx:  # noqa:H601
@@ -96,7 +118,7 @@ class Influx:  # noqa:H601
         records_next: Records,
         influx_chunks_queue: Queue,
     ) -> None:
-        """Import ASCII data to influxdb, both for csv and jay.
+        """Import ASCII data to influxdb, both for csv and cache.
 
         Args:
             record (Record): a record from the work queue
@@ -113,9 +135,9 @@ class Influx:  # noqa:H601
                 record.status != "INFLUX_UPLOAD"
                 and str.lower(record.data_format) == "ascii"
             ):
-                jay_path = Path(record.data_dir, ".data")
-                if jay_path.exists():
-                    self._import_jay(
+                cache_path = Path(record.data_dir, CACHE_FILENAME)
+                if cache_path.exists():
+                    self._import_cache(
                         record,
                         args,
                         records_current,
@@ -123,8 +145,8 @@ class Influx:  # noqa:H601
                         influx_chunks_queue,
                     )
                 elif "CSV" in record.status:
-                    Api.test_for_jay_or_create(record, args)
-                    self._import_jay(
+                    Api.test_for_cache_or_create(record, args)
+                    self._import_cache(
                         record,
                         args,
                         records_current,
@@ -137,7 +159,7 @@ class Influx:  # noqa:H601
 
             if args["delete_after_influx"]:
                 Path(record.data_dir, record.zip_filename).unlink()
-                Path(record.data_dir, record.jay_filename).unlink()
+                Path(record.data_dir, record.cache_filename).unlink()
             records_next.put(record)
         except Exception as err:
             print(  # noqa:T201
@@ -148,7 +170,7 @@ class Influx:  # noqa:H601
         finally:
             records_current.task_done()
 
-    def _import_jay(
+    def _import_cache(
         self,
         record: Record,
         args: dict,
@@ -156,7 +178,7 @@ class Influx:  # noqa:H601
         records_next: Records,  # noqa:W0613 # pylint: disable=W0613
         influx_chunks_queue: Queue,
     ) -> None:
-        """Import a jay file with a ReactiveX pub/sub queue.
+        """Import a cache file with a ReactiveX pub/sub queue.
 
         Args:
             record (Record): a record from the work queue config.CURRENT_QUEUE
@@ -165,50 +187,37 @@ class Influx:  # noqa:H601
             records_next (Records): config.NEXT_QUEUE
             influx_chunks_queue (Queue): config.INFLUX_CHUNKS_QUEUE
         """
-        jay = Api.import_jay_data(record.data_dir + record.jay_filename)
+        cache = Api.import_cache_data(record.data_dir + record.cache_filename)
+        batch_size = _coerce_batch_size(args["batch_size"])
 
         with ProcessPoolExecutor(
             max_workers=1,
             initializer=self._init_counters,
-            initargs=(influx_chunks_queue, config.ARGS),
+            initargs=(influx_chunks_queue, args),
         ) as executor:
+            for rows in _iter_polars_row_batches(cache, batch_size):
+                executor.submit(self._parse_cache_rows, rows, record).result()
 
-            rx_data_queue = rx.from_iterable(jay.to_tuples()).pipe(
-                ops.buffer_with_count(args["batch_size"]),
-                ops.flat_map(
-                    lambda rows: executor.submit(  # noqa:BLK100
-                        self._parse_jay_rows, rows, record
-                    )
-                ),
-            )
-
-            rx_data_queue.subscribe(
-                on_next=lambda x: None,
-                on_error=lambda er: print(  # noqa:T201
-                    f"Unexpected error: {er}"
-                ),  # noqa:T201
-            )
-
-    def _parse_jay_rows(self, iterable: Iterable, record: Record) -> None:
-        """Create a list by mapping row-by-row from datatable Frame (from jay).
+    def _parse_cache_rows(self, iterable: Iterable, record: Record) -> None:
+        """Create a list by mapping row-by-row from a cached dataframe.
 
         Args:
-            iterable (Iterable): datatable.Frame
+            iterable (Iterable): cached rows
             record (Record): a record from the work queue.
         """
-        map_func = partial(self._parse_jay_row, record=record)
+        map_func = partial(self._parse_cache_row, record=record)
         parsed_rows = list(map(map_func, iterable))
 
         INFLUX_CHUNKS_QUEUE.put(parsed_rows)  # type: ignore
 
-    def _parse_jay_row(self, row: Tuple[Any], record: Record) -> str:
+    def _parse_cache_row(self, row: Tuple[Any], record: Record) -> str:
         """Return influxdb line-protocol line (str) for each from a map function.
 
             Applies different fields for line in line-protocol on Timeframe
                 M1 or T.
 
         Args:
-            row (Tuple[Any]): row from datatable.Frame
+            row (Tuple[Any]): row from cached dataframe
             record (Record): record from the work queue
 
         Returns:
@@ -276,6 +285,7 @@ class InfluxDBWriter(Process):
         Process.__init__(self)
         self.args = args
         self.influx_chunks_queue = influx_chunks_queue
+        batch_size = _coerce_batch_size(args["batch_size"])
         self.client = InfluxDBClient(
             url=self.args["INFLUX_URL"],
             token=self.args["INFLUX_TOKEN"],
@@ -286,8 +296,8 @@ class InfluxDBWriter(Process):
         self.write_api = self.client.write_api(
             write_options=WriteOptions(
                 write_type=WriteType.batching,
-                batch_size=args["batch_size"],
-                flush_interval=args["batch_size"],
+                batch_size=batch_size,
+                flush_interval=batch_size,
             ),
             write_scheduler=ThreadPoolScheduler(
                 max_workers=get_pool_cpu_count(config.ARGS["cpu_utilization"])

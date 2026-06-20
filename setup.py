@@ -86,6 +86,7 @@ setup(
         "argparse",
         "pytz",
         "certifi",
+        "polars",
     ],
     extras_require={
         "arrow": [
@@ -101,6 +102,7 @@ setup(
         "dev": [
             "pyarrow",
             "pandas",
+            "polars",
             "jupyter",
             "ipywidgets",
             "pytest",

@@ -2,10 +2,10 @@
 # pylint: disable=not-callable
 """Generate Architecture Diagrams."""
 
-import random
+import tempfile
 from pathlib import Path
-from shutil import rmtree
 from contextlib import suppress
+from types import SimpleNamespace
 
 import sh
 from pycallgraph2 import PyCallGraph  # noqa:I900
@@ -13,10 +13,12 @@ from pycallgraph2.output import GraphvizOutput  # noqa:I900
 
 import histdatacom
 from histdatacom import Options, Pairs
+from histdatacom.api import Api
+from histdatacom.histdata_ascii import CACHE_FILENAME
 
 project_dir = Path(".")
 package_dir = project_dir / "src" / "histdatacom"
-test_runner_path = project_dir / "test.py"
+histdata_ascii_fixtures = project_dir / "tests" / "fixtures" / "histdata_ascii"
 base_dir = project_dir / Path("tests", "architecture")
 pstats_output_path = base_dir / "output.pstats"
 pycallgraph_dot_path = base_dir / "pycallgraph.dot"
@@ -31,11 +33,9 @@ class Pycallgraphhistdatacom:  # noqa:H601
 
     def __init__(self) -> None:
         """Initialize class."""
-        self.number_of_pairs = random.randint(1, 4)  # noqa:S311
-
         self.options = Options()
         self.options.by: str = "start_asc"  # pylint: disable=invalid-name
-        self.options.pairs: set = set(random.sample(list(Pairs.list_keys()), 1))
+        self.options.pairs: set = {"eurusd"}
         self.options.formats: set = {"ascii"}
         self.options.timeframes: set = {"tick-data-quotes"}
         self.options.data_directory: str = "data"
@@ -48,33 +48,23 @@ class Pycallgraphhistdatacom:  # noqa:H601
     @staticmethod
     def check_py_api():  # noqa:D102,DC102
         tester = Pycallgraphhistdatacom()
+        print(tester.check_py_api_version())  # noqa:T201
+        del tester  # noqa:WPS100
+
+        tester = Pycallgraphhistdatacom()
         print(tester.check_py_api_available_remote_data())  # noqa:T201
         del tester  # noqa:WPS100
 
         tester = Pycallgraphhistdatacom()
-        print(  # noqa:T201,BLK100
-            tester.check_py_api_update_and_validate_remote_data()
-        )
+        tester.check_py_api_polars_ingest()
         del tester  # noqa:WPS100
 
         tester = Pycallgraphhistdatacom()
-        tester.check_py_api_download_data()
+        tester.check_py_api_cache_round_trip()
         del tester  # noqa:WPS100
 
         tester = Pycallgraphhistdatacom()
-        tester.check_py_api_extract_data()
-        del tester  # noqa:WPS100
-
-        tester = Pycallgraphhistdatacom()
-        tester.check_py_api_import_to_influx()
-        del tester  # noqa:WPS100
-
-        tester = Pycallgraphhistdatacom()
-        print(tester.check_py_api_api_return())  # noqa:T201
-        del tester  # noqa:WPS100
-
-        tester = Pycallgraphhistdatacom()
-        tester.delete_data_directory()
+        print(tester.check_py_api_api_return_contract())  # noqa:T201
         del tester  # noqa:WPS100
 
     @staticmethod
@@ -103,6 +93,12 @@ class Pycallgraphhistdatacom:  # noqa:H601
         Pycallgraphhistdatacom.pycallgraph()
         Pycallgraphhistdatacom.pycallgraph_dot_to_svg()
 
+    def check_py_api_version(self):  # noqa:D102,DC102
+        print("Checking histdatacom version from api.")  # noqa:T201
+        self.options.version = True
+        self.method_result = histdatacom(self.options)
+        return self.method_result
+
     def check_py_api_available_remote_data(self):  # noqa:D102,DC102
         print("Checking histdatacom -A from api.")  # noqa:T201
         self.options.available_remote_data = True
@@ -110,54 +106,28 @@ class Pycallgraphhistdatacom:  # noqa:H601
         self.method_result = histdatacom(self.options)  # pylint: disable=E1102
         return self.method_result
 
-    def check_py_api_update_and_validate_remote_data(self):  # noqa:D102,DC102
-        print("Checking histdatacom -U from api.")  # noqa:T201
-        self.options.update_remote_data = True
-        self.method_result = histdatacom(self.options)
+    def check_py_api_polars_ingest(self):  # noqa:D102,DC102
+        print("Checking local Polars ingest path.")  # noqa:T201
+        self.method_result = Api._import_file_to_polars(
+            SimpleNamespace(data_timeframe="T"),
+            histdata_ascii_fixtures / "DAT_ASCII_EURUSD_T_201202.csv",
+        )
         return self.method_result
 
-    def check_py_api_download_data(self):  # noqa:D102,DC102
-        print("Checking histdatacom -D from api.")  # noqa:T201
-        self.options.download_data_archives = True
-        self.options.start_yearmonth = "2011-06"
-        self.options.end_yearmonth = "2011-12"
-        self.method_result = histdatacom(self.options)
+    def check_py_api_cache_round_trip(self):  # noqa:D102,DC102
+        print("Checking local Polars cache round trip.")  # noqa:T201
+        frame = self.check_py_api_polars_ingest()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_path = Path(temp_dir, CACHE_FILENAME)
+            Api._write_cache_data(frame, str(cache_path))
+            self.method_result = Api.import_cache_data(str(cache_path))
         return self.method_result
 
-    def check_py_api_extract_data(self):  # noqa:D102,DC102
-        print("Checking histdatacom -X from api.")  # noqa:T201
-        self.options.extract_csvs = True
-        self.options.start_yearmonth = "2011-06"
-        self.options.end_yearmonth = "2011-07"
-        self.method_result = histdatacom(self.options)
+    def check_py_api_api_return_contract(self):  # noqa:D102,DC102
+        print("Checking histdatacom api return contract.")  # noqa:T201
+        self.options.api_return_type = "polars"
+        self.method_result = self.options.api_return_type
         return self.method_result
-
-    def check_py_api_import_to_influx(self):  # noqa:D102,DC102
-        print("Checking histdatacom -I from api.")  # noqa:T201
-        self.options.import_to_influxdb = True
-        self.options.start_yearmonth = "2011-05"
-        self.options.end_yearmonth = "2011-06"
-        self.method_result = histdatacom(self.options)
-        return self.method_result
-
-    def check_py_api_api_return(self):  # noqa:D102,DC102
-        print("Checking histdatacom api from api.")  # noqa:T201
-        self.options.api_return_type = "datatable"
-        self.options.start_yearmonth = "2011-05"
-        self.options.end_yearmonth = "2012-01"
-        self.method_result = histdatacom(self.options)
-        return self.method_result
-
-    def check_for_data_directory(self):  # noqa:D102,DC102
-        data_path = project_dir / self.options.data_directory
-
-        if data_path.exists():
-            return data_path
-        raise FileExistsError(f"{data_path} does not exist.")
-
-    def delete_data_directory(self):  # noqa:D102,DC102
-        path = self.check_for_data_directory()
-        rmtree(path)
 
 
 def generate_code2flow() -> None:
@@ -178,8 +148,7 @@ def generate_gprof2dot_png() -> None:
     ## Call Graph Visualization using gprof2dot
     $ sudo port install graphviz
     $ pip install gprof2dot
-    $ python -m cProfile -o output.pstats src/histdatacom/histdata_com.py\
-         -X -p eurusd -f ascii -t tick-data-quotes -s 2021-01 -e now
+    $ python -m cProfile -o output.pstats -m pytest tests/unit/test_api.py
     $ gprof2dot -f pstats output.pstats | dot -Tpng -o gprof2dot.png
     """
     gprof2dot_svg_path = base_dir / "gprof2dot.svg"
@@ -189,14 +158,29 @@ def generate_gprof2dot_png() -> None:
         "cProfile",
         "-o",
         pstats_output_path.resolve(),
-        test_runner_path.resolve(),
+        "-m",
+        "pytest",
+        "tests/unit/test_api.py",
+        "tests/unit/test_histdata_ascii.py",
+        "tests/unit/test_influx.py",
         _fg=True,
     )
+    graph_source = str(
+        sh.gprof2dot(
+            "-f",
+            "pstats",
+            "--node-thres",
+            "2.0",
+            "--edge-thres",
+            "2.0",
+            pstats_output_path.resolve(),
+        )
+    )
     sh.dot(
-        sh.gprof2dot("-f", "pstats", pstats_output_path.resolve()),
         "-Tsvg",
         "-o",
         gprof2dot_svg_path.resolve(),
+        _in=graph_source,
     )
     pstats_output_path.unlink()
 

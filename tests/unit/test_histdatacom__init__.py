@@ -3,6 +3,7 @@
 import sys
 
 import histdatacom
+import pytest
 from histdatacom import Options
 
 
@@ -38,3 +39,24 @@ def test_histdatacom_call() -> None:
     options.version = True
 
     assert histdatacom(options)  # type: ignore  # act
+
+
+def test_histdatacom_version_allows_polars_return_type() -> None:
+    # pylint: disable=not-callable
+    """Validate Polars return requests without importing the legacy backend."""
+    options = Options()
+    options.version = True
+    options.api_return_type = "polars"
+
+    assert histdatacom(options) == histdatacom.__version__  # type: ignore
+
+
+def test_histdatacom_rejects_unsupported_api_return_type() -> None:
+    # pylint: disable=not-callable
+    """Reject unsupported return types before module availability checks."""
+    options = Options()
+    options.version = True
+    options.api_return_type = "numpy"
+
+    with pytest.raises(ValueError, match="unsupported api_return_type 'numpy'"):
+        histdatacom(options)  # type: ignore

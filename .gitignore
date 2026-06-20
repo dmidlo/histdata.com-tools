@@ -4,6 +4,7 @@ venv/
 *.txt
 !whitelist.txt
 *.zip
+!tests/fixtures/**/*.csv
 .info
 .meta
 .queue

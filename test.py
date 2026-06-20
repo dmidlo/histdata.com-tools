@@ -67,7 +67,7 @@ class Testhistdatacom:
 
     def test_py_api_api_return(self):
         print("Testing histdatacom api from api.")
-        self.options.api_return_type = "datatable"
+        self.options.api_return_type = "polars"
         self.options.start_yearmonth = "2011-05"
         self.options.end_yearmonth = "2012-01"
         self.result = histdatacom(self.options)

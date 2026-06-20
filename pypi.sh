@@ -6,7 +6,6 @@ dev()
     echo "${bold}pypi.sh: Setting Up Dev${normal}"
     pip uninstall -y histdatacom
     pip install twine wheel
-    pip install git+https://github.com/h2oai/datatable
     pip install -e .[dev]
     pre-commit install
     pre-commit autoupdate
@@ -32,7 +31,7 @@ buildenv()
     python -m venv venv
     echo "${bold}activating test pip environment${normal}"
     source venv/bin/activate
-    pip install git+https://github.com/h2oai/datatable
+    pip install polars
     echo "${bold}test pip environment set up complete.${normal}"
 }
 

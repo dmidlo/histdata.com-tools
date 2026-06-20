@@ -6,14 +6,14 @@ Raises:
 Returns:
     QueueManager: multi-process serial communication manager
     repo_data (set): a set of repo pairs with start and end date ranges.
-    Data (Frame | DataFrame | Table):
-        a datatable Frame, a pandas DataFrame, or a pyarrow Table
+    Data (PolarsDataFrame | DataFrame | Table):
+        a Polars DataFrame, pandas DataFrame, or pyarrow Table
     List Of Data:   [
                         {
                             "timeframe": timeframe,
                             "pair": pair,
                             "records": [record, record, ...],
-                            "data": Frame | DataFrame | Table,
+                            "data": PolarsDataFrame | DataFrame | Table,
                         },
                         ...
                         ...
@@ -35,11 +35,12 @@ from histdatacom.utils import (
     load_influx_yaml,
     set_working_data_dir,
     check_installed_module,
+    normalize_api_return_type,
 )
 
 if TYPE_CHECKING:
-    from datatable import Frame  # noqa:I900
     from pandas import DataFrame
+    from polars import DataFrame as PolarsDataFrame
     from pyarrow import Table
 
 
@@ -70,6 +71,9 @@ class _HistDataCom:  # noqa:R701
         config.ARGS["default_download_dir"] = set_working_data_dir(
             config.ARGS["data_directory"]
         )
+        config.ARGS["api_return_type"] = normalize_api_return_type(
+            config.ARGS["api_return_type"]
+        )
 
         if config.ARGS["import_to_influxdb"]:
             influx_yaml = load_influx_yaml()
@@ -82,14 +86,20 @@ class _HistDataCom:  # noqa:R701
         self.scraper = Scraper()
         self.csvs = Csv()
 
-        if config.ARGS["from_api"] and config.ARGS["api_return_type"]:
+        if (
+            config.ARGS["from_api"]
+            and config.ARGS["api_return_type"]
+            and not config.ARGS["version"]
+            and not config.ARGS["available_remote_data"]
+            and not config.ARGS["update_remote_data"]
+        ):
+            check_installed_module(config.ARGS["api_return_type"])
             from histdatacom.api import Api
 
-            check_installed_module(config.ARGS["api_return_type"])
             self.api = Api()
 
         if config.ARGS["import_to_influxdb"]:
-            config.ARGS["api_return_type"] = "datatable"
+            config.ARGS["api_return_type"] = "polars"
             check_installed_module(config.ARGS["api_return_type"])
             from histdatacom.influx import Influx
 
@@ -105,20 +115,20 @@ class _HistDataCom:  # noqa:R701
 
     def run(  # noqa:CCR001,CFQ004,CCR001,R701
         self,
-    ) -> list | dict | Frame | DataFrame | Table | None:  # noqa:CCR001
+    ) -> list | dict | PolarsDataFrame | DataFrame | Table | None:
         """Execute. histdatacom's execution order.
 
         Returns:
-            list | dict | Frame | DataFrame | Table | None:
+            list | dict | PolarsDataFrame | DataFrame | Table | None:
 
-            Data (Frame | DataFrame | Table):
-                    a datatable Frame, a pandas DataFrame, or a pyarrow Table
+            Data (PolarsDataFrame | DataFrame | Table):
+                    a Polars DataFrame, pandas DataFrame, or pyarrow Table.
             List of dicts:  [
                                 {
                                     "timeframe": timeframe,
                                     "pair": pair,
                                     "records": [record, record, ...],
-                                    "data": Frame | DataFrame | Table,
+                                    "data": PolarsDataFrame | DataFrame | Table,
                                 },
                                 ...
                                 ...
@@ -147,8 +157,8 @@ class _HistDataCom:  # noqa:R701
             self.scraper.download_zips()
             del self.scraper  # noqa:WPS100
             if config.ARGS["from_api"] and config.ARGS["api_return_type"]:
-                self.api.validate_jays()
-                return self.api.merge_jays()
+                self.api.validate_caches()
+                return self.api.merge_caches()
 
         if config.ARGS["extract_csvs"]:
             self.csvs.extract_csvs()
@@ -162,23 +172,23 @@ class _HistDataCom:  # noqa:R701
 
 def main(
     options: Options | None = None,
-) -> list | dict | Frame | DataFrame | Table:
+) -> list | dict | PolarsDataFrame | DataFrame | Table | None:
     """Execute. Entry-point for histdatacom.
 
     Args:
         options (Options): a histdatacom.options Options object.
 
     Returns:
-        list | dict | Frame | DataFrame | Table:
+        list | dict | PolarsDataFrame | DataFrame | Table | None:
 
-            Data (Frame | DataFrame | Table):
-                    a datatable Frame, a pandas DataFrame, or a pyarrow Table
+            Data (PolarsDataFrame | DataFrame | Table):
+                    a Polars DataFrame, pandas DataFrame, or pyarrow Table.
             List of dicts:  [
                                 {
                                     "timeframe": timeframe,
                                     "pair": pair,
                                     "records": [record, record, ...],
-                                    "data": Frame | DataFrame | Table,
+                                    "data": PolarsDataFrame | DataFrame | Table,
                                 },
                                 ...
                                 ...

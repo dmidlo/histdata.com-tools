@@ -239,7 +239,7 @@ class Scraper:  # noqa:H601
                 traceback.format_exc(),
             )
             record.delete_momento_file()
-            raise SystemExit from err
+            raise SystemExit(1) from err
         finally:
             config.CURRENT_QUEUE.task_done()  # type: ignore
 
@@ -313,7 +313,7 @@ class Scraper:  # noqa:H601
             config.CURRENT_QUEUE.task_done()  # type: ignore
 
     def _check_for_existing_archives_on_disk(self, record: Record) -> bool:
-        """Check for zip, csv, or jay file.
+        """Check for zip, csv, or cache file.
 
         Args:
             record (Record): a record from the work queue.
@@ -324,7 +324,7 @@ class Scraper:  # noqa:H601
         return bool(
             os.path.exists(record.data_dir + record.zip_filename)
             or os.path.exists(record.data_dir + record.csv_filename)
-            or os.path.exists(record.data_dir + record.jay_filename)
+            or os.path.exists(record.data_dir + record.cache_filename)
         )
 
     def _get_page_data(self, url: str, timeout: int) -> dict:
