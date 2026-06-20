@@ -118,7 +118,7 @@ class Influx:  # noqa:H601
         records_next: Records,
         influx_chunks_queue: Queue,
     ) -> None:
-        """Import ASCII data to influxdb, both for csv and jay.
+        """Import ASCII data to influxdb, both for csv and cache.
 
         Args:
             record (Record): a record from the work queue
@@ -135,9 +135,9 @@ class Influx:  # noqa:H601
                 record.status != "INFLUX_UPLOAD"
                 and str.lower(record.data_format) == "ascii"
             ):
-                jay_path = Path(record.data_dir, CACHE_FILENAME)
-                if jay_path.exists():
-                    self._import_jay(
+                cache_path = Path(record.data_dir, CACHE_FILENAME)
+                if cache_path.exists():
+                    self._import_cache(
                         record,
                         args,
                         records_current,
@@ -145,8 +145,8 @@ class Influx:  # noqa:H601
                         influx_chunks_queue,
                     )
                 elif "CSV" in record.status:
-                    Api.test_for_jay_or_create(record, args)
-                    self._import_jay(
+                    Api.test_for_cache_or_create(record, args)
+                    self._import_cache(
                         record,
                         args,
                         records_current,
@@ -159,7 +159,7 @@ class Influx:  # noqa:H601
 
             if args["delete_after_influx"]:
                 Path(record.data_dir, record.zip_filename).unlink()
-                Path(record.data_dir, record.jay_filename).unlink()
+                Path(record.data_dir, record.cache_filename).unlink()
             records_next.put(record)
         except Exception as err:
             print(  # noqa:T201
@@ -170,7 +170,7 @@ class Influx:  # noqa:H601
         finally:
             records_current.task_done()
 
-    def _import_jay(
+    def _import_cache(
         self,
         record: Record,
         args: dict,
@@ -178,7 +178,7 @@ class Influx:  # noqa:H601
         records_next: Records,  # noqa:W0613 # pylint: disable=W0613
         influx_chunks_queue: Queue,
     ) -> None:
-        """Import a jay file with a ReactiveX pub/sub queue.
+        """Import a cache file with a ReactiveX pub/sub queue.
 
         Args:
             record (Record): a record from the work queue config.CURRENT_QUEUE
@@ -187,7 +187,7 @@ class Influx:  # noqa:H601
             records_next (Records): config.NEXT_QUEUE
             influx_chunks_queue (Queue): config.INFLUX_CHUNKS_QUEUE
         """
-        jay = Api.import_cache_data(record.data_dir + record.jay_filename)
+        cache = Api.import_cache_data(record.data_dir + record.cache_filename)
         batch_size = _coerce_batch_size(args["batch_size"])
 
         with ProcessPoolExecutor(
@@ -195,22 +195,22 @@ class Influx:  # noqa:H601
             initializer=self._init_counters,
             initargs=(influx_chunks_queue, args),
         ) as executor:
-            for rows in _iter_polars_row_batches(jay, batch_size):
-                executor.submit(self._parse_jay_rows, rows, record).result()
+            for rows in _iter_polars_row_batches(cache, batch_size):
+                executor.submit(self._parse_cache_rows, rows, record).result()
 
-    def _parse_jay_rows(self, iterable: Iterable, record: Record) -> None:
+    def _parse_cache_rows(self, iterable: Iterable, record: Record) -> None:
         """Create a list by mapping row-by-row from a cached dataframe.
 
         Args:
             iterable (Iterable): cached rows
             record (Record): a record from the work queue.
         """
-        map_func = partial(self._parse_jay_row, record=record)
+        map_func = partial(self._parse_cache_row, record=record)
         parsed_rows = list(map(map_func, iterable))
 
         INFLUX_CHUNKS_QUEUE.put(parsed_rows)  # type: ignore
 
-    def _parse_jay_row(self, row: Tuple[Any], record: Record) -> str:
+    def _parse_cache_row(self, row: Tuple[Any], record: Record) -> str:
         """Return influxdb line-protocol line (str) for each from a map function.
 
             Applies different fields for line in line-protocol on Timeframe

@@ -11,7 +11,7 @@
 #     pl.col("datetime").str.slice(13, 2).cast(pl.Int32),
 #     pl.col("datetime").str.slice(15, 3).cast(pl.Int32) * 1_000,
 #     time_unit="ms",
-# ).dt.epoch("ms")
+# ).cast(pl.Int64)
 # print(frame.with_columns(timestamp.alias("datetime")))
 
 # histdatacom -I -p eurusd usdjpy gbpusd usdcad usdchf audusd nzdusd -f ascii -t tick-data-quotes -s start -e now

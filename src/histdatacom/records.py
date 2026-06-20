@@ -1,4 +1,5 @@
 """Records queue and Record work object for queue."""
+
 import contextlib
 import json
 import os
@@ -39,10 +40,10 @@ class Record:  # noqa:H601
         self.data_tk = kwargs.get("data_tk", "")
         self.zip_filename = kwargs.get("zip_filename", "")
         self.csv_filename = kwargs.get("csv_filename", "")
-        self.jay_filename = kwargs.get("jay_filename", "")
-        self.jay_line_count = kwargs.get("jay_line_count", "")
-        self.jay_start = kwargs.get("jay_start", "")
-        self.jay_end = kwargs.get("jay_end", "")
+        self.cache_filename = kwargs.get("cache_filename", "")
+        self.cache_line_count = kwargs.get("cache_line_count", "")
+        self.cache_start = kwargs.get("cache_start", "")
+        self.cache_end = kwargs.get("cache_end", "")
         self.zip_persist = kwargs.get("zip_persist", "")
 
     def write_memento_file(self, base_dir: str = "") -> None:
@@ -76,7 +77,7 @@ class Record:  # noqa:H601
             print(  # noqa:T201,BLK100
                 "Error: create_record_data_dir not provided base_dir="
             )
-            raise SystemExit from err
+            raise SystemExit(1) from err
 
     def delete_momento_file(self) -> None:
         """Delete memento file."""
@@ -101,9 +102,9 @@ class Record:  # noqa:H601
         record_dict: dict = {}
 
         with (
-            momento_path.open(  # noqa:BLK100
+            momento_path.open(
                 "r", encoding="UTF-8"
-            ) as json_read,
+            ) as json_read,  # noqa:BLK100
             contextlib.suppress(Exception),
         ):
             while True:
@@ -134,10 +135,10 @@ class Record:  # noqa:H601
             "data_tk": self.data_tk,
             "zip_filename": self.zip_filename,
             "csv_filename": self.csv_filename,
-            "jay_line_count": self.jay_line_count,
-            "jay_start": self.jay_start,
-            "jay_end": self.jay_end,
-            "jay_filename": self.jay_filename,
+            "cache_line_count": self.cache_line_count,
+            "cache_start": self.cache_start,
+            "cache_end": self.cache_end,
+            "cache_filename": self.cache_filename,
             "zip_persist": self.zip_persist,
         }
 
@@ -210,7 +211,7 @@ class Record:  # noqa:H601
             print(  # noqa:BLK100,T201
                 "Error: create_record_data_dir not provided base_dir="
             )
-            raise SystemExit from err
+            raise SystemExit(1) from err
 
     def __call__(self, **kwargs: str) -> Any:
         """Set instance attribute by kwargs.

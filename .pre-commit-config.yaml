@@ -1,5 +1,5 @@
 files: (src/|tests/)
-default_stages: [commit-msg, commit, push]
+default_stages: [commit-msg, pre-commit, pre-push]
 repos:
 - hooks:
   - args:
@@ -11,6 +11,7 @@ repos:
   rev: 22.10.0
 - hooks:
   - additional_dependencies:
+    - setuptools<81
     - bandit
     - flake8-bandit
     - black
@@ -92,8 +93,9 @@ repos:
   rev: v2.6
 - hooks:
   - id: sourcery
+    require_serial: true
   repo: https://github.com/sourcery-ai/sourcery
-  rev: v1.0.1
+  rev: v1.43.0
 - hooks:
   - id: pylint
     entry: pylint
@@ -155,4 +157,4 @@ repos:
   hooks:
     - id: commitizen
     - id: commitizen-branch
-      stages: [push]
+      stages: [pre-push]

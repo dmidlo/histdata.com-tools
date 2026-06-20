@@ -33,7 +33,7 @@ LEGACY_CACHE_ERROR = (
 
 @dataclass(frozen=True)
 class CacheSummary:
-    """Data-file summary currently stored in Record jay metadata fields."""
+    """Data-file summary currently stored in Record cache metadata fields."""
 
     line_count: int
     start: int
@@ -101,13 +101,17 @@ def parse_histdata_datetime_to_utc_ms(value: str, timeframe: str) -> int:
 
 def normalize_ascii_row(
     timeframe: str, row: Sequence[str]
-) -> tuple[int, float, float, float, float, int] | tuple[int, float, float, int]:
+) -> tuple[int, float, float, float, float, int] | tuple[
+    int, float, float, int
+]:
     """Normalize a raw HistData ASCII row into typed values."""
     values = tuple(cell.strip() for cell in row)
     match timeframe:
         case "M1":
             if len(values) != 6:
-                raise ValueError(f"M1 rows must have 6 fields, got {len(values)}")
+                raise ValueError(
+                    f"M1 rows must have 6 fields, got {len(values)}"
+                )
             return (
                 parse_histdata_datetime_to_utc_ms(values[0], timeframe),
                 float(values[1]),
@@ -118,7 +122,9 @@ def normalize_ascii_row(
             )
         case "T":
             if len(values) != 4:
-                raise ValueError(f"T rows must have 4 fields, got {len(values)}")
+                raise ValueError(
+                    f"T rows must have 4 fields, got {len(values)}"
+                )
             return (
                 parse_histdata_datetime_to_utc_ms(values[0], timeframe),
                 float(values[1]),
@@ -149,7 +155,9 @@ def read_ascii_file(path: Path, timeframe: str) -> ParsedAsciiBatch:
     """Parse a plain CSV file or a ZIP containing one HistData CSV file."""
     if path.suffix == ".zip":
         with zipfile.ZipFile(path) as archive:
-            names = tuple(name for name in archive.namelist() if not name.endswith("/"))
+            names = tuple(
+                name for name in archive.namelist() if not name.endswith("/")
+            )
             if len(names) != 1:
                 raise ValueError("expected ZIP archive to contain one CSV file")
             with archive.open(names[0]) as source:
@@ -173,7 +181,9 @@ def summarize_rows(rows: Sequence[Sequence[Any]]) -> CacheSummary:
 
 def rows_as_records(batch: ParsedAsciiBatch) -> tuple[dict[str, Any], ...]:
     """Return row dictionaries with the same field names as API dataframes."""
-    return tuple(dict(zip(batch.columns, row, strict=True)) for row in batch.rows)
+    return tuple(
+        dict(zip(batch.columns, row, strict=True)) for row in batch.rows
+    )
 
 
 def _arrow_type_for_column(column: str) -> Any:
@@ -207,7 +217,9 @@ def raw_polars_schema_for_timeframe(timeframe: str) -> dict[str, Any]:
     import polars as pl
 
     return {
-        column: pl.Utf8 if column == "datetime" else _polars_type_for_column(column)
+        column: pl.Utf8
+        if column == "datetime"
+        else _polars_type_for_column(column)
         for column in columns_for_timeframe(timeframe)
     }
 
@@ -240,18 +252,17 @@ def polars_datetime_to_utc_ms_expr(
             raise ValueError(f"unsupported ASCII timeframe: {timeframe}")
 
     return (
-        parsed.dt.epoch("ms")
-        + EST_NO_DST_OFFSET_MS
-    ).cast(pl.Int64).alias(column)
+        (parsed.cast(pl.Int64) + EST_NO_DST_OFFSET_MS)
+        .cast(pl.Int64)
+        .alias(column)
+    )
 
 
 def convert_polars_datetime_to_utc_ms(
     frame: Any, timeframe: str, column: str = "datetime"
 ) -> Any:
     """Convert a raw Polars HistData datetime column to UTC epoch millis."""
-    return frame.with_columns(
-        polars_datetime_to_utc_ms_expr(timeframe, column)
-    )
+    return frame.with_columns(polars_datetime_to_utc_ms_expr(timeframe, column))
 
 
 def _read_csv_to_polars(source: Any, timeframe: str) -> Any:
@@ -341,8 +352,7 @@ def to_polars_frame(batch: ParsedAsciiBatch) -> Any:
         for index, column in enumerate(batch.columns)
     }
     schema = {
-        column: _polars_type_for_column(column)
-        for column in batch.columns
+        column: _polars_type_for_column(column) for column in batch.columns
     }
     return pl.DataFrame(data, schema=schema)
 
@@ -362,7 +372,9 @@ def convert_batch_for_api(batch: ParsedAsciiBatch, return_type: str) -> Any:
             raise ValueError(f"unsupported API return type: {return_type}")
 
 
-def merge_batches(batches: Iterable[ParsedAsciiBatch]) -> tuple[tuple[Any, ...], ...]:
+def merge_batches(
+    batches: Iterable[ParsedAsciiBatch],
+) -> tuple[tuple[Any, ...], ...]:
     """Merge batches in current record-start order."""
     ordered = sorted(batches, key=lambda batch: str(batch.summary.start))
     return tuple(row for batch in ordered for row in batch.rows)

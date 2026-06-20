@@ -1,4 +1,5 @@
 """Utilities for histdatacom."""
+
 from __future__ import annotations
 
 import hashlib
@@ -100,7 +101,11 @@ def set_working_data_dir(data_dir_name: str) -> str:
     Returns:
         str: working dir string
     """
-    return f"{Path.cwd()}{os.sep}{data_dir_name}{os.sep}"
+    data_dir = Path(data_dir_name).expanduser()
+    if not data_dir.is_absolute():
+        data_dir = Path.cwd() / data_dir
+
+    return f"{data_dir}{os.sep}"
 
 
 def load_influx_yaml() -> dict | Any:
@@ -122,17 +127,17 @@ def load_influx_yaml() -> dict | Any:
             try:
                 yaml_file = yaml.safe_load(file)
             except yaml.YAMLError as exc:
-                raise SystemExit from exc
+                raise SystemExit(1) from exc
 
         return yaml_file
 
-    print(  # noqa:T201
+    print(
         """ ERROR: -I flag is used to import data to a influxdb instance...
                         there is no influxdb.yaml file in working directory.
                         did you forget to set it up?
             """
-    )
-    raise SystemExit
+    )  # noqa:T201
+    raise SystemExit(1)
 
 
 def get_current_datemonth_gmt_minus5() -> str:

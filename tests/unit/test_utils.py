@@ -1,11 +1,16 @@
 """Pytest unit tests for histdatacom.utils.py."""
 
+import os
+from pathlib import Path
+
 import pytest
 
 from histdatacom.utils import (
     SUPPORTED_API_RETURN_TYPES,
     check_installed_module,
+    load_influx_yaml,
     normalize_api_return_type,
+    set_working_data_dir,
 )
 
 
@@ -33,7 +38,7 @@ def test_normalize_api_return_type(
     assert normalize_api_return_type(return_type) == expected
 
 
-@pytest.mark.parametrize("return_type", ("numpy", "datatable"))
+@pytest.mark.parametrize("return_type", ("numpy", "sqlite"))
 def test_normalize_api_return_type_rejects_unsupported_values(
     return_type: str,
 ) -> None:
@@ -57,3 +62,35 @@ def test_api_return_type_contract_is_explicit() -> None:
 def test_check_installed_module_accepts_polars_return_type() -> None:
     """Polars is now the default dataframe dependency."""
     assert check_installed_module("polars")
+
+
+def test_set_working_data_dir_expands_relative_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Relative data directories resolve under the current working directory."""
+    monkeypatch.chdir(tmp_path)
+
+    assert set_working_data_dir("data/live") == (
+        f"{tmp_path}{os.sep}data{os.sep}live{os.sep}"
+    )
+
+
+def test_set_working_data_dir_preserves_absolute_paths(
+    tmp_path: Path,
+) -> None:
+    """Absolute data directories should not be relocated under cwd."""
+    data_dir = tmp_path / "histdatacom-live"
+
+    assert set_working_data_dir(str(data_dir)) == f"{data_dir}{os.sep}"
+
+
+def test_load_influx_yaml_missing_config_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing Influx config should be a failed CLI precondition."""
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as err:
+        load_influx_yaml()
+
+    assert err.value.code == 1

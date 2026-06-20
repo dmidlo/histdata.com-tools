@@ -1,8 +1,8 @@
 """Api functions for histdatacom.
 
 Raises:
-    ValueError: On failed jay creation
-    SystemExit: On failed jay creation
+    ValueError: On failed cache creation
+    SystemExit: On failed cache creation
 
 Returns:
     "PolarsDataFrame" | "DataFrame" | "Table":
@@ -10,6 +10,7 @@ Returns:
         - (DataFrame) if options.api_return_type = "pandas"
         - (Table) if options.api_return_type = "arrow"
 """
+
 from __future__ import annotations
 
 import sys  # sourcery skip
@@ -42,8 +43,8 @@ class Api:  # noqa:H601
     """Api functions for histdatacom.
 
     Raises:
-        ValueError: On failed jay creation
-        SystemExit: On failed jay creation
+        ValueError: On failed cache creation
+        SystemExit: On failed cache creation
 
     Returns:
         "PolarsDataFrame" | "DataFrame" | "Table":
@@ -53,7 +54,7 @@ class Api:  # noqa:H601
     """
 
     @classmethod
-    def _create_jay(cls, record: "Record", args: dict) -> None:
+    def _create_cache(cls, record: "Record", args: dict) -> None:
         """Create cache file based on single record's data.
 
         creates a Polars dataframe, saves it in Arrow IPC format
@@ -73,15 +74,15 @@ class Api:  # noqa:H601
         else:
             raise ValueError("expected downloaded ZIP or CSV source file")
 
-        record.jay_filename = CACHE_FILENAME
-        jay_path = record.data_dir + record.jay_filename
-        cls._write_cache_data(file_data, jay_path)
+        record.cache_filename = CACHE_FILENAME
+        cache_path = record.data_dir + record.cache_filename
+        cls._write_cache_data(file_data, cache_path)
 
-        record.jay_line_count = file_data.height
-        record.jay_start = str(
+        record.cache_line_count = file_data.height
+        record.cache_start = str(
             cls._extract_single_value_from_frame(file_data, 0, "datetime")
         )
-        record.jay_end = str(
+        record.cache_end = str(
             cls._extract_single_value_from_frame(
                 file_data, file_data.height - 1, "datetime"
             )
@@ -89,10 +90,10 @@ class Api:  # noqa:H601
         record.write_memento_file(base_dir=args["default_download_dir"])
 
     @classmethod
-    def test_for_jay_or_create(cls, record: Record, args: dict) -> None:
-        """Test for record's jay file. if it doesn't exist, create it.
+    def test_for_cache_or_create(cls, record: Record, args: dict) -> None:
+        """Test for record's cache file. if it doesn't exist, create it.
 
-           a helper method to ensure the existence of a Record's jay file
+           a helper method to ensure the existence of a Record's cache file
            prior to further processing from the API or Influx classes
 
         Args:
@@ -105,21 +106,21 @@ class Api:  # noqa:H601
             "T",
             "M1",
         ]:
-            jay_path = Path(record.data_dir, CACHE_FILENAME)
-            if not jay_path.exists():
+            cache_path = Path(record.data_dir, CACHE_FILENAME)
+            if not cache_path.exists():
                 if "CSV" not in record.status:
                     Scraper.get_zip_file(record)
-                cls._create_jay(record, args)
+                cls._create_cache(record, args)
 
     @classmethod
-    def _validate_jay(
+    def _validate_cache(
         cls,
         record: Record,
         args: dict,
         records_current: Records,
         records_next: Records,
     ) -> None:
-        """Validate Jay prior to possible merge operation.
+        """Validate Cache prior to possible merge operation.
 
            A Wrapper to be passed to an individual process within the process
            pool to test for or create a Polars cache file based on a Record of
@@ -139,7 +140,7 @@ class Api:  # noqa:H601
             Exception: Unknown Exception
         """
         try:
-            cls.test_for_jay_or_create(record, args)
+            cls.test_for_cache_or_create(record, args)
             records_next.put(record)
         except Exception:
             print("Unexpected error:", sys.exc_info())  # noqa:T201
@@ -194,7 +195,7 @@ class Api:  # noqa:H601
                 record.data_timeframe,
             )
         except ValueError as err:
-            raise SystemExit from err
+            raise SystemExit(1) from err
 
     @classmethod
     def _import_frame_with_headers(  # noqa:BLK001
@@ -238,10 +239,10 @@ class Api:  # noqa:H601
         """
         return read_polars_cache(Path(cache_path))
 
-    def validate_jays(self) -> None:
-        """Initialize a process pool to validate jay files."""
+    def validate_caches(self) -> None:
+        """Initialize a process pool to validate cache files."""
         pool = ProcessPool(
-            self._validate_jay,
+            self._validate_cache,
             config.ARGS,
             "Staging",
             "data files...",
@@ -249,7 +250,7 @@ class Api:  # noqa:H601
         )
         pool(config.CURRENT_QUEUE, config.NEXT_QUEUE)
 
-    def merge_jays(self) -> list | PolarsDataFrame | DataFrame | Table:
+    def merge_caches(self) -> list | PolarsDataFrame | DataFrame | Table:
         """Merge caches for start_yearmonth and end_yearmonth range.
 
         Returns:
@@ -284,7 +285,7 @@ class Api:  # noqa:H601
         """
         import polars as pl
 
-        tp_set_dict["records"].sort(key=lambda record: record.jay_start)
+        tp_set_dict["records"].sort(key=lambda record: record.cache_start)
 
         frames = []
         records_count = len(tp_set_dict["records"])
@@ -298,8 +299,8 @@ class Api:  # noqa:H601
                 task_id = progress.add_task("merge", total=records_count)
 
                 for m_record in tp_set_dict["records"]:
-                    jay_path = m_record.data_dir + m_record.jay_filename
-                    frames.append(self.import_cache_data(jay_path))
+                    cache_path = m_record.data_dir + m_record.cache_filename
+                    frames.append(self.import_cache_data(cache_path))
                     progress.advance(task_id)
 
         merged = pl.concat(frames) if frames else pl.DataFrame()
@@ -332,8 +333,8 @@ class Api:  # noqa:H601
                 break
 
             if (
-                record.jay_filename == CACHE_FILENAME
-                and Path(record.data_dir, record.jay_filename).exists()
+                record.cache_filename == CACHE_FILENAME
+                and Path(record.data_dir, record.cache_filename).exists()
             ):
                 records_to_merge.append(record)
 

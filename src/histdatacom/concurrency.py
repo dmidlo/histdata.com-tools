@@ -5,6 +5,7 @@ Raises:
                     low, medium, or high. or integer percent 1-200
     SystemExit: exit on error
 """
+
 # pylint: disable=redefined-outer-name
 from __future__ import annotations
 
@@ -282,7 +283,7 @@ def get_pool_cpu_count(count: str | int | None = None) -> int:  # noqa:CCR001
 
         return count - 1 if count > 2 else ceil(count / 2)  # noqa:TC300
     except ValueError as err:
-        raise SystemExit from err
+        raise SystemExit(1) from err
 
 
 class QueueManager:
@@ -363,9 +364,12 @@ def _complete_future(
         futures (list): list of futures.
         future (Future): future from pool.
     """
-    progress.advance(task_id, 0.75)
-    futures.remove(future)
-    del future  # noqa:WPS100
+    try:
+        future.result()
+    finally:
+        progress.advance(task_id, 0.75)
+        futures.remove(future)
+        del future  # noqa:WPS100
 
 
 def _on_keyboard_interrupt(

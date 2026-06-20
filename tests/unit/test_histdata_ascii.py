@@ -198,8 +198,7 @@ def test_polars_ingest_reads_csv_fixtures_with_stable_raw_schema(
     assert frame.schema["datetime"] == pl.String
     assert frame.schema["vol"] == pl.Int32
     assert all(
-        frame.schema[column] == pl.Float64
-        for column in expected_columns[1:-1]
+        frame.schema[column] == pl.Float64 for column in expected_columns[1:-1]
     )
 
 
@@ -320,8 +319,7 @@ def test_polars_timestamp_conversion_matches_characterization_values(
     ]
     assert frame.schema["vol"] == pl.Int32
     assert all(
-        frame.schema[column] == pl.Float64
-        for column in frame.columns[1:-1]
+        frame.schema[column] == pl.Float64 for column in frame.columns[1:-1]
     )
 
 
@@ -409,7 +407,9 @@ def test_timestamp_conversion_uses_fixed_est_no_dst_offset(
 ) -> None:
     """DST boundary examples prove the current conversion is fixed EST, not local."""
     assert EST_NO_DST_OFFSET_MS == 18_000_000
-    assert parse_histdata_datetime_to_utc_ms(raw_value, timeframe) == expected_ms
+    assert (
+        parse_histdata_datetime_to_utc_ms(raw_value, timeframe) == expected_ms
+    )
 
 
 def test_summarize_rows_rejects_empty_inputs() -> None:
@@ -437,9 +437,7 @@ def test_invalid_or_unsupported_ascii_rows_fail_fast(
 def test_merge_batches_orders_by_cache_start_and_preserves_rows() -> None:
     """Current merge behavior sorts record batches by the cached start value."""
     first = read_ascii_file(FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv", "M1")
-    second = read_ascii_file(
-        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv", "T"
-    )
+    second = read_ascii_file(FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv", "T")
 
     assert merge_batches((second, first)) == (*first.rows, *second.rows)
 
@@ -485,8 +483,7 @@ def test_pandas_api_return_adapter_preserves_values_and_dtype_intent(
     assert str(frame.dtypes["datetime"]) == "int64"
     assert str(frame.dtypes["vol"]) == "int32"
     assert all(
-        str(frame.dtypes[column]) == "float64"
-        for column in batch.columns[1:-1]
+        str(frame.dtypes[column]) == "float64" for column in batch.columns[1:-1]
     )
 
 
@@ -510,7 +507,9 @@ def test_polars_api_return_adapter_preserves_values_and_dtype_intent(
     assert frame.to_dicts() == list(rows_as_records(batch))
     assert frame.schema["datetime"] == pl.Int64
     assert frame.schema["vol"] == pl.Int32
-    assert all(frame.schema[column] == pl.Float64 for column in batch.columns[1:-1])
+    assert all(
+        frame.schema[column] == pl.Float64 for column in batch.columns[1:-1]
+    )
 
 
 @pytest.mark.parametrize(

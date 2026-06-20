@@ -60,7 +60,7 @@ def test_influx_parser_accepts_rows_from_polars_cache(
         data_timeframe=timeframe,
     )
 
-    assert Influx()._parse_jay_row(row, influx_record) == expected_line
+    assert Influx()._parse_cache_row(row, influx_record) == expected_line
 
 
 def test_influx_polars_row_batches_honor_integer_batch_size(
@@ -86,7 +86,9 @@ def test_influx_polars_row_batches_honor_integer_batch_size(
 
 
 @pytest.mark.parametrize("batch_size", (0, -1, "0", "not-an-int", None))
-def test_influx_batch_size_requires_positive_integer(batch_size: object) -> None:
+def test_influx_batch_size_requires_positive_integer(
+    batch_size: object,
+) -> None:
     """Invalid Influx batch sizes should fail before queue processing."""
     from histdatacom.influx import _coerce_batch_size
 
@@ -94,7 +96,7 @@ def test_influx_batch_size_requires_positive_integer(batch_size: object) -> None
         _coerce_batch_size(batch_size)
 
 
-def test_import_jay_batches_polars_rows_into_influx_queue(
+def test_import_cache_batches_polars_rows_into_influx_queue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Import batching should submit bounded row groups to the queue flow."""
@@ -144,7 +146,7 @@ def test_import_jay_batches_polars_rows_into_influx_queue(
     queue = FakeQueue()
     record = SimpleNamespace(
         data_dir=str(tmp_path) + "/",
-        jay_filename=CACHE_FILENAME,
+        cache_filename=CACHE_FILENAME,
         data_fxpair="eurusd",
         data_format="ascii",
         data_timeframe="M1",
@@ -157,7 +159,7 @@ def test_import_jay_batches_polars_rows_into_influx_queue(
         FakeExecutor,
     )
 
-    Influx()._import_jay(
+    Influx()._import_cache(
         record,
         args,
         SimpleNamespace(),

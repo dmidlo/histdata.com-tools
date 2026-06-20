@@ -157,8 +157,8 @@ class _HistDataCom:  # noqa:R701
             self.scraper.download_zips()
             del self.scraper  # noqa:WPS100
             if config.ARGS["from_api"] and config.ARGS["api_return_type"]:
-                self.api.validate_jays()
-                return self.api.merge_jays()
+                self.api.validate_caches()
+                return self.api.merge_caches()
 
         if config.ARGS["extract_csvs"]:
             self.csvs.extract_csvs()

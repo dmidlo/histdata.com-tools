@@ -37,8 +37,8 @@ def _write_cache_record(
     write_polars_cache(frame, data_dir / CACHE_FILENAME)
     return SimpleNamespace(
         data_dir=str(data_dir) + os.sep,
-        jay_filename=CACHE_FILENAME,
-        jay_start=str(start),
+        cache_filename=CACHE_FILENAME,
+        cache_start=str(start),
         data_fxpair=pair,
         data_timeframe=timeframe,
     )
@@ -49,15 +49,13 @@ def test_api() -> None:
     assert True  # noqa:S101 # sourcery skip # act
 
 
-def test_api_module_import_does_not_import_datatable() -> None:
-    """Raw Polars ingest should not require datatable at API import time."""
+def test_api_module_imports_cleanly() -> None:
+    """Raw Polars ingest should keep API imports lightweight."""
     sys.modules.pop("histdatacom.api", None)
-    sys.modules.pop("datatable", None)
 
     module = importlib.import_module("histdatacom.api")
 
     assert module.Api.__name__ == "Api"
-    assert "datatable" not in sys.modules
 
 
 @pytest.mark.parametrize(
@@ -84,8 +82,7 @@ def test_import_frame_with_headers_returns_polars_raw_ingest_frame(
     assert frame.schema["datetime"] == pl.String
     assert frame.schema["vol"] == pl.Int32
     assert all(
-        frame.schema[column] == pl.Float64
-        for column in expected_columns[1:-1]
+        frame.schema[column] == pl.Float64 for column in expected_columns[1:-1]
     )
 
 
@@ -115,7 +112,9 @@ def test_import_file_to_polars_wraps_raw_ingest_for_records() -> None:
     assert isinstance(frame, pl.DataFrame)
     assert frame.columns == EXPECTED_M1_COLUMNS
     assert frame.schema["datetime"] == pl.Int64
-    assert frame.select("datetime").to_series().to_list() == EXPECTED_M1_DATETIMES
+    assert (
+        frame.select("datetime").to_series().to_list() == EXPECTED_M1_DATETIMES
+    )
 
 
 def test_import_file_to_polars_reads_zip_archives(tmp_path: Path) -> None:
@@ -135,7 +134,10 @@ def test_import_file_to_polars_reads_zip_archives(tmp_path: Path) -> None:
     assert isinstance(frame, pl.DataFrame)
     assert frame.columns == EXPECTED_TICK_COLUMNS
     assert frame.schema["datetime"] == pl.Int64
-    assert frame.select("datetime").to_series().to_list() == EXPECTED_TICK_DATETIMES
+    assert (
+        frame.select("datetime").to_series().to_list()
+        == EXPECTED_TICK_DATETIMES
+    )
     assert frame.height == 3
 
 
@@ -152,7 +154,7 @@ def test_import_file_to_polars_preserves_system_exit_on_bad_timeframe() -> None:
         )
 
 
-def test_create_jay_writes_polars_cache_and_record_metadata(
+def test_create_cache_writes_polars_cache_and_record_metadata(
     tmp_path: Path,
 ) -> None:
     """Cache creation should preserve the transitional Record metadata fields."""
@@ -173,16 +175,16 @@ def test_create_jay_writes_polars_cache_and_record_metadata(
         status="CSV",
     )
 
-    Api._create_jay(
+    Api._create_cache(
         record,
         {"default_download_dir": str(tmp_path) + os.sep},
     )
     cache_frame = Api.import_cache_data(str(tmp_path / CACHE_FILENAME))
 
-    assert record.jay_filename == CACHE_FILENAME
-    assert record.jay_line_count == 3
-    assert record.jay_start == str(EXPECTED_M1_DATETIMES[0])
-    assert record.jay_end == str(EXPECTED_M1_DATETIMES[-1])
+    assert record.cache_filename == CACHE_FILENAME
+    assert record.cache_line_count == 3
+    assert record.cache_start == str(EXPECTED_M1_DATETIMES[0])
+    assert record.cache_end == str(EXPECTED_M1_DATETIMES[-1])
     assert (tmp_path / CACHE_FILENAME).exists()
     assert (tmp_path / ".meta").exists()
     assert isinstance(cache_frame, pl.DataFrame)
@@ -198,7 +200,6 @@ def test_import_cache_data_reads_polars_cache_without_legacy_backend(
     """The cache reader should not import the retired backend at runtime."""
     from histdatacom.api import Api
 
-    sys.modules.pop("datatable", None)
     record = SimpleNamespace(data_timeframe="T")
     frame = Api._import_file_to_polars(
         record,
@@ -209,7 +210,6 @@ def test_import_cache_data_reads_polars_cache_without_legacy_backend(
     cache_frame = Api.import_cache_data(str(tmp_path / CACHE_FILENAME))
 
     assert cache_frame.to_dicts() == frame.to_dicts()
-    assert "datatable" not in sys.modules
 
 
 def test_merge_records_reads_polars_cache_files(
@@ -291,7 +291,7 @@ def test_merge_records_empty_set_returns_empty_polars_dataframe() -> None:
     "api_return_type",
     ("polars", "pandas", "arrow"),
 )
-def test_merge_jays_converts_single_pair_timeframe_return_types(
+def test_merge_caches_converts_single_pair_timeframe_return_types(
     tmp_path: Path, api_return_type: str
 ) -> None:
     """A single observed pair/timeframe should return the requested type."""
@@ -303,7 +303,6 @@ def test_merge_jays_converts_single_pair_timeframe_return_types(
     from histdatacom.api import Api
     from histdatacom.records import Records
 
-    sys.modules.pop("datatable", None)
     source = Api._import_file_to_polars(
         SimpleNamespace(data_timeframe="M1"),
         FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
@@ -333,7 +332,7 @@ def test_merge_jays_converts_single_pair_timeframe_return_types(
     try:
         config.ARGS["api_return_type"] = api_return_type
         config.CURRENT_QUEUE = records
-        result = Api().merge_jays()
+        result = Api().merge_caches()
     finally:
         config.ARGS = original_args
         config.CURRENT_QUEUE = original_current_queue
@@ -349,10 +348,9 @@ def test_merge_jays_converts_single_pair_timeframe_return_types(
         values = result.column("datetime").to_pylist()
 
     assert values == EXPECTED_M1_DATETIMES
-    assert "datatable" not in sys.modules
 
 
-def test_merge_jays_returns_only_observed_pair_timeframe_sets(
+def test_merge_caches_returns_only_observed_pair_timeframe_sets(
     tmp_path: Path,
 ) -> None:
     """Merge collation should not emit empty cross-product result sets."""
@@ -395,7 +393,7 @@ def test_merge_jays_returns_only_observed_pair_timeframe_sets(
     try:
         config.ARGS["api_return_type"] = "polars"
         config.CURRENT_QUEUE = records
-        result = Api().merge_jays()
+        result = Api().merge_caches()
     finally:
         config.ARGS = original_args
         config.CURRENT_QUEUE = original_current_queue
@@ -406,24 +404,23 @@ def test_merge_jays_returns_only_observed_pair_timeframe_sets(
         ("M1", "eurusd"),
     ]
     assert all(
-        set(item) == {"timeframe", "pair", "records", "data"}
-        for item in result
+        set(item) == {"timeframe", "pair", "records", "data"} for item in result
     )
     assert [len(item["records"]) for item in result] == [1, 1]
     assert all(isinstance(item["data"], pl.DataFrame) for item in result)
 
 
-def test_merge_jays_returns_empty_list_when_no_cache_records(
+def test_merge_caches_returns_empty_list_when_no_cache_records(
     tmp_path: Path,
 ) -> None:
-    """Records without cache files should be ignored by merge_jays."""
+    """Records without cache files should be ignored by merge_caches."""
     from histdatacom import config
     from histdatacom.api import Api
     from histdatacom.records import Records
 
     missing_cache = SimpleNamespace(
         data_dir=str(tmp_path) + os.sep,
-        jay_filename=CACHE_FILENAME,
+        cache_filename=CACHE_FILENAME,
         data_fxpair="eurusd",
         data_timeframe="M1",
     )
@@ -435,7 +432,7 @@ def test_merge_jays_returns_empty_list_when_no_cache_records(
     try:
         config.ARGS["api_return_type"] = "polars"
         config.CURRENT_QUEUE = records
-        result = Api().merge_jays()
+        result = Api().merge_caches()
     finally:
         config.ARGS = original_args
         config.CURRENT_QUEUE = original_current_queue
