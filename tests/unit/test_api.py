@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from histdatacom.histdata_ascii import CACHE_FILENAME
+from histdatacom.histdata_ascii import CACHE_FILENAME, write_polars_cache
 
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
@@ -20,6 +20,28 @@ EXPECTED_M1_COLUMNS = ["datetime", "open", "high", "low", "close", "vol"]
 EXPECTED_TICK_COLUMNS = ["datetime", "bid", "ask", "vol"]
 EXPECTED_M1_DATETIMES = [1328072400000, 1328072460000, 1328072520000]
 EXPECTED_TICK_DATETIMES = [1328072403660, 1328072403973, 1328072414990]
+
+
+def _write_cache_record(
+    tmp_path: Path,
+    dirname: str,
+    frame: object,
+    *,
+    pair: str,
+    timeframe: str,
+    start: int,
+) -> SimpleNamespace:
+    """Write a cache frame and return the minimal merge record shape."""
+    data_dir = tmp_path / dirname
+    data_dir.mkdir()
+    write_polars_cache(frame, data_dir / CACHE_FILENAME)
+    return SimpleNamespace(
+        data_dir=str(data_dir) + os.sep,
+        jay_filename=CACHE_FILENAME,
+        jay_start=str(start),
+        data_fxpair=pair,
+        data_timeframe=timeframe,
+    )
 
 
 def test_api() -> None:
@@ -216,28 +238,27 @@ def test_merge_records_reads_polars_cache_files(
 
     from histdatacom import config
     from histdatacom.api import Api
-    from histdatacom.histdata_ascii import write_polars_cache
 
     api = Api()
     source = Api._import_file_to_polars(
         SimpleNamespace(data_timeframe="M1"),
         FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
     )
-    first_dir = tmp_path / "first"
-    second_dir = tmp_path / "second"
-    first_dir.mkdir()
-    second_dir.mkdir()
-    write_polars_cache(source.slice(0, 1), first_dir / CACHE_FILENAME)
-    write_polars_cache(source.slice(1, 2), second_dir / CACHE_FILENAME)
-    first = SimpleNamespace(
-        data_dir=str(first_dir) + os.sep,
-        jay_filename=CACHE_FILENAME,
-        jay_start=str(EXPECTED_M1_DATETIMES[0]),
+    first = _write_cache_record(
+        tmp_path,
+        "first",
+        source.slice(0, 1),
+        pair="eurusd",
+        timeframe="M1",
+        start=EXPECTED_M1_DATETIMES[0],
     )
-    second = SimpleNamespace(
-        data_dir=str(second_dir) + os.sep,
-        jay_filename=CACHE_FILENAME,
-        jay_start=str(EXPECTED_M1_DATETIMES[1]),
+    second = _write_cache_record(
+        tmp_path,
+        "second",
+        source.slice(1, 2),
+        pair="eurusd",
+        timeframe="M1",
+        start=EXPECTED_M1_DATETIMES[1],
     )
     original_args = config.ARGS.copy()
 
@@ -257,3 +278,210 @@ def test_merge_records_reads_polars_cache_files(
     assert tp_set["data"].select("datetime").to_series().to_list() == (
         EXPECTED_M1_DATETIMES
     )
+
+
+def test_merge_records_empty_set_returns_empty_polars_dataframe() -> None:
+    """Empty merge sets should produce an intentional empty Polars frame."""
+    import polars as pl
+
+    from histdatacom import config
+    from histdatacom.api import Api
+
+    original_args = config.ARGS.copy()
+
+    try:
+        config.ARGS["api_return_type"] = "polars"
+        tp_set = {
+            "timeframe": "M1",
+            "pair": "eurusd",
+            "records": [],
+            "data": None,
+        }
+        Api()._merge_records(tp_set)
+    finally:
+        config.ARGS = original_args
+
+    assert isinstance(tp_set["data"], pl.DataFrame)
+    assert tp_set["data"].is_empty()
+
+
+def test_merge_records_legacy_datatable_return_type_stays_polars(
+    tmp_path: Path,
+) -> None:
+    """The legacy return key should not create datatable objects in merge."""
+    import polars as pl
+
+    from histdatacom import config
+    from histdatacom.api import Api
+
+    sys.modules.pop("datatable", None)
+    api = Api()
+    source = Api._import_file_to_polars(
+        SimpleNamespace(data_timeframe="T"),
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
+    )
+    record = _write_cache_record(
+        tmp_path,
+        "tick",
+        source,
+        pair="eurusd",
+        timeframe="T",
+        start=EXPECTED_TICK_DATETIMES[0],
+    )
+    original_args = config.ARGS.copy()
+
+    try:
+        config.ARGS["api_return_type"] = "datatable"
+        tp_set = {
+            "timeframe": "T",
+            "pair": "eurusd",
+            "records": [record],
+            "data": None,
+        }
+        api._merge_records(tp_set)
+    finally:
+        config.ARGS = original_args
+
+    assert isinstance(tp_set["data"], pl.DataFrame)
+    assert "datatable" not in sys.modules
+
+
+def test_merge_jays_returns_dataframe_for_single_pair_timeframe(
+    tmp_path: Path,
+) -> None:
+    """A single observed pair/timeframe should return the merged dataframe."""
+    import polars as pl
+
+    from histdatacom import config
+    from histdatacom.api import Api
+    from histdatacom.records import Records
+
+    source = Api._import_file_to_polars(
+        SimpleNamespace(data_timeframe="M1"),
+        FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+    )
+    first = _write_cache_record(
+        tmp_path,
+        "single-first",
+        source.slice(0, 1),
+        pair="eurusd",
+        timeframe="M1",
+        start=EXPECTED_M1_DATETIMES[0],
+    )
+    second = _write_cache_record(
+        tmp_path,
+        "single-second",
+        source.slice(1, 2),
+        pair="eurusd",
+        timeframe="M1",
+        start=EXPECTED_M1_DATETIMES[1],
+    )
+    records = Records()
+    records.put(second)
+    records.put(first)
+    original_args = config.ARGS.copy()
+    original_current_queue = config.CURRENT_QUEUE
+
+    try:
+        config.ARGS["api_return_type"] = "polars"
+        config.CURRENT_QUEUE = records
+        result = Api().merge_jays()
+    finally:
+        config.ARGS = original_args
+        config.CURRENT_QUEUE = original_current_queue
+
+    assert isinstance(result, pl.DataFrame)
+    assert result.select("datetime").to_series().to_list() == (
+        EXPECTED_M1_DATETIMES
+    )
+
+
+def test_merge_jays_returns_only_observed_pair_timeframe_sets(
+    tmp_path: Path,
+) -> None:
+    """Merge collation should not emit empty cross-product result sets."""
+    import polars as pl
+
+    from histdatacom import config
+    from histdatacom.api import Api
+    from histdatacom.records import Records
+
+    m1_source = Api._import_file_to_polars(
+        SimpleNamespace(data_timeframe="M1"),
+        FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+    )
+    tick_source = Api._import_file_to_polars(
+        SimpleNamespace(data_timeframe="T"),
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
+    )
+    tick_record = _write_cache_record(
+        tmp_path,
+        "gbpusd-tick",
+        tick_source,
+        pair="gbpusd",
+        timeframe="T",
+        start=EXPECTED_TICK_DATETIMES[0],
+    )
+    m1_record = _write_cache_record(
+        tmp_path,
+        "eurusd-m1",
+        m1_source,
+        pair="eurusd",
+        timeframe="M1",
+        start=EXPECTED_M1_DATETIMES[0],
+    )
+    records = Records()
+    records.put(tick_record)
+    records.put(m1_record)
+    original_args = config.ARGS.copy()
+    original_current_queue = config.CURRENT_QUEUE
+
+    try:
+        config.ARGS["api_return_type"] = "polars"
+        config.CURRENT_QUEUE = records
+        result = Api().merge_jays()
+    finally:
+        config.ARGS = original_args
+        config.CURRENT_QUEUE = original_current_queue
+
+    assert isinstance(result, list)
+    assert [(item["timeframe"], item["pair"]) for item in result] == [
+        ("T", "gbpusd"),
+        ("M1", "eurusd"),
+    ]
+    assert all(
+        set(item) == {"timeframe", "pair", "records", "data"}
+        for item in result
+    )
+    assert [len(item["records"]) for item in result] == [1, 1]
+    assert all(isinstance(item["data"], pl.DataFrame) for item in result)
+
+
+def test_merge_jays_returns_empty_list_when_no_cache_records(
+    tmp_path: Path,
+) -> None:
+    """Records without cache files should be ignored by merge_jays."""
+    from histdatacom import config
+    from histdatacom.api import Api
+    from histdatacom.records import Records
+
+    missing_cache = SimpleNamespace(
+        data_dir=str(tmp_path) + os.sep,
+        jay_filename=CACHE_FILENAME,
+        data_fxpair="eurusd",
+        data_timeframe="M1",
+    )
+    records = Records()
+    records.put(missing_cache)
+    original_args = config.ARGS.copy()
+    original_current_queue = config.CURRENT_QUEUE
+
+    try:
+        config.ARGS["api_return_type"] = "polars"
+        config.CURRENT_QUEUE = records
+        result = Api().merge_jays()
+    finally:
+        config.ARGS = original_args
+        config.CURRENT_QUEUE = original_current_queue
+
+    assert result == []

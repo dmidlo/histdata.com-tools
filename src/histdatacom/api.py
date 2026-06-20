@@ -12,10 +12,9 @@ Returns:
 """
 from __future__ import annotations
 
-import itertools
 import sys  # sourcery skip
 from pathlib import Path
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
@@ -263,14 +262,11 @@ class Api:  # noqa:H601
         Returns:
             list | DataFrame | Table: _description_
         """
-        records_to_merge: list
-        pairs: list
-        timeframes: list
+        records_to_merge: list = self._dequeue_records_for_merge()
+        sets_to_merge: list = self._collate_sets_to_merge(records_to_merge)
 
-        records_to_merge, pairs, timeframes = self._dequeue_records_for_merge()
-        sets_to_merge: list = self._collate_sets_to_merge(
-            records_to_merge, pairs, timeframes
-        )
+        if not sets_to_merge:
+            return []
 
         for tp_set in sets_to_merge:
             self._merge_records(tp_set)
@@ -296,48 +292,47 @@ class Api:  # noqa:H601
 
         tp_set_dict["records"].sort(key=lambda record: record.jay_start)
 
+        frames = []
         records_count = len(tp_set_dict["records"])
-        with Progress(
-            TextColumn(text_format="[cyan]Merging records..."),
-            BarColumn(),
-            "[progress.percentage]{task.percentage:>3.0f}%",
-            TimeElapsedColumn(),
-        ) as progress:
-            progress.add_task("merge", total=records_count)
+        if records_count:
+            with Progress(
+                TextColumn(text_format="[cyan]Merging records..."),
+                BarColumn(),
+                "[progress.percentage]{task.percentage:>3.0f}%",
+                TimeElapsedColumn(),
+            ) as progress:
+                task_id = progress.add_task("merge", total=records_count)
 
-            frames = []
-            for m_record in tp_set_dict["records"]:
-                jay_path = m_record.data_dir + m_record.jay_filename
-                frames.append(self.import_jay_data(jay_path))
+                for m_record in tp_set_dict["records"]:
+                    jay_path = m_record.data_dir + m_record.jay_filename
+                    frames.append(self.import_jay_data(jay_path))
+                    progress.advance(task_id)
 
-            merged = pl.concat(frames) if frames else pl.DataFrame()
+        merged = pl.concat(frames) if frames else pl.DataFrame()
 
-            match config.ARGS["api_return_type"]:
-                case "datatable":
-                    tp_set_dict["data"] = merged
-                case "arrow":
-                    check_installed_module("arrow", True)
-                    tp_set_dict["data"] = merged.to_arrow()
-                case "pandas":
-                    check_installed_module("pandas", True)
-                    tp_set_dict["data"] = merged.to_pandas()
-                case "polars":
-                    check_installed_module("polars", True)
-                    tp_set_dict["data"] = merged
+        match config.ARGS["api_return_type"]:
+            case "datatable":
+                tp_set_dict["data"] = merged
+            case "arrow":
+                check_installed_module("arrow", True)
+                tp_set_dict["data"] = merged.to_arrow()
+            case "pandas":
+                check_installed_module("pandas", True)
+                tp_set_dict["data"] = merged.to_pandas()
+            case "polars":
+                check_installed_module("polars", True)
+                tp_set_dict["data"] = merged
 
-    def _dequeue_records_for_merge(self) -> Tuple[list, list, list]:
+    def _dequeue_records_for_merge(self) -> list:
         """Empty the queue of relevant records.
 
-        Empty the queue of relevant records, create additional
-        lists for each pair and timeframe to appear in the set
-        of records.
+        Empty the queue of relevant records and return records whose cache
+        files exist.
 
         Returns:
-            Tuple[list, list, list]: records_to_merge, pairs, timeframes
+            list: records_to_merge
         """
         records_to_merge: list = []
-        pairs: list = []
-        timeframes: list = []
         while not config.CURRENT_QUEUE.empty():  # type: ignore
             record = config.CURRENT_QUEUE.get()  # type: ignore
 
@@ -348,39 +343,33 @@ class Api:  # noqa:H601
                 record.jay_filename == CACHE_FILENAME
                 and Path(record.data_dir, record.jay_filename).exists()
             ):
-                pairs.append(record.data_fxpair)
-                timeframes.append(record.data_timeframe)
                 records_to_merge.append(record)
 
-        return records_to_merge, pairs, timeframes
+        return records_to_merge
 
-    def _collate_sets_to_merge(
-        self, records_to_merge: list, pairs: list, timeframes: list
-    ) -> list:  # noqa:TAE002
+    def _collate_sets_to_merge(self, records_to_merge: list) -> list:
         """Organize records into pair/timeframe sets.
 
         Args:
             records_to_merge (list): list of records
-            pairs (list): list of pairs
-            timeframes (list): list of timeframes
 
         Returns:
             list: _description_
         """
         sets_to_merge = []
-        for timeframe, pair in itertools.product(set(timeframes), set(pairs)):
-            tp_set_dict = {
-                "timeframe": timeframe,
-                "pair": pair,
-                "records": [],
-                "data": None,
-            }
-            for m_record in records_to_merge:
-                if (
-                    m_record.data_timeframe == timeframe
-                    and m_record.data_fxpair == pair
-                ):
-                    tp_set_dict["records"].append(m_record)
-            sets_to_merge.append(tp_set_dict)
+        sets_by_key = {}
+        for m_record in records_to_merge:
+            key = (m_record.data_timeframe, m_record.data_fxpair)
+            if key not in sets_by_key:
+                tp_set_dict = {
+                    "timeframe": m_record.data_timeframe,
+                    "pair": m_record.data_fxpair,
+                    "records": [],
+                    "data": None,
+                }
+                sets_by_key[key] = tp_set_dict
+                sets_to_merge.append(tp_set_dict)
+
+            sets_by_key[key]["records"].append(m_record)
 
         return sets_to_merge
