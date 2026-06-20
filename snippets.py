@@ -1,50 +1,18 @@
-# import datatable as dt
-# from datatable import f
-
-# Try something like this
-# DT = dt.Frame(["20220401 001612839"])
-# print(DT)
-#    | C0
-#    | str32
-# -- + ------------------
-#  0 | 20220401 000012839
-
-# year, month, day, hour
-
-# DT = DT[:, dt.time.ymdt(f[:][0:4].as_type(int), \
-#                         f[:][4:6].as_type(int), \
-#                         f[:][6:8].as_type(int), \
-#                         f[:][9:11].as_type(int), \
-#                         f[:][11:13].as_type(int), \
-#                         f[:][13:15].as_type(int), \
-#                         10**6 * f[:][15:18].as_type(int))]
-
-# # >    | C0
-# # >    | time64
-# # > -- + -----------------------
-# # >  0 | 2022-04-01T00:00:12.839
-# # > [1 row x 1 column]
-# print(DT)
-# DT = DT[:, (f[:].as_type(int)//10**6)]
-# print(DT)
-# DT = DT[:, f[:].as_type(dt.Type.time64)**6]
-# print(DT)
-# print(DT)
-# >    |            C0
-# >    |         int64
-# > -- + -------------
-# >  0 | 1648771212839
-# > [1 row x 1 column]
-
-# DT = dt.Frame(["20220401 000012839"])
-# DT = DT[:, f[:][0:4]+"-"+f[:][4:6]+"-"+f[:][6:8]+" "+f[:][9:11]+":"+f[:][11:13]+":"+f[:][13:15]+"."+f[:][15:18]]
-# DT[0] = dt.Type.time64
-# print(DT[:, f[:].as_type(int)//10**6])
-#    |            C0
-#    |         int64
-# -- + -------------
-#  0 | 1648771212839
-# [1 row x 1 column]
+# Polars timestamp sketch used while validating HistData tick timestamps.
+# import polars as pl
+#
+# frame = pl.DataFrame({"datetime": ["20220401 000012839"]})
+# timestamp = pl.datetime(
+#     pl.col("datetime").str.slice(0, 4).cast(pl.Int32),
+#     pl.col("datetime").str.slice(4, 2).cast(pl.Int32),
+#     pl.col("datetime").str.slice(6, 2).cast(pl.Int32),
+#     pl.col("datetime").str.slice(9, 2).cast(pl.Int32),
+#     pl.col("datetime").str.slice(11, 2).cast(pl.Int32),
+#     pl.col("datetime").str.slice(13, 2).cast(pl.Int32),
+#     pl.col("datetime").str.slice(15, 3).cast(pl.Int32) * 1_000,
+#     time_unit="ms",
+# ).dt.epoch("ms")
+# print(frame.with_columns(timestamp.alias("datetime")))
 
 # histdatacom -I -p eurusd usdjpy gbpusd usdcad usdchf audusd nzdusd -f ascii -t tick-data-quotes -s start -e now
 # histdatacom -I -p eurgbp euraud gbpchf audnzd audcad audchf gbpaud usdmxn -f ascii -t tick-data-quotes -s start -e now -c low
@@ -161,9 +129,9 @@ def get_available_range_data(pairs):
     return range_data
 
 
-def print_one_datatable_frame(pair, start=None, end=None):
+def print_one_polars_frame(pair, start=None, end=None):
     options = Options()
-    options.api_return_type = "datatable"
+    options.api_return_type = "polars"
     options.pairs = {f"{pair}"}
     options.start_yearmonth = "201501"
     options.formats = {"ascii"}

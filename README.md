@@ -34,7 +34,6 @@ A Multi-threaded/Multi-Process command-line utility and python ETL package that 
   - [Anaconda Setup](#anaconda-setup)
     - [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
     - [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
-  - [Data Table Installation Options](#datatable-installation-options)
 - [Roadmap](#roadmap)
 
 ---
@@ -361,13 +360,14 @@ As opposed to the `CLI` interface, one may wish to load data from histdata.com a
 
 - return types can be:
 
-  - A `datatable` Frame
+  - a `polars` dataframe
   - a `pandas` dataframe
-  - in Apache `arrow` in-memory format
+  - a `pyarrow` table
 
-- *to use `pandas` or `arrow` formats you must install the required packages*
-  - `pip install pandas`
-  - `pip install pyarrow`
+- `polars` is installed with `histdatacom`.
+- *to use `pandas` or `arrow` return formats, install the optional extras*
+  - `pip install "histdatacom[pandas]"`
+  - `pip install "histdatacom[arrow]"`
 
 - ***All datetime is returned as milliseconds since January 1, 1970 (midnight UTC/GMT)***
 
@@ -387,7 +387,7 @@ options = Options()
 ##### Jupyter & External Script Options
 
 ```python
-options.api_return_type = "pandas"  # "datatable", "pandas", or "arrow"
+options.api_return_type = "polars"  # "polars", "pandas", or "arrow"
 options.formats = {"ascii"}  # Must be {"ascii"}
 options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
 options.pairs = {"eurusd"}
@@ -404,26 +404,13 @@ options.cpu_utilization = "high"
 ```python
 data = histdatacom(options)  # (Jupyter)
 
-print(data)
+print(data.shape)
 print(type(data))
 ```
 
 ```text
-              datetime      bid      ask  vol
-0         1617253200478  1.17243  1.17244    0
-1         1617253206261  1.17246  1.17248    0
-2         1617253206362  1.17247  1.17249    0
-3         1617253206946  1.17247  1.17250    0
-4         1617253207121  1.17249  1.17250    0
-...                 ...      ...      ...  ...
-18648493  1650664783081  1.07968  1.08042    0
-18648494  1650664783182  1.07968  1.08039    0
-18648495  1650664790108  1.07964  1.08032    0
-18648496  1650664790958  1.07947  1.08032    0
-18648497  1650664794462  1.07947  1.08032    0
-
-[18648498 rows x 4 columns]
-<class 'pandas.core.frame.DataFrame'>
+(18648498, 4)
+<class 'polars.dataframe.frame.DataFrame'>
 ```
 
 - When specifying more than one pair/symbol/instrument or timeframe, the api will return an ***list of dictionaries*** with references to the timeframe, pair, records used to create the data, and the merged data itself.
@@ -560,9 +547,9 @@ def get_available_range_data(pairs):
     range_data = histdatacom(range_options)  # (Jupyter)
     return range_data
 
-def print_one_datatable_frame(pair, start=None, end=None):
+def print_one_polars_frame(pair, start=None, end=None):
     options = Options()
-    options.api_return_type = "datatable"
+    options.api_return_type = "polars"
     options.pairs = {f"{pair}"}
     options.start_yearmonth = "201501"
     options.formats = {"ascii"}
@@ -602,21 +589,17 @@ if __name__ == '__main__':
 
 ---
 
-#### Install the latest version of datatable
-
-- **this is a temporary fix until the datatable team updates PyPi. [See this issue](https://github.com/h2oai/datatable/issues/3268) for more details*
-
-check out the section: [Data Table Installation Options](#datatable-installation-options) to either:
-
-- [install a build wheel from Datatable's Appveyor CI/CD pipeline](#install-from-appveyor), or;
-- [build from source](#build-from-source)
-
----
-
 #### Install histdatacom
 
 ```sh
 pip install histdatacom
+```
+
+Polars is installed by default. To request optional API return formats:
+
+```sh
+pip install "histdatacom[pandas]"
+pip install "histdatacom[arrow]"
 ```
 
 to install latest development version
@@ -646,10 +629,6 @@ python -m venv venv && source venv/bin/activate
 ```bash
 which python && python --version
 ```
-
-##### Build the latest version of datatable
-
-follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
 
 ##### Install the histdata.com-tools package from PyPi
 
@@ -709,10 +688,6 @@ python -m venv venv; .\venv\Scripts\Activate.ps1
 Get-Command python | select Source; python --version
 ```
 
-##### Build the latest version of datatable
-
-follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
-
 ##### Install histdata.com-tools package from PyPi
 
 ```powershell
@@ -751,10 +726,6 @@ conda create -n py310 python=3.10 && conda activate py310
 which python && python --version
 ```
 
-###### Build the latest version of datatable
-
-follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
-
 ###### Install histdatacom package from PyPi
 
 ```shell
@@ -790,10 +761,6 @@ conda create -n py310 python=3.10 && conda activate py310
 where python && python --version
 ```
 
-###### Build the latest version of datatable
-
-follow the instructions from [Install the latest version of datatable](#install-the-latest-version-of-datatable)
-
 ###### Install histdatacom package from PyPi
 
 ```shell
@@ -804,106 +771,6 @@ pip install histdatacom
 
 ```shell
 histdatacom -h
-```
-
----
-
-### Datatable Installation Options
-
----
-
-#### Install from Appveyor
-
-Build wheels are pre-compiled versions of datatable, and would easily be the preferred route of installation while we wait for the datatable team to provide an official Python 3.10 package on PyPi.  The only drawback is documenting the procedure as the wheel's URL expires monthly thus this documentation could go out of date rather quickly...
-
-##### Activate Python Environment if you're using one
-
-refer to the **Create a Python Virtual Environment and activate it** steps outlined for your platform
-
-- [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
-- [Vanilla Windows Powershell](#vanilla-windows-powershell)
-- [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
-- [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
-
-##### Get the Build Wheel's URL for your platform
-
-To find the latest build wheels for datatable, go to dataable's [Appveyor CI/CD Instance](https://ci.appveyor.com/project/h2oops/datatable):
-
-- Select the Platform you're installing for:
-  - ![image](https://user-images.githubusercontent.com/1161295/175226383-5211e4f9-9718-4f0b-9c00-713067f62f02.png)
-- Select `"Artifacts"` and right/option-click on the filename that contains `cp310`. e.g. `dist\datatable-1.1.0a2157-cp310-cp310-win_amd64.whl`
-- Select `"Copy Link Address"` from your browser's context menu to copy the wheel's URL
-  - ![image](https://user-images.githubusercontent.com/1161295/175226442-ffcf8370-31bb-426c-a8e9-09ab29db91e0.png)
-
-##### Install datatable using pip with the wheel's URL from Appveyor
-
-e.g. `pip install {https://APPVEYOR DATATABLE BUILD WHEEL URL.whl}`
-
----
-
-#### Build from Source
-
-- You will need a C++ compiler installed to build datatable from source
-
----
-
-##### MacOS XCode Command Line Tools
-
-- For **MacOS**, run `xcode-select --install` from your terminal and confirm the prompts for download and installation of the xcode command-line tools.
-
----
-
-##### Windows MSVC C++ Compiler
-
-- For **Windows**, you need to download and install the [Visual Studio Community Edition](https://visualstudio.microsoft.com/vs/community/) and choose the option `Desktop Development with C++`, then select install.
-
----
-
-###### Launch the Visual Studio command line environment (for Windows only)
-
-- Open either a `powershell`, `cmd`, or `Anaconda Prompt` terminal
-  - the setup scripts for the VS CLI environments are located in the `.\Common7\Tools\` directory of your Visual Studio installation directory
-    - e.g. `"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\"`
-- Run the VS CLI environment setup script
-  - for **Powershell**:
-    - `PS> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1"`
-  - for **CMD** and **Anaconda Prompt**:
-    - `> "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\LaunchDevCmd.bat"`
-
----
-
-###### Tell the datatable setup where to find the MSVC C++ compiler
-
-- for **Powershell**:
-  - `PS> $env:DT_MSVC_PATH="$env:VSINSTALLDIR"+"VC\Tools\MSVC\"`
-- for **CMD** and **Anaconda Prompt**:
-  - `set DT_MSVC_PATH=%VSINSTALLDIR%VC\Tools\MSVC\`
-
----
-
-###### Return to Your Project's Directory
-
-The Visual Studio command line environment setup scripts change your directory, you'll need to find your way back to your project's directory.  I like to use the variable `%USERPROFILE%` to save myself some typing:
-
-*e.g.* `> cd %USERPROFILE%\Documents\projects\myproject`
-
----
-
-##### Activate Python Environment if you're using one
-
-refer to the **Create a Python Virtual Environment and activate it** steps outlined for your platform
-
-- [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
-- [Vanilla Windows Powershell](#vanilla-windows-powershell)
-- [Anaconda MacOS and Linux](#anaconda-macos-and-linux)
-- [Anaconda Windows using the Anaconda Prompt](#anaconda-windows-using-the-anaconda-prompt)
-
----
-
-##### Install datatable
-
-```shell
-pip install git+https://github.com/h2oai/datatable
 ```
 
 ---
