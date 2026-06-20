@@ -181,6 +181,19 @@ def _arrow_type_for_column(column: str) -> Any:
             return pa.float64()
 
 
+def _polars_type_for_column(column: str) -> Any:
+    """Return the Polars type that preserves current dataframe dtype intent."""
+    import polars as pl
+
+    match column:
+        case "datetime":
+            return pl.Int64
+        case "vol":
+            return pl.Int32
+        case _:
+            return pl.Float64
+
+
 def to_arrow_table(batch: ParsedAsciiBatch) -> Any:
     """Convert parsed rows to the Arrow table shape returned by the API."""
     import pyarrow as pa
@@ -207,6 +220,21 @@ def to_pandas_frame(batch: ParsedAsciiBatch) -> Any:
     return frame.astype({"datetime": "int64", "vol": "int32"})
 
 
+def to_polars_frame(batch: ParsedAsciiBatch) -> Any:
+    """Convert parsed rows to the Polars dataframe shape returned by the API."""
+    import polars as pl
+
+    data = {
+        column: _column_values(batch.rows, index)
+        for index, column in enumerate(batch.columns)
+    }
+    schema = {
+        column: _polars_type_for_column(column)
+        for column in batch.columns
+    }
+    return pl.DataFrame(data, schema=schema)
+
+
 def convert_batch_for_api(batch: ParsedAsciiBatch, return_type: str) -> Any:
     """Convert parsed rows to a supported API return type."""
     match return_type:
@@ -216,6 +244,8 @@ def convert_batch_for_api(batch: ParsedAsciiBatch, return_type: str) -> Any:
             return to_arrow_table(batch)
         case "pandas":
             return to_pandas_frame(batch)
+        case "polars":
+            return to_polars_frame(batch)
         case _:
             raise ValueError(f"unsupported API return type: {return_type}")
 

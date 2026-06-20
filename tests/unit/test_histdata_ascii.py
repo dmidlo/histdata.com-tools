@@ -195,7 +195,33 @@ def test_pandas_api_return_adapter_preserves_values_and_dtype_intent(
     assert frame.to_dict("records") == list(rows_as_records(batch))
     assert str(frame.dtypes["datetime"]) == "int64"
     assert str(frame.dtypes["vol"]) == "int32"
-    assert all(str(frame.dtypes[column]) == "float64" for column in batch.columns[1:-1])
+    assert all(
+        str(frame.dtypes[column]) == "float64"
+        for column in batch.columns[1:-1]
+    )
+
+
+@pytest.mark.parametrize(
+    ("timeframe", "filename"),
+    (
+        ("M1", "DAT_ASCII_EURUSD_M1_201202.csv"),
+        ("T", "DAT_ASCII_EURUSD_T_201202.csv"),
+    ),
+)
+def test_polars_api_return_adapter_preserves_values_and_dtype_intent(
+    timeframe: str, filename: str
+) -> None:
+    """Polars API returns should preserve columns, rows, and integer dtypes."""
+    import polars as pl
+
+    batch = read_ascii_file(FIXTURES / filename, timeframe)
+    frame = convert_batch_for_api(batch, "polars")
+
+    assert frame.columns == list(batch.columns)
+    assert frame.to_dicts() == list(rows_as_records(batch))
+    assert frame.schema["datetime"] == pl.Int64
+    assert frame.schema["vol"] == pl.Int32
+    assert all(frame.schema[column] == pl.Float64 for column in batch.columns[1:-1])
 
 
 @pytest.mark.parametrize(

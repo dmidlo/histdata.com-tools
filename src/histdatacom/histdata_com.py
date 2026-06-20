@@ -35,6 +35,7 @@ from histdatacom.utils import (
     load_influx_yaml,
     set_working_data_dir,
     check_installed_module,
+    normalize_api_return_type,
 )
 
 if TYPE_CHECKING:
@@ -70,6 +71,9 @@ class _HistDataCom:  # noqa:R701
         config.ARGS["default_download_dir"] = set_working_data_dir(
             config.ARGS["data_directory"]
         )
+        config.ARGS["api_return_type"] = normalize_api_return_type(
+            config.ARGS["api_return_type"]
+        )
 
         if config.ARGS["import_to_influxdb"]:
             influx_yaml = load_influx_yaml()
@@ -82,10 +86,16 @@ class _HistDataCom:  # noqa:R701
         self.scraper = Scraper()
         self.csvs = Csv()
 
-        if config.ARGS["from_api"] and config.ARGS["api_return_type"]:
+        if (
+            config.ARGS["from_api"]
+            and config.ARGS["api_return_type"]
+            and not config.ARGS["version"]
+            and not config.ARGS["available_remote_data"]
+            and not config.ARGS["update_remote_data"]
+        ):
+            check_installed_module(config.ARGS["api_return_type"])
             from histdatacom.api import Api
 
-            check_installed_module(config.ARGS["api_return_type"])
             self.api = Api()
 
         if config.ARGS["import_to_influxdb"]:

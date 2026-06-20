@@ -425,6 +425,11 @@ class Api:  # noqa:H601
                 case "pandas":
                     check_installed_module("pandas", True)
                     tp_set_dict["data"] = merged.to_pandas()
+                case "polars":
+                    check_installed_module("polars", True)
+                    import polars as pl
+
+                    tp_set_dict["data"] = pl.from_arrow(merged.to_arrow())
 
     def _dequeue_records_for_merge(self) -> Tuple[list, list, list]:
         """Empty the queue of relevant records.

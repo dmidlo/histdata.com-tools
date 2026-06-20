@@ -15,6 +15,16 @@ import pytz
 import yaml
 from rich import print  # pylint: disable=redefined-builtin
 
+API_RETURN_TYPE_MODULES = {
+    "arrow": "pyarrow",
+    "datatable": "datatable",
+    "pandas": "pandas",
+    "polars": "polars",
+}
+
+SUPPORTED_API_RETURN_TYPES = frozenset(API_RETURN_TYPE_MODULES)
+LEGACY_API_RETURN_TYPES = frozenset({"datatable"})
+
 
 def get_month_from_datemonth(
     datemonth: str | int,
@@ -178,6 +188,25 @@ def get_now_utc_timestamp() -> float:
     return datetime.utcnow().timestamp()  # sourcery skip
 
 
+def normalize_api_return_type(return_type: Optional[str]) -> Optional[str]:
+    """Normalize and validate public API dataframe return type names."""
+    if not return_type:
+        return None
+
+    normalized = return_type.strip().lower()
+    if normalized == "pyarrow":
+        normalized = "arrow"
+
+    if normalized not in SUPPORTED_API_RETURN_TYPES:
+        supported = ", ".join(sorted(SUPPORTED_API_RETURN_TYPES))
+        raise ValueError(
+            f"unsupported api_return_type '{return_type}'. "
+            f"Supported values are: {supported}."
+        )
+
+    return normalized
+
+
 def check_installed_module(  # noqa:CCR001,BLK100
     module_name: str, load: bool = False
 ) -> bool:
@@ -194,8 +223,8 @@ def check_installed_module(  # noqa:CCR001,BLK100
     Returns:
         bool: True module is installed and available
     """
-    if module_name == "arrow":
-        module_name = "pyarrow"
+    if module_name in API_RETURN_TYPE_MODULES:
+        module_name = API_RETURN_TYPE_MODULES[module_name]
 
     if module_name in sys.modules:  # noqa:R505
         return True
@@ -204,7 +233,7 @@ def check_installed_module(  # noqa:CCR001,BLK100
     ) is not None:
         module = importlib.util.module_from_spec(spec)  # type: ignore
         if load:
-            sys.modules[module] = module
+            sys.modules[module_name] = module
             spec.loader.exec_module(module)  # type: ignore
         return True
     else:
