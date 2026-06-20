@@ -17,6 +17,8 @@ from histdatacom.histdata_ascii import (
     normalize_ascii_row,
     parse_histdata_datetime_to_utc_ms,
     read_ascii_file,
+    read_ascii_file_to_polars,
+    raw_polars_schema_for_timeframe,
     rows_as_records,
     summarize_rows,
 )
@@ -34,6 +36,54 @@ EXPECTED_TICK_ROWS = (
     (1328072403660, 1.3066, 1.30677, 0),
     (1328072403973, 1.30658, 1.30675, 25),
     (1328072414990, 1.30657, 1.30674, 2147483647),
+)
+
+EXPECTED_RAW_M1_RECORDS = (
+    {
+        "datetime": "20120201 000000",
+        "open": 1.3066,
+        "high": 1.3066,
+        "low": 1.30656,
+        "close": 1.30656,
+        "vol": 0,
+    },
+    {
+        "datetime": "20120201 000100",
+        "open": 1.30657,
+        "high": 1.30657,
+        "low": 1.30647,
+        "close": 1.30656,
+        "vol": 17,
+    },
+    {
+        "datetime": "20120201 000200",
+        "open": 1.30652,
+        "high": 1.30656,
+        "low": 1.30652,
+        "close": 1.30656,
+        "vol": 2147483647,
+    },
+)
+
+EXPECTED_RAW_TICK_RECORDS = (
+    {
+        "datetime": "20120201 000003660",
+        "bid": 1.3066,
+        "ask": 1.30677,
+        "vol": 0,
+    },
+    {
+        "datetime": "20120201 000003973",
+        "bid": 1.30658,
+        "ask": 1.30675,
+        "vol": 25,
+    },
+    {
+        "datetime": "20120201 000014990",
+        "bid": 1.30657,
+        "ask": 1.30674,
+        "vol": 2147483647,
+    },
 )
 
 
@@ -102,6 +152,103 @@ def test_ascii_zip_fixtures_parse_like_direct_csv_files(
         archive.write(source, arcname=filename)
 
     assert read_ascii_file(archive_path, timeframe).rows == expected_rows
+
+
+@pytest.mark.parametrize(
+    (
+        "timeframe",
+        "filename",
+        "expected_columns",
+        "expected_records",
+    ),
+    (
+        (
+            "M1",
+            "DAT_ASCII_EURUSD_M1_201202.csv",
+            M1_COLUMNS,
+            EXPECTED_RAW_M1_RECORDS,
+        ),
+        (
+            "T",
+            "DAT_ASCII_EURUSD_T_201202.csv",
+            TICK_COLUMNS,
+            EXPECTED_RAW_TICK_RECORDS,
+        ),
+    ),
+)
+def test_polars_ingest_reads_csv_fixtures_with_stable_raw_schema(
+    timeframe: str,
+    filename: str,
+    expected_columns: tuple[str, ...],
+    expected_records: tuple[dict[str, object], ...],
+) -> None:
+    """Polars raw CSV ingest should preserve HistData layout and dtypes."""
+    import polars as pl
+
+    frame = read_ascii_file_to_polars(FIXTURES / filename, timeframe)
+
+    assert frame.columns == list(expected_columns)
+    assert frame.to_dicts() == list(expected_records)
+    assert frame.schema["datetime"] == pl.String
+    assert frame.schema["vol"] == pl.Int32
+    assert all(
+        frame.schema[column] == pl.Float64
+        for column in expected_columns[1:-1]
+    )
+
+
+@pytest.mark.parametrize(
+    ("timeframe", "filename", "expected_records"),
+    (
+        (
+            "M1",
+            "DAT_ASCII_EURUSD_M1_201202.csv",
+            EXPECTED_RAW_M1_RECORDS,
+        ),
+        (
+            "T",
+            "DAT_ASCII_EURUSD_T_201202.csv",
+            EXPECTED_RAW_TICK_RECORDS,
+        ),
+    ),
+)
+def test_polars_ingest_reads_zip_fixtures_like_csv_files(
+    tmp_path: Path,
+    timeframe: str,
+    filename: str,
+    expected_records: tuple[dict[str, object], ...],
+) -> None:
+    """Downloaded ZIP archives should produce equivalent Polars frames."""
+    source = FIXTURES / filename
+    archive_path = tmp_path / f"{filename}.zip"
+
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.write(source, arcname=filename)
+
+    assert read_ascii_file_to_polars(
+        archive_path,
+        timeframe,
+    ).to_dicts() == list(expected_records)
+
+
+def test_polars_raw_schema_rejects_unsupported_timeframes() -> None:
+    """Unsupported layouts should fail before Polars scans input data."""
+    with pytest.raises(ValueError, match="unsupported ASCII timeframe"):
+        raw_polars_schema_for_timeframe("T_LAST")
+
+
+def test_polars_zip_ingest_requires_exactly_one_csv_member(
+    tmp_path: Path,
+) -> None:
+    """Ambiguous downloaded archives should fail instead of guessing."""
+    archive_path = tmp_path / "ambiguous.zip"
+
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("first.csv", "")
+        archive.writestr("second.csv", "")
+
+    with pytest.raises(ValueError, match="one CSV file"):
+        read_ascii_file_to_polars(archive_path, "M1")
 
 
 @pytest.mark.parametrize(

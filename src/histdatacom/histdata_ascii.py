@@ -9,6 +9,7 @@ import csv
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -192,6 +193,53 @@ def _polars_type_for_column(column: str) -> Any:
             return pl.Int32
         case _:
             return pl.Float64
+
+
+def raw_polars_schema_for_timeframe(timeframe: str) -> dict[str, Any]:
+    """Return the raw ingest Polars schema for a supported timeframe."""
+    import polars as pl
+
+    return {
+        column: pl.Utf8 if column == "datetime" else _polars_type_for_column(column)
+        for column in columns_for_timeframe(timeframe)
+    }
+
+
+def _read_csv_to_polars(source: Any, timeframe: str) -> Any:
+    """Read a HistData ASCII CSV source into a raw Polars dataframe."""
+    import polars as pl
+
+    return pl.read_csv(
+        source,
+        has_header=False,
+        separator=delimiter_for_timeframe(timeframe),
+        new_columns=list(columns_for_timeframe(timeframe)),
+        schema_overrides=raw_polars_schema_for_timeframe(timeframe),
+    )
+
+
+def _single_csv_member_from_zip(path: Path) -> bytes:
+    """Return the single CSV member payload from a HistData ZIP archive."""
+    with zipfile.ZipFile(path) as archive:
+        names = tuple(
+            name
+            for name in archive.namelist()
+            if not name.endswith("/") and Path(name).suffix.lower() == ".csv"
+        )
+        if len(names) != 1:
+            raise ValueError("expected ZIP archive to contain one CSV file")
+        return archive.read(names[0])
+
+
+def read_ascii_file_to_polars(path: Path, timeframe: str) -> Any:
+    """Read a plain CSV file or ZIP archive into a raw Polars dataframe."""
+    if path.suffix.lower() == ".zip":
+        return _read_csv_to_polars(
+            BytesIO(_single_csv_member_from_zip(path)),
+            timeframe,
+        )
+
+    return _read_csv_to_polars(path, timeframe)
 
 
 def to_arrow_table(batch: ParsedAsciiBatch) -> Any:

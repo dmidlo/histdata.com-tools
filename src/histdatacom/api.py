@@ -15,25 +15,31 @@ from __future__ import annotations
 import itertools
 import sys  # sourcery skip
 from pathlib import Path
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Any, Tuple
 
-import datatable as dt  # noqa:I900
-from datatable import Frame, f, update  # noqa:I900
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from histdatacom import config
 from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
+from histdatacom.histdata_ascii import read_ascii_file_to_polars
 from histdatacom.scraper.scraper import Scraper
 from histdatacom.utils import check_installed_module
 
 if TYPE_CHECKING:
-    from datatable import FExpr  # noqa:I900
+    from datatable import FExpr, Frame  # noqa:I900
     from pandas.core.frame import DataFrame
+    from polars import DataFrame as PolarsDataFrame
     from pyarrow import Table
 
     from histdatacom.records import Record, Records
 
-dt.options.progress.enabled = False
+
+def _load_datatable() -> Any:
+    """Import datatable lazily for migration code paths that still require it."""
+    import datatable as dt  # noqa:I900
+
+    dt.options.progress.enabled = False
+    return dt
 
 
 class Api:  # noqa:H601
@@ -161,8 +167,10 @@ class Api:  # noqa:H601
         return int(frame[row, column])
 
     @classmethod
-    def _import_file_to_datatable(cls, record: Record, zip_path: Path) -> Frame:
-        """Import file as datatable Frame and convert timestamp to UTC.
+    def _import_file_to_polars(
+        cls, record: Record, zip_path: Path
+    ) -> "PolarsDataFrame":
+        """Import file as a raw Polars dataframe.
 
         # noqa: DAR402
 
@@ -176,57 +184,25 @@ class Api:  # noqa:H601
 
 
         Returns:
-            Frame: datatable.Frame
+            DataFrame: polars.DataFrame
         """
-        # pylint: disable=expression-not-assigned
         try:
-            match record.data_timeframe:
-                case "M1":
-                    frame_data: Frame = cls._import_frame_with_headers(
-                        record.data_timeframe, zip_path
-                    )
-
-                    ascii_m1_etc_ms_timestamp = cls._strptime_fexpr_for_frame(
-                        record.data_timeframe
-                    )
-
-                    ascii_m1_utc_ms_timestamp = (  # noqa:BLK001
-                        cls._adjust_est_timestamp_to_utc(  # noqa:BLK001
-                            ascii_m1_etc_ms_timestamp
-                        )
-                    )
-
-                    # pylint: disable-next=unsubscriptable-object
-                    frame_data[:, update(datetime=ascii_m1_utc_ms_timestamp)]
-                case "T":
-                    frame_data = cls._import_frame_with_headers(
-                        record.data_timeframe, zip_path
-                    )
-
-                    ascii_t_etc_ms_timestamp = cls._strptime_fexpr_for_frame(
-                        record.data_timeframe
-                    )
-
-                    ascii_t_utc_ms_timestamp = cls._adjust_est_timestamp_to_utc(
-                        ascii_t_etc_ms_timestamp
-                    )
-
-                    # pylint: disable-next=unsubscriptable-object
-                    frame_data[:, update(datetime=ascii_t_utc_ms_timestamp)]
-                case _:
-                    raise ValueError
-
-            # pylint: disable-next=unsupported-assignment-operation
-            frame_data["vol"] = dt.int32
-            return frame_data  # noqa:TC300
+            return cls._import_frame_with_headers(record.data_timeframe, zip_path)
         except ValueError as err:
             raise SystemExit from err
 
     @classmethod
+    def _import_file_to_datatable(
+        cls, record: Record, zip_path: Path
+    ) -> "PolarsDataFrame":
+        """Compatibility wrapper for the Polars-backed ingest path."""
+        return cls._import_file_to_polars(record, zip_path)
+
+    @classmethod
     def _import_frame_with_headers(  # noqa:BLK001
         cls, timeframe: str, zip_path: Path
-    ) -> "Frame":
-        """Import datatable.Frame with headers for M1 and Tick data.
+    ) -> "PolarsDataFrame":
+        """Import a raw Polars dataframe with headers for M1 and Tick data.
 
         Args:
             timeframe (str): M1 or T
@@ -236,33 +212,9 @@ class Api:  # noqa:H601
             ValueError: when not M1 or T
 
         Returns:
-            Frame: datatable.Frame
+            DataFrame: polars.DataFrame
         """
-        match timeframe:
-            case "M1":
-                frame = dt.fread(
-                    zip_path,
-                    header=False,
-                    columns=[
-                        "datetime",
-                        "open",
-                        "high",
-                        "low",
-                        "close",
-                        "vol",
-                    ],
-                    multiple_sources="ignore",
-                )
-            case "T":
-                frame = dt.fread(
-                    zip_path,
-                    header=False,
-                    columns=["datetime", "bid", "ask", "vol"],
-                    multiple_sources="ignore",
-                )
-            case _:
-                raise ValueError
-        return frame  # noqa:R504
+        return read_ascii_file_to_polars(zip_path, timeframe)
 
     @classmethod
     def _strptime_fexpr_for_frame(cls, timeframe: str) -> "FExpr":
@@ -279,6 +231,8 @@ class Api:  # noqa:H601
         """
         match timeframe:
             case "M1":
+                dt = _load_datatable()
+                f = dt.f
                 ascii_m1_str_splitter = dt.time.ymdt(  # sourcery skip
                     f.datetime[0:4].as_type(int),
                     f.datetime[4:6].as_type(int),
@@ -289,6 +243,8 @@ class Api:  # noqa:H601
                 )
                 temp_time = ascii_m1_str_splitter.as_type(int)
             case "T":
+                dt = _load_datatable()
+                f = dt.f
                 ascii_t_str_splitter = dt.time.ymdt(
                     f.datetime[0:4].as_type(int),
                     f.datetime[4:6].as_type(int),
@@ -337,6 +293,7 @@ class Api:  # noqa:H601
         Returns:
             Frame: datatable.Frame
         """
+        dt = _load_datatable()
         return dt.fread(jay_path)
 
     def validate_jays(self) -> None:
@@ -385,6 +342,7 @@ class Api:  # noqa:H601
                                  "data": datatable.Frame | None,
                                 }
         """
+        dt = _load_datatable()
         match tp_set_dict["timeframe"]:
             case "T":
                 merged = dt.Frame(names=["datetime", "bid", "ask", "vol"])
