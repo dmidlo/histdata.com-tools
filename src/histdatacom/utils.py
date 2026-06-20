@@ -17,7 +17,7 @@ from rich import print  # pylint: disable=redefined-builtin
 
 API_RETURN_TYPE_MODULES = {
     "arrow": "pyarrow",
-    "datatable": "datatable",
+    "datatable": "polars",
     "pandas": "pandas",
     "polars": "polars",
 }
@@ -210,7 +210,7 @@ def normalize_api_return_type(return_type: Optional[str]) -> Optional[str]:
 def check_installed_module(  # noqa:CCR001,BLK100
     module_name: str, load: bool = False
 ) -> bool:
-    """Check to see if module is installed.
+    """Check to see if module or API return backend is installed.
 
     Args:
         module_name (str): a module name
@@ -237,15 +237,6 @@ def check_installed_module(  # noqa:CCR001,BLK100
             spec.loader.exec_module(module)  # type: ignore
         return True
     else:
-        if module_name == "datatable":
-            err_text = (
-                "datatable not installed. please visit "
-                "https://github.com/dmidlo/histdata.com-tools"
-                "#datatable-installation-options "
-                "for installation instructions."
-            )
-            raise SystemExit(err_text)
-
         if module_name == "pyarrow":
             module_name = "arrow"
 

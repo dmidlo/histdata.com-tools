@@ -5,8 +5,10 @@ Raises:
     SystemExit: On failed jay creation
 
 Returns:
-    "Frame" | "DataFrame" | "Table":
-        - (Frame) if options.api_return_type = "datatable"
+    "PolarsDataFrame" | "DataFrame" | "Table":
+        - (PolarsDataFrame) if options.api_return_type = "polars"
+        - (PolarsDataFrame) if options.api_return_type = "datatable"
+          during the legacy compatibility window
         - (DataFrame) if options.api_return_type = "pandas"
         - (Table) if options.api_return_type = "arrow"
 """
@@ -46,8 +48,10 @@ class Api:  # noqa:H601
         SystemExit: On failed jay creation
 
     Returns:
-        "Frame" | "DataFrame" | "Table":
-            - (Frame) if options.api_return_type = "datatable"
+        "PolarsDataFrame" | "DataFrame" | "Table":
+            - (PolarsDataFrame) if options.api_return_type = "polars"
+            - (PolarsDataFrame) if options.api_return_type = "datatable"
+              during the legacy compatibility window
             - (DataFrame) if options.api_return_type = "pandas"
             - (Table) if options.api_return_type = "arrow"
     """
@@ -122,7 +126,7 @@ class Api:  # noqa:H601
         """Validate Jay prior to possible merge operation.
 
            A Wrapper to be passed to an individual process within the process
-           pool to test for or create a datatable jay file based on a Record of
+           pool to test for or create a Polars cache file based on a Record of
            Work's information.  Receives a unit of work from the pool, performs
            validation, readies the Record for further processing, and marks the
            current work as complete.
@@ -257,10 +261,11 @@ class Api:  # noqa:H601
         pool(config.CURRENT_QUEUE, config.NEXT_QUEUE)
 
     def merge_jays(self) -> list | PolarsDataFrame | DataFrame | Table:
-        """Merge jays for start_yearmonth and end_yearmonth range.
+        """Merge caches for start_yearmonth and end_yearmonth range.
 
         Returns:
-            list | DataFrame | Table: _description_
+            list | PolarsDataFrame | DataFrame | Table:
+                merged data for the configured API return type
         """
         records_to_merge: list = self._dequeue_records_for_merge()
         sets_to_merge: list = self._collate_sets_to_merge(records_to_merge)
@@ -312,6 +317,7 @@ class Api:  # noqa:H601
 
         match config.ARGS["api_return_type"]:
             case "datatable":
+                check_installed_module("polars", True)
                 tp_set_dict["data"] = merged
             case "arrow":
                 check_installed_module("arrow", True)

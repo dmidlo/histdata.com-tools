@@ -1,5 +1,7 @@
 """Pytest unit tests for histdatacom.utils.py."""
 
+import sys
+
 import pytest
 
 from histdatacom.utils import (
@@ -58,3 +60,11 @@ def test_api_return_type_contract_is_explicit() -> None:
 def test_check_installed_module_accepts_polars_return_type() -> None:
     """Polars is now the default dataframe dependency."""
     assert check_installed_module("polars")
+
+
+def test_check_installed_module_aliases_datatable_to_polars() -> None:
+    """The transitional datatable return key should not require datatable."""
+    sys.modules.pop("datatable", None)
+
+    assert check_installed_module("datatable")
+    assert "datatable" not in sys.modules

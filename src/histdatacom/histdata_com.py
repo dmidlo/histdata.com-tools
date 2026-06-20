@@ -6,14 +6,14 @@ Raises:
 Returns:
     QueueManager: multi-process serial communication manager
     repo_data (set): a set of repo pairs with start and end date ranges.
-    Data (Frame | DataFrame | Table):
-        a datatable Frame, a pandas DataFrame, or a pyarrow Table
+    Data (PolarsDataFrame | DataFrame | Table):
+        a Polars DataFrame, pandas DataFrame, or pyarrow Table
     List Of Data:   [
                         {
                             "timeframe": timeframe,
                             "pair": pair,
                             "records": [record, record, ...],
-                            "data": Frame | DataFrame | Table,
+                            "data": PolarsDataFrame | DataFrame | Table,
                         },
                         ...
                         ...
@@ -39,8 +39,8 @@ from histdatacom.utils import (
 )
 
 if TYPE_CHECKING:
-    from datatable import Frame  # noqa:I900
     from pandas import DataFrame
+    from polars import DataFrame as PolarsDataFrame
     from pyarrow import Table
 
 
@@ -115,20 +115,22 @@ class _HistDataCom:  # noqa:R701
 
     def run(  # noqa:CCR001,CFQ004,CCR001,R701
         self,
-    ) -> list | dict | Frame | DataFrame | Table | None:  # noqa:CCR001
+    ) -> list | dict | PolarsDataFrame | DataFrame | Table | None:
         """Execute. histdatacom's execution order.
 
         Returns:
-            list | dict | Frame | DataFrame | Table | None:
+            list | dict | PolarsDataFrame | DataFrame | Table | None:
 
-            Data (Frame | DataFrame | Table):
-                    a datatable Frame, a pandas DataFrame, or a pyarrow Table
+            Data (PolarsDataFrame | DataFrame | Table):
+                    a Polars DataFrame, pandas DataFrame, or pyarrow Table.
+                    The legacy datatable return key currently aliases to
+                    Polars during migration.
             List of dicts:  [
                                 {
                                     "timeframe": timeframe,
                                     "pair": pair,
                                     "records": [record, record, ...],
-                                    "data": Frame | DataFrame | Table,
+                                    "data": PolarsDataFrame | DataFrame | Table,
                                 },
                                 ...
                                 ...
@@ -172,23 +174,25 @@ class _HistDataCom:  # noqa:R701
 
 def main(
     options: Options | None = None,
-) -> list | dict | Frame | DataFrame | Table:
+) -> list | dict | PolarsDataFrame | DataFrame | Table | None:
     """Execute. Entry-point for histdatacom.
 
     Args:
         options (Options): a histdatacom.options Options object.
 
     Returns:
-        list | dict | Frame | DataFrame | Table:
+        list | dict | PolarsDataFrame | DataFrame | Table | None:
 
-            Data (Frame | DataFrame | Table):
-                    a datatable Frame, a pandas DataFrame, or a pyarrow Table
+            Data (PolarsDataFrame | DataFrame | Table):
+                    a Polars DataFrame, pandas DataFrame, or pyarrow Table.
+                    The legacy datatable return key currently aliases to
+                    Polars during migration.
             List of dicts:  [
                                 {
                                     "timeframe": timeframe,
                                     "pair": pair,
                                     "records": [record, record, ...],
-                                    "data": Frame | DataFrame | Table,
+                                    "data": PolarsDataFrame | DataFrame | Table,
                                 },
                                 ...
                                 ...

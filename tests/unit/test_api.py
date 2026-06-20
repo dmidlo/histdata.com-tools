@@ -346,16 +346,23 @@ def test_merge_records_legacy_datatable_return_type_stays_polars(
     assert "datatable" not in sys.modules
 
 
-def test_merge_jays_returns_dataframe_for_single_pair_timeframe(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "api_return_type",
+    ("polars", "datatable", "pandas", "arrow"),
+)
+def test_merge_jays_converts_single_pair_timeframe_return_types(
+    tmp_path: Path, api_return_type: str
 ) -> None:
-    """A single observed pair/timeframe should return the merged dataframe."""
+    """A single observed pair/timeframe should return the requested type."""
+    import pandas as pd
     import polars as pl
+    import pyarrow as pa
 
     from histdatacom import config
     from histdatacom.api import Api
     from histdatacom.records import Records
 
+    sys.modules.pop("datatable", None)
     source = Api._import_file_to_polars(
         SimpleNamespace(data_timeframe="M1"),
         FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
@@ -383,17 +390,25 @@ def test_merge_jays_returns_dataframe_for_single_pair_timeframe(
     original_current_queue = config.CURRENT_QUEUE
 
     try:
-        config.ARGS["api_return_type"] = "polars"
+        config.ARGS["api_return_type"] = api_return_type
         config.CURRENT_QUEUE = records
         result = Api().merge_jays()
     finally:
         config.ARGS = original_args
         config.CURRENT_QUEUE = original_current_queue
 
-    assert isinstance(result, pl.DataFrame)
-    assert result.select("datetime").to_series().to_list() == (
-        EXPECTED_M1_DATETIMES
-    )
+    if api_return_type in {"datatable", "polars"}:
+        assert isinstance(result, pl.DataFrame)
+        values = result.select("datetime").to_series().to_list()
+    elif api_return_type == "pandas":
+        assert isinstance(result, pd.DataFrame)
+        values = result["datetime"].tolist()
+    else:
+        assert isinstance(result, pa.Table)
+        values = result.column("datetime").to_pylist()
+
+    assert values == EXPECTED_M1_DATETIMES
+    assert "datatable" not in sys.modules
 
 
 def test_merge_jays_returns_only_observed_pair_timeframe_sets(

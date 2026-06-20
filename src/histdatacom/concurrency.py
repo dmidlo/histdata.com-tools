@@ -30,8 +30,8 @@ from histdatacom import config
 from histdatacom.records import Records
 
 if TYPE_CHECKING:
-    from datatable import Frame  # noqa:I900
     from pandas import DataFrame
+    from polars import DataFrame as PolarsDataFrame
     from pyarrow import Table
 
     from histdatacom.histdata_com import _HistDataCom
@@ -304,14 +304,15 @@ class QueueManager:
     # pylint: disable-next=inconsistent-return-statements
     def __call__(  # type: ignore
         self, runner_: Type[_HistDataCom]
-    ) -> list | dict | Frame | DataFrame | Table:
+    ) -> list | dict | PolarsDataFrame | DataFrame | Table:
         """Configure global queues and execute.
 
         Args:
             runner_ (Type[_HistDataCom]): _description_
 
         Returns:
-            list | dict | Frame | DataFrame | Table: _description_
+            list | dict | PolarsDataFrame | DataFrame | Table:
+                API data or repository metadata from the runner.
         """
         # pylint: disable-next=consider-using-with
         config.QUEUE_MANAGER.start()  # type: ignore
