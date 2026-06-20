@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import importlib
+import os
+import shutil
 import sys
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from histdatacom.histdata_ascii import CACHE_FILENAME
 
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
@@ -142,3 +146,114 @@ def test_import_file_to_polars_preserves_system_exit_on_bad_timeframe() -> None:
             record,
             FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
         )
+
+
+def test_create_jay_writes_polars_cache_and_record_metadata(
+    tmp_path: Path,
+) -> None:
+    """Cache creation should preserve the transitional Record metadata fields."""
+    import polars as pl
+
+    from histdatacom.api import Api
+    from histdatacom.records import Record
+
+    filename = "DAT_ASCII_EURUSD_M1_201202.csv"
+    shutil.copyfile(FIXTURES / filename, tmp_path / filename)
+    record = Record(
+        data_dir=str(tmp_path) + os.sep,
+        csv_filename=filename,
+        zip_filename="missing.zip",
+        data_timeframe="M1",
+        data_format="ascii",
+        data_fxpair="eurusd",
+        status="CSV",
+    )
+
+    Api._create_jay(
+        record,
+        {"default_download_dir": str(tmp_path) + os.sep},
+    )
+    cache_frame = Api.import_jay_data(str(tmp_path / CACHE_FILENAME))
+
+    assert record.jay_filename == CACHE_FILENAME
+    assert record.jay_line_count == 3
+    assert record.jay_start == str(EXPECTED_M1_DATETIMES[0])
+    assert record.jay_end == str(EXPECTED_M1_DATETIMES[-1])
+    assert (tmp_path / CACHE_FILENAME).exists()
+    assert (tmp_path / ".meta").exists()
+    assert isinstance(cache_frame, pl.DataFrame)
+    assert cache_frame.schema["datetime"] == pl.Int64
+    assert cache_frame.select("datetime").to_series().to_list() == (
+        EXPECTED_M1_DATETIMES
+    )
+
+
+def test_import_jay_data_reads_polars_cache_without_datatable(
+    tmp_path: Path,
+) -> None:
+    """The cache reader should not import datatable at runtime."""
+    from histdatacom.api import Api
+
+    sys.modules.pop("datatable", None)
+    record = SimpleNamespace(data_timeframe="T")
+    frame = Api._import_file_to_polars(
+        record,
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
+    )
+
+    Api._export_datatable_to_jay(frame, str(tmp_path / CACHE_FILENAME))
+    cache_frame = Api.import_jay_data(str(tmp_path / CACHE_FILENAME))
+
+    assert cache_frame.to_dicts() == frame.to_dicts()
+    assert "datatable" not in sys.modules
+
+
+def test_merge_records_reads_polars_cache_files(
+    tmp_path: Path,
+) -> None:
+    """Merge should read the replacement cache format from disk."""
+    import polars as pl
+
+    from histdatacom import config
+    from histdatacom.api import Api
+    from histdatacom.histdata_ascii import write_polars_cache
+
+    api = Api()
+    source = Api._import_file_to_polars(
+        SimpleNamespace(data_timeframe="M1"),
+        FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+    )
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    write_polars_cache(source.slice(0, 1), first_dir / CACHE_FILENAME)
+    write_polars_cache(source.slice(1, 2), second_dir / CACHE_FILENAME)
+    first = SimpleNamespace(
+        data_dir=str(first_dir) + os.sep,
+        jay_filename=CACHE_FILENAME,
+        jay_start=str(EXPECTED_M1_DATETIMES[0]),
+    )
+    second = SimpleNamespace(
+        data_dir=str(second_dir) + os.sep,
+        jay_filename=CACHE_FILENAME,
+        jay_start=str(EXPECTED_M1_DATETIMES[1]),
+    )
+    original_args = config.ARGS.copy()
+
+    try:
+        config.ARGS["api_return_type"] = "polars"
+        tp_set = {
+            "timeframe": "M1",
+            "pair": "eurusd",
+            "records": [second, first],
+            "data": None,
+        }
+        api._merge_records(tp_set)
+    finally:
+        config.ARGS = original_args
+
+    assert isinstance(tp_set["data"], pl.DataFrame)
+    assert tp_set["data"].select("datetime").to_series().to_list() == (
+        EXPECTED_M1_DATETIMES
+    )

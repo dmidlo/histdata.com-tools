@@ -21,6 +21,7 @@ from rx import operators as ops
 from histdatacom import config
 from histdatacom.api import Api
 from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
+from histdatacom.histdata_ascii import CACHE_FILENAME
 
 if TYPE_CHECKING:
     from histdatacom.records import Record, Records
@@ -113,7 +114,7 @@ class Influx:  # noqa:H601
                 record.status != "INFLUX_UPLOAD"
                 and str.lower(record.data_format) == "ascii"
             ):
-                jay_path = Path(record.data_dir, ".data")
+                jay_path = Path(record.data_dir, CACHE_FILENAME)
                 if jay_path.exists():
                     self._import_jay(
                         record,
@@ -173,7 +174,7 @@ class Influx:  # noqa:H601
             initargs=(influx_chunks_queue, config.ARGS),
         ) as executor:
 
-            rx_data_queue = rx.from_iterable(jay.to_tuples()).pipe(
+            rx_data_queue = rx.from_iterable(jay.iter_rows()).pipe(
                 ops.buffer_with_count(args["batch_size"]),
                 ops.flat_map(
                     lambda rows: executor.submit(  # noqa:BLK100
@@ -190,10 +191,10 @@ class Influx:  # noqa:H601
             )
 
     def _parse_jay_rows(self, iterable: Iterable, record: Record) -> None:
-        """Create a list by mapping row-by-row from datatable Frame (from jay).
+        """Create a list by mapping row-by-row from a cached dataframe.
 
         Args:
-            iterable (Iterable): datatable.Frame
+            iterable (Iterable): cached rows
             record (Record): a record from the work queue.
         """
         map_func = partial(self._parse_jay_row, record=record)
@@ -208,7 +209,7 @@ class Influx:  # noqa:H601
                 M1 or T.
 
         Args:
-            row (Tuple[Any]): row from datatable.Frame
+            row (Tuple[Any]): row from cached dataframe
             record (Record): record from the work queue
 
         Returns:

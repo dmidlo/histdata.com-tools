@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from histdatacom.histdata_ascii import (
+    CACHE_FILENAME,
     EST_NO_DST_OFFSET_MS,
+    LEGACY_CACHE_ERROR,
     M1_COLUMNS,
     TICK_COLUMNS,
     convert_polars_datetime_to_utc_ms,
@@ -20,9 +22,11 @@ from histdatacom.histdata_ascii import (
     polars_datetime_to_utc_ms_expr,
     read_ascii_file,
     read_ascii_file_to_polars,
+    read_polars_cache,
     raw_polars_schema_for_timeframe,
     rows_as_records,
     summarize_rows,
+    write_polars_cache,
 )
 
 
@@ -251,6 +255,43 @@ def test_polars_zip_ingest_requires_exactly_one_csv_member(
 
     with pytest.raises(ValueError, match="one CSV file"):
         read_ascii_file_to_polars(archive_path, "M1")
+
+
+@pytest.mark.parametrize(
+    ("timeframe", "filename"),
+    (
+        ("M1", "DAT_ASCII_EURUSD_M1_201202.csv"),
+        ("T", "DAT_ASCII_EURUSD_T_201202.csv"),
+    ),
+)
+def test_polars_cache_round_trip_preserves_schema_and_values(
+    tmp_path: Path, timeframe: str, filename: str
+) -> None:
+    """The replacement cache should preserve Polars schema and row values."""
+    frame = convert_polars_datetime_to_utc_ms(
+        read_ascii_file_to_polars(FIXTURES / filename, timeframe),
+        timeframe,
+    )
+    cache_path = tmp_path / CACHE_FILENAME
+
+    write_polars_cache(frame, cache_path)
+    round_trip = read_polars_cache(cache_path)
+
+    assert dict(round_trip.schema) == dict(frame.schema)
+    assert round_trip.to_dicts() == frame.to_dicts()
+
+
+def test_polars_cache_rejects_legacy_datatable_jay_payloads(
+    tmp_path: Path,
+) -> None:
+    """Old datatable .jay caches must be regenerated into Polars IPC."""
+    cache_path = tmp_path / CACHE_FILENAME
+    cache_path.write_bytes(b"not an arrow ipc payload")
+
+    with pytest.raises(ValueError, match="regenerated") as err:
+        read_polars_cache(cache_path)
+
+    assert str(err.value) == LEGACY_CACHE_ERROR
 
 
 @pytest.mark.parametrize(

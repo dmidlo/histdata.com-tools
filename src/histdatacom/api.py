@@ -15,34 +15,28 @@ from __future__ import annotations
 import itertools
 import sys  # sourcery skip
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Tuple
+from typing import TYPE_CHECKING, Tuple
 
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from histdatacom import config
 from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
 from histdatacom.histdata_ascii import (
+    CACHE_FILENAME,
     convert_polars_datetime_to_utc_ms,
+    read_polars_cache,
     read_ascii_file_to_polars,
+    write_polars_cache,
 )
 from histdatacom.scraper.scraper import Scraper
 from histdatacom.utils import check_installed_module
 
 if TYPE_CHECKING:
-    from datatable import Frame  # noqa:I900
     from pandas.core.frame import DataFrame
     from polars import DataFrame as PolarsDataFrame
     from pyarrow import Table
 
     from histdatacom.records import Record, Records
-
-
-def _load_datatable() -> Any:
-    """Import datatable lazily for migration code paths that still require it."""
-    import datatable as dt  # noqa:I900
-
-    dt.options.progress.enabled = False
-    return dt
 
 
 class Api:  # noqa:H601
@@ -61,9 +55,9 @@ class Api:  # noqa:H601
 
     @classmethod
     def _create_jay(cls, record: "Record", args: dict) -> None:
-        """Create .jay file based on single record's data.
+        """Create cache file based on single record's data.
 
-        creates a datatable file, saves it in dt's native jay format
+        creates a Polars dataframe, saves it in Arrow IPC format
         using and updating relevant information in a Record of work.
 
         Args:
@@ -77,18 +71,20 @@ class Api:  # noqa:H601
             file_data = cls._import_file_to_datatable(record, zip_path)
         elif csv_path.exists():
             file_data = cls._import_file_to_datatable(record, csv_path)
+        else:
+            raise ValueError("expected downloaded ZIP or CSV source file")
 
-        record.jay_filename = ".data"
+        record.jay_filename = CACHE_FILENAME
         jay_path = record.data_dir + record.jay_filename
         cls._export_datatable_to_jay(file_data, jay_path)
 
-        record.jay_line_count = file_data.nrows
+        record.jay_line_count = file_data.height
         record.jay_start = str(
             cls._extract_single_value_from_frame(file_data, 0, "datetime")
         )
         record.jay_end = str(
             cls._extract_single_value_from_frame(
-                file_data, file_data.nrows - 1, "datetime"
+                file_data, file_data.height - 1, "datetime"
             )
         )
         record.write_memento_file(base_dir=args["default_download_dir"])
@@ -110,7 +106,7 @@ class Api:  # noqa:H601
             "T",
             "M1",
         ]:
-            jay_path = Path(record.data_dir, ".data")
+            jay_path = Path(record.data_dir, CACHE_FILENAME)
             if not jay_path.exists():
                 if "CSV" not in record.status:
                     Scraper.get_zip_file(record)
@@ -155,19 +151,19 @@ class Api:  # noqa:H601
 
     @classmethod
     def _extract_single_value_from_frame(
-        cls, frame: "Frame", row: int, column: str
+        cls, frame: "PolarsDataFrame", row: int, column: str
     ) -> int:
-        """Extract Single Value from datatable Frame.
+        """Extract a single value from a dataframe.
 
         Args:
-            frame (Frame): datatable.Frame
-            row (int): datatable frame row
-            column (str): datatable frame column
+            frame (PolarsDataFrame): dataframe
+            row (int): frame row
+            column (str): frame column
 
         Returns:
-            int: datatable time64
+            int: cell value
         """
-        return int(frame[row, column])
+        return int(frame.item(row, column))
 
     @classmethod
     def _import_file_to_polars(
@@ -228,29 +224,27 @@ class Api:  # noqa:H601
 
     @classmethod
     def _export_datatable_to_jay(  # noqa:BLK001
-        cls, data_frame: "Frame", file_path: str
+        cls, data_frame: "PolarsDataFrame", file_path: str
     ) -> None:
-        """Export datatable frame to jay.
+        """Export a Polars frame to the transitional cache path.
 
         Args:
-            data_frame (Frame): datatable.Frame
+            data_frame (PolarsDataFrame): Polars dataframe.
             file_path (str): dest path
         """
-        data_path = file_path
-        data_frame.to_jay(data_path)
+        write_polars_cache(data_frame, Path(file_path))
 
     @classmethod
-    def import_jay_data(cls, jay_path: str) -> "Frame":
-        """Read jay file in to datatable Frame.
+    def import_jay_data(cls, jay_path: str) -> "PolarsDataFrame":
+        """Read cache file into a Polars dataframe.
 
         Args:
             jay_path (str): source path
 
         Returns:
-            Frame: datatable.Frame
+            DataFrame: polars.DataFrame
         """
-        dt = _load_datatable()
-        return dt.fread(jay_path)
+        return read_polars_cache(Path(jay_path))
 
     def validate_jays(self) -> None:
         """Initialize a process pool to validate jay files."""
@@ -263,11 +257,11 @@ class Api:  # noqa:H601
         )
         pool(config.CURRENT_QUEUE, config.NEXT_QUEUE)
 
-    def merge_jays(self) -> list | Frame | DataFrame | Table:
+    def merge_jays(self) -> list | PolarsDataFrame | DataFrame | Table:
         """Merge jays for start_yearmonth and end_yearmonth range.
 
         Returns:
-            list | Frame | DataFrame | Table: _description_
+            list | DataFrame | Table: _description_
         """
         records_to_merge: list
         pairs: list
@@ -295,28 +289,14 @@ class Api:  # noqa:H601
                                  "timeframe": timeframe,
                                  "pair": pair,
                                  "records": [],
-                                 "data": datatable.Frame | None,
+                                 "data": PolarsDataFrame | None,
                                 }
         """
-        dt = _load_datatable()
-        match tp_set_dict["timeframe"]:
-            case "T":
-                merged = dt.Frame(names=["datetime", "bid", "ask", "vol"])
-            case "M1":
-                merged = dt.Frame(
-                    names=[
-                        "datetime",
-                        "open",
-                        "high",
-                        "low",
-                        "close",
-                        "vol",
-                    ]
-                )
+        import polars as pl
 
         tp_set_dict["records"].sort(key=lambda record: record.jay_start)
 
-        records_count = len(tp_set_dict)
+        records_count = len(tp_set_dict["records"])
         with Progress(
             TextColumn(text_format="[cyan]Merging records..."),
             BarColumn(),
@@ -325,10 +305,12 @@ class Api:  # noqa:H601
         ) as progress:
             progress.add_task("merge", total=records_count)
 
+            frames = []
             for m_record in tp_set_dict["records"]:
                 jay_path = m_record.data_dir + m_record.jay_filename
-                jay_data = self.import_jay_data(jay_path)
-                merged.rbind(jay_data)
+                frames.append(self.import_jay_data(jay_path))
+
+            merged = pl.concat(frames) if frames else pl.DataFrame()
 
             match config.ARGS["api_return_type"]:
                 case "datatable":
@@ -341,9 +323,7 @@ class Api:  # noqa:H601
                     tp_set_dict["data"] = merged.to_pandas()
                 case "polars":
                     check_installed_module("polars", True)
-                    import polars as pl
-
-                    tp_set_dict["data"] = pl.from_arrow(merged.to_arrow())
+                    tp_set_dict["data"] = merged
 
     def _dequeue_records_for_merge(self) -> Tuple[list, list, list]:
         """Empty the queue of relevant records.
@@ -365,7 +345,7 @@ class Api:  # noqa:H601
                 break
 
             if (
-                record.jay_filename == ".data"
+                record.jay_filename == CACHE_FILENAME
                 and Path(record.data_dir, record.jay_filename).exists()
             ):
                 pairs.append(record.data_fxpair)

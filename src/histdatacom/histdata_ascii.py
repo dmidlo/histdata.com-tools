@@ -22,6 +22,13 @@ TICK = "T"
 
 M1_COLUMNS = ("datetime", "open", "high", "low", "close", "vol")
 TICK_COLUMNS = ("datetime", "bid", "ask", "vol")
+CACHE_FILENAME = ".data"
+CACHE_FORMAT = "Polars Arrow IPC"
+LEGACY_CACHE_ERROR = (
+    f"cannot read cache file as {CACHE_FORMAT}. Existing datatable .jay "
+    f"caches must be regenerated: delete the {CACHE_FILENAME} file and "
+    "rerun validation or import so histdatacom can rebuild it."
+)
 
 
 @dataclass(frozen=True)
@@ -282,6 +289,21 @@ def read_ascii_file_to_polars(path: Path, timeframe: str) -> Any:
         )
 
     return _read_csv_to_polars(path, timeframe)
+
+
+def write_polars_cache(frame: Any, path: Path) -> None:
+    """Write a Polars dataframe cache using Arrow IPC payloads."""
+    frame.write_ipc(path)
+
+
+def read_polars_cache(path: Path) -> Any:
+    """Read a Polars Arrow IPC cache, or fail with migration guidance."""
+    import polars as pl
+
+    try:
+        return pl.read_ipc(path)
+    except Exception as err:
+        raise ValueError(LEGACY_CACHE_ERROR) from err
 
 
 def to_arrow_table(batch: ParsedAsciiBatch) -> Any:
