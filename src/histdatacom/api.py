@@ -21,12 +21,15 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from histdatacom import config
 from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
-from histdatacom.histdata_ascii import read_ascii_file_to_polars
+from histdatacom.histdata_ascii import (
+    convert_polars_datetime_to_utc_ms,
+    read_ascii_file_to_polars,
+)
 from histdatacom.scraper.scraper import Scraper
 from histdatacom.utils import check_installed_module
 
 if TYPE_CHECKING:
-    from datatable import FExpr, Frame  # noqa:I900
+    from datatable import Frame  # noqa:I900
     from pandas.core.frame import DataFrame
     from polars import DataFrame as PolarsDataFrame
     from pyarrow import Table
@@ -187,7 +190,14 @@ class Api:  # noqa:H601
             DataFrame: polars.DataFrame
         """
         try:
-            return cls._import_frame_with_headers(record.data_timeframe, zip_path)
+            raw_frame = cls._import_frame_with_headers(
+                record.data_timeframe,
+                zip_path,
+            )
+            return convert_polars_datetime_to_utc_ms(
+                raw_frame,
+                record.data_timeframe,
+            )
         except ValueError as err:
             raise SystemExit from err
 
@@ -215,60 +225,6 @@ class Api:  # noqa:H601
             DataFrame: polars.DataFrame
         """
         return read_ascii_file_to_polars(zip_path, timeframe)
-
-    @classmethod
-    def _strptime_fexpr_for_frame(cls, timeframe: str) -> "FExpr":
-        """Convert csv datetime to unix timestamp in EST.
-
-           Convert csv datetime to unix timestamp in EST with NO
-           DAYLIGHT SAVINGS TIME.
-
-        Args:
-            timeframe (str): M1 or T
-
-        Returns:
-            FExpr: datatable.FExpr
-        """
-        match timeframe:
-            case "M1":
-                dt = _load_datatable()
-                f = dt.f
-                ascii_m1_str_splitter = dt.time.ymdt(  # sourcery skip
-                    f.datetime[0:4].as_type(int),
-                    f.datetime[4:6].as_type(int),
-                    f.datetime[6:8].as_type(int),
-                    f.datetime[9:11].as_type(int),
-                    f.datetime[11:13].as_type(int),
-                    f.datetime[13:15].as_type(int),
-                )
-                temp_time = ascii_m1_str_splitter.as_type(int)
-            case "T":
-                dt = _load_datatable()
-                f = dt.f
-                ascii_t_str_splitter = dt.time.ymdt(
-                    f.datetime[0:4].as_type(int),
-                    f.datetime[4:6].as_type(int),
-                    f.datetime[6:8].as_type(int),
-                    f.datetime[9:11].as_type(int),
-                    f.datetime[11:13].as_type(int),
-                    f.datetime[13:15].as_type(int),
-                    10**6 * f.datetime[15:18].as_type(int),
-                )
-                temp_time = ascii_t_str_splitter.as_type(int)
-
-        return temp_time // 10**6
-
-    @classmethod
-    def _adjust_est_timestamp_to_utc(cls, est_fexpr: "FExpr") -> "FExpr":
-        """Convert ESTnoDST millisecond timestamp to UTC.
-
-        Args:
-            est_fexpr (FExpr): datatable.FExpr
-
-        Returns:
-            FExpr: datatable.FExpr
-        """
-        return est_fexpr + 18000000
 
     @classmethod
     def _export_datatable_to_jay(  # noqa:BLK001

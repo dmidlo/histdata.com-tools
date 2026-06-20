@@ -10,12 +10,14 @@ from histdatacom.histdata_ascii import (
     EST_NO_DST_OFFSET_MS,
     M1_COLUMNS,
     TICK_COLUMNS,
+    convert_polars_datetime_to_utc_ms,
     convert_batch_for_api,
     delimiter_for_timeframe,
     format_influx_line,
     merge_batches,
     normalize_ascii_row,
     parse_histdata_datetime_to_utc_ms,
+    polars_datetime_to_utc_ms_expr,
     read_ascii_file,
     read_ascii_file_to_polars,
     raw_polars_schema_for_timeframe,
@@ -252,12 +254,111 @@ def test_polars_zip_ingest_requires_exactly_one_csv_member(
 
 
 @pytest.mark.parametrize(
+    ("timeframe", "filename", "expected_rows"),
+    (
+        ("M1", "DAT_ASCII_EURUSD_M1_201202.csv", EXPECTED_M1_ROWS),
+        ("T", "DAT_ASCII_EURUSD_T_201202.csv", EXPECTED_TICK_ROWS),
+    ),
+)
+def test_polars_timestamp_conversion_matches_characterization_values(
+    timeframe: str,
+    filename: str,
+    expected_rows: tuple[tuple[object, ...], ...],
+) -> None:
+    """Vectorized Polars parsing should keep exact current timestamp values."""
+    import polars as pl
+
+    frame = convert_polars_datetime_to_utc_ms(
+        read_ascii_file_to_polars(FIXTURES / filename, timeframe),
+        timeframe,
+    )
+
+    assert frame.schema["datetime"] == pl.Int64
+    assert frame.select("datetime").to_series().to_list() == [
+        row[0] for row in expected_rows
+    ]
+    assert frame.schema["vol"] == pl.Int32
+    assert all(
+        frame.schema[column] == pl.Float64
+        for column in frame.columns[1:-1]
+    )
+
+
+@pytest.mark.parametrize(
+    ("timeframe", "raw_values", "expected_values"),
+    (
+        (
+            "M1",
+            (
+                "20120201 000000",
+                "20120229 235900",
+                "20161231 235900",
+                "20170101 000000",
+                "20220313 023000",
+                "20221106 013000",
+            ),
+            (
+                1328072400000,
+                1330577940000,
+                1483246740000,
+                1483246800000,
+                1647156600000,
+                1667716200000,
+            ),
+        ),
+        (
+            "T",
+            (
+                "20120201 000003660",
+                "20120201 000014990",
+                "20120229 235959999",
+                "20161231 235959999",
+                "20170101 000000000",
+            ),
+            (
+                1328072403660,
+                1328072414990,
+                1330577999999,
+                1483246799999,
+                1483246800000,
+            ),
+        ),
+    ),
+)
+def test_polars_timestamp_expression_uses_fixed_est_no_dst_offset(
+    timeframe: str,
+    raw_values: tuple[str, ...],
+    expected_values: tuple[int, ...],
+) -> None:
+    """The Polars expression should mirror EST-no-DST timestamp semantics."""
+    import polars as pl
+
+    frame = pl.DataFrame({"datetime": raw_values})
+
+    assert frame.select(
+        polars_datetime_to_utc_ms_expr(timeframe)
+    ).to_series().to_list() == list(expected_values)
+
+
+def test_polars_timestamp_expression_rejects_unsupported_timeframes() -> None:
+    """Unsupported timestamp layouts should fail before expression execution."""
+    with pytest.raises(ValueError, match="unsupported ASCII timeframe"):
+        polars_datetime_to_utc_ms_expr("T_LAST")
+
+
+@pytest.mark.parametrize(
     ("timeframe", "raw_value", "expected_ms"),
     (
         ("M1", "20120201 000000", 1328072400000),
         ("M1", "20120201 000100", 1328072460000),
         ("T", "20120201 000003660", 1328072403660),
         ("T", "20120201 000014990", 1328072414990),
+        ("M1", "20120229 235900", 1330577940000),
+        ("T", "20120229 235959999", 1330577999999),
+        ("M1", "20161231 235900", 1483246740000),
+        ("T", "20161231 235959999", 1483246799999),
+        ("M1", "20170101 000000", 1483246800000),
+        ("T", "20170101 000000000", 1483246800000),
         ("M1", "20220313 023000", 1647156600000),
         ("M1", "20221106 013000", 1667716200000),
     ),

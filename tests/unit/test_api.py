@@ -14,6 +14,8 @@ FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
 
 EXPECTED_M1_COLUMNS = ["datetime", "open", "high", "low", "close", "vol"]
 EXPECTED_TICK_COLUMNS = ["datetime", "bid", "ask", "vol"]
+EXPECTED_M1_DATETIMES = [1328072400000, 1328072460000, 1328072520000]
+EXPECTED_TICK_DATETIMES = [1328072403660, 1328072403973, 1328072414990]
 
 
 def test_api() -> None:
@@ -73,7 +75,7 @@ def test_import_frame_with_headers_rejects_unsupported_timeframes() -> None:
 
 
 def test_import_file_to_polars_wraps_raw_ingest_for_records() -> None:
-    """Record-based ingest should use the same Polars raw CSV loader."""
+    """Record-based ingest should normalize raw CSV timestamps in Polars."""
     import polars as pl
 
     from histdatacom.api import Api
@@ -86,10 +88,12 @@ def test_import_file_to_polars_wraps_raw_ingest_for_records() -> None:
 
     assert isinstance(frame, pl.DataFrame)
     assert frame.columns == EXPECTED_M1_COLUMNS
+    assert frame.schema["datetime"] == pl.Int64
+    assert frame.select("datetime").to_series().to_list() == EXPECTED_M1_DATETIMES
 
 
 def test_import_file_to_polars_reads_zip_archives(tmp_path: Path) -> None:
-    """Record-based ingest should support downloaded ZIP archives."""
+    """Record-based ingest should normalize downloaded ZIP archives."""
     import polars as pl
 
     from histdatacom.api import Api
@@ -104,6 +108,8 @@ def test_import_file_to_polars_reads_zip_archives(tmp_path: Path) -> None:
 
     assert isinstance(frame, pl.DataFrame)
     assert frame.columns == EXPECTED_TICK_COLUMNS
+    assert frame.schema["datetime"] == pl.Int64
+    assert frame.select("datetime").to_series().to_list() == EXPECTED_TICK_DATETIMES
     assert frame.height == 3
 
 
@@ -121,6 +127,8 @@ def test_import_file_to_datatable_is_polars_compatibility_wrapper() -> None:
 
     assert isinstance(frame, pl.DataFrame)
     assert frame.columns == EXPECTED_TICK_COLUMNS
+    assert frame.schema["datetime"] == pl.Int64
+    assert frame.select("datetime").to_series().to_list() == EXPECTED_TICK_DATETIMES
 
 
 def test_import_file_to_polars_preserves_system_exit_on_bad_timeframe() -> None:

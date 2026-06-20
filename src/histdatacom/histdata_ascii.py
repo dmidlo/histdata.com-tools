@@ -205,6 +205,48 @@ def raw_polars_schema_for_timeframe(timeframe: str) -> dict[str, Any]:
     }
 
 
+def polars_datetime_to_utc_ms_expr(
+    timeframe: str, column: str = "datetime"
+) -> Any:
+    """Return a Polars expression for HistData UTC millisecond timestamps."""
+    import polars as pl
+
+    raw = pl.col(column)
+    args = [
+        raw.str.slice(0, 4).cast(pl.Int32),
+        raw.str.slice(4, 2).cast(pl.Int32),
+        raw.str.slice(6, 2).cast(pl.Int32),
+        raw.str.slice(9, 2).cast(pl.Int32),
+        raw.str.slice(11, 2).cast(pl.Int32),
+        raw.str.slice(13, 2).cast(pl.Int32),
+    ]
+    match timeframe:
+        case "M1":
+            parsed = pl.datetime(*args, time_unit="ms")
+        case "T":
+            parsed = pl.datetime(
+                *args,
+                raw.str.slice(15, 3).cast(pl.Int32) * 1_000,
+                time_unit="ms",
+            )
+        case _:
+            raise ValueError(f"unsupported ASCII timeframe: {timeframe}")
+
+    return (
+        parsed.dt.epoch("ms")
+        + EST_NO_DST_OFFSET_MS
+    ).cast(pl.Int64).alias(column)
+
+
+def convert_polars_datetime_to_utc_ms(
+    frame: Any, timeframe: str, column: str = "datetime"
+) -> Any:
+    """Convert a raw Polars HistData datetime column to UTC epoch millis."""
+    return frame.with_columns(
+        polars_datetime_to_utc_ms_expr(timeframe, column)
+    )
+
+
 def _read_csv_to_polars(source: Any, timeframe: str) -> Any:
     """Read a HistData ASCII CSV source into a raw Polars dataframe."""
     import polars as pl
