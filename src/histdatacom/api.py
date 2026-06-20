@@ -7,8 +7,6 @@ Raises:
 Returns:
     "PolarsDataFrame" | "DataFrame" | "Table":
         - (PolarsDataFrame) if options.api_return_type = "polars"
-        - (PolarsDataFrame) if options.api_return_type = "datatable"
-          during the legacy compatibility window
         - (DataFrame) if options.api_return_type = "pandas"
         - (Table) if options.api_return_type = "arrow"
 """
@@ -50,8 +48,6 @@ class Api:  # noqa:H601
     Returns:
         "PolarsDataFrame" | "DataFrame" | "Table":
             - (PolarsDataFrame) if options.api_return_type = "polars"
-            - (PolarsDataFrame) if options.api_return_type = "datatable"
-              during the legacy compatibility window
             - (DataFrame) if options.api_return_type = "pandas"
             - (Table) if options.api_return_type = "arrow"
     """
@@ -71,15 +67,15 @@ class Api:  # noqa:H601
         csv_path = Path(record.data_dir, record.csv_filename)
 
         if zip_path.exists():
-            file_data = cls._import_file_to_datatable(record, zip_path)
+            file_data = cls._import_file_to_polars(record, zip_path)
         elif csv_path.exists():
-            file_data = cls._import_file_to_datatable(record, csv_path)
+            file_data = cls._import_file_to_polars(record, csv_path)
         else:
             raise ValueError("expected downloaded ZIP or CSV source file")
 
         record.jay_filename = CACHE_FILENAME
         jay_path = record.data_dir + record.jay_filename
-        cls._export_datatable_to_jay(file_data, jay_path)
+        cls._write_cache_data(file_data, jay_path)
 
         record.jay_line_count = file_data.height
         record.jay_start = str(
@@ -201,13 +197,6 @@ class Api:  # noqa:H601
             raise SystemExit from err
 
     @classmethod
-    def _import_file_to_datatable(
-        cls, record: Record, zip_path: Path
-    ) -> "PolarsDataFrame":
-        """Compatibility wrapper for the Polars-backed ingest path."""
-        return cls._import_file_to_polars(record, zip_path)
-
-    @classmethod
     def _import_frame_with_headers(  # noqa:BLK001
         cls, timeframe: str, zip_path: Path
     ) -> "PolarsDataFrame":
@@ -226,7 +215,7 @@ class Api:  # noqa:H601
         return read_ascii_file_to_polars(zip_path, timeframe)
 
     @classmethod
-    def _export_datatable_to_jay(  # noqa:BLK001
+    def _write_cache_data(  # noqa:BLK001
         cls, data_frame: "PolarsDataFrame", file_path: str
     ) -> None:
         """Export a Polars frame to the transitional cache path.
@@ -238,16 +227,16 @@ class Api:  # noqa:H601
         write_polars_cache(data_frame, Path(file_path))
 
     @classmethod
-    def import_jay_data(cls, jay_path: str) -> "PolarsDataFrame":
+    def import_cache_data(cls, cache_path: str) -> "PolarsDataFrame":
         """Read cache file into a Polars dataframe.
 
         Args:
-            jay_path (str): source path
+            cache_path (str): source path
 
         Returns:
             DataFrame: polars.DataFrame
         """
-        return read_polars_cache(Path(jay_path))
+        return read_polars_cache(Path(cache_path))
 
     def validate_jays(self) -> None:
         """Initialize a process pool to validate jay files."""
@@ -310,15 +299,12 @@ class Api:  # noqa:H601
 
                 for m_record in tp_set_dict["records"]:
                     jay_path = m_record.data_dir + m_record.jay_filename
-                    frames.append(self.import_jay_data(jay_path))
+                    frames.append(self.import_cache_data(jay_path))
                     progress.advance(task_id)
 
         merged = pl.concat(frames) if frames else pl.DataFrame()
 
         match config.ARGS["api_return_type"]:
-            case "datatable":
-                check_installed_module("polars", True)
-                tp_set_dict["data"] = merged
             case "arrow":
                 check_installed_module("arrow", True)
                 tp_set_dict["data"] = merged.to_arrow()

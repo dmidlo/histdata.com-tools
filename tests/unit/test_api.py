@@ -139,24 +139,6 @@ def test_import_file_to_polars_reads_zip_archives(tmp_path: Path) -> None:
     assert frame.height == 3
 
 
-def test_import_file_to_datatable_is_polars_compatibility_wrapper() -> None:
-    """The legacy method name should no longer create datatable frames."""
-    import polars as pl
-
-    from histdatacom.api import Api
-
-    record = SimpleNamespace(data_timeframe="T")
-    frame = Api._import_file_to_datatable(
-        record,
-        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
-    )
-
-    assert isinstance(frame, pl.DataFrame)
-    assert frame.columns == EXPECTED_TICK_COLUMNS
-    assert frame.schema["datetime"] == pl.Int64
-    assert frame.select("datetime").to_series().to_list() == EXPECTED_TICK_DATETIMES
-
-
 def test_import_file_to_polars_preserves_system_exit_on_bad_timeframe() -> None:
     """The record wrapper should preserve existing SystemExit behavior."""
     from histdatacom.api import Api
@@ -195,7 +177,7 @@ def test_create_jay_writes_polars_cache_and_record_metadata(
         record,
         {"default_download_dir": str(tmp_path) + os.sep},
     )
-    cache_frame = Api.import_jay_data(str(tmp_path / CACHE_FILENAME))
+    cache_frame = Api.import_cache_data(str(tmp_path / CACHE_FILENAME))
 
     assert record.jay_filename == CACHE_FILENAME
     assert record.jay_line_count == 3
@@ -210,10 +192,10 @@ def test_create_jay_writes_polars_cache_and_record_metadata(
     )
 
 
-def test_import_jay_data_reads_polars_cache_without_datatable(
+def test_import_cache_data_reads_polars_cache_without_legacy_backend(
     tmp_path: Path,
 ) -> None:
-    """The cache reader should not import datatable at runtime."""
+    """The cache reader should not import the retired backend at runtime."""
     from histdatacom.api import Api
 
     sys.modules.pop("datatable", None)
@@ -223,8 +205,8 @@ def test_import_jay_data_reads_polars_cache_without_datatable(
         FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
     )
 
-    Api._export_datatable_to_jay(frame, str(tmp_path / CACHE_FILENAME))
-    cache_frame = Api.import_jay_data(str(tmp_path / CACHE_FILENAME))
+    Api._write_cache_data(frame, str(tmp_path / CACHE_FILENAME))
+    cache_frame = Api.import_cache_data(str(tmp_path / CACHE_FILENAME))
 
     assert cache_frame.to_dicts() == frame.to_dicts()
     assert "datatable" not in sys.modules
@@ -305,50 +287,9 @@ def test_merge_records_empty_set_returns_empty_polars_dataframe() -> None:
     assert tp_set["data"].is_empty()
 
 
-def test_merge_records_legacy_datatable_return_type_stays_polars(
-    tmp_path: Path,
-) -> None:
-    """The legacy return key should not create datatable objects in merge."""
-    import polars as pl
-
-    from histdatacom import config
-    from histdatacom.api import Api
-
-    sys.modules.pop("datatable", None)
-    api = Api()
-    source = Api._import_file_to_polars(
-        SimpleNamespace(data_timeframe="T"),
-        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
-    )
-    record = _write_cache_record(
-        tmp_path,
-        "tick",
-        source,
-        pair="eurusd",
-        timeframe="T",
-        start=EXPECTED_TICK_DATETIMES[0],
-    )
-    original_args = config.ARGS.copy()
-
-    try:
-        config.ARGS["api_return_type"] = "datatable"
-        tp_set = {
-            "timeframe": "T",
-            "pair": "eurusd",
-            "records": [record],
-            "data": None,
-        }
-        api._merge_records(tp_set)
-    finally:
-        config.ARGS = original_args
-
-    assert isinstance(tp_set["data"], pl.DataFrame)
-    assert "datatable" not in sys.modules
-
-
 @pytest.mark.parametrize(
     "api_return_type",
-    ("polars", "datatable", "pandas", "arrow"),
+    ("polars", "pandas", "arrow"),
 )
 def test_merge_jays_converts_single_pair_timeframe_return_types(
     tmp_path: Path, api_return_type: str
@@ -397,7 +338,7 @@ def test_merge_jays_converts_single_pair_timeframe_return_types(
         config.ARGS = original_args
         config.CURRENT_QUEUE = original_current_queue
 
-    if api_return_type in {"datatable", "polars"}:
+    if api_return_type == "polars":
         assert isinstance(result, pl.DataFrame)
         values = result.select("datetime").to_series().to_list()
     elif api_return_type == "pandas":

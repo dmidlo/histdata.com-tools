@@ -187,7 +187,7 @@ class Influx:  # noqa:H601
             records_next (Records): config.NEXT_QUEUE
             influx_chunks_queue (Queue): config.INFLUX_CHUNKS_QUEUE
         """
-        jay = Api.import_jay_data(record.data_dir + record.jay_filename)
+        jay = Api.import_cache_data(record.data_dir + record.jay_filename)
         batch_size = _coerce_batch_size(args["batch_size"])
 
         with ProcessPoolExecutor(

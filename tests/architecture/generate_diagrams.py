@@ -142,7 +142,7 @@ class Pycallgraphhistdatacom:  # noqa:H601
 
     def check_py_api_api_return(self):  # noqa:D102,DC102
         print("Checking histdatacom api from api.")  # noqa:T201
-        self.options.api_return_type = "datatable"
+        self.options.api_return_type = "polars"
         self.options.start_yearmonth = "2011-05"
         self.options.end_yearmonth = "2012-01"
         self.method_result = histdatacom(self.options)

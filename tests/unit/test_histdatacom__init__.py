@@ -41,7 +41,7 @@ def test_histdatacom_call() -> None:
     assert histdatacom(options)  # type: ignore  # act
 
 
-def test_histdatacom_version_allows_polars_return_type_without_datatable() -> None:
+def test_histdatacom_version_allows_polars_return_type() -> None:
     # pylint: disable=not-callable
     """Validate Polars return requests without importing the legacy backend."""
     options = Options()

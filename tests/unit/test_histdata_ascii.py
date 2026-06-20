@@ -281,10 +281,10 @@ def test_polars_cache_round_trip_preserves_schema_and_values(
     assert round_trip.to_dicts() == frame.to_dicts()
 
 
-def test_polars_cache_rejects_legacy_datatable_jay_payloads(
+def test_polars_cache_rejects_legacy_cache_payloads(
     tmp_path: Path,
 ) -> None:
-    """Old datatable .jay caches must be regenerated into Polars IPC."""
+    """Old cache payloads must be regenerated into Polars IPC."""
     cache_path = tmp_path / CACHE_FILENAME
     cache_path.write_bytes(b"not an arrow ipc payload")
 
@@ -541,11 +541,11 @@ def test_arrow_api_return_adapter_preserves_values_and_dtype_intent(
 
 
 def test_api_return_adapter_rejects_unsupported_return_types() -> None:
-    """The datatable-free seam should fail clearly for unported return types."""
+    """The adapter seam should fail clearly for unported return types."""
     batch = read_ascii_file(FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv", "M1")
 
-    with pytest.raises(ValueError, match="unsupported API return type: datatable"):
-        convert_batch_for_api(batch, "datatable")
+    with pytest.raises(ValueError, match="unsupported API return type: numpy"):
+        convert_batch_for_api(batch, "numpy")
 
 
 def test_influx_line_protocol_for_m1_matches_current_fields() -> None:

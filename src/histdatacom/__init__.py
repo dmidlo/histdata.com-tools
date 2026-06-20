@@ -54,8 +54,6 @@ class APICaller(sys.modules[__name__].__class__):  # type: ignore # noqa:H601
             "list" | "PolarsDataFrame" | "DataFrame" | "Table":
                 - (list) if called with -A or -U
                 - (PolarsDataFrame) if options.api_return_type = "polars"
-                - (PolarsDataFrame) if options.api_return_type = "datatable"
-                  during the legacy compatibility window
                 - (DataFrame) if options.api_return_type = "pandas"
                 - (Table) if options.api_return_type = "arrow"
         """

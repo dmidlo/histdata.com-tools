@@ -36,8 +36,8 @@ def _read_cache_frame(tmp_path: Path, timeframe: str, filename: str) -> object:
         source_record,
         FIXTURES / filename,
     )
-    Api._export_datatable_to_jay(frame, str(tmp_path / CACHE_FILENAME))
-    return Api.import_jay_data(str(tmp_path / CACHE_FILENAME))
+    Api._write_cache_data(frame, str(tmp_path / CACHE_FILENAME))
+    return Api.import_cache_data(str(tmp_path / CACHE_FILENAME))
 
 
 @pytest.mark.parametrize(

@@ -99,7 +99,7 @@ class _HistDataCom:  # noqa:R701
             self.api = Api()
 
         if config.ARGS["import_to_influxdb"]:
-            config.ARGS["api_return_type"] = "datatable"
+            config.ARGS["api_return_type"] = "polars"
             check_installed_module(config.ARGS["api_return_type"])
             from histdatacom.influx import Influx
 
@@ -123,8 +123,6 @@ class _HistDataCom:  # noqa:R701
 
             Data (PolarsDataFrame | DataFrame | Table):
                     a Polars DataFrame, pandas DataFrame, or pyarrow Table.
-                    The legacy datatable return key currently aliases to
-                    Polars during migration.
             List of dicts:  [
                                 {
                                     "timeframe": timeframe,
@@ -185,8 +183,6 @@ def main(
 
             Data (PolarsDataFrame | DataFrame | Table):
                     a Polars DataFrame, pandas DataFrame, or pyarrow Table.
-                    The legacy datatable return key currently aliases to
-                    Polars during migration.
             List of dicts:  [
                                 {
                                     "timeframe": timeframe,

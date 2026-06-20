@@ -17,13 +17,11 @@ from rich import print  # pylint: disable=redefined-builtin
 
 API_RETURN_TYPE_MODULES = {
     "arrow": "pyarrow",
-    "datatable": "polars",
     "pandas": "pandas",
     "polars": "polars",
 }
 
 SUPPORTED_API_RETURN_TYPES = frozenset(API_RETURN_TYPE_MODULES)
-LEGACY_API_RETURN_TYPES = frozenset({"datatable"})
 
 
 def get_month_from_datemonth(

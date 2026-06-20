@@ -1,7 +1,7 @@
 """Domain helpers for HistData ASCII market data.
 
 This module is intentionally dataframe-independent. It captures the data
-semantics that must survive the datatable-to-Polars migration.
+semantics that must survive the backend migration to Polars.
 """
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ TICK_COLUMNS = ("datetime", "bid", "ask", "vol")
 CACHE_FILENAME = ".data"
 CACHE_FORMAT = "Polars Arrow IPC"
 LEGACY_CACHE_ERROR = (
-    f"cannot read cache file as {CACHE_FORMAT}. Existing datatable .jay "
-    f"caches must be regenerated: delete the {CACHE_FILENAME} file and "
+    f"cannot read cache file as {CACHE_FORMAT}. Existing legacy caches must "
+    f"be regenerated: delete the {CACHE_FILENAME} file and "
     "rerun validation or import so histdatacom can rebuild it."
 )
 
