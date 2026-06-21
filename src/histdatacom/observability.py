@@ -44,6 +44,8 @@ def progress_rate_per_second(
 def progress_increment(event: StatusEvent) -> float:
     """Return the renderer advance amount carried by a progress event."""
     value = event.metadata.get("increment", 0.0)
+    if not isinstance(value, (str, int, float)):
+        return 0.0
     try:
         return float(value or 0.0)
     except (TypeError, ValueError):

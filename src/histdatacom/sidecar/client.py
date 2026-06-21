@@ -471,8 +471,10 @@ async def retry_job(
     **kwargs: Any,
 ) -> SidecarJobSnapshot:
     """Represent retry intent for a job in the control API."""
-    return (await inspect_job_status(workflow_id, **kwargs)).request_retry(
-        reason=reason
+    snapshot = await inspect_job_status(workflow_id, **kwargs)
+    return snapshot.request_retry(
+        reason=reason,
+        stage=_snapshot_stage(snapshot),
     )
 
 
@@ -491,8 +493,10 @@ async def resume_job(
     **kwargs: Any,
 ) -> SidecarJobSnapshot:
     """Represent resume intent for a job in the control API."""
-    return (await inspect_job_status(workflow_id, **kwargs)).request_resume(
-        reason=reason
+    snapshot = await inspect_job_status(workflow_id, **kwargs)
+    return snapshot.request_resume(
+        reason=reason,
+        stage=_snapshot_stage(snapshot),
     )
 
 
@@ -660,6 +664,12 @@ def _logs_from_progress(
         )
         for event in progress.events
     )
+
+
+def _snapshot_stage(snapshot: SidecarJobSnapshot) -> str:
+    if snapshot.progress is None:
+        return ""
+    return snapshot.progress.current_stage
 
 
 async def _collect_workflow_descriptions(raw_jobs: Any) -> list[Any]:

@@ -18,7 +18,16 @@ from histdatacom.activity_stages import (
     repository_refresh_stage,
     validate_url_work_item,
 )
-from histdatacom.exceptions import influx_failure_info
+from histdatacom.cancellation import (
+    cancellation_metadata,
+    cleanup_partial_artifacts,
+    operation_resume_metadata,
+    partial_artifact_candidates,
+)
+from histdatacom.exceptions import (
+    CancellationOperationError,
+    influx_failure_info,
+)
 from histdatacom.observability import attach_progress_metadata
 from histdatacom.runtime_contracts import (
     FailureInfo,
@@ -74,6 +83,23 @@ def repository_refresh_activity(
     """Run repository refresh/listing as a Temporal activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     repo_path = _repo_local_path(request)
+    if _activity_cancelled():
+        result = _observe_stage_result(
+            _cancelled_stage_result(
+                "repository_refresh",
+                work_id=request.request_id,
+                cleanup_paths=partial_artifact_candidates(
+                    "repository_refresh",
+                    repo_local_path=repo_path,
+                ),
+            ),
+            total=1,
+            completed=0,
+            unit="operations",
+            increment=0,
+        )
+        return cast(dict[str, Any], result.to_dict())
+
     output = repository_refresh_stage(
         repo_data={},
         repo_file_exists=repo_path.exists(),
@@ -96,6 +122,22 @@ def repository_refresh_activity(
 def dataset_plan_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
     """Run deterministic URL and dataset planning as a Temporal activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
+    if _activity_cancelled():
+        result = _observe_stage_result(
+            _cancelled_stage_result(
+                "dataset_plan",
+                work_id=request.request_id,
+            ),
+            total=0,
+            completed=0,
+            unit="work_items",
+            increment=0,
+        )
+        return cast(
+            dict[str, Any],
+            {"work_items": [], "result": result.to_dict()},
+        )
+
     output = dataset_plan_stage(
         start_yearmonth=request.start_yearmonth,
         end_yearmonth=request.end_yearmonth,
@@ -115,7 +157,7 @@ def dataset_plan_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
             increment=len(output.work_items),
         ),
     )
-    return cast(dict[str, Any], output.to_dict())
+    return output.to_dict()
 
 
 @activity_defn(name="validate_urls")
@@ -136,21 +178,17 @@ def validate_urls_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
             result.to_dict(),
         )
 
-    total = len(work_items)
     args = {
         "default_download_dir": set_working_data_dir(request.data_directory),
         "requests_timeout": _request_timeout(request),
     }
-    outputs = tuple(
-        _observe_activity_output(
-            validate_url_work_item(work_item, args=args),
-            total=total,
-            completed=index,
-        )
-        for index, work_item in enumerate(work_items, start=1)
+    outputs = _cancellable_outputs(
+        "validate_url",
+        work_items,
+        lambda work_item: validate_url_work_item(work_item, args=args),
     )
     if len(outputs) == 1:
-        return cast(dict[str, Any], outputs[0].to_dict())
+        return outputs[0].to_dict()
 
     return cast(
         dict[str, Any],
@@ -185,22 +223,18 @@ def download_archives_activity(
             result.to_dict(),
         )
 
-    total = len(work_items)
     args = {
         "default_download_dir": set_working_data_dir(request.data_directory),
         "requests_timeout": _request_timeout(request),
         "from_api": bool(request.api_return_type),
     }
-    outputs = tuple(
-        _observe_activity_output(
-            download_archive_work_item(work_item, args=args),
-            total=total,
-            completed=index,
-        )
-        for index, work_item in enumerate(work_items, start=1)
+    outputs = _cancellable_outputs(
+        "download_archive",
+        work_items,
+        lambda work_item: download_archive_work_item(work_item, args=args),
     )
     if len(outputs) == 1:
-        return cast(dict[str, Any], outputs[0].to_dict())
+        return outputs[0].to_dict()
 
     return cast(
         dict[str, Any],
@@ -235,21 +269,17 @@ def extract_csv_activity(
             result.to_dict(),
         )
 
-    total = len(work_items)
     args = {
         "default_download_dir": set_working_data_dir(request.data_directory),
         "zip_persist": request.zip_persist,
     }
-    outputs = tuple(
-        _observe_activity_output(
-            extract_csv_work_item(work_item, args=args),
-            total=total,
-            completed=index,
-        )
-        for index, work_item in enumerate(work_items, start=1)
+    outputs = _cancellable_outputs(
+        "extract_csv",
+        work_items,
+        lambda work_item: extract_csv_work_item(work_item, args=args),
     )
     if len(outputs) == 1:
-        return cast(dict[str, Any], outputs[0].to_dict())
+        return outputs[0].to_dict()
 
     return cast(
         dict[str, Any],
@@ -284,20 +314,16 @@ def build_cache_activity(
             result.to_dict(),
         )
 
-    total = len(work_items)
     args = {
         "default_download_dir": set_working_data_dir(request.data_directory),
     }
-    outputs = tuple(
-        _observe_activity_output(
-            build_cache_work_item(work_item, args=args),
-            total=total,
-            completed=index,
-        )
-        for index, work_item in enumerate(work_items, start=1)
+    outputs = _cancellable_outputs(
+        "build_cache",
+        work_items,
+        lambda work_item: build_cache_work_item(work_item, args=args),
     )
     if len(outputs) == 1:
-        return cast(dict[str, Any], outputs[0].to_dict())
+        return outputs[0].to_dict()
 
     return cast(
         dict[str, Any],
@@ -331,6 +357,19 @@ def merge_cache_activity(
             result.to_dict(),
         )
 
+    if _activity_cancelled():
+        result = _observe_stage_result(
+            _cancelled_stage_result("merge_cache"),
+            total=len(work_items),
+            completed=0,
+            unit="work_items",
+            increment=0,
+        )
+        return cast(
+            dict[str, Any],
+            {"result": result.to_dict(), "merge_sets": []},
+        )
+
     output = merge_cache_work_items(
         work_items,
         materialize=False,
@@ -345,7 +384,7 @@ def merge_cache_activity(
             increment=len(work_items),
         ),
     )
-    return cast(dict[str, Any], output.to_dict())
+    return output.to_dict()
 
 
 @activity_defn(name="import_to_influx")
@@ -372,17 +411,14 @@ def import_to_influx_activity(
     args = _influx_args(request)
     try:
         with _influx_batch_writer(args) as writer:
-            outputs = tuple(
-                _observe_activity_output(
-                    _import_to_influx_with_writer(
-                        work_item,
-                        args=args,
-                        writer=writer,
-                    ),
-                    total=total,
-                    completed=index,
-                )
-                for index, work_item in enumerate(work_items, start=1)
+            outputs = _cancellable_outputs(
+                "import_to_influx",
+                work_items,
+                lambda work_item: _import_to_influx_with_writer(
+                    work_item,
+                    args=args,
+                    writer=writer,
+                ),
             )
     except (Exception, SystemExit) as err:
         outputs = tuple(
@@ -395,7 +431,7 @@ def import_to_influx_activity(
         )
 
     if len(outputs) == 1:
-        return cast(dict[str, Any], outputs[0].to_dict())
+        return outputs[0].to_dict()
 
     return cast(
         dict[str, Any],
@@ -509,11 +545,109 @@ def _activity_heartbeat(metadata: Mapping[str, JSONValue]) -> None:
         heartbeat(dict(metadata))
 
 
+def _activity_cancelled() -> bool:
+    for attribute in (
+        "is_cancelled",
+        "is_cancel_requested",
+        "is_cancellation_requested",
+    ):
+        value = getattr(activity, attribute, None)
+        if callable(value):
+            return bool(value())
+        if isinstance(value, bool):
+            return value
+    return False
+
+
+def _cancellable_outputs(
+    stage: str,
+    work_items: tuple[WorkItem, ...],
+    run_one: Callable[[WorkItem], ActivityStageOutput],
+) -> tuple[ActivityStageOutput, ...]:
+    total = len(work_items)
+    outputs: list[ActivityStageOutput] = []
+    for index, work_item in enumerate(work_items, start=1):
+        if _activity_cancelled():
+            outputs.append(
+                _observe_activity_output(
+                    _cancelled_activity_output(work_item, stage),
+                    total=total,
+                    completed=len(outputs),
+                    increment=0,
+                )
+            )
+            break
+        outputs.append(
+            _observe_activity_output(
+                run_one(work_item),
+                total=total,
+                completed=index,
+            )
+        )
+    return tuple(outputs)
+
+
+def _cancelled_activity_output(
+    work_item: WorkItem,
+    stage: str,
+) -> ActivityStageOutput:
+    return ActivityStageOutput(
+        work_item=work_item.with_status(WorkStatus.CANCELLED),
+        result=_cancelled_stage_result(
+            stage,
+            work_id=work_item.work_id,
+            cleanup_paths=partial_artifact_candidates(stage, work_item),
+        ),
+        forward=False,
+    )
+
+
+def _cancelled_stage_result(
+    stage: str,
+    *,
+    work_id: str = "",
+    reason: str = "Activity cancellation requested.",
+    cleanup_paths: tuple[Path, ...] = (),
+) -> StageResult:
+    cleanup_results = cleanup_partial_artifacts(cleanup_paths)
+    metadata = cancellation_metadata(
+        stage,
+        reason=reason,
+        cleanup_results=cleanup_results,
+    )
+    failure = CancellationOperationError(
+        reason,
+        detail={"cancellation": metadata},
+    ).to_failure_info()
+    return StageResult(
+        work_id=work_id,
+        stage=stage,
+        status=WorkStatus.CANCELLED,
+        failure=failure,
+        events=(
+            StatusEvent(
+                status=WorkStatus.CANCELLED,
+                stage=stage,
+                message=reason,
+                work_id=work_id,
+                metadata={"cancellation": metadata},
+            ),
+        ),
+        metrics={
+            "forward": False,
+            "cancelled": True,
+            "cleanup": metadata["cleanup"],
+            "resume_policy": operation_resume_metadata(stage),
+        },
+    )
+
+
 def _observe_activity_output(
     output: ActivityStageOutput,
     *,
     total: int,
     completed: int,
+    increment: int = 1,
 ) -> ActivityStageOutput:
     return replace(
         output,
@@ -522,6 +656,7 @@ def _observe_activity_output(
             total=total,
             completed=completed,
             unit="work_items",
+            increment=increment,
         ),
     )
 
@@ -650,12 +785,16 @@ def _aggregate_activity_outputs(
 ) -> StageResult:
     statuses = tuple(output.result.status for output in outputs)
     status = (
-        WorkStatus.FAILED
-        if WorkStatus.FAILED in statuses
+        WorkStatus.CANCELLED
+        if WorkStatus.CANCELLED in statuses
         else (
-            WorkStatus.RETRIED
-            if WorkStatus.RETRIED in statuses
-            else WorkStatus.COMPLETED
+            WorkStatus.FAILED
+            if WorkStatus.FAILED in statuses
+            else (
+                WorkStatus.RETRIED
+                if WorkStatus.RETRIED in statuses
+                else WorkStatus.COMPLETED
+            )
         )
     )
     return StageResult(

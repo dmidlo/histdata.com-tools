@@ -29,6 +29,7 @@ from rich.progress import (
 )
 
 from histdatacom import config
+from histdatacom.cancellation import cancellation_metadata
 from histdatacom.observability import (
     ProgressEventSink,
     ProgressState,
@@ -152,7 +153,12 @@ class ThreadPool:
                             progress_state=progress_state,
                         )
             except KeyboardInterrupt as exc_info:
-                _on_keyboard_interrupt(executor, progress, exc_info)
+                _on_keyboard_interrupt(
+                    executor,
+                    progress,
+                    exc_info,
+                    progress_state=progress_state,
+                )
 
         records_current.join()  # type: ignore
         records_next.dump_to_queue(records_current)  # type: ignore
@@ -279,7 +285,13 @@ class ProcessPool:
                         )
 
             except KeyboardInterrupt as exc_info:
-                _on_keyboard_interrupt(executor, progress, exc_info, writer)
+                _on_keyboard_interrupt(
+                    executor,
+                    progress,
+                    exc_info,
+                    writer,
+                    progress_state=progress_state,
+                )
 
         if self.join:
             records_current.join()  # type: ignore
@@ -442,6 +454,7 @@ def _on_keyboard_interrupt(
     progress: Progress,
     exc_info: KeyboardInterrupt,
     writer: InfluxBatchWriter | None = None,
+    progress_state: ProgressState | None = None,
 ) -> None:
     """Exit Handler for user exit during concurrency.
 
@@ -452,11 +465,25 @@ def _on_keyboard_interrupt(
         exc_info (KeyboardInterrupt): Keyboard Interrupt err info
         writer (InfluxBatchWriter | None, optional):
             InfluxDB batch writer. Defaults to None.
+        progress_state (ProgressState | None): optional structured progress
+            aggregate for cancellation status.
 
     Raises:
         SystemExit: User Exit.
     """
     progress.stop()
+    if progress_state is not None:
+        progress_state.advance(
+            0.0,
+            status=WorkStatus.CANCELLED,
+            message="Interrupted by operator.",
+            metadata={
+                "cancellation": cancellation_metadata(
+                    progress_state.stage,
+                    reason="KeyboardInterrupt",
+                )
+            },
+        )
     with Progress(
         TextColumn(text_format="[cyan]...Exiting. Please wait..."),
     ) as exit_progress:

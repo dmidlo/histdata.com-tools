@@ -20,6 +20,7 @@ import certifi
 import requests
 from bs4 import BeautifulSoup
 
+from histdatacom.cancellation import deterministic_partial_path
 from histdatacom.exceptions import (
     ArchiveDownloadError,
     ArchiveExtractionError,
@@ -1924,10 +1925,16 @@ def write_repository_data_file(
 ) -> ArtifactRef:
     """Write repository metadata to disk and return an artifact reference."""
     repo_path = Path(repo_local_path)
+    temp_path = deterministic_partial_path(repo_path, str(repo_path))
     create_full_path(repo_path.parent)
     hashed_data = hash_repository_data(repo_data)
-    with repo_path.open("w", encoding="UTF-8") as target:
-        json.dump(hashed_data, target)
+    try:
+        with temp_path.open("w", encoding="UTF-8") as target:
+            json.dump(hashed_data, target)
+        temp_path.replace(repo_path)
+    except (OSError, TypeError, ValueError):
+        _unlink_path(temp_path)
+        raise
     return ArtifactRef(
         kind="repository",
         path=str(repo_path),

@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path
 from urllib.error import URLError
 
+import pytest
 import requests
 
 from histdatacom.activity_stages import (
@@ -25,6 +26,7 @@ from histdatacom.activity_stages import (
     repository_data_with_record,
     repository_refresh_stage,
     validate_url_work_item,
+    write_repository_data_file,
 )
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
@@ -1122,6 +1124,26 @@ def test_repository_refresh_stage_writes_artifact_and_available_data(
     assert written["eurusd"] == {"start": "200005", "end": "202212"}
     assert "hash" in written
     assert "hash_utc" in written
+
+
+def test_repository_write_removes_partial_temp_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Repository metadata writes should not leave retry-confusing temps."""
+    repo_path = tmp_path / ".repo"
+
+    def fail_dump(data: object, target: object) -> None:  # noqa: ARG001
+        target.write("{")  # type: ignore[attr-defined]
+        raise ValueError("failed repository write")
+
+    monkeypatch.setattr("histdatacom.activity_stages.json.dump", fail_dump)
+
+    with pytest.raises(ValueError, match="failed repository write"):
+        write_repository_data_file({"eurusd": {"start": "1"}}, repo_path)
+
+    assert not repo_path.exists()
+    assert not list(tmp_path.glob(".repo.*.tmp"))
 
 
 def test_repository_refresh_stage_network_error_is_structured_failure(

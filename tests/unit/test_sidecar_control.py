@@ -123,9 +123,15 @@ def test_job_snapshot_represents_cancel_retry_resume_transitions() -> None:
     )
 
     cancel_requested = base.request_cancel(reason="operator")
-    retry_requested = base.request_retry(reason="transient network")
+    retry_requested = base.request_retry(
+        reason="transient network",
+        stage="BuildCacheWorkflow",
+    )
     retrying = retry_requested.mark_retrying()
-    resume_requested = base.request_resume(reason="continue checkpoint")
+    resume_requested = base.request_resume(
+        reason="continue checkpoint",
+        stage="DownloadArchivesWorkflow",
+    )
     resuming = resume_requested.mark_resuming()
 
     assert cancel_requested.lifecycle == JobLifecycle.CANCEL_REQUESTED
@@ -134,7 +140,21 @@ def test_job_snapshot_represents_cancel_retry_resume_transitions() -> None:
         == ControlOperationPhase.REQUESTED
     )
     assert cancel_requested.controls.cancel.reason == "operator"
+    assert (
+        cancel_requested.controls.cancel.metadata["cancellation"][
+            "stops_future_work"
+        ]
+        is True
+    )
     assert retry_requested.lifecycle == JobLifecycle.RETRY_REQUESTED
+    assert (
+        retry_requested.controls.retry.metadata["resume_policy"]["stage"]
+        == "build_cache"
+    )
     assert retrying.lifecycle == JobLifecycle.RETRYING
     assert resume_requested.lifecycle == JobLifecycle.RESUME_REQUESTED
+    assert (
+        resume_requested.controls.resume.metadata["resume_policy"]["stage"]
+        == "download_archives"
+    )
     assert resuming.lifecycle == JobLifecycle.RESUMING

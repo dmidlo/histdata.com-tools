@@ -436,6 +436,33 @@ def test_validate_urls_activity_returns_retried(monkeypatch, tmp_path) -> None:
     assert result["result"]["failure"]["retryable"]
 
 
+def test_validate_urls_activity_returns_cancelled_when_requested(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Activity cancellation should skip future work and emit metadata."""
+    import histdatacom.sidecar.activities as activities
+
+    monkeypatch.setattr(
+        activities.activity,
+        "is_cancelled",
+        lambda: True,
+        raising=False,
+    )
+
+    result = validate_urls_activity(_validation_payload(tmp_path))
+
+    assert result["work_item"]["status"] == WorkStatus.CANCELLED.value
+    assert result["result"]["status"] == WorkStatus.CANCELLED.value
+    assert result["result"]["failure"]["code"] == "OPERATION_CANCELLED"
+    assert result["result"]["metrics"]["cancelled"] is True
+    assert result["result"]["metrics"]["resume_policy"]["stage"] == (
+        "validate_url"
+    )
+    cancellation = result["result"]["events"][-1]["metadata"]["cancellation"]
+    assert cancellation["stops_future_work"] is True
+
+
 def test_download_archives_activity_reuses_existing_zip(tmp_path) -> None:
     """Archive downloads should be callable as a registered activity."""
     result = download_archives_activity(_download_payload(tmp_path))
@@ -446,6 +473,38 @@ def test_download_archives_activity_reuses_existing_zip(tmp_path) -> None:
     assert result["work_item"]["status"] == WorkStatus.CSV_ZIP.value
     assert result["result"]["artifacts"][0]["kind"] == "zip"
     assert result["result"]["artifacts"][0]["sha256"]
+
+
+def test_download_archives_activity_removes_partial_temp_on_cancel(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Cancellation should clean hidden temp files and preserve complete ZIPs."""
+    import histdatacom.sidecar.activities as activities
+
+    payload = _download_payload(tmp_path)
+    zip_path = tmp_path / payload["work_item"]["zip_filename"]
+    partial = tmp_path / ".DAT_ASCII_EURUSD_M1_2022.zip.partial.tmp"
+    partial.write_text("partial", encoding="utf-8")
+    monkeypatch.setattr(
+        activities.activity,
+        "is_cancelled",
+        lambda: True,
+        raising=False,
+    )
+
+    result = download_archives_activity(payload)
+
+    assert result["result"]["status"] == WorkStatus.CANCELLED.value
+    assert result["result"]["metrics"]["resume_policy"]["stage"] == (
+        "download_archive"
+    )
+    assert zip_path.exists()
+    assert not partial.exists()
+    assert any(
+        item["path"] == str(partial) and item["removed"]
+        for item in result["result"]["metrics"]["cleanup"]
+    )
 
 
 def test_extract_csv_activity_extracts_existing_zip(tmp_path) -> None:

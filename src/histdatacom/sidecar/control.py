@@ -6,6 +6,10 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Mapping
 
+from histdatacom.cancellation import (
+    job_cancellation_metadata,
+    operation_resume_metadata,
+)
 from histdatacom.runtime_contracts import (
     ArtifactRef,
     JSONValue,
@@ -503,13 +507,19 @@ class SidecarJobSnapshot:
         requested_at_utc: str = "",
         reason: str = "",
         message: str = "Cancellation requested.",
+        metadata: Mapping[str, JSONValue] | None = None,
     ) -> "SidecarJobSnapshot":
         """Return a snapshot with cancellation explicitly requested."""
+        operation_metadata = {
+            "cancellation": job_cancellation_metadata(reason),
+            **dict(metadata or {}),
+        }
         state = self.controls.cancel.transition(
             ControlOperationPhase.REQUESTED,
             requested_at_utc=requested_at_utc,
             reason=reason,
             message=message,
+            metadata=operation_metadata,
         )
         return replace(
             self,
@@ -524,11 +534,16 @@ class SidecarJobSnapshot:
         self,
         *,
         message: str = "Job cancelled.",
+        metadata: Mapping[str, JSONValue] | None = None,
     ) -> "SidecarJobSnapshot":
         """Return a terminal cancelled snapshot."""
         state = self.controls.cancel.transition(
             ControlOperationPhase.COMPLETED,
             message=message,
+            metadata={
+                "cancellation": job_cancellation_metadata(),
+                **dict(metadata or {}),
+            },
         )
         lifecycle = JobLifecycle.CANCELLED
         status = WorkStatus.CANCELLED
@@ -548,13 +563,21 @@ class SidecarJobSnapshot:
         requested_at_utc: str = "",
         reason: str = "",
         message: str = "Retry requested.",
+        stage: str = "",
+        metadata: Mapping[str, JSONValue] | None = None,
     ) -> "SidecarJobSnapshot":
         """Return a snapshot with retry explicitly requested."""
+        operation_metadata = dict(metadata or {})
+        if stage:
+            operation_metadata["resume_policy"] = operation_resume_metadata(
+                stage
+            )
         state = self.controls.retry.transition(
             ControlOperationPhase.REQUESTED,
             requested_at_utc=requested_at_utc,
             reason=reason,
             message=message,
+            metadata=operation_metadata,
         )
         return replace(
             self,
@@ -569,11 +592,13 @@ class SidecarJobSnapshot:
         self,
         *,
         message: str = "Retry in progress.",
+        metadata: Mapping[str, JSONValue] | None = None,
     ) -> "SidecarJobSnapshot":
         """Return a snapshot with retry in progress."""
         state = self.controls.retry.transition(
             ControlOperationPhase.IN_PROGRESS,
             message=message,
+            metadata=metadata,
         )
         return replace(
             self,
@@ -590,13 +615,21 @@ class SidecarJobSnapshot:
         requested_at_utc: str = "",
         reason: str = "",
         message: str = "Resume requested.",
+        stage: str = "",
+        metadata: Mapping[str, JSONValue] | None = None,
     ) -> "SidecarJobSnapshot":
         """Return a snapshot with resume explicitly requested."""
+        operation_metadata = dict(metadata or {})
+        if stage:
+            operation_metadata["resume_policy"] = operation_resume_metadata(
+                stage
+            )
         state = self.controls.resume.transition(
             ControlOperationPhase.REQUESTED,
             requested_at_utc=requested_at_utc,
             reason=reason,
             message=message,
+            metadata=operation_metadata,
         )
         return replace(
             self,
@@ -611,11 +644,13 @@ class SidecarJobSnapshot:
         self,
         *,
         message: str = "Resume in progress.",
+        metadata: Mapping[str, JSONValue] | None = None,
     ) -> "SidecarJobSnapshot":
         """Return a snapshot with resume in progress."""
         state = self.controls.resume.transition(
             ControlOperationPhase.IN_PROGRESS,
             message=message,
+            metadata=metadata,
         )
         return replace(
             self,

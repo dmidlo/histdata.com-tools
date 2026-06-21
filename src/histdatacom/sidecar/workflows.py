@@ -205,7 +205,9 @@ class WorkflowProgress:
             self._child_progress_event(stage, result),
         )
         self.artifacts = (*self.artifacts, *result.artifacts)
-        if result.failure is not None:
+        if result.status == WorkStatus.CANCELLED:
+            self.status = WorkStatus.CANCELLED
+        elif result.failure is not None:
             self.status = WorkStatus.FAILED
 
     def finish(self, status: WorkStatus) -> None:
@@ -870,6 +872,8 @@ DEFAULT_WORKFLOWS = (
 
 
 def _execute_status(results: tuple[StageResult, ...]) -> WorkStatus:
+    if any(result.status == WorkStatus.CANCELLED for result in results):
+        return WorkStatus.CANCELLED
     if any(result.failure is not None for result in results):
         return WorkStatus.FAILED
     if results and all(
@@ -909,6 +913,8 @@ async def _execute_child_plan(
         )
         results.append(result)
         progress.record_child(invocation.workflow_name, result)
+        if result.status == WorkStatus.CANCELLED:
+            break
     progress.finish(_execute_status(tuple(results)))
     return _summary_payload(
         request=request,

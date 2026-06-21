@@ -364,6 +364,42 @@ def test_cancel_job_requests_temporal_cancel_and_reports_state(
     assert handle.cancel_calls == 1
     assert snapshot.lifecycle == JobLifecycle.CANCEL_REQUESTED
     assert snapshot.controls.cancel.reason == "operator"
+    assert (
+        snapshot.controls.cancel.metadata["cancellation"]["stops_future_work"]
+        is True
+    )
+
+
+def test_retry_and_resume_include_current_stage_resume_policy(
+    tmp_path: Path,
+) -> None:
+    """Retry/resume intent should carry the current operation resume policy."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient()
+
+    retry = asyncio.run(
+        client.retry_job(
+            "histdatacom-run-test",
+            reason="network",
+            config=config,
+            client=temporal_client,
+        )
+    )
+    resume = asyncio.run(
+        client.resume_job(
+            "histdatacom-run-test",
+            reason="continue",
+            config=config,
+            client=temporal_client,
+        )
+    )
+
+    assert retry.controls.retry.metadata["resume_policy"]["stage"] == (
+        "download_archives"
+    )
+    assert resume.controls.resume.metadata["resume_policy"]["stage"] == (
+        "download_archives"
+    )
 
 
 def test_list_job_statuses_uses_temporal_visibility_list(

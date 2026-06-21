@@ -238,3 +238,39 @@ def test_on_keyboard_interrupt_shuts_down_executor_and_writer() -> None:
         "wait": False,
         "cancel_futures": True,
     }
+
+
+def test_on_keyboard_interrupt_emits_cancellation_progress() -> None:
+    """Keyboard interrupts should emit structured cancellation metadata."""
+    from histdatacom.concurrency import _on_keyboard_interrupt
+    from histdatacom.observability import ProgressState
+    from histdatacom.runtime_contracts import StatusEvent, WorkStatus
+
+    events: list[StatusEvent] = []
+    executor = _SynchronousExecutor(max_workers=1)
+    progress = SimpleNamespace(stopped=False)
+
+    def stop() -> None:
+        progress.stopped = True
+
+    progress.stop = stop
+    progress_state = ProgressState(
+        stage="download_archive",
+        total=1,
+        event_sink=events.append,
+    )
+
+    with pytest.raises(SystemExit):
+        _on_keyboard_interrupt(
+            executor,  # type: ignore[arg-type]
+            progress,  # type: ignore[arg-type]
+            KeyboardInterrupt(),
+            progress_state=progress_state,
+        )
+
+    assert progress.stopped
+    assert events[-1].status is WorkStatus.CANCELLED
+    assert events[-1].metadata["cancellation"]["stops_future_work"] is True
+    assert events[-1].metadata["cancellation"]["resume_policy"]["stage"] == (
+        "download_archive"
+    )

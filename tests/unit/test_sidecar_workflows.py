@@ -7,6 +7,7 @@ from typing import Mapping
 
 from histdatacom.runtime_contracts import (
     ArtifactRef,
+    FailureInfo,
     JSONValue,
     RunRequest,
     StageResult,
@@ -48,6 +49,41 @@ class _RecordingChildExecutor:
                     kind="manifest",
                     path=f"{workflow_id}.json",
                 ),
+            ),
+        ).to_dict()
+
+
+class _CancellingChildExecutor:
+    """Fake child workflow executor that cancels the first child."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def execute_child_workflow(
+        self,
+        workflow_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        workflow_id: str,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Record child workflow calls and return a cancelled stage."""
+        self.calls.append(
+            {
+                "workflow_name": workflow_name,
+                "payload": dict(payload),
+                "workflow_id": workflow_id,
+                "task_queue": task_queue,
+            }
+        )
+        return StageResult(
+            work_id=workflow_id,
+            stage=workflow_name,
+            status=WorkStatus.CANCELLED,
+            failure=FailureInfo(
+                code="OPERATION_CANCELLED",
+                message="operator cancelled",
+                retryable=False,
             ),
         ).to_dict()
 
@@ -226,6 +262,29 @@ def test_symbol_timeframe_workflow_composes_operation_children() -> None:
         "MergeCacheWorkflow",
         "ImportWorkflow",
     ]
+
+
+def test_symbol_timeframe_workflow_stops_after_cancelled_child() -> None:
+    """A cancellation result should prevent later child workflows starting."""
+    executor = _CancellingChildExecutor()
+    workflow = workflows.SymbolTimeframeWorkflow(executor=executor)
+    request = _request()
+
+    summary = asyncio.run(
+        workflow.run(
+            {
+                "request": request.to_dict(),
+                "partition": {"pair": "EURUSD", "timeframe": "M1"},
+            }
+        )
+    )
+
+    assert [call["workflow_name"] for call in executor.calls] == [
+        "ValidateUrlsWorkflow"
+    ]
+    assert summary["status"] == WorkStatus.CANCELLED.value
+    assert summary["progress"]["completed_children"] == 1
+    assert summary["progress"]["last_error"] == "operator cancelled"
 
 
 def test_leaf_workflow_uses_mocked_activity_executor() -> None:
