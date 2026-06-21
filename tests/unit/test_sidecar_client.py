@@ -15,6 +15,7 @@ from histdatacom.runtime_contracts import (
     WorkStatus,
 )
 from histdatacom.sidecar.control import JobLifecycle
+from histdatacom.sidecar.control import SidecarJobSnapshot
 from histdatacom.sidecar import client
 from histdatacom.sidecar.queues import build_sidecar_worker_config
 from histdatacom.sidecar.runtime import build_sidecar_runtime_policy
@@ -97,9 +98,48 @@ class _FakeWorkflowHandle:
         self.run_id = run_id
         self.cancel_calls = 0
 
-    async def result(self) -> dict[str, str]:
+    async def result(self) -> dict[str, object]:
         """Return a fake workflow result payload."""
-        return {"workflow_name": "HistDataRunWorkflow", "status": "COMPLETED"}
+        return {
+            "workflow_name": "HistDataRunWorkflow",
+            "request_id": "run-test",
+            "status": "COMPLETED",
+            "progress": {
+                "workflow_name": "HistDataRunWorkflow",
+                "request_id": "run-test",
+                "status": "COMPLETED",
+                "current_stage": "finished",
+                "total_children": 1,
+                "completed_children": 1,
+                "planned_children": ["ValidateUrlsWorkflow"],
+                "completed_stages": ["ValidateUrlsWorkflow"],
+                "events": [
+                    StatusEvent(
+                        status=WorkStatus.COMPLETED,
+                        stage="finished",
+                    ).to_dict()
+                ],
+                "artifacts": [
+                    ArtifactRef(
+                        kind="manifest",
+                        path="/tmp/manifest.json",
+                    ).to_dict()
+                ],
+            },
+            "stage_results": [
+                {
+                    "work_id": "work-1",
+                    "stage": "validate_urls",
+                    "status": "COMPLETED",
+                }
+            ],
+            "work_items": [{"work_id": "work-1"}],
+            "artifacts": [
+                ArtifactRef(
+                    kind="manifest", path="/tmp/manifest.json"
+                ).to_dict()
+            ],
+        }
 
     async def query(self, query_name: str) -> dict[str, object]:
         """Return a fake workflow status query payload."""
@@ -246,6 +286,12 @@ def test_submit_run_request_uses_orchestration_queue(
         config.task_queues.to_dict()
     )
     assert payload["metadata"]["workflow_topology_version"] == 1
+    stored = client.sidecar_job_store(config).get_job_snapshot(
+        "histdatacom-run-test"
+    )
+    assert stored is not None
+    assert stored["lifecycle"] == JobLifecycle.SUBMITTED.value
+    assert client.sidecar_job_store_path(config).parent.name == ".histdatacom"
 
 
 def test_submit_and_observe_reuses_running_sidecar(
@@ -267,12 +313,19 @@ def test_submit_and_observe_reuses_running_sidecar(
     )
 
     assert result.status == "completed"
-    assert result.result == {
-        "workflow_name": "HistDataRunWorkflow",
-        "status": "COMPLETED",
-    }
+    assert result.result["workflow_name"] == "HistDataRunWorkflow"
+    assert result.result["status"] == "COMPLETED"
+    assert "stage_results" in result.result
     assert result.snapshot is not None
     assert result.snapshot.lifecycle == JobLifecycle.SUCCEEDED
+    stored = client.sidecar_job_store(config).get_job_snapshot(
+        "histdatacom-run-test"
+    )
+    assert stored is not None
+    assert stored["lifecycle"] == JobLifecycle.SUCCEEDED.value
+    assert stored["result"]["status"] == WorkStatus.COMPLETED.value
+    assert stored["result"]["stage_result_count"] == 1
+    assert "stage_results" not in stored["result"]
     assert supervisor.status_calls == 1
     assert supervisor.start_calls == 0
     assert temporal_client.started[0]["id"] == "histdatacom-run-test"
@@ -300,6 +353,11 @@ def test_submit_and_observe_can_start_unavailable_sidecar(
     assert result.status == "submitted"
     assert result.snapshot is not None
     assert result.snapshot.lifecycle == JobLifecycle.SUBMITTED
+    stored = client.sidecar_job_store(config).get_job_snapshot(
+        "histdatacom-run-start"
+    )
+    assert stored is not None
+    assert stored["lifecycle"] == JobLifecycle.SUBMITTED.value
     assert supervisor.start_calls == 1
 
 
@@ -342,6 +400,31 @@ def test_inspect_job_status_queries_workflow_status(tmp_path: Path) -> None:
     assert snapshot.progress.completed_children == 1
     assert snapshot.logs[0].message == "URLs validated"
     assert snapshot.artifacts[0].kind == "manifest"
+    stored = client.sidecar_job_store(config).get_job_snapshot(
+        "histdatacom-run-test"
+    )
+    store = client.sidecar_job_store(config)
+    history = store.status_history("histdatacom-run-test", owner_kind="job")
+    [artifact] = store.list_artifacts(
+        "histdatacom-run-test",
+        owner_kind="job",
+    )
+    assert stored is not None
+    assert stored["progress"]["current_stage"] == "DownloadArchivesWorkflow"
+    assert history[-1]["stage"] == "validate_urls"
+    assert artifact["kind"] == "manifest"
+
+    offline = asyncio.run(
+        client.inspect_job_status(
+            "histdatacom-run-test",
+            config=config,
+            offline=True,
+        )
+    )
+
+    assert offline.workflow_id == "histdatacom-run-test"
+    assert offline.logs[0].message == "URLs validated"
+    assert offline.artifacts[0].kind == "manifest"
 
 
 def test_cancel_job_requests_temporal_cancel_and_reports_state(
@@ -368,6 +451,11 @@ def test_cancel_job_requests_temporal_cancel_and_reports_state(
         snapshot.controls.cancel.metadata["cancellation"]["stops_future_work"]
         is True
     )
+    stored = client.sidecar_job_store(config).get_job_snapshot(
+        "histdatacom-run-test"
+    )
+    assert stored is not None
+    assert stored["lifecycle"] == JobLifecycle.CANCEL_REQUESTED.value
 
 
 def test_retry_and_resume_include_current_stage_resume_policy(
@@ -400,6 +488,66 @@ def test_retry_and_resume_include_current_stage_resume_policy(
     assert resume.controls.resume.metadata["resume_policy"]["stage"] == (
         "download_archives"
     )
+    stored = client.sidecar_job_store(config).get_job_snapshot(
+        "histdatacom-run-test"
+    )
+    assert stored is not None
+    assert stored["lifecycle"] == JobLifecycle.RESUME_REQUESTED.value
+
+
+def test_get_job_result_persists_result_snapshot(tmp_path: Path) -> None:
+    """Result lookup should persist the bounded workflow result payload."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient()
+
+    snapshot = asyncio.run(
+        client.get_job_result(
+            "histdatacom-run-test",
+            config=config,
+            client=temporal_client,
+        )
+    )
+
+    stored = client.sidecar_job_store(config).get_job_snapshot(
+        "histdatacom-run-test"
+    )
+
+    assert snapshot.lifecycle == JobLifecycle.SUCCEEDED
+    assert stored is not None
+    assert stored["result"]["workflow_name"] == "HistDataRunWorkflow"
+    assert stored["result"]["status"] == WorkStatus.COMPLETED.value
+    assert stored["result"]["stage_result_count"] == 1
+    assert stored["result"]["work_item_count"] == 1
+    assert stored["result"]["artifact_count"] == 1
+    assert stored["result"]["progress"]["event_count"] == 1
+    assert "stage_results" not in stored["result"]
+    assert "work_items" not in stored["result"]
+    assert "events" not in stored["result"]["progress"]
+
+
+def test_list_job_statuses_offline_reads_local_store(
+    tmp_path: Path,
+) -> None:
+    """Offline listing should not require a live Temporal client."""
+    config = _config(tmp_path)
+    store = client.sidecar_job_store(config)
+    store.write_job_snapshot(
+        SidecarJobSnapshot.from_handle(
+            SimpleNamespace(
+                request_id="run-offline",
+                workflow_id="histdatacom-run-offline",
+                run_id="run-stored",
+                task_queue=config.task_queues.orchestration,
+                namespace=config.namespace,
+            )
+        )
+    )
+
+    jobs = asyncio.run(client.list_job_statuses(config=config, offline=True))
+
+    assert len(jobs.jobs) == 1
+    assert jobs.jobs[0].workflow_id == "histdatacom-run-offline"
+    assert jobs.jobs[0].lifecycle == JobLifecycle.SUBMITTED
 
 
 def test_list_job_statuses_uses_temporal_visibility_list(

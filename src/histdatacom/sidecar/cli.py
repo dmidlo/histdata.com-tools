@@ -157,6 +157,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="submit, inspect, and control sidecar jobs",
     )
     _add_common_args(jobs, include_defaults=False)
+    jobs.add_argument(
+        "--offline",
+        action="store_true",
+        help="read persisted local job snapshots without querying Temporal",
+    )
     job_subparsers = jobs.add_subparsers(
         dest="jobs_command",
         required=True,
@@ -190,6 +195,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--query",
         default="",
         help="Temporal workflow list query override",
+    )
+    list_jobs.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="maximum stored jobs to return in offline/fallback mode",
     )
 
     for command, help_text in (
@@ -374,7 +385,12 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
         _write_control_payload(snapshot.to_dict(), as_json=args.json)
         return 0
     if args.jobs_command == "list":
-        jobs = list_job_statuses_sync(config=config, query=args.query)
+        jobs = list_job_statuses_sync(
+            config=config,
+            query=args.query,
+            offline=args.offline,
+            limit=args.limit,
+        )
         _write_control_payload(jobs.to_dict(), as_json=args.json)
         return 0
 
@@ -382,6 +398,7 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
         "run_id": args.run_id,
         "config": config,
         "supervisor": supervisor,
+        "offline": args.offline,
     }
     if args.jobs_command == "inspect":
         snapshot = inspect_job_status_sync(args.workflow_id, **identity_kwargs)

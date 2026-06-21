@@ -18,6 +18,7 @@ from histdatacom.runtime_contracts import (
 )
 
 CONTROL_SCHEMA_VERSION = 1
+MAX_RESULT_REPR_CHARS = 256
 
 
 class JobControlAction(str, Enum):
@@ -497,7 +498,7 @@ class SidecarJobSnapshot:
             status=status,
             progress=progress,
             artifacts=artifacts,
-            result=result,
+            result=_bounded_result_payload(result),
             controls=JobControlStates.for_status(status, lifecycle),
         )
 
@@ -765,6 +766,89 @@ def lifecycle_from_work_status(status: WorkStatus) -> JobLifecycle:
     if status.terminal:
         return JobLifecycle.SUCCEEDED
     return JobLifecycle.RUNNING
+
+
+def _bounded_result_payload(result: Any) -> dict[str, JSONValue]:
+    if not isinstance(result, Mapping):
+        return {
+            "result_type": type(result).__name__,
+            "repr": repr(result)[:MAX_RESULT_REPR_CHARS],
+        }
+
+    payload: dict[str, JSONValue] = {}
+    for key in ("request_id", "workflow_name"):
+        value = result.get(key)
+        if value:
+            payload[key] = str(value)
+
+    payload["status"] = WorkStatus.from_value(result.get("status")).value
+    payload["stage_result_count"] = _list_count(result.get("stage_results"))
+    payload["work_item_count"] = _work_item_count(result)
+    payload["artifact_count"] = _list_count(result.get("artifacts"))
+
+    partition = result.get("partition")
+    if isinstance(partition, Mapping):
+        payload["partition"] = {
+            str(key): str(value) for key, value in partition.items()
+        }
+
+    progress = result.get("progress")
+    if isinstance(progress, Mapping):
+        payload["progress"] = _bounded_progress_payload(progress)
+
+    return payload
+
+
+def _bounded_progress_payload(
+    progress: Mapping[str, Any],
+) -> dict[str, JSONValue]:
+    payload: dict[str, JSONValue] = {}
+    for key in (
+        "workflow_name",
+        "request_id",
+        "current_stage",
+        "unit",
+        "started_at_utc",
+        "updated_at_utc",
+        "last_error",
+    ):
+        value = progress.get(key)
+        if value:
+            payload[key] = str(value)
+
+    payload["status"] = WorkStatus.from_value(progress.get("status")).value
+    for key in (
+        "total_children",
+        "completed_children",
+        "percent_complete",
+        "rate_per_second",
+    ):
+        value = progress.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int | float):
+            payload[key] = value
+
+    payload["planned_child_count"] = _list_count(
+        progress.get("planned_children")
+    )
+    payload["completed_stage_count"] = _list_count(
+        progress.get("completed_stages")
+    )
+    payload["event_count"] = _list_count(progress.get("events"))
+    payload["artifact_count"] = _list_count(progress.get("artifacts"))
+    return payload
+
+
+def _list_count(value: Any) -> int:
+    return len(value) if isinstance(value, list) else 0
+
+
+def _work_item_count(result: Mapping[str, Any]) -> int:
+    count = _list_count(result.get("work_items"))
+    if "work_item" in result:
+        count += 1
+    return count
 
 
 def _coerce_mapping(value: Any) -> dict[str, Any]:

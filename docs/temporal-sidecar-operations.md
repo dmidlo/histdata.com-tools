@@ -90,6 +90,7 @@ Workspace runtime contents:
 | `logs/temporal-worker-<lane>.log` | Worker lane stdout/stderr |
 | `sqlite/temporal.db` | Temporal developer-server SQLite persistence |
 | `manifests/runtime-policy.json` | Resolved runtime path, port, and workspace policy |
+| `manifests/.histdatacom/manifest-status.sqlite3` | Durable sidecar job snapshots, status events, and artifact references |
 
 ## Ports
 
@@ -243,6 +244,35 @@ histdatacom-sidecar jobs resume histdatacom-<request-id> --reason "continue run"
 ```
 
 The workflow ID format is `histdatacom-<request_id>`.
+
+Job snapshots are persisted under the workspace-scoped sidecar runtime
+manifests directory, not in HistData download/cache directories:
+
+```txt
+<sidecar-runtime>/<workspace-slug>/manifests/.histdatacom/manifest-status.sqlite3
+```
+
+Submit, inspect, progress, logs, artifacts, result, cancel, retry, and resume
+commands write the latest bounded snapshot metadata to that store. The payloads
+contain request IDs, workflow IDs, progress/status events, artifact references,
+control state, and workflow result metadata; rows, dataframe contents, archive
+bytes, and cache data remain on disk outside workflow history and outside the
+job snapshot payload.
+
+Use offline mode to inspect recent persisted jobs without connecting to
+Temporal:
+
+```sh
+histdatacom-sidecar jobs --offline list --json
+histdatacom-sidecar jobs --offline inspect histdatacom-<request-id> --json
+histdatacom-sidecar jobs --offline progress histdatacom-<request-id> --json
+histdatacom-sidecar jobs --offline logs histdatacom-<request-id> --json
+histdatacom-sidecar jobs --offline artifacts histdatacom-<request-id> --json
+histdatacom-sidecar jobs --offline result histdatacom-<request-id> --json
+```
+
+When Temporal is unavailable, read-only job commands fall back to this local
+store when a matching snapshot exists.
 
 ## Workers And Task Queues
 

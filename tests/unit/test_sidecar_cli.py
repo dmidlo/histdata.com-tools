@@ -9,8 +9,11 @@ from pathlib import Path
 import pytest
 
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
+from histdatacom.sidecar import client as sidecar_client
 from histdatacom.sidecar import cli
 from histdatacom.sidecar.control import JobLifecycle, SidecarJobSnapshot
+from histdatacom.sidecar.queues import build_sidecar_worker_config
+from histdatacom.sidecar.runtime import build_sidecar_runtime_policy
 
 
 class _StatusOnlySupervisor:
@@ -261,6 +264,39 @@ def test_sidecar_jobs_inspect_cli_emits_control_snapshot_json(
     assert exit_code == 0
     assert payload["workflow_id"] == "histdatacom-run-cli"
     assert payload["lifecycle"] == JobLifecycle.RUNNING.value
+
+
+def test_sidecar_jobs_offline_cli_reads_persisted_store(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Offline job commands should use the local durable status store."""
+    config = build_sidecar_worker_config(
+        runtime_policy=build_sidecar_runtime_policy(
+            workspace=tmp_path / "workspace",
+            runtime_home=tmp_path / "runtime",
+        )
+    )
+    sidecar_client.sidecar_job_store(config).write_job_snapshot(_snapshot())
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("stopped"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: config)
+
+    list_exit = cli.main(["jobs", "--json", "--offline", "list"])
+    list_payload = json.loads(capsys.readouterr().out)
+    inspect_exit = cli.main(
+        ["jobs", "--json", "--offline", "inspect", "histdatacom-run-cli"]
+    )
+    inspect_payload = json.loads(capsys.readouterr().out)
+
+    assert list_exit == 0
+    assert inspect_exit == 0
+    assert list_payload["jobs"][0]["workflow_id"] == "histdatacom-run-cli"
+    assert inspect_payload["workflow_id"] == "histdatacom-run-cli"
 
 
 def test_sidecar_jobs_cancel_cli_passes_reason(

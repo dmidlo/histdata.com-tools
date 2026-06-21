@@ -367,6 +367,9 @@ class ManifestStatusStore:
         progress = payload.get("progress")
         progress_payload = progress if isinstance(progress, Mapping) else {}
         now = _utc_now()
+        payload["updated_at_utc"] = str(
+            payload.get("updated_at_utc", "") or now
+        )
         with self._connect() as conn:
             conn.execute(
                 """

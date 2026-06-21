@@ -6,8 +6,10 @@ import asyncio
 from dataclasses import dataclass, replace
 from importlib import import_module
 from inspect import isawaitable
+from pathlib import Path
 from typing import Any, Mapping
 
+from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.runtime_contracts import (
     ArtifactRef,
     JSONValue,
@@ -117,6 +119,7 @@ async def submit_run_request(
     config: SidecarWorkerConfig | None = None,
     client: Any | None = None,
     client_class: Any | None = None,
+    status_store: ManifestStatusStore | None = None,
     workflow: Any = DEFAULT_RUN_WORKFLOW_NAME,
 ) -> SidecarJobHandle:
     """Submit a serialized HistData run request without activity imports."""
@@ -134,13 +137,19 @@ async def submit_run_request(
             task_queue=resolved_config.task_queues.orchestration,
         )
     )
-    return SidecarJobHandle(
+    job_handle = SidecarJobHandle(
         request_id=request.request_id,
         workflow_id=str(getattr(handle, "id", workflow_id)),
         run_id=str(getattr(handle, "run_id", "")),
         task_queue=resolved_config.task_queues.orchestration,
         namespace=resolved_config.namespace,
     )
+    _persist_job_snapshot(
+        SidecarJobSnapshot.from_handle(job_handle),
+        config=resolved_config,
+        status_store=status_store,
+    )
+    return job_handle
 
 
 async def submit_run_request_and_observe(
@@ -152,6 +161,7 @@ async def submit_run_request_and_observe(
     supervisor: SidecarSupervisor | None = None,
     start_if_needed: bool = False,
     wait_for_result: bool = True,
+    status_store: ManifestStatusStore | None = None,
     workflow: Any = DEFAULT_RUN_WORKFLOW_NAME,
 ) -> SidecarJobResult:
     """Submit a run through a healthy sidecar and optionally await its result."""
@@ -181,23 +191,28 @@ async def submit_run_request_and_observe(
         workflow_id=workflow_id,
         config=resolved_config,
     )
-    if not wait_for_result:
-        snapshot = SidecarJobSnapshot.from_handle(
+    submitted_snapshot = _persist_job_snapshot(
+        SidecarJobSnapshot.from_handle(
             handle,
             sidecar_status=sidecar_status,
-        )
+        ),
+        config=resolved_config,
+        status_store=status_store,
+    )
+    if not wait_for_result:
         return SidecarJobResult(
             handle=handle,
             status="submitted",
             sidecar_status=sidecar_status,
-            snapshot=snapshot,
+            snapshot=submitted_snapshot,
         )
 
     result = await observe_workflow_result(raw_handle)
-    snapshot = SidecarJobSnapshot.from_handle(
-        handle,
-        sidecar_status=sidecar_status,
-    ).with_result(result)
+    snapshot = _persist_job_snapshot(
+        submitted_snapshot.with_result(result),
+        config=resolved_config,
+        status_store=status_store,
+    )
     return SidecarJobResult(
         handle=handle,
         status="completed",
@@ -253,29 +268,53 @@ async def inspect_job_status(
     client: Any | None = None,
     client_class: Any | None = None,
     supervisor: SidecarSupervisor | None = None,
+    status_store: ManifestStatusStore | None = None,
+    offline: bool = False,
+    store_fallback: bool = True,
 ) -> SidecarJobSnapshot:
     """Return a GUI-ready status snapshot for one sidecar job."""
     resolved_config = config or build_sidecar_worker_config()
-    temporal_client = client or await connect_temporal_client(
-        config=resolved_config,
-        client_class=client_class,
-    )
-    workflow_handle = _workflow_handle_for_job(
-        temporal_client,
-        workflow_id,
-        run_id=run_id,
-    )
-    handle = _job_handle_from_workflow_identity(
-        workflow_id,
-        run_id=run_id or str(getattr(workflow_handle, "run_id", "") or ""),
-        config=resolved_config,
-    )
-    sidecar_status = _sidecar_status(supervisor)
-    return await _inspect_workflow_handle(
-        workflow_handle,
-        handle=handle,
-        sidecar_status=sidecar_status,
-    )
+    if offline:
+        return _stored_job_snapshot_or_raise(
+            workflow_id,
+            config=resolved_config,
+            status_store=status_store,
+        )
+    try:
+        temporal_client = client or await connect_temporal_client(
+            config=resolved_config,
+            client_class=client_class,
+        )
+        workflow_handle = _workflow_handle_for_job(
+            temporal_client,
+            workflow_id,
+            run_id=run_id,
+        )
+        handle = _job_handle_from_workflow_identity(
+            workflow_id,
+            run_id=run_id or str(getattr(workflow_handle, "run_id", "") or ""),
+            config=resolved_config,
+        )
+        sidecar_status = _sidecar_status(supervisor)
+        snapshot = await _inspect_workflow_handle(
+            workflow_handle,
+            handle=handle,
+            sidecar_status=sidecar_status,
+        )
+        return _persist_job_snapshot(
+            snapshot,
+            config=resolved_config,
+            status_store=status_store,
+        )
+    except Exception as err:
+        if store_fallback:
+            return _stored_job_snapshot_or_raise(
+                workflow_id,
+                config=resolved_config,
+                status_store=status_store,
+                cause=err,
+            )
+        raise
 
 
 def inspect_job_status_sync(
@@ -292,29 +331,56 @@ async def list_job_statuses(
     config: SidecarWorkerConfig | None = None,
     client: Any | None = None,
     client_class: Any | None = None,
+    status_store: ManifestStatusStore | None = None,
+    offline: bool = False,
+    store_fallback: bool = True,
+    status: WorkStatus | str | None = None,
+    limit: int | None = None,
 ) -> SidecarJobList:
     """List known HistData job handles without reading workflow histories."""
     resolved_config = config or build_sidecar_worker_config()
-    temporal_client = client or await connect_temporal_client(
-        config=resolved_config,
-        client_class=client_class,
-    )
-    list_workflows = getattr(temporal_client, "list_workflows", None)
-    if list_workflows is None:
-        raise TypeError("Temporal client must define list_workflows()")
-    raw_jobs = list_workflows(
-        query=query or "WorkflowType='HistDataRunWorkflow'"
-    )
-    descriptions = await _collect_workflow_descriptions(raw_jobs)
-    return SidecarJobList(
-        jobs=tuple(
+    if offline:
+        return list_stored_job_statuses(
+            config=resolved_config,
+            status_store=status_store,
+            status=status,
+            limit=limit,
+        )
+    try:
+        temporal_client = client or await connect_temporal_client(
+            config=resolved_config,
+            client_class=client_class,
+        )
+        list_workflows = getattr(temporal_client, "list_workflows", None)
+        if list_workflows is None:
+            raise TypeError("Temporal client must define list_workflows()")
+        raw_jobs = list_workflows(
+            query=query or "WorkflowType='HistDataRunWorkflow'"
+        )
+        descriptions = await _collect_workflow_descriptions(raw_jobs)
+        snapshots = tuple(
             _snapshot_from_workflow_description(
                 description,
                 config=resolved_config,
             )
             for description in descriptions
         )
-    )
+        for snapshot in snapshots:
+            _persist_job_snapshot(
+                snapshot,
+                config=resolved_config,
+                status_store=status_store,
+            )
+        return SidecarJobList(jobs=snapshots)
+    except Exception:
+        if store_fallback:
+            return list_stored_job_statuses(
+                config=resolved_config,
+                status_store=status_store,
+                status=status,
+                limit=limit,
+            )
+        raise
 
 
 def list_job_statuses_sync(**kwargs: Any) -> SidecarJobList:
@@ -346,7 +412,7 @@ async def get_job_logs(
     snapshot: SidecarJobSnapshot = await inspect_job_status(
         workflow_id, **kwargs
     )
-    return snapshot.logs
+    return tuple(snapshot.logs)
 
 
 def get_job_logs_sync(
@@ -365,7 +431,7 @@ async def get_job_artifacts(
     snapshot: SidecarJobSnapshot = await inspect_job_status(
         workflow_id, **kwargs
     )
-    return snapshot.artifacts
+    return tuple(snapshot.artifacts)
 
 
 def get_job_artifacts_sync(
@@ -384,30 +450,56 @@ async def get_job_result(
     client: Any | None = None,
     client_class: Any | None = None,
     supervisor: SidecarSupervisor | None = None,
+    status_store: ManifestStatusStore | None = None,
+    offline: bool = False,
+    store_fallback: bool = True,
 ) -> SidecarJobSnapshot:
     """Return a snapshot with the workflow result payload attached."""
     resolved_config = config or build_sidecar_worker_config()
-    temporal_client = client or await connect_temporal_client(
-        config=resolved_config,
-        client_class=client_class,
-    )
-    workflow_handle = _workflow_handle_for_job(
-        temporal_client,
-        workflow_id,
-        run_id=run_id,
-    )
-    handle = _job_handle_from_workflow_identity(
-        workflow_id,
-        run_id=run_id or str(getattr(workflow_handle, "run_id", "") or ""),
-        config=resolved_config,
-    )
-    sidecar_status = _sidecar_status(supervisor)
-    snapshot = await _inspect_workflow_handle(
-        workflow_handle,
-        handle=handle,
-        sidecar_status=sidecar_status,
-    )
-    return snapshot.with_result(await observe_workflow_result(workflow_handle))
+    if offline:
+        return _stored_job_snapshot_or_raise(
+            workflow_id,
+            config=resolved_config,
+            status_store=status_store,
+        )
+    try:
+        temporal_client = client or await connect_temporal_client(
+            config=resolved_config,
+            client_class=client_class,
+        )
+        workflow_handle = _workflow_handle_for_job(
+            temporal_client,
+            workflow_id,
+            run_id=run_id,
+        )
+        handle = _job_handle_from_workflow_identity(
+            workflow_id,
+            run_id=run_id or str(getattr(workflow_handle, "run_id", "") or ""),
+            config=resolved_config,
+        )
+        sidecar_status = _sidecar_status(supervisor)
+        snapshot = await _inspect_workflow_handle(
+            workflow_handle,
+            handle=handle,
+            sidecar_status=sidecar_status,
+        )
+        result_snapshot = snapshot.with_result(
+            await observe_workflow_result(workflow_handle)
+        )
+        return _persist_job_snapshot(
+            result_snapshot,
+            config=resolved_config,
+            status_store=status_store,
+        )
+    except Exception as err:
+        if store_fallback:
+            return _stored_job_snapshot_or_raise(
+                workflow_id,
+                config=resolved_config,
+                status_store=status_store,
+                cause=err,
+            )
+        raise
 
 
 def get_job_result_sync(
@@ -427,9 +519,26 @@ async def cancel_job(
     client: Any | None = None,
     client_class: Any | None = None,
     supervisor: SidecarSupervisor | None = None,
+    status_store: ManifestStatusStore | None = None,
+    offline: bool = False,
 ) -> SidecarJobSnapshot:
     """Request cancellation and return explicit cancellation state."""
     resolved_config = config or build_sidecar_worker_config()
+    if offline:
+        snapshot = _stored_job_snapshot_or_raise(
+            workflow_id,
+            config=resolved_config,
+            status_store=status_store,
+        ).request_cancel(
+            reason=reason,
+            message="Cancellation requested while offline.",
+            metadata={"offline": True},
+        )
+        return _persist_job_snapshot(
+            snapshot,
+            config=resolved_config,
+            status_store=status_store,
+        )
     temporal_client = client or await connect_temporal_client(
         config=resolved_config,
         client_class=client_class,
@@ -453,7 +562,11 @@ async def cancel_job(
     if cancel is None:
         raise TypeError("Temporal workflow handle must define cancel()")
     await _maybe_await(cancel())
-    return snapshot.request_cancel(reason=reason)
+    return _persist_job_snapshot(
+        snapshot.request_cancel(reason=reason),
+        config=resolved_config,
+        status_store=status_store,
+    )
 
 
 def cancel_job_sync(
@@ -472,10 +585,11 @@ async def retry_job(
 ) -> SidecarJobSnapshot:
     """Represent retry intent for a job in the control API."""
     snapshot = await inspect_job_status(workflow_id, **kwargs)
-    return snapshot.request_retry(
+    retry_snapshot = snapshot.request_retry(
         reason=reason,
         stage=_snapshot_stage(snapshot),
     )
+    return _persist_job_snapshot_from_kwargs(retry_snapshot, kwargs)
 
 
 def retry_job_sync(
@@ -494,10 +608,11 @@ async def resume_job(
 ) -> SidecarJobSnapshot:
     """Represent resume intent for a job in the control API."""
     snapshot = await inspect_job_status(workflow_id, **kwargs)
-    return snapshot.request_resume(
+    resume_snapshot = snapshot.request_resume(
         reason=reason,
         stage=_snapshot_stage(snapshot),
     )
+    return _persist_job_snapshot_from_kwargs(resume_snapshot, kwargs)
 
 
 def resume_job_sync(
@@ -525,6 +640,119 @@ def run_request_payload(
     metadata[TOPOLOGY_METADATA_KEY] = TOPOLOGY_SCHEMA_VERSION
     payload["metadata"] = metadata
     return payload
+
+
+def sidecar_job_store_root(
+    config: SidecarWorkerConfig | None = None,
+) -> Path:
+    """Return the workspace-scoped root used for durable job snapshots."""
+    resolved_config = config or build_sidecar_worker_config()
+    return Path(resolved_config.runtime_policy.paths.manifests_dir)
+
+
+def sidecar_job_store_path(
+    config: SidecarWorkerConfig | None = None,
+) -> Path:
+    """Return the SQLite path for durable sidecar job snapshots."""
+    return Path(
+        ManifestStatusStore.path_for_root(sidecar_job_store_root(config))
+    )
+
+
+def sidecar_job_store(
+    config: SidecarWorkerConfig | None = None,
+) -> ManifestStatusStore:
+    """Return the workspace-scoped durable sidecar job status store."""
+    return ManifestStatusStore(sidecar_job_store_root(config))
+
+
+def list_stored_job_statuses(
+    *,
+    config: SidecarWorkerConfig | None = None,
+    status_store: ManifestStatusStore | None = None,
+    status: WorkStatus | str | None = None,
+    limit: int | None = None,
+) -> SidecarJobList:
+    """List durable sidecar jobs without querying Temporal."""
+    store = status_store or sidecar_job_store(config)
+    return SidecarJobList(
+        jobs=tuple(
+            SidecarJobSnapshot.from_dict(payload)
+            for payload in store.list_job_snapshots(
+                status=status,
+                limit=limit,
+            )
+        )
+    )
+
+
+def _persist_job_snapshot(
+    snapshot: SidecarJobSnapshot,
+    *,
+    config: SidecarWorkerConfig,
+    status_store: ManifestStatusStore | None = None,
+) -> SidecarJobSnapshot:
+    store = status_store or sidecar_job_store(config)
+    store.write_job_snapshot(snapshot)
+    return snapshot
+
+
+def _persist_job_snapshot_from_kwargs(
+    snapshot: SidecarJobSnapshot,
+    kwargs: Mapping[str, Any],
+) -> SidecarJobSnapshot:
+    config = kwargs.get("config")
+    resolved_config = (
+        config if isinstance(config, SidecarWorkerConfig) else None
+    ) or build_sidecar_worker_config()
+    status_store = kwargs.get("status_store")
+    return _persist_job_snapshot(
+        snapshot,
+        config=resolved_config,
+        status_store=(
+            status_store
+            if isinstance(status_store, ManifestStatusStore)
+            else None
+        ),
+    )
+
+
+def _stored_job_snapshot(
+    workflow_id: str,
+    *,
+    config: SidecarWorkerConfig,
+    status_store: ManifestStatusStore | None = None,
+) -> SidecarJobSnapshot | None:
+    store = status_store or sidecar_job_store(config)
+    payload = store.get_job_snapshot(workflow_id)
+    if payload is None and not workflow_id.startswith("histdatacom-"):
+        payload = store.get_job_snapshot(f"histdatacom-{workflow_id}")
+    if payload is None:
+        return None
+    return SidecarJobSnapshot.from_dict(payload)
+
+
+def _stored_job_snapshot_or_raise(
+    workflow_id: str,
+    *,
+    config: SidecarWorkerConfig,
+    status_store: ManifestStatusStore | None = None,
+    cause: Exception | None = None,
+) -> SidecarJobSnapshot:
+    snapshot = _stored_job_snapshot(
+        workflow_id,
+        config=config,
+        status_store=status_store,
+    )
+    if snapshot is not None:
+        return snapshot
+    error = SidecarUnavailableError(
+        "No durable sidecar job snapshot found for "
+        f"{workflow_id!r} in {sidecar_job_store_path(config)}"
+    )
+    if cause is not None:
+        raise error from cause
+    raise error
 
 
 def _ensure_sidecar_available(
@@ -669,7 +897,7 @@ def _logs_from_progress(
 def _snapshot_stage(snapshot: SidecarJobSnapshot) -> str:
     if snapshot.progress is None:
         return ""
-    return snapshot.progress.current_stage
+    return str(snapshot.progress.current_stage)
 
 
 async def _collect_workflow_descriptions(raw_jobs: Any) -> list[Any]:
