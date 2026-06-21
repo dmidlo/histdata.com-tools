@@ -86,8 +86,24 @@ jobs:
       - name: Compile source and tests
         run: python -m compileall -q src tests test.py snippets.py
 
-      - name: Validate package metadata
-        run: python setup.py check
+      - name: Smoke editable install metadata
+        run: |
+          python - <<'PY'
+          from importlib import metadata
+
+          import histdatacom
+
+          dist = metadata.distribution("histdatacom")
+          scripts = {
+              entry.name: entry.value
+              for entry in metadata.entry_points().select(group="console_scripts")
+          }
+
+          assert dist.metadata["Name"] == "histdatacom"
+          assert metadata.version("histdatacom") == histdatacom.__version__
+          assert scripts["histdatacom"] == "histdatacom.histdata_com:main"
+          PY
+        shell: bash
 
   build:
     name: Build package artifacts
@@ -113,6 +129,55 @@ jobs:
 
       - name: Check package artifacts
         run: python -m twine check dist/*
+
+      - name: Inspect wheel metadata
+        run: |
+          python - <<'PY'
+          from email.parser import Parser
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          wheels = sorted(Path("dist").glob("histdatacom-*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"expected exactly one wheel, found {wheels}")
+
+          with ZipFile(wheels[0]) as wheel:
+              metadata_path = next(
+                  name
+                  for name in wheel.namelist()
+                  if name.endswith(".dist-info/METADATA")
+              )
+              entry_points_path = next(
+                  name
+                  for name in wheel.namelist()
+                  if name.endswith(".dist-info/entry_points.txt")
+              )
+              wheel_metadata = Parser().parsestr(
+                  wheel.read(metadata_path).decode("utf-8")
+              )
+              entry_points = wheel.read(entry_points_path).decode("utf-8")
+
+          assert wheel_metadata["Name"] == "histdatacom"
+          assert wheel_metadata["Requires-Python"] == ">=3.10.0"
+          assert "histdatacom = histdatacom.histdata_com:main" in entry_points
+          PY
+        shell: bash
+
+      - name: Smoke wheel install
+        run: |
+          python -m venv .wheel-smoke
+          . .wheel-smoke/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python - <<'PY'
+          from importlib import metadata
+
+          import histdatacom
+
+          assert metadata.version("histdatacom") == histdatacom.__version__
+          PY
+          histdatacom --version
+        shell: bash
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v7.0.1
