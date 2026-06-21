@@ -131,7 +131,8 @@ class Api:  # noqa:H601
                 download_file=Scraper.get_zip_file,
             )
             apply_stage_output_to_record(output, record)
-            records_next.put(record)
+            if output.forward:
+                records_next.put(record)
         except Exception:
             print("Unexpected error:", sys.exc_info())  # noqa:T201
             record.delete_momento_file()

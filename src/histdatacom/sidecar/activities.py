@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, TypeVar, cast
 
 from histdatacom.activity_stages import (
+    build_cache_work_item,
     dataset_plan_stage,
     download_archive_work_item,
     extract_csv_work_item,
@@ -202,6 +203,41 @@ def extract_csv_activity(
     )
 
 
+@activity_defn(name="build_cache")
+def build_cache_activity(
+    payload: dict[str, JSONValue],
+) -> dict[str, Any]:
+    """Run Polars cache build/validation as an activity."""
+    request = RunRequest.from_dict(_mapping(payload.get("request", {})))
+    work_items = _work_items_from_payload(payload)
+    if not work_items:
+        return cast(
+            dict[str, Any],
+            _missing_work_item_result(payload, "build_cache").to_dict(),
+        )
+
+    args = {
+        "default_download_dir": set_working_data_dir(request.data_directory),
+    }
+    outputs = tuple(
+        build_cache_work_item(work_item, args=args) for work_item in work_items
+    )
+    if len(outputs) == 1:
+        return outputs[0].to_dict()
+
+    return cast(
+        dict[str, Any],
+        {
+            "work_items": [output.work_item.to_dict() for output in outputs],
+            "stage_results": [output.result.to_dict() for output in outputs],
+            "result": _aggregate_activity_outputs(
+                outputs,
+                "build_cache",
+            ).to_dict(),
+        },
+    )
+
+
 def default_activities() -> tuple[Callable[..., Any], ...]:
     """Return default sidecar activities for worker registration."""
     return (
@@ -210,6 +246,7 @@ def default_activities() -> tuple[Callable[..., Any], ...]:
         validate_urls_activity,
         download_archives_activity,
         extract_csv_activity,
+        build_cache_activity,
     )
 
 

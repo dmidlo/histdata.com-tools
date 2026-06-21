@@ -292,6 +292,40 @@ def test_extract_csv_workflow_uses_activity_executor() -> None:
     assert workflow.status()["completed_children"] == 1
 
 
+def test_build_cache_workflow_uses_activity_executor() -> None:
+    """The cache leaf workflow should execute its registered activity."""
+    activity_executor = _RecordingActivityExecutor()
+    workflow = workflows.BuildCacheWorkflow(activity_executor=activity_executor)
+    request = _request(
+        validate_urls=False,
+        download_data_archives=False,
+        extract_csvs=False,
+        api_return_type="polars",
+        import_to_influxdb=False,
+    )
+    invocation = workflows.build_symbol_child_invocations(
+        request,
+        {"pair": "EURUSD", "timeframe": "M1"},
+    )[0]
+
+    summary = asyncio.run(workflow.run(invocation.payload))
+
+    assert activity_executor.calls == [
+        {
+            "activity_name": "build_cache",
+            "payload": {
+                **invocation.payload,
+                "activity": "build_cache",
+                "stage": "build_cache",
+                "task_queue": "queue-cpu-file",
+            },
+            "task_queue": "queue-cpu-file",
+        }
+    ]
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert workflow.status()["completed_children"] == 1
+
+
 def test_dataset_plan_workflow_uses_activity_executor() -> None:
     """Dataset planning should run through the activity executor seam."""
     activity_executor = _RecordingActivityExecutor()

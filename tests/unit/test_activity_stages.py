@@ -28,6 +28,7 @@ from histdatacom.activity_stages import (
 )
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
+    LEGACY_CACHE_ERROR,
     convert_polars_datetime_to_utc_ms,
     read_ascii_file_to_polars,
     write_polars_cache,
@@ -715,10 +716,135 @@ def test_build_cache_work_item_writes_cache_from_csv(
     assert output.work_item.status is WorkStatus.CACHE_READY
     assert output.work_item.cache_filename == CACHE_FILENAME
     assert output.work_item.cache_line_count == "3"
+    assert output.work_item.cache_start == str(EXPECTED_M1_DATETIMES[0])
+    assert output.work_item.cache_end == str(EXPECTED_M1_DATETIMES[-1])
     assert output.result.status is WorkStatus.CACHE_READY
     assert output.result.metrics["cache_created"] is True
     assert output.result.metrics["cache_line_count"] == 3
+    assert output.result.metrics["cache_start"] == str(EXPECTED_M1_DATETIMES[0])
+    assert output.result.metrics["cache_end"] == str(EXPECTED_M1_DATETIMES[-1])
+    assert output.result.metrics["line_count"] == 3
+    assert output.result.metrics["start"] == str(EXPECTED_M1_DATETIMES[0])
+    assert output.result.metrics["end"] == str(EXPECTED_M1_DATETIMES[-1])
+    assert output.result.metrics["timeframe"] == "M1"
+    assert output.result.metrics["schema"] == {
+        "datetime": "Int64",
+        "open": "Float64",
+        "high": "Float64",
+        "low": "Float64",
+        "close": "Float64",
+        "vol": "Int32",
+    }
     assert output.result.artifacts[0].path == str(tmp_path / CACHE_FILENAME)
+    assert output.result.artifacts[0].sha256
+
+
+def test_build_cache_work_item_reuses_existing_cache(
+    tmp_path: Path,
+) -> None:
+    """Existing Polars caches should be validated and summarized."""
+    write_polars_cache(_m1_frame(), tmp_path / CACHE_FILENAME)
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        data_format="ascii",
+        data_timeframe="M1",
+        data_fxpair="eurusd",
+        status=WorkStatus.CSV_FILE.value,
+    )
+
+    output = build_cache_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+    )
+
+    assert output.work_item.status is WorkStatus.CACHE_READY
+    assert output.work_item.cache_filename == CACHE_FILENAME
+    assert output.work_item.cache_line_count == "3"
+    assert output.result.metrics["decision"] == "reuse_existing"
+    assert output.result.metrics["reused_existing"] is True
+    assert output.result.metrics["cache_created"] is False
+    assert output.result.metrics["path"] == str(tmp_path / CACHE_FILENAME)
+
+
+def test_build_cache_work_item_invalid_legacy_cache_is_failed(
+    tmp_path: Path,
+) -> None:
+    """Legacy cache payloads should fail with regeneration guidance."""
+    cache_path = tmp_path / CACHE_FILENAME
+    cache_path.write_bytes(b"not an arrow ipc payload")
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        cache_filename=CACHE_FILENAME,
+        data_format="ascii",
+        data_timeframe="M1",
+        data_fxpair="eurusd",
+        status=WorkStatus.CACHE_READY.value,
+    )
+
+    output = build_cache_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+    )
+
+    assert not output.forward
+    assert output.work_item.status is WorkStatus.FAILED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "CACHE_INVALID_LEGACY_PAYLOAD"
+    assert output.result.failure.message == LEGACY_CACHE_ERROR
+    assert not output.result.failure.retryable
+
+
+def test_build_cache_work_item_missing_source_is_failed(
+    tmp_path: Path,
+) -> None:
+    """Missing ZIP/CSV sources should become structured failures."""
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        csv_filename="missing.csv",
+        zip_filename="missing.zip",
+        data_format="ascii",
+        data_timeframe="M1",
+        data_fxpair="eurusd",
+        status=WorkStatus.CSV_FILE.value,
+    )
+
+    output = build_cache_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+    )
+
+    assert not output.forward
+    assert output.work_item.status is WorkStatus.FAILED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "CACHE_SOURCE_NOT_FOUND"
+
+
+def test_build_cache_work_item_invalid_source_is_failed(
+    tmp_path: Path,
+) -> None:
+    """Invalid source files should fail without committing a cache."""
+    filename = "empty.csv"
+    (tmp_path / filename).write_text("", encoding="utf-8")
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        csv_filename=filename,
+        zip_filename="missing.zip",
+        data_format="ascii",
+        data_timeframe="M1",
+        data_fxpair="eurusd",
+        status=WorkStatus.CSV_FILE.value,
+    )
+
+    output = build_cache_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+    )
+
+    assert not output.forward
+    assert output.work_item.status is WorkStatus.FAILED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "CACHE_SOURCE_INVALID"
+    assert not (tmp_path / CACHE_FILENAME).exists()
 
 
 def test_merge_cache_work_items_uses_explicit_inputs(tmp_path: Path) -> None:

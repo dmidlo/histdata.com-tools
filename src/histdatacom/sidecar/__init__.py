@@ -34,6 +34,7 @@ from histdatacom.sidecar.client import (
     workflow_id_for_request,
 )
 from histdatacom.sidecar.activities import (
+    build_cache_activity,
     dataset_plan_activity,
     default_activities,
     download_archives_activity,
@@ -163,6 +164,7 @@ __all__ = [
     "WorkflowInvocation",
     "WorkflowProgress",
     "WorkflowSpec",
+    "build_cache_activity",
     "build_run_child_invocations",
     "build_sidecar_task_queues",
     "build_sidecar_runtime_policy",

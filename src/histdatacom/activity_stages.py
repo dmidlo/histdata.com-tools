@@ -311,6 +311,55 @@ class ArchiveExtractionError(Exception):
         self.detail = dict(detail or {})
 
 
+@dataclass(frozen=True, slots=True)
+class CacheBuildResult:
+    """A built or validated Polars cache artifact."""
+
+    filename: str
+    path: str
+    size_bytes: int
+    sha256: str
+    line_count: int
+    start: str
+    end: str
+    timeframe: str
+    schema: dict[str, str]
+    reused_existing: bool = False
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return JSON-compatible cache metadata."""
+        return {
+            "filename": self.filename,
+            "path": self.path,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+            "line_count": self.line_count,
+            "start": self.start,
+            "end": self.end,
+            "timeframe": self.timeframe,
+            "schema": dict(self.schema),
+            "reused_existing": self.reused_existing,
+        }
+
+
+class CacheBuildError(Exception):
+    """Structured Polars cache build/validation failure."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        retryable: bool,
+        detail: Mapping[str, JSONValue] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.detail = dict(detail or {})
+
+
 RecordTransformer = Callable[[Record], Record]
 RecordAction = Callable[[Record], None]
 NoArgBool = Callable[[], bool]
@@ -1098,40 +1147,178 @@ def build_cache_work_item(
 ) -> ActivityStageOutput:
     """Build or validate one Polars cache without touching global queues."""
     record = _record_from_work_item(work_item)
-    if not _supports_cache(record):
+    try:
+        _ensure_record_data_dir(record, args)
+        if not _supports_cache(record):
+            return _activity_output(
+                _work_item_from_record(record, work_item),
+                stage="build_cache",
+                status=WorkStatus.SKIPPED,
+                metrics={
+                    "forward": True,
+                    "cache_supported": False,
+                    "decision": "skipped_unsupported",
+                    "data_format": record.data_format,
+                    "timeframe": record.data_timeframe,
+                },
+            )
+
+        cache_path = Path(record.data_dir, CACHE_FILENAME)
+        created = False
+        if cache_path.exists():
+            record.cache_filename = CACHE_FILENAME
+            cache_result = cache_build_result_for_record(
+                record,
+                reused_existing=True,
+            )
+        else:
+            if not _cache_source_artifact_exists(record):
+                if download_file is None:
+                    raise CacheBuildError(
+                        "CACHE_SOURCE_NOT_FOUND",
+                        "Cache build requires a local ZIP or CSV source file.",
+                        retryable=False,
+                        detail={
+                            "data_dir": record.data_dir,
+                            "zip_filename": record.zip_filename,
+                            "csv_filename": record.csv_filename,
+                        },
+                    )
+                download_file(record)
+
+            create_cache_file(record, args)
+            created = True
+            cache_result = cache_build_result_for_record(record)
+
+        record.status = WorkStatus.CACHE_READY.value
+        record.write_memento_file(base_dir=_default_download_dir(args))
+        updated = _work_item_from_record(record, work_item)
+        metrics = {
+            "forward": True,
+            "decision": "built" if created else "reuse_existing",
+            "cache_created": created,
+            "cache_line_count": cache_result.line_count,
+            "cache_start": cache_result.start,
+            "cache_end": cache_result.end,
+            "timeframe": cache_result.timeframe,
+            "schema": cache_result.schema,
+            **cache_result.to_dict(),
+        }
         return _activity_output(
-            work_item,
+            updated,
             stage="build_cache",
-            status=WorkStatus.SKIPPED,
-            metrics={"cache_supported": False},
+            status=WorkStatus.CACHE_READY,
+            artifacts=_artifact_refs_for_record(record, "cache"),
+            metrics=metrics,
+        )
+    except (CacheBuildError, OSError, ValueError) as err:
+        record.delete_momento_file()
+        failure = _cache_build_failure(err, record)
+        status = WorkStatus.RETRIED if failure.retryable else WorkStatus.FAILED
+        failed = _work_item_from_record(record, work_item).with_status(status)
+        return _activity_output(
+            failed,
+            stage="build_cache",
+            status=status,
+            forward=False,
+            failure=failure,
+            metrics={
+                "forward": False,
+                "retryable": failure.retryable,
+            },
+            message=failure.message,
+        )
+    except SystemExit as err:
+        record.delete_momento_file()
+        failure = FailureInfo(
+            code="CACHE_BUILD_INTERRUPTED",
+            message=str(err),
+            retryable=False,
+            detail={
+                "data_dir": record.data_dir,
+                "zip_filename": record.zip_filename,
+                "csv_filename": record.csv_filename,
+            },
+        )
+        failed = _work_item_from_record(record, work_item).with_status(
+            WorkStatus.FAILED
+        )
+        return _activity_output(
+            failed,
+            stage="build_cache",
+            status=WorkStatus.FAILED,
+            forward=False,
+            failure=failure,
+            metrics={"forward": False, "retryable": False},
+            message=failure.message,
         )
 
-    cache_path = Path(record.data_dir, CACHE_FILENAME)
-    created = False
-    if not cache_path.exists():
-        if not status_has_csv_artifact(record.status):
-            if download_file is None:
-                raise ValueError(
-                    "download_file is required when no local source exists"
-                )
-            download_file(record)
-        create_cache_file(record, args)
-        created = True
-    elif not record.cache_filename:
-        record.cache_filename = CACHE_FILENAME
 
-    record.status = WorkStatus.CACHE_READY.value
-    record.write_memento_file(base_dir=_default_download_dir(args))
-    updated = _work_item_from_record(record, work_item)
-    return _activity_output(
-        updated,
-        stage="build_cache",
-        status=WorkStatus.CACHE_READY,
-        artifacts=_artifact_refs_for_record(record, "cache"),
-        metrics={
-            "cache_created": created,
-            "cache_line_count": _json_int(record.cache_line_count),
-        },
+def cache_build_result_for_record(
+    record: Record,
+    *,
+    reused_existing: bool = False,
+) -> CacheBuildResult:
+    """Validate a cache artifact and return bounded cache metadata."""
+    if not record.data_dir:
+        raise CacheBuildError(
+            "INVALID_CACHE_REQUEST",
+            "Cache validation requires a data directory.",
+            retryable=False,
+        )
+    cache_filename = record.cache_filename or CACHE_FILENAME
+    cache_path = Path(record.data_dir, cache_filename)
+    if not cache_path.exists():
+        raise CacheBuildError(
+            "CACHE_ARTIFACT_NOT_FOUND",
+            "Cache artifact does not exist.",
+            retryable=False,
+            detail={"path": str(cache_path)},
+        )
+
+    try:
+        frame = read_polars_cache(cache_path)
+    except ValueError as err:
+        raise CacheBuildError(
+            "CACHE_INVALID_LEGACY_PAYLOAD",
+            str(err),
+            retryable=False,
+            detail={"path": str(cache_path)},
+        ) from err
+    except OSError as err:
+        raise CacheBuildError(
+            "CACHE_FILESYSTEM_ERROR",
+            str(err),
+            retryable=False,
+            detail={"path": str(cache_path)},
+        ) from err
+
+    if getattr(frame, "height", 0) < 1:
+        raise CacheBuildError(
+            "CACHE_EMPTY",
+            "Cache artifact contains no rows.",
+            retryable=False,
+            detail={"path": str(cache_path)},
+        )
+
+    line_count = int(frame.height)
+    record.cache_filename = cache_filename
+    record.cache_line_count = str(line_count)
+    record.cache_start = str(_extract_single_value(frame, 0, "datetime"))
+    record.cache_end = str(
+        _extract_single_value(frame, frame.height - 1, "datetime")
+    )
+    return CacheBuildResult(
+        filename=cache_path.name,
+        path=str(cache_path),
+        size_bytes=cache_path.stat().st_size,
+        sha256=_file_sha256(cache_path),
+        line_count=line_count,
+        start=record.cache_start,
+        end=record.cache_end,
+        timeframe=record.data_timeframe,
+        schema=_cache_schema(frame),
+        reused_existing=reused_existing,
     )
 
 
@@ -2087,6 +2274,30 @@ def _archive_extraction_failure(
     )
 
 
+def _cache_build_failure(
+    err: Exception,
+    record: Record,
+) -> FailureInfo:
+    if isinstance(err, CacheBuildError):
+        return FailureInfo(
+            code=err.code,
+            message=err.message,
+            retryable=err.retryable,
+            detail=err.detail,
+        )
+    return FailureInfo(
+        code="CACHE_BUILD_FAILED",
+        message=str(err),
+        retryable=False,
+        detail={
+            "data_dir": record.data_dir,
+            "zip_filename": record.zip_filename,
+            "csv_filename": record.csv_filename,
+            "cache_filename": record.cache_filename,
+        },
+    )
+
+
 def _validate_archive_request(record: Record) -> None:
     missing = [
         field_name
@@ -2283,20 +2494,61 @@ def _supports_cache(record: Record) -> bool:
     )
 
 
-def create_cache_file(record: Record, args: Mapping[str, Any]) -> None:
-    zip_path = Path(record.data_dir, record.zip_filename)
-    csv_path = Path(record.data_dir, record.csv_filename)
+def _cache_source_artifact_exists(record: Record) -> bool:
+    return any(
+        _source_artifact_path(record, filename) is not None
+        for filename in (record.zip_filename, record.csv_filename)
+    )
 
-    if zip_path.exists():
+
+def _source_artifact_path(record: Record, filename: str) -> Path | None:
+    if not filename:
+        return None
+    path = Path(record.data_dir, filename)
+    if not path.is_file():
+        return None
+    return path
+
+
+def create_cache_file(record: Record, args: Mapping[str, Any]) -> None:
+    zip_path = _source_artifact_path(record, record.zip_filename)
+    csv_path = _source_artifact_path(record, record.csv_filename)
+
+    if zip_path is not None:
         file_data = _import_source_to_polars(record, zip_path)
-    elif csv_path.exists():
+    elif csv_path is not None:
         file_data = _import_source_to_polars(record, csv_path)
     else:
-        raise ValueError("expected downloaded ZIP or CSV source file")
+        raise CacheBuildError(
+            "CACHE_SOURCE_NOT_FOUND",
+            "Cache build requires a local ZIP or CSV source file.",
+            retryable=False,
+            detail={
+                "data_dir": record.data_dir,
+                "zip_filename": record.zip_filename,
+                "csv_filename": record.csv_filename,
+            },
+        )
+
+    if getattr(file_data, "height", 0) < 1:
+        raise CacheBuildError(
+            "CACHE_EMPTY",
+            "Cache source contains no rows.",
+            retryable=False,
+            detail={
+                "data_dir": record.data_dir,
+                "zip_filename": record.zip_filename,
+                "csv_filename": record.csv_filename,
+            },
+        )
 
     record.cache_filename = CACHE_FILENAME
     cache_path = Path(record.data_dir, record.cache_filename)
-    write_polars_cache(file_data, cache_path)
+    atomic_write_polars_cache(
+        file_data,
+        cache_path,
+        work_id=record.url or str(zip_path or csv_path),
+    )
 
     record.cache_line_count = file_data.height
     record.cache_start = str(_extract_single_value(file_data, 0, "datetime"))
@@ -2316,7 +2568,62 @@ def _import_source_to_polars(record: Record, source_path: Path) -> Any:
             record.data_timeframe,
         )
     except ValueError as err:
-        raise SystemExit(1) from err
+        raise CacheBuildError(
+            "CACHE_SOURCE_INVALID",
+            str(err),
+            retryable=False,
+            detail={
+                "path": str(source_path),
+                "timeframe": record.data_timeframe,
+            },
+        ) from err
+    except Exception as err:
+        raise CacheBuildError(
+            "CACHE_SOURCE_INVALID",
+            str(err),
+            retryable=False,
+            detail={
+                "path": str(source_path),
+                "timeframe": record.data_timeframe,
+            },
+        ) from err
+
+
+def atomic_write_polars_cache(
+    frame: Any,
+    target_path: Path,
+    *,
+    work_id: str,
+) -> Path:
+    """Write a Polars IPC cache through a temp file, then rename."""
+    temp_path = target_path.with_name(
+        f".{target_path.name}.{derive_work_id(work_id).removeprefix('work-')}.tmp"
+    )
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        write_polars_cache(frame, temp_path)
+        temp_path.replace(target_path)
+        return target_path
+    except OSError as err:
+        _unlink_path(temp_path)
+        raise CacheBuildError(
+            "CACHE_FILESYSTEM_ERROR",
+            str(err),
+            retryable=False,
+            detail={"path": str(target_path)},
+        ) from err
+    except Exception as err:
+        _unlink_path(temp_path)
+        raise CacheBuildError(
+            "CACHE_WRITE_FAILED",
+            str(err),
+            retryable=False,
+            detail={"path": str(target_path)},
+        ) from err
+
+
+def _cache_schema(frame: Any) -> dict[str, str]:
+    return {str(column): str(dtype) for column, dtype in frame.schema.items()}
 
 
 def _extract_single_value(frame: Any, row: int, column: str) -> int:

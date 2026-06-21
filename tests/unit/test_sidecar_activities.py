@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import io
+import shutil
 import zipfile
+from pathlib import Path
 
 from histdatacom.activity_stages import UrlValidationError
+from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
 from histdatacom.sidecar.activities import (
+    build_cache_activity,
     dataset_plan_activity,
     default_activities,
     download_archives_activity,
@@ -15,6 +19,9 @@ from histdatacom.sidecar.activities import (
     repository_refresh_activity,
     validate_urls_activity,
 )
+
+FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
+EXPECTED_M1_DATETIMES = [1328072400000, 1328072460000, 1328072520000]
 
 
 def _form_html(*, token: str = "token") -> str:
@@ -98,6 +105,29 @@ def _extraction_payload(tmp_path) -> dict:
             "status": WorkStatus.CSV_ZIP.value,
             "data_dir": f"{tmp_path}/",
             "zip_filename": zip_path.name,
+        },
+    }
+
+
+def _cache_payload(tmp_path) -> dict:
+    """Return a minimal cache activity payload with an existing CSV."""
+    filename = "DAT_ASCII_EURUSD_M1_201202.csv"
+    shutil.copyfile(FIXTURES / filename, tmp_path / filename)
+    request = RunRequest(
+        request_id="run-cache",
+        data_directory=str(tmp_path),
+    )
+    return {
+        "request": request.to_dict(),
+        "work_item": {
+            "work_id": "work-cache",
+            "status": WorkStatus.CSV_FILE.value,
+            "data_dir": f"{tmp_path}/",
+            "csv_filename": filename,
+            "zip_filename": "missing.zip",
+            "data_format": "ascii",
+            "data_timeframe": "M1",
+            "data_fxpair": "eurusd",
         },
     }
 
@@ -265,6 +295,28 @@ def test_extract_csv_activity_extracts_existing_zip(tmp_path) -> None:
     assert result["result"]["artifacts"][0]["sha256"]
 
 
+def test_build_cache_activity_builds_polars_cache(tmp_path) -> None:
+    """Polars cache builds should be callable as a registered activity."""
+    result = build_cache_activity(_cache_payload(tmp_path))
+
+    assert result["result"]["stage"] == "build_cache"
+    assert result["result"]["status"] == WorkStatus.CACHE_READY.value
+    assert result["result"]["metrics"]["decision"] == "built"
+    assert result["result"]["metrics"]["cache_line_count"] == 3
+    assert result["result"]["metrics"]["cache_start"] == str(
+        EXPECTED_M1_DATETIMES[0]
+    )
+    assert result["result"]["metrics"]["cache_end"] == str(
+        EXPECTED_M1_DATETIMES[-1]
+    )
+    assert result["result"]["metrics"]["timeframe"] == "M1"
+    assert result["result"]["artifacts"][0]["kind"] == "cache"
+    assert result["work_item"]["status"] == WorkStatus.CACHE_READY.value
+    assert result["work_item"]["cache_filename"] == CACHE_FILENAME
+    assert result["work_item"]["cache_line_count"] == "3"
+    assert (tmp_path / CACHE_FILENAME).exists()
+
+
 def test_default_activities_register_operation_activities() -> None:
     """The worker default activity set should include migrated activities."""
     assert default_activities() == (
@@ -273,4 +325,5 @@ def test_default_activities_register_operation_activities() -> None:
         validate_urls_activity,
         download_archives_activity,
         extract_csv_activity,
+        build_cache_activity,
     )
