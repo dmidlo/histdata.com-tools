@@ -34,6 +34,7 @@ from histdatacom.sidecar.client import (
     workflow_id_for_request,
 )
 from histdatacom.sidecar.activities import (
+    dataset_plan_activity,
     default_activities,
     repository_refresh_activity,
 )
@@ -170,6 +171,7 @@ __all__ = [
     "cancel_job_sync",
     "connect_temporal_client",
     "current_platform_key",
+    "dataset_plan_activity",
     "default_activities",
     "default_sidecar_runtime_home",
     "default_sidecar_state_dir",

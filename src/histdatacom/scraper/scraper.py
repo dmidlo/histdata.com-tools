@@ -21,6 +21,7 @@ from histdatacom import config
 from histdatacom.activity_stages import (
     apply_stage_output_to_record,
     download_archive_work_item,
+    plan_dataset_work_items,
     validate_url_work_item,
 )
 from histdatacom.concurrency import ThreadPool, get_pool_cpu_count
@@ -128,14 +129,17 @@ class Scraper:  # noqa:H601
         ) as progress:
             progress.add_task("waiting", total=0)
 
-            for url in self.urls.generate_form_urls(
-                config.ARGS["start_yearmonth"],
-                config.ARGS["end_yearmonth"],
-                config.ARGS["formats"],
-                config.FILTER_PAIRS,
-                config.ARGS["timeframes"],
+            for work_item in plan_dataset_work_items(
+                start_yearmonth=config.ARGS["start_yearmonth"],
+                end_yearmonth=config.ARGS["end_yearmonth"],
+                formats=config.ARGS["formats"],
+                pairs=config.FILTER_PAIRS,
+                timeframes=config.ARGS["timeframes"],
+                default_download_dir=config.ARGS["default_download_dir"],
+                base_url=self.urls.base_url,
+                zip_persist=bool(config.ARGS["zip_persist"]),
             ):
-                record = self._init_record(url)
+                record = self._init_record_from_work_item(work_item)
 
                 if record.status != WorkStatus.URL_NO_REPO_DATA.value:
                     record.write_memento_file(  # noqa:BLK100
@@ -188,6 +192,12 @@ class Scraper:  # noqa:H601
         """
         record = Record()
         record(url=url, status=WorkStatus.URL_NEW.value)
+        record.restore_momento(base_dir=config.ARGS["default_download_dir"])
+        return record
+
+    def _init_record_from_work_item(self, work_item: WorkItem) -> Record:
+        """Create a legacy record from a planned work item."""
+        record = Record(**work_item.to_record_kwargs())
         record.restore_momento(base_dir=config.ARGS["default_download_dir"])
         return record
 

@@ -642,8 +642,15 @@ class DatasetPlanWorkflow(_ActivityWorkflowBase):
 
     @workflow_run
     async def run(self, payload: Mapping[str, JSONValue]) -> dict:
-        """Run dataset planning activity placeholder."""
-        return await self._run_activity(payload)
+        """Run dataset planning as a real activity."""
+        return await execute_activity_workflow(
+            self.workflow_name,
+            payload,
+            activity_executor=(
+                self._activity_executor or TemporalActivityExecutor()
+            ),
+            progress=self._progress,
+        )
 
     status = workflow_query(_ActivityWorkflowBase.status)
 
@@ -919,6 +926,8 @@ def _stage_result_from_mapping(
     *,
     fallback_stage: str,
 ) -> StageResult:
+    if "result" in data:
+        return StageResult.from_dict(_coerce_mapping(data.get("result")))
     if "stage_results" in data:
         stage_results = data.get("stage_results") or []
         if isinstance(stage_results, list) and stage_results:

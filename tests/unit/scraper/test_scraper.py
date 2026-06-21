@@ -10,6 +10,7 @@ from histdatacom import config
 from histdatacom.records import Record, Records
 from histdatacom.runtime_contracts import WorkStatus
 from histdatacom.scraper.scraper import Scraper
+from histdatacom.scraper.urls import Urls
 
 ASCII_M1_URL = (
     "http://www.histdata.com/download-free-forex-data/"
@@ -117,3 +118,46 @@ def test_download_zip_transitions_valid_record_to_csv_zip(
     assert record.status == WorkStatus.CSV_ZIP.value
     assert config.NEXT_QUEUE.get().status == WorkStatus.CSV_ZIP.value
     assert metadata["status"] == WorkStatus.CSV_ZIP.value
+
+
+def test_populate_initial_queue_uses_deterministic_plan(
+    tmp_path: Path,
+) -> None:
+    """Legacy queue population should adapt planned work items to records."""
+    scraper = _scraper_without_init()
+    scraper.urls = Urls()
+    config.CURRENT_QUEUE = Records()
+    config.NEXT_QUEUE = Records()
+    config.ARGS = {
+        "start_yearmonth": "202201",
+        "end_yearmonth": "202203",
+        "formats": {"ascii"},
+        "timeframes": {"T"},
+        "default_download_dir": f"{tmp_path}{os.sep}",
+        "zip_persist": False,
+    }
+    config.FILTER_PAIRS = {"eurusd"}
+
+    scraper.populate_initial_queue()
+
+    records = []
+    while not config.CURRENT_QUEUE.empty():
+        records.append(config.CURRENT_QUEUE.get())
+
+    assert [record.url for record in records] == [
+        "http://www.histdata.com/download-free-forex-data/"
+        "?/ascii/tick-data-quotes/eurusd/2022/1",
+        "http://www.histdata.com/download-free-forex-data/"
+        "?/ascii/tick-data-quotes/eurusd/2022/2",
+        "http://www.histdata.com/download-free-forex-data/"
+        "?/ascii/tick-data-quotes/eurusd/2022/3",
+    ]
+    assert [record.data_datemonth for record in records] == [
+        "202201",
+        "202202",
+        "202203",
+    ]
+    meta_path = Path(records[0].data_dir) / ".meta"
+    metadata = json.loads(meta_path.read_text(encoding="UTF-8"))
+    assert metadata["status"] == WorkStatus.URL_NEW.value
+    assert metadata["data_format"] == "ASCII"

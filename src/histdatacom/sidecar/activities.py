@@ -6,7 +6,10 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, Callable, Mapping, TypeVar, cast
 
-from histdatacom.activity_stages import repository_refresh_stage
+from histdatacom.activity_stages import (
+    dataset_plan_stage,
+    repository_refresh_stage,
+)
 from histdatacom.runtime_contracts import JSONValue, RunRequest
 from histdatacom.utils import set_working_data_dir
 
@@ -65,9 +68,25 @@ def repository_refresh_activity(
     return cast(dict[str, Any], output.result.to_dict())
 
 
+@activity_defn(name="dataset_plan")
+def dataset_plan_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
+    """Run deterministic URL and dataset planning as a Temporal activity."""
+    request = RunRequest.from_dict(_mapping(payload.get("request", {})))
+    output = dataset_plan_stage(
+        start_yearmonth=request.start_yearmonth,
+        end_yearmonth=request.end_yearmonth,
+        formats=request.formats,
+        pairs=request.pairs,
+        timeframes=request.timeframes,
+        default_download_dir=set_working_data_dir(request.data_directory),
+        zip_persist=request.zip_persist,
+    )
+    return output.to_dict()
+
+
 def default_activities() -> tuple[Callable[..., Any], ...]:
     """Return default sidecar activities for worker registration."""
-    return (repository_refresh_activity,)
+    return (repository_refresh_activity, dataset_plan_activity)
 
 
 def _repo_local_path(request: RunRequest) -> Path:

@@ -10,6 +10,7 @@ from urllib.error import URLError
 
 from histdatacom.activity_stages import (
     build_cache_work_item,
+    dataset_plan_stage,
     download_archive_work_item,
     extract_csv_work_item,
     import_to_influx_work_item,
@@ -26,7 +27,7 @@ from histdatacom.histdata_ascii import (
     write_polars_cache,
 )
 from histdatacom.records import Record
-from histdatacom.runtime_contracts import WorkItem, WorkStatus
+from histdatacom.runtime_contracts import WorkItem, WorkStatus, derive_work_id
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
 ASCII_M1_URL = (
@@ -257,6 +258,125 @@ def test_import_to_influx_work_item_emits_batches_without_writer(
     assert output.result.metrics == {"batch_count": 2, "line_count": 3}
     assert [len(batch) for batch in emitted] == [2, 1]
     assert emitted[0][0] == EXPECTED_M1_LINE
+
+
+def test_dataset_plan_stage_emits_stable_historical_m1_work_item(
+    tmp_path: Path,
+) -> None:
+    """Historical M1 ranges should plan yearly HistData archive units."""
+    output = dataset_plan_stage(
+        start_yearmonth="202201",
+        end_yearmonth="202203",
+        formats=("ascii",),
+        pairs=("eurusd",),
+        timeframes=("M1",),
+        default_download_dir=f"{tmp_path}{os.sep}",
+        current_yearmonth="202606",
+    )
+
+    assert output.result.status is WorkStatus.COMPLETED
+    assert output.result.metrics["work_item_count"] == 1
+    assert len(output.work_items) == 1
+    [item] = output.work_items
+    assert item.work_id == derive_work_id(
+        "dataset_plan",
+        "ascii",
+        "M1",
+        "eurusd",
+        "2022",
+        "",
+    )
+    assert item.status is WorkStatus.URL_NEW
+    assert item.url == (
+        "http://www.histdata.com/download-free-forex-data/"
+        "?/ascii/1-minute-bar-quotes/eurusd/2022"
+    )
+    assert item.data_datemonth == "2022"
+    assert (
+        item.data_dir
+        == f"{tmp_path}{os.sep}ASCII{os.sep}M1{os.sep}eurusd{os.sep}2022{os.sep}"
+    )
+
+
+def test_dataset_plan_stage_preserves_current_year_m1_monthly_edge(
+    tmp_path: Path,
+) -> None:
+    """Current-year M1 data should plan monthly URLs like legacy code."""
+    output = dataset_plan_stage(
+        start_yearmonth="202401",
+        end_yearmonth="202403",
+        formats=("ascii",),
+        pairs=("eurusd",),
+        timeframes=("M1",),
+        default_download_dir=f"{tmp_path}{os.sep}",
+        current_yearmonth="202403",
+    )
+
+    assert [
+        item.url.rsplit("/", maxsplit=2)[-2:] for item in output.work_items
+    ] == [
+        ["2024", "1"],
+        ["2024", "2"],
+        ["2024", "3"],
+    ]
+    assert [item.data_datemonth for item in output.work_items] == [
+        "202401",
+        "202402",
+        "202403",
+    ]
+
+
+def test_dataset_plan_stage_preserves_tick_monthly_behavior() -> None:
+    """Tick data should plan one work item per month."""
+    output = dataset_plan_stage(
+        start_yearmonth="202201",
+        end_yearmonth="202203",
+        formats=("ascii",),
+        pairs=("eurusd",),
+        timeframes=("T",),
+        current_yearmonth="202606",
+    )
+
+    assert [item.data_datemonth for item in output.work_items] == [
+        "202201",
+        "202202",
+        "202203",
+    ]
+    assert [item.url for item in output.work_items] == [
+        "http://www.histdata.com/download-free-forex-data/"
+        "?/ascii/tick-data-quotes/eurusd/2022/1",
+        "http://www.histdata.com/download-free-forex-data/"
+        "?/ascii/tick-data-quotes/eurusd/2022/2",
+        "http://www.histdata.com/download-free-forex-data/"
+        "?/ascii/tick-data-quotes/eurusd/2022/3",
+    ]
+
+
+def test_dataset_plan_stage_is_deterministic_for_sets_and_generators() -> None:
+    """Plan output order and IDs should not depend on input container order."""
+    first = dataset_plan_stage(
+        start_yearmonth="202201",
+        end_yearmonth="202201",
+        formats={"ascii"},
+        pairs={"gbpusd", "eurusd"},
+        timeframes={"T", "M1"},
+        current_yearmonth="202606",
+    )
+    second = dataset_plan_stage(
+        start_yearmonth="202201",
+        end_yearmonth="202201",
+        formats=(item for item in ("ascii",)),
+        pairs=(item for item in ("eurusd", "gbpusd")),
+        timeframes=(item for item in ("M1", "T")),
+        current_yearmonth="202606",
+    )
+
+    assert [item.work_id for item in first.work_items] == [
+        item.work_id for item in second.work_items
+    ]
+    assert [item.url for item in first.work_items] == [
+        item.url for item in second.work_items
+    ]
 
 
 def test_repository_refresh_stage_writes_artifact_and_available_data(

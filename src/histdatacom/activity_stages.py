@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import ssl
 import zipfile
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from urllib.request import urlopen
 
 import certifi
 
+from histdatacom.fx_enums import Format, Timeframe, get_valid_format_timeframes
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     convert_polars_datetime_to_utc_ms,
@@ -37,7 +39,10 @@ from histdatacom.utils import (
     check_installed_module,
     create_full_path,
     force_datemonth_if_only_year,
+    get_current_datemonth_gmt_minus5,
+    get_month_from_datemonth,
     get_now_utc_timestamp,
+    get_year_from_datemonth,
     hash_dict,
 )
 
@@ -45,6 +50,7 @@ DEFAULT_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/dmidlo/"
     "histdata.com-tools/main/data/.repo"
 )
+DEFAULT_HISTDATA_BASE_URL = "http://www.histdata.com/download-free-forex-data/"
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +97,31 @@ class RepositoryStageOutput:
             "repo_file_exists": self.repo_file_exists,
             "result": self.result.to_dict(),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetPlanOutput:
+    """Deterministic dataset planning result."""
+
+    work_items: tuple[WorkItem, ...]
+    result: StageResult
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return JSON-compatible planned work items and stage result."""
+        return {
+            "work_items": [item.to_dict() for item in self.work_items],
+            "result": self.result.to_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetPeriod:
+    """A HistData URL period component."""
+
+    year: str
+    month: str
+    url_path: str
+    datemonth: str
 
 
 RecordTransformer = Callable[[Record], Record]
@@ -446,6 +477,281 @@ def emit_influx_cache_batches(
             batch_count += 1
             line_count += len(lines)
     return batch_count, line_count
+
+
+def dataset_plan_stage(
+    *,
+    start_yearmonth: str | None,
+    end_yearmonth: str | None,
+    formats: Iterable[Any],
+    pairs: Iterable[Any] | None,
+    timeframes: Iterable[Any],
+    default_download_dir: str = "",
+    base_url: str = DEFAULT_HISTDATA_BASE_URL,
+    current_yearmonth: str | None = None,
+    zip_persist: bool = False,
+) -> DatasetPlanOutput:
+    """Plan explicit dataset work items without queues or side effects."""
+    formats_input = tuple(formats or ())
+    pairs_input = tuple(pairs or ()) if pairs is not None else None
+    timeframes_input = tuple(timeframes or ())
+    work_items = plan_dataset_work_items(
+        start_yearmonth=start_yearmonth,
+        end_yearmonth=end_yearmonth,
+        formats=formats_input,
+        pairs=pairs_input,
+        timeframes=timeframes_input,
+        default_download_dir=default_download_dir,
+        base_url=base_url,
+        current_yearmonth=current_yearmonth,
+        zip_persist=zip_persist,
+    )
+    normalized_formats = normalize_dataset_formats(formats_input)
+    normalized_timeframes = normalize_dataset_timeframes(timeframes_input)
+    normalized_pairs = normalize_dataset_pairs(pairs_input)
+    resolved_current = current_yearmonth or get_current_datemonth_gmt_minus5()
+    result = StageResult(
+        work_id=derive_work_id(
+            "dataset_plan",
+            _coerce_yearmonth(start_yearmonth) or "",
+            _coerce_yearmonth(end_yearmonth) or "",
+            *normalized_formats,
+            *normalized_timeframes,
+            *normalized_pairs,
+        ),
+        stage="dataset_plan",
+        status=WorkStatus.COMPLETED,
+        events=(
+            StatusEvent(
+                status=WorkStatus.COMPLETED,
+                stage="dataset_plan",
+                message="Dataset work items planned.",
+                metadata={"work_item_count": len(work_items)},
+            ),
+        ),
+        metrics={
+            "work_item_count": len(work_items),
+            "pairs": list(normalized_pairs),
+            "formats": list(normalized_formats),
+            "timeframes": list(normalized_timeframes),
+            "start_yearmonth": _coerce_yearmonth(start_yearmonth) or "",
+            "end_yearmonth": _coerce_yearmonth(end_yearmonth) or "",
+            "current_yearmonth": resolved_current,
+        },
+    )
+    return DatasetPlanOutput(work_items=work_items, result=result)
+
+
+def plan_dataset_work_items(
+    *,
+    start_yearmonth: str | None,
+    end_yearmonth: str | None,
+    formats: Iterable[Any],
+    pairs: Iterable[Any] | None,
+    timeframes: Iterable[Any],
+    default_download_dir: str = "",
+    base_url: str = DEFAULT_HISTDATA_BASE_URL,
+    current_yearmonth: str | None = None,
+    zip_persist: bool = False,
+) -> tuple[WorkItem, ...]:
+    """Return deterministic URL work items for a HistData request."""
+    formats_input = tuple(formats or ())
+    pairs_input = tuple(pairs or ()) if pairs is not None else None
+    timeframes_input = tuple(timeframes or ())
+    resolved_current = current_yearmonth or get_current_datemonth_gmt_minus5()
+    start = _coerce_yearmonth(start_yearmonth)
+    end = _coerce_yearmonth(end_yearmonth)
+    if not start and not end:
+        start = "200001"
+        end = resolved_current
+
+    planned: list[WorkItem] = []
+    normalized_pairs = normalize_dataset_pairs(pairs_input)
+    for csv_format, timeframe in valid_dataset_dimensions(
+        formats_input,
+        timeframes_input,
+    ):
+        for pair in normalized_pairs:
+            for period in iter_dataset_periods(
+                start,
+                end,
+                timeframe=timeframe,
+                current_yearmonth=resolved_current,
+            ):
+                planned.append(
+                    dataset_work_item(
+                        csv_format=csv_format,
+                        timeframe=timeframe,
+                        pair=pair,
+                        period=period,
+                        default_download_dir=default_download_dir,
+                        base_url=base_url,
+                        zip_persist=zip_persist,
+                    )
+                )
+    return tuple(planned)
+
+
+def plan_dataset_urls(
+    *,
+    start_yearmonth: str | None,
+    end_yearmonth: str | None,
+    formats: Iterable[Any],
+    pairs: Iterable[Any] | None,
+    timeframes: Iterable[Any],
+    base_url: str = DEFAULT_HISTDATA_BASE_URL,
+    current_yearmonth: str | None = None,
+) -> tuple[str, ...]:
+    """Return deterministic HistData URLs for a request."""
+    return tuple(
+        item.url
+        for item in plan_dataset_work_items(
+            start_yearmonth=start_yearmonth,
+            end_yearmonth=end_yearmonth,
+            formats=formats,
+            pairs=pairs,
+            timeframes=timeframes,
+            base_url=base_url,
+            current_yearmonth=current_yearmonth,
+        )
+    )
+
+
+def valid_dataset_dimensions(
+    formats: Iterable[Any],
+    timeframes: Iterable[Any],
+) -> tuple[tuple[str, str], ...]:
+    """Return supported format/timeframe pairs in deterministic order."""
+    normalized_formats = normalize_dataset_formats(formats)
+    normalized_timeframes = normalize_dataset_timeframes(timeframes)
+    return tuple(
+        (csv_format, timeframe)
+        for csv_format in normalized_formats
+        for timeframe in normalized_timeframes
+        if timeframe in get_valid_format_timeframes(csv_format)
+    )
+
+
+def normalize_dataset_formats(formats: Iterable[Any]) -> tuple[str, ...]:
+    """Normalize HistData format inputs to enum values."""
+    return tuple(
+        sorted({_format_value(csv_format) for csv_format in formats or ()})
+    )
+
+
+def normalize_dataset_timeframes(timeframes: Iterable[Any]) -> tuple[str, ...]:
+    """Normalize HistData timeframe inputs to enum keys."""
+    return tuple(
+        sorted({_timeframe_key(timeframe) for timeframe in timeframes or ()})
+    )
+
+
+def normalize_dataset_pairs(pairs: Iterable[Any] | None) -> tuple[str, ...]:
+    """Normalize symbols to lowercase pair keys in deterministic order."""
+    if pairs is None:
+        return ()
+    return tuple(sorted({str(pair).lower() for pair in pairs}))
+
+
+def iter_dataset_periods(
+    start_yearmonth: str | None,
+    end_yearmonth: str | None,
+    *,
+    timeframe: str,
+    current_yearmonth: str,
+) -> tuple[DatasetPeriod, ...]:
+    """Return HistData period URL components for the requested range."""
+    start = _coerce_yearmonth(start_yearmonth)
+    end = _coerce_yearmonth(end_yearmonth)
+    if not start:
+        return ()
+
+    if not end:
+        return tuple(
+            _dataset_period_from_path(path)
+            for path in _single_year_or_month_paths(
+                timeframe,
+                start,
+                current_yearmonth=current_yearmonth,
+            )
+        )
+
+    start_year = int(get_year_from_datemonth(start))
+    start_month = int(get_month_from_datemonth(start))
+    end_year = int(get_year_from_datemonth(end))
+    end_month = int(get_month_from_datemonth(end))
+    current_year = int(get_year_from_datemonth(current_yearmonth))
+    paths: list[str] = []
+    for year in range(start_year, end_year + 1):
+        paths.extend(
+            _year_range_paths(
+                year,
+                timeframe=timeframe,
+                start_year=start_year,
+                start_month=start_month,
+                end_year=end_year,
+                end_month=end_month,
+                current_year=current_year,
+            )
+        )
+    return tuple(_dataset_period_from_path(path) for path in paths)
+
+
+def dataset_work_item(
+    *,
+    csv_format: str,
+    timeframe: str,
+    pair: str,
+    period: DatasetPeriod,
+    default_download_dir: str = "",
+    base_url: str = DEFAULT_HISTDATA_BASE_URL,
+    zip_persist: bool = False,
+) -> WorkItem:
+    """Build one deterministic planned dataset work item."""
+    normalized_format = _format_value(csv_format)
+    normalized_timeframe = _timeframe_key(timeframe)
+    normalized_pair = pair.lower()
+    return WorkItem(
+        work_id=derive_work_id(
+            "dataset_plan",
+            normalized_format,
+            normalized_timeframe,
+            normalized_pair,
+            period.year,
+            period.month,
+        ),
+        status=WorkStatus.URL_NEW,
+        url=_dataset_url(
+            normalized_format,
+            normalized_timeframe,
+            normalized_pair,
+            period,
+            base_url=base_url,
+        ),
+        data_date=period.datemonth,
+        data_year=period.year,
+        data_month=period.month,
+        data_datemonth=period.datemonth,
+        data_format=Format(normalized_format).name,
+        data_timeframe=normalized_timeframe,
+        data_fxpair=normalized_pair,
+        data_dir=_dataset_data_dir(
+            normalized_format,
+            normalized_timeframe,
+            normalized_pair,
+            period,
+            default_download_dir=default_download_dir,
+        ),
+        zip_persist=str(zip_persist),
+        metadata={
+            "format": normalized_format,
+            "timeframe": normalized_timeframe,
+            "pair": normalized_pair,
+            "year": period.year,
+            "month": period.month,
+            "datemonth": period.datemonth,
+        },
+    )
 
 
 def repository_refresh_stage(
@@ -956,6 +1262,185 @@ def _collate_cache_sets(
         sets_by_key[key]["records"].append(item)
 
     return sets_to_merge
+
+
+def _coerce_yearmonth(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value)
+    return normalized or None
+
+
+def _format_value(csv_format: Any) -> str:
+    normalized = str(csv_format).lower()
+    if normalized in Format.list_values():
+        return normalized
+    if str(csv_format) in Format.__members__:
+        return str(Format[str(csv_format)].value)
+    return str(Format(normalized).value)
+
+
+def _timeframe_key(timeframe: Any) -> str:
+    normalized = str(timeframe)
+    if normalized in Timeframe.__members__:
+        return normalized
+    return str(Timeframe(normalized).name)
+
+
+def _dataset_url(
+    csv_format: str,
+    timeframe: str,
+    pair: str,
+    period: DatasetPeriod,
+    *,
+    base_url: str,
+) -> str:
+    normalized_base = f"{base_url.rstrip('/')}/"
+    return (
+        f"{normalized_base}?/{csv_format}/"
+        f"{Timeframe[timeframe].value}/{pair}/{period.url_path}"
+    )
+
+
+def _dataset_data_dir(
+    csv_format: str,
+    timeframe: str,
+    pair: str,
+    period: DatasetPeriod,
+    *,
+    default_download_dir: str,
+) -> str:
+    if not default_download_dir:
+        return ""
+
+    data_path = (
+        Path(default_download_dir)
+        / Format(csv_format).name
+        / timeframe
+        / pair
+        / period.year
+    )
+    if period.month:
+        data_path /= period.month
+    return f"{data_path}{os.sep}"
+
+
+def _dataset_period_from_path(url_path: str) -> DatasetPeriod:
+    parts = url_path.split("/")
+    year = parts[0]
+    month = parts[1] if len(parts) > 1 else ""
+    datemonth = f"{year}{int(month):02d}" if month else year
+    return DatasetPeriod(
+        year=year,
+        month=month,
+        url_path=url_path,
+        datemonth=datemonth,
+    )
+
+
+def _year_range_paths(
+    year: int,
+    *,
+    timeframe: str,
+    start_year: int,
+    start_month: int,
+    end_year: int,
+    end_month: int,
+    current_year: int,
+) -> tuple[str, ...]:
+    if year == current_year:
+        return _current_year_paths(
+            year,
+            start_year=start_year,
+            start_month=start_month,
+            end_year=end_year,
+            end_month=end_month,
+        )
+    if start_year == year == end_year:
+        return _same_year_paths(timeframe, year, start_month, end_month)
+    if year == start_year != end_year:
+        return _start_year_paths(timeframe, year, start_month)
+    if year == end_year != start_year:
+        return _end_year_paths(timeframe, year, end_month)
+    return _year_paths(timeframe, year)
+
+
+def _current_year_paths(
+    year: int,
+    *,
+    start_year: int,
+    start_month: int,
+    end_year: int,
+    end_month: int,
+) -> tuple[str, ...]:
+    first_month = start_month if start_year == end_year else 1
+    return tuple(
+        f"{year}/{month}" for month in range(first_month, end_month + 1)
+    )
+
+
+def _same_year_paths(
+    timeframe: str,
+    year: int,
+    start_month: int,
+    end_month: int,
+) -> tuple[str, ...]:
+    if timeframe == "M1":
+        return (f"{year}",)
+    return tuple(
+        f"{year}/{month}" for month in range(start_month, end_month + 1)
+    )
+
+
+def _start_year_paths(
+    timeframe: str,
+    year: int,
+    start_month: int,
+) -> tuple[str, ...]:
+    if timeframe == "M1":
+        return (f"{year}",)
+    return tuple(f"{year}/{month}" for month in range(start_month, 12 + 1))
+
+
+def _end_year_paths(
+    timeframe: str,
+    year: int,
+    end_month: int,
+) -> tuple[str, ...]:
+    if timeframe == "M1":
+        return (f"{year}",)
+    return tuple(f"{year}/{month}" for month in range(1, end_month + 1))
+
+
+def _year_paths(timeframe: str, year: int) -> tuple[str, ...]:
+    if timeframe == "M1":
+        return (f"{year}",)
+    return tuple(f"{year}/{month}" for month in range(1, 12 + 1))
+
+
+def _single_year_or_month_paths(
+    timeframe: str,
+    start_yearmonth: str,
+    *,
+    current_yearmonth: str,
+) -> tuple[str, ...]:
+    current_year = int(get_year_from_datemonth(current_yearmonth))
+    current_month = int(get_month_from_datemonth(current_yearmonth))
+    start_year = int(get_year_from_datemonth(start_yearmonth))
+    start_month = int(get_month_from_datemonth(start_yearmonth))
+
+    if start_month == 0:
+        if start_year == current_year:
+            return tuple(
+                f"{start_year}/{month}" for month in range(1, current_month + 1)
+            )
+        return _year_paths(timeframe, start_year)
+
+    if start_year == current_year:
+        return (f"{start_year}/{start_month}",)
+    if timeframe == "M1":
+        return (f"{start_year}",)
+    return (f"{start_year}/{start_month}",)
 
 
 def _json_int(value: Any) -> int:

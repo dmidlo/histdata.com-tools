@@ -258,6 +258,33 @@ def test_leaf_workflow_uses_mocked_activity_executor() -> None:
     assert workflow.status()["completed_children"] == 1
 
 
+def test_dataset_plan_workflow_uses_activity_executor() -> None:
+    """Dataset planning should run through the activity executor seam."""
+    activity_executor = _RecordingActivityExecutor()
+    workflow = workflows.DatasetPlanWorkflow(
+        activity_executor=activity_executor
+    )
+    request = _request()
+    invocation = workflows.build_run_child_invocations(request)[0]
+
+    summary = asyncio.run(workflow.run(invocation.payload))
+
+    assert activity_executor.calls == [
+        {
+            "activity_name": "dataset_plan",
+            "payload": {
+                **invocation.payload,
+                "activity": "dataset_plan",
+                "stage": "dataset_plan",
+                "task_queue": "queue-cpu-file",
+            },
+            "task_queue": "queue-cpu-file",
+        }
+    ]
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert workflow.status()["planned_children"] == ["dataset_plan"]
+
+
 def test_repository_refresh_workflow_uses_activity_executor() -> None:
     """Repository refresh should run through the activity executor seam."""
     activity_executor = _RecordingActivityExecutor()

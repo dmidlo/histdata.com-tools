@@ -119,7 +119,7 @@ def test_run_temporal_worker_accepts_fake_temporal_classes(
     }
     assert {
         activity.__name__ for activity in _FakeWorker.instances[0].activities
-    } == {"repository_refresh_activity"}
+    } == {"repository_refresh_activity", "dataset_plan_activity"}
 
 
 def test_default_workflows_include_topology_classes() -> None:
@@ -139,9 +139,10 @@ def test_default_workflows_include_topology_classes() -> None:
 
 
 def test_default_activities_include_repository_refresh() -> None:
-    """Default worker registration should include repository activities."""
+    """Default worker registration should include migrated activities."""
     assert [activity.__name__ for activity in worker.default_activities()] == [
-        "repository_refresh_activity"
+        "repository_refresh_activity",
+        "dataset_plan_activity",
     ]
 
 
