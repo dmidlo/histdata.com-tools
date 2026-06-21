@@ -33,6 +33,10 @@ from histdatacom.sidecar.client import (
     submit_run_request,
     workflow_id_for_request,
 )
+from histdatacom.sidecar.activities import (
+    default_activities,
+    repository_refresh_activity,
+)
 from histdatacom.sidecar.control import (
     CONTROL_SCHEMA_VERSION,
     ControlOperationName,
@@ -83,6 +87,7 @@ from histdatacom.sidecar.supervisor import (
     build_temporal_start_command,
 )
 from histdatacom.sidecar.worker import (
+    default_activities as default_worker_activities,
     default_workflows,
     build_temporal_worker,
     run_temporal_worker,
@@ -98,6 +103,7 @@ from histdatacom.sidecar.workflows import (
     ActivityExecutor,
     ChildWorkflowExecutor,
     HistDataRunWorkflow,
+    TemporalActivityExecutor,
     WorkflowInvocation,
     WorkflowProgress,
     WorkflowSpec,
@@ -136,6 +142,7 @@ __all__ = [
     "TOPOLOGY_SCHEMA_VERSION",
     "TaskQueueLane",
     "TemporalDependencyError",
+    "TemporalActivityExecutor",
     "WORKFLOW_TOPOLOGY",
     "ActivityExecutor",
     "ChildWorkflowExecutor",
@@ -163,9 +170,11 @@ __all__ = [
     "cancel_job_sync",
     "connect_temporal_client",
     "current_platform_key",
+    "default_activities",
     "default_sidecar_runtime_home",
     "default_sidecar_state_dir",
     "default_sidecar_workspace",
+    "default_worker_activities",
     "default_workflows",
     "execute_histdata_run_workflow",
     "execute_symbol_timeframe_workflow",
@@ -184,6 +193,7 @@ __all__ = [
     "list_job_statuses_sync",
     "load_sidecar_manifest",
     "observe_workflow_result",
+    "repository_refresh_activity",
     "request_partitions",
     "resume_job",
     "resume_job_sync",

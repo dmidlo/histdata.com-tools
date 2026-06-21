@@ -256,3 +256,30 @@ def test_leaf_workflow_uses_mocked_activity_executor() -> None:
     ]
     assert summary["status"] == WorkStatus.COMPLETED.value
     assert workflow.status()["completed_children"] == 1
+
+
+def test_repository_refresh_workflow_uses_activity_executor() -> None:
+    """Repository refresh should run through the activity executor seam."""
+    activity_executor = _RecordingActivityExecutor()
+    workflow = workflows.RepositoryRefreshWorkflow(
+        activity_executor=activity_executor
+    )
+    request = _request(available_remote_data=True, update_remote_data=False)
+    invocation = workflows.build_run_child_invocations(request)[0]
+
+    summary = asyncio.run(workflow.run(invocation.payload))
+
+    assert activity_executor.calls == [
+        {
+            "activity_name": "repository_refresh",
+            "payload": {
+                **invocation.payload,
+                "activity": "repository_refresh",
+                "stage": "repository_refresh",
+                "task_queue": "queue-network",
+            },
+            "task_queue": "queue-network",
+        }
+    ]
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert workflow.status()["planned_children"] == ["repository_refresh"]

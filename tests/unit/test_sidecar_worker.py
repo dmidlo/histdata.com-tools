@@ -117,6 +117,9 @@ def test_run_temporal_worker_accepts_fake_temporal_classes(
         "SymbolTimeframeWorkflow",
         "ValidateUrlsWorkflow",
     }
+    assert {
+        activity.__name__ for activity in _FakeWorker.instances[0].activities
+    } == {"repository_refresh_activity"}
 
 
 def test_default_workflows_include_topology_classes() -> None:
@@ -132,6 +135,13 @@ def test_default_workflows_include_topology_classes() -> None:
         "BuildCacheWorkflow",
         "MergeCacheWorkflow",
         "ImportWorkflow",
+    ]
+
+
+def test_default_activities_include_repository_refresh() -> None:
+    """Default worker registration should include repository activities."""
+    assert [activity.__name__ for activity in worker.default_activities()] == [
+        "repository_refresh_activity"
     ]
 
 

@@ -46,11 +46,14 @@ def build_temporal_worker(
     workflow_classes = (
         list(workflows) if workflows else list(default_workflows())
     )
+    activity_functions = (
+        list(activities) if activities else list(default_activities())
+    )
     return temporal_worker_class(
         client,
         task_queue=resolved_config.task_queue,
         workflows=workflow_classes,
-        activities=list(activities),
+        activities=activity_functions,
         **worker_options,
     )
 
@@ -252,6 +255,13 @@ def default_workflows() -> tuple[Any, ...]:
     from histdatacom.sidecar.workflows import DEFAULT_WORKFLOWS
 
     return cast(tuple[Any, ...], DEFAULT_WORKFLOWS)
+
+
+def default_activities() -> tuple[Any, ...]:
+    """Return default sidecar activity callables."""
+    from histdatacom.sidecar.activities import default_activities as defaults
+
+    return cast(tuple[Any, ...], defaults())
 
 
 async def _maybe_await(value: Any) -> Any:

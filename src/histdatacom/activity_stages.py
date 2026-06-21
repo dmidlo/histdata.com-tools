@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import json
+import ssl
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from ssl import SSLCertVerificationError
 from typing import Any, Callable, Iterable, Mapping, MutableMapping, Sequence
+from urllib.error import URLError
+from urllib.request import urlopen
+
+import certifi
 
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
@@ -26,7 +33,18 @@ from histdatacom.runtime_contracts import (
     derive_work_id,
     status_has_csv_artifact,
 )
-from histdatacom.utils import check_installed_module
+from histdatacom.utils import (
+    check_installed_module,
+    create_full_path,
+    force_datemonth_if_only_year,
+    get_now_utc_timestamp,
+    hash_dict,
+)
+
+DEFAULT_REPOSITORY_URL = (
+    "https://raw.githubusercontent.com/dmidlo/"
+    "histdata.com-tools/main/data/.repo"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,10 +72,32 @@ class MergeStageOutput:
     result: StageResult
 
 
+@dataclass(frozen=True, slots=True)
+class RepositoryStageOutput:
+    """Repository metadata operation result with explicit state."""
+
+    repo_data: dict[str, Any]
+    available_data: dict[str, Any]
+    filter_pairs: tuple[str, ...]
+    repo_file_exists: bool
+    result: StageResult
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return JSON-compatible repository operation output."""
+        return {
+            "repo_data": dict(self.repo_data),
+            "available_data": dict(self.available_data),
+            "filter_pairs": list(self.filter_pairs),
+            "repo_file_exists": self.repo_file_exists,
+            "result": self.result.to_dict(),
+        }
+
+
 RecordTransformer = Callable[[Record], Record]
 RecordAction = Callable[[Record], None]
 NoArgBool = Callable[[], bool]
 LineSink = Callable[[list[str]], None]
+RepositoryFetcher = Callable[[str], Mapping[str, Any]]
 
 
 def validate_url_work_item(
@@ -408,6 +448,322 @@ def emit_influx_cache_batches(
     return batch_count, line_count
 
 
+def repository_refresh_stage(
+    *,
+    repo_data: Mapping[str, Any],
+    repo_file_exists: bool,
+    repo_local_path: str | Path,
+    repo_url: str = DEFAULT_REPOSITORY_URL,
+    pairs: Iterable[str] = (),
+    by: str | None = None,
+    available_remote_data: bool = False,
+    update_remote_data: bool = False,
+    fetch_remote_repository: RepositoryFetcher | None = None,
+) -> RepositoryStageOutput:
+    """Refresh/list repository metadata with explicit inputs and outputs."""
+    fetcher = fetch_remote_repository or fetch_repository_data_from_url
+    requested_pairs = set(pairs)
+    repo_path = Path(repo_local_path)
+    local_exists = bool(repo_file_exists or repo_path.exists())
+    working_repo = dict(repo_data)
+    artifacts = _repository_artifacts(repo_path)
+    remote_checked = False
+    remote_refreshed = False
+    local_written = False
+
+    if local_exists and not working_repo:
+        try:
+            working_repo.update(read_repository_data_file(repo_path))
+        except (OSError, json.JSONDecodeError) as err:
+            return _repository_failure_output(
+                repo_data=working_repo,
+                repo_file_exists=local_exists,
+                repo_local_path=repo_path,
+                pairs=requested_pairs,
+                by=by,
+                code="REPOSITORY_READ_ERROR",
+                message=str(err),
+                retryable=False,
+            )
+
+    try:
+        if available_remote_data or update_remote_data or not local_exists:
+            remote_checked = True
+            remote_repo = dict(fetcher(repo_url))
+            refreshed_repo = merge_remote_repository_data(
+                working_repo,
+                remote_repo,
+                repo_file_exists=local_exists,
+            )
+            remote_refreshed = refreshed_repo != working_repo
+            working_repo = refreshed_repo
+
+            if not local_exists or remote_refreshed or update_remote_data:
+                artifact = write_repository_data_file(working_repo, repo_path)
+                working_repo = read_repository_data_file(repo_path)
+                artifacts = (artifact,)
+                local_exists = True
+                local_written = True
+    except (SSLCertVerificationError, URLError) as err:
+        return _repository_failure_output(
+            repo_data=working_repo,
+            repo_file_exists=local_exists,
+            repo_local_path=repo_path,
+            pairs=requested_pairs,
+            by=by,
+            code="REPOSITORY_NETWORK_ERROR",
+            message=str(err),
+            retryable=True,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as err:
+        return _repository_failure_output(
+            repo_data=working_repo,
+            repo_file_exists=local_exists,
+            repo_local_path=repo_path,
+            pairs=requested_pairs,
+            by=by,
+            code="REPOSITORY_REFRESH_ERROR",
+            message=str(err),
+            retryable=False,
+        )
+
+    filter_pairs = repository_missing_pairs(working_repo, requested_pairs)
+    available_data = sort_repository_data(working_repo, requested_pairs, by)
+    result = StageResult(
+        work_id=derive_work_id(
+            "repository_refresh",
+            str(repo_path),
+            repo_url,
+            *(sorted(requested_pairs)),
+        ),
+        stage="repository_refresh",
+        status=WorkStatus.COMPLETED,
+        artifacts=artifacts,
+        events=(
+            StatusEvent(
+                status=WorkStatus.COMPLETED,
+                stage="repository_refresh",
+                message="Repository metadata refreshed/listed.",
+                metadata={
+                    "pair_count": len(repository_pair_data(working_repo)),
+                    "remote_checked": remote_checked,
+                    "remote_refreshed": remote_refreshed,
+                    "local_written": local_written,
+                },
+            ),
+        ),
+        metrics={
+            "available_data": available_data,
+            "filter_pairs": list(filter_pairs),
+            "pair_count": len(repository_pair_data(working_repo)),
+            "repo_file_exists": local_exists,
+            "remote_checked": remote_checked,
+            "remote_refreshed": remote_refreshed,
+            "local_written": local_written,
+            "repo_url": repo_url,
+        },
+    )
+    return RepositoryStageOutput(
+        repo_data=working_repo,
+        available_data=available_data,
+        filter_pairs=tuple(filter_pairs),
+        repo_file_exists=local_exists,
+        result=result,
+    )
+
+
+def fetch_repository_data_from_url(repo_url: str) -> Mapping[str, Any]:
+    """Fetch repository metadata JSON from the configured remote URL."""
+    with urlopen(  # noqa:S310
+        repo_url,
+        context=ssl.create_default_context(cafile=certifi.where()),
+    ) as repo_data:
+        loaded = json.load(repo_data)
+    if not isinstance(loaded, Mapping):
+        raise ValueError("repository response must be a JSON object")
+    return loaded
+
+
+def read_repository_data_file(repo_local_path: str | Path) -> dict[str, Any]:
+    """Read repository metadata from disk without mutating globals."""
+    repo_path = Path(repo_local_path)
+    if not repo_path.exists():
+        return {}
+    with repo_path.open("r", encoding="UTF-8") as source:
+        loaded = json.load(source)
+    if not isinstance(loaded, Mapping):
+        raise ValueError("repository file must contain a JSON object")
+    return dict(loaded)
+
+
+def write_repository_data_file(
+    repo_data: Mapping[str, Any],
+    repo_local_path: str | Path,
+) -> ArtifactRef:
+    """Write repository metadata to disk and return an artifact reference."""
+    repo_path = Path(repo_local_path)
+    create_full_path(repo_path.parent)
+    hashed_data = hash_repository_data(repo_data)
+    with repo_path.open("w", encoding="UTF-8") as target:
+        json.dump(hashed_data, target)
+    return ArtifactRef(
+        kind="repository",
+        path=str(repo_path),
+        size_bytes=repo_path.stat().st_size,
+        metadata={"pair_count": len(repository_pair_data(hashed_data))},
+    )
+
+
+def hash_repository_data(repo_data: Mapping[str, Any]) -> dict[str, Any]:
+    """Return repository metadata with refreshed hash fields."""
+    clean_repo = {
+        key: value
+        for key, value in dict(repo_data).items()
+        if key not in {"hash", "hash_utc"}
+    }
+    clean_repo["hash"] = hash_dict(clean_repo)
+    clean_repo["hash_utc"] = get_now_utc_timestamp()
+    return clean_repo
+
+
+def merge_remote_repository_data(
+    local_repo_data: Mapping[str, Any],
+    remote_repo_data: Mapping[str, Any],
+    *,
+    repo_file_exists: bool,
+) -> dict[str, Any]:
+    """Return the repository data that should be used after remote refresh."""
+    if not repo_file_exists:
+        return dict(remote_repo_data)
+    if not local_repo_data:
+        return dict(remote_repo_data)
+
+    local_hash = str(local_repo_data.get("hash", "") or "")
+    remote_hash = str(remote_repo_data.get("hash", "") or "")
+    local_time = _json_float(local_repo_data.get("hash_utc"))
+    remote_time = _json_float(remote_repo_data.get("hash_utc"))
+    if local_hash != remote_hash and local_time < remote_time:
+        return dict(remote_repo_data)
+    return dict(local_repo_data)
+
+
+def repository_data_with_record(
+    repo_data: Mapping[str, Any],
+    record: Record,
+) -> dict[str, Any]:
+    """Return repository metadata updated from one validated record."""
+    updated = {
+        key: dict(value) if isinstance(value, Mapping) else value
+        for key, value in dict(repo_data).items()
+        if key not in {"hash", "hash_utc"}
+    }
+    datemonth = force_datemonth_if_only_year(record.data_datemonth)
+    pair = record.data_fxpair.lower()
+    current = updated.get(pair)
+    if not isinstance(current, Mapping):
+        updated[pair] = {"start": datemonth, "end": datemonth}
+        return updated
+
+    start = str(current.get("start", datemonth))
+    end = str(current.get("end", datemonth))
+    updated[pair] = {
+        "start": datemonth if int(datemonth) < int(start) else start,
+        "end": datemonth if int(datemonth) > int(end) else end,
+    }
+    return updated
+
+
+def repository_pair_data(repo_data: Mapping[str, Any]) -> dict[str, Any]:
+    """Return only pair range entries from repository metadata."""
+    return {
+        str(pair): dict(value)
+        for pair, value in repo_data.items()
+        if isinstance(value, Mapping) and "start" in value and "end" in value
+    }
+
+
+def repository_missing_pairs(
+    repo_data: Mapping[str, Any],
+    pairs: set[str],
+) -> tuple[str, ...]:
+    """Return requested pairs absent from repository metadata."""
+    if not pairs:
+        return ()
+    return tuple(sorted(pairs - set(repository_pair_data(repo_data))))
+
+
+def repository_queue_needed(
+    args: Mapping[str, Any],
+    *,
+    repo_file_exists: bool,
+    filter_pairs: Iterable[str] | None,
+) -> bool:
+    """Return whether legacy queue population is needed for repo metadata."""
+    return bool(
+        (
+            not repo_file_exists
+            and bool(args.get("available_remote_data", False))
+        )
+        or bool(args.get("update_remote_data", False))
+        or tuple(filter_pairs or ())
+    )
+
+
+def repository_should_create_or_update(
+    args: Mapping[str, Any],
+    *,
+    repo_file_exists: bool,
+    filter_pairs: Iterable[str] | None,
+) -> bool:
+    """Return whether a repo metadata file should be written from queues."""
+    return bool(
+        bool(args.get("update_remote_data", False))
+        or not repo_file_exists
+        or tuple(filter_pairs or ())
+    )
+
+
+def sort_repository_data(
+    repo_data: Mapping[str, Any],
+    filter_pairs: set[str],
+    by: str | None,
+) -> dict[str, Any]:
+    """Return repository pair metadata filtered and sorted."""
+    filtered = filter_repository_data_by_pairs(repo_data, filter_pairs)
+    match by:
+        case "pair_asc" | None:
+            return dict(sorted(filtered.items()))
+        case "pair_dsc":
+            return dict(sorted(filtered.items(), reverse=True))
+        case "start_asc":
+            return dict(
+                sorted(filtered.items(), key=lambda pair: pair[1]["start"])
+            )
+        case "start_dsc":
+            return dict(
+                sorted(
+                    filtered.items(),
+                    key=lambda pair: pair[1]["start"],
+                    reverse=True,
+                )
+            )
+        case _:
+            return dict(sorted(filtered.items()))
+
+
+def filter_repository_data_by_pairs(
+    repo_data: Mapping[str, Any],
+    filter_pairs: set[str],
+) -> dict[str, Any]:
+    """Filter repository pair metadata by requested pairs."""
+    pairs = repository_pair_data(repo_data)
+    if not filter_pairs:
+        return pairs
+    return {
+        pair: pairs[pair] for pair in sorted(set(pairs) & set(filter_pairs))
+    }
+
+
 def coerce_batch_size(batch_size: Any) -> int:
     """Return a positive integer batch size."""
     try:
@@ -607,6 +963,72 @@ def _json_int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _json_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _repository_failure_output(
+    *,
+    repo_data: Mapping[str, Any],
+    repo_file_exists: bool,
+    repo_local_path: Path,
+    pairs: Iterable[str],
+    by: str | None,
+    code: str,
+    message: str,
+    retryable: bool,
+) -> RepositoryStageOutput:
+    available_data = sort_repository_data(repo_data, set(pairs), by)
+    filter_pairs = repository_missing_pairs(repo_data, set(pairs))
+    result = StageResult(
+        work_id=derive_work_id("repository_refresh", str(repo_local_path)),
+        stage="repository_refresh",
+        status=WorkStatus.FAILED,
+        artifacts=_repository_artifacts(repo_local_path),
+        events=(
+            StatusEvent(
+                status=WorkStatus.FAILED,
+                stage="repository_refresh",
+                message=message,
+            ),
+        ),
+        failure=FailureInfo(
+            code=code,
+            message=message,
+            retryable=retryable,
+            detail={"repo_local_path": str(repo_local_path)},
+        ),
+        metrics={
+            "available_data": available_data,
+            "filter_pairs": list(filter_pairs),
+            "pair_count": len(repository_pair_data(repo_data)),
+            "repo_file_exists": repo_file_exists,
+        },
+    )
+    return RepositoryStageOutput(
+        repo_data=dict(repo_data),
+        available_data=available_data,
+        filter_pairs=filter_pairs,
+        repo_file_exists=repo_file_exists,
+        result=result,
+    )
+
+
+def _repository_artifacts(repo_local_path: Path) -> tuple[ArtifactRef, ...]:
+    if not repo_local_path.exists():
+        return ()
+    return (
+        ArtifactRef(
+            kind="repository",
+            path=str(repo_local_path),
+            size_bytes=repo_local_path.stat().st_size,
+        ),
+    )
 
 
 def _unlink_if_present(data_dir: str, filename: str) -> None:

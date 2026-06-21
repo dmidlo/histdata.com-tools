@@ -7,6 +7,7 @@ references instead of downloaded rows, dataframes, or queue payloads.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from dataclasses import dataclass
 from importlib import import_module
 from typing import Any, Callable, Mapping, Protocol, TypeVar, cast
@@ -276,6 +277,30 @@ class PendingActivityExecutor:
             metrics={"activity_pending": True},
         )
         return dict(result.to_dict())
+
+
+class TemporalActivityExecutor:
+    """Temporal-backed activity executor."""
+
+    async def execute_activity(
+        self,
+        activity_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        task_queue: str,
+    ) -> Mapping[str, Any]:
+        """Run an operation activity using Temporal's workflow API."""
+        options: dict[str, Any] = {
+            "start_to_close_timeout": timedelta(minutes=30),
+        }
+        if task_queue:
+            options["task_queue"] = task_queue
+        result = await workflow.execute_activity(
+            activity_name,
+            dict(payload),
+            **options,
+        )
+        return _coerce_mapping(result)
 
 
 RUN_CHILDREN = (
@@ -596,8 +621,15 @@ class RepositoryRefreshWorkflow(_ActivityWorkflowBase):
 
     @workflow_run
     async def run(self, payload: Mapping[str, JSONValue]) -> dict:
-        """Run repository refresh activity placeholder."""
-        return await self._run_activity(payload)
+        """Run repository refresh as a real activity."""
+        return await execute_activity_workflow(
+            self.workflow_name,
+            payload,
+            activity_executor=(
+                self._activity_executor or TemporalActivityExecutor()
+            ),
+            progress=self._progress,
+        )
 
     status = workflow_query(_ActivityWorkflowBase.status)
 

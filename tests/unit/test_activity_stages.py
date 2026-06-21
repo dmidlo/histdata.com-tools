@@ -6,6 +6,7 @@ import os
 import shutil
 import zipfile
 from pathlib import Path
+from urllib.error import URLError
 
 from histdatacom.activity_stages import (
     build_cache_work_item,
@@ -13,6 +14,9 @@ from histdatacom.activity_stages import (
     extract_csv_work_item,
     import_to_influx_work_item,
     merge_cache_work_items,
+    read_repository_data_file,
+    repository_data_with_record,
+    repository_refresh_stage,
     validate_url_work_item,
 )
 from histdatacom.histdata_ascii import (
@@ -253,3 +257,102 @@ def test_import_to_influx_work_item_emits_batches_without_writer(
     assert output.result.metrics == {"batch_count": 2, "line_count": 3}
     assert [len(batch) for batch in emitted] == [2, 1]
     assert emitted[0][0] == EXPECTED_M1_LINE
+
+
+def test_repository_refresh_stage_writes_artifact_and_available_data(
+    tmp_path: Path,
+) -> None:
+    """Repository refresh should use explicit data and artifact results."""
+    remote_repo = {
+        "eurusd": {"start": "200005", "end": "202212"},
+        "gbpusd": {"start": "200005", "end": "202212"},
+        "hash": "remote",
+        "hash_utc": 10.0,
+    }
+
+    output = repository_refresh_stage(
+        repo_data={},
+        repo_file_exists=False,
+        repo_local_path=tmp_path / ".repo",
+        pairs=("eurusd",),
+        by="pair_asc",
+        available_remote_data=True,
+        fetch_remote_repository=lambda url: remote_repo,
+    )
+
+    assert output.result.status is WorkStatus.COMPLETED
+    assert output.available_data == {
+        "eurusd": {"start": "200005", "end": "202212"}
+    }
+    assert output.filter_pairs == ()
+    assert output.repo_file_exists is True
+    assert output.result.artifacts[0].kind == "repository"
+    assert output.result.metrics["available_data"] == output.available_data
+    written = read_repository_data_file(tmp_path / ".repo")
+    assert written["eurusd"] == {"start": "200005", "end": "202212"}
+    assert "hash" in written
+    assert "hash_utc" in written
+
+
+def test_repository_refresh_stage_network_error_is_structured_failure(
+    tmp_path: Path,
+) -> None:
+    """Network failures should be activity failures with retry metadata."""
+    local_repo = {"eurusd": {"start": "200005", "end": "202212"}}
+
+    def fail_fetch(url: str) -> dict:
+        raise URLError("offline")
+
+    output = repository_refresh_stage(
+        repo_data=local_repo,
+        repo_file_exists=True,
+        repo_local_path=tmp_path / ".repo",
+        pairs=("eurusd",),
+        available_remote_data=True,
+        fetch_remote_repository=fail_fetch,
+    )
+
+    assert output.result.status is WorkStatus.FAILED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "REPOSITORY_NETWORK_ERROR"
+    assert output.result.failure.retryable is True
+    assert output.available_data == local_repo
+    assert output.result.metrics["available_data"] == local_repo
+
+
+def test_repository_refresh_stage_accepts_one_shot_pair_iterable(
+    tmp_path: Path,
+) -> None:
+    """Pair filtering and work IDs should not depend on iterable reuse."""
+    local_repo = {
+        "eurusd": {"start": "200005", "end": "202212"},
+        "gbpusd": {"start": "200005", "end": "202212"},
+    }
+    pairs = (pair for pair in ("eurusd",))
+
+    output = repository_refresh_stage(
+        repo_data=local_repo,
+        repo_file_exists=True,
+        repo_local_path=tmp_path / ".repo",
+        pairs=pairs,
+        by="pair_asc",
+    )
+
+    assert output.available_data == {
+        "eurusd": {"start": "200005", "end": "202212"}
+    }
+    assert output.result.metrics["filter_pairs"] == []
+
+
+def test_repository_data_with_record_updates_ranges_without_globals() -> None:
+    """Repository range updates should work from explicit inputs."""
+    existing = {"eurusd": {"start": "202201", "end": "202201"}}
+    record = Record(
+        data_fxpair="EURUSD",
+        data_datemonth="202212",
+    )
+
+    updated = repository_data_with_record(existing, record)
+
+    assert updated == {"eurusd": {"start": "202201", "end": "202212"}}
+    assert existing == {"eurusd": {"start": "202201", "end": "202201"}}

@@ -7,27 +7,29 @@ Returns:
     dict: _description_
 """
 
-import contextlib
-import json
-import ssl
 from pathlib import Path
-from ssl import SSLCertVerificationError
 from typing import TYPE_CHECKING
-from urllib.error import URLError
-from urllib.request import urlopen
-
-import certifi
 from rich import print  # pylint: disable=redefined-builtin
 from rich import box
 from rich.table import Table
 
 from histdatacom import config
+from histdatacom.activity_stages import (
+    DEFAULT_REPOSITORY_URL,
+    fetch_repository_data_from_url,
+    filter_repository_data_by_pairs,
+    hash_repository_data,
+    read_repository_data_file,
+    repository_data_with_record,
+    repository_missing_pairs,
+    repository_queue_needed,
+    repository_refresh_stage,
+    repository_should_create_or_update,
+    sort_repository_data,
+    write_repository_data_file,
+)
 from histdatacom.scraper.scraper import Scraper
 from histdatacom.utils import (
-    force_datemonth_if_only_year,
-    create_full_path,
-    hash_dict,
-    get_now_utc_timestamp,
     get_year_from_datemonth,
     get_month_from_datemonth,
 )
@@ -47,10 +49,7 @@ class Repo:  # noqa: H601
 
     def __init__(self) -> None:
         """Initialize repo class with remote url."""
-        self.repo_url = (
-            "https://raw.githubusercontent.com/dmidlo/"
-            "histdata.com-tools/main/data/.repo"
-        )
+        self.repo_url = DEFAULT_REPOSITORY_URL
         self.repo_local_path = Path(  # noqa:BLK100
             config.ARGS["default_download_dir"], ".repo"
         )
@@ -63,13 +62,10 @@ class Repo:  # noqa: H601
         Returns:
             bool: conditonal filter
         """
-        return bool(
-            (  # noqa:BLK100
-                not config.REPO_DATA_FILE_EXISTS
-                and config.ARGS["available_remote_data"]
-            )
-            or config.ARGS["update_remote_data"]
-            or config.FILTER_PAIRS
+        return repository_queue_needed(
+            config.ARGS,
+            repo_file_exists=config.REPO_DATA_FILE_EXISTS,
+            filter_pairs=config.FILTER_PAIRS,
         )
 
     @staticmethod
@@ -92,18 +88,10 @@ class Repo:  # noqa: H601
             record (Record): a single downloadable record
                              of pair, year, and month
         """
-        datemonth: str = force_datemonth_if_only_year(  # noqa:BLK100
-            record.data_datemonth
+        config.REPO_DATA = repository_data_with_record(
+            config.REPO_DATA,
+            record,
         )
-        pair = record.data_fxpair.lower()
-
-        if pair not in config.REPO_DATA:
-            config.REPO_DATA[pair] = {"start": datemonth, "end": datemonth}
-        else:
-            if int(datemonth) < int(config.REPO_DATA[pair]["start"]):
-                config.REPO_DATA[pair]["start"] = datemonth
-            if int(datemonth) > int(config.REPO_DATA[pair]["end"]):
-                config.REPO_DATA[pair]["end"] = datemonth
 
     def test_for_repo_data_file(self) -> bool:
         """Test for repo data file and update global boolean.
@@ -119,12 +107,7 @@ class Repo:  # noqa: H601
 
     def read_repo_data_file(self) -> None:
         """Read local file repo data. Append/update global working repo data."""
-        with (
-            self.repo_local_path.open("r", encoding="UTF-8") as json_read,
-            contextlib.suppress(Exception),
-        ):
-            while True:
-                config.REPO_DATA.update(json.load(json_read))
+        config.REPO_DATA.update(read_repository_data_file(self.repo_local_path))
 
     def update_repo_from_github(self) -> None:
         """Fetch remote repo data.
@@ -133,34 +116,23 @@ class Repo:  # noqa: H601
         remote timestamp is more recent than local file timestamp, overwrite
         local data with remote data.
         """
-        try:
-            with urlopen(  # noqa: S310
-                self.repo_url,
-                context=ssl.create_default_context(cafile=certifi.where()),
-            ) as repo_data:
-                remote_repo = json.load(repo_data)
+        output = repository_refresh_stage(
+            repo_data=config.REPO_DATA,
+            repo_file_exists=config.REPO_DATA_FILE_EXISTS,
+            repo_local_path=self.repo_local_path,
+            repo_url=self.repo_url,
+            pairs=config.ARGS["pairs"],
+            by=config.ARGS.get("by"),
+            available_remote_data=config.ARGS["available_remote_data"],
+            update_remote_data=config.ARGS["update_remote_data"],
+            fetch_remote_repository=fetch_repository_data_from_url,
+        )
+        if output.result.failure is not None:
+            self._print_refresh_failure(output.result.failure.code)
+            return
 
-            if config.REPO_DATA_FILE_EXISTS:
-                old_hash = config.REPO_DATA["hash"]
-                old_time = config.REPO_DATA["hash_utc"]
-
-                remote_hash = remote_repo["hash"]
-                remote_time = remote_repo["hash_utc"]
-
-                if old_hash != remote_hash and old_time < remote_time:
-                    config.REPO_DATA = remote_repo
-            else:
-                config.REPO_DATA = remote_repo
-                config.REPO_DATA_FILE_EXISTS = True
-                self._write_repo_data_file()
-        except SSLCertVerificationError:
-            print("""[red]Unable to fetch repo list from github.
-                        - Please install certifi package with:
-                            pip install certifi`""")  # noqa: T201  # noqa: W605
-        except URLError:
-            # pylint: disable=anomalous-backslash-in-string
-            print(r"""[red]Unable to fetch repo list from github.
-                - You can manually update using `-U \[pair(s)]`""")  # noqa:T201
+        config.REPO_DATA = output.repo_data
+        config.REPO_DATA_FILE_EXISTS = output.repo_file_exists
 
     def get_available_repo_data(self) -> dict | None:
         """Fetch available data based on -p Pairs filter.
@@ -173,8 +145,13 @@ class Repo:  # noqa: H601
               {'pair': {'start': 'datemonth', 'end': 'datemonth'}
               ...}
         """
-        filter_pairs = config.ARGS["pairs"] - set(config.REPO_DATA)
-        config.FILTER_PAIRS = None if len(filter_pairs) == 0 else filter_pairs
+        filter_pairs = repository_missing_pairs(
+            config.REPO_DATA,
+            config.ARGS["pairs"],
+        )
+        config.FILTER_PAIRS = (
+            None if len(filter_pairs) == 0 else set(filter_pairs)
+        )
 
         if self.check_if_queue_is_needed():
             scraper = Scraper()
@@ -186,7 +163,8 @@ class Repo:  # noqa: H601
 
         if config.ARGS["from_api"]:
             return self._sort_repo_dict_by(
-                config.REPO_DATA.copy(), config.ARGS["pairs"]
+                config.REPO_DATA.copy(),
+                config.ARGS["pairs"],
             )
 
         self._print_repo_data_table()
@@ -198,29 +176,21 @@ class Repo:  # noqa: H601
         Returns:
             bool: conditonal filter
         """
-        return bool(
-            config.ARGS["update_remote_data"]
-            or not config.REPO_DATA_FILE_EXISTS
-            or config.FILTER_PAIRS
+        return repository_should_create_or_update(
+            config.ARGS,
+            repo_file_exists=config.REPO_DATA_FILE_EXISTS,
+            filter_pairs=config.FILTER_PAIRS,
         )
 
     def _write_repo_data_file(self) -> None:
         """Write repository data file with hash. Create directories if needed."""
-        self._hash_repo()
-
-        create_full_path(self.repo_local_path.parent)
-
-        with self.repo_local_path.open("w", encoding="UTF-8") as target:
-            json.dump(config.REPO_DATA, target)
+        write_repository_data_file(config.REPO_DATA, self.repo_local_path)
+        config.REPO_DATA = read_repository_data_file(self.repo_local_path)
+        config.REPO_DATA_FILE_EXISTS = True
 
     def _hash_repo(self) -> None:
         """Sanitize global data repo and update hash and timestamp."""
-        if "hash" in config.REPO_DATA:
-            config.REPO_DATA.pop("hash", None)
-        if "hash_utc" in config.REPO_DATA:
-            config.REPO_DATA.pop("hash_utc", None)
-        config.REPO_DATA["hash"] = hash_dict(config.REPO_DATA)
-        config.REPO_DATA["hash_utc"] = get_now_utc_timestamp()
+        config.REPO_DATA = hash_repository_data(config.REPO_DATA)
 
     def _sort_repo_dict_by(
         self, repo_dict_copy: dict, filter_pairs: set
@@ -243,32 +213,11 @@ class Repo:  # noqa: H601
               {'pair': {'start': 'datemonth', 'end': 'datemonth'}
               ...}
         """
-        filtered_pairs: dict = self._filter_repo_dict_by_pairs(
-            repo_dict_copy, filter_pairs
+        return sort_repository_data(
+            repo_dict_copy,
+            filter_pairs,
+            config.ARGS.get("by"),
         )
-
-        match config.ARGS["by"]:
-            case "pair_asc":
-                filtered_pairs = dict(sorted(filtered_pairs.items()))
-            case "pair_dsc":
-                filtered_pairs = dict(  # noqa:BLK100
-                    sorted(filtered_pairs.items(), reverse=True)
-                )
-            case "start_asc":
-                filtered_pairs = dict(
-                    sorted(
-                        filtered_pairs.items(), key=lambda pair: pair[1]["start"]  # type: ignore # noqa: E501,LN002
-                    )
-                )
-            case "start_dsc":
-                filtered_pairs = dict(
-                    sorted(
-                        filtered_pairs.items(),
-                        key=lambda pair: pair[1]["start"],  # type: ignore
-                        reverse=True,
-                    )
-                )
-        return filtered_pairs
 
     def _filter_repo_dict_by_pairs(
         self, repo_dict_copy: dict, filter_pairs: set
@@ -285,15 +234,7 @@ class Repo:  # noqa: H601
               {'pair': {'start': 'datemonth', 'end': 'datemonth'}
               ...}
         """
-        filtered: dict = {
-            pair: {
-                "start": repo_dict_copy[pair]["start"],
-                "end": repo_dict_copy[pair]["end"],
-            }
-            for pair in set(repo_dict_copy) & filter_pairs
-        }
-
-        return filtered if filter_pairs else repo_dict_copy
+        return filter_repository_data_by_pairs(repo_dict_copy, filter_pairs)
 
     def _print_repo_data_table(self) -> None:
         """Print filtered repo info to terminal."""
@@ -321,3 +262,12 @@ class Repo:  # noqa: H601
                 f"{end_year}-{end_month}",
             )
         print(table)  # noqa: T201
+
+    def _print_refresh_failure(self, code: str) -> None:
+        if code == "REPOSITORY_NETWORK_ERROR":
+            print(r"""[red]Unable to fetch repo list from github.
+                - You can manually update using `-U \[pair(s)]`""")  # noqa:T201
+            return
+        print("""[red]Unable to fetch repo list from github.
+                        - Please install certifi package with:
+                            pip install certifi`""")  # noqa:T201,W605
