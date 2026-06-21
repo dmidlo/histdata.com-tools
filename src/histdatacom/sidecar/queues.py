@@ -7,6 +7,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
 
+from histdatacom.sidecar.performance import (
+    DEFAULT_INFLUX_WORKERS,
+    DEFAULT_NETWORK_MULTIPLIER,
+    DEFAULT_ORCHESTRATION_WORKERS,
+    SidecarConcurrencyProfile,
+    build_sidecar_concurrency_profile,
+)
 from histdatacom.sidecar.runtime import (
     SidecarRuntimePolicy,
     build_sidecar_runtime_policy,
@@ -83,6 +90,7 @@ class SidecarWorkerConfig:
     namespace: str
     task_queues: SidecarTaskQueues
     lane: TaskQueueLane = TaskQueueLane.ORCHESTRATION
+    concurrency: SidecarConcurrencyProfile | None = None
 
     @property
     def target_host(self) -> str:
@@ -95,6 +103,20 @@ class SidecarWorkerConfig:
         """Return the active task queue for the configured worker lane."""
         return self.task_queues.for_lane(self.lane)
 
+    @property
+    def concurrency_profile(self) -> SidecarConcurrencyProfile:
+        """Return configured or default sidecar concurrency policy."""
+        return self.concurrency or build_sidecar_concurrency_profile()
+
+    @property
+    def worker_options(self) -> dict[str, int]:
+        """Return Temporal worker options for this lane."""
+        return {
+            "max_concurrent_activities": (
+                self.concurrency_profile.workers_for_lane(self.lane)
+            )
+        }
+
     def for_lane(self, lane: str | TaskQueueLane) -> "SidecarWorkerConfig":
         """Return this config pointed at a different worker lane."""
         return SidecarWorkerConfig(
@@ -102,6 +124,7 @@ class SidecarWorkerConfig:
             namespace=self.namespace,
             task_queues=self.task_queues,
             lane=TaskQueueLane.from_value(lane),
+            concurrency=self.concurrency_profile,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -112,6 +135,8 @@ class SidecarWorkerConfig:
             "lane": self.lane.value,
             "task_queue": self.task_queue,
             "task_queues": self.task_queues.to_dict(),
+            "concurrency": self.concurrency_profile.to_dict(),
+            "worker_options": dict(self.worker_options),
             "runtime_policy": self.runtime_policy.to_dict(),
         }
 
@@ -144,6 +169,11 @@ def build_sidecar_worker_config(
     namespace: str = DEFAULT_TEMPORAL_NAMESPACE,
     task_queue_prefix: str = DEFAULT_TASK_QUEUE_PREFIX,
     lane: str | TaskQueueLane = TaskQueueLane.ORCHESTRATION,
+    cpu_utilization: str | int | None = "medium",
+    network_multiplier: int = DEFAULT_NETWORK_MULTIPLIER,
+    orchestration_workers: int = DEFAULT_ORCHESTRATION_WORKERS,
+    influx_workers: int = DEFAULT_INFLUX_WORKERS,
+    concurrency_overrides: Mapping[str | TaskQueueLane, int] | None = None,
 ) -> SidecarWorkerConfig:
     """Build Temporal worker/client config from sidecar runtime policy."""
     policy = runtime_policy or build_sidecar_runtime_policy(
@@ -159,6 +189,13 @@ def build_sidecar_worker_config(
             prefix=task_queue_prefix,
         ),
         lane=TaskQueueLane.from_value(lane),
+        concurrency=build_sidecar_concurrency_profile(
+            cpu_utilization=cpu_utilization,
+            network_multiplier=network_multiplier,
+            orchestration_workers=orchestration_workers,
+            influx_workers=influx_workers,
+            lane_overrides=concurrency_overrides,
+        ),
     )
 
 

@@ -89,6 +89,32 @@ def test_build_temporal_worker_uses_central_worker_config(
     assert built.worker_options == {"max_concurrent_activities": 2}
 
 
+def test_build_temporal_worker_applies_configured_concurrency(
+    tmp_path: Path,
+) -> None:
+    """Worker construction should apply lane concurrency by default."""
+    _FakeWorker.instances.clear()
+    policy = build_sidecar_runtime_policy(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+    )
+    config = build_sidecar_worker_config(
+        runtime_policy=policy,
+        lane=TaskQueueLane.NETWORK,
+        concurrency_overrides={TaskQueueLane.NETWORK: 11},
+    )
+
+    built = worker.build_temporal_worker(
+        object(),
+        config=config,
+        worker_class=_FakeWorker,
+        workflows=("workflow",),
+        activities=("activity",),
+    )
+
+    assert built.worker_options == {"max_concurrent_activities": 11}
+
+
 def test_run_temporal_worker_accepts_fake_temporal_classes(
     tmp_path: Path,
 ) -> None:
@@ -175,6 +201,10 @@ def test_worker_config_cli_emits_queue_metadata(
             str(tmp_path / "runtime"),
             "--lane",
             "network",
+            "--cpu-utilization",
+            "medium",
+            "--max-concurrent-activities",
+            "12",
             "--json",
         ]
     )
@@ -184,6 +214,8 @@ def test_worker_config_cli_emits_queue_metadata(
     assert payload["lane"] == "network"
     assert payload["task_queue"] == payload["task_queues"]["network"]
     assert payload["task_queues"]["cpu_file"].endswith(".cpu-file")
+    assert payload["worker_options"] == {"max_concurrent_activities": 12}
+    assert payload["concurrency"]["network_workers"] == 12
 
 
 def test_worker_run_cli_reports_missing_temporal_extra(

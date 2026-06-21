@@ -49,12 +49,16 @@ def build_temporal_worker(
     activity_functions = (
         list(activities) if activities else list(default_activities())
     )
+    resolved_worker_options = {
+        **resolved_config.worker_options,
+        **worker_options,
+    }
     return temporal_worker_class(
         client,
         task_queue=resolved_config.task_queue,
         workflows=workflow_classes,
         activities=activity_functions,
-        **worker_options,
+        **resolved_worker_options,
     )
 
 
@@ -207,6 +211,38 @@ def _add_worker_args(parser: argparse.ArgumentParser) -> None:
         default=TaskQueueLane.ORCHESTRATION.value,
         help="worker task queue lane to run",
     )
+    parser.add_argument(
+        "--cpu-utilization",
+        default="medium",
+        help=(
+            "legacy CPU policy used to derive sidecar worker concurrency "
+            "(low, medium, high, or percent 1-200)"
+        ),
+    )
+    parser.add_argument(
+        "--network-multiplier",
+        type=int,
+        default=3,
+        help="network lane multiplier applied to the legacy CPU worker count",
+    )
+    parser.add_argument(
+        "--orchestration-workers",
+        type=int,
+        default=1,
+        help="max concurrent orchestration lane activities",
+    )
+    parser.add_argument(
+        "--influx-workers",
+        type=int,
+        default=1,
+        help="max concurrent Influx lane activities",
+    )
+    parser.add_argument(
+        "--max-concurrent-activities",
+        type=int,
+        default=None,
+        help="explicit max concurrent activities override for this lane",
+    )
 
 
 def _config_from_args(args: argparse.Namespace) -> SidecarWorkerConfig:
@@ -223,6 +259,15 @@ def _config_from_args(args: argparse.Namespace) -> SidecarWorkerConfig:
         namespace=args.namespace,
         task_queue_prefix=args.task_queue_prefix,
         lane=args.lane,
+        cpu_utilization=args.cpu_utilization,
+        network_multiplier=args.network_multiplier,
+        orchestration_workers=args.orchestration_workers,
+        influx_workers=args.influx_workers,
+        concurrency_overrides=(
+            {args.lane: args.max_concurrent_activities}
+            if args.max_concurrent_activities is not None
+            else None
+        ),
     )
 
 
@@ -239,6 +284,7 @@ def _write_config(
     print(f"target_host: {payload['target_host']}")  # noqa:T201
     print(f"lane: {payload['lane']}")  # noqa:T201
     print(f"task_queue: {payload['task_queue']}")  # noqa:T201
+    print(f"worker_options: {payload['worker_options']}")  # noqa:T201
 
 
 def _load_temporal_worker_class() -> Any:

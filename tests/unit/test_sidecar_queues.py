@@ -48,6 +48,35 @@ def test_task_queue_lanes_round_trip_from_cli_values(tmp_path: Path) -> None:
     assert config.lane == TaskQueueLane.CPU_FILE
     assert config.task_queue == config.task_queues.cpu_file
     assert config.for_lane("network").task_queue == config.task_queues.network
+    assert config.worker_options["max_concurrent_activities"] >= 1
+    assert (
+        config.for_lane("network").worker_options["max_concurrent_activities"]
+        >= config.worker_options["max_concurrent_activities"]
+    )
+
+
+def test_worker_config_accepts_concurrency_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Sidecar workers should expose lane-level concurrency tuning."""
+    import histdatacom.concurrency as concurrency
+
+    monkeypatch.setattr(concurrency, "cpu_count", lambda: 8)
+    policy = build_sidecar_runtime_policy(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+    )
+    config = build_sidecar_worker_config(
+        runtime_policy=policy,
+        lane="network",
+        cpu_utilization="medium",
+        concurrency_overrides={"network": 12},
+    )
+
+    assert config.concurrency_profile.base_workers == 5
+    assert config.worker_options == {"max_concurrent_activities": 12}
+    assert config.to_dict()["concurrency"]["network_workers"] == 12
 
 
 def test_empty_task_queue_prefix_fails_clearly(tmp_path: Path) -> None:
