@@ -5,7 +5,7 @@ dev()
 {
     echo "${bold}pypi.sh: Setting Up Dev${normal}"
     pip uninstall -y histdatacom
-    pip install twine wheel
+    pip install build "setuptools>=77" twine wheel
     pip install -e .[dev]
     pre-commit install
     pre-commit autoupdate
@@ -15,10 +15,10 @@ dev()
 build()
 {
     rm -rf ./dist
-    pip install twine wheel
+    pip install build "setuptools>=77" twine wheel
     python setup.py check
-    python setup.py sdist
-    python setup.py bdist_wheel --universal
+    python -m build
+    python -m twine check dist/*
 }
 
 buildenv()
@@ -65,13 +65,13 @@ elif [[ $1 == "pypi" ]]
 then
     build
     gpg --detach-sign -a dist/*.tar.gz
-    twine upload -r pypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
+    python -m twine upload -r pypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
     exit 0
 elif [[ $1 == "testpypi" ]]
 then
     build
     gpg --detach-sign -a dist/*.tar.gz
-    twine upload -r testpypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
+    python -m twine upload -r testpypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
 elif [[ $1 == "testpypi_install" ]]
 then
     buildenv
