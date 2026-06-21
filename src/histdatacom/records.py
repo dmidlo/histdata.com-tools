@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 from queue import Queue
-from typing import Any, Optional
+from typing import Any
 
 from rich import print  # pylint: disable=redefined-builtin
 
@@ -110,6 +110,7 @@ class Record:  # noqa:H601
             while True:
                 record_dict |= json.load(json_read)
 
+        record_dict.pop("data_dir", None)
         self(**record_dict)
         return True
 
@@ -131,7 +132,6 @@ class Record:  # noqa:H601
             "data_format": self.data_format,
             "data_timeframe": self.data_timeframe,
             "data_fxpair": self.data_fxpair,
-            "data_dir": self.data_dir,
             "data_tk": self.data_tk,
             "zip_filename": self.zip_filename,
             "csv_filename": self.csv_filename,
@@ -142,13 +142,11 @@ class Record:  # noqa:H601
             "zip_persist": self.zip_persist,
         }
 
-    def _set_record_data_dir(  # noqa:CFQ004,BLK100
-        self, base_dir: Optional[str]
-    ) -> str:
+    def _set_record_data_dir(self, base_dir: str) -> str:  # noqa:CFQ004
         """Set Record's data directory.
 
         Args:
-            base_dir (Optional[str]): base data directory.
+            base_dir (str): base data directory.
 
         Returns:
             str: self.data_dir  # record's data.
@@ -159,28 +157,32 @@ class Record:  # noqa:H601
         csv_format = Format(query_string_args[1]).name
         timeframe = Timeframe(query_string_args[2]).name
 
-        record_data_dir = f"{base_dir}{csv_format}{os.sep}{timeframe}{os.sep}"
+        record_data_path = Path(base_dir) / csv_format / timeframe
+        record_data_dir = f"{record_data_path}{os.sep}"
 
         if length == 3:
             self.data_dir = record_data_dir
             return self.data_dir
 
         pair = query_string_args[3]
-        record_data_dir = record_data_dir + pair.lower() + os.sep
+        record_data_path = record_data_path / pair.lower()
+        record_data_dir = f"{record_data_path}{os.sep}"
 
         if length == 4:
             self.data_dir = record_data_dir
             return self.data_dir
 
         year = query_string_args[4]
-        record_data_dir = record_data_dir + year + os.sep
+        record_data_path = record_data_path / year
+        record_data_dir = f"{record_data_path}{os.sep}"
 
         if length == 5:
             self.data_dir = record_data_dir
             return self.data_dir
 
         month = query_string_args[5]
-        record_data_dir = record_data_dir + month + os.sep
+        record_data_path = record_data_path / month
+        record_data_dir = f"{record_data_path}{os.sep}"
 
         if length == 6:
             self.data_dir = record_data_dir
@@ -248,10 +250,9 @@ class Records(Queue):  # noqa:H601
             dst_queue (Queue): destination queue
             count (int): Dump N number of records. Defaults to 0.
         """
+        counter = 0
         if count == 0:
             count = None
-        else:
-            counter = 0
 
         while not self.empty():
             record = self.get()
