@@ -779,6 +779,29 @@ Pyroma, ShellCheck, Commitizen, and the local CLI/coverage smoke hooks. The
 previous flake8 plugin stack was intentionally replaced with Ruff so local
 installs and hook behavior do not drift independently.
 
+### Release Operator Path
+
+Tagged releases and manual release runs build a metadata-only sdist/fallback
+wheel plus bundled Temporal sidecar wheels for Linux x86_64, Linux arm64, macOS
+Intel, macOS arm64, and Windows x86_64. The release workflow downloads Temporal
+CLI `1.7.2` from the pinned upstream release, verifies SHA-256 checksums before
+bundling, inspects every wheel with the sidecar manifest checker, smoke-installs
+each platform wheel on a matching GitHub-hosted runner, and attaches artifact
+provenance before upload or publish.
+
+Use `release_target=build-only` for dry runs, `release_target=testpypi` for the
+first publish rehearsal, and `release_target=pypi` only after setting
+`testpypi_dry_run_confirmed=true`. The final `histdatacom-dist` artifact
+contains only publishable sdists and wheels; JSON build and checksum reports are
+uploaded separately as release reports.
+
+If a bundled platform wheel fails after release, prefer yanking the affected
+file on PyPI and cutting a replacement release. The sdist and universal fallback
+wheel intentionally remain metadata-only rollback artifacts: users can still
+install `histdatacom[temporal]` and start the sidecar with
+`histdatacom-sidecar start --executable /path/to/temporal` until a corrected
+platform wheel is available.
+
 ### Coverage Policy
 
 Coverage is enforced as a conservative total-project ratchet. The initial

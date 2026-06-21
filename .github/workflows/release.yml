@@ -24,18 +24,17 @@ on:
 permissions:
   contents: read
 
+env:
+  TEMPORAL_CLI_VERSION: "1.7.2"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build release artifacts
+  build-metadata:
+    name: Build metadata release artifacts
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
 
     steps:
       - name: Check out source
@@ -52,38 +51,260 @@ jobs:
           python -m pip install --upgrade pip "setuptools>=77" wheel
           python -m pip install -e ".[release]"
 
-      - name: Build sdist and wheel
+      - name: Build sdist and fallback wheel
         run: python -m build
 
       - name: Check package artifacts
-        run: python -m twine check dist/*
+        run: python -m twine check dist/*.whl dist/*.tar.gz
 
-      - name: Inspect wheel sidecar resources
-        run: python scripts/inspect_wheel.py --report dist/sidecar-wheel-report.json
+      - name: Inspect fallback wheel sidecar resources
+        run: |
+          mkdir -p release-reports
+          python scripts/inspect_wheel.py \
+            --report release-reports/sidecar-wheel-report.json
+        shell: bash
 
-      - name: Smoke release wheel sidecar install
+      - name: Smoke fallback wheel sidecar install
         run: |
           python -m venv .wheel-smoke
           . .wheel-smoke/bin/activate
           python -m pip install --upgrade pip
-          python scripts/smoke_sidecar_install.py --wheel-dir dist --state-dir .sidecar-smoke
+          python scripts/smoke_sidecar_install.py \
+            --wheel-dir dist \
+            --state-dir .sidecar-smoke
         shell: bash
 
-      - name: Generate artifact provenance attestation
+      - name: Upload metadata distributions
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: histdatacom-metadata-dist
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload metadata release reports
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: histdatacom-metadata-reports
+          path: release-reports/*.json
+          if-no-files-found: error
+
+  build-platform-wheels:
+    name: Build bundled wheel for ${{ matrix.platform_key }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform_key: linux-x86_64
+          - platform_key: linux-arm64
+          - platform_key: macos-x86_64
+          - platform_key: macos-arm64
+          - platform_key: windows-x86_64
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip "setuptools>=77" wheel
+          python -m pip install -e ".[release]"
+
+      - name: Fetch pinned Temporal CLI artifact
+        id: temporal
+        run: |
+          mkdir -p release-reports
+          python scripts/fetch_temporal_cli.py \
+            --platform-key "${{ matrix.platform_key }}" \
+            --version "${TEMPORAL_CLI_VERSION}" \
+            --download-dir ".temporal-cli/${{ matrix.platform_key }}/downloads" \
+            --output-dir ".temporal-cli/${{ matrix.platform_key }}/bin" \
+            --report "release-reports/temporal-cli-${{ matrix.platform_key }}.json" \
+            --github-output
+        shell: bash
+
+      - name: Build bundled platform wheel
+        run: |
+          python scripts/sidecar_platform_wheel.py \
+            --dist-dir dist-platform \
+            --platform-key "${{ matrix.platform_key }}" \
+            --executable "${{ steps.temporal.outputs.executable }}" \
+            --report "release-reports/platform-wheel-${{ matrix.platform_key }}.json"
+        shell: bash
+
+      - name: Check bundled platform wheel
+        run: |
+          wheel="$(ls dist-platform/histdatacom-*.whl)"
+          python -m twine check "${wheel}"
+          python scripts/inspect_wheel.py \
+            --wheel "${wheel}" \
+            --require-bundled-platform "${{ matrix.platform_key }}" \
+            --report "release-reports/sidecar-wheel-${{ matrix.platform_key }}.json"
+        shell: bash
+
+      - name: Generate bundled wheel provenance attestation
+        uses: actions/attest@v4.1.0
+        with:
+          subject-path: dist-platform/*.whl
+
+      - name: Upload bundled platform wheel
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: histdatacom-platform-wheel-${{ matrix.platform_key }}
+          path: dist-platform/*.whl
+          if-no-files-found: error
+
+      - name: Upload bundled platform reports
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: histdatacom-platform-reports-${{ matrix.platform_key }}
+          path: release-reports/*.json
+          if-no-files-found: error
+
+  smoke-platform-wheels:
+    name: Smoke bundled wheel for ${{ matrix.platform_key }}
+    needs: build-platform-wheels
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform_key: linux-x86_64
+            runner: ubuntu-latest
+          - platform_key: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform_key: macos-x86_64
+            runner: macos-15-intel
+          - platform_key: macos-arm64
+            runner: macos-15
+          - platform_key: windows-x86_64
+            runner: windows-2025
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Download bundled platform wheel
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: histdatacom-platform-wheel-${{ matrix.platform_key }}
+          path: dist-platform
+
+      - name: Upgrade installer
+        run: python -m pip install --upgrade pip
+
+      - name: Smoke bundled sidecar install
+        run: >
+          python scripts/smoke_sidecar_install.py
+          --wheel-dir dist-platform
+          --state-dir .sidecar-smoke
+          --expect-temporal-extra
+          --require-bundled-current-platform
+          --check-executable-version
+          --start-sidecar
+
+  assemble-release-artifacts:
+    name: Assemble release artifacts
+    needs:
+      - build-metadata
+      - build-platform-wheels
+      - smoke-platform-wheels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install release tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[release]"
+
+      - name: Download metadata distributions
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: histdatacom-metadata-dist
+          path: dist
+
+      - name: Download bundled platform wheels
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: histdatacom-platform-wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download release reports
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: histdatacom-*-reports*
+          path: release-reports
+          merge-multiple: true
+
+      - name: Verify assembled release distributions
+        run: |
+          python -m twine check dist/*.whl dist/*.tar.gz
+          python - <<'PY'
+          from pathlib import Path
+
+          wheels = sorted(Path("dist").glob("histdatacom-*.whl"))
+          sdists = sorted(Path("dist").glob("histdatacom-*.tar.gz"))
+          if len(wheels) != 6:
+              raise SystemExit(f"expected 6 wheels, found {wheels}")
+          if len(sdists) != 1:
+              raise SystemExit(f"expected 1 sdist, found {sdists}")
+          PY
+        shell: bash
+
+      - name: Generate release provenance attestation
         uses: actions/attest@v4.1.0
         with:
           subject-path: dist/*
 
-      - name: Upload release artifacts
+      - name: Upload release distributions
         uses: actions/upload-artifact@v7.0.1
         with:
           name: histdatacom-dist
           path: dist/*
           if-no-files-found: error
 
+      - name: Upload release reports
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: histdatacom-release-reports
+          path: release-reports/*.json
+          if-no-files-found: error
+
   publish-testpypi:
     name: Publish to TestPyPI
-    needs: build
+    needs: assemble-release-artifacts
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && inputs.release_target == 'testpypi'
     environment:
@@ -108,7 +329,7 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    needs: build
+    needs: assemble-release-artifacts
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && inputs.release_target == 'pypi'
     environment:

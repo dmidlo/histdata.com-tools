@@ -36,6 +36,22 @@ executable path to `histdatacom-sidecar start --executable`. The Temporal
 dependency extra is required for lifecycle start because the supervisor also
 launches the worker lane fleet.
 
+Release automation builds the metadata-only sdist/fallback wheel first, then
+builds bundled Temporal platform wheels for Linux x86_64, Linux arm64, macOS
+Intel, macOS arm64, and Windows x86_64. The bundled wheels use pinned Temporal
+CLI `1.7.2` release artifacts and verify SHA-256 checksums before bundling.
+Every bundled wheel must pass `scripts/inspect_wheel.py --require-bundled-platform`,
+install on its matching GitHub-hosted runner, run
+`histdatacom-sidecar doctor --json` with
+`platform.executable_bundled == true`, probe the executable version, and start
+the sidecar without `--executable`.
+
+Rollback behavior is intentionally conservative. If a platform executable or
+wheel is bad after publish, yank the affected platform wheel and cut a
+replacement release. The sdist and universal fallback wheel are metadata-only
+recovery artifacts; they keep the package installable while operators provide
+an explicit Temporal executable path.
+
 ## Runtime Model
 
 The sidecar runs a local Temporal developer server with SQLite persistence plus
