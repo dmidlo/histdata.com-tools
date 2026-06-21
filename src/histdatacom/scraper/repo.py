@@ -119,9 +119,10 @@ class Repo:  # noqa: H601
 
     def read_repo_data_file(self) -> None:
         """Read local file repo data. Append/update global working repo data."""
-        with self.repo_local_path.open(
-            "r", encoding="UTF-8"
-        ) as json_read, contextlib.suppress(Exception):
+        with (
+            self.repo_local_path.open("r", encoding="UTF-8") as json_read,
+            contextlib.suppress(Exception),
+        ):
             while True:
                 config.REPO_DATA.update(json.load(json_read))
 
@@ -153,17 +154,13 @@ class Repo:  # noqa: H601
                 config.REPO_DATA_FILE_EXISTS = True
                 self._write_repo_data_file()
         except SSLCertVerificationError:
-            print(  # noqa: T201
-                """[red]Unable to fetch repo list from github.
+            print("""[red]Unable to fetch repo list from github.
                         - Please install certifi package with:
-                            pip install certifi`"""  # noqa: W605
-            )
+                            pip install certifi`""")  # noqa: T201  # noqa: W605
         except URLError:
             # pylint: disable=anomalous-backslash-in-string
-            print(  # noqa:T201
-                """[red]Unable to fetch repo list from github.
-                - You can manually update using `-U \[pair(s)]`"""  # noqa:W605
-            )
+            print(r"""[red]Unable to fetch repo list from github.
+                - You can manually update using `-U \[pair(s)]`""")  # noqa:T201
 
     def get_available_repo_data(self) -> dict | None:
         """Fetch available data based on -p Pairs filter.

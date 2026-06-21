@@ -3,6 +3,7 @@
 Yields:
     url (str): histdata.com archive url
 """
+
 from typing import Any, Generator, Optional, Set
 
 from histdatacom.fx_enums import Timeframe, get_valid_format_timeframes

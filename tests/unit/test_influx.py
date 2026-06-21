@@ -1,4 +1,5 @@
 """Pytest unit tests for histdatacom.influx.py."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +8,6 @@ from types import SimpleNamespace
 import pytest
 
 from histdatacom.histdata_ascii import CACHE_FILENAME
-
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
 

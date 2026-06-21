@@ -3,6 +3,7 @@
 This module is intentionally dataframe-independent. It captures the data
 semantics that must survive the backend migration to Polars.
 """
+
 from __future__ import annotations
 
 import csv
@@ -12,7 +13,6 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterable, Sequence
-
 
 EST_NO_DST_OFFSET_MS = 18_000_000
 UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -101,9 +101,9 @@ def parse_histdata_datetime_to_utc_ms(value: str, timeframe: str) -> int:
 
 def normalize_ascii_row(
     timeframe: str, row: Sequence[str]
-) -> tuple[int, float, float, float, float, int] | tuple[
-    int, float, float, int
-]:
+) -> (
+    tuple[int, float, float, float, float, int] | tuple[int, float, float, int]
+):
     """Normalize a raw HistData ASCII row into typed values."""
     values = tuple(cell.strip() for cell in row)
     match timeframe:
@@ -217,9 +217,9 @@ def raw_polars_schema_for_timeframe(timeframe: str) -> dict[str, Any]:
     import polars as pl
 
     return {
-        column: pl.Utf8
-        if column == "datetime"
-        else _polars_type_for_column(column)
+        column: (
+            pl.Utf8 if column == "datetime" else _polars_type_for_column(column)
+        )
         for column in columns_for_timeframe(timeframe)
     }
 

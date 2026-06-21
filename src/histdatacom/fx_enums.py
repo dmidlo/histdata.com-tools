@@ -1,4 +1,5 @@
 """Configure Enums used by histdatacom."""
+
 # pylint: disable=invalid-name
 from enum import Enum
 

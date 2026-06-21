@@ -131,12 +131,10 @@ def load_influx_yaml() -> dict | Any:
 
         return yaml_file
 
-    print(
-        """ ERROR: -I flag is used to import data to a influxdb instance...
+    print(""" ERROR: -I flag is used to import data to a influxdb instance...
                         there is no influxdb.yaml file in working directory.
                         did you forget to set it up?
-            """
-    )  # noqa:T201
+            """)  # noqa:T201
     raise SystemExit(1)
 
 

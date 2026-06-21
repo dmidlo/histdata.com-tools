@@ -15,6 +15,7 @@ from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
 )
+from functools import partial
 from math import ceil
 from multiprocessing import Queue, cpu_count, managers
 from typing import TYPE_CHECKING, Callable, Optional, Type
@@ -77,6 +78,9 @@ class ThreadPool:
             records_current (Optional[Records]): from config.CURRENT_QUEUE
             records_next (Optional[Records]): from config.NEXT_QUEUE
         """
+        if records_current is None or records_next is None:
+            raise ValueError("records_current and records_next are required")
+
         records_count = records_current.qsize()  # type: ignore
         with Progress(
             TextColumn(
@@ -95,8 +99,12 @@ class ThreadPool:
             try:
                 with ThreadPoolExecutor(
                     max_workers=self.cpu_count,
-                    initializer=_init_counters,
-                    initargs=(records_current, records_next, self.args.copy()),
+                    initializer=partial(
+                        _init_counters,
+                        records_current,
+                        records_next,
+                        self.args.copy(),
+                    ),
                 ) as executor:
                     futures = []
 
@@ -169,6 +177,9 @@ class ProcessPool:
                                     used for RxPY queue. Defaults to None.
             writer (InfluxDBWriter | None): influxdb writer process.
         """
+        if records_current is None or records_next is None:
+            raise ValueError("records_current and records_next are required")
+
         records_count = records_current.qsize()  # type: ignore
         with Progress(
             TextColumn(
@@ -189,8 +200,8 @@ class ProcessPool:
             try:
                 with ProcessPoolExecutor(
                     max_workers=self.cpu_count,
-                    initializer=_init_counters,
-                    initargs=(
+                    initializer=partial(
+                        _init_counters,
                         records_current,
                         records_next,
                         self.args.copy(),

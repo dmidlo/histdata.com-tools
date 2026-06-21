@@ -1,4 +1,5 @@
 """Test --version argument from API and CLI."""
+
 import subprocess
 import sys
 

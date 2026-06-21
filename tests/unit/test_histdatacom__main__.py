@@ -1,4 +1,5 @@
 """Pytest unit tests for histdatacom.histdatacom__main__.py."""
+
 import pytest
 
 import histdatacom.__main__ as histdatacom_main

@@ -1,9 +1,9 @@
 """Download (if needed), format, and import data to influxdb."""
+
 # pylint: disable=redefined-outer-name
 from __future__ import annotations
 
 import sys
-from collections import namedtuple
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from multiprocessing import Process, Queue
@@ -210,7 +210,7 @@ class Influx:  # noqa:H601
 
         INFLUX_CHUNKS_QUEUE.put(parsed_rows)  # type: ignore
 
-    def _parse_cache_row(self, row: Tuple[Any], record: Record) -> str:
+    def _parse_cache_row(self, row: Tuple[Any, ...], record: Record) -> str:
         """Return influxdb line-protocol line (str) for each from a map function.
 
             Applies different fields for line in line-protocol on Timeframe
@@ -232,37 +232,22 @@ class Influx:  # noqa:H601
 
         match record.data_timeframe:
             case "M1":
-                _row = namedtuple(
-                    "_row",
-                    ["datetime", "open", "high", "low", "close", "vol"],
-                )
-                named_row = _row(
-                    row[0],
-                    row[1],  # type: ignore
-                    row[2],  # type: ignore
-                    row[3],  # type: ignore
-                    row[4],  # type: ignore
-                    row[5],  # type: ignore
-                )
-
                 fields = (
-                    f"openbid={named_row.open},"
-                    f"highbid={named_row.high},"
-                    f"lowbid={named_row.low},"
-                    f"closebid={named_row.close}"
+                    f"openbid={row[1]},"
+                    f"highbid={row[2]},"
+                    f"lowbid={row[3]},"
+                    f"closebid={row[4]}"
                 ).replace(" ", "")
-                time = str(named_row.datetime)
+                time = str(row[0])
             case "T":
-                _row = namedtuple(  # type: ignore
-                    "_row", ["datetime", "bid", "ask", "vol"]
+                fields = (f"bidquote={row[1]}," f"askquote={row[2]}").replace(
+                    " ", ""
                 )
-                named_row = _row(row[0], row[1], row[2], row[3])  # type: ignore
-
-                fields = (
-                    f"bidquote={named_row.bid},"  # type: ignore
-                    f"askquote={named_row.ask}"
-                ).replace(" ", "")
-                time = str(named_row.datetime)
+                time = str(row[0])
+            case _:
+                raise ValueError(
+                    f"unsupported timeframe: {record.data_timeframe}"
+                )
 
         # return in line-protocol format.
         return f"{measurement},{tags} {fields} {time}"
