@@ -67,8 +67,21 @@ jobs:
           python -m pip install --upgrade pip "setuptools>=77" wheel
           python -m pip install -e ".[pandas,arrow]" pytest pytest-cov
 
-      - name: Run tests
-        run: python -m pytest
+      - name: Run tests with coverage
+        run: python -m pytest --cov=histdatacom --cov-report=term-missing:skip-covered --cov-report=xml --cov-report=html
+
+      - name: Enforce coverage threshold
+        run: python -m coverage report
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: coverage-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            coverage.xml
+            htmlcov/
+          if-no-files-found: warn
 
       - name: Compile source and tests
         run: python -m compileall -q src tests test.py snippets.py
