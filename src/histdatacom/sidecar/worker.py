@@ -6,9 +6,10 @@ import argparse
 import asyncio
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 from inspect import isawaitable
-from typing import Any, Sequence, cast
+from typing import Any, Mapping, Sequence, cast
 
 from histdatacom.sidecar.client import (
     TEMPORAL_EXTRA_HINT,
@@ -53,6 +54,13 @@ def build_temporal_worker(
         **resolved_config.worker_options,
         **worker_options,
     }
+    if (
+        activity_functions
+        and "activity_executor" not in resolved_worker_options
+    ):
+        resolved_worker_options["activity_executor"] = _activity_executor(
+            resolved_worker_options
+        )
     return temporal_worker_class(
         client,
         task_queue=resolved_config.task_queue,
@@ -294,6 +302,12 @@ def _load_temporal_worker_class() -> Any:
         if (err.name or "").split(".")[0] == "temporalio":
             raise TemporalDependencyError(TEMPORAL_EXTRA_HINT) from err
         raise
+
+
+def _activity_executor(worker_options: Mapping[str, Any]) -> ThreadPoolExecutor:
+    """Build the default executor required for synchronous activities."""
+    max_workers = int(worker_options.get("max_concurrent_activities", 1) or 1)
+    return ThreadPoolExecutor(max_workers=max(1, max_workers))
 
 
 def default_workflows() -> tuple[Any, ...]:

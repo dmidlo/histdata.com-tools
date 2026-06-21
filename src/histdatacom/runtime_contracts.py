@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import uuid
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Mapping
@@ -208,6 +207,8 @@ class StatusEvent:
 
 def new_request_id() -> str:
     """Return a new public request identifier."""
+    import uuid
+
     return f"run-{uuid.uuid4().hex}"
 
 

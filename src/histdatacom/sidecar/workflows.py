@@ -704,7 +704,7 @@ class HistDataRunWorkflow:
         self._progress = WorkflowProgress("HistDataRunWorkflow")
 
     @workflow_run
-    async def run(self, request_payload: Mapping[str, JSONValue]) -> dict:
+    async def run(self, request_payload: dict[str, Any]) -> dict:
         """Run repository, planning, and partition child workflows."""
         request = RunRequest.from_dict(request_payload)
         return await execute_histdata_run_workflow(
@@ -731,7 +731,7 @@ class SymbolTimeframeWorkflow:
         self._progress = WorkflowProgress("SymbolTimeframeWorkflow")
 
     @workflow_run
-    async def run(self, payload: Mapping[str, JSONValue]) -> dict:
+    async def run(self, payload: dict[str, Any]) -> dict:
         """Run operation-family children for one partition."""
         request = RunRequest.from_dict(
             _coerce_mapping(payload.get("request", {}))
@@ -767,7 +767,7 @@ class _ActivityWorkflowBase:
         self._activity_executor = activity_executor
         self._progress = WorkflowProgress(self.workflow_name)
 
-    async def _run_activity(self, payload: Mapping[str, JSONValue]) -> dict:
+    async def _run_activity(self, payload: dict[str, Any]) -> dict:
         return await execute_activity_workflow(
             self.workflow_name,
             payload,
@@ -789,7 +789,7 @@ class RepositoryRefreshWorkflow(_ActivityWorkflowBase):
     workflow_name = "RepositoryRefreshWorkflow"
 
     @workflow_run
-    async def run(self, payload: Mapping[str, JSONValue]) -> dict:
+    async def run(self, payload: dict[str, Any]) -> dict:
         """Run repository refresh as a real activity."""
         return await execute_activity_workflow(
             self.workflow_name,
@@ -810,7 +810,7 @@ class DatasetPlanWorkflow(_ActivityWorkflowBase):
     workflow_name = "DatasetPlanWorkflow"
 
     @workflow_run
-    async def run(self, payload: Mapping[str, JSONValue]) -> dict:
+    async def run(self, payload: dict[str, Any]) -> dict:
         """Run dataset planning as a real activity."""
         return await execute_activity_workflow(
             self.workflow_name,
@@ -831,7 +831,7 @@ class ValidateUrlsWorkflow(_ActivityWorkflowBase):
     workflow_name = "ValidateUrlsWorkflow"
 
     @workflow_run
-    async def run(self, payload: Mapping[str, JSONValue]) -> dict:
+    async def run(self, payload: dict[str, Any]) -> dict:
         """Run URL validation as a real activity."""
         return await execute_activity_workflow(
             self.workflow_name,
@@ -852,7 +852,7 @@ class DownloadArchivesWorkflow(_ActivityWorkflowBase):
     workflow_name = "DownloadArchivesWorkflow"
 
     @workflow_run
-    async def run(self, payload: Mapping[str, JSONValue]) -> dict:
+    async def run(self, payload: dict[str, Any]) -> dict:
         """Run archive download as a real activity."""
         return await execute_activity_workflow(
             self.workflow_name,
@@ -873,7 +873,7 @@ class ExtractCsvWorkflow(_ActivityWorkflowBase):
     workflow_name = "ExtractCsvWorkflow"
 
     @workflow_run
-    async def run(self, payload: Mapping[str, JSONValue]) -> dict:
+    async def run(self, payload: dict[str, Any]) -> dict:
         """Run CSV extraction as a real activity."""
         return await execute_activity_workflow(
             self.workflow_name,
@@ -894,7 +894,7 @@ class BuildCacheWorkflow(_ActivityWorkflowBase):
     workflow_name = "BuildCacheWorkflow"
 
     @workflow_run
-    async def run(self, payload: Mapping[str, JSONValue]) -> dict:
+    async def run(self, payload: dict[str, Any]) -> dict:
         """Run cache build as a real activity."""
         return await execute_activity_workflow(
             self.workflow_name,
@@ -915,7 +915,7 @@ class MergeCacheWorkflow(_ActivityWorkflowBase):
     workflow_name = "MergeCacheWorkflow"
 
     @workflow_run
-    async def run(self, payload: Mapping[str, JSONValue]) -> dict:
+    async def run(self, payload: dict[str, Any]) -> dict:
         """Run cache merge as a real activity."""
         return await execute_activity_workflow(
             self.workflow_name,
@@ -936,7 +936,7 @@ class ImportWorkflow(_ActivityWorkflowBase):
     workflow_name = "ImportWorkflow"
 
     @workflow_run
-    async def run(self, payload: Mapping[str, JSONValue]) -> dict:
+    async def run(self, payload: dict[str, Any]) -> dict:
         """Run Influx import as a real activity."""
         return await execute_activity_workflow(
             self.workflow_name,

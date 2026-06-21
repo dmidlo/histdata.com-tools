@@ -14,8 +14,6 @@ from typing import TYPE_CHECKING
 from histdatacom.fx_enums import Format, Pairs, Timeframe
 from histdatacom.options import Options
 
-from . import histdata_com  # noqa:WPS130
-
 if TYPE_CHECKING:
     from pandas import DataFrame  # type: ignore
     from polars import DataFrame as PolarsDataFrame
@@ -58,6 +56,8 @@ class APICaller(sys.modules[__name__].__class__):  # type: ignore # noqa:H601
                 - (DataFrame) if options.api_return_type = "pandas"
                 - (Table) if options.api_return_type = "arrow"
         """
+        from . import histdata_com
+
         return histdata_com.main(options)
 
 

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import pytest
 
 from histdatacom.sidecar import worker
 from histdatacom.sidecar.queues import (
@@ -86,7 +89,11 @@ def test_build_temporal_worker_uses_central_worker_config(
     assert built.task_queue == config.task_queue
     assert built.workflows == ["workflow"]
     assert built.activities == ["activity"]
-    assert built.worker_options == {"max_concurrent_activities": 2}
+    assert built.worker_options["max_concurrent_activities"] == 2
+    assert isinstance(
+        built.worker_options["activity_executor"],
+        ThreadPoolExecutor,
+    )
 
 
 def test_build_temporal_worker_applies_configured_concurrency(
@@ -112,7 +119,31 @@ def test_build_temporal_worker_applies_configured_concurrency(
         activities=("activity",),
     )
 
-    assert built.worker_options == {"max_concurrent_activities": 11}
+    assert built.worker_options["max_concurrent_activities"] == 11
+    assert isinstance(
+        built.worker_options["activity_executor"],
+        ThreadPoolExecutor,
+    )
+
+
+def test_build_temporal_worker_preserves_explicit_activity_executor(
+    tmp_path: Path,
+) -> None:
+    """Worker construction should not replace a caller-provided executor."""
+    _FakeWorker.instances.clear()
+    config = _config(tmp_path)
+    activity_executor = object()
+
+    built = worker.build_temporal_worker(
+        object(),
+        config=config,
+        worker_class=_FakeWorker,
+        workflows=("workflow",),
+        activities=("activity",),
+        activity_executor=activity_executor,
+    )
+
+    assert built.worker_options["activity_executor"] is activity_executor
 
 
 def test_run_temporal_worker_accepts_fake_temporal_classes(
@@ -171,6 +202,21 @@ def test_default_workflows_include_topology_classes() -> None:
         "MergeCacheWorkflow",
         "ImportWorkflow",
     ]
+
+
+def test_default_workflows_validate_in_temporal_sandbox() -> None:
+    """Workflow imports should not drag activity-only dependencies into sandbox."""
+    temporal_workflow = pytest.importorskip("temporalio.workflow")
+    sandbox = pytest.importorskip("temporalio.worker.workflow_sandbox")
+
+    async def validate() -> None:
+        for workflow_class in worker.default_workflows():
+            definition = temporal_workflow._Definition.must_from_class(
+                workflow_class
+            )
+            sandbox.SandboxedWorkflowRunner().prepare_workflow(definition)
+
+    asyncio.run(validate())
 
 
 def test_default_activities_include_repository_refresh() -> None:

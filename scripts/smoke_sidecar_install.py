@@ -66,9 +66,7 @@ def _run_json(command: Sequence[str]) -> dict[str, Any]:
             f"stdout:\n{completed.stdout}"
         ) from err
     if not isinstance(payload, dict):
-        raise SystemExit(
-            f"command emitted non-object JSON: {' '.join(command)}"
-        )
+        raise SystemExit(f"command emitted non-object JSON: {' '.join(command)}")
     return payload
 
 
@@ -85,9 +83,7 @@ def install_wheel(
         install_target = (
             "histdatacom[temporal] @ " f"{resolved_wheel.resolve().as_uri()}"
         )
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", install_target]
-    )
+    subprocess.check_call([sys.executable, "-m", "pip", "install", install_target])
     return resolved_wheel
 
 
@@ -178,9 +174,7 @@ def check_sidecar_resources(
             )
         try:
             with sidecar_executable_path(platform_key):
-                raise SystemExit(
-                    "metadata-only sidecar resource exposed an executable"
-                )
+                raise SystemExit("metadata-only sidecar resource exposed an executable")
         except SidecarExecutableUnavailable as err:
             if "not bundled in this distribution" not in str(err):
                 raise
@@ -276,6 +270,40 @@ def check_cli_smoke(
     }
 
 
+def check_live_sidecar_smoke(
+    *,
+    workspace: Path,
+    runtime_home: Path,
+    data_directory: Path,
+    temporal_executable: Path | None = None,
+    startup_timeout: float,
+    completion_timeout: float,
+    stop_timeout: float,
+) -> dict[str, Any]:
+    """Run a live Temporal sidecar, worker fleet, and minimal job smoke."""
+    from histdatacom.sidecar.live_smoke import (
+        LiveSidecarSmokeError,
+        diagnostics_json,
+        run_live_sidecar_smoke,
+    )
+
+    try:
+        return run_live_sidecar_smoke(
+            workspace=workspace,
+            runtime_home=runtime_home,
+            data_directory=data_directory,
+            temporal_executable=temporal_executable,
+            startup_timeout=startup_timeout,
+            completion_timeout=completion_timeout,
+            stop_timeout=stop_timeout,
+        ).to_dict()
+    except LiveSidecarSmokeError as err:
+        raise SystemExit(
+            "live sidecar smoke failed with diagnostics:\n"
+            f"{diagnostics_json(err.diagnostics)}"
+        ) from err
+
+
 def main() -> None:
     """Run install-time sidecar smoke checks."""
     parser = argparse.ArgumentParser()
@@ -319,11 +347,62 @@ def main() -> None:
         action="store_true",
         help="start the sidecar without --executable and then stop it",
     )
+    parser.add_argument(
+        "--live-sidecar-smoke",
+        action="store_true",
+        help=(
+            "operator-gated smoke that starts Temporal workers, submits a "
+            "minimal non-Influx job, and validates status/artifacts"
+        ),
+    )
+    parser.add_argument(
+        "--temporal-executable",
+        type=Path,
+        help=(
+            "Temporal executable for --live-sidecar-smoke; defaults to "
+            "HISTDATACOM_TEMPORAL_EXECUTABLE or the packaged executable"
+        ),
+    )
+    parser.add_argument(
+        "--live-workspace",
+        type=Path,
+        help="workspace path used for --live-sidecar-smoke runtime scoping",
+    )
+    parser.add_argument(
+        "--live-runtime-home",
+        type=Path,
+        help="runtime home used for --live-sidecar-smoke state/logs/SQLite",
+    )
+    parser.add_argument(
+        "--live-data-dir",
+        type=Path,
+        help="HistData data directory used by the live sidecar smoke job",
+    )
+    parser.add_argument(
+        "--live-startup-timeout",
+        type=float,
+        default=30.0,
+        help="seconds to wait for the live Temporal frontend to start",
+    )
+    parser.add_argument(
+        "--live-completion-timeout",
+        type=float,
+        default=180.0,
+        help="seconds to wait for the live smoke job to complete",
+    )
+    parser.add_argument(
+        "--live-stop-timeout",
+        type=float,
+        default=30.0,
+        help="seconds to wait for live sidecar processes to stop",
+    )
     args = parser.parse_args()
     if args.wheel is not None and args.wheel_dir is not None:
         parser.error("--wheel and --wheel-dir are mutually exclusive")
     if args.start_sidecar and not args.expect_temporal_extra:
         parser.error("--start-sidecar requires --expect-temporal-extra")
+    if args.live_sidecar_smoke and not args.expect_temporal_extra:
+        parser.error("--live-sidecar-smoke requires --expect-temporal-extra")
 
     wheel_name = ""
     if args.wheel_dir is not None or args.wheel is not None:
@@ -347,6 +426,7 @@ def main() -> None:
                 check_executable_version=args.check_executable_version,
             ),
             "cli": None,
+            "live_sidecar": None,
         }
         if not args.skip_cli:
             report["cli"] = check_cli_smoke(
@@ -355,6 +435,23 @@ def main() -> None:
                     args.require_bundled_current_platform
                 ),
                 start_sidecar=args.start_sidecar,
+            )
+        if args.live_sidecar_smoke:
+            live_workspace = args.live_workspace or Path(temporary_dir) / (
+                "live-workspace"
+            )
+            live_runtime_home = (
+                args.live_runtime_home or Path(temporary_dir) / "live-runtime"
+            )
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
+            report["live_sidecar"] = check_live_sidecar_smoke(
+                workspace=live_workspace,
+                runtime_home=live_runtime_home,
+                data_directory=live_data_dir,
+                temporal_executable=args.temporal_executable,
+                startup_timeout=args.live_startup_timeout,
+                completion_timeout=args.live_completion_timeout,
+                stop_timeout=args.live_stop_timeout,
             )
 
     print(json.dumps(report, indent=2, sort_keys=True))  # noqa:T201
