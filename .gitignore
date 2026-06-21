@@ -12,6 +12,7 @@ venv/
 .DS_Store
 __pycache__
 .pytest_cache/
+.histdatacom/
 build/
 dist/
 *.egg-info

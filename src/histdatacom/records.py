@@ -1,6 +1,5 @@
 """Records queue and Record work object for queue."""
 
-import contextlib
 import json
 import os
 from pathlib import Path
@@ -10,6 +9,11 @@ from typing import Any
 from rich import print  # pylint: disable=redefined-builtin
 
 from histdatacom.fx_enums import Format, Timeframe
+from histdatacom.manifest_store import (
+    ManifestStatusStore,
+    delete_record_from_manifest,
+    restore_record_from_manifest,
+)
 from histdatacom.utils import (
     create_full_path,
     get_query_string,
@@ -68,6 +72,7 @@ class Record:  # noqa:H601
             if not Path(self.data_dir).exists():
                 create_full_path(self.data_dir)
 
+            ManifestStatusStore(base_dir or self.data_dir).write_record(self)
             momento_path = Path(self.data_dir, ".meta")
 
             with momento_path.open("w", encoding="UTF-8") as target:
@@ -79,11 +84,12 @@ class Record:  # noqa:H601
             )
             raise SystemExit(1) from err
 
-    def delete_momento_file(self) -> None:
+    def delete_momento_file(self, base_dir: str = "") -> None:
         """Delete memento file."""
         momento_path = Path(self.data_dir, ".meta")
         if momento_path.exists():
             momento_path.unlink()
+        delete_record_from_manifest(self, base_dir=base_dir)
 
     def restore_momento(self, base_dir: str) -> bool:
         """Restore momento from .meta file.
@@ -95,24 +101,7 @@ class Record:  # noqa:H601
             bool: True (success) | False (failure)
         """
         self._set_record_data_dir(base_dir)
-
-        momento_path = Path(self.data_dir, ".meta")
-        if not momento_path.exists():
-            return False
-        record_dict: dict = {}
-
-        with (
-            momento_path.open(
-                "r", encoding="UTF-8"
-            ) as json_read,  # noqa:BLK100
-            contextlib.suppress(Exception),
-        ):
-            while True:
-                record_dict |= json.load(json_read)
-
-        record_dict.pop("data_dir", None)
-        self(**record_dict)
-        return True
+        return restore_record_from_manifest(self, base_dir=base_dir)
 
     def _to_dict(self) -> dict:
         """Return dict representation of Record.
