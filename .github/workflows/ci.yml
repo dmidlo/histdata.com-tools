@@ -160,6 +160,7 @@ jobs:
               assert "not bundled in this distribution" in str(err)
           PY
           histdatacom --version
+          histdatacom-sidecar --help >/dev/null
         shell: bash
 
       - name: Smoke wheel extras install

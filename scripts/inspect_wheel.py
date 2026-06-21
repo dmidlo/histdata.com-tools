@@ -76,6 +76,10 @@ def inspect_wheel(wheel_path: Path) -> None:
         raise SystemExit(
             "histdatacom console script missing from wheel metadata"
         )
+    if "histdatacom-sidecar = histdatacom.sidecar.cli:main" not in entry_points:
+        raise SystemExit(
+            "histdatacom-sidecar console script missing from wheel metadata"
+        )
     if manifest["sidecar"] != "temporal":
         raise SystemExit("sidecar manifest does not describe Temporal")
     if manifest["distribution_strategy"] != (

@@ -23,6 +23,7 @@ Returns:
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 import histdatacom
@@ -174,7 +175,7 @@ class _HistDataCom:  # noqa:R701
 
 def main(
     options: Options | None = None,
-) -> list | dict | PolarsDataFrame | DataFrame | Table | None:
+) -> list | dict | PolarsDataFrame | DataFrame | Table | int | None:
     """Execute. Entry-point for histdatacom.
 
     Args:
@@ -196,6 +197,11 @@ def main(
                                 ...
                             ]
     """
+    if not options and len(sys.argv) > 1 and sys.argv[1] == "sidecar":
+        from histdatacom.sidecar.cli import main as sidecar_main
+
+        return sidecar_main(sys.argv[2:])
+
     if not options:
         options = Options()
         QueueManager(options)(_HistDataCom)

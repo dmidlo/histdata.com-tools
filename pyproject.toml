@@ -131,6 +131,7 @@ Homepage = "https://github.com/dmidlo/histdata.com-tools"
 
 [project.scripts]
 histdatacom = "histdatacom.histdata_com:main"
+histdatacom-sidecar = "histdatacom.sidecar.cli:main"
 
 [tool.setuptools.package-dir]
 "" = "src"
