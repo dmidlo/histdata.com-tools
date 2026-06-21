@@ -88,6 +88,15 @@ activity implementation modules.
 `cancel`, `retry`, and `resume` use the same bounded status and artifact
 contracts. Workflow IDs use the format `histdatacom-<request-id>`.
 
+Retry and resume create deterministic replacement parent workflows rather than
+mutating completed workflow histories. Replacement requests carry
+`control_execution` metadata with the parent workflow ID, previous run ID,
+attempt number, stage-specific resume policy, cleanup results, and artifact reuse
+preference. Existing complete artifacts remain on disk and are referenced through
+the normal `ArtifactRef`/`StageResult` path; hidden temp artifacts are removed or
+ignored according to the stage resume policy before the replacement workflow is
+submitted.
+
 ## Testing Strategy
 
 Workflow tests should exercise composition, metadata shape, status queries,

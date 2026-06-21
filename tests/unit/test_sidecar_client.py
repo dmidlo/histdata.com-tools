@@ -27,10 +27,11 @@ class _FakeTemporalClient:
 
     connect_calls: list[dict[str, str]] = []
 
-    def __init__(self) -> None:
+    def __init__(self, status_payload: dict[str, object] | None = None) -> None:
         self.started: list[dict[str, object]] = []
         self.list_query = ""
         self.handles: dict[str, _FakeWorkflowHandle] = {}
+        self.status_payload = status_payload
 
     @classmethod
     async def connect(cls, target_host: str, *, namespace: str):
@@ -57,7 +58,11 @@ class _FakeTemporalClient:
                 "task_queue": task_queue,
             }
         )
-        handle = _FakeWorkflowHandle(id=id, run_id="run-fake")
+        handle = _FakeWorkflowHandle(
+            id=id,
+            run_id="run-fake",
+            status_payload=self.status_payload,
+        )
         self.handles[id] = handle
         return handle
 
@@ -73,6 +78,7 @@ class _FakeTemporalClient:
             _FakeWorkflowHandle(
                 id=workflow_id,
                 run_id=run_id or "run-fake",
+                status_payload=self.status_payload,
             ),
         )
 
@@ -93,10 +99,17 @@ class _FakeTemporalClient:
 class _FakeWorkflowHandle:
     """Minimal fake Temporal workflow handle."""
 
-    def __init__(self, *, id: str, run_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        id: str,
+        run_id: str,
+        status_payload: dict[str, object] | None = None,
+    ) -> None:
         self.id = id
         self.run_id = run_id
         self.cancel_calls = 0
+        self.status_payload = status_payload
 
     async def result(self) -> dict[str, object]:
         """Return a fake workflow result payload."""
@@ -144,6 +157,8 @@ class _FakeWorkflowHandle:
     async def query(self, query_name: str) -> dict[str, object]:
         """Return a fake workflow status query payload."""
         assert query_name == "status"
+        if self.status_payload is not None:
+            return self.status_payload
         return {
             "workflow_name": "HistDataRunWorkflow",
             "request_id": "run-test",
@@ -220,6 +235,75 @@ def _status(state: str) -> SidecarStatus:
         logs={},
         pids={"temporal": 123} if state == "running" else {},
     )
+
+
+def _status_payload(
+    *,
+    stage: str,
+    status: WorkStatus,
+    artifact_path: str = "/tmp/manifest.json",
+    artifact_kind: str = "manifest",
+) -> dict[str, object]:
+    return {
+        "workflow_name": "HistDataRunWorkflow",
+        "request_id": "run-test",
+        "status": status.value,
+        "current_stage": stage,
+        "total_children": 3,
+        "completed_children": 1,
+        "planned_children": ["ValidateUrlsWorkflow"],
+        "completed_stages": ["ValidateUrlsWorkflow"],
+        "events": [
+            StatusEvent(
+                status=status,
+                stage=stage,
+                message=f"{stage} status",
+            ).to_dict()
+        ],
+        "artifacts": [
+            ArtifactRef(
+                kind=artifact_kind,
+                path=artifact_path,
+            ).to_dict()
+        ],
+    }
+
+
+def _run_request(
+    *,
+    request_id: str = "run-test",
+    data_directory: str = "data",
+) -> RunRequest:
+    return RunRequest(
+        request_id=request_id,
+        pairs=("EURUSD",),
+        formats=("ascii",),
+        timeframes=("m1",),
+        data_directory=data_directory,
+        validate_urls=True,
+        download_data_archives=True,
+        extract_csvs=True,
+        api_return_type="polars",
+    )
+
+
+def _submit_seed_run(
+    *,
+    config,
+    temporal_client: _FakeTemporalClient,
+    request: RunRequest,
+    status_payload: dict[str, object],
+) -> None:
+    asyncio.run(
+        client.submit_run_request(
+            request,
+            config=config,
+            client=temporal_client,
+        )
+    )
+    temporal_client.handles[
+        client.workflow_id_for_request(request)
+    ].status_payload = status_payload
 
 
 def test_connect_temporal_client_uses_runtime_policy_target(
@@ -461,9 +545,19 @@ def test_cancel_job_requests_temporal_cancel_and_reports_state(
 def test_retry_and_resume_include_current_stage_resume_policy(
     tmp_path: Path,
 ) -> None:
-    """Retry/resume intent should carry the current operation resume policy."""
+    """Retry/resume should start replacement workflows with resume policy."""
     config = _config(tmp_path)
     temporal_client = _FakeTemporalClient()
+    request = _run_request()
+    _submit_seed_run(
+        config=config,
+        temporal_client=temporal_client,
+        request=request,
+        status_payload=_status_payload(
+            stage="DownloadArchivesWorkflow",
+            status=WorkStatus.FAILED,
+        ),
+    )
 
     retry = asyncio.run(
         client.retry_job(
@@ -482,17 +576,183 @@ def test_retry_and_resume_include_current_stage_resume_policy(
         )
     )
 
+    assert retry.workflow_id == (
+        "histdatacom-run-test-retry-download-archives-001"
+    )
+    assert retry.lifecycle == JobLifecycle.RETRYING
     assert retry.controls.retry.metadata["resume_policy"]["stage"] == (
         "download_archives"
     )
+    assert retry.controls.retry.metadata["parent_workflow_id"] == (
+        "histdatacom-run-test"
+    )
+    assert (
+        retry.controls.retry.metadata["replacement_handle"]["workflow_id"]
+        == retry.workflow_id
+    )
+    assert temporal_client.started[-2]["id"] == retry.workflow_id
+
+    assert resume.workflow_id == (
+        "histdatacom-run-test-resume-download-archives-001"
+    )
+    assert resume.lifecycle == JobLifecycle.RESUMING
     assert resume.controls.resume.metadata["resume_policy"]["stage"] == (
         "download_archives"
     )
+    assert resume.controls.resume.metadata["parent_workflow_id"] == (
+        "histdatacom-run-test"
+    )
+    assert temporal_client.started[-1]["id"] == resume.workflow_id
+
+    retry_payload = temporal_client.started[-2]["payload"]
+    assert retry_payload["request_id"] == (
+        "run-test-retry-download-archives-001"
+    )
+    assert retry_payload["metadata"]["control_execution"]["action"] == "retry"
+    assert (
+        retry_payload["metadata"]["control_execution"][
+            "reuse_completed_artifacts"
+        ]
+        is True
+    )
+
     stored = client.sidecar_job_store(config).get_job_snapshot(
         "histdatacom-run-test"
     )
+    stored_retry = client.sidecar_job_store(config).get_job_snapshot(
+        retry.workflow_id
+    )
+    stored_resume = client.sidecar_job_store(config).get_job_snapshot(
+        resume.workflow_id
+    )
     assert stored is not None
     assert stored["lifecycle"] == JobLifecycle.RESUME_REQUESTED.value
+    assert stored["metadata"]["control_attempts"]["retry"] == 1
+    assert stored["metadata"]["control_attempts"]["resume"] == 1
+    assert stored_retry is not None
+    assert (
+        stored_retry["metadata"]["control_execution"]["parent_workflow_id"]
+        == "histdatacom-run-test"
+    )
+    assert stored_resume is not None
+    assert stored_resume["lifecycle"] == JobLifecycle.RESUMING.value
+
+
+@pytest.mark.parametrize(
+    ("stage", "expected_stage", "artifact_kind", "filename", "partial_name"),
+    (
+        (
+            "ExtractCsvWorkflow",
+            "extract_csv",
+            "csv",
+            "EURUSD.csv",
+            ".EURUSD.csv.abc.tmp",
+        ),
+        (
+            "BuildCacheWorkflow",
+            "build_cache",
+            "cache",
+            ".data",
+            ".data.abc.tmp",
+        ),
+    ),
+)
+def test_retry_replacement_handles_failed_file_and_cache_states(
+    tmp_path: Path,
+    stage: str,
+    expected_stage: str,
+    artifact_kind: str,
+    filename: str,
+    partial_name: str,
+) -> None:
+    """Retry should replace failed file/cache jobs and clean known partials."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient()
+    data_dir = tmp_path / "data" / expected_stage
+    data_dir.mkdir(parents=True)
+    artifact_path = data_dir / filename
+    artifact_path.write_text("complete")
+    partial_path = data_dir / partial_name
+    partial_path.write_text("partial")
+    request = _run_request(data_directory=str(tmp_path / "data"))
+    _submit_seed_run(
+        config=config,
+        temporal_client=temporal_client,
+        request=request,
+        status_payload=_status_payload(
+            stage=stage,
+            status=WorkStatus.FAILED,
+            artifact_path=str(artifact_path),
+            artifact_kind=artifact_kind,
+        ),
+    )
+
+    retry = asyncio.run(
+        client.retry_job(
+            "histdatacom-run-test",
+            reason="repair",
+            config=config,
+            client=temporal_client,
+        )
+    )
+
+    assert retry.workflow_id == (
+        f"histdatacom-run-test-retry-{expected_stage.replace('_', '-')}-001"
+    )
+    assert retry.lifecycle == JobLifecycle.RETRYING
+    assert retry.controls.retry.metadata["resume_policy"]["stage"] == (
+        expected_stage
+    )
+    assert retry.controls.retry.metadata["cleanup"][0]["removed"] is True
+    assert not partial_path.exists()
+
+
+def test_resume_replacement_handles_cancelled_state(
+    tmp_path: Path,
+) -> None:
+    """Resume should replace cancelled jobs with explicit lineage metadata."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient()
+    data_dir = tmp_path / "data" / "download"
+    data_dir.mkdir(parents=True)
+    artifact_path = data_dir / "EURUSD.zip"
+    artifact_path.write_text("complete")
+    partial_path = data_dir / ".EURUSD.zip.abc.tmp"
+    partial_path.write_text("partial")
+    request = _run_request(data_directory=str(tmp_path / "data"))
+    _submit_seed_run(
+        config=config,
+        temporal_client=temporal_client,
+        request=request,
+        status_payload=_status_payload(
+            stage="DownloadArchivesWorkflow",
+            status=WorkStatus.CANCELLED,
+            artifact_path=str(artifact_path),
+            artifact_kind="zip",
+        ),
+    )
+
+    resume = asyncio.run(
+        client.resume_job(
+            "histdatacom-run-test",
+            reason="operator continue",
+            config=config,
+            client=temporal_client,
+        )
+    )
+
+    assert resume.workflow_id == (
+        "histdatacom-run-test-resume-download-archives-001"
+    )
+    assert resume.lifecycle == JobLifecycle.RESUMING
+    assert resume.controls.resume.metadata["previous_run_id"] == "run-fake"
+    assert resume.controls.resume.metadata["cleanup"][0]["removed"] is True
+    assert not partial_path.exists()
+    stored_original = client.sidecar_job_store(config).get_job_snapshot(
+        "histdatacom-run-test"
+    )
+    assert stored_original is not None
+    assert stored_original["lifecycle"] == JobLifecycle.RESUME_REQUESTED.value
 
 
 def test_get_job_result_persists_result_snapshot(tmp_path: Path) -> None:

@@ -337,6 +337,51 @@ def test_sidecar_jobs_cancel_cli_passes_reason(
     assert payload["lifecycle"] == JobLifecycle.CANCEL_REQUESTED.value
 
 
+def test_sidecar_jobs_retry_cli_passes_recompute_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Jobs retry should pass the explicit recompute preference."""
+    captured: dict[str, object] = {}
+
+    def fake_retry(workflow_id: str, **kwargs: object) -> SidecarJobSnapshot:
+        captured["workflow_id"] = workflow_id
+        captured["kwargs"] = kwargs
+        return _snapshot().mark_retrying(
+            metadata={
+                "reuse_completed_artifacts": bool(
+                    kwargs["reuse_completed_artifacts"]
+                )
+            }
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(cli, "retry_job_sync", fake_retry)
+
+    exit_code = cli.main(
+        [
+            "jobs",
+            "--json",
+            "retry",
+            "histdatacom-run-cli",
+            "--reason",
+            "operator",
+            "--recompute-complete",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert captured["workflow_id"] == "histdatacom-run-cli"
+    assert captured["kwargs"]["reuse_completed_artifacts"] is False
+    assert payload["lifecycle"] == JobLifecycle.RETRYING.value
+
+
 def test_sidecar_jobs_submit_cli_loads_run_request_json(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

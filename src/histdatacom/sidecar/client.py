@@ -9,6 +9,11 @@ from inspect import isawaitable
 from pathlib import Path
 from typing import Any, Mapping
 
+from histdatacom.cancellation import (
+    PartialArtifactDisposition,
+    cleanup_partial_artifacts,
+    operation_resume_policy,
+)
 from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.runtime_contracts import (
     ArtifactRef,
@@ -17,6 +22,7 @@ from histdatacom.runtime_contracts import (
     WorkStatus,
 )
 from histdatacom.sidecar.control import (
+    JobLifecycle,
     JobLogEntry,
     JobProgressSnapshot,
     SidecarJobList,
@@ -39,6 +45,9 @@ TEMPORAL_EXTRA_HINT = (
     "Install histdatacom[temporal] to use sidecar client and worker features."
 )
 DEFAULT_RUN_WORKFLOW_NAME = "HistDataRunWorkflow"
+RUN_REQUEST_METADATA_KEY = "run_request"
+CONTROL_ATTEMPTS_METADATA_KEY = "control_attempts"
+CONTROL_EXECUTION_METADATA_KEY = "control_execution"
 
 
 class TemporalDependencyError(RuntimeError):
@@ -145,7 +154,10 @@ async def submit_run_request(
         namespace=resolved_config.namespace,
     )
     _persist_job_snapshot(
-        SidecarJobSnapshot.from_handle(job_handle),
+        _snapshot_with_run_request(
+            SidecarJobSnapshot.from_handle(job_handle),
+            request,
+        ),
         config=resolved_config,
         status_store=status_store,
     )
@@ -192,9 +204,12 @@ async def submit_run_request_and_observe(
         config=resolved_config,
     )
     submitted_snapshot = _persist_job_snapshot(
-        SidecarJobSnapshot.from_handle(
-            handle,
-            sidecar_status=sidecar_status,
+        _snapshot_with_run_request(
+            SidecarJobSnapshot.from_handle(
+                handle,
+                sidecar_status=sidecar_status,
+            ),
+            request,
         ),
         config=resolved_config,
         status_store=status_store,
@@ -580,46 +595,78 @@ def cancel_job_sync(
 async def retry_job(
     workflow_id: str,
     *,
+    run_id: str = "",
     reason: str = "",
-    **kwargs: Any,
+    config: SidecarWorkerConfig | None = None,
+    client: Any | None = None,
+    client_class: Any | None = None,
+    supervisor: SidecarSupervisor | None = None,
+    status_store: ManifestStatusStore | None = None,
+    offline: bool = False,
+    reuse_completed_artifacts: bool = True,
+    workflow: Any = DEFAULT_RUN_WORKFLOW_NAME,
 ) -> SidecarJobSnapshot:
-    """Represent retry intent for a job in the control API."""
-    snapshot = await inspect_job_status(workflow_id, **kwargs)
-    retry_snapshot = snapshot.request_retry(
+    """Start a deterministic replacement workflow for retry."""
+    return await _start_replacement_job(
+        workflow_id,
+        action="retry",
+        run_id=run_id,
         reason=reason,
-        stage=_snapshot_stage(snapshot),
+        config=config,
+        client=client,
+        client_class=client_class,
+        supervisor=supervisor,
+        status_store=status_store,
+        offline=offline,
+        reuse_completed_artifacts=reuse_completed_artifacts,
+        workflow=workflow,
     )
-    return _persist_job_snapshot_from_kwargs(retry_snapshot, kwargs)
 
 
 def retry_job_sync(
     workflow_id: str,
     **kwargs: Any,
 ) -> SidecarJobSnapshot:
-    """Synchronously represent retry intent for a job."""
+    """Synchronously start a deterministic retry replacement workflow."""
     return asyncio.run(retry_job(workflow_id, **kwargs))
 
 
 async def resume_job(
     workflow_id: str,
     *,
+    run_id: str = "",
     reason: str = "",
-    **kwargs: Any,
+    config: SidecarWorkerConfig | None = None,
+    client: Any | None = None,
+    client_class: Any | None = None,
+    supervisor: SidecarSupervisor | None = None,
+    status_store: ManifestStatusStore | None = None,
+    offline: bool = False,
+    reuse_completed_artifacts: bool = True,
+    workflow: Any = DEFAULT_RUN_WORKFLOW_NAME,
 ) -> SidecarJobSnapshot:
-    """Represent resume intent for a job in the control API."""
-    snapshot = await inspect_job_status(workflow_id, **kwargs)
-    resume_snapshot = snapshot.request_resume(
+    """Start a deterministic replacement workflow for resume."""
+    return await _start_replacement_job(
+        workflow_id,
+        action="resume",
+        run_id=run_id,
         reason=reason,
-        stage=_snapshot_stage(snapshot),
+        config=config,
+        client=client,
+        client_class=client_class,
+        supervisor=supervisor,
+        status_store=status_store,
+        offline=offline,
+        reuse_completed_artifacts=reuse_completed_artifacts,
+        workflow=workflow,
     )
-    return _persist_job_snapshot_from_kwargs(resume_snapshot, kwargs)
 
 
 def resume_job_sync(
     workflow_id: str,
     **kwargs: Any,
 ) -> SidecarJobSnapshot:
-    """Synchronously represent resume intent for a job."""
+    """Synchronously start a deterministic resume replacement workflow."""
     return asyncio.run(resume_job(workflow_id, **kwargs))
 
 
@@ -686,6 +733,118 @@ def list_stored_job_statuses(
     )
 
 
+async def _start_replacement_job(
+    workflow_id: str,
+    *,
+    action: str,
+    run_id: str = "",
+    reason: str = "",
+    config: SidecarWorkerConfig | None = None,
+    client: Any | None = None,
+    client_class: Any | None = None,
+    supervisor: SidecarSupervisor | None = None,
+    status_store: ManifestStatusStore | None = None,
+    offline: bool = False,
+    reuse_completed_artifacts: bool = True,
+    workflow: Any = DEFAULT_RUN_WORKFLOW_NAME,
+) -> SidecarJobSnapshot:
+    if offline:
+        raise SidecarUnavailableError(
+            "Retry and resume require a live Temporal sidecar; "
+            "--offline is only supported for read-only job commands."
+        )
+    if action not in {"retry", "resume"}:
+        raise ValueError(f"unsupported control action: {action}")
+
+    resolved_config = config or build_sidecar_worker_config()
+    temporal_client = client or await connect_temporal_client(
+        config=resolved_config,
+        client_class=client_class,
+    )
+    snapshot = await inspect_job_status(
+        workflow_id,
+        run_id=run_id,
+        config=resolved_config,
+        client=temporal_client,
+        supervisor=supervisor,
+        status_store=status_store,
+        store_fallback=True,
+    )
+    stage = _snapshot_stage(snapshot)
+    policy = operation_resume_policy(stage)
+    cleanup_results = _cleanup_partial_artifacts_for_snapshot(snapshot, stage)
+    attempt = _next_control_attempt(snapshot, action)
+    replacement_request = _replacement_run_request(
+        snapshot,
+        action=action,
+        stage=policy.stage,
+        reason=reason,
+        attempt=attempt,
+        reuse_completed_artifacts=reuse_completed_artifacts,
+        cleanup_results=cleanup_results,
+    )
+    replacement_workflow_id = workflow_id_for_request(replacement_request)
+    raw_handle = await _start_workflow(
+        temporal_client,
+        workflow,
+        run_request_payload(replacement_request, resolved_config),
+        workflow_id=replacement_workflow_id,
+        task_queue=resolved_config.task_queues.orchestration,
+    )
+    replacement_handle = _job_handle_from_workflow_handle(
+        replacement_request,
+        raw_handle,
+        workflow_id=replacement_workflow_id,
+        config=resolved_config,
+    )
+    execution_metadata = _control_execution_metadata(
+        snapshot,
+        replacement_handle,
+        action=action,
+        stage=stage,
+        normalized_stage=policy.stage,
+        reason=reason,
+        attempt=attempt,
+        reuse_completed_artifacts=reuse_completed_artifacts,
+        cleanup_results=cleanup_results,
+    )
+    requested_snapshot = _control_requested_snapshot(
+        snapshot,
+        action=action,
+        reason=reason,
+        stage=stage,
+        metadata=execution_metadata,
+    )
+    _persist_job_snapshot(
+        _snapshot_with_control_metadata(
+            requested_snapshot,
+            action=action,
+            attempt=attempt,
+            execution_metadata=execution_metadata,
+        ),
+        config=resolved_config,
+        status_store=status_store,
+    )
+
+    replacement_snapshot = _control_replacement_snapshot(
+        replacement_handle,
+        action=action,
+        sidecar_status=_sidecar_status(supervisor),
+        metadata=execution_metadata,
+    )
+    return _persist_job_snapshot(
+        _snapshot_with_run_request(
+            _snapshot_with_metadata(
+                replacement_snapshot,
+                {CONTROL_EXECUTION_METADATA_KEY: execution_metadata},
+            ),
+            replacement_request,
+        ),
+        config=resolved_config,
+        status_store=status_store,
+    )
+
+
 def _persist_job_snapshot(
     snapshot: SidecarJobSnapshot,
     *,
@@ -693,28 +852,267 @@ def _persist_job_snapshot(
     status_store: ManifestStatusStore | None = None,
 ) -> SidecarJobSnapshot:
     store = status_store or sidecar_job_store(config)
+    snapshot = _merge_stored_snapshot_metadata(snapshot, store)
     store.write_job_snapshot(snapshot)
     return snapshot
 
 
-def _persist_job_snapshot_from_kwargs(
+def _snapshot_with_run_request(
     snapshot: SidecarJobSnapshot,
-    kwargs: Mapping[str, Any],
+    request: RunRequest,
 ) -> SidecarJobSnapshot:
-    config = kwargs.get("config")
-    resolved_config = (
-        config if isinstance(config, SidecarWorkerConfig) else None
-    ) or build_sidecar_worker_config()
-    status_store = kwargs.get("status_store")
-    return _persist_job_snapshot(
+    return _snapshot_with_metadata(
         snapshot,
-        config=resolved_config,
-        status_store=(
-            status_store
-            if isinstance(status_store, ManifestStatusStore)
-            else None
-        ),
+        {RUN_REQUEST_METADATA_KEY: request.to_dict()},
     )
+
+
+def _snapshot_with_metadata(
+    snapshot: SidecarJobSnapshot,
+    metadata: Mapping[str, JSONValue],
+) -> SidecarJobSnapshot:
+    return replace(
+        snapshot,
+        metadata={
+            **snapshot.metadata,
+            **dict(metadata),
+        },
+    )
+
+
+def _merge_stored_snapshot_metadata(
+    snapshot: SidecarJobSnapshot,
+    store: ManifestStatusStore,
+) -> SidecarJobSnapshot:
+    payload = store.get_job_snapshot(snapshot.job_id or snapshot.workflow_id)
+    if payload is None:
+        return snapshot
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return snapshot
+    return replace(
+        snapshot,
+        metadata={
+            **dict(metadata),
+            **snapshot.metadata,
+        },
+    )
+
+
+def _replacement_run_request(
+    snapshot: SidecarJobSnapshot,
+    *,
+    action: str,
+    stage: str,
+    reason: str,
+    attempt: int,
+    reuse_completed_artifacts: bool,
+    cleanup_results: tuple[Any, ...],
+) -> RunRequest:
+    request = _run_request_from_snapshot(snapshot)
+    policy = operation_resume_policy(stage)
+    request_id = _replacement_request_id(
+        request.request_id,
+        action=action,
+        stage=stage,
+        attempt=attempt,
+    )
+    metadata = dict(request.metadata)
+    metadata[CONTROL_EXECUTION_METADATA_KEY] = {
+        "action": action,
+        "parent_job_id": snapshot.job_id,
+        "parent_workflow_id": snapshot.workflow_id,
+        "previous_run_id": snapshot.run_id,
+        "stage": stage,
+        "reason": reason,
+        "attempt": attempt,
+        "reuse_completed_artifacts": reuse_completed_artifacts,
+        "partial_artifact_disposition": (
+            policy.partial_artifact_disposition.value
+        ),
+        "resume_policy": policy.to_dict(),
+        "cleanup": [result.to_dict() for result in cleanup_results],
+    }
+    return replace(
+        request,
+        request_id=request_id,
+        metadata=metadata,
+    )
+
+
+def _run_request_from_snapshot(snapshot: SidecarJobSnapshot) -> RunRequest:
+    payload = snapshot.metadata.get(RUN_REQUEST_METADATA_KEY)
+    if not isinstance(payload, Mapping):
+        raise SidecarUnavailableError(
+            "Cannot retry/resume job without a persisted RunRequest snapshot. "
+            "Submit the job again with the current sidecar client first."
+        )
+    return RunRequest.from_dict(payload)
+
+
+def _replacement_request_id(
+    request_id: str,
+    *,
+    action: str,
+    stage: str,
+    attempt: int,
+) -> str:
+    base = request_id.strip() or "request"
+    stage_slug = _slug(stage or "job")
+    return f"{base}-{action}-{stage_slug}-{attempt:03d}"
+
+
+def _slug(value: str) -> str:
+    chars = [
+        char.lower() if char.isalnum() else "-"
+        for char in str(value or "").strip()
+    ]
+    slug = "-".join(filter(None, "".join(chars).split("-")))
+    return slug or "job"
+
+
+def _next_control_attempt(snapshot: SidecarJobSnapshot, action: str) -> int:
+    attempts = snapshot.metadata.get(CONTROL_ATTEMPTS_METADATA_KEY)
+    if not isinstance(attempts, Mapping):
+        return 1
+    value = attempts.get(action, 0)
+    if not isinstance(value, str | int | float):
+        return 1
+    try:
+        return int(value or 0) + 1
+    except (TypeError, ValueError):
+        return 1
+
+
+def _cleanup_partial_artifacts_for_snapshot(
+    snapshot: SidecarJobSnapshot,
+    stage: str,
+) -> tuple[Any, ...]:
+    policy = operation_resume_policy(stage)
+    if (
+        policy.partial_artifact_disposition
+        != PartialArtifactDisposition.REMOVE_TEMP
+    ):
+        return ()
+    candidates: set[Path] = set()
+    for artifact in snapshot.artifacts:
+        if not artifact.path:
+            continue
+        artifact_path = Path(artifact.path)
+        parent = artifact_path.parent
+        if not parent.exists():
+            continue
+        for pattern in policy.partial_artifact_patterns:
+            candidates.update(parent.glob(pattern))
+            if not pattern.startswith("."):
+                candidates.update(parent.glob(f".{pattern}"))
+        candidates.update(parent.glob(f".{artifact_path.name}.*.tmp"))
+    return tuple(
+        cleanup_partial_artifacts(
+            tuple(sorted(candidates, key=lambda path: str(path)))
+        )
+    )
+
+
+def _control_execution_metadata(
+    snapshot: SidecarJobSnapshot,
+    replacement_handle: SidecarJobHandle,
+    *,
+    action: str,
+    stage: str,
+    normalized_stage: str,
+    reason: str,
+    attempt: int,
+    reuse_completed_artifacts: bool,
+    cleanup_results: tuple[Any, ...],
+) -> dict[str, JSONValue]:
+    policy = operation_resume_policy(stage)
+    return {
+        "action": action,
+        "parent_job_id": snapshot.job_id,
+        "parent_workflow_id": snapshot.workflow_id,
+        "previous_run_id": snapshot.run_id,
+        "replacement_request_id": replacement_handle.request_id,
+        "replacement_workflow_id": replacement_handle.workflow_id,
+        "replacement_handle": {
+            key: str(value)
+            for key, value in replacement_handle.to_dict().items()
+        },
+        "stage": normalized_stage,
+        "requested_stage": stage,
+        "reason": reason,
+        "attempt": attempt,
+        "reuse_completed_artifacts": reuse_completed_artifacts,
+        "partial_artifact_disposition": (
+            policy.partial_artifact_disposition.value
+        ),
+        "resume_policy": policy.to_dict(),
+        "cleanup": [result.to_dict() for result in cleanup_results],
+    }
+
+
+def _control_requested_snapshot(
+    snapshot: SidecarJobSnapshot,
+    *,
+    action: str,
+    reason: str,
+    stage: str,
+    metadata: Mapping[str, JSONValue],
+) -> SidecarJobSnapshot:
+    if action == "retry":
+        return snapshot.request_retry(
+            reason=reason,
+            stage=stage,
+            metadata=metadata,
+        )
+    return snapshot.request_resume(
+        reason=reason,
+        stage=stage,
+        metadata=metadata,
+    )
+
+
+def _snapshot_with_control_metadata(
+    snapshot: SidecarJobSnapshot,
+    *,
+    action: str,
+    attempt: int,
+    execution_metadata: Mapping[str, JSONValue],
+) -> SidecarJobSnapshot:
+    raw_attempts = snapshot.metadata.get(CONTROL_ATTEMPTS_METADATA_KEY)
+    attempts: dict[str, JSONValue] = (
+        dict(raw_attempts) if isinstance(raw_attempts, Mapping) else {}
+    )
+    attempts[action] = attempt
+    return _snapshot_with_metadata(
+        snapshot,
+        {
+            CONTROL_ATTEMPTS_METADATA_KEY: attempts,
+            CONTROL_EXECUTION_METADATA_KEY: dict(execution_metadata),
+        },
+    )
+
+
+def _control_replacement_snapshot(
+    handle: SidecarJobHandle,
+    *,
+    action: str,
+    sidecar_status: SidecarStatus | None,
+    metadata: Mapping[str, JSONValue],
+) -> SidecarJobSnapshot:
+    snapshot = SidecarJobSnapshot.from_handle(
+        handle,
+        lifecycle=(
+            JobLifecycle.RETRYING
+            if action == "retry"
+            else JobLifecycle.RESUMING
+        ),
+        status=WorkStatus.UNKNOWN,
+        sidecar_status=sidecar_status,
+    )
+    if action == "retry":
+        return snapshot.mark_retrying(metadata=metadata)
+    return snapshot.mark_resuming(metadata=metadata)
 
 
 def _stored_job_snapshot(

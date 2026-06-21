@@ -274,6 +274,26 @@ histdatacom-sidecar jobs --offline result histdatacom-<request-id> --json
 When Temporal is unavailable, read-only job commands fall back to this local
 store when a matching snapshot exists.
 
+Retry and resume are executable control operations, not intent-only labels. The
+client inspects the original job, reads the persisted `RunRequest` snapshot, and
+starts a deterministic replacement `HistDataRunWorkflow` with a workflow ID like:
+
+```txt
+histdatacom-<request-id>-retry-<stage>-001
+histdatacom-<request-id>-resume-<stage>-001
+```
+
+The original job snapshot is updated to `retry_requested` or
+`resume_requested`; the replacement job snapshot is returned as `retrying` or
+`resuming`. Both snapshots carry bounded `control_execution` metadata with the
+parent workflow ID, previous run ID, replacement handle, stage-specific resume
+policy, cleanup decisions, attempt number, and whether complete artifacts should
+be reused. Complete ZIP, CSV/XLSX, and Polars cache artifacts are reused by
+default through the existing stage helpers; pass `--recompute-complete` to mark a
+replacement run as explicitly recompute-oriented. Known hidden temp artifacts are
+removed before replacement submission when the stage resume policy says partials
+must be removed.
+
 ## Workers And Task Queues
 
 Workers use workspace-scoped task queues. Defaults:

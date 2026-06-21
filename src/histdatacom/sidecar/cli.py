@@ -210,8 +210,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("artifacts", "show one job's artifact view"),
         ("result", "show one job's result payload"),
         ("cancel", "request job cancellation"),
-        ("retry", "represent retry intent for a job"),
-        ("resume", "represent resume intent for a job"),
+        ("retry", "start a deterministic retry replacement job"),
+        ("resume", "start a deterministic resume replacement job"),
     ):
         job_parser = job_subparsers.add_parser(command, help=help_text)
         _add_job_identity_args(job_parser)
@@ -220,6 +220,15 @@ def build_parser() -> argparse.ArgumentParser:
                 "--reason",
                 default="",
                 help="operator-visible reason for the control request",
+            )
+        if command in {"retry", "resume"}:
+            job_parser.add_argument(
+                "--recompute-complete",
+                action="store_true",
+                help=(
+                    "mark the replacement run to recompute completed artifacts "
+                    "instead of reusing them"
+                ),
             )
     return parser
 
@@ -458,6 +467,7 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
         snapshot = retry_job_sync(
             args.workflow_id,
             reason=args.reason,
+            reuse_completed_artifacts=not args.recompute_complete,
             **identity_kwargs,
         )
         _write_control_payload(snapshot.to_dict(), as_json=args.json)
@@ -466,6 +476,7 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
         snapshot = resume_job_sync(
             args.workflow_id,
             reason=args.reason,
+            reuse_completed_artifacts=not args.recompute_complete,
             **identity_kwargs,
         )
         _write_control_payload(snapshot.to_dict(), as_json=args.json)
