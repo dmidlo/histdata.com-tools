@@ -35,7 +35,7 @@ from histdatacom.histdata_ascii import (
     read_ascii_file_to_polars,
     write_polars_cache,
 )
-from histdatacom.runtime_contracts import WorkItem
+from histdatacom.runtime_contracts import WorkItem, WorkStatus
 from histdatacom.scraper.scraper import Scraper
 
 if TYPE_CHECKING:
@@ -249,15 +249,23 @@ class Api:  # noqa:H601
                 merged data for the configured API return type
         """
         records_to_merge: list = self._dequeue_records_for_merge()
-        sets_to_merge: list = self._collate_sets_to_merge(records_to_merge)
+        return self.merge_records(records_to_merge)
 
-        if not sets_to_merge:
+    def merge_records(
+        self,
+        records_to_merge: list,
+    ) -> list | PolarsDataFrame | DataFrame | Table:
+        """Merge explicit cache records into the configured API return type."""
+        if not records_to_merge:
             return []
 
         merge_output = merge_cache_work_items(
             [WorkItem.from_record(record) for record in records_to_merge],
             return_type=config.ARGS["api_return_type"],
+            materialize=True,
         )
+        if merge_output.result.status is WorkStatus.SKIPPED:
+            return []
         return merge_output.data
 
     def _merge_records(self, tp_set_dict: dict) -> None:

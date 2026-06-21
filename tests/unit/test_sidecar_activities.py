@@ -8,7 +8,12 @@ import zipfile
 from pathlib import Path
 
 from histdatacom.activity_stages import UrlValidationError
-from histdatacom.histdata_ascii import CACHE_FILENAME
+from histdatacom.histdata_ascii import (
+    CACHE_FILENAME,
+    convert_polars_datetime_to_utc_ms,
+    read_ascii_file_to_polars,
+    write_polars_cache,
+)
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
 from histdatacom.sidecar.activities import (
     build_cache_activity,
@@ -16,6 +21,7 @@ from histdatacom.sidecar.activities import (
     default_activities,
     download_archives_activity,
     extract_csv_activity,
+    merge_cache_activity,
     repository_refresh_activity,
     validate_urls_activity,
 )
@@ -129,6 +135,57 @@ def _cache_payload(tmp_path) -> dict:
             "data_timeframe": "M1",
             "data_fxpair": "eurusd",
         },
+    }
+
+
+def _merge_payload(tmp_path) -> dict:
+    """Return a merge activity payload with two cache artifacts."""
+    source = convert_polars_datetime_to_utc_ms(
+        read_ascii_file_to_polars(
+            FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+            "M1",
+        ),
+        "M1",
+    )
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    write_polars_cache(source.slice(0, 1), first_dir / CACHE_FILENAME)
+    write_polars_cache(source.slice(1, 2), second_dir / CACHE_FILENAME)
+    request = RunRequest(
+        request_id="run-merge",
+        data_directory=str(tmp_path),
+        api_return_type="polars",
+    )
+    return {
+        "request": request.to_dict(),
+        "work_items": [
+            {
+                "work_id": "work-second",
+                "status": WorkStatus.CACHE_READY.value,
+                "data_dir": f"{second_dir}/",
+                "cache_filename": CACHE_FILENAME,
+                "cache_line_count": "2",
+                "cache_start": str(EXPECTED_M1_DATETIMES[1]),
+                "cache_end": str(EXPECTED_M1_DATETIMES[2]),
+                "data_format": "ascii",
+                "data_timeframe": "M1",
+                "data_fxpair": "eurusd",
+            },
+            {
+                "work_id": "work-first",
+                "status": WorkStatus.CACHE_READY.value,
+                "data_dir": f"{first_dir}/",
+                "cache_filename": CACHE_FILENAME,
+                "cache_line_count": "1",
+                "cache_start": str(EXPECTED_M1_DATETIMES[0]),
+                "cache_end": str(EXPECTED_M1_DATETIMES[0]),
+                "data_format": "ascii",
+                "data_timeframe": "M1",
+                "data_fxpair": "eurusd",
+            },
+        ],
     }
 
 
@@ -317,6 +374,28 @@ def test_build_cache_activity_builds_polars_cache(tmp_path) -> None:
     assert (tmp_path / CACHE_FILENAME).exists()
 
 
+def test_merge_cache_activity_returns_bounded_merge_metadata(tmp_path) -> None:
+    """Cache merge should return summaries and refs, not frame payloads."""
+    result = merge_cache_activity(_merge_payload(tmp_path))
+
+    assert result["result"]["stage"] == "merge_cache"
+    assert result["result"]["status"] == WorkStatus.COMPLETED.value
+    assert result["result"]["metrics"]["record_count"] == 2
+    assert result["result"]["metrics"]["set_count"] == 1
+    assert result["result"]["metrics"]["materialized"] is False
+    assert "data" not in result
+    merge_set = result["merge_sets"][0]
+    assert merge_set["timeframe"] == "M1"
+    assert merge_set["pair"] == "eurusd"
+    assert merge_set["line_count"] == 3
+    assert merge_set["start"] == str(EXPECTED_M1_DATETIMES[0])
+    assert merge_set["end"] == str(EXPECTED_M1_DATETIMES[2])
+    assert [artifact["kind"] for artifact in merge_set["artifacts"]] == [
+        "cache",
+        "cache",
+    ]
+
+
 def test_default_activities_register_operation_activities() -> None:
     """The worker default activity set should include migrated activities."""
     assert default_activities() == (
@@ -326,4 +405,5 @@ def test_default_activities_register_operation_activities() -> None:
         download_archives_activity,
         extract_csv_activity,
         build_cache_activity,
+        merge_cache_activity,
     )

@@ -82,6 +82,43 @@ class MergeStageOutput:
 
     data: Any
     result: StageResult
+    merge_sets: tuple["CacheMergeSetSummary", ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return JSON-compatible merge metadata without dataframe payloads."""
+        return {
+            "result": self.result.to_dict(),
+            "merge_sets": [
+                merge_set.to_dict() for merge_set in self.merge_sets
+            ],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CacheMergeSetSummary:
+    """Bounded metadata for one pair/timeframe cache merge set."""
+
+    timeframe: str
+    pair: str
+    record_count: int
+    line_count: int
+    start: str
+    end: str
+    artifacts: tuple[ArtifactRef, ...]
+    work_ids: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return JSON-compatible merge-set metadata."""
+        return {
+            "timeframe": self.timeframe,
+            "pair": self.pair,
+            "record_count": self.record_count,
+            "line_count": self.line_count,
+            "start": self.start,
+            "end": self.end,
+            "artifacts": [artifact.to_dict() for artifact in self.artifacts],
+            "work_ids": list(self.work_ids),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -1325,31 +1362,50 @@ def cache_build_result_for_record(
 def merge_cache_work_items(
     work_items: Sequence[WorkItem],
     *,
-    return_type: str,
+    return_type: str = "polars",
+    materialize: bool = True,
 ) -> MergeStageOutput:
     """Merge cache artifacts from explicit work items."""
-    mergeable = [
-        item
-        for item in work_items
-        if item.cache_filename == CACHE_FILENAME
-        and Path(item.data_dir, item.cache_filename).exists()
-    ]
+    mergeable = _mergeable_cache_items(work_items)
     sets_to_merge = _collate_cache_sets(mergeable)
+    merge_sets: list[CacheMergeSetSummary] = []
     for cache_set in sets_to_merge:
-        cache_set["data"] = merge_cache_items(
-            cache_set["records"],
-            return_type=return_type,
+        ordered_items = order_cache_items(cache_set["records"])
+        cache_set["records"] = ordered_items
+        merge_summary = summarize_cache_merge_set(
+            timeframe=str(cache_set["timeframe"]),
+            pair=str(cache_set["pair"]),
+            work_items=ordered_items,
         )
+        merge_sets.append(merge_summary)
+        if materialize:
+            cache_set["data"] = merge_cache_items(
+                ordered_items,
+                return_type=return_type,
+                already_ordered=True,
+            )
 
-    data = (
-        sets_to_merge[0]["data"] if len(sets_to_merge) == 1 else sets_to_merge
-    )
+    if not materialize:
+        data = None
+    elif len(sets_to_merge) == 1:
+        data = sets_to_merge[0]["data"]
+    else:
+        data = sets_to_merge
+
+    merge_set_metrics: list[JSONValue] = [
+        merge_set.to_dict() for merge_set in merge_sets
+    ]
     result = StageResult(
         work_id=derive_work_id(
             "merge_cache", *(item.work_id for item in mergeable)
         ),
         stage="merge_cache",
         status=WorkStatus.COMPLETED if sets_to_merge else WorkStatus.SKIPPED,
+        artifacts=tuple(
+            artifact
+            for merge_set in merge_sets
+            for artifact in merge_set.artifacts
+        ),
         events=(
             StatusEvent(
                 status=(
@@ -1362,26 +1418,36 @@ def merge_cache_work_items(
                 metadata={
                     "record_count": len(mergeable),
                     "set_count": len(sets_to_merge),
+                    "materialized": materialize,
                 },
             ),
         ),
         metrics={
             "record_count": len(mergeable),
             "set_count": len(sets_to_merge),
+            "materialized": materialize,
+            "sets": merge_set_metrics,
         },
     )
-    return MergeStageOutput(data=data, result=result)
+    return MergeStageOutput(
+        data=data,
+        result=result,
+        merge_sets=tuple(merge_sets),
+    )
 
 
 def merge_cache_items(
     work_items: Sequence[WorkItem],
     *,
     return_type: str,
+    already_ordered: bool = False,
 ) -> Any:
     """Merge one pair/timeframe cache set into the requested API type."""
     import polars as pl
 
-    ordered_items = sorted(work_items, key=lambda item: item.cache_start)
+    ordered_items = (
+        tuple(work_items) if already_ordered else order_cache_items(work_items)
+    )
     frames = [
         read_polars_cache(Path(item.data_dir, item.cache_filename))
         for item in ordered_items
@@ -1399,6 +1465,38 @@ def merge_cache_records(
     return merge_cache_items(
         [WorkItem.from_record(record) for record in records],
         return_type=return_type,
+    )
+
+
+def order_cache_items(
+    work_items: Sequence[WorkItem],
+) -> tuple[WorkItem, ...]:
+    """Return cache work items in stable cache-start order."""
+    return tuple(sorted(work_items, key=lambda item: item.cache_start))
+
+
+def summarize_cache_merge_set(
+    *,
+    timeframe: str,
+    pair: str,
+    work_items: Sequence[WorkItem],
+) -> CacheMergeSetSummary:
+    """Return bounded metadata for a cache merge set."""
+    artifacts = tuple(
+        _cache_artifact_ref_for_work_item(item) for item in work_items
+    )
+    line_count = sum(_coerce_int(item.cache_line_count) for item in work_items)
+    starts = [item.cache_start for item in work_items if item.cache_start]
+    ends = [item.cache_end for item in work_items if item.cache_end]
+    return CacheMergeSetSummary(
+        timeframe=timeframe,
+        pair=pair,
+        record_count=len(work_items),
+        line_count=line_count,
+        start=starts[0] if starts else "",
+        end=ends[-1] if ends else "",
+        artifacts=artifacts,
+        work_ids=tuple(item.work_id for item in work_items),
     )
 
 
@@ -2456,6 +2554,43 @@ def _file_sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _mergeable_cache_items(
+    work_items: Sequence[WorkItem],
+) -> list[WorkItem]:
+    return [
+        item
+        for item in work_items
+        if item.cache_filename == CACHE_FILENAME
+        and Path(item.data_dir, item.cache_filename).is_file()
+    ]
+
+
+def _cache_artifact_ref_for_work_item(item: WorkItem) -> ArtifactRef:
+    path = Path(item.data_dir, item.cache_filename)
+    return ArtifactRef(
+        kind="cache",
+        path=str(path),
+        size_bytes=path.stat().st_size,
+        sha256=_file_sha256(path),
+        metadata={
+            "filename": item.cache_filename,
+            "timeframe": item.data_timeframe,
+            "pair": item.data_fxpair,
+            "line_count": item.cache_line_count,
+            "start": item.cache_start,
+            "end": item.cache_end,
+            "work_id": item.work_id,
+        },
+    )
+
+
+def _coerce_int(value: object) -> int:
+    try:
+        return int(str(value or "0"))
+    except ValueError:
+        return 0
 
 
 def _artifact_refs_for_record(

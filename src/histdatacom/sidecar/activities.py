@@ -11,6 +11,7 @@ from histdatacom.activity_stages import (
     dataset_plan_stage,
     download_archive_work_item,
     extract_csv_work_item,
+    merge_cache_work_items,
     repository_refresh_stage,
     validate_url_work_item,
 )
@@ -238,6 +239,25 @@ def build_cache_activity(
     )
 
 
+@activity_defn(name="merge_cache")
+def merge_cache_activity(
+    payload: dict[str, JSONValue],
+) -> dict[str, Any]:
+    """Assemble cache merge references without materializing dataframes."""
+    work_items = _work_items_from_payload(payload)
+    if not work_items:
+        return cast(
+            dict[str, Any],
+            _missing_work_item_result(payload, "merge_cache").to_dict(),
+        )
+
+    output = merge_cache_work_items(
+        work_items,
+        materialize=False,
+    )
+    return output.to_dict()
+
+
 def default_activities() -> tuple[Callable[..., Any], ...]:
     """Return default sidecar activities for worker registration."""
     return (
@@ -247,6 +267,7 @@ def default_activities() -> tuple[Callable[..., Any], ...]:
         download_archives_activity,
         extract_csv_activity,
         build_cache_activity,
+        merge_cache_activity,
     )
 
 

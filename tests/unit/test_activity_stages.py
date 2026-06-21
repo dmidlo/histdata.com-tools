@@ -860,7 +860,9 @@ def test_merge_cache_work_items_uses_explicit_inputs(tmp_path: Path) -> None:
         Record(
             data_dir=f"{first_dir}{os.sep}",
             cache_filename=CACHE_FILENAME,
+            cache_line_count="1",
             cache_start=str(EXPECTED_M1_DATETIMES[0]),
+            cache_end=str(EXPECTED_M1_DATETIMES[0]),
             data_fxpair="eurusd",
             data_timeframe="M1",
         )
@@ -869,7 +871,9 @@ def test_merge_cache_work_items_uses_explicit_inputs(tmp_path: Path) -> None:
         Record(
             data_dir=f"{second_dir}{os.sep}",
             cache_filename=CACHE_FILENAME,
+            cache_line_count="2",
             cache_start=str(EXPECTED_M1_DATETIMES[1]),
+            cache_end=str(EXPECTED_M1_DATETIMES[2]),
             data_fxpair="eurusd",
             data_timeframe="M1",
         )
@@ -879,9 +883,63 @@ def test_merge_cache_work_items_uses_explicit_inputs(tmp_path: Path) -> None:
 
     assert output.result.status is WorkStatus.COMPLETED
     assert output.result.metrics["record_count"] == 2
+    assert output.result.metrics["set_count"] == 1
+    assert output.result.metrics["materialized"] is True
+    assert output.merge_sets[0].line_count == 3
+    assert output.merge_sets[0].start == str(EXPECTED_M1_DATETIMES[0])
+    assert output.merge_sets[0].end == str(EXPECTED_M1_DATETIMES[2])
+    assert len(output.result.artifacts) == 2
     assert output.data.select("datetime").to_series().to_list() == (
         EXPECTED_M1_DATETIMES
     )
+
+
+def test_merge_cache_work_items_can_skip_materialization(
+    tmp_path: Path,
+) -> None:
+    """Workflow merge summaries should not include dataframe payloads."""
+    frame = _m1_frame()
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    write_polars_cache(frame.slice(0, 1), first_dir / CACHE_FILENAME)
+    write_polars_cache(frame.slice(1, 2), second_dir / CACHE_FILENAME)
+    first = WorkItem.from_record(
+        Record(
+            data_dir=f"{first_dir}{os.sep}",
+            cache_filename=CACHE_FILENAME,
+            cache_line_count="1",
+            cache_start=str(EXPECTED_M1_DATETIMES[0]),
+            cache_end=str(EXPECTED_M1_DATETIMES[0]),
+            data_fxpair="eurusd",
+            data_timeframe="M1",
+        )
+    )
+    second = WorkItem.from_record(
+        Record(
+            data_dir=f"{second_dir}{os.sep}",
+            cache_filename=CACHE_FILENAME,
+            cache_line_count="2",
+            cache_start=str(EXPECTED_M1_DATETIMES[1]),
+            cache_end=str(EXPECTED_M1_DATETIMES[2]),
+            data_fxpair="eurusd",
+            data_timeframe="M1",
+        )
+    )
+
+    output = merge_cache_work_items(
+        [second, first],
+        materialize=False,
+    )
+    payload = output.to_dict()
+
+    assert output.data is None
+    assert output.result.status is WorkStatus.COMPLETED
+    assert output.result.metrics["materialized"] is False
+    assert output.merge_sets[0].record_count == 2
+    assert payload["merge_sets"][0]["line_count"] == 3
+    assert "data" not in payload
 
 
 def test_import_to_influx_work_item_emits_batches_without_writer(

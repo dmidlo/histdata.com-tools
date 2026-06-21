@@ -39,6 +39,7 @@ from histdatacom.sidecar.activities import (
     default_activities,
     download_archives_activity,
     extract_csv_activity,
+    merge_cache_activity,
     repository_refresh_activity,
     validate_urls_activity,
 )
@@ -201,6 +202,7 @@ __all__ = [
     "list_job_statuses",
     "list_job_statuses_sync",
     "load_sidecar_manifest",
+    "merge_cache_activity",
     "observe_workflow_result",
     "repository_refresh_activity",
     "request_partitions",

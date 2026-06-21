@@ -262,6 +262,49 @@ def test_merge_records_reads_polars_cache_files(
     )
 
 
+def test_merge_records_accepts_explicit_records_without_queue(
+    tmp_path: Path,
+) -> None:
+    """API merge assembly should work from explicit cache records."""
+    import polars as pl
+
+    from histdatacom import config
+    from histdatacom.api import Api
+
+    source = Api._import_file_to_polars(
+        SimpleNamespace(data_timeframe="M1"),
+        FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+    )
+    first = _write_cache_record(
+        tmp_path,
+        "explicit-first",
+        source.slice(0, 1),
+        pair="eurusd",
+        timeframe="M1",
+        start=EXPECTED_M1_DATETIMES[0],
+    )
+    second = _write_cache_record(
+        tmp_path,
+        "explicit-second",
+        source.slice(1, 2),
+        pair="eurusd",
+        timeframe="M1",
+        start=EXPECTED_M1_DATETIMES[1],
+    )
+    original_args = config.ARGS.copy()
+
+    try:
+        config.ARGS["api_return_type"] = "polars"
+        result = Api().merge_records([second, first])
+    finally:
+        config.ARGS = original_args
+
+    assert isinstance(result, pl.DataFrame)
+    assert result.select("datetime").to_series().to_list() == (
+        EXPECTED_M1_DATETIMES
+    )
+
+
 def test_merge_records_empty_set_returns_empty_polars_dataframe() -> None:
     """Empty merge sets should produce an intentional empty Polars frame."""
     import polars as pl
