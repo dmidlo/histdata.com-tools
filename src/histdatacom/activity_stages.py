@@ -6,7 +6,7 @@ import json
 import os
 import ssl
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from ssl import SSLCertVerificationError
 from typing import Any, Callable, Iterable, Mapping, MutableMapping, Sequence
@@ -14,6 +14,8 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 import certifi
+import requests
+from bs4 import BeautifulSoup
 
 from histdatacom.fx_enums import Format, Timeframe, get_valid_format_timeframes
 from histdatacom.histdata_ascii import (
@@ -28,6 +30,7 @@ from histdatacom.records import Record
 from histdatacom.runtime_contracts import (
     ArtifactRef,
     FailureInfo,
+    JSONValue,
     StageResult,
     StatusEvent,
     WorkItem,
@@ -124,28 +127,148 @@ class DatasetPeriod:
     datemonth: str
 
 
+@dataclass(frozen=True, slots=True)
+class UrlPageData:
+    """Fetched HistData archive page metadata."""
+
+    html: str
+    encoding: str
+    bytes_length: str
+    headers: dict[str, str]
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return JSON-compatible page metadata."""
+        return {
+            "html": self.html,
+            "page_content": self.html,
+            "encoding": self.encoding,
+            "bytes_length": self.bytes_length,
+            "headers": dict(self.headers),
+        }
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "UrlPageData":
+        """Create page metadata from legacy or activity payloads."""
+        return cls(
+            html=str(data.get("html") or data.get("page_content") or ""),
+            encoding=str(data.get("encoding", "") or ""),
+            bytes_length=str(data.get("bytes_length", "") or ""),
+            headers={
+                str(key): str(value)
+                for key, value in dict(data.get("headers") or {}).items()
+            },
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class UrlFormMetadata:
+    """Parsed HistData download form metadata."""
+
+    data_tk: str
+    data_date: str
+    data_datemonth: str
+    data_format: str
+    data_timeframe: str
+    data_fxpair: str
+    encoding: str
+    bytes_length: str
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return JSON-compatible form metadata."""
+        return {
+            "data_tk": self.data_tk,
+            "data_date": self.data_date,
+            "data_datemonth": self.data_datemonth,
+            "data_format": self.data_format,
+            "data_timeframe": self.data_timeframe,
+            "data_fxpair": self.data_fxpair,
+            "encoding": self.encoding,
+            "bytes_length": self.bytes_length,
+        }
+
+
+class UrlValidationError(Exception):
+    """Structured URL validation failure."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        retryable: bool = False,
+        no_data: bool = False,
+        detail: Mapping[str, JSONValue] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.no_data = no_data
+        self.detail = dict(detail or {})
+
+
+class HistDataNoDataError(UrlValidationError):
+    """HistData returned a page without downloadable archive metadata."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "HISTDATA_NO_DATA",
+        detail: Mapping[str, JSONValue] | None = None,
+    ) -> None:
+        super().__init__(
+            code,
+            message,
+            retryable=False,
+            no_data=True,
+            detail=detail,
+        )
+
+
 RecordTransformer = Callable[[Record], Record]
 RecordAction = Callable[[Record], None]
 NoArgBool = Callable[[], bool]
 LineSink = Callable[[list[str]], None]
 RepositoryFetcher = Callable[[str], Mapping[str, Any]]
+UrlPageFetcher = Callable[[str, int], UrlPageData | Mapping[str, Any]]
 
 
 def validate_url_work_item(
     work_item: WorkItem,
     *,
     args: Mapping[str, Any],
-    scrape_record_info: RecordTransformer,
-    check_for_valid_download: RecordAction,
+    scrape_record_info: RecordTransformer | None = None,
+    check_for_valid_download: RecordAction | None = None,
+    fetch_page_data: UrlPageFetcher | None = None,
     check_if_queue_is_needed: NoArgBool | None = None,
     set_repo_datum: RecordAction | None = None,
 ) -> ActivityStageOutput:
     """Validate one HistData URL without touching global queues."""
     record = _record_from_work_item(work_item)
+    updated = _work_item_from_record(record, work_item)
     try:
         if record.status == WorkStatus.URL_NEW.value:
-            record = scrape_record_info(record)
-            check_for_valid_download(record)
+            if scrape_record_info is not None:
+                record = scrape_record_info(record)
+                if check_for_valid_download is None:
+                    _check_form_token(record.data_tk)
+                else:
+                    check_for_valid_download(record)
+                updated = _work_item_from_record(record, work_item)
+            else:
+                page_fetcher = fetch_page_data or fetch_histdata_page_data
+                page_data = page_fetcher(
+                    record.url,
+                    _requests_timeout(args),
+                )
+                metadata = parse_histdata_form_metadata(page_data)
+                updated = apply_form_metadata_to_work_item(
+                    work_item,
+                    metadata,
+                )
+                record = _record_from_work_item(updated)
+
             if (
                 check_if_queue_is_needed is not None
                 and check_if_queue_is_needed()
@@ -155,15 +278,19 @@ def validate_url_work_item(
 
             record.status = WorkStatus.URL_VALID.value
             record.write_memento_file(base_dir=_default_download_dir(args))
+            updated = _work_item_from_record(record, updated)
 
-        updated = _work_item_from_record(record, work_item)
         return _activity_output(
             updated,
             stage="validate_url",
             status=updated.status,
-            metrics={"forward": True},
+            metrics={
+                "forward": True,
+                "encoding": updated.encoding,
+                "bytes_length": updated.bytes_length,
+            },
         )
-    except ValueError:
+    except (HistDataNoDataError, ValueError) as err:
         record.status = WorkStatus.URL_NO_REPO_DATA.value
         record.write_memento_file(base_dir=_default_download_dir(args))
         updated = _work_item_from_record(record, work_item)
@@ -173,11 +300,189 @@ def validate_url_work_item(
             status=WorkStatus.URL_NO_REPO_DATA,
             forward=False,
             metrics={"forward": False, "missing_repo_data": True},
-            message="HistData has no downloadable archive for this URL.",
+            message=(
+                "HistData has no downloadable archive for this URL."
+                if isinstance(err, ValueError)
+                else err.message
+            ),
+        )
+    except UrlValidationError as err:
+        status = WorkStatus.RETRIED if err.retryable else WorkStatus.FAILED
+        updated = _work_item_from_record(record, work_item).with_status(status)
+        return _activity_output(
+            updated,
+            stage="validate_url",
+            status=status,
+            forward=False,
+            failure=FailureInfo(
+                code=err.code,
+                message=err.message,
+                retryable=err.retryable,
+                detail=err.detail,
+            ),
+            metrics={
+                "forward": False,
+                "retryable": err.retryable,
+                "failed": not err.retryable,
+            },
+            message=err.message,
         )
     except Exception as err:
-        record.delete_momento_file()
-        raise SystemExit(1) from err
+        updated = _work_item_from_record(record, work_item).with_status(
+            WorkStatus.FAILED
+        )
+        return _activity_output(
+            updated,
+            stage="validate_url",
+            status=WorkStatus.FAILED,
+            forward=False,
+            failure=FailureInfo(
+                code="URL_VALIDATION_FAILED",
+                message=str(err),
+                retryable=False,
+                detail={"url": record.url},
+            ),
+            metrics={"forward": False, "failed": True},
+            message=str(err),
+        )
+
+
+def fetch_histdata_page_data(
+    url: str,
+    timeout: int,
+    *,
+    headers: Mapping[str, str] | None = None,
+    request_get: Callable[..., Any] | None = None,
+) -> UrlPageData:
+    """Fetch a HistData archive page with invocation-local headers."""
+    local_headers = dict(headers or {})
+    get = request_get or requests.get
+    kwargs: dict[str, Any] = {"timeout": timeout}
+    if local_headers:
+        kwargs["headers"] = local_headers
+
+    try:
+        response = get(url, **kwargs)
+        raise_for_status = getattr(response, "raise_for_status", None)
+        if callable(raise_for_status):
+            raise_for_status()
+    except requests.RequestException as err:
+        raise UrlValidationError(
+            "URL_FETCH_RETRYABLE",
+            str(err),
+            retryable=True,
+            detail={"url": url},
+        ) from err
+    except OSError as err:
+        raise UrlValidationError(
+            "URL_FETCH_RETRYABLE",
+            str(err),
+            retryable=True,
+            detail={"url": url},
+        ) from err
+
+    response_headers = {
+        str(key): str(value)
+        for key, value in dict(getattr(response, "headers", {}) or {}).items()
+    }
+    encoding = _required_header(response_headers, "Content-Encoding", url=url)
+    bytes_length = _required_header(
+        response_headers,
+        "Content-Length",
+        url=url,
+    )
+    if not bytes_length.isdigit():
+        raise UrlValidationError(
+            "MALFORMED_HEADERS",
+            "HistData response Content-Length header is not numeric.",
+            detail={"url": url, "content_length": bytes_length},
+        )
+
+    return UrlPageData(
+        html=_response_html(response),
+        encoding=encoding,
+        bytes_length=bytes_length,
+        headers=response_headers,
+    )
+
+
+def parse_histdata_form_metadata(
+    page_data: UrlPageData | Mapping[str, Any],
+) -> UrlFormMetadata:
+    """Parse HistData download form values from a fetched archive page."""
+    page = (
+        page_data
+        if isinstance(page_data, UrlPageData)
+        else UrlPageData.from_mapping(page_data)
+    )
+    soup = BeautifulSoup(page.html, "html.parser")
+    form = soup.find("form", id="file_down")
+    if form is None:
+        raise HistDataNoDataError(
+            "HistData page does not include a download form.",
+        )
+
+    values = {
+        key: _form_value(form, key)
+        for key in (
+            "tk",
+            "date",
+            "datemonth",
+            "platform",
+            "timeframe",
+            "fxpair",
+        )
+    }
+    if not values["tk"]:
+        raise HistDataNoDataError(
+            "HistData page does not include a download token.",
+        )
+
+    missing = sorted(key for key, value in values.items() if not value)
+    if missing:
+        raise UrlValidationError(
+            "MALFORMED_FORM",
+            "HistData download form is missing required fields.",
+            detail={"missing_fields": ",".join(missing)},
+        )
+
+    return UrlFormMetadata(
+        data_tk=values["tk"],
+        data_date=values["date"],
+        data_datemonth=values["datemonth"],
+        data_format=values["platform"],
+        data_timeframe=values["timeframe"],
+        data_fxpair=values["fxpair"],
+        encoding=page.encoding,
+        bytes_length=page.bytes_length,
+    )
+
+
+def apply_form_metadata_to_work_item(
+    work_item: WorkItem,
+    metadata: UrlFormMetadata,
+) -> WorkItem:
+    """Return a validated work item with parsed form metadata applied."""
+    return replace(
+        work_item,
+        status=WorkStatus.URL_VALID,
+        status_text="",
+        encoding=metadata.encoding,
+        bytes_length=metadata.bytes_length,
+        data_tk=metadata.data_tk,
+        data_date=metadata.data_date,
+        data_datemonth=metadata.data_datemonth,
+        data_format=metadata.data_format,
+        data_timeframe=metadata.data_timeframe,
+        data_fxpair=metadata.data_fxpair,
+    )
+
+
+def _check_form_token(token: str) -> None:
+    if not token:
+        raise HistDataNoDataError(
+            "HistData page does not include a download token.",
+        )
 
 
 def download_archive_work_item(
@@ -1099,6 +1404,51 @@ def apply_stage_output_to_record(
     """Apply an explicit stage output to a legacy mutable record."""
     record(**output.work_item.to_record_kwargs())
     return record
+
+
+def _required_header(
+    headers: Mapping[str, str],
+    name: str,
+    *,
+    url: str,
+) -> str:
+    for key, value in headers.items():
+        if key.lower() == name.lower() and value:
+            return value
+    raise UrlValidationError(
+        "MALFORMED_HEADERS",
+        f"HistData response is missing {name}.",
+        detail={"url": url, "missing_header": name},
+    )
+
+
+def _response_html(response: Any) -> str:
+    text = getattr(response, "text", None)
+    if isinstance(text, str) and text:
+        return text
+
+    content = getattr(response, "content", b"")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, bytes):
+        encoding = str(getattr(response, "encoding", "") or "utf-8")
+        return content.decode(encoding, errors="replace")
+    return str(content or "")
+
+
+def _form_value(form: Any, field_id: str) -> str:
+    element = form.find(id=field_id)
+    if element is None:
+        return ""
+    value = element.get("value")
+    return str(value or "")
+
+
+def _requests_timeout(args: Mapping[str, Any]) -> int:
+    try:
+        return int(args.get("requests_timeout") or args.get("timeout") or 10)
+    except (TypeError, ValueError):
+        return 10
 
 
 def _record_from_work_item(work_item: WorkItem) -> Record:

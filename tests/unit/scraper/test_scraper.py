@@ -18,6 +18,22 @@ ASCII_M1_URL = (
 )
 
 
+def _form_html(*, token: str = "token") -> str:
+    """Return a minimal HistData download form."""
+    return f"""
+    <html>
+      <form id="file_down">
+        <input id="tk" value="{token}">
+        <input id="date" value="2022">
+        <input id="datemonth" value="2022">
+        <input id="platform" value="ASCII">
+        <input id="timeframe" value="M1">
+        <input id="fxpair" value="eurusd">
+      </form>
+    </html>
+    """
+
+
 def test_scraper() -> None:
     """Test pytest path resolution."""
     assert True  # noqa:S101 # sourcery skip # act
@@ -51,16 +67,11 @@ def test_validate_url_transitions_new_record_to_valid_and_writes_meta(
     record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
     _configure_stage_queues(record, tmp_path)
 
-    def scrape_record_info(record_: Record) -> Record:
-        record_.data_tk = "token"
-        record_.data_date = "2022"
-        record_.data_datemonth = "2022"
-        record_.data_format = "ASCII"
-        record_.data_timeframe = "M1"
-        record_.data_fxpair = "eurusd"
-        return record_
-
-    scraper._scrape_record_info = scrape_record_info  # type: ignore[method-assign]
+    scraper._get_page_data = lambda url, timeout: {  # type: ignore[method-assign]
+        "html": _form_html(),
+        "encoding": "gzip",
+        "bytes_length": "123",
+    }
 
     scraper._validate_url(record, config.ARGS)
 
@@ -81,7 +92,11 @@ def test_validate_url_transitions_missing_record_without_requeue(
     scraper.check_for_repo_action = lambda: False
     record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
     _configure_stage_queues(record, tmp_path)
-    scraper._scrape_record_info = lambda record_: record_  # type: ignore[method-assign]
+    scraper._get_page_data = lambda url, timeout: {  # type: ignore[method-assign]
+        "html": _form_html(token=""),
+        "encoding": "gzip",
+        "bytes_length": "123",
+    }
 
     scraper._validate_url(record, config.ARGS)
 
@@ -91,6 +106,39 @@ def test_validate_url_transitions_missing_record_without_requeue(
     assert record.status == WorkStatus.URL_NO_REPO_DATA.value
     assert config.NEXT_QUEUE.empty()
     assert metadata["status"] == WorkStatus.URL_NO_REPO_DATA.value
+
+
+def test_request_file_uses_local_post_headers(monkeypatch) -> None:
+    """Download requests should not mutate global POST_HEADERS."""
+    original_headers = dict(config.POST_HEADERS)
+    captured: list[dict[str, str]] = []
+
+    class Response:
+        headers = {
+            "Content-Disposition": "attachment; filename=archive.zip",
+        }
+        content = b"zip"
+
+    def post(url, *, data, headers, timeout):  # noqa:ANN001
+        captured.append(headers)
+        return Response()
+
+    monkeypatch.setattr("histdatacom.scraper.scraper.requests.post", post)
+    record = Record(
+        url=ASCII_M1_URL,
+        data_tk="token",
+        data_date="2022",
+        data_datemonth="2022",
+        data_format="ASCII",
+        data_timeframe="M1",
+        data_fxpair="eurusd",
+    )
+
+    Scraper._request_file(record, 1)
+
+    assert config.POST_HEADERS == original_headers
+    assert captured[0] is not config.POST_HEADERS
+    assert captured[0]["Referer"] == ASCII_M1_URL
 
 
 def test_download_zip_transitions_valid_record_to_csv_zip(

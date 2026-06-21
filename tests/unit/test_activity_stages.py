@@ -8,11 +8,15 @@ import zipfile
 from pathlib import Path
 from urllib.error import URLError
 
+import requests
+
 from histdatacom.activity_stages import (
+    UrlPageData,
     build_cache_work_item,
     dataset_plan_stage,
     download_archive_work_item,
     extract_csv_work_item,
+    fetch_histdata_page_data,
     import_to_influx_work_item,
     merge_cache_work_items,
     read_repository_data_file,
@@ -42,6 +46,24 @@ EXPECTED_M1_LINE = (
 )
 
 
+class _FakeResponse:
+    """Tiny requests.Response stand-in for validation fetch tests."""
+
+    def __init__(
+        self,
+        *,
+        headers: dict[str, str],
+        content: bytes,
+    ) -> None:
+        self.headers = headers
+        self.content = content
+        self.text = ""
+        self.encoding = "utf-8"
+
+    def raise_for_status(self) -> None:
+        """Match the requests response API."""
+
+
 def _args(tmp_path: Path) -> dict[str, object]:
     """Return explicit stage args for tests."""
     return {
@@ -58,6 +80,22 @@ def _m1_frame() -> object:
         "M1",
     )
     return convert_polars_datetime_to_utc_ms(raw, "M1")
+
+
+def _form_html(*, token: str = "token") -> str:
+    """Return a minimal HistData download form."""
+    return f"""
+    <html>
+      <form id="file_down">
+        <input id="tk" value="{token}">
+        <input id="date" value="2022">
+        <input id="datemonth" value="2022">
+        <input id="platform" value="ASCII">
+        <input id="timeframe" value="M1">
+        <input id="fxpair" value="eurusd">
+      </form>
+    </html>
+    """
 
 
 def test_validate_url_work_item_returns_updated_item_without_queue(
@@ -91,6 +129,32 @@ def test_validate_url_work_item_returns_updated_item_without_queue(
     assert (Path(output.work_item.data_dir) / ".meta").exists()
 
 
+def test_validate_url_work_item_parses_form_metadata(
+    tmp_path: Path,
+) -> None:
+    """URL validation should parse form metadata without record callbacks."""
+    record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
+
+    output = validate_url_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        fetch_page_data=lambda url, timeout: UrlPageData(
+            html=_form_html(),
+            encoding="gzip",
+            bytes_length="123",
+            headers={},
+        ),
+    )
+
+    assert output.forward
+    assert output.result.status is WorkStatus.URL_VALID
+    assert output.work_item.status is WorkStatus.URL_VALID
+    assert output.work_item.data_tk == "token"
+    assert output.work_item.encoding == "gzip"
+    assert output.work_item.bytes_length == "123"
+    assert output.result.metrics["encoding"] == "gzip"
+
+
 def test_validate_url_work_item_missing_data_does_not_forward(
     tmp_path: Path,
 ) -> None:
@@ -111,6 +175,84 @@ def test_validate_url_work_item_missing_data_does_not_forward(
     assert output.work_item.status is WorkStatus.URL_NO_REPO_DATA
     assert output.result.metrics["missing_repo_data"] is True
     assert (Path(output.work_item.data_dir) / ".meta").exists()
+
+
+def test_validate_url_work_item_missing_token_is_no_data(
+    tmp_path: Path,
+) -> None:
+    """Missing form tokens should be an explicit no-data result."""
+    record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
+
+    output = validate_url_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        fetch_page_data=lambda url, timeout: UrlPageData(
+            html=_form_html(token=""),
+            encoding="gzip",
+            bytes_length="123",
+            headers={},
+        ),
+    )
+
+    assert not output.forward
+    assert output.result.status is WorkStatus.URL_NO_REPO_DATA
+    assert output.work_item.status is WorkStatus.URL_NO_REPO_DATA
+    assert output.result.failure is None
+    assert output.result.metrics["missing_repo_data"] is True
+
+
+def test_validate_url_work_item_malformed_headers_fail(
+    tmp_path: Path,
+) -> None:
+    """Malformed fetch headers should be a structured failed result."""
+    record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
+
+    def get(url: str, *, timeout: int) -> _FakeResponse:
+        return _FakeResponse(headers={}, content=_form_html().encode())
+
+    output = validate_url_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        fetch_page_data=lambda url, timeout: fetch_histdata_page_data(
+            url,
+            timeout,
+            request_get=get,
+        ),
+    )
+
+    assert not output.forward
+    assert output.result.status is WorkStatus.FAILED
+    assert output.work_item.status is WorkStatus.FAILED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "MALFORMED_HEADERS"
+    assert not output.result.failure.retryable
+
+
+def test_validate_url_work_item_network_failure_is_retried(
+    tmp_path: Path,
+) -> None:
+    """Network failures should be retryable validation outcomes."""
+    record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
+
+    def get(url: str, *, timeout: int) -> _FakeResponse:
+        raise requests.Timeout("connect timeout")
+
+    output = validate_url_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        fetch_page_data=lambda url, timeout: fetch_histdata_page_data(
+            url,
+            timeout,
+            request_get=get,
+        ),
+    )
+
+    assert not output.forward
+    assert output.result.status is WorkStatus.RETRIED
+    assert output.work_item.status is WorkStatus.RETRIED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "URL_FETCH_RETRYABLE"
+    assert output.result.failure.retryable
 
 
 def test_download_archive_work_item_returns_zip_artifact(

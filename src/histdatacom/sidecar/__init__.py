@@ -37,6 +37,7 @@ from histdatacom.sidecar.activities import (
     dataset_plan_activity,
     default_activities,
     repository_refresh_activity,
+    validate_urls_activity,
 )
 from histdatacom.sidecar.control import (
     CONTROL_SCHEMA_VERSION,
@@ -211,6 +212,7 @@ __all__ = [
     "submit_run_request_and_observe",
     "submit_run_request_and_observe_sync",
     "submit_run_request",
+    "validate_urls_activity",
     "workflow_names",
     "workflow_id_for_request",
     "workflow_topology_document",

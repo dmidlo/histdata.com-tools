@@ -11,17 +11,18 @@ import traceback
 from pathlib import Path
 from typing import Callable
 
-import bs4
 import requests
-from bs4 import BeautifulSoup
 from rich import print  # pylint: disable=redefined-builtin
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from histdatacom import config
 from histdatacom.activity_stages import (
     apply_stage_output_to_record,
+    apply_form_metadata_to_work_item,
     download_archive_work_item,
+    fetch_histdata_page_data,
     plan_dataset_work_items,
+    parse_histdata_form_metadata,
     validate_url_work_item,
 )
 from histdatacom.concurrency import ThreadPool, get_pool_cpu_count
@@ -102,7 +103,7 @@ class Scraper:  # noqa:H601
         Returns:
             requests.Response: zip file response
         """
-        post_headers = config.POST_HEADERS
+        post_headers = dict(config.POST_HEADERS)
         post_headers["Referer"] = record.url
         return requests.post(
             "http://www.histdata.com/get.php",
@@ -229,8 +230,7 @@ class Scraper:  # noqa:H601
             output = validate_url_work_item(
                 WorkItem.from_record(record),
                 args=args,
-                scrape_record_info=self._scrape_record_info,
-                check_for_valid_download=self._check_for_valid_download,
+                fetch_page_data=self._get_page_data,
                 check_if_queue_is_needed=self.check_if_queue_is_needed,
                 set_repo_datum=self.set_repo_datum,
             )
@@ -349,17 +349,7 @@ class Scraper:  # noqa:H601
                  "encoding": encoding,
                  "bytes_length: bytes_length}
         """
-        request = requests.get(url, timeout=timeout)
-
-        page_content = BeautifulSoup(request.content, "html.parser")
-        encoding = dict(request.headers)["Content-Encoding"]
-        bytes_length = dict(request.headers)["Content-Length"]
-
-        return {
-            "page_content": page_content,
-            "encoding": encoding,
-            "bytes_length": bytes_length,
-        }
+        return fetch_histdata_page_data(url, timeout).to_dict()
 
     def _fetch_form_values(self, page_data: dict, record: Record) -> Record:
         """Get values from page's file download form.
@@ -371,23 +361,10 @@ class Scraper:  # noqa:H601
         Returns:
             Record: record for the work queue.
         """
-        form_page_content = page_data["page_content"]
-        form = form_page_content.find_all("form", id="file_down")
-
-        for element in form:
-            for form_value in element:
-                if isinstance(form_value, bs4.element.Tag):
-                    match form_value.get("id"):
-                        case "tk":
-                            record.data_tk = form_value.get("value")
-                        case "date":
-                            record.data_date = form_value.get("value")
-                        case "datemonth":
-                            record.data_datemonth = form_value.get("value")
-                        case "platform":
-                            record.data_format = form_value.get("value")
-                        case "timeframe":
-                            record.data_timeframe = form_value.get("value")
-                        case "fxpair":
-                            record.data_fxpair = form_value.get("value")
+        metadata = parse_histdata_form_metadata(page_data)
+        work_item = apply_form_metadata_to_work_item(
+            WorkItem.from_record(record),
+            metadata,
+        )
+        record(**work_item.to_record_kwargs())
         return record
