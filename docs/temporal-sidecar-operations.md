@@ -218,6 +218,12 @@ the requested `polars`, `pandas`, or `arrow` object by materializing completed
 cache artifacts on disk. When `sidecar_wait_result` is `False`, the call
 returns the sidecar job payload instead.
 
+Waited sidecar repository requests preserve the foreground compatibility
+surface. API calls using `available_remote_data` or `update_remote_data` return
+the available-data dictionary, while CLI calls using `-A` or `-U` render the
+repository table and use the same repository failure exit behavior. Submit-only
+repository requests still return sidecar job metadata.
+
 ## Job Control Commands
 
 The sidecar control surface is intentionally JSON-friendly for CLI automation

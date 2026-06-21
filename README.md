@@ -387,6 +387,7 @@ histdatacom-sidecar jobs cancel histdatacom-<request-id> --reason "operator stop
 - `-A`, `-U`, `-V`, `-D`, `-X`, and `-I` keep their existing option semantics before a sidecar request is submitted.
 - `--sidecar-start` starts the server and worker lane fleet only when no healthy sidecar is running.
 - `--sidecar-submit-only` submits a job and returns job metadata instead of waiting for cache artifacts or workflow results.
+- Waited sidecar `-A` / `-U` repository requests keep the foreground output contract: API calls return the available-data dictionary, and CLI calls render the repository table.
 - API calls with `options.api_return_type` and `options.use_sidecar = True` return the requested `polars`, `pandas`, or `arrow` object after a completed sidecar job by materializing cache artifacts on disk.
 - If the sidecar is unavailable, CLI calls exit nonzero with a clear error and API calls raise `SidecarUnavailableError`.
 

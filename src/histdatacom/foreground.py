@@ -41,6 +41,38 @@ from histdatacom.runtime_contracts import (
 from histdatacom.utils import get_month_from_datemonth, get_year_from_datemonth
 
 
+def print_repository_table(repo_data: dict[str, Any]) -> None:
+    """Render repository metadata using the legacy CLI table contract."""
+    table = Table(
+        title="Data and date ranges available from HistData.com",
+        box=box.MARKDOWN,
+    )
+    table.add_column("Pair -p")
+    table.add_column("Start -s")
+    table.add_column("End -e")
+
+    for row, value in repo_data.items():
+        start = str(value["start"])
+        end = str(value["end"])
+        table.add_row(
+            row.lower(),
+            f"{get_year_from_datemonth(start)}-{get_month_from_datemonth(start)}",
+            f"{get_year_from_datemonth(end)}-{get_month_from_datemonth(end)}",
+        )
+    print(table)  # noqa:T201
+
+
+def print_repository_failure(code: str) -> None:
+    """Render the legacy repository failure message."""
+    if code == "REPOSITORY_NETWORK_ERROR":
+        print(r"""[red]Unable to fetch repo list from github.
+                - You can manually update using `-U \[pair(s)]`""")  # noqa:T201
+        return
+    print("""[red]Unable to fetch repo list from github.
+                        - Please install certifi package with:
+                            pip install certifi`""")  # noqa:T201
+
+
 class ForegroundRun:
     """Run HistData operations locally without manager-backed queues."""
 
@@ -117,7 +149,10 @@ class ForegroundRun:
                 repository_output.result.failure.code
             )
             if self.args.get("from_api"):
-                return repository_output.available_data
+                failure_available_data: dict[str, Any] = (
+                    repository_output.available_data
+                )
+                return failure_available_data
             raise SystemExit(1)
 
         if self._repository_needs_validation(repository_output):
@@ -137,7 +172,8 @@ class ForegroundRun:
             str(self.args.get("by", "") or ""),
         )
         if self.args.get("from_api"):
-            return available_data
+            api_available_data: dict[str, Any] = available_data
+            return api_available_data
 
         self._print_repository_table(available_data)
         raise SystemExit(0)
@@ -183,7 +219,8 @@ class ForegroundRun:
             zip_persist=self.request.zip_persist,
         )
         self.stage_results.append(output.result)
-        return output.work_items
+        work_items: tuple[WorkItem, ...] = output.work_items
+        return work_items
 
     def _validate_work_items(
         self,
@@ -232,32 +269,10 @@ class ForegroundRun:
         return None if not missing else set(missing)
 
     def _print_repository_table(self, repo_data: dict[str, Any]) -> None:
-        table = Table(
-            title="Data and date ranges available from HistData.com",
-            box=box.MARKDOWN,
-        )
-        table.add_column("Pair -p")
-        table.add_column("Start -s")
-        table.add_column("End -e")
-
-        for row, value in repo_data.items():
-            start = str(value["start"])
-            end = str(value["end"])
-            table.add_row(
-                row.lower(),
-                f"{get_year_from_datemonth(start)}-{get_month_from_datemonth(start)}",
-                f"{get_year_from_datemonth(end)}-{get_month_from_datemonth(end)}",
-            )
-        print(table)  # noqa:T201
+        print_repository_table(repo_data)
 
     def _print_repository_failure(self, code: str) -> None:
-        if code == "REPOSITORY_NETWORK_ERROR":
-            print(r"""[red]Unable to fetch repo list from github.
-                - You can manually update using `-U \[pair(s)]`""")  # noqa:T201
-            return
-        print("""[red]Unable to fetch repo list from github.
-                        - Please install certifi package with:
-                            pip install certifi`""")  # noqa:T201
+        print_repository_failure(code)
 
 
 def run_foreground(

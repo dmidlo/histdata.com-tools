@@ -406,6 +406,10 @@ class RunRequest:
     @classmethod
     def from_options(cls, options: Any, request_id: str = "") -> "RunRequest":
         """Create a request contract from the current Options object shape."""
+        metadata = dict(getattr(options, "metadata", {}) or {})
+        repo_sort = str(getattr(options, "by", "") or "")
+        if repo_sort:
+            metadata["repo_sort"] = repo_sort
         return cls(
             request_id=request_id or new_request_id(),
             pairs=tuple(sorted(getattr(options, "pairs", ()) or ())),
@@ -439,6 +443,7 @@ class RunRequest:
                 getattr(options, "delete_after_influx", False)
             ),
             zip_persist=bool(getattr(options, "zip_persist", False)),
+            metadata=metadata,
         )
 
     def to_dict(self) -> dict[str, JSONValue]:

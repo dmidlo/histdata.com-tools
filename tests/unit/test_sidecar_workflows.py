@@ -73,6 +73,41 @@ class _RecordingChildExecutor:
         ).to_dict()
 
 
+class _RepositoryMetricsChildExecutor:
+    """Fake child executor that returns repository stage metrics."""
+
+    async def execute_child_workflow(
+        self,
+        workflow_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        workflow_id: str,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Return a child workflow summary with available repository data."""
+        return {
+            "workflow_name": workflow_name,
+            "request_id": "run-topology",
+            "status": WorkStatus.COMPLETED.value,
+            "stage_results": [
+                StageResult(
+                    work_id=workflow_id,
+                    stage="repository_refresh",
+                    status=WorkStatus.COMPLETED,
+                    metrics={
+                        "available_data": {
+                            "eurusd": {
+                                "start": "200005",
+                                "end": "202212",
+                            }
+                        }
+                    },
+                ).to_dict()
+            ],
+            "artifacts": [],
+        }
+
+
 class _CancellingChildExecutor:
     """Fake child workflow executor that cancels the first child."""
 
@@ -513,6 +548,32 @@ def test_repository_only_request_only_plans_repository_refresh() -> None:
     assert [item.workflow_name for item in invocations] == [
         "RepositoryRefreshWorkflow"
     ]
+
+
+def test_parent_workflow_preserves_repository_available_data_metrics() -> None:
+    """Parent results should retain bounded repo data for API parity."""
+    request = _request(
+        available_remote_data=True,
+        pairs=("eurusd",),
+        timeframes=(),
+        validate_urls=False,
+        download_data_archives=False,
+        extract_csvs=False,
+        api_return_type="",
+        import_to_influxdb=False,
+    )
+    workflow = workflows.HistDataRunWorkflow(
+        executor=_RepositoryMetricsChildExecutor()
+    )
+
+    summary = asyncio.run(workflow.run(request.to_dict()))
+
+    stage_result = summary["stage_results"][0]
+    metrics = stage_result["metrics"]
+    assert metrics["available_data"] == {
+        "eurusd": {"start": "200005", "end": "202212"}
+    }
+    assert metrics["child_stage_count"] == 1
 
 
 def test_parent_workflow_composes_symbol_timeframe_children() -> None:

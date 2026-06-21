@@ -26,12 +26,16 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Mapping
 
 import histdatacom
 from histdatacom import Options, config
 from histdatacom.cli import ArgParser
-from histdatacom.foreground import run_foreground
+from histdatacom.foreground import (
+    print_repository_failure,
+    print_repository_table,
+    run_foreground,
+)
 from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import RunRequest
@@ -166,6 +170,27 @@ class _HistDataCom:  # noqa:R701
             raise SystemExit(1) from err
 
         payload = result.to_dict()
+        if self._should_materialize_sidecar_repository_return():
+            if _sidecar_repository_payload_failed(payload):
+                if config.ARGS["from_api"]:
+                    return (
+                        _repository_available_data_from_sidecar_payload(payload)
+                        or {}
+                    )
+                print_repository_failure(
+                    _repository_failure_code_from_sidecar_payload(payload)
+                )
+                raise SystemExit(1)
+
+            available_data = _repository_available_data_from_sidecar_payload(
+                payload
+            )
+            if available_data is not None:
+                if config.ARGS["from_api"]:
+                    return available_data
+                print_repository_table(available_data)
+                raise SystemExit(0)
+
         if self._should_materialize_sidecar_api_return(payload):
             records = _cache_records_from_sidecar_payload(payload)
             if records:
@@ -173,6 +198,16 @@ class _HistDataCom:  # noqa:R701
         if not config.ARGS["from_api"]:
             print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
         return payload
+
+    def _should_materialize_sidecar_repository_return(self) -> bool:
+        """Return whether a waited sidecar repo request should mimic legacy IO."""
+        return bool(
+            config.ARGS["sidecar_wait_result"]
+            and (
+                config.ARGS["available_remote_data"]
+                or config.ARGS["update_remote_data"]
+            )
+        )
 
     def _should_materialize_sidecar_api_return(self, payload: dict) -> bool:
         """Return whether a completed sidecar run should mimic API returns."""
@@ -249,6 +284,47 @@ def _cache_records_from_sidecar_payload(payload: dict) -> list[Record]:
     return records
 
 
+def _repository_available_data_from_sidecar_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Return legacy repository data from sidecar result metrics."""
+    for item in _iter_mapping_payloads(payload):
+        metrics = item.get("metrics")
+        if not isinstance(metrics, Mapping) or "available_data" not in metrics:
+            continue
+        available_data = metrics.get("available_data")
+        if isinstance(available_data, Mapping):
+            return {
+                str(pair): dict(value) if isinstance(value, Mapping) else value
+                for pair, value in available_data.items()
+            }
+    return None
+
+
+def _sidecar_repository_payload_failed(payload: Mapping[str, Any]) -> bool:
+    """Return whether the waited sidecar result represents repo failure."""
+    result = payload.get("result")
+    if isinstance(result, Mapping):
+        status = str(result.get("status", "") or "").lower()
+        if status in {"failed", "cancelled"}:
+            return True
+    return bool(_repository_failure_code_from_sidecar_payload(payload))
+
+
+def _repository_failure_code_from_sidecar_payload(
+    payload: Mapping[str, Any],
+) -> str:
+    """Return the first structured failure code in a sidecar result payload."""
+    for item in _iter_mapping_payloads(payload):
+        failure = item.get("failure")
+        if not isinstance(failure, Mapping):
+            continue
+        code = failure.get("code")
+        if code:
+            return str(code)
+    return ""
+
+
 def _record_from_cache_artifact(
     path: Path,
     artifact: dict,
@@ -265,6 +341,19 @@ def _record_from_cache_artifact(
         data_fxpair=str(metadata.get("pair", "") or ""),
         data_format="ascii",
     )
+
+
+def _iter_mapping_payloads(value: object) -> list[Mapping[str, Any]]:
+    """Collect dictionaries from nested sidecar result payloads."""
+    payloads: list[Mapping[str, Any]] = []
+    if isinstance(value, Mapping):
+        payloads.append(value)
+        for item in value.values():
+            payloads.extend(_iter_mapping_payloads(item))
+    elif isinstance(value, list):
+        for item in value:
+            payloads.extend(_iter_mapping_payloads(item))
+    return payloads
 
 
 def _iter_artifact_payloads(value: object) -> list[dict]:

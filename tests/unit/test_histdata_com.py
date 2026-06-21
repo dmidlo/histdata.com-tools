@@ -22,7 +22,7 @@ def test_histdata_com() -> None:
     assert True  # noqa:S101 # sourcery skip # act
 
 
-def _sidecar_options() -> Options:
+def _sidecar_options(api_return_type: str = "polars") -> Options:
     """Return a small API request configured for sidecar execution."""
     options = Options()
     options.use_sidecar = True
@@ -30,7 +30,17 @@ def _sidecar_options() -> Options:
     options.formats = {"ascii"}
     options.timeframes = {"M1"}
     options.start_yearmonth = "2022-12"
-    options.api_return_type = "polars"
+    options.api_return_type = api_return_type
+    return options
+
+
+def _sidecar_repository_options() -> Options:
+    """Return an API repository request configured for sidecar execution."""
+    options = Options()
+    options.use_sidecar = True
+    options.available_remote_data = True
+    options.pairs = {"eurusd", "gbpusd"}
+    options.by = "start_dsc"
     return options
 
 
@@ -46,6 +56,45 @@ def _job_result(*, status: str = "completed") -> SidecarJobResult:
         ),
         status=status,
         result={"workflow_name": "HistDataRunWorkflow"},
+    )
+
+
+def _sidecar_repository_result(
+    *,
+    status: str = "completed",
+    failure_code: str = "",
+) -> SidecarJobResult:
+    """Return a completed sidecar result with repository metrics."""
+    available_data = {
+        "gbpusd": {"start": "200005", "end": "202212"},
+        "eurusd": {"start": "200005", "end": "202212"},
+    }
+    stage_result = {
+        "stage": "RepositoryRefreshWorkflow",
+        "status": status,
+        "metrics": {
+            "available_data": available_data,
+            "filter_pairs": [],
+            "repo_file_exists": True,
+        },
+        "failure": None,
+    }
+    if failure_code:
+        stage_result["failure"] = {
+            "code": failure_code,
+            "message": "offline",
+            "retryable": True,
+            "detail": {},
+        }
+    return SidecarJobResult(
+        handle=_job_result().handle,
+        status="completed",
+        result={
+            "workflow_name": "HistDataRunWorkflow",
+            "status": status,
+            "stage_results": [stage_result],
+            "artifacts": [],
+        },
     )
 
 
@@ -121,12 +170,23 @@ def test_api_options_can_submit_sidecar_job_and_return_result(
     }
 
 
+@pytest.mark.parametrize(
+    ("api_return_type", "expected_module", "expected_name"),
+    (
+        ("polars", "polars", "DataFrame"),
+        ("pandas", "pandas", "DataFrame"),
+        ("arrow", "pyarrow", "Table"),
+    ),
+)
 def test_api_sidecar_dataframe_return_is_materialized_from_cache_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    api_return_type: str,
+    expected_module: str,
+    expected_name: str,
 ) -> None:
     """API sidecar runs should preserve the legacy dataframe return contract."""
-    import polars as pl
+    import importlib
 
     import histdatacom.histdata_com as histdata_com
 
@@ -143,14 +203,169 @@ def test_api_sidecar_dataframe_return_is_materialized_from_cache_artifacts(
         fake_submit,
     )
 
-    result = histdata_com.main(_sidecar_options())
+    result = histdata_com.main(_sidecar_options(api_return_type))
 
-    assert isinstance(result, pl.DataFrame)
-    assert result.height == 3
-    assert captured["request"].api_return_type == "polars"
+    expected_type = getattr(
+        importlib.import_module(expected_module), expected_name
+    )
+    assert isinstance(result, expected_type)
+    assert len(result) == 3
+    assert captured["request"].api_return_type == api_return_type
     assert captured["kwargs"] == {
         "start_if_needed": False,
         "wait_for_result": True,
+    }
+
+
+def test_api_sidecar_repository_request_returns_available_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Waited sidecar repository API calls should return the legacy dict."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _sidecar_repository_result()
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+
+    result = histdata_com.main(_sidecar_repository_options())
+
+    assert list(result) == ["gbpusd", "eurusd"]
+    assert result["eurusd"] == {"start": "200005", "end": "202212"}
+    assert captured["request"].available_remote_data is True
+    assert captured["request"].metadata["repo_sort"] == "start_dsc"
+    assert captured["kwargs"] == {
+        "start_if_needed": False,
+        "wait_for_result": True,
+    }
+
+
+def test_api_sidecar_repository_failure_returns_available_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repository API failure behavior should match foreground compatibility."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fake_submit(*args: object, **kwargs: object) -> SidecarJobResult:
+        return _sidecar_repository_result(
+            status="failed",
+            failure_code="REPOSITORY_NETWORK_ERROR",
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+
+    result = histdata_com.main(_sidecar_repository_options())
+
+    assert result["eurusd"] == {"start": "200005", "end": "202212"}
+
+
+def test_cli_sidecar_repository_request_prints_legacy_table(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Waited sidecar repository CLI calls should keep table output."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fake_submit(*args: object, **kwargs: object) -> SidecarJobResult:
+        return _sidecar_repository_result()
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--sidecar", "-A", "-p", "eurusd"],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    assert err.value.code == 0
+    output = capsys.readouterr().out
+    assert "Data and date ranges available" in output
+    assert "from HistData.com" in output
+    assert "eurusd" in output
+    assert '"status"' not in output
+
+
+def test_cli_sidecar_repository_failure_exits_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Repository CLI failure behavior should match foreground compatibility."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fake_submit(*args: object, **kwargs: object) -> SidecarJobResult:
+        return _sidecar_repository_result(
+            status="failed",
+            failure_code="REPOSITORY_NETWORK_ERROR",
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--sidecar", "-A", "-p", "eurusd"],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    assert err.value.code == 1
+    assert "Unable to fetch repo list" in capsys.readouterr().out
+
+
+def test_api_sidecar_repository_submit_only_keeps_job_payload_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Submit-only sidecar repository calls should not materialize data."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return SidecarJobResult(
+            handle=_job_result().handle,
+            status="submitted",
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    options = _sidecar_repository_options()
+    options.sidecar_wait_result = False
+
+    result = histdata_com.main(options)
+
+    assert result["status"] == "submitted"
+    assert result["result"] is None
+    assert captured["request"].available_remote_data is True
+    assert captured["kwargs"] == {
+        "start_if_needed": False,
+        "wait_for_result": False,
     }
 
 

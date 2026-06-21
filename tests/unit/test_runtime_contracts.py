@@ -109,6 +109,7 @@ def test_run_request_round_trips_options_payload() -> None:
     options.api_return_type = "polars"
     options.cpu_utilization = "high"
     options.batch_size = 2500
+    options.by = "start_dsc"
     options.validate_urls = True
     options.download_data_archives = True
     options.extract_csvs = True
@@ -121,6 +122,7 @@ def test_run_request_round_trips_options_payload() -> None:
     assert restored.pairs == ("eurusd", "gbpusd")
     assert restored.timeframes == ("M1", "T")
     assert restored.batch_size == "2500"
+    assert restored.metadata["repo_sort"] == "start_dsc"
     assert restored.validate_urls
     assert restored.download_data_archives
     assert restored.extract_csvs

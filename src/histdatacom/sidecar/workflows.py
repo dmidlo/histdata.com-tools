@@ -1261,6 +1261,13 @@ def _workflow_summary_stage_result(
         for artifact in data.get("artifacts", [])
         if isinstance(artifact, Mapping)
     )
+    metrics = _workflow_summary_metrics(stage_results)
+    metrics.update(
+        {
+            "child_stage_count": len(stage_results),
+            "work_item_count": len(_work_items_from_payload(data)),
+        }
+    )
     return StageResult(
         work_id=str(data.get("request_id", "")),
         stage=str(data.get("workflow_name", fallback_stage)),
@@ -1274,11 +1281,21 @@ def _workflow_summary_stage_result(
             ),
             None,
         ),
-        metrics={
-            "child_stage_count": len(stage_results),
-            "work_item_count": len(_work_items_from_payload(data)),
-        },
+        metrics=metrics,
     )
+
+
+def _workflow_summary_metrics(
+    stage_results: tuple[StageResult, ...],
+) -> dict[str, JSONValue]:
+    if len(stage_results) != 1:
+        return {}
+    metrics = stage_results[0].metrics
+    return {
+        key: metrics[key]
+        for key in ("available_data", "filter_pairs", "repo_file_exists")
+        if key in metrics
+    }
 
 
 def _payload_with_work_items(
