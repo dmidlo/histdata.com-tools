@@ -21,6 +21,7 @@ output.pstats
 result.json
 out.gv
 htmlcov/
+coverage.xml
 .coverage
 .coverage.*
 

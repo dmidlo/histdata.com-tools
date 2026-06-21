@@ -1,12 +1,22 @@
 [run]
 branch = True
 concurrency = multiprocessing
-source = src
-command_line = venv/bin/pytest
+source = histdatacom
+command_line = -m pytest
 relative_files = True
 
 [report]
+fail_under = 58.0
+precision = 1
+show_missing = True
+skip_covered = True
 exclude_lines =
     pragma: no cover
     if TYPE_CHECKING:
     if __name__ == "__main__":
+
+[xml]
+output = coverage.xml
+
+[html]
+directory = htmlcov

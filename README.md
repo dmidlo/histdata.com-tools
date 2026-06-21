@@ -627,6 +627,20 @@ Commitizen, and the local CLI/coverage smoke hooks. The previous flake8 plugin
 stack was intentionally replaced with Ruff so local installs and hook behavior
 do not drift independently.
 
+### Coverage Policy
+
+Coverage is enforced as a conservative total-project ratchet. The initial
+threshold is set in `.coveragerc` from the current baseline so CI catches real
+coverage regressions without blocking modernization work on unrelated low-legacy
+modules. Future test work should raise `fail_under` when the baseline improves;
+do not lower it unless a PR explains the production risk and links the follow-up
+issue.
+
+CI runs pytest through `pytest-cov`, enforces the `.coveragerc` threshold, and
+uploads `coverage.xml` plus the `htmlcov/` report for every Python and OS matrix
+leg. The first-pass gate is total-only. Per-package or domain thresholds belong
+with the broader testing work tracked in issues #9 and #68.
+
 ---
 
 #### Vanilla MacOS and Linux
