@@ -280,6 +280,35 @@ histdatacom-sidecar jobs --offline result histdatacom-<request-id> --json
 When Temporal is unavailable, read-only job commands fall back to this local
 store when a matching snapshot exists.
 
+## Dataset Plan References
+
+Dataset planning stores full work-item metadata outside workflow history. The
+`dataset_plan` activity writes the plan and its work items to
+`<data-directory>/.histdatacom/manifest-status.sqlite3`, then returns a compact
+`dataset_plan_ref` with the plan ID, store root, store path, schema version, and
+work-item count.
+
+Small plans remain simple: by default, plans with `64` or fewer work items can
+still include inline `work_items`. Larger plans omit the full list and return
+`dataset_plan_batches` instead. Each batch carries deterministic partition
+metadata and a bounded comma-separated `work_ids` field. Child workflows pass
+the reference and partition to leaf activities, and the first operation activity
+hydrates only the assigned batch from the manifest store.
+
+Override the inline threshold only for testing or targeted tuning:
+
+```json
+{
+  "temporal_plan_spill": {
+    "inline_work_item_limit": 32
+  }
+}
+```
+
+The plan reference is local to the workspace and data directory. It is not a
+portable export format; copy the referenced artifacts and manifest database
+together if a diagnostic bundle needs to reproduce a run elsewhere.
+
 Retry and resume are executable control operations, not intent-only labels. The
 client inspects the original job, reads the persisted `RunRequest` snapshot, and
 starts a deterministic replacement `HistDataRunWorkflow` with a workflow ID like:

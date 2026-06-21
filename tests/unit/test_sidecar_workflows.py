@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Mapping
 
+from histdatacom.manifest_store import (
+    DATASET_PLAN_BATCHES_KEY,
+    DATASET_PLAN_REF_KEY,
+)
 from histdatacom.runtime_contracts import (
     ArtifactRef,
     FailureInfo,
@@ -70,6 +75,65 @@ class _RecordingChildExecutor:
                     path=f"{workflow_id}.json",
                 ),
             ),
+        ).to_dict()
+
+
+class _PlanReferenceChildExecutor:
+    """Fake executor that spills dataset plan work items by reference."""
+
+    def __init__(self, work_items: tuple[WorkItem, ...]) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.work_items = work_items
+
+    async def execute_child_workflow(
+        self,
+        workflow_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        workflow_id: str,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Record child workflow calls and return compact plan metadata."""
+        self.calls.append(
+            {
+                "workflow_name": workflow_name,
+                "payload": dict(payload),
+                "workflow_id": workflow_id,
+                "task_queue": task_queue,
+            }
+        )
+        if workflow_name == "DatasetPlanWorkflow":
+            request = RunRequest.from_dict(dict(payload["request"]))
+            return {
+                "result": StageResult(
+                    work_id=workflow_id,
+                    stage="dataset_plan",
+                    status=WorkStatus.COMPLETED,
+                    metrics={
+                        "work_item_count": len(self.work_items),
+                        "work_items_spilled": True,
+                    },
+                ).to_dict(),
+                DATASET_PLAN_REF_KEY: {
+                    "kind": "dataset_plan",
+                    "plan_id": "plan-spilled",
+                    "store_root": "/tmp/histdatacom-plan",
+                    "store_path": "/tmp/histdatacom-plan/.histdatacom/db",
+                    "work_item_count": len(self.work_items),
+                },
+                DATASET_PLAN_BATCHES_KEY: [
+                    partition
+                    for partition in workflows.period_batch_partitions(
+                        request,
+                        self.work_items,
+                    )
+                ],
+            }
+
+        return StageResult(
+            work_id=workflow_id,
+            stage=workflow_name,
+            status=WorkStatus.COMPLETED,
         ).to_dict()
 
 
@@ -585,6 +649,11 @@ def test_workflow_topology_documents_expected_hierarchy() -> None:
         document["metadata_keys"]["max_parallel_child_workflows"]
         == workflows.MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY
     )
+    assert document["metadata_keys"]["dataset_plan_ref"] == DATASET_PLAN_REF_KEY
+    assert (
+        document["metadata_keys"]["dataset_plan_batches"]
+        == DATASET_PLAN_BATCHES_KEY
+    )
     assert set(workflows.workflow_names()) == {
         "HistDataRunWorkflow",
         "RepositoryRefreshWorkflow",
@@ -768,6 +837,53 @@ def test_parent_workflow_expands_symbol_children_to_period_batches() -> None:
     ]
     assert all(partition["batch_key"] for partition in partitions)
     assert all(call["workflow_id"] != coarse_symbol_id for call in symbol_calls)
+
+
+def test_parent_workflow_expands_large_plan_from_compact_reference() -> None:
+    """Spilled plans should not embed full work items in parent history."""
+    request = _request(
+        pairs=("EURUSD",),
+        metadata={
+            **_request().metadata,
+            workflows.BATCHING_METADATA_KEY: {
+                workflows.MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY: 1
+            },
+            workflows.FANOUT_METADATA_KEY: {
+                workflows.MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY: 4
+            },
+        },
+    )
+    executor = _PlanReferenceChildExecutor(
+        work_items=_multi_period_work_items(count=50)
+    )
+    workflow = workflows.HistDataRunWorkflow(executor=executor)
+
+    summary = asyncio.run(workflow.run(request.to_dict()))
+
+    symbol_calls = [
+        call
+        for call in executor.calls
+        if call["workflow_name"] == "SymbolTimeframeWorkflow"
+    ]
+    symbol_payloads = [
+        call["payload"]
+        for call in symbol_calls
+        if isinstance(call["payload"], Mapping)
+    ]
+
+    assert len(symbol_calls) == 50
+    assert "work_items" not in summary
+    assert all("work_items" not in payload for payload in symbol_payloads)
+    assert all(DATASET_PLAN_REF_KEY in payload for payload in symbol_payloads)
+    assert summary["progress"]["total_children"] == 51
+    assert len(json.dumps(summary, sort_keys=True)) < 60000
+    assert (
+        max(
+            len(json.dumps(payload, sort_keys=True))
+            for payload in symbol_payloads
+        )
+        < 2500
+    )
 
 
 def test_parent_workflow_runs_symbol_batches_with_bounded_fanout() -> None:

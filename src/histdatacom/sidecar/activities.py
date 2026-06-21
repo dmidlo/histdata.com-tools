@@ -28,8 +28,18 @@ from histdatacom.exceptions import (
     CancellationOperationError,
     influx_failure_info,
 )
+from histdatacom.manifest_store import (
+    DATASET_PLAN_BATCHES_KEY,
+    DATASET_PLAN_REF_KEY,
+    DEFAULT_DATASET_PLAN_INLINE_WORK_ITEM_LIMIT,
+    INLINE_WORK_ITEM_LIMIT_METADATA_KEY,
+    MANIFEST_SCHEMA_VERSION,
+    PLAN_SPILL_METADATA_KEY,
+    ManifestStatusStore,
+)
 from histdatacom.observability import attach_progress_metadata
 from histdatacom.runtime_contracts import (
+    ArtifactRef,
     FailureInfo,
     JSONValue,
     RunRequest,
@@ -37,6 +47,7 @@ from histdatacom.runtime_contracts import (
     StatusEvent,
     WorkItem,
     WorkStatus,
+    derive_work_id,
 )
 from histdatacom.utils import set_working_data_dir
 
@@ -122,6 +133,7 @@ def repository_refresh_activity(
 def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
     """Run deterministic URL and dataset planning as a Temporal activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
+    data_root = set_working_data_dir(request.data_directory)
     if _activity_cancelled():
         result = _observe_stage_result(
             _cancelled_stage_result(
@@ -144,8 +156,56 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
         formats=request.formats,
         pairs=request.pairs,
         timeframes=request.timeframes,
-        default_download_dir=set_working_data_dir(request.data_directory),
+        default_download_dir=data_root,
         zip_persist=request.zip_persist,
+    )
+    plan_id = derive_work_id(
+        request.request_id,
+        output.result.work_id,
+        "dataset_plan",
+    )
+    store = ManifestStatusStore(data_root)
+    plan_ref = store.write_dataset_plan(
+        plan_id=plan_id,
+        request_id=request.request_id,
+        work_items=output.work_items,
+        metadata={
+            "start_yearmonth": request.start_yearmonth,
+            "end_yearmonth": request.end_yearmonth,
+            "formats": list(request.formats),
+            "pairs": list(request.pairs),
+            "timeframes": list(request.timeframes),
+        },
+    )
+    plan_batches = _dataset_plan_batches(request, output.work_items)
+    inline_limit = _dataset_plan_inline_limit(request)
+    spilled = len(output.work_items) > inline_limit
+    metrics = dict(output.result.metrics)
+    metrics.update(
+        {
+            "dataset_plan_ref": plan_ref,
+            "dataset_plan_batch_count": len(plan_batches),
+            "inline_work_item_limit": inline_limit,
+            "work_items_spilled": spilled,
+        }
+    )
+    artifact = ArtifactRef(
+        kind="dataset-plan",
+        path=str(store.db_path),
+        metadata={
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "plan_id": plan_id,
+            "work_item_count": len(output.work_items),
+            "batch_count": len(plan_batches),
+        },
+    )
+    output = replace(
+        output,
+        result=replace(
+            output.result,
+            artifacts=(*output.result.artifacts, artifact),
+            metrics=metrics,
+        ),
     )
     output = replace(
         output,
@@ -158,6 +218,12 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
         ),
     )
     output_payload: dict[str, Any] = output.to_dict()
+    output_payload[DATASET_PLAN_REF_KEY] = plan_ref
+    output_payload[DATASET_PLAN_BATCHES_KEY] = [
+        dict(batch) for batch in plan_batches
+    ]
+    if spilled:
+        output_payload.pop("work_items", None)
     return output_payload
 
 
@@ -165,7 +231,7 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
 def validate_urls_activity(payload: dict[str, Any]) -> dict[str, Any]:
     """Run URL validation and form metadata scraping as an activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
-    work_items = _work_items_from_payload(payload)
+    work_items = _activity_work_items_from_payload(payload)
     if not work_items:
         result = _observe_stage_result(
             _missing_work_item_result(payload, "validate_urls"),
@@ -211,7 +277,7 @@ def download_archives_activity(
 ) -> dict[str, Any]:
     """Run idempotent archive download as an activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
-    work_items = _work_items_from_payload(payload)
+    work_items = _activity_work_items_from_payload(payload)
     if not work_items:
         result = _observe_stage_result(
             _missing_work_item_result(payload, "download_archives"),
@@ -258,7 +324,7 @@ def extract_csv_activity(
 ) -> dict[str, Any]:
     """Run idempotent archive extraction as an activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
-    work_items = _work_items_from_payload(payload)
+    work_items = _activity_work_items_from_payload(payload)
     if not work_items:
         result = _observe_stage_result(
             _missing_work_item_result(payload, "extract_csv"),
@@ -304,7 +370,7 @@ def build_cache_activity(
 ) -> dict[str, Any]:
     """Run Polars cache build/validation as an activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
-    work_items = _work_items_from_payload(payload)
+    work_items = _activity_work_items_from_payload(payload)
     if not work_items:
         result = _observe_stage_result(
             _missing_work_item_result(payload, "build_cache"),
@@ -348,7 +414,7 @@ def merge_cache_activity(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     """Assemble cache merge references without materializing dataframes."""
-    work_items = _work_items_from_payload(payload)
+    work_items = _activity_work_items_from_payload(payload)
     if not work_items:
         result = _observe_stage_result(
             _missing_work_item_result(payload, "merge_cache"),
@@ -399,7 +465,7 @@ def import_to_influx_activity(
 ) -> dict[str, Any]:
     """Upload cache batches to InfluxDB without queue-backed writers."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
-    work_items = _work_items_from_payload(payload)
+    work_items = _activity_work_items_from_payload(payload)
     if not work_items:
         result = _observe_stage_result(
             _missing_work_item_result(payload, "import_to_influx"),
@@ -484,6 +550,41 @@ def _influx_batch_writer(args: Mapping[str, Any]) -> Any:
     from histdatacom.influx import InfluxBatchWriter
 
     return InfluxBatchWriter(dict(args))
+
+
+def _dataset_plan_batches(
+    request: RunRequest,
+    work_items: tuple[WorkItem, ...],
+) -> tuple[dict[str, str], ...]:
+    from histdatacom.sidecar.workflows import period_batch_partitions
+
+    return period_batch_partitions(request, work_items)
+
+
+def _dataset_plan_inline_limit(request: RunRequest) -> int:
+    spill_config = request.metadata.get(PLAN_SPILL_METADATA_KEY)
+    value: object | None = None
+    if isinstance(spill_config, Mapping):
+        value = spill_config.get(INLINE_WORK_ITEM_LIMIT_METADATA_KEY)
+    if value is None:
+        value = request.metadata.get(INLINE_WORK_ITEM_LIMIT_METADATA_KEY)
+    if value is None:
+        return DEFAULT_DATASET_PLAN_INLINE_WORK_ITEM_LIMIT
+    return _positive_inline_limit(value)
+
+
+def _positive_inline_limit(value: object) -> int:
+    if isinstance(value, bool):
+        raise ValueError("inline_work_item_limit must be a positive integer")
+    if isinstance(value, int):
+        normalized = value
+    elif isinstance(value, str):
+        normalized = int(value)
+    else:
+        normalized = int(str(value))
+    if normalized < 1:
+        raise ValueError("inline_work_item_limit must be a positive integer")
+    return normalized
 
 
 def _import_to_influx_with_writer(
@@ -771,6 +872,42 @@ def _work_items_from_payload(
             if isinstance(item, Mapping)
         )
     return ()
+
+
+def _activity_work_items_from_payload(
+    payload: Mapping[str, Any],
+) -> tuple[WorkItem, ...]:
+    inline_work_items = _work_items_from_payload(payload)
+    if inline_work_items:
+        return inline_work_items
+    return _work_items_from_dataset_plan_ref(payload)
+
+
+def _work_items_from_dataset_plan_ref(
+    payload: Mapping[str, Any],
+) -> tuple[WorkItem, ...]:
+    plan_ref = _mapping(payload.get(DATASET_PLAN_REF_KEY, {}))
+    plan_id = str(plan_ref.get("plan_id", "") or "")
+    store_root = str(plan_ref.get("store_root", "") or "")
+    if not plan_id or not store_root:
+        return ()
+    partition = _mapping(payload.get("partition", {}))
+    work_ids = _partition_work_ids(partition)
+    return ManifestStatusStore(store_root).get_dataset_plan_work_items(
+        plan_id,
+        work_ids=work_ids,
+    )
+
+
+def _partition_work_ids(partition: Mapping[str, Any]) -> tuple[str, ...]:
+    raw_work_ids = str(partition.get("work_ids", "") or "")
+    if not raw_work_ids:
+        return ()
+    return tuple(
+        work_id.strip()
+        for work_id in raw_work_ids.split(",")
+        if work_id.strip()
+    )
 
 
 def _missing_work_item_result(

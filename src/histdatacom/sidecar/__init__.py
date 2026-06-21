@@ -14,6 +14,18 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.control",
         "CONTROL_SCHEMA_VERSION",
     ),
+    "DATASET_PLAN_BATCHES_KEY": (
+        "histdatacom.manifest_store",
+        "DATASET_PLAN_BATCHES_KEY",
+    ),
+    "DATASET_PLAN_REF_KEY": (
+        "histdatacom.manifest_store",
+        "DATASET_PLAN_REF_KEY",
+    ),
+    "DEFAULT_DATASET_PLAN_INLINE_WORK_ITEM_LIMIT": (
+        "histdatacom.manifest_store",
+        "DEFAULT_DATASET_PLAN_INLINE_WORK_ITEM_LIMIT",
+    ),
     "DEFAULT_MAX_WORK_ITEMS_PER_BATCH": (
         "histdatacom.sidecar.workflows",
         "DEFAULT_MAX_WORK_ITEMS_PER_BATCH",
@@ -81,6 +93,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.workflows",
         "HistDataRunWorkflow",
     ),
+    "INLINE_WORK_ITEM_LIMIT_METADATA_KEY": (
+        "histdatacom.manifest_store",
+        "INLINE_WORK_ITEM_LIMIT_METADATA_KEY",
+    ),
     "JobControlAction": ("histdatacom.sidecar.control", "JobControlAction"),
     "JobControlStates": ("histdatacom.sidecar.control", "JobControlStates"),
     "JobLifecycle": ("histdatacom.sidecar.control", "JobLifecycle"),
@@ -92,6 +108,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "PortAllocationError": (
         "histdatacom.sidecar.runtime",
         "PortAllocationError",
+    ),
+    "PLAN_SPILL_METADATA_KEY": (
+        "histdatacom.manifest_store",
+        "PLAN_SPILL_METADATA_KEY",
     ),
     "SidecarExecutableUnavailable": (
         "histdatacom.sidecar.resources",

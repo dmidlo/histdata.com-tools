@@ -13,6 +13,13 @@ from datetime import timedelta
 from importlib import import_module
 from typing import Any, Callable, Mapping, Protocol, TypeVar, cast
 
+from histdatacom.manifest_store import (
+    DATASET_PLAN_BATCHES_KEY,
+    DATASET_PLAN_REF_KEY,
+    DEFAULT_DATASET_PLAN_INLINE_WORK_ITEM_LIMIT,
+    INLINE_WORK_ITEM_LIMIT_METADATA_KEY,
+    PLAN_SPILL_METADATA_KEY,
+)
 from histdatacom.observability import (
     PROGRESS_EVENT_TYPE,
     progress_percent,
@@ -491,15 +498,22 @@ def workflow_topology_document() -> dict[str, JSONValue]:
             "max_parallel_child_workflows": (
                 MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY
             ),
+            "dataset_plan_ref": DATASET_PLAN_REF_KEY,
+            "dataset_plan_batches": DATASET_PLAN_BATCHES_KEY,
+            "plan_spill": PLAN_SPILL_METADATA_KEY,
+            "inline_work_item_limit": INLINE_WORK_ITEM_LIMIT_METADATA_KEY,
         },
         "history_policy": (
             "Workflow histories carry bounded metadata only. Stage outputs "
             "must return StageResult and ArtifactRef payloads rather than "
-            "rows, dataframes, or archive bytes. Dataset work items are "
-            "grouped into deterministic pair/timeframe/format/year-month "
-            "batches before operation workflows run. Independent "
-            "symbol/timeframe batch workflows are started with deterministic "
-            "bounded fan-out."
+            "rows, dataframes, or archive bytes. Dataset plans above "
+            f"{DEFAULT_DATASET_PLAN_INLINE_WORK_ITEM_LIMIT} work items spill "
+            "work-item metadata to the manifest store and return compact "
+            "dataset_plan_ref and dataset_plan_batches payloads. Dataset "
+            "work items are grouped into deterministic "
+            "pair/timeframe/format/year-month batches before operation "
+            "workflows run. Independent symbol/timeframe batch workflows are "
+            "started with deterministic bounded fan-out."
         ),
         "workflows": [spec.to_dict() for spec in WORKFLOW_TOPOLOGY],
     }
@@ -536,6 +550,7 @@ def build_symbol_child_invocations(
     request: RunRequest,
     partition: Mapping[str, str],
     work_items: tuple[WorkItem, ...] = (),
+    plan_ref: Mapping[str, JSONValue] | None = None,
 ) -> tuple[WorkflowInvocation, ...]:
     """Plan operation-family child workflow calls for one partition."""
     invocations: list[WorkflowInvocation] = []
@@ -546,6 +561,7 @@ def build_symbol_child_invocations(
                 workflow_name,
                 partition=partition,
                 work_items=work_items,
+                plan_ref=plan_ref,
             )
         )
     return tuple(invocations)
@@ -557,6 +573,7 @@ def build_symbol_batch_invocations(
     work_items: tuple[WorkItem, ...],
     *,
     max_work_items_per_batch: int | None = None,
+    plan_ref: Mapping[str, JSONValue] | None = None,
 ) -> tuple[WorkflowInvocation, ...]:
     """Plan bounded symbol/timeframe child workflows for planned work items."""
     partition_work_items = _partition_work_items(work_items, partition)
@@ -566,6 +583,7 @@ def build_symbol_batch_invocations(
             SYMBOL_TIMEFRAME_WORKFLOW,
             partition=batch_partition,
             work_items=batch_work_items,
+            plan_ref=plan_ref,
         )
         for batch_partition, batch_work_items in _work_item_batches(
             request,
@@ -660,6 +678,7 @@ async def execute_symbol_timeframe_workflow(
     request: RunRequest,
     partition: Mapping[str, str],
     work_items: tuple[WorkItem, ...] = (),
+    plan_ref: Mapping[str, JSONValue] | None = None,
     *,
     executor: ChildWorkflowExecutor,
     progress: WorkflowProgress,
@@ -669,6 +688,7 @@ async def execute_symbol_timeframe_workflow(
         request,
         partition,
         work_items=work_items,
+        plan_ref=plan_ref,
     )
     return await _execute_child_plan(
         request,
@@ -678,6 +698,7 @@ async def execute_symbol_timeframe_workflow(
         progress=progress,
         partition=partition,
         work_items=work_items,
+        plan_ref=plan_ref,
     )
 
 
@@ -779,10 +800,12 @@ class SymbolTimeframeWorkflow:
             _work_items_from_payload(payload),
             partition,
         )
+        plan_ref = _plan_ref_from_payload(payload)
         return await execute_symbol_timeframe_workflow(
             request,
             partition,
             work_items,
+            plan_ref=plan_ref,
             executor=self._executor or TemporalChildWorkflowExecutor(),
             progress=self._progress,
         )
@@ -1025,6 +1048,7 @@ async def _execute_child_plan(
     progress: WorkflowProgress,
     partition: Mapping[str, str] | None = None,
     work_items: tuple[WorkItem, ...] = (),
+    plan_ref: Mapping[str, JSONValue] | None = None,
 ) -> dict[str, JSONValue]:
     progress.start(
         request_id=request.request_id,
@@ -1034,6 +1058,8 @@ async def _execute_child_plan(
     )
     results: list[StageResult] = []
     current_work_items = tuple(work_items)
+    current_plan_ref = dict(plan_ref or {})
+    current_plan_batches: tuple[dict[str, str], ...] = ()
     pending_invocations = list(invocations)
     index = 0
     while index < len(pending_invocations):
@@ -1044,6 +1070,8 @@ async def _execute_child_plan(
                 pending_invocations,
                 start_index=index,
                 current_work_items=current_work_items,
+                plan_ref=current_plan_ref,
+                plan_batches=current_plan_batches,
             )
             if expanded:
                 _refresh_progress_plan(progress, tuple(pending_invocations))
@@ -1056,6 +1084,7 @@ async def _execute_child_plan(
                 request,
                 invocations=symbol_invocations,
                 current_work_items=current_work_items,
+                plan_ref=current_plan_ref,
                 executor=executor,
                 progress=progress,
             )
@@ -1065,7 +1094,11 @@ async def _execute_child_plan(
                 break
             continue
 
-        prepared = _prepare_child_invocation(invocation, current_work_items)
+        prepared = _prepare_child_invocation(
+            invocation,
+            current_work_items,
+            plan_ref=current_plan_ref,
+        )
         if prepared.skipped_result is not None:
             result = prepared.skipped_result
             results.append(result)
@@ -1086,6 +1119,8 @@ async def _execute_child_plan(
         forwarded_work_items = _forwarded_work_items(result_payload)
         if invocation.workflow_name == "DatasetPlanWorkflow":
             current_work_items = forwarded_work_items
+            current_plan_ref = _plan_ref_from_payload(result_payload)
+            current_plan_batches = _plan_batches_from_payload(result_payload)
         elif invocation.workflow_name == "SymbolTimeframeWorkflow":
             pass
         elif _requires_work_items(invocation.workflow_name):
@@ -1114,6 +1149,8 @@ def _expand_pending_symbol_invocations(
     *,
     start_index: int,
     current_work_items: tuple[WorkItem, ...],
+    plan_ref: Mapping[str, JSONValue],
+    plan_batches: tuple[dict[str, str], ...],
 ) -> tuple[list[WorkflowInvocation], bool]:
     expanded: list[WorkflowInvocation] = []
     changed = False
@@ -1130,11 +1167,20 @@ def _expand_pending_symbol_invocations(
             expanded.append(invocation)
             continue
 
-        batch_invocations = build_symbol_batch_invocations(
-            request,
-            partition,
-            current_work_items,
-        )
+        if current_work_items:
+            batch_invocations = build_symbol_batch_invocations(
+                request,
+                partition,
+                current_work_items,
+                plan_ref=plan_ref,
+            )
+        else:
+            batch_invocations = _symbol_batch_invocations_from_plan_ref(
+                request,
+                partition,
+                plan_ref=plan_ref,
+                plan_batches=plan_batches,
+            )
         if not batch_invocations:
             expanded.append(invocation)
             continue
@@ -1161,17 +1207,43 @@ def _contiguous_invocations(
     return tuple(group), index
 
 
+def _symbol_batch_invocations_from_plan_ref(
+    request: RunRequest,
+    partition: Mapping[str, str],
+    *,
+    plan_ref: Mapping[str, JSONValue],
+    plan_batches: tuple[dict[str, str], ...],
+) -> tuple[WorkflowInvocation, ...]:
+    if not plan_ref:
+        return ()
+    return tuple(
+        _invocation(
+            request,
+            SYMBOL_TIMEFRAME_WORKFLOW,
+            partition=batch_partition,
+            plan_ref=plan_ref,
+        )
+        for batch_partition in plan_batches
+        if _partition_matches(batch_partition, partition)
+    )
+
+
 async def _execute_parallel_symbol_invocations(
     request: RunRequest,
     *,
     invocations: tuple[WorkflowInvocation, ...],
     current_work_items: tuple[WorkItem, ...],
+    plan_ref: Mapping[str, JSONValue],
     executor: ChildWorkflowExecutor,
     progress: WorkflowProgress,
 ) -> tuple[StageResult, ...]:
     max_parallel = max_parallel_child_workflows(request)
     prepared = tuple(
-        _prepare_child_invocation(invocation, current_work_items)
+        _prepare_child_invocation(
+            invocation,
+            current_work_items,
+            plan_ref=plan_ref,
+        )
         for invocation in invocations
     )
     results: list[StageResult] = []
@@ -1253,11 +1325,25 @@ async def _execute_prepared_child_window(
 def _prepare_child_invocation(
     invocation: WorkflowInvocation,
     current_work_items: tuple[WorkItem, ...],
+    *,
+    plan_ref: Mapping[str, JSONValue],
 ) -> _PreparedChildInvocation:
     partition = _string_mapping(invocation.payload.get("partition", {}))
     work_items = _partition_work_items(current_work_items, partition)
     if _requires_work_items(invocation.workflow_name):
         if not work_items:
+            invocation_plan_ref = _plan_ref_from_payload(invocation.payload)
+            if invocation_plan_ref or plan_ref:
+                payload = dict(invocation.payload)
+                if DATASET_PLAN_REF_KEY not in payload:
+                    payload[DATASET_PLAN_REF_KEY] = cast(
+                        JSONValue,
+                        dict(invocation_plan_ref or plan_ref),
+                    )
+                return _PreparedChildInvocation(
+                    invocation=invocation,
+                    payload=payload,
+                )
             return _PreparedChildInvocation(
                 invocation=invocation,
                 skipped_result=_skipped_workflow_result(
@@ -1346,6 +1432,7 @@ def _invocation(
     *,
     partition: Mapping[str, str] | None = None,
     work_items: tuple[WorkItem, ...] = (),
+    plan_ref: Mapping[str, JSONValue] | None = None,
 ) -> WorkflowInvocation:
     spec = WORKFLOW_SPECS_BY_NAME[workflow_name]
     partition_payload = dict(partition or {})
@@ -1363,6 +1450,8 @@ def _invocation(
             JSONValue,
             [item.to_dict() for item in work_items],
         )
+    if plan_ref:
+        payload[DATASET_PLAN_REF_KEY] = cast(JSONValue, dict(plan_ref))
     return WorkflowInvocation(
         workflow_name=workflow_name,
         workflow_id=workflow_id,
@@ -1542,6 +1631,30 @@ def _payload_with_work_items(
     return updated
 
 
+def _plan_ref_from_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, JSONValue]:
+    value = payload.get(DATASET_PLAN_REF_KEY)
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        str(key): cast(JSONValue, item)
+        for key, item in value.items()
+        if isinstance(key, str)
+    }
+
+
+def _plan_batches_from_payload(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, str], ...]:
+    value = payload.get(DATASET_PLAN_BATCHES_KEY)
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        _string_mapping(batch) for batch in value if isinstance(batch, Mapping)
+    )
+
+
 def _work_items_from_payload(
     payload: Mapping[str, Any],
 ) -> tuple[WorkItem, ...]:
@@ -1629,6 +1742,26 @@ def _partition_work_items(
         and (not timeframe or item.data_timeframe.lower() == timeframe)
         and (not data_format or item.data_format.lower() == data_format)
         and (not work_ids or item.work_id in work_ids)
+    )
+
+
+def _partition_matches(
+    candidate: Mapping[str, str],
+    requested: Mapping[str, str],
+) -> bool:
+    pair = str(requested.get("pair", "") or "").lower()
+    timeframe = str(requested.get("timeframe", "") or "").lower()
+    data_format = str(requested.get("format", "") or "").lower()
+    return (
+        (not pair or str(candidate.get("pair", "")).lower() == pair)
+        and (
+            not timeframe
+            or str(candidate.get("timeframe", "")).lower() == timeframe
+        )
+        and (
+            not data_format
+            or str(candidate.get("format", "")).lower() == data_format
+        )
     )
 
 

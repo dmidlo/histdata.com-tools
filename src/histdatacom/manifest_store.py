@@ -22,6 +22,11 @@ from histdatacom.runtime_contracts import (
 MANIFEST_DIRECTORY = ".histdatacom"
 MANIFEST_DB_FILENAME = "manifest-status.sqlite3"
 MANIFEST_SCHEMA_VERSION = 1
+DATASET_PLAN_REF_KEY = "dataset_plan_ref"
+DATASET_PLAN_BATCHES_KEY = "dataset_plan_batches"
+DEFAULT_DATASET_PLAN_INLINE_WORK_ITEM_LIMIT = 64
+PLAN_SPILL_METADATA_KEY = "temporal_plan_spill"
+INLINE_WORK_ITEM_LIMIT_METADATA_KEY = "inline_work_item_limit"
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +167,117 @@ class ManifestStatusStore:
                 ),
             )
 
+    def write_dataset_plan(
+        self,
+        *,
+        plan_id: str,
+        request_id: str,
+        work_items: tuple[WorkItem, ...],
+        metadata: Mapping[str, JSONValue] | None = None,
+    ) -> dict[str, JSONValue]:
+        """Persist a dataset plan and return a compact workflow reference."""
+        work_ids = tuple(item.work_id for item in work_items)
+        payload: dict[str, JSONValue] = {
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "plan_id": plan_id,
+            "request_id": request_id,
+            "work_item_count": len(work_items),
+            "work_ids": list(work_ids),
+            "metadata": dict(metadata or {}),
+        }
+        now = _utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO dataset_plans (
+                    plan_id,
+                    request_id,
+                    work_item_count,
+                    work_ids_json,
+                    payload_json,
+                    updated_at_utc,
+                    schema_version
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(plan_id) DO UPDATE SET
+                    request_id=excluded.request_id,
+                    work_item_count=excluded.work_item_count,
+                    work_ids_json=excluded.work_ids_json,
+                    payload_json=excluded.payload_json,
+                    updated_at_utc=excluded.updated_at_utc,
+                    schema_version=excluded.schema_version
+                """,
+                (
+                    plan_id,
+                    request_id,
+                    len(work_items),
+                    _json_dumps(list(work_ids)),
+                    _json_dumps(payload),
+                    now,
+                    MANIFEST_SCHEMA_VERSION,
+                ),
+            )
+        for item in work_items:
+            self.write_work_item(
+                item,
+                source="dataset_plan",
+                message="Dataset plan work item stored.",
+            )
+        return self.dataset_plan_ref(plan_id, work_item_count=len(work_items))
+
+    def dataset_plan_ref(
+        self,
+        plan_id: str,
+        *,
+        work_item_count: int = 0,
+    ) -> dict[str, JSONValue]:
+        """Return a compact JSON-safe reference to a stored dataset plan."""
+        ref: dict[str, JSONValue] = {
+            "kind": "dataset_plan",
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "plan_id": plan_id,
+            "store_root": str(self.root_dir),
+            "store_path": str(self.db_path),
+        }
+        if work_item_count:
+            ref["work_item_count"] = work_item_count
+        return ref
+
+    def get_dataset_plan(self, plan_id: str) -> dict[str, Any] | None:
+        """Return one stored dataset plan payload."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM dataset_plans WHERE plan_id = ?",
+                (plan_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return dict(json.loads(str(row["payload_json"])))
+
+    def get_dataset_plan_work_items(
+        self,
+        plan_id: str,
+        *,
+        work_ids: tuple[str, ...] = (),
+    ) -> tuple[WorkItem, ...]:
+        """Load ordered work items from a stored dataset plan."""
+        plan_work_ids = self._dataset_plan_work_ids(plan_id)
+        if not plan_work_ids:
+            return ()
+        if work_ids:
+            plan_work_id_set = set(plan_work_ids)
+            selected_work_ids = tuple(
+                work_id for work_id in work_ids if work_id in plan_work_id_set
+            )
+        else:
+            selected_work_ids = plan_work_ids
+        items: list[WorkItem] = []
+        for work_id in selected_work_ids:
+            item = self.get_work_item(work_id)
+            if item is not None:
+                items.append(item)
+        return tuple(items)
+
     def get_work_item(self, work_id: str) -> WorkItem | None:
         """Return a work item by stable id."""
         with self._connect() as conn:
@@ -225,6 +341,19 @@ class ManifestStatusStore:
             WorkItem.from_dict(json.loads(str(row["payload_json"])))
             for row in rows
         )
+
+    def _dataset_plan_work_ids(self, plan_id: str) -> tuple[str, ...]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT work_ids_json FROM dataset_plans WHERE plan_id = ?",
+                (plan_id,),
+            ).fetchone()
+        if row is None:
+            return ()
+        raw_work_ids = json.loads(str(row["work_ids_json"]))
+        if not isinstance(raw_work_ids, list):
+            return ()
+        return tuple(str(work_id) for work_id in raw_work_ids)
 
     def delete_record(self, record: Any) -> None:
         """Remove current work-item state for a legacy Record."""
@@ -624,6 +753,17 @@ class ManifestStatusStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_stage_results_work_id
                     ON stage_results(work_id, id);
+                CREATE TABLE IF NOT EXISTS dataset_plans (
+                    plan_id TEXT PRIMARY KEY,
+                    request_id TEXT NOT NULL DEFAULT '',
+                    work_item_count INTEGER NOT NULL DEFAULT 0,
+                    work_ids_json TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at_utc TEXT NOT NULL,
+                    schema_version INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE INDEX IF NOT EXISTS idx_dataset_plans_request_id
+                    ON dataset_plans(request_id);
                 CREATE TABLE IF NOT EXISTS jobs (
                     job_id TEXT PRIMARY KEY,
                     request_id TEXT NOT NULL DEFAULT '',

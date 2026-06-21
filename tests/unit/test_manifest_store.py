@@ -17,6 +17,7 @@ from histdatacom.runtime_contracts import (
     FailureInfo,
     StageResult,
     StatusEvent,
+    WorkItem,
     WorkStatus,
 )
 from histdatacom.sidecar.control import (
@@ -184,6 +185,64 @@ def test_manifest_store_persists_stage_result_details(
     assert event["metadata"]["attempt"] == 2
     assert artifact["kind"] == "zip"
     assert artifact["metadata"]["pair"] == "eurusd"
+
+
+def test_manifest_store_persists_dataset_plan_work_items(
+    tmp_path: Path,
+) -> None:
+    """Dataset plans should store ordered work-item metadata by reference."""
+    store = ManifestStatusStore(tmp_path)
+    first = WorkItem(
+        work_id="work-eurusd-202201",
+        status=WorkStatus.URL_NEW,
+        data_fxpair="eurusd",
+        data_timeframe="T",
+        data_format="ASCII",
+        data_datemonth="202201",
+    )
+    second = WorkItem(
+        work_id="work-eurusd-202202",
+        status=WorkStatus.URL_NEW,
+        data_fxpair="eurusd",
+        data_timeframe="T",
+        data_format="ASCII",
+        data_datemonth="202202",
+    )
+    unrelated = WorkItem(
+        work_id="work-usdjpy-202202",
+        status=WorkStatus.URL_NEW,
+        data_fxpair="usdjpy",
+        data_timeframe="T",
+        data_format="ASCII",
+        data_datemonth="202202",
+    )
+
+    plan_ref = store.write_dataset_plan(
+        plan_id="plan-1",
+        request_id="run-plan",
+        work_items=(first, second),
+        metadata={"pair": "eurusd"},
+    )
+    store.write_work_item(unrelated, source="unrelated")
+
+    plan = store.get_dataset_plan("plan-1")
+    loaded = store.get_dataset_plan_work_items(
+        "plan-1",
+        work_ids=(
+            "work-usdjpy-202202",
+            "work-eurusd-202202",
+            "work-eurusd-202201",
+        ),
+    )
+
+    assert plan_ref["plan_id"] == "plan-1"
+    assert plan_ref["store_root"] == str(tmp_path)
+    assert plan is not None
+    assert plan["work_item_count"] == 2
+    assert [item.work_id for item in loaded] == [
+        "work-eurusd-202202",
+        "work-eurusd-202201",
+    ]
 
 
 def test_manifest_store_persists_sidecar_job_snapshots(

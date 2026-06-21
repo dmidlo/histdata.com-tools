@@ -18,6 +18,11 @@ from histdatacom.histdata_ascii import (
     read_ascii_file_to_polars,
     write_polars_cache,
 )
+from histdatacom.manifest_store import (
+    DATASET_PLAN_BATCHES_KEY,
+    DATASET_PLAN_REF_KEY,
+    ManifestStatusStore,
+)
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
 from histdatacom.sidecar.activities import (
     build_cache_activity,
@@ -339,6 +344,85 @@ def test_dataset_plan_activity_returns_explicit_work_items(tmp_path) -> None:
         "?/ascii/1-minute-bar-quotes/eurusd/2022"
     )
     assert result["work_items"][0]["data_datemonth"] == "2022"
+
+
+def test_dataset_plan_activity_spills_large_plan_to_manifest(
+    tmp_path: Path,
+) -> None:
+    """Large dataset plans should return references instead of full items."""
+    request = RunRequest(
+        request_id="run-plan-spill",
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        start_yearmonth="202201",
+        end_yearmonth="202203",
+        data_directory=str(tmp_path),
+        metadata={
+            "temporal_plan_spill": {"inline_work_item_limit": 2},
+            "temporal_batching": {"max_work_items_per_batch": 1},
+        },
+    )
+
+    result = dataset_plan_activity({"request": request.to_dict()})
+
+    assert "work_items" not in result
+    assert result[DATASET_PLAN_REF_KEY]["work_item_count"] == 3
+    assert len(result[DATASET_PLAN_BATCHES_KEY]) == 3
+    assert result["result"]["metrics"]["work_items_spilled"] is True
+    store = ManifestStatusStore(str(tmp_path))
+    loaded = store.get_dataset_plan_work_items(
+        str(result[DATASET_PLAN_REF_KEY]["plan_id"])
+    )
+    assert [item.data_datemonth for item in loaded] == [
+        "202201",
+        "202202",
+        "202203",
+    ]
+
+
+def test_validate_urls_activity_loads_work_items_from_plan_ref(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Leaf activities should hydrate only their referenced batch."""
+    monkeypatch.setattr(
+        "histdatacom.activity_stages.fetch_histdata_page_data",
+        lambda url, timeout: {
+            "html": _form_html(),
+            "encoding": "gzip",
+            "bytes_length": "123",
+        },
+    )
+    request = RunRequest(
+        request_id="run-plan-load",
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        start_yearmonth="202201",
+        end_yearmonth="202203",
+        data_directory=str(tmp_path),
+        validate_urls=True,
+        metadata={
+            "temporal_plan_spill": {"inline_work_item_limit": 2},
+            "temporal_batching": {"max_work_items_per_batch": 1},
+        },
+    )
+    plan_payload = dataset_plan_activity({"request": request.to_dict()})
+    partition = plan_payload[DATASET_PLAN_BATCHES_KEY][1]
+
+    result = validate_urls_activity(
+        {
+            "request": request.to_dict(),
+            "partition": partition,
+            DATASET_PLAN_REF_KEY: plan_payload[DATASET_PLAN_REF_KEY],
+            "workflow_id": "validate-from-plan-ref",
+        }
+    )
+
+    assert str(result["work_item"]["url"]).endswith("/2022/2")
+    assert result["work_item"]["status"] == WorkStatus.URL_VALID.value
+    assert result["result"]["metrics"]["progress"]["total"] == 1.0
 
 
 def test_dataset_plan_activity_payload_survives_temporal_converter(

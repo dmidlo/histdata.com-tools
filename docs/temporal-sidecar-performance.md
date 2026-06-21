@@ -91,9 +91,12 @@ metadata and does not require a live Temporal server.
 
 ## Dataset-Period Batching
 
-`DatasetPlanWorkflow` still produces bounded `WorkItem` metadata for the full
-request. Before operation workflows run, each coarse pair/timeframe partition
-is expanded into deterministic child workflow batches grouped by:
+`DatasetPlanWorkflow` persists the full dataset plan to the manifest store. It
+keeps inline `WorkItem` metadata only for small plans, then spills larger plans
+out of workflow history and returns `dataset_plan_ref` plus
+`dataset_plan_batches`. Before operation workflows run, each coarse
+pair/timeframe partition is expanded into deterministic child workflow batches
+grouped by:
 
 - pair
 - timeframe
@@ -111,10 +114,21 @@ metadata:
 }
 ```
 
+The default dataset-plan inline threshold is also `64` work items. Requests can
+override it in metadata:
+
+```json
+{
+  "temporal_plan_spill": {
+    "inline_work_item_limit": 32
+  }
+}
+```
+
 `HistDataRunWorkflow` starts independent `SymbolTimeframeWorkflow` period
-batches with bounded fan-out after `DatasetPlanWorkflow` returns the planned
-work items. The production default fan-out window is `4` child workflows.
-Requests can override it in metadata:
+batches with bounded fan-out after `DatasetPlanWorkflow` returns compact plan
+metadata. The production default fan-out window is `4` child workflows. Requests
+can override it in metadata:
 
 ```json
 {
@@ -133,6 +147,9 @@ This keeps throughput high by preserving lane-level concurrency while avoiding
 one large symbol/timeframe workflow carrying every monthly work item for a
 multi-year request. Cancellation and retry scope also become smaller: a failed
 batch can be reasoned about as a specific pair/timeframe/format/period slice.
+For spilled plans, the first operation activity loads only the batch `work_ids`
+from the manifest reference, then downstream operation stages forward the
+bounded batch state as usual.
 Fan-out applies only to independent symbol/timeframe batch workflows. Within a
 single batch, `ValidateUrlsWorkflow`, `DownloadArchivesWorkflow`,
 `ExtractCsvWorkflow`, `BuildCacheWorkflow`, `MergeCacheWorkflow`, and

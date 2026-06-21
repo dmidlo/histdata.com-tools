@@ -15,14 +15,20 @@ user-visible CLI/API/GUI job.
 - `DatasetPlanWorkflow` for bounded dataset planning metadata.
 - `SymbolTimeframeWorkflow` for bounded dataset-period batches after planning.
 
-The initial request shape starts from pair/timeframe intent. Once
-`DatasetPlanWorkflow` returns planned `WorkItem` metadata, the parent expands
-each pair/timeframe group into deterministic batches by pair, timeframe, data
-format, and ordered year-month periods. Batch partitions carry only bounded
-metadata such as `batch_key`, `batch_index`, `batch_count`, `work_item_count`,
-and a bounded `work_ids` list. Independent `SymbolTimeframeWorkflow` batches
-are then started with deterministic bounded fan-out. Parent summaries still
-record child results in planned order.
+The initial request shape starts from pair/timeframe intent.
+`DatasetPlanWorkflow` persists the dataset plan to the manifest store and
+returns `dataset_plan_ref` plus deterministic `dataset_plan_batches`. Plans at
+or below the inline threshold can still include `work_items` for simple paths.
+Plans above the threshold omit the full `work_items` list from workflow history.
+The default inline threshold is `64` work items and can be overridden with
+`temporal_plan_spill.inline_work_item_limit`.
+
+After planning, the parent expands each pair/timeframe group into deterministic
+batches by pair, timeframe, data format, and ordered year-month periods. Batch
+partitions carry only bounded metadata such as `batch_key`, `batch_index`,
+`batch_count`, `work_item_count`, and a bounded `work_ids` list. Independent
+`SymbolTimeframeWorkflow` batches are then started with deterministic bounded
+fan-out. Parent summaries still record child results in planned order.
 
 `SymbolTimeframeWorkflow` runs operation-family child workflows:
 
@@ -42,7 +48,10 @@ referenced through
 
 Operation-family workflows inside one `SymbolTimeframeWorkflow` remain
 sequential because validation, download, extraction, cache build, merge, and
-import depend on forwarded work-item state from the previous stage.
+import depend on forwarded work-item state from the previous stage. If a large
+plan was spilled, the first operation activity hydrates only the batch
+`work_ids` from `dataset_plan_ref`; later operation stages use the normally
+forwarded bounded batch state.
 
 ## Activities
 
@@ -60,7 +69,10 @@ The default activities are:
 
 The activity functions delegate to queue-free stage helpers and return
 `StageResult`, `ArtifactRef`, progress metadata, cancellation metadata, and
-bounded operation summaries. They do not return rows, raw archive bytes, or
+bounded operation summaries. `dataset_plan` stores full plan metadata in the
+manifest SQLite store and returns a compact reference. Operation activities can
+load their assigned batch from that reference when no inline `work_items`
+payload is present. Activities do not return rows, raw archive bytes, or
 materialized dataframes through Temporal history.
 
 ## Task Queues
