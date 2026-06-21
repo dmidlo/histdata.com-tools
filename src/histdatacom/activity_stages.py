@@ -20,6 +20,14 @@ import certifi
 import requests
 from bs4 import BeautifulSoup
 
+from histdatacom.exceptions import (
+    ArchiveDownloadError,
+    ArchiveExtractionError,
+    CacheBuildError,
+    HistDataNoDataError,
+    UrlValidationError,
+    failure_info_from_exception,
+)
 from histdatacom.fx_enums import Format, Timeframe, get_valid_format_timeframes
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
@@ -227,45 +235,6 @@ class UrlFormMetadata:
         }
 
 
-class UrlValidationError(Exception):
-    """Structured URL validation failure."""
-
-    def __init__(
-        self,
-        code: str,
-        message: str,
-        *,
-        retryable: bool = False,
-        no_data: bool = False,
-        detail: Mapping[str, JSONValue] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.retryable = retryable
-        self.no_data = no_data
-        self.detail = dict(detail or {})
-
-
-class HistDataNoDataError(UrlValidationError):
-    """HistData returned a page without downloadable archive metadata."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: str = "HISTDATA_NO_DATA",
-        detail: Mapping[str, JSONValue] | None = None,
-    ) -> None:
-        super().__init__(
-            code,
-            message,
-            retryable=False,
-            no_data=True,
-            detail=detail,
-        )
-
-
 @dataclass(frozen=True, slots=True)
 class ArchiveDownloadResult:
     """A downloaded or reused archive artifact."""
@@ -289,24 +258,6 @@ class ArchiveDownloadResult:
         }
 
 
-class ArchiveDownloadError(Exception):
-    """Structured archive download failure."""
-
-    def __init__(
-        self,
-        code: str,
-        message: str,
-        *,
-        retryable: bool,
-        detail: Mapping[str, JSONValue] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.retryable = retryable
-        self.detail = dict(detail or {})
-
-
 @dataclass(frozen=True, slots=True)
 class ArchiveExtractionResult:
     """An extracted or reused CSV/XLSX artifact."""
@@ -328,24 +279,6 @@ class ArchiveExtractionResult:
             "reused_existing": self.reused_existing,
             "zip_deleted": self.zip_deleted,
         }
-
-
-class ArchiveExtractionError(Exception):
-    """Structured archive extraction failure."""
-
-    def __init__(
-        self,
-        code: str,
-        message: str,
-        *,
-        retryable: bool,
-        detail: Mapping[str, JSONValue] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.retryable = retryable
-        self.detail = dict(detail or {})
 
 
 @dataclass(frozen=True, slots=True)
@@ -377,24 +310,6 @@ class CacheBuildResult:
             "schema": dict(self.schema),
             "reused_existing": self.reused_existing,
         }
-
-
-class CacheBuildError(Exception):
-    """Structured Polars cache build/validation failure."""
-
-    def __init__(
-        self,
-        code: str,
-        message: str,
-        *,
-        retryable: bool,
-        detail: Mapping[str, JSONValue] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.retryable = retryable
-        self.detail = dict(detail or {})
 
 
 RecordTransformer = Callable[[Record], Record]
@@ -486,11 +401,8 @@ def validate_url_work_item(
             stage="validate_url",
             status=status,
             forward=False,
-            failure=FailureInfo(
-                code=err.code,
-                message=err.message,
-                retryable=err.retryable,
-                detail=err.detail,
+            failure=failure_info_from_exception(
+                err, detail={"url": record.url}
             ),
             metrics={
                 "forward": False,
@@ -508,10 +420,9 @@ def validate_url_work_item(
             stage="validate_url",
             status=WorkStatus.FAILED,
             forward=False,
-            failure=FailureInfo(
-                code="URL_VALIDATION_FAILED",
-                message=str(err),
-                retryable=False,
+            failure=failure_info_from_exception(
+                err,
+                default_code="URL_VALIDATION_FAILED",
                 detail={"url": record.url},
             ),
             metrics={"forward": False, "failed": True},
@@ -759,11 +670,10 @@ def download_archive_work_item(
         failed = _work_item_from_record(record, work_item).with_status(
             WorkStatus.FAILED
         )
-        failure = FailureInfo(
-            code="ARCHIVE_DOWNLOAD_FAILED",
-            message=str(err),
-            retryable=False,
-            detail={"url": record.url},
+        failure = failure_info_from_exception(
+            err,
+            default_code="ARCHIVE_DOWNLOAD_FAILED",
+            detail={"url": record.url, "data_dir": record.data_dir},
         )
         return _activity_output(
             failed,
@@ -1267,10 +1177,9 @@ def build_cache_work_item(
         )
     except SystemExit as err:
         record.delete_momento_file()
-        failure = FailureInfo(
-            code="CACHE_BUILD_INTERRUPTED",
-            message=str(err),
-            retryable=False,
+        failure = failure_info_from_exception(
+            err,
+            default_code="CACHE_BUILD_INTERRUPTED",
             detail={
                 "data_dir": record.data_dir,
                 "zip_filename": record.zip_filename,
@@ -2318,11 +2227,9 @@ def _archive_download_failure(
     record: Record,
 ) -> FailureInfo:
     if isinstance(err, ArchiveDownloadError):
-        return FailureInfo(
-            code=err.code,
-            message=err.message,
-            retryable=err.retryable,
-            detail=err.detail,
+        return failure_info_from_exception(
+            err,
+            detail={"url": record.url, "data_dir": record.data_dir},
         )
     if isinstance(err, KeyError):
         return FailureInfo(
@@ -2351,11 +2258,13 @@ def _archive_extraction_failure(
     record: Record,
 ) -> FailureInfo:
     if isinstance(err, ArchiveExtractionError):
-        return FailureInfo(
-            code=err.code,
-            message=err.message,
-            retryable=err.retryable,
-            detail=err.detail,
+        return failure_info_from_exception(
+            err,
+            detail={
+                "url": record.url,
+                "data_dir": record.data_dir,
+                "zip_filename": record.zip_filename,
+            },
         )
     if isinstance(err, zipfile.BadZipFile):
         return FailureInfo(
@@ -2381,11 +2290,14 @@ def _cache_build_failure(
     record: Record,
 ) -> FailureInfo:
     if isinstance(err, CacheBuildError):
-        return FailureInfo(
-            code=err.code,
-            message=err.message,
-            retryable=err.retryable,
-            detail=err.detail,
+        return failure_info_from_exception(
+            err,
+            detail={
+                "data_dir": record.data_dir,
+                "zip_filename": record.zip_filename,
+                "csv_filename": record.csv_filename,
+                "cache_filename": record.cache_filename,
+            },
         )
     return FailureInfo(
         code="CACHE_BUILD_FAILED",

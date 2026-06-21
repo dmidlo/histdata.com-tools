@@ -6,8 +6,6 @@ Raises:
 """
 
 import os
-import sys
-import traceback
 from pathlib import Path
 from typing import Callable
 
@@ -232,7 +230,6 @@ class Scraper:  # noqa:H601
 
         Raises:
             KeyboardInterrupt: User Exit.
-            SystemExit: On any undefined error from scraping
         """
         try:
             output = validate_url_work_item(
@@ -255,12 +252,6 @@ class Scraper:  # noqa:H601
         except KeyboardInterrupt as exc_info:
             print("keyboard from _validate_url.")  # noqa:T201
             raise KeyboardInterrupt from exc_info
-        except SystemExit:
-            print(  # noqa:T201
-                f"Unknown Error for URL: {record.url}",
-                traceback.format_exc(),
-            )
-            raise
         finally:
             config.CURRENT_QUEUE.task_done()  # type: ignore
 
@@ -301,8 +292,6 @@ class Scraper:  # noqa:H601
             args (dict): a global config.ARGS dict.
 
         Raises:
-            KeyError: Invalid Zip from remote. # noqa:DAR402
-            Exception: Unknown error.
             KeyboardInterrupt: User Exit.
         """
         try:
@@ -321,10 +310,6 @@ class Scraper:  # noqa:H601
         except KeyboardInterrupt as exc_info:
             print("keyboard from _download_zip.")  # noqa:T201
             raise KeyboardInterrupt from exc_info
-        except Exception:
-            print("Unexpected error:", sys.exc_info())  # noqa:T201
-            record.delete_momento_file()
-            raise
         finally:
             config.CURRENT_QUEUE.task_done()  # type: ignore
 

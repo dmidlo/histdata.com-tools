@@ -13,7 +13,6 @@ Returns:
 
 from __future__ import annotations
 
-import sys  # sourcery skip
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -121,8 +120,6 @@ class Api:  # noqa:H601
             records_next (Records):
                 Records Queue for Further Work
 
-        Raises:
-            Exception: Unknown Exception
         """
         try:
             output = build_cache_work_item(
@@ -133,10 +130,6 @@ class Api:  # noqa:H601
             apply_stage_output_to_record(output, record)
             if output.forward:
                 records_next.put(record)
-        except Exception:
-            print("Unexpected error:", sys.exc_info())  # noqa:T201
-            record.delete_momento_file()
-            raise
         finally:
             records_current.task_done()
 

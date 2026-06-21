@@ -18,6 +18,7 @@ from histdatacom.activity_stages import (
     repository_refresh_stage,
     validate_url_work_item,
 )
+from histdatacom.exceptions import influx_failure_info
 from histdatacom.runtime_contracts import (
     FailureInfo,
     JSONValue,
@@ -410,16 +411,13 @@ def _influx_failure_output(
     work_item: WorkItem,
     err: Exception | SystemExit,
 ) -> ActivityStageOutput:
+    failure = _influx_failure_info(err)
     result = StageResult(
         work_id=work_item.work_id,
         stage="import_to_influx",
-        status=(
-            WorkStatus.RETRIED
-            if isinstance(err, OSError)
-            else WorkStatus.FAILED
-        ),
-        failure=_influx_failure_info(err),
-        metrics={"forward": False, "retryable": isinstance(err, OSError)},
+        status=WorkStatus.RETRIED if failure.retryable else WorkStatus.FAILED,
+        failure=failure,
+        metrics={"forward": False, "retryable": failure.retryable},
     )
     return ActivityStageOutput(
         work_item=work_item.with_status(result.status),
@@ -429,40 +427,7 @@ def _influx_failure_output(
 
 
 def _influx_failure_info(err: Exception | SystemExit) -> FailureInfo:
-    message = str(err)
-    if isinstance(err, OSError):
-        return FailureInfo(
-            code="INFLUX_IMPORT_RETRYABLE",
-            message=message,
-            retryable=True,
-            detail={"idempotent_retry": True},
-        )
-    if (
-        "histdatacom[influx]" in message
-        or "InfluxDB import not installed" in message
-    ):
-        return FailureInfo(
-            code="INFLUX_OPTIONAL_DEPENDENCY_MISSING",
-            message=message,
-            retryable=False,
-        )
-    if isinstance(err, (ModuleNotFoundError, ImportError)):
-        return FailureInfo(
-            code="INFLUX_OPTIONAL_DEPENDENCY_MISSING",
-            message=message,
-            retryable=False,
-        )
-    if isinstance(err, SystemExit):
-        return FailureInfo(
-            code="INFLUX_IMPORT_PRECONDITION_FAILED",
-            message=message,
-            retryable=False,
-        )
-    return FailureInfo(
-        code="INFLUX_IMPORT_FAILED",
-        message=message,
-        retryable=False,
-    )
+    return influx_failure_info(err)
 
 
 def _mapping(value: Any) -> dict[str, Any]:

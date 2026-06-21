@@ -3,7 +3,6 @@
 # pylint: disable=redefined-outer-name
 from __future__ import annotations
 
-import sys
 from functools import partial
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Tuple
 
@@ -17,6 +16,10 @@ from histdatacom.activity_stages import (
     emit_influx_cache_batches,
     import_to_influx_work_item,
     iter_polars_row_batches,
+)
+from histdatacom.exceptions import (
+    InfluxConfigurationError,
+    InfluxDependencyError,
 )
 from histdatacom.histdata_ascii import format_influx_line
 from histdatacom.runtime_contracts import WorkItem
@@ -99,7 +102,6 @@ class Influx:  # noqa:H601
             emit_lines (LineSink | Any): line sink or legacy queue
 
         Raises:
-            Exception: on unknown exception.
         """
         try:
             output = import_to_influx_work_item(
@@ -109,12 +111,6 @@ class Influx:  # noqa:H601
             )
             apply_stage_output_to_record(output, record)
             records_next.put(record)
-        except Exception as err:
-            print(  # noqa:T201
-                "Unexpected error from here:", sys.exc_info(), err
-            )  # noqa:T201
-            record.delete_momento_file()
-            raise
         finally:
             records_current.task_done()
 
@@ -250,7 +246,7 @@ def _args_with_influx_config(args: dict) -> dict:
         values["INFLUX_URL"] = influx_config["url"]
         values["INFLUX_TOKEN"] = influx_config["token"]
     except (KeyError, TypeError) as err:
-        raise ValueError(
+        raise InfluxConfigurationError(
             "influxdb.yaml is missing required influxdb keys: "
             "org, bucket, url, token."
         ) from err
@@ -259,7 +255,10 @@ def _args_with_influx_config(args: dict) -> dict:
 
 
 def _load_influx_client_api() -> tuple[Any, Any, Any]:
-    check_installed_module("influxdb_client")
+    try:
+        check_installed_module("influxdb_client")
+    except SystemExit as err:
+        raise InfluxDependencyError(str(err)) from err
     from influxdb_client import InfluxDBClient, WritePrecision
     from influxdb_client.client.write_api import SYNCHRONOUS
 
