@@ -93,6 +93,13 @@ PY
     )
 }
 
+sign_dist_artifacts()
+{
+    local artifacts=(dist/*.whl dist/*.tar.gz)
+
+    gpg --detach-sign --armor "${artifacts[@]}"
+}
+
 build()
 {
     rm -rf ./dist
@@ -146,12 +153,12 @@ case "${1:-}" in
         ;;
     pypi)
         build
-        gpg --detach-sign -a dist/*.tar.gz
+        sign_dist_artifacts
         python -m twine upload -r pypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
         ;;
     testpypi)
         build
-        gpg --detach-sign -a dist/*.tar.gz
+        sign_dist_artifacts
         python -m twine upload -r testpypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
         ;;
     testpypi_install)

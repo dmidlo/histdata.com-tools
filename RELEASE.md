@@ -3,6 +3,59 @@
 `histdatacom` is published on PyPI. Keep release changes conservative and
 validate both source distributions and wheels before publishing.
 
+## Release Decision Tree
+
+Use GitHub Actions for release artifact builds and provenance. Use the local
+publisher only as a fallback while Trusted Publishing is being verified or if
+GitHub Actions is unavailable.
+
+1. Build and validate only: run the `Release` workflow manually with
+   `release_target=build-only`, or push a `v*` tag. This builds, validates,
+   attests, and uploads artifacts. It does not publish.
+2. TestPyPI dry run: configure the TestPyPI Trusted Publisher, then run the
+   `Release` workflow manually with `release_target=testpypi`. Approve the
+   `testpypi` environment deployment, then verify install behavior from
+   TestPyPI.
+3. PyPI production release: configure the PyPI Trusted Publisher, confirm the
+   same version passed TestPyPI, then run the `Release` workflow manually with
+   `release_target=pypi` and `testpypi_dry_run_confirmed=true`. Approve the
+   `pypi` environment deployment.
+4. Local fallback: run `bash pypi.sh build`, then `bash pypi.sh testpypi` or
+   `bash pypi.sh pypi` only when the GitHub Trusted Publishing path is not
+   available.
+
+Tag pushes are intentionally build-only. Production publishing is reachable
+only from manual `workflow_dispatch`, the `pypi` environment approval gate, and
+the explicit TestPyPI dry-run confirmation input.
+
+## Trusted Publishing Configuration
+
+The GitHub repository has protected `testpypi` and `pypi` environments with
+required reviewer approval. Configure the matching Trusted Publishers in
+TestPyPI and PyPI before using the publish jobs:
+
+- PyPI/TestPyPI project: `histdatacom`
+- GitHub owner/repository: `dmidlo/histdata.com-tools`
+- Workflow filename: `release.yml`
+- TestPyPI environment name: `testpypi`
+- PyPI environment name: `pypi`
+
+Trusted Publishing removes long-lived PyPI credentials from GitHub Actions.
+The publish jobs request only job-scoped OIDC credentials with `id-token:
+write`, and the build job remains separate from publish jobs.
+
+## Provenance And Signatures
+
+The release workflow generates GitHub artifact attestations for the built wheel
+and source distribution before uploading them as workflow artifacts. The
+Trusted Publishing upload action also publishes PyPI digital attestations by
+default for PyPI and TestPyPI uploads.
+
+Local GPG detached signatures remain part of the local fallback path for now.
+`pypi.sh` signs both the wheel and source distribution before local upload. The
+GitHub release path does not use local GPG keys; it relies on GitHub artifact
+attestations and PyPI Trusted Publishing attestations.
+
 ## Local Publishing
 
 The existing local workflow remains available:
@@ -30,7 +83,20 @@ must use `setuptools>=77` so the built artifacts include current SPDX license
 metadata.
 
 The upload commands still use local `.pypirc` credentials and GPG detached
-signatures, matching the historical release process.
+signatures, matching the historical release process. Prefer the GitHub Trusted
+Publishing path once the PyPI and TestPyPI publishers are verified.
+
+After a TestPyPI dry run, install from TestPyPI in a disposable environment:
+
+```sh
+bash pypi.sh testpypi_install
+```
+
+After a production publish, verify the PyPI install path:
+
+```sh
+bash pypi.sh pypi_install
+```
 
 ## GitHub Actions
 
@@ -44,9 +110,13 @@ Actions mistakes are checked before push.
 Workflow actions are pinned to current supported releases:
 
 - `actions/checkout@v7.0.0`
+- `actions/attest@v4.1.0`
 - `actions/setup-python@v6.2.0`
 - `actions/upload-artifact@v7.0.1`
 - `actions/download-artifact@v8.0.1`
+- `actions/dependency-review-action@v5.0.0`
+- `github/codeql-action/init@v4.36.2`
+- `github/codeql-action/analyze@v4.36.2`
 - `pypa/gh-action-pypi-publish@v1.14.0`
 - `rhysd/actionlint@v1.7.12`
 
@@ -63,19 +133,21 @@ updated. Release workflow concurrency does not cancel in-progress runs, so a
 manual publish cannot be interrupted by a later tag or dispatch event.
 
 The release workflow builds artifacts on `v*` tags and manual dispatches. It
-does not publish automatically on tag push. Publishing to PyPI through GitHub
-Actions requires a manual workflow dispatch with `publish_to_pypi` enabled.
+does not publish automatically on tag push. Publishing to TestPyPI or PyPI
+requires a manual workflow dispatch, a matching protected environment approval,
+and OIDC Trusted Publishing configured on the target index.
 
-Before enabling GitHub Actions publishing, configure PyPI Trusted Publishing for
-this project:
+## Rollback And Yank Guidance
 
-- PyPI project: `histdatacom`
-- GitHub owner/repository: `dmidlo/histdata.com-tools`
-- Workflow filename: `release.yml`
-- Environment name: `pypi`
+Published package files are immutable. If a release is bad, publish a fixed
+patch release rather than trying to replace files for the same version.
 
-The `pypi` environment should require manual approval in GitHub before publish
-jobs run.
+Yank a release on PyPI when it is broken, uninstallable, violates compatibility
+expectations, or contains a security vulnerability. Use the PyPI release
+management page and provide a yank reason so downstream users can understand
+the mitigation. Delete a release only for exceptional cases such as leaked
+secrets or malicious content where leaving the files available is worse than
+breaking historical installs.
 
 ## Dependency And Security Triage
 
