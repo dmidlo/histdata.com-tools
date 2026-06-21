@@ -34,6 +34,7 @@ from histdatacom.histdata_ascii import (
     read_ascii_file_to_polars,
     write_polars_cache,
 )
+from histdatacom.observability import ProgressState, progress_increment
 from histdatacom.runtime_contracts import WorkItem, WorkStatus
 from histdatacom.scraper.scraper import Scraper
 
@@ -274,6 +275,12 @@ class Api:  # noqa:H601
         """
         records_count = len(tp_set_dict["records"])
         if records_count:
+            progress_state = ProgressState(
+                stage="merge_cache",
+                total=float(records_count),
+                unit="records",
+                status=WorkStatus.COMPLETED,
+            )
             with Progress(
                 TextColumn(text_format="[cyan]Merging records..."),
                 BarColumn(),
@@ -283,7 +290,10 @@ class Api:  # noqa:H601
                 task_id = progress.add_task("merge", total=records_count)
 
                 for _ in tp_set_dict["records"]:
-                    progress.advance(task_id)
+                    event = progress_state.advance(
+                        message="Merged cache record."
+                    )
+                    progress.advance(task_id, progress_increment(event))
 
         tp_set_dict["data"] = merge_cache_records(
             tp_set_dict["records"],

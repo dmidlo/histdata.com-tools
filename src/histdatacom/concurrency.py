@@ -29,7 +29,13 @@ from rich.progress import (
 )
 
 from histdatacom import config
+from histdatacom.observability import (
+    ProgressEventSink,
+    ProgressState,
+    progress_increment,
+)
 from histdatacom.records import Records
+from histdatacom.runtime_contracts import WorkStatus
 
 if TYPE_CHECKING:
     from pandas import DataFrame
@@ -51,6 +57,7 @@ class ThreadPool:
         progress_pre_text: str,
         progress_post_text: str,
         cpu_count: int,
+        event_sink: ProgressEventSink | None = None,
     ) -> None:
         """Initialize attributes for thread pool.
 
@@ -60,12 +67,15 @@ class ThreadPool:
             progress_pre_text (str): display for rich.Progress
             progress_post_text (str): display for rich.Progress
             cpu_count (int): CPU count to use for pool.
+            event_sink (ProgressEventSink | None): optional structured event
+                receiver.
         """
         self.exec_func = exec_func
         self.args = args
         self.progress_pre_text = progress_pre_text
         self.progress_post_text = progress_post_text
         self.cpu_count = cpu_count
+        self.event_sink = event_sink
 
     def __call__(
         self,
@@ -82,6 +92,12 @@ class ThreadPool:
             raise ValueError("records_current and records_next are required")
 
         records_count = records_current.qsize()  # type: ignore
+        progress_state = ProgressState(
+            stage=_progress_stage(self.progress_pre_text, "thread_pool"),
+            total=float(records_count),
+            unit=self.progress_post_text or "records",
+            event_sink=self.event_sink,
+        )
         with Progress(
             TextColumn(
                 text_format=(
@@ -117,11 +133,24 @@ class ThreadPool:
                         future = executor.submit(  # noqa:BLK100
                             self.exec_func, record, self.args
                         )
-                        progress.advance(task_id, 0.25)
+                        _advance_progress(
+                            progress,
+                            task_id,
+                            0.25,
+                            progress_state,
+                            message="Submitted record to worker pool.",
+                            current=getattr(record, "url", ""),
+                        )
                         futures.append(future)
 
                     for future in as_completed(futures):
-                        _complete_future(progress, task_id, futures, future)
+                        _complete_future(
+                            progress,
+                            task_id,
+                            futures,
+                            future,
+                            progress_state=progress_state,
+                        )
             except KeyboardInterrupt as exc_info:
                 _on_keyboard_interrupt(executor, progress, exc_info)
 
@@ -141,6 +170,7 @@ class ProcessPool:
         cpu_count: int,
         join: bool = True,
         dump: bool = True,
+        event_sink: ProgressEventSink | None = None,
     ) -> None:
         """Initialize attributes for process pool.
 
@@ -152,6 +182,8 @@ class ProcessPool:
             cpu_count (int): CPU count to use for pool.
             join (bool): disable join waits. Defaults to True.
             dump (bool): enable queue dumps. Defaults to True.
+            event_sink (ProgressEventSink | None): optional structured event
+                receiver.
         """
         self.exec_func = exec_func
         self.args = args
@@ -160,6 +192,7 @@ class ProcessPool:
         self.cpu_count = cpu_count
         self.join = join
         self.dump = dump
+        self.event_sink = event_sink
 
     def __call__(  # noqa:CCR001
         self,
@@ -178,6 +211,12 @@ class ProcessPool:
             raise ValueError("records_current and records_next are required")
 
         records_count = records_current.qsize()  # type: ignore
+        progress_state = ProgressState(
+            stage=_progress_stage(self.progress_pre_text, "process_pool"),
+            total=float(records_count),
+            unit=self.progress_post_text or "records",
+            event_sink=self.event_sink,
+        )
         with Progress(
             TextColumn(
                 text_format=(
@@ -220,11 +259,24 @@ class ProcessPool:
                             records_next,
                         )
 
-                        progress.advance(task_id, 0.25)
+                        _advance_progress(
+                            progress,
+                            task_id,
+                            0.25,
+                            progress_state,
+                            message="Submitted record to worker pool.",
+                            current=getattr(record, "url", ""),
+                        )
                         futures.append(future)
 
                     for future in as_completed(futures):
-                        _complete_future(progress, task_id, futures, future)
+                        _complete_future(
+                            progress,
+                            task_id,
+                            futures,
+                            future,
+                            progress_state=progress_state,
+                        )
 
             except KeyboardInterrupt as exc_info:
                 _on_keyboard_interrupt(executor, progress, exc_info, writer)
@@ -343,7 +395,12 @@ def _init_counters(
 
 
 def _complete_future(
-    progress: Progress, task_id: TaskID, futures: list, future: Future
+    progress: Progress,
+    task_id: TaskID,
+    futures: list,
+    future: Future,
+    *,
+    progress_state: ProgressState | None = None,
 ) -> None:
     """Finalize future and rich.Progress task.
 
@@ -352,11 +409,30 @@ def _complete_future(
         task_id (TaskID): progress instance task id.
         futures (list): list of futures.
         future (Future): future from pool.
+        progress_state (ProgressState | None): optional structured progress
+            aggregate.
     """
     try:
         future.result()
+    except Exception as err:
+        _advance_progress(
+            progress,
+            task_id,
+            0.75,
+            progress_state,
+            status=WorkStatus.FAILED,
+            message=str(err),
+        )
+        raise
+    else:
+        _advance_progress(
+            progress,
+            task_id,
+            0.75,
+            progress_state,
+            message="Worker item completed.",
+        )
     finally:
-        progress.advance(task_id, 0.75)
         futures.remove(future)
         del future  # noqa:WPS100
 
@@ -389,3 +465,30 @@ def _on_keyboard_interrupt(
         exit_progress.add_task("exiting", total=0)
         executor.shutdown(wait=False, cancel_futures=True)
         raise SystemExit from exc_info
+
+
+def _advance_progress(
+    progress: Progress,
+    task_id: TaskID,
+    increment: float,
+    progress_state: ProgressState | None,
+    *,
+    status: WorkStatus | None = None,
+    message: str = "",
+    current: str = "",
+) -> None:
+    if progress_state is None:
+        progress.advance(task_id, increment)
+        return
+    event = progress_state.advance(
+        increment,
+        status=status,
+        message=message,
+        current=current,
+    )
+    progress.advance(task_id, progress_increment(event))
+
+
+def _progress_stage(value: str, fallback: str) -> str:
+    normalized = "_".join(value.strip().lower().split())
+    return normalized or fallback

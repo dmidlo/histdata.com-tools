@@ -22,7 +22,8 @@ from histdatacom.exceptions import (
     InfluxDependencyError,
 )
 from histdatacom.histdata_ascii import format_influx_line
-from histdatacom.runtime_contracts import WorkItem
+from histdatacom.observability import ProgressState, progress_increment
+from histdatacom.runtime_contracts import WorkItem, WorkStatus
 from histdatacom.utils import check_installed_module, load_influx_yaml
 
 if TYPE_CHECKING:
@@ -58,6 +59,12 @@ class Influx:  # noqa:H601
             raise ValueError("Influx import requires configured record queues.")
 
         records_count = config.CURRENT_QUEUE.qsize()  # type: ignore
+        progress_state = ProgressState(
+            stage="import_to_influx",
+            total=float(records_count),
+            unit="records",
+            status=WorkStatus.INFLUX_UPLOAD,
+        )
         with InfluxBatchWriter(config.ARGS) as writer:
             with Progress(
                 TextColumn(text_format="[cyan]Uploading to InfluxDB"),
@@ -79,7 +86,10 @@ class Influx:  # noqa:H601
                         config.NEXT_QUEUE,  # type: ignore[arg-type]
                         writer.write_lines,
                     )
-                    progress.advance(task_id)
+                    event = progress_state.advance(
+                        message="Uploaded cache record to InfluxDB."
+                    )
+                    progress.advance(task_id, progress_increment(event))
 
         print("[cyan] done.")  # noqa:T201
         config.NEXT_QUEUE.dump_to_queue(config.CURRENT_QUEUE)  # type: ignore

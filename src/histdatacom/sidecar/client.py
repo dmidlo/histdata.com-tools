@@ -649,9 +649,12 @@ def _logs_from_progress(
 ) -> tuple[JobLogEntry, ...]:
     return tuple(
         JobLogEntry(
-            source=event.stage,
+            source=str(event.metadata.get("source") or event.stage),
             message=event.message,
-            level="error" if event.status == WorkStatus.FAILED else "info",
+            level=str(
+                event.metadata.get("level")
+                or ("error" if event.status == WorkStatus.FAILED else "info")
+            ),
             timestamp_utc=event.timestamp_utc,
             metadata=event.metadata,
         )

@@ -19,6 +19,7 @@ from histdatacom.activity_stages import (
     validate_url_work_item,
 )
 from histdatacom.exceptions import influx_failure_info
+from histdatacom.observability import attach_progress_metadata
 from histdatacom.runtime_contracts import (
     FailureInfo,
     JSONValue,
@@ -82,7 +83,13 @@ def repository_refresh_activity(
         available_remote_data=request.available_remote_data,
         update_remote_data=request.update_remote_data,
     )
-    return cast(dict[str, Any], output.result.to_dict())
+    result = _observe_stage_result(
+        output.result,
+        total=1,
+        completed=1,
+        unit="operations",
+    )
+    return cast(dict[str, Any], result.to_dict())
 
 
 @activity_defn(name="dataset_plan")
@@ -98,7 +105,17 @@ def dataset_plan_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
         default_download_dir=set_working_data_dir(request.data_directory),
         zip_persist=request.zip_persist,
     )
-    return output.to_dict()
+    output = replace(
+        output,
+        result=_observe_stage_result(
+            output.result,
+            total=len(output.work_items),
+            completed=len(output.work_items),
+            unit="work_items",
+            increment=len(output.work_items),
+        ),
+    )
+    return cast(dict[str, Any], output.to_dict())
 
 
 @activity_defn(name="validate_urls")
@@ -107,20 +124,33 @@ def validate_urls_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     work_items = _work_items_from_payload(payload)
     if not work_items:
+        result = _observe_stage_result(
+            _missing_work_item_result(payload, "validate_urls"),
+            total=0,
+            completed=0,
+            unit="work_items",
+            increment=0,
+        )
         return cast(
             dict[str, Any],
-            _missing_work_item_result(payload, "validate_urls").to_dict(),
+            result.to_dict(),
         )
 
+    total = len(work_items)
     args = {
         "default_download_dir": set_working_data_dir(request.data_directory),
         "requests_timeout": _request_timeout(request),
     }
     outputs = tuple(
-        validate_url_work_item(work_item, args=args) for work_item in work_items
+        _observe_activity_output(
+            validate_url_work_item(work_item, args=args),
+            total=total,
+            completed=index,
+        )
+        for index, work_item in enumerate(work_items, start=1)
     )
     if len(outputs) == 1:
-        return outputs[0].to_dict()
+        return cast(dict[str, Any], outputs[0].to_dict())
 
     return cast(
         dict[str, Any],
@@ -143,22 +173,34 @@ def download_archives_activity(
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     work_items = _work_items_from_payload(payload)
     if not work_items:
+        result = _observe_stage_result(
+            _missing_work_item_result(payload, "download_archives"),
+            total=0,
+            completed=0,
+            unit="work_items",
+            increment=0,
+        )
         return cast(
             dict[str, Any],
-            _missing_work_item_result(payload, "download_archives").to_dict(),
+            result.to_dict(),
         )
 
+    total = len(work_items)
     args = {
         "default_download_dir": set_working_data_dir(request.data_directory),
         "requests_timeout": _request_timeout(request),
         "from_api": bool(request.api_return_type),
     }
     outputs = tuple(
-        download_archive_work_item(work_item, args=args)
-        for work_item in work_items
+        _observe_activity_output(
+            download_archive_work_item(work_item, args=args),
+            total=total,
+            completed=index,
+        )
+        for index, work_item in enumerate(work_items, start=1)
     )
     if len(outputs) == 1:
-        return outputs[0].to_dict()
+        return cast(dict[str, Any], outputs[0].to_dict())
 
     return cast(
         dict[str, Any],
@@ -181,20 +223,33 @@ def extract_csv_activity(
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     work_items = _work_items_from_payload(payload)
     if not work_items:
+        result = _observe_stage_result(
+            _missing_work_item_result(payload, "extract_csv"),
+            total=0,
+            completed=0,
+            unit="work_items",
+            increment=0,
+        )
         return cast(
             dict[str, Any],
-            _missing_work_item_result(payload, "extract_csv").to_dict(),
+            result.to_dict(),
         )
 
+    total = len(work_items)
     args = {
         "default_download_dir": set_working_data_dir(request.data_directory),
         "zip_persist": request.zip_persist,
     }
     outputs = tuple(
-        extract_csv_work_item(work_item, args=args) for work_item in work_items
+        _observe_activity_output(
+            extract_csv_work_item(work_item, args=args),
+            total=total,
+            completed=index,
+        )
+        for index, work_item in enumerate(work_items, start=1)
     )
     if len(outputs) == 1:
-        return outputs[0].to_dict()
+        return cast(dict[str, Any], outputs[0].to_dict())
 
     return cast(
         dict[str, Any],
@@ -217,19 +272,32 @@ def build_cache_activity(
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     work_items = _work_items_from_payload(payload)
     if not work_items:
+        result = _observe_stage_result(
+            _missing_work_item_result(payload, "build_cache"),
+            total=0,
+            completed=0,
+            unit="work_items",
+            increment=0,
+        )
         return cast(
             dict[str, Any],
-            _missing_work_item_result(payload, "build_cache").to_dict(),
+            result.to_dict(),
         )
 
+    total = len(work_items)
     args = {
         "default_download_dir": set_working_data_dir(request.data_directory),
     }
     outputs = tuple(
-        build_cache_work_item(work_item, args=args) for work_item in work_items
+        _observe_activity_output(
+            build_cache_work_item(work_item, args=args),
+            total=total,
+            completed=index,
+        )
+        for index, work_item in enumerate(work_items, start=1)
     )
     if len(outputs) == 1:
-        return outputs[0].to_dict()
+        return cast(dict[str, Any], outputs[0].to_dict())
 
     return cast(
         dict[str, Any],
@@ -251,16 +319,33 @@ def merge_cache_activity(
     """Assemble cache merge references without materializing dataframes."""
     work_items = _work_items_from_payload(payload)
     if not work_items:
+        result = _observe_stage_result(
+            _missing_work_item_result(payload, "merge_cache"),
+            total=0,
+            completed=0,
+            unit="work_items",
+            increment=0,
+        )
         return cast(
             dict[str, Any],
-            _missing_work_item_result(payload, "merge_cache").to_dict(),
+            result.to_dict(),
         )
 
     output = merge_cache_work_items(
         work_items,
         materialize=False,
     )
-    return output.to_dict()
+    output = replace(
+        output,
+        result=_observe_stage_result(
+            output.result,
+            total=len(work_items),
+            completed=len(work_items),
+            unit="work_items",
+            increment=len(work_items),
+        ),
+    )
+    return cast(dict[str, Any], output.to_dict())
 
 
 @activity_defn(name="import_to_influx")
@@ -271,29 +356,46 @@ def import_to_influx_activity(
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     work_items = _work_items_from_payload(payload)
     if not work_items:
+        result = _observe_stage_result(
+            _missing_work_item_result(payload, "import_to_influx"),
+            total=0,
+            completed=0,
+            unit="work_items",
+            increment=0,
+        )
         return cast(
             dict[str, Any],
-            _missing_work_item_result(payload, "import_to_influx").to_dict(),
+            result.to_dict(),
         )
 
+    total = len(work_items)
     args = _influx_args(request)
     try:
         with _influx_batch_writer(args) as writer:
             outputs = tuple(
-                _import_to_influx_with_writer(
-                    work_item,
-                    args=args,
-                    writer=writer,
+                _observe_activity_output(
+                    _import_to_influx_with_writer(
+                        work_item,
+                        args=args,
+                        writer=writer,
+                    ),
+                    total=total,
+                    completed=index,
                 )
-                for work_item in work_items
+                for index, work_item in enumerate(work_items, start=1)
             )
     except (Exception, SystemExit) as err:
         outputs = tuple(
-            _influx_failure_output(work_item, err) for work_item in work_items
+            _observe_activity_output(
+                _influx_failure_output(work_item, err),
+                total=total,
+                completed=index,
+            )
+            for index, work_item in enumerate(work_items, start=1)
         )
 
     if len(outputs) == 1:
-        return outputs[0].to_dict()
+        return cast(dict[str, Any], outputs[0].to_dict())
 
     return cast(
         dict[str, Any],
@@ -405,6 +507,67 @@ def _activity_heartbeat(metadata: Mapping[str, JSONValue]) -> None:
     heartbeat = getattr(activity, "heartbeat", None)
     if callable(heartbeat):
         heartbeat(dict(metadata))
+
+
+def _observe_activity_output(
+    output: ActivityStageOutput,
+    *,
+    total: int,
+    completed: int,
+) -> ActivityStageOutput:
+    return replace(
+        output,
+        result=_observe_stage_result(
+            output.result,
+            total=total,
+            completed=completed,
+            unit="work_items",
+        ),
+    )
+
+
+def _observe_stage_result(
+    result: StageResult,
+    *,
+    total: int,
+    completed: int,
+    unit: str,
+    increment: int = 1,
+) -> StageResult:
+    failure_message = result.failure.message if result.failure else ""
+    base_events = result.events or (
+        StatusEvent(
+            status=result.status,
+            stage=result.stage,
+            message=f"{result.stage} status updated.",
+            work_id=result.work_id,
+        ),
+    )
+    observed_event = attach_progress_metadata(
+        base_events[-1],
+        total=float(total),
+        completed=float(completed),
+        unit=unit,
+        increment=float(increment),
+        last_error=failure_message,
+        metadata={
+            "artifact_count": len(result.artifacts),
+            "failure_code": result.failure.code if result.failure else "",
+        },
+    )
+    observed_events = (*base_events[:-1], observed_event)
+    progress_metadata = dict(observed_event.metadata)
+    progress_metadata.update(
+        {
+            "stage": result.stage,
+            "status": result.status.value,
+            "work_id": result.work_id,
+        }
+    )
+    _activity_heartbeat(progress_metadata)
+    metrics = dict(result.metrics)
+    metrics["progress"] = progress_metadata
+    return replace(result, events=observed_events, metrics=metrics)
 
 
 def _influx_failure_output(

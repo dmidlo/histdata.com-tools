@@ -110,7 +110,9 @@ def test_thread_pool_moves_processed_records_back_to_current_queue(
         current.task_done()
 
     monkeypatch.setattr(concurrency, "ThreadPoolExecutor", _SynchronousExecutor)
-    monkeypatch.setattr(concurrency, "as_completed", lambda futures: futures)
+    monkeypatch.setattr(
+        concurrency, "as_completed", lambda futures: tuple(futures)
+    )
 
     concurrency.ThreadPool(
         worker,
@@ -122,6 +124,48 @@ def test_thread_pool_moves_processed_records_back_to_current_queue(
 
     assert _drain_statuses(current) == ["CSV_ZIP", "CSV_ZIP"]
     assert next_records.empty()
+
+
+def test_thread_pool_emits_structured_progress_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ThreadPool progress should be observable without inspecting Rich."""
+    import histdatacom.concurrency as concurrency
+    from histdatacom.records import Record, Records
+    from histdatacom.runtime_contracts import StatusEvent
+
+    current = Records()
+    next_records = Records()
+    for status in ("URL_NEW", "URL_VALID"):
+        current.put(Record(status=status))
+    events: list[StatusEvent] = []
+
+    def worker(record: Record, args: dict) -> None:  # noqa: ARG001
+        next_records.put(record)
+        current.task_done()
+
+    monkeypatch.setattr(concurrency, "ThreadPoolExecutor", _SynchronousExecutor)
+    monkeypatch.setattr(
+        concurrency, "as_completed", lambda futures: tuple(futures)
+    )
+
+    concurrency.ThreadPool(
+        worker,
+        {},
+        "Testing",
+        "records",
+        2,
+        event_sink=events.append,
+    )(current, next_records)
+
+    assert [event.metadata["increment"] for event in events] == [
+        0.25,
+        0.25,
+        0.75,
+        0.75,
+    ]
+    assert events[-1].metadata["completed"] == 2.0
+    assert events[-1].metadata["event_type"] == "progress"
 
 
 def test_process_pool_moves_processed_records_back_to_current_queue(

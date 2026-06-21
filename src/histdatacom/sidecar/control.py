@@ -255,6 +255,11 @@ class JobProgressSnapshot:
     current_stage: str = ""
     total_children: int = 0
     completed_children: int = 0
+    unit: str = "children"
+    started_at_utc: str = ""
+    updated_at_utc: str = ""
+    rate_per_second: float = 0.0
+    last_error: str = ""
     planned_children: tuple[str, ...] = ()
     completed_stages: tuple[str, ...] = ()
     events: tuple[StatusEvent, ...] = ()
@@ -279,7 +284,12 @@ class JobProgressSnapshot:
             "current_stage": self.current_stage,
             "total_children": self.total_children,
             "completed_children": self.completed_children,
+            "unit": self.unit,
             "percent_complete": self.percent_complete,
+            "rate_per_second": self.rate_per_second,
+            "started_at_utc": self.started_at_utc,
+            "updated_at_utc": self.updated_at_utc,
+            "last_error": self.last_error,
             "planned_children": list(self.planned_children),
             "completed_stages": list(self.completed_stages),
             "events": [event.to_dict() for event in self.events],
@@ -289,6 +299,10 @@ class JobProgressSnapshot:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "JobProgressSnapshot":
         """Create progress state from a workflow status query payload."""
+        events = tuple(
+            StatusEvent.from_dict(_coerce_mapping(item))
+            for item in data.get("events", [])
+        )
         return cls(
             workflow_name=str(data.get("workflow_name", "") or ""),
             request_id=str(data.get("request_id", "") or ""),
@@ -296,16 +310,20 @@ class JobProgressSnapshot:
             current_stage=str(data.get("current_stage", "") or ""),
             total_children=int(data.get("total_children", 0) or 0),
             completed_children=int(data.get("completed_children", 0) or 0),
+            unit=str(data.get("unit", "children") or "children"),
+            started_at_utc=str(data.get("started_at_utc", "") or ""),
+            updated_at_utc=str(data.get("updated_at_utc", "") or ""),
+            rate_per_second=_float_value(data.get("rate_per_second")),
+            last_error=str(
+                data.get("last_error", "") or _last_event_error(events)
+            ),
             planned_children=tuple(
                 str(item) for item in data.get("planned_children", [])
             ),
             completed_stages=tuple(
                 str(item) for item in data.get("completed_stages", [])
             ),
-            events=tuple(
-                StatusEvent.from_dict(_coerce_mapping(item))
-                for item in data.get("events", [])
-            ),
+            events=events,
             artifacts=tuple(
                 ArtifactRef.from_dict(_coerce_mapping(item))
                 for item in data.get("artifacts", [])
@@ -423,10 +441,17 @@ class SidecarJobSnapshot:
         """Return a copy enriched with sidecar process status, if present."""
         if sidecar_status is None:
             return self
+        metadata = dict(self.metadata)
+        logs = getattr(sidecar_status, "logs", None)
+        if isinstance(logs, Mapping):
+            metadata["sidecar_logs"] = {
+                str(key): str(value) for key, value in logs.items()
+            }
         return replace(
             self,
             sidecar_state=str(getattr(sidecar_status, "state", "") or ""),
             sidecar_message=str(getattr(sidecar_status, "message", "") or ""),
+            metadata=metadata,
         )
 
     def with_progress(
@@ -711,3 +736,20 @@ def _coerce_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
     return {}
+
+
+def _float_value(value: Any) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _last_event_error(events: tuple[StatusEvent, ...]) -> str:
+    for event in reversed(events):
+        value = event.metadata.get("last_error")
+        if value:
+            return str(value)
+        if event.status == WorkStatus.FAILED and event.message:
+            return str(event.message)
+    return ""

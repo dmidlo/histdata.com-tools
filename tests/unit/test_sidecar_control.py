@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from histdatacom.runtime_contracts import ArtifactRef, StatusEvent, WorkStatus
 from histdatacom.sidecar.control import (
     ControlOperationPhase,
@@ -30,6 +32,11 @@ def test_progress_snapshot_serializes_events_and_artifacts() -> None:
         current_stage="DownloadArchivesWorkflow",
         total_children=4,
         completed_children=1,
+        unit="children",
+        started_at_utc="2026-06-21T00:00:00Z",
+        updated_at_utc="2026-06-21T00:00:04Z",
+        rate_per_second=0.25,
+        last_error="",
         planned_children=(
             "ValidateUrlsWorkflow",
             "DownloadArchivesWorkflow",
@@ -56,6 +63,8 @@ def test_progress_snapshot_serializes_events_and_artifacts() -> None:
     round_trip = JobProgressSnapshot.from_dict(payload)
 
     assert payload["percent_complete"] == 25.0
+    assert payload["rate_per_second"] == 0.25
+    assert payload["unit"] == "children"
     assert round_trip == progress
 
 
@@ -80,6 +89,29 @@ def test_job_snapshot_round_trips_with_progress_and_controls() -> None:
     assert payload["controls"]["retry"]["available"] is False
     assert round_trip.workflow_id == "histdatacom-run-control"
     assert round_trip.progress == progress
+
+
+def test_job_snapshot_carries_sidecar_runtime_log_paths() -> None:
+    """Runtime log file paths should be visible to GUI clients."""
+    sidecar_status = SimpleNamespace(
+        state="running",
+        message="ok",
+        logs={
+            "server": "/tmp/histdatacom/temporal-server.log",
+            "worker": "/tmp/histdatacom/worker.log",
+        },
+    )
+
+    snapshot = SidecarJobSnapshot.from_handle(
+        _Handle(),
+        sidecar_status=sidecar_status,
+    )
+
+    assert snapshot.sidecar_state == "running"
+    assert snapshot.metadata["sidecar_logs"] == {
+        "server": "/tmp/histdatacom/temporal-server.log",
+        "worker": "/tmp/histdatacom/worker.log",
+    }
 
 
 def test_job_snapshot_represents_cancel_retry_resume_transitions() -> None:

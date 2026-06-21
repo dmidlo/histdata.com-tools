@@ -7,11 +7,16 @@ references instead of downloaded rows, dataframes, or queue payloads.
 
 from __future__ import annotations
 
-from datetime import timedelta
 from dataclasses import dataclass
+from datetime import timedelta
 from importlib import import_module
 from typing import Any, Callable, Mapping, Protocol, TypeVar, cast
 
+from histdatacom.observability import (
+    PROGRESS_EVENT_TYPE,
+    progress_percent,
+    progress_rate_per_second,
+)
 from histdatacom.runtime_contracts import (
     ArtifactRef,
     JSONValue,
@@ -141,6 +146,11 @@ class WorkflowProgress:
     current_stage: str = ""
     total_children: int = 0
     completed_children: int = 0
+    unit: str = "children"
+    started_at_utc: str = ""
+    updated_at_utc: str = ""
+    rate_per_second: float = 0.0
+    last_error: str = ""
     planned_children: tuple[str, ...] = ()
     completed_stages: tuple[str, ...] = ()
     events: tuple[StatusEvent, ...] = ()
@@ -158,6 +168,11 @@ class WorkflowProgress:
         self.current_stage = "started"
         self.total_children = len(planned_children)
         self.completed_children = 0
+        self.unit = "children"
+        self.started_at_utc = ""
+        self.updated_at_utc = ""
+        self.rate_per_second = 0.0
+        self.last_error = ""
         self.planned_children = planned_children
         self.completed_stages = ()
         self.events = ()
@@ -168,7 +183,27 @@ class WorkflowProgress:
         self.current_stage = stage
         self.completed_children += 1
         self.completed_stages = (*self.completed_stages, stage)
-        self.events = (*self.events, *result.events)
+        latest_timestamp = _latest_event_timestamp(result.events)
+        if latest_timestamp:
+            if not self.started_at_utc:
+                self.started_at_utc = latest_timestamp
+            self.updated_at_utc = latest_timestamp
+        if result.failure is not None:
+            self.last_error = result.failure.message
+        else:
+            self.last_error = (
+                _last_event_error(result.events) or self.last_error
+            )
+        self.rate_per_second = progress_rate_per_second(
+            float(self.completed_children),
+            self.started_at_utc,
+            self.updated_at_utc,
+        )
+        self.events = (
+            *self.events,
+            *result.events,
+            self._child_progress_event(stage, result),
+        )
         self.artifacts = (*self.artifacts, *result.artifacts)
         if result.failure is not None:
             self.status = WorkStatus.FAILED
@@ -187,11 +222,50 @@ class WorkflowProgress:
             "current_stage": self.current_stage,
             "total_children": self.total_children,
             "completed_children": self.completed_children,
+            "unit": self.unit,
+            "percent_complete": progress_percent(
+                float(self.completed_children),
+                float(self.total_children),
+            ),
+            "rate_per_second": self.rate_per_second,
+            "started_at_utc": self.started_at_utc,
+            "updated_at_utc": self.updated_at_utc,
+            "last_error": self.last_error,
             "planned_children": list(self.planned_children),
             "completed_stages": list(self.completed_stages),
             "events": [event.to_dict() for event in self.events],
             "artifacts": [artifact.to_dict() for artifact in self.artifacts],
         }
+
+    def _child_progress_event(
+        self,
+        stage: str,
+        result: StageResult,
+    ) -> StatusEvent:
+        return StatusEvent(
+            status=result.status,
+            stage=stage,
+            message=f"{stage} completed.",
+            work_id=result.work_id,
+            timestamp_utc=self.updated_at_utc,
+            metadata={
+                "event_type": PROGRESS_EVENT_TYPE,
+                "completed": self.completed_children,
+                "total": self.total_children,
+                "unit": self.unit,
+                "increment": 1,
+                "percent_complete": progress_percent(
+                    float(self.completed_children),
+                    float(self.total_children),
+                ),
+                "rate_per_second": self.rate_per_second,
+                "started_at_utc": self.started_at_utc,
+                "updated_at_utc": self.updated_at_utc,
+                "last_error": self.last_error,
+                "child_stage": result.stage,
+                "artifact_count": len(result.artifacts),
+            },
+        )
 
 
 class ChildWorkflowExecutor(Protocol):
@@ -987,6 +1061,26 @@ def _coerce_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
     return {}
+
+
+def _latest_event_timestamp(events: tuple[StatusEvent, ...]) -> str:
+    for event in reversed(events):
+        if event.timestamp_utc:
+            return str(event.timestamp_utc)
+        updated_at = event.metadata.get("updated_at_utc")
+        if updated_at:
+            return str(updated_at)
+    return ""
+
+
+def _last_event_error(events: tuple[StatusEvent, ...]) -> str:
+    for event in reversed(events):
+        value = event.metadata.get("last_error")
+        if value:
+            return str(value)
+        if event.status == WorkStatus.FAILED and event.message:
+            return str(event.message)
+    return ""
 
 
 def _string_mapping(value: Any) -> dict[str, str]:

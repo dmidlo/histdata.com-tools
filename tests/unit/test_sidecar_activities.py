@@ -342,6 +342,42 @@ def test_validate_urls_activity_returns_form_metadata(
     assert result["work_item"]["encoding"] == "gzip"
 
 
+def test_validate_urls_activity_emits_progress_heartbeat(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Activities should publish GUI-ready progress heartbeat metadata."""
+    import histdatacom.sidecar.activities as activities
+
+    heartbeats: list[dict] = []
+    monkeypatch.setattr(
+        activities.activity,
+        "heartbeat",
+        heartbeats.append,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "histdatacom.activity_stages.fetch_histdata_page_data",
+        lambda url, timeout: {
+            "html": _form_html(),
+            "encoding": "gzip",
+            "bytes_length": "123",
+        },
+    )
+
+    result = validate_urls_activity(_validation_payload(tmp_path))
+
+    assert heartbeats[-1]["event_type"] == "progress"
+    assert heartbeats[-1]["stage"] == "validate_url"
+    assert heartbeats[-1]["status"] == WorkStatus.URL_VALID.value
+    assert heartbeats[-1]["completed"] == 1.0
+    assert heartbeats[-1]["total"] == 1.0
+    assert result["result"]["events"][-1]["metadata"]["event_type"] == (
+        "progress"
+    )
+    assert result["result"]["metrics"]["progress"]["stage"] == "validate_url"
+
+
 def test_validate_urls_activity_returns_no_data(monkeypatch, tmp_path) -> None:
     """Missing tokens should flow through the registered activity."""
     monkeypatch.setattr(

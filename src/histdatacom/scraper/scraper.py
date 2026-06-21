@@ -7,7 +7,7 @@ Raises:
 
 import os
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, cast
 
 import requests
 from rich import print  # pylint: disable=redefined-builtin
@@ -27,6 +27,7 @@ from histdatacom.activity_stages import (
     validate_url_work_item,
 )
 from histdatacom.concurrency import ThreadPool, get_pool_cpu_count
+from histdatacom.observability import ProgressState
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkItem, WorkStatus
 from histdatacom.scraper.urls import Urls
@@ -81,7 +82,7 @@ class Scraper:  # noqa:H601
         Returns:
             str: *.zip file name
         """
-        return archive_filename_from_response(response)
+        return str(archive_filename_from_response(response))
 
     @classmethod
     def _write_file(cls, record: Record, zip_content: bytes) -> None:
@@ -127,6 +128,12 @@ class Scraper:  # noqa:H601
 
     def populate_initial_queue(self) -> None:
         """Fill Current Queue with records to be acted on."""
+        progress_state = ProgressState(
+            stage="dataset_plan",
+            total=0.0,
+            unit="requests",
+            status=WorkStatus.COMPLETED,
+        )
         with Progress(
             TextColumn(text_format="[cyan] Generating API Requests"),
             SpinnerColumn(),
@@ -136,6 +143,7 @@ class Scraper:  # noqa:H601
         ) as progress:
             progress.add_task("waiting", total=0)
 
+            planned_count = 0
             for work_item in plan_dataset_work_items(
                 start_yearmonth=config.ARGS["start_yearmonth"],
                 end_yearmonth=config.ARGS["end_yearmonth"],
@@ -146,6 +154,13 @@ class Scraper:  # noqa:H601
                 base_url=self.urls.base_url,
                 zip_persist=bool(config.ARGS["zip_persist"]),
             ):
+                planned_count += 1
+                progress_state.advance(
+                    0.0,
+                    message="Planned dataset request.",
+                    current=work_item.url,
+                    metadata={"planned_count": planned_count},
+                )
                 record = self._init_record_from_work_item(work_item)
 
                 if record.status != WorkStatus.URL_NO_REPO_DATA.value:
@@ -341,7 +356,9 @@ class Scraper:  # noqa:H601
                  "encoding": encoding,
                  "bytes_length: bytes_length}
         """
-        return fetch_histdata_page_data(url, timeout).to_dict()
+        return cast(
+            dict[Any, Any], fetch_histdata_page_data(url, timeout).to_dict()
+        )
 
     def _fetch_form_values(self, page_data: dict, record: Record) -> Record:
         """Get values from page's file download form.
