@@ -7,7 +7,7 @@ import os
 import signal
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, cast
@@ -18,6 +18,14 @@ from histdatacom.sidecar.resources import (
     read_sidecar_asset_text,
     sidecar_executable_path,
 )
+from histdatacom.sidecar.runtime import (
+    PortAvailabilityProbe,
+    SidecarPaths,
+    SidecarRuntimePolicy,
+    build_sidecar_runtime_policy,
+    default_sidecar_state_dir,  # noqa:F401
+    is_port_available,
+)
 
 SIDECAR_STATE_SCHEMA_VERSION = 1
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 10.0
@@ -26,29 +34,6 @@ DEFAULT_STOP_TIMEOUT_SECONDS = 10.0
 ProcessFactory = Callable[..., Any]
 ProcessExists = Callable[[int], bool]
 ProcessTerminate = Callable[[int], None]
-
-
-@dataclass(frozen=True, slots=True)
-class SidecarPaths:
-    """Filesystem paths used by the sidecar supervisor."""
-
-    state_dir: Path
-    pid_file: Path
-    lock_file: Path
-    server_log: Path
-    worker_log: Path
-
-    @classmethod
-    def from_state_dir(cls, state_dir: Path | str) -> "SidecarPaths":
-        """Create sidecar paths under a state directory."""
-        root = Path(state_dir).expanduser()
-        return cls(
-            state_dir=root,
-            pid_file=root / "sidecar.pid.json",
-            lock_file=root / "sidecar.lock",
-            server_log=root / "temporal-server.log",
-            worker_log=root / "temporal-worker.log",
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +48,7 @@ class SidecarStatus:
     logs: dict[str, str]
     pids: dict[str, int]
     command: tuple[str, ...] = ()
+    ports: dict[str, int | str | list[int]] = field(default_factory=dict)
 
     @property
     def running(self) -> bool:
@@ -80,15 +66,8 @@ class SidecarStatus:
             "logs": dict(self.logs),
             "pids": dict(self.pids),
             "command": list(self.command),
+            "ports": dict(self.ports),
         }
-
-
-def default_sidecar_state_dir() -> Path:
-    """Return the default sidecar state directory for this migration slice."""
-    override = os.environ.get("HISTDATACOM_SIDECAR_HOME")
-    if override:
-        return Path(override).expanduser()
-    return Path.home() / ".histdatacom" / "sidecar"
 
 
 def _utc_now() -> str:
@@ -127,10 +106,20 @@ def _load_runtime_defaults() -> dict[str, Any]:
 def build_temporal_start_command(
     executable: Path | str,
     extra_args: Sequence[str] = (),
+    *,
+    runtime_policy: SidecarRuntimePolicy | None = None,
 ) -> tuple[str, ...]:
     """Build the Temporal server start command."""
     defaults = _load_runtime_defaults()
-    args = [str(executable), *defaults["command"]["args"], *extra_args]
+    runtime_args = (
+        runtime_policy.temporal_start_args() if runtime_policy else ()
+    )
+    args = [
+        str(executable),
+        *defaults["command"]["args"],
+        *runtime_args,
+        *extra_args,
+    ]
     return tuple(args)
 
 
@@ -141,18 +130,22 @@ class SidecarSupervisor:
         self,
         paths: SidecarPaths | None = None,
         *,
+        runtime_policy: SidecarRuntimePolicy | None = None,
         process_exists: ProcessExists = _process_exists,
         process_terminate: ProcessTerminate = _terminate_process,
         process_factory: ProcessFactory = subprocess.Popen,
+        port_available: PortAvailabilityProbe = is_port_available,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         """Initialize the sidecar supervisor."""
-        self.paths = paths or SidecarPaths.from_state_dir(
-            default_sidecar_state_dir()
+        self.runtime_policy: SidecarRuntimePolicy = (
+            runtime_policy or build_sidecar_runtime_policy(paths=paths)
         )
+        self.paths: SidecarPaths = self.runtime_policy.paths
         self._process_exists = process_exists
         self._process_terminate = process_terminate
         self._process_factory = process_factory
+        self._port_available = port_available
         self._sleep = sleep
 
     def status(self, *, repair: bool = False) -> SidecarStatus:
@@ -174,6 +167,7 @@ class SidecarSupervisor:
 
         pids = self._state_pids(state)
         command = tuple(str(item) for item in state.get("command", []))
+        ports = self._state_ports(state)
         if not pids:
             if repair:
                 self._remove_state_files()
@@ -182,6 +176,7 @@ class SidecarSupervisor:
                 "Sidecar state does not contain any valid process IDs.",
                 {},
                 command,
+                ports,
             )
 
         missing = {
@@ -195,6 +190,7 @@ class SidecarSupervisor:
                 "Sidecar is running.",
                 pids,
                 command,
+                ports,
             )
 
         if repair:
@@ -204,6 +200,7 @@ class SidecarSupervisor:
             f"Sidecar state references dead processes: {missing}.",
             pids,
             command,
+            ports,
         )
 
     def start(
@@ -224,6 +221,10 @@ class SidecarSupervisor:
             )
 
         self.paths.state_dir.mkdir(parents=True, exist_ok=True)
+        runtime_policy = self.runtime_policy.with_available_ports(
+            self._port_available
+        )
+        self.runtime_policy = runtime_policy
         self._acquire_lock()
         try:
             if executable is None:
@@ -232,11 +233,13 @@ class SidecarSupervisor:
                         packaged_executable,
                         extra_args,
                         startup_timeout,
+                        runtime_policy,
                     )
             return self._start_process(
                 Path(executable).expanduser(),
                 extra_args,
                 startup_timeout,
+                runtime_policy,
             )
         finally:
             self._release_lock()
@@ -332,6 +335,7 @@ class SidecarSupervisor:
                 ),
             },
             "runtime_defaults": _load_runtime_defaults(),
+            "runtime_policy": self.runtime_policy.to_dict(),
         }
 
     def _start_process(
@@ -339,10 +343,15 @@ class SidecarSupervisor:
         executable: Path,
         extra_args: Sequence[str],
         startup_timeout: float,
+        runtime_policy: SidecarRuntimePolicy,
     ) -> SidecarStatus:
         """Start the Temporal server process and persist state."""
-        command = build_temporal_start_command(executable, extra_args)
-        self.paths.server_log.parent.mkdir(parents=True, exist_ok=True)
+        command = build_temporal_start_command(
+            executable,
+            extra_args,
+            runtime_policy=runtime_policy,
+        )
+        runtime_policy.write_manifest()
         log = self.paths.server_log.open("ab")
         try:
             process = self._process_factory(
@@ -367,7 +376,12 @@ class SidecarSupervisor:
                     "started_at_utc": _utc_now(),
                     "command": list(command),
                     "pids": {"server": pid},
-                    "logs": {"server": str(self.paths.server_log)},
+                    "ports": runtime_policy.ports.to_dict(),
+                    "runtime_policy": runtime_policy.to_dict(),
+                    "logs": {
+                        "server": str(self.paths.server_log),
+                        "worker": str(self.paths.worker_log),
+                    },
                 }
                 self._write_state(state)
                 log.close()
@@ -440,6 +454,23 @@ class SidecarSupervisor:
                 pids[str(component)] = parsed_pid
         return pids
 
+    def _state_ports(
+        self,
+        state: Mapping[str, Any],
+    ) -> dict[str, int | str | list[int]]:
+        """Return persisted runtime port values when available."""
+        ports = state.get("ports")
+        if isinstance(ports, Mapping):
+            return {
+                str(key): value
+                for key, value in ports.items()
+                if isinstance(value, (int, str, list))
+            }
+        return cast(
+            dict[str, int | str | list[int]],
+            self.runtime_policy.ports.to_dict(),
+        )
+
     def _remove_state_files(self) -> None:
         """Remove PID and lock files."""
         self.paths.pid_file.unlink(missing_ok=True)
@@ -451,6 +482,7 @@ class SidecarSupervisor:
         message: str,
         pids: Mapping[str, int],
         command: Sequence[str],
+        ports: Mapping[str, int | str | list[int]] | None = None,
     ) -> SidecarStatus:
         """Create a sidecar status object."""
         return SidecarStatus(
@@ -465,14 +497,15 @@ class SidecarSupervisor:
             },
             pids=dict(pids),
             command=tuple(command),
+            ports=dict(
+                ports
+                or cast(
+                    dict[str, int | str | list[int]],
+                    self.runtime_policy.ports.to_dict(),
+                )
+            ),
         )
 
     def _path_dict(self) -> dict[str, str]:
         """Return path diagnostics."""
-        return {
-            "state_dir": str(self.paths.state_dir),
-            "pid_file": str(self.paths.pid_file),
-            "lock_file": str(self.paths.lock_file),
-            "server_log": str(self.paths.server_log),
-            "worker_log": str(self.paths.worker_log),
-        }
+        return dict(self.paths.to_dict())

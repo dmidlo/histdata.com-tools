@@ -12,6 +12,17 @@
       "start-dev"
     ]
   },
+  "runtime_policy": {
+    "workspace_env": "HISTDATACOM_SIDECAR_WORKSPACE",
+    "runtime_home_env": "HISTDATACOM_SIDECAR_HOME",
+    "bind_ip_env": "HISTDATACOM_SIDECAR_IP",
+    "port_env": "HISTDATACOM_SIDECAR_PORT",
+    "ui_port_env": "HISTDATACOM_SIDECAR_UI_PORT",
+    "default_bind_ip": "127.0.0.1",
+    "default_grpc_port_base": 17233,
+    "default_ui_port_offset": 1000,
+    "default_port_window": 2000
+  },
   "owned_by_future_issues": {
     "supervisor": "#147",
     "runtime_paths_and_ports": "#148",

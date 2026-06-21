@@ -26,6 +26,9 @@ class _StatusOnlySupervisor:
         return {
             "status": _FakeStatus(self.state).to_dict(),
             "platform": {"message": "ok"},
+            "runtime_policy": {
+                "ports": {"bind_ip": "127.0.0.1", "grpc": 17233, "ui": 18233}
+            },
         }
 
 
@@ -70,13 +73,14 @@ class _FakeStatus:
             "logs": {},
             "pids": {},
             "command": [],
+            "ports": {"bind_ip": "127.0.0.1", "grpc": 17233, "ui": 18233},
         }
 
 
 def test_sidecar_status_cli_emits_json(monkeypatch, capsys) -> None:
     """Sidecar status should be available as a first-class CLI command."""
     monkeypatch.setattr(
-        cli, "_supervisor", lambda state_dir: _StatusOnlySupervisor("running")
+        cli, "_supervisor", lambda args: _StatusOnlySupervisor("running")
     )
 
     exit_code = cli.main(["status", "--json"])
@@ -89,7 +93,7 @@ def test_sidecar_status_cli_emits_json(monkeypatch, capsys) -> None:
 def test_sidecar_doctor_cli_returns_diagnostics(monkeypatch, capsys) -> None:
     """Doctor should expose sidecar diagnostics for humans and tools."""
     monkeypatch.setattr(
-        cli, "_supervisor", lambda state_dir: _StatusOnlySupervisor("stopped")
+        cli, "_supervisor", lambda args: _StatusOnlySupervisor("stopped")
     )
 
     exit_code = cli.main(["doctor"])
@@ -106,7 +110,7 @@ def test_sidecar_lifecycle_cli_commands_delegate_to_supervisor(
 ) -> None:
     """Start, stop, and restart should be first-class sidecar commands."""
     supervisor = _LifecycleSupervisor()
-    monkeypatch.setattr(cli, "_supervisor", lambda state_dir: supervisor)
+    monkeypatch.setattr(cli, "_supervisor", lambda args: supervisor)
 
     assert (
         cli.main(

@@ -11,6 +11,10 @@ from histdatacom.sidecar.supervisor import (
     SidecarSupervisor,
     build_temporal_start_command,
 )
+from histdatacom.sidecar.runtime import (
+    SidecarRuntimePolicy,
+    build_sidecar_runtime_policy,
+)
 
 
 class _FakeProcess:
@@ -33,18 +37,31 @@ def _executable(tmp_path: Path) -> Path:
     return executable
 
 
+def _policy(tmp_path: Path) -> SidecarRuntimePolicy:
+    """Create a deterministic runtime policy for supervisor tests."""
+    return build_sidecar_runtime_policy(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+        environ={},
+    )
+
+
 def test_build_temporal_start_command_uses_runtime_defaults(
     tmp_path: Path,
 ) -> None:
     """Start command construction should be centralized and deterministic."""
     executable = _executable(tmp_path)
+    policy = _policy(tmp_path)
 
     assert build_temporal_start_command(
-        executable, ("--namespace", "histdatacom")
+        executable,
+        ("--namespace", "histdatacom"),
+        runtime_policy=policy,
     ) == (
         str(executable),
         "server",
         "start-dev",
+        *policy.temporal_start_args(),
         "--namespace",
         "histdatacom",
     )
@@ -55,7 +72,8 @@ def test_start_writes_state_and_is_idempotent_for_running_sidecar(
 ) -> None:
     """A healthy existing sidecar should not spawn a duplicate process."""
     executable = _executable(tmp_path)
-    paths = SidecarPaths.from_state_dir(tmp_path / "state")
+    policy = _policy(tmp_path)
+    paths = policy.paths
     calls: list[list[str]] = []
     live_pids = {1234}
 
@@ -64,9 +82,10 @@ def test_start_writes_state_and_is_idempotent_for_running_sidecar(
         return _FakeProcess(1234)
 
     supervisor = SidecarSupervisor(
-        paths,
+        runtime_policy=policy,
         process_exists=lambda pid: pid in live_pids,
         process_factory=process_factory,
+        port_available=lambda bind_ip, port: True,
     )
 
     first = supervisor.start(executable=executable)
@@ -75,16 +94,21 @@ def test_start_writes_state_and_is_idempotent_for_running_sidecar(
 
     assert first.state == "running"
     assert second.message == "Sidecar is already running."
-    assert calls == [[str(executable), "server", "start-dev"]]
+    assert calls == [
+        [str(executable), "server", "start-dev", *policy.temporal_start_args()]
+    ]
     assert state["schema_version"] == SIDECAR_STATE_SCHEMA_VERSION
     assert state["pids"] == {"server": 1234}
+    assert state["runtime_policy"]["paths"]["sqlite_db"] == str(paths.sqlite_db)
+    assert paths.runtime_manifest.exists()
     assert not paths.lock_file.exists()
 
 
 def test_start_repairs_stale_pid_and_lock_files(tmp_path: Path) -> None:
     """Dead PID and lock files should not block a new start."""
     executable = _executable(tmp_path)
-    paths = SidecarPaths.from_state_dir(tmp_path / "state")
+    policy = _policy(tmp_path)
+    paths = policy.paths
     paths.state_dir.mkdir(parents=True)
     paths.pid_file.write_text(
         json.dumps({"pids": {"server": 111}, "command": ["old"]}),
@@ -96,9 +120,10 @@ def test_start_repairs_stale_pid_and_lock_files(tmp_path: Path) -> None:
     )
 
     supervisor = SidecarSupervisor(
-        paths,
+        runtime_policy=policy,
         process_exists=lambda pid: pid == 333,
         process_factory=lambda command, **kwargs: _FakeProcess(333),
+        port_available=lambda bind_ip, port: True,
     )
 
     status = supervisor.start(executable=executable)
@@ -193,5 +218,9 @@ def test_default_state_dir_accepts_environment_override(
     from histdatacom.sidecar.supervisor import default_sidecar_state_dir
 
     monkeypatch.setenv("HISTDATACOM_SIDECAR_HOME", str(tmp_path))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    monkeypatch.chdir(workspace)
 
-    assert default_sidecar_state_dir() == tmp_path
+    assert default_sidecar_state_dir().name == "state"
+    assert default_sidecar_state_dir().is_relative_to(tmp_path)

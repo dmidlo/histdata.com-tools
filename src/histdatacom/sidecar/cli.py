@@ -5,17 +5,21 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 from typing import Sequence
 
 from histdatacom.sidecar.resources import SidecarResourceError
+from histdatacom.sidecar.runtime import (
+    PortAllocationError,
+    SidecarPaths,
+    build_sidecar_runtime_policy,
+    default_sidecar_runtime_home,
+    default_sidecar_workspace,
+)
 from histdatacom.sidecar.supervisor import (
     DEFAULT_STARTUP_TIMEOUT_SECONDS,
     DEFAULT_STOP_TIMEOUT_SECONDS,
-    SidecarPaths,
     SidecarStatus,
     SidecarSupervisor,
-    default_sidecar_state_dir,
 )
 
 
@@ -25,16 +29,32 @@ def _add_common_args(
     include_defaults: bool,
 ) -> None:
     """Add common sidecar options to a parser or subparser."""
-    state_dir_default = (
-        str(default_sidecar_state_dir())
+    workspace_default = (
+        str(default_sidecar_workspace())
         if include_defaults
         else argparse.SUPPRESS
     )
+    runtime_home_default = (
+        str(default_sidecar_runtime_home())
+        if include_defaults
+        else argparse.SUPPRESS
+    )
+    state_dir_default = None if include_defaults else argparse.SUPPRESS
     json_default = False if include_defaults else argparse.SUPPRESS
+    parser.add_argument(
+        "--workspace",
+        default=workspace_default,
+        help="workspace path used to scope sidecar runtime state",
+    )
+    parser.add_argument(
+        "--runtime-home",
+        default=runtime_home_default,
+        help="base directory for per-workspace sidecar runtime state",
+    )
     parser.add_argument(
         "--state-dir",
         default=state_dir_default,
-        help="directory for sidecar PID, lock, and log files",
+        help="explicit state directory override for tests or manual recovery",
     )
     parser.add_argument(
         "--json",
@@ -109,9 +129,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _supervisor(state_dir: str) -> SidecarSupervisor:
+def _supervisor(args: argparse.Namespace) -> SidecarSupervisor:
     """Create a supervisor for CLI arguments."""
-    return SidecarSupervisor(SidecarPaths.from_state_dir(Path(state_dir)))
+    paths = (
+        SidecarPaths.from_state_dir(args.state_dir) if args.state_dir else None
+    )
+    runtime_policy = build_sidecar_runtime_policy(
+        workspace=args.workspace,
+        runtime_home=args.runtime_home,
+        paths=paths,
+    )
+    return SidecarSupervisor(runtime_policy=runtime_policy)
 
 
 def _write_payload(payload: dict, *, as_json: bool) -> None:
@@ -122,6 +150,13 @@ def _write_payload(payload: dict, *, as_json: bool) -> None:
     print(f"{payload['state']}: {payload['message']}")  # noqa:T201
     if payload.get("pids"):
         print(f"pids: {payload['pids']}")  # noqa:T201
+    if payload.get("ports"):
+        ports = payload["ports"]
+        print(  # noqa:T201
+            "ports: "
+            f"{ports.get('bind_ip')}:{ports.get('grpc')} "
+            f"ui={ports.get('ui')}"
+        )
     print(f"state_dir: {payload['state_dir']}")  # noqa:T201
 
 
@@ -141,9 +176,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run sidecar lifecycle commands."""
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
-    supervisor = _supervisor(args.state_dir)
 
     try:
+        supervisor = _supervisor(args)
         if args.command == "start":
             status = supervisor.start(
                 executable=args.executable,
@@ -179,17 +214,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                 status = payload["status"]
                 print(f"{status['state']}: {status['message']}")  # noqa:T201
                 print(payload["platform"]["message"])  # noqa:T201
+                ports = payload["runtime_policy"]["ports"]
+                print(  # noqa:T201
+                    "ports: "
+                    f"{ports['bind_ip']}:{ports['grpc']} ui={ports['ui']}"
+                )
                 print(f"state_dir: {status['state_dir']}")  # noqa:T201
             return 0
         parser.error(f"unsupported sidecar command: {args.command}")
-    except (RuntimeError, SidecarResourceError, OSError) as err:
+    except (
+        RuntimeError,
+        SidecarResourceError,
+        PortAllocationError,
+        OSError,
+    ) as err:
         if args.json:
             print(
                 json.dumps(
                     {
                         "state": "error",
                         "message": str(err),
-                        "state_dir": str(args.state_dir),
+                        "state_dir": str(args.state_dir or ""),
+                        "workspace": str(args.workspace),
                     },
                     indent=2,
                     sort_keys=True,
