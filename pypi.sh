@@ -7,17 +7,16 @@ dev()
 {
     echo "${bold}pypi.sh: Setting Up Dev${normal}"
     pip uninstall -y histdatacom
-    pip install build "setuptools>=77" twine wheel
+    pip install build==1.5.0 setuptools==80.10.2 twine==6.2.0 wheel==0.47.0
     pip install -e .[dev]
     pre-commit install
-    pre-commit autoupdate
     echo "${bold}pypi.sh: Dev Ready.${normal}"
 }
 
 build()
 {
     rm -rf ./dist
-    pip install build "setuptools>=77" twine wheel
+    pip install build==1.5.0 setuptools==80.10.2 twine==6.2.0 wheel==0.47.0
     python setup.py check
     python -m build
     python -m twine check dist/*

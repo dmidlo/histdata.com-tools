@@ -1,4 +1,5 @@
 """Pytest unit tests for histdatacom.api.py."""
+
 from __future__ import annotations
 
 import importlib
@@ -12,7 +13,6 @@ from types import SimpleNamespace
 import pytest
 
 from histdatacom.histdata_ascii import CACHE_FILENAME, write_polars_cache
-
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
 

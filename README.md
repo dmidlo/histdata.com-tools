@@ -28,6 +28,7 @@ A Multi-threaded/Multi-Process command-line utility and python ETL package that 
     - [Full Script Example](#full-script-example)
 - [Setup](#setup)
   - [TLDR for all platforms](#tldr-for-all-platforms)
+  - [Developer Setup](#developer-setup)
   - [Vanilla Python Setup](#vanilla-python-setup)
     - [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
     - [Vanilla Windows Powershell](#vanilla-windows-powershell)
@@ -607,6 +608,24 @@ to install latest development version
 ```sh
 pip install git+https://github.com/dmidlo/histdata.com-tools.git
 ```
+
+### Developer Setup
+
+Use a project virtual environment for local development. Do not install
+developer tooling into the user-local Python environment.
+
+```sh
+python -m venv venv
+source venv/bin/activate
+PYTHONNOUSERSITE=1 python -m pip install -e ".[dev]"
+PYTHONNOUSERSITE=1 pre-commit install --install-hooks
+```
+
+The `dev` extra pins the direct developer tools used by pre-commit. The active
+lint baseline is Black, Ruff, mypy, generic file checks, Pyroma, ShellCheck,
+Commitizen, and the local CLI/coverage smoke hooks. The previous flake8 plugin
+stack was intentionally replaced with Ruff so local installs and hook behavior
+do not drift independently.
 
 ---
 

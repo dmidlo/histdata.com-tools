@@ -1,4 +1,5 @@
 """Domain coverage for HistData ASCII behavior required by Polars migration."""
+
 from __future__ import annotations
 
 import zipfile
@@ -28,7 +29,6 @@ from histdatacom.histdata_ascii import (
     summarize_rows,
     write_polars_cache,
 )
-
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
 
@@ -93,7 +93,9 @@ EXPECTED_RAW_TICK_RECORDS = (
 )
 
 
-def test_columns_and_delimiters_are_locked_for_supported_ascii_timeframes() -> None:
+def test_columns_and_delimiters_are_locked_for_supported_ascii_timeframes() -> (
+    None
+):
     """Document the two HistData ASCII layouts the API pipeline supports."""
     assert M1_COLUMNS == ("datetime", "open", "high", "low", "close", "vol")
     assert TICK_COLUMNS == ("datetime", "bid", "ask", "vol")
