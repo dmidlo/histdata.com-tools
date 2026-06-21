@@ -1,4 +1,10 @@
-files: (src/|tests/)
+# Keep source-quality hooks scoped to package and test code. Root helper/example
+# files snippets.py and test.py are intentionally outside that legacy lint
+# baseline; setup.py and .vulture.py stay covered by package/repo-specific hooks.
+# Generic config/release hooks still inspect root files such as pyproject.toml,
+# GitHub workflows, pypi.sh, and pre-commit config. Generated architecture SVGs
+# and the example notebook are excluded globally because they are bulky outputs.
+exclude: ^(tests/architecture/.*\.svg|snippets\.ipynb)$
 default_stages: [commit-msg, pre-commit, pre-push]
 repos:
 - hooks:
@@ -7,6 +13,7 @@ repos:
     - '80'
     id: black
     language_version: python3.10
+    files: ^(src|tests)/.*\.py$
   repo: https://github.com/psf/black
   rev: 22.10.0
 - hooks:
@@ -40,6 +47,7 @@ repos:
     - flake8-annotations-complexity
     - flake8-type-checking
     id: flake8
+    files: ^(src|tests)/.*\.py$
   repo: https://github.com/pycqa/flake8
   rev: 6.0.0
 - hooks:
@@ -49,6 +57,7 @@ repos:
   - id: check-case-conflict
   - id: check-docstring-first
   - id: check-executables-have-shebangs
+  - id: check-shebang-scripts-are-executable
   - id: check-json
   - id: check-symlinks
   - id: check-toml
@@ -67,18 +76,22 @@ repos:
     - pandas-stubs
     - types-beautifulsoup4
     id: mypy
+    files: ^src/.*\.py$
   repo: https://github.com/pre-commit/mirrors-mypy
   rev: v0.991
 - hooks:
   - id: darglint
+    files: ^(src|tests)/.*\.py$
   repo: https://github.com/terrencepreilly/darglint
   rev: v1.8.1
 - hooks:
   - id: tryceratops
+    files: ^(src|tests)/.*\.py$
   repo: https://github.com/guilatrova/tryceratops
   rev: v1.1.0
 - hooks:
   - id: pyroma
+    files: ^(pyproject\.toml|setup\.py|README\.md|LICENSE)$
   repo: https://github.com/regebro/pyroma
   rev: 5.0.1
 - hooks:
@@ -89,18 +102,26 @@ repos:
     - --min-confidence
     - '59'
     id: vulture
+    files: ^(src/|setup\.py|\.vulture\.py)
   repo: https://github.com/jendrikseipp/vulture
   rev: v2.6
 - hooks:
   - id: sourcery
     require_serial: true
+    files: ^(src|tests)/.*\.py$
   repo: https://github.com/sourcery-ai/sourcery
   rev: v1.43.0
+- hooks:
+  - id: shellcheck
+    files: ^pypi\.sh$
+  repo: https://github.com/shellcheck-py/shellcheck-py
+  rev: v0.11.0.1
 - hooks:
   - id: pylint
     entry: pylint
     name: pylint
     language: system
+    files: ^(src|tests)/.*\.py$
     types:
       - python
     args:

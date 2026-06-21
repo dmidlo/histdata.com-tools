@@ -165,7 +165,7 @@ The formats available are:
 ##### To download 1-minute-bar-quotes for both metastock and excel
 
 ```sh
-histdatacom -p usdjpy -f metastock excel -s now 
+histdatacom -p usdjpy -f metastock excel -s now
 ```
 
 ---
@@ -342,7 +342,7 @@ options.cpu_utilization = 100
 at present, calling from another script or module is limited to using the `__name__=="__main__"` idiom.
 
 ```python
-if __name__=="__main__": 
+if __name__=="__main__":
    histdatacom(options)
 ```
 
@@ -435,10 +435,10 @@ print(type(data))
 ```txt
 [
   {
-    'timeframe': 'M1', 
-    'pair': 'EURUSD', 
+    'timeframe': 'M1',
+    'pair': 'EURUSD',
     'records': [<histdatacom.records.Record object ...>, ...],
-    'data':    
+    'data':
                     datetime     open     high      low    close  vol
       0       1609711200000  1.22396  1.22396  1.22373  1.22395    0
       1       1609711260000  1.22387  1.22420  1.22385  1.22395    0
@@ -453,12 +453,12 @@ print(type(data))
       484176  1650664680000  1.07980  1.07986  1.07963  1.07963    0
 
       [484177 rows x 6 columns]
-  }, 
+  },
   {
-    'timeframe': 'M1', 
+    'timeframe': 'M1',
     'pair': 'USDCAD',
     'records': [<histdatacom.records.Record object ...>, ...],
-    'data':                
+    'data':
                     datetime     open     high      low    close  vol
       0       1609711200000  1.27136  1.27201  1.27136  1.27201    0
       1       1609711260000  1.27207  1.27241  1.27207  1.27220    0
@@ -507,7 +507,7 @@ M1 EURUSD
 at present, calling from another script or module is limited to using the `__name__=="__main__"` idiom.
 
 ```python
-if __name__=="__main__": 
+if __name__=="__main__":
    histdatacom(options)
 ```
 
@@ -558,7 +558,7 @@ def print_one_polars_frame(pair, start=None, end=None):
 
 def main():
     histdata_symbs = Pairs.list_keys()
-    
+
     # Oanda Symbols:
     oanda_symbs = {"audcad","audchf","audhkd","audjpy","audsgd","audusd","cadhkd","cadjpy","cadsgd",
     "chfhkd","chfjpy","euraud","eurcad","eurchf","eurgbp","eurhkd","eurjpy","eursgd","eurusd","gbpaud",
@@ -574,7 +574,7 @@ def main():
     for pair in pairs_data:
         start = pairs_data[pair]['start']
         end = pairs_data[pair]['end']
-        
+
         import_pair_to_influx(pair, start, end)
 
 if __name__ == '__main__':

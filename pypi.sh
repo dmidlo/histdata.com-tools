@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 bold=$(tput bold)
 normal=$(tput sgr0)
 
@@ -26,10 +28,11 @@ buildenv()
     echo "${bold}setting up test pip environment${normal}"
     rm -rf ../myproject
     mkdir ../myproject
-    cd ../myproject
+    cd ../myproject || exit
     pwd
     python -m venv venv
     echo "${bold}activating test pip environment${normal}"
+    # shellcheck source=/dev/null
     source venv/bin/activate
     pip install polars
     echo "${bold}test pip environment set up complete.${normal}"
@@ -37,9 +40,10 @@ buildenv()
 
 destroyenv()
 {
-    cd ../histdata.com-tools
+    cd ../histdata.com-tools || exit
     rm -rf ../myproject
     echo "${bold}leaving test pip environment${normal}"
+    # shellcheck source=/dev/null
     source venv/bin/activate
 }
 
