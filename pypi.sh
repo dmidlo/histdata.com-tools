@@ -5,25 +5,18 @@ set -euo pipefail
 bold=$(tput bold 2>/dev/null || true)
 normal=$(tput sgr0 2>/dev/null || true)
 project_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-build_dependencies=(
-    build==1.5.0
-    setuptools==80.10.2
-    twine==6.2.0
-    wheel==0.47.0
-)
 
 cd "${project_root}"
 
-install_build_frontend()
+install_release_frontend()
 {
-    python -m pip install "${build_dependencies[@]}"
+    python -m pip install -e ".[release]"
 }
 
 dev()
 {
     echo "${bold}pypi.sh: Setting Up Dev${normal}"
     python -m pip uninstall -y histdatacom
-    install_build_frontend
     python -m pip install -e ".[dev]"
     pre-commit install
     echo "${bold}pypi.sh: Dev Ready.${normal}"
@@ -103,7 +96,7 @@ sign_dist_artifacts()
 build()
 {
     rm -rf ./dist
-    install_build_frontend
+    install_release_frontend
     python -m build
     python -m twine check dist/*
     inspect_wheel_metadata

@@ -1,6 +1,6 @@
 # histdata.com-tools
 
-A Multi-threaded/Multi-Process command-line utility and python ETL package that downloads currency exchange rates from Histdata.com. Imports to InfluxDB. Can be used in Jupyter Notebooks. Works on MacOS, Linux & Windows Systems.
+A Multi-threaded/Multi-Process command-line utility and python ETL package that downloads currency exchange rates from Histdata.com. Optional InfluxDB and Jupyter integrations are available through extras. Works on MacOS, Linux & Windows Systems.
 **Requires Python3.10+**
 
 **NEW:** Expanded API support!!!
@@ -262,7 +262,11 @@ histdatacom -c medium -p udxusd -f metatrader -s 2015-04 -e 2016-04
 
 ### Import to InfluxDB
 
-To import data to an influxdb instance, use the `-I --import_to_influxdb` flag along with an `influxdb.yaml` file in the current working directory (where ever you are running the command from).
+To import data to an influxdb instance, install the Influx extra and use the `-I --import_to_influxdb` flag along with an `influxdb.yaml` file in the current working directory (where ever you are running the command from).
+
+```sh
+pip install "histdatacom[influx]"
+```
 
 - ascii is the only format accepted for influxdb import.
 - all histdata.com datetime data is in EST (Eastern Standard Time) with no adjustments for daylight savings.
@@ -369,6 +373,9 @@ As opposed to the `CLI` interface, one may wish to load data from histdata.com a
 - *to use `pandas` or `arrow` return formats, install the optional extras*
   - `pip install "histdatacom[pandas]"`
   - `pip install "histdatacom[arrow]"`
+- *to use InfluxDB imports or notebook tooling, install the corresponding extras*
+  - `pip install "histdatacom[influx]"`
+  - `pip install "histdatacom[jupyter]"`
 
 - ***All datetime is returned as milliseconds since January 1, 1970 (midnight UTC/GMT)***
 
@@ -603,6 +610,14 @@ pip install "histdatacom[pandas]"
 pip install "histdatacom[arrow]"
 ```
 
+InfluxDB import and notebook support are optional:
+
+```sh
+pip install "histdatacom[influx]"
+pip install "histdatacom[jupyter]"
+pip install "histdatacom[all]"
+```
+
 to install latest development version
 
 ```sh
@@ -621,11 +636,22 @@ PYTHONNOUSERSITE=1 python -m pip install -e ".[dev]"
 PYTHONNOUSERSITE=1 pre-commit install --install-hooks
 ```
 
-The `dev` extra pins the direct developer tools used by pre-commit. The active
-lint baseline is Black, Ruff, mypy, generic file checks, Pyroma, ShellCheck,
-Commitizen, and the local CLI/coverage smoke hooks. The previous flake8 plugin
-stack was intentionally replaced with Ruff so local installs and hook behavior
-do not drift independently.
+The dependency surfaces are split by purpose:
+
+- `.[test]` installs pytest, coverage, pandas, pyarrow, and InfluxDB support
+  used by the test suite.
+- `.[lint]` installs pre-commit and direct lint/type/doc hygiene tools.
+- `.[release]` installs build and publish tooling.
+- `.[dev]` is the aggregate local contributor environment with test, lint,
+  release, and optional integration dependencies.
+
+The `dev`, `lint`, `test`, and `release` extras pin direct developer tools
+where reproducibility matters. Runtime dependencies keep compatibility lower
+bounds rather than lock-file pins because `histdatacom` is a published PyPI
+library. The active lint baseline is Black, Ruff, mypy, generic file checks,
+Pyroma, ShellCheck, Commitizen, and the local CLI/coverage smoke hooks. The
+previous flake8 plugin stack was intentionally replaced with Ruff so local
+installs and hook behavior do not drift independently.
 
 ### Coverage Policy
 

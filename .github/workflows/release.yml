@@ -50,7 +50,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip "setuptools>=77" wheel
-          python -m pip install build twine
+          python -m pip install -e ".[release]"
 
       - name: Build sdist and wheel
         run: python -m build

@@ -65,7 +65,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip "setuptools>=77" wheel
-          python -m pip install -e ".[pandas,arrow]" pytest pytest-cov
+          python -m pip install -e ".[test]"
 
       - name: Run tests with coverage
         run: python -m pytest --cov=histdatacom --cov-report=term-missing:skip-covered --cov-report=xml --cov-report=html
@@ -122,7 +122,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip "setuptools>=77" wheel
-          python -m pip install build twine
+          python -m pip install -e ".[release]"
 
       - name: Build sdist and wheel
         run: python -m build
@@ -177,6 +177,37 @@ jobs:
           assert metadata.version("histdatacom") == histdatacom.__version__
           PY
           histdatacom --version
+        shell: bash
+
+      - name: Smoke wheel extras install
+        run: |
+          python -m venv .wheel-extras-smoke
+          . .wheel-extras-smoke/bin/activate
+          python -m pip install --upgrade pip
+          wheel="$(ls dist/*.whl)"
+          python -m pip install "${wheel}[all]"
+          python - <<'PY'
+          from importlib import metadata
+          import importlib.util
+
+          for distribution_name in (
+              "influxdb-client",
+              "ipywidgets",
+              "jupyter",
+              "pandas",
+              "pyarrow",
+          ):
+              metadata.version(distribution_name)
+
+          for module_name in (
+              "influxdb_client",
+              "ipywidgets",
+              "pandas",
+              "pyarrow",
+          ):
+              if importlib.util.find_spec(module_name) is None:
+                  raise SystemExit(f"missing expected optional module {module_name}")
+          PY
         shell: bash
 
       - name: Upload package artifacts

@@ -1,7 +1,9 @@
 """Pytest unit tests for histdatacom.utils.py."""
 
+import importlib.util
 import os
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -62,6 +64,29 @@ def test_api_return_type_contract_is_explicit() -> None:
 def test_check_installed_module_accepts_polars_return_type() -> None:
     """Polars is now the default dataframe dependency."""
     assert check_installed_module("polars")
+
+
+def test_check_installed_module_reports_influx_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Influx should report its optional extra instead of a generic format."""
+    real_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(
+        module_name: str,
+    ) -> importlib.machinery.ModuleSpec | None:
+        if module_name == "influxdb_client":
+            return None
+        return real_find_spec(module_name)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+    monkeypatch.delitem(sys.modules, "influxdb_client", raising=False)
+
+    with pytest.raises(SystemExit) as err:
+        check_installed_module("influxdb_client")
+
+    assert "InfluxDB import not installed" in str(err.value)
+    assert "pip install histdatacom[influx]" in str(err.value)
 
 
 def test_set_working_data_dir_expands_relative_paths(

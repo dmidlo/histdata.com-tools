@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 from pathlib import Path
 import re
+import sys
 from datetime import datetime
 from typing import Any, Optional
-import sys
-import importlib
 
 import pytz
 import yaml
@@ -20,6 +20,20 @@ API_RETURN_TYPE_MODULES = {
     "arrow": "pyarrow",
     "pandas": "pandas",
     "polars": "polars",
+}
+
+OPTIONAL_MODULE_EXTRAS = {
+    "influxdb_client": "influx",
+    "pandas": "pandas",
+    "polars": "polars",
+    "pyarrow": "arrow",
+}
+
+OPTIONAL_MODULE_FEATURES = {
+    "influxdb_client": "InfluxDB import",
+    "pandas": "pandas return format",
+    "polars": "polars return format",
+    "pyarrow": "arrow return format",
 }
 
 SUPPORTED_API_RETURN_TYPES = frozenset(API_RETURN_TYPE_MODULES)
@@ -224,6 +238,7 @@ def check_installed_module(  # noqa:CCR001,BLK100
     Returns:
         bool: True module is installed and available
     """
+    requested_module_name = module_name
     if module_name in API_RETURN_TYPE_MODULES:
         module_name = API_RETURN_TYPE_MODULES[module_name]
 
@@ -238,13 +253,17 @@ def check_installed_module(  # noqa:CCR001,BLK100
             spec.loader.exec_module(module)  # type: ignore
         return True
     else:
-        if module_name == "pyarrow":
-            module_name = "arrow"
+        extra_name = OPTIONAL_MODULE_EXTRAS.get(
+            module_name, requested_module_name
+        )
+        feature_name = OPTIONAL_MODULE_FEATURES.get(
+            module_name, f"{requested_module_name} format"
+        )
 
         err_text = (
-            f"{module_name} format not installed. "
+            f"{feature_name} not installed. "
             "please run:\n\n  "
-            f"pip install histdatacom[{module_name}]"
+            f"pip install histdatacom[{extra_name}]"
             "\n\n to install."
         )
 
