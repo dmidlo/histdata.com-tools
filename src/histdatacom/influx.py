@@ -7,7 +7,6 @@ import sys
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from multiprocessing import Process, Queue
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Optional, Tuple
 
 from influxdb_client import InfluxDBClient, WriteOptions, WritePrecision
@@ -17,10 +16,16 @@ from rich import print  # pylint: disable=redefined-builtin
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from histdatacom import config
+from histdatacom.activity_stages import (
+    apply_stage_output_to_record,
+    coerce_batch_size,
+    import_to_influx_work_item,
+    iter_polars_row_batches,
+)
 from histdatacom.api import Api
 from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
-from histdatacom.histdata_ascii import CACHE_FILENAME
-from histdatacom.runtime_contracts import WorkStatus, status_has_csv_artifact
+from histdatacom.histdata_ascii import format_influx_line
+from histdatacom.runtime_contracts import WorkItem
 
 if TYPE_CHECKING:
     from histdatacom.records import Record, Records
@@ -28,25 +33,14 @@ if TYPE_CHECKING:
 
 def _coerce_batch_size(batch_size: Any) -> int:
     """Return a positive integer batch size."""
-    try:
-        normalized = int(batch_size)
-    except (TypeError, ValueError) as err:
-        raise ValueError("batch_size must be a positive integer") from err
-
-    if normalized < 1:
-        raise ValueError("batch_size must be a positive integer")
-
-    return normalized
+    return int(coerce_batch_size(batch_size))
 
 
 def _iter_polars_row_batches(
     frame: Any, batch_size: int
 ) -> Iterable[list[tuple[Any, ...]]]:
     """Yield bounded row batches from a Polars dataframe."""
-    for frame_slice in frame.iter_slices(n_rows=batch_size):
-        rows = list(frame_slice.iter_rows())
-        if rows:
-            yield rows
+    yield from iter_polars_row_batches(frame, batch_size)
 
 
 class Influx:  # noqa:H601
@@ -132,35 +126,12 @@ class Influx:  # noqa:H601
             Exception: on unknown exception.
         """
         try:
-            if (
-                record.status != WorkStatus.INFLUX_UPLOAD.value
-                and str.lower(record.data_format) == "ascii"
-            ):
-                cache_path = Path(record.data_dir, CACHE_FILENAME)
-                if cache_path.exists():
-                    self._import_cache(
-                        record,
-                        args,
-                        records_current,
-                        records_next,
-                        influx_chunks_queue,
-                    )
-                elif status_has_csv_artifact(record.status):
-                    Api.test_for_cache_or_create(record, args)
-                    self._import_cache(
-                        record,
-                        args,
-                        records_current,
-                        records_next,
-                        influx_chunks_queue,
-                    )
-
-            record.status = WorkStatus.INFLUX_UPLOAD.value
-            record.write_memento_file(base_dir=args["default_download_dir"])
-
-            if args["delete_after_influx"]:
-                Path(record.data_dir, record.zip_filename).unlink()
-                Path(record.data_dir, record.cache_filename).unlink()
+            output = import_to_influx_work_item(
+                WorkItem.from_record(record),
+                args=args,
+                emit_lines=influx_chunks_queue.put,
+            )
+            apply_stage_output_to_record(output, record)
             records_next.put(record)
         except Exception as err:
             print(  # noqa:T201
@@ -224,34 +195,14 @@ class Influx:  # noqa:H601
         Returns:
             str: line-protocol (influxdb)
         """
-        # pylint: disable=line-too-long
-        measurement = f"{record.data_fxpair}"
-        tags = (
-            f"source=histdata.com,format={record.data_format}"
-            f",timeframe={record.data_timeframe}"
-        ).replace(" ", "")
-
-        match record.data_timeframe:
-            case "M1":
-                fields = (
-                    f"openbid={row[1]},"
-                    f"highbid={row[2]},"
-                    f"lowbid={row[3]},"
-                    f"closebid={row[4]}"
-                ).replace(" ", "")
-                time = str(row[0])
-            case "T":
-                fields = (f"bidquote={row[1]}," f"askquote={row[2]}").replace(
-                    " ", ""
-                )
-                time = str(row[0])
-            case _:
-                raise ValueError(
-                    f"unsupported timeframe: {record.data_timeframe}"
-                )
-
-        # return in line-protocol format.
-        return f"{measurement},{tags} {fields} {time}"
+        return str(
+            format_influx_line(
+                record.data_fxpair,
+                record.data_format,
+                record.data_timeframe,
+                row,
+            )
+        )
 
 
 class InfluxDBWriter(Process):

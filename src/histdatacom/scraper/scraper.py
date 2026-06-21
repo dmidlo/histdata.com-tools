@@ -18,9 +18,14 @@ from rich import print  # pylint: disable=redefined-builtin
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from histdatacom import config
+from histdatacom.activity_stages import (
+    apply_stage_output_to_record,
+    download_archive_work_item,
+    validate_url_work_item,
+)
 from histdatacom.concurrency import ThreadPool, get_pool_cpu_count
 from histdatacom.records import Record
-from histdatacom.runtime_contracts import WorkStatus
+from histdatacom.runtime_contracts import WorkItem, WorkStatus
 from histdatacom.scraper.urls import Urls
 
 
@@ -211,36 +216,33 @@ class Scraper:  # noqa:H601
             SystemExit: On any undefined error from scraping
         """
         try:
-            if record.status == WorkStatus.URL_NEW.value:
-                record = self._scrape_record_info(record)
-                self._check_for_valid_download(record)
-
-                if self.check_if_queue_is_needed():
-                    self.set_repo_datum(record)
-
-                record.status = WorkStatus.URL_VALID.value
-                record.write_memento_file(base_dir=args["default_download_dir"])
-
-            config.NEXT_QUEUE.put(record)  # type: ignore
-        except ValueError:
-            if not self.check_for_repo_action():
+            output = validate_url_work_item(
+                WorkItem.from_record(record),
+                args=args,
+                scrape_record_info=self._scrape_record_info,
+                check_for_valid_download=self._check_for_valid_download,
+                check_if_queue_is_needed=self.check_if_queue_is_needed,
+                set_repo_datum=self.set_repo_datum,
+            )
+            apply_stage_output_to_record(output, record)
+            if (
+                output.result.status == WorkStatus.URL_NO_REPO_DATA
+                and not self.check_for_repo_action()
+            ):
                 print(  # noqa:T201,BLK100
                     f"Info: Histdata.com does not have: {record.url}"
                 )
-
-            record.status = WorkStatus.URL_NO_REPO_DATA.value
-            record.write_memento_file(base_dir=args["default_download_dir"])
+            if output.forward:
+                config.NEXT_QUEUE.put(record)  # type: ignore
         except KeyboardInterrupt as exc_info:
             print("keyboard from _validate_url.")  # noqa:T201
             raise KeyboardInterrupt from exc_info
-        except Exception as err:
+        except SystemExit:
             print(  # noqa:T201
                 f"Unknown Error for URL: {record.url}",
-                err,
                 traceback.format_exc(),
             )
-            record.delete_momento_file()
-            raise SystemExit(1) from err
+            raise
         finally:
             config.CURRENT_QUEUE.task_done()  # type: ignore
 
@@ -286,25 +288,19 @@ class Scraper:  # noqa:H601
             KeyboardInterrupt: User Exit.
         """
         try:
-            if WorkStatus.URL_VALID.value in record.status or (
-                args["from_api"]
-                and not self._check_for_existing_archives_on_disk(record)
-            ):
-                self.get_zip_file(record)
-                record.status = (
-                    WorkStatus.CSV_ZIP.value
-                    if record.status == WorkStatus.URL_VALID.value
-                    else record.status
-                )
-                record.write_memento_file(base_dir=args["default_download_dir"])
-
-            config.NEXT_QUEUE.put(record)  # type: ignore
-        except KeyError:
-            print(  # noqa:T201
-                f"Invalid Zip on histdata.com: {record.url}",
-                sys.exc_info(),
+            output = download_archive_work_item(
+                WorkItem.from_record(record),
+                args=args,
+                download_file=self.get_zip_file,
             )
-            record.delete_momento_file()
+            apply_stage_output_to_record(output, record)
+            if output.result.failure is not None:
+                print(  # noqa:T201
+                    f"Invalid Zip on histdata.com: {record.url}",
+                    output.result.failure.message,
+                )
+            if output.forward:
+                config.NEXT_QUEUE.put(record)  # type: ignore
         except KeyboardInterrupt as exc_info:
             print("keyboard from _download_zip.")  # noqa:T201
             raise KeyboardInterrupt from exc_info

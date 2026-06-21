@@ -20,6 +20,13 @@ from typing import TYPE_CHECKING
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from histdatacom import config
+from histdatacom.activity_stages import (
+    apply_stage_output_to_record,
+    build_cache_work_item,
+    create_cache_file,
+    merge_cache_records,
+    merge_cache_work_items,
+)
 from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
@@ -28,9 +35,8 @@ from histdatacom.histdata_ascii import (
     read_ascii_file_to_polars,
     write_polars_cache,
 )
-from histdatacom.runtime_contracts import status_has_csv_artifact
+from histdatacom.runtime_contracts import WorkItem
 from histdatacom.scraper.scraper import Scraper
-from histdatacom.utils import check_installed_module
 
 if TYPE_CHECKING:
     from pandas.core.frame import DataFrame
@@ -65,30 +71,7 @@ class Api:  # noqa:H601
             record (Record): a histdatacom.records.Record
             args (dict): args received from argparse
         """
-        zip_path = Path(record.data_dir, record.zip_filename)
-        csv_path = Path(record.data_dir, record.csv_filename)
-
-        if zip_path.exists():
-            file_data = cls._import_file_to_polars(record, zip_path)
-        elif csv_path.exists():
-            file_data = cls._import_file_to_polars(record, csv_path)
-        else:
-            raise ValueError("expected downloaded ZIP or CSV source file")
-
-        record.cache_filename = CACHE_FILENAME
-        cache_path = record.data_dir + record.cache_filename
-        cls._write_cache_data(file_data, cache_path)
-
-        record.cache_line_count = file_data.height
-        record.cache_start = str(
-            cls._extract_single_value_from_frame(file_data, 0, "datetime")
-        )
-        record.cache_end = str(
-            cls._extract_single_value_from_frame(
-                file_data, file_data.height - 1, "datetime"
-            )
-        )
-        record.write_memento_file(base_dir=args["default_download_dir"])
+        create_cache_file(record, args)
 
     @classmethod
     def test_for_cache_or_create(cls, record: Record, args: dict) -> None:
@@ -107,11 +90,12 @@ class Api:  # noqa:H601
             "T",
             "M1",
         ]:
-            cache_path = Path(record.data_dir, CACHE_FILENAME)
-            if not cache_path.exists():
-                if not status_has_csv_artifact(record.status):
-                    Scraper.get_zip_file(record)
-                cls._create_cache(record, args)
+            output = build_cache_work_item(
+                WorkItem.from_record(record),
+                args=args,
+                download_file=Scraper.get_zip_file,
+            )
+            apply_stage_output_to_record(output, record)
 
     @classmethod
     def _validate_cache(
@@ -141,7 +125,12 @@ class Api:  # noqa:H601
             Exception: Unknown Exception
         """
         try:
-            cls.test_for_cache_or_create(record, args)
+            output = build_cache_work_item(
+                WorkItem.from_record(record),
+                args=args,
+                download_file=Scraper.get_zip_file,
+            )
+            apply_stage_output_to_record(output, record)
             records_next.put(record)
         except Exception:
             print("Unexpected error:", sys.exc_info())  # noqa:T201
@@ -264,14 +253,11 @@ class Api:  # noqa:H601
         if not sets_to_merge:
             return []
 
-        for tp_set in sets_to_merge:
-            self._merge_records(tp_set)
-
-        return (  # noqa:BLK001
-            sets_to_merge[0]["data"]  # noqa:BLK001
-            if len(sets_to_merge) == 1
-            else sets_to_merge
+        merge_output = merge_cache_work_items(
+            [WorkItem.from_record(record) for record in records_to_merge],
+            return_type=config.ARGS["api_return_type"],
         )
+        return merge_output.data
 
     def _merge_records(self, tp_set_dict: dict) -> None:
         """Sort and Merge records from a timeframe/pair set.
@@ -284,11 +270,6 @@ class Api:  # noqa:H601
                                  "data": PolarsDataFrame | None,
                                 }
         """
-        import polars as pl
-
-        tp_set_dict["records"].sort(key=lambda record: record.cache_start)
-
-        frames = []
         records_count = len(tp_set_dict["records"])
         if records_count:
             with Progress(
@@ -299,23 +280,13 @@ class Api:  # noqa:H601
             ) as progress:
                 task_id = progress.add_task("merge", total=records_count)
 
-                for m_record in tp_set_dict["records"]:
-                    cache_path = m_record.data_dir + m_record.cache_filename
-                    frames.append(self.import_cache_data(cache_path))
+                for _ in tp_set_dict["records"]:
                     progress.advance(task_id)
 
-        merged = pl.concat(frames) if frames else pl.DataFrame()
-
-        match config.ARGS["api_return_type"]:
-            case "arrow":
-                check_installed_module("arrow", True)
-                tp_set_dict["data"] = merged.to_arrow()
-            case "pandas":
-                check_installed_module("pandas", True)
-                tp_set_dict["data"] = merged.to_pandas()
-            case "polars":
-                check_installed_module("polars", True)
-                tp_set_dict["data"] = merged
+        tp_set_dict["data"] = merge_cache_records(
+            tp_set_dict["records"],
+            return_type=config.ARGS["api_return_type"],
+        )
 
     def _dequeue_records_for_merge(self) -> list:
         """Empty the queue of relevant records.

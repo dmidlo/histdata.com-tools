@@ -244,7 +244,7 @@ class TemporalChildWorkflowExecutor:
 
 
 class PendingActivityExecutor:
-    """Placeholder activity executor until issue #151 extracts activities."""
+    """Placeholder activity executor until Temporal activity wiring exists."""
 
     async def execute_activity(
         self,
@@ -264,8 +264,8 @@ class PendingActivityExecutor:
                     status=WorkStatus.PLANNED,
                     stage=stage,
                     message=(
-                        "Activity implementation is pending queue-free "
-                        "extraction in issue #151."
+                        "Temporal activity wiring is pending; queue-free "
+                        "stage functions are available for implementation."
                     ),
                     metadata={
                         "activity": activity_name,
@@ -773,7 +773,7 @@ def _summary_payload(
     partition: Mapping[str, str] | None = None,
 ) -> dict[str, JSONValue]:
     artifacts = [
-        artifact.to_dict()
+        cast(JSONValue, artifact.to_dict())
         for result in stage_results
         for artifact in result.artifacts
     ]
@@ -782,11 +782,13 @@ def _summary_payload(
         "workflow_name": workflow_name,
         "status": progress.status.value,
         "progress": progress.to_dict(),
-        "stage_results": [result.to_dict() for result in stage_results],
+        "stage_results": [
+            cast(JSONValue, result.to_dict()) for result in stage_results
+        ],
         "artifacts": artifacts,
     }
     if partition:
-        payload["partition"] = dict(partition)
+        payload["partition"] = cast(JSONValue, dict(partition))
     return payload
 
 
@@ -804,7 +806,7 @@ def _invocation(
         "workflow_name": workflow_name,
         "workflow_id": workflow_id,
         "stage": OPERATION_ACTIVITIES.get(workflow_name, workflow_name),
-        "partition": partition_payload,
+        "partition": cast(JSONValue, partition_payload),
         "history_policy": spec.history_policy,
     }
     return WorkflowInvocation(
