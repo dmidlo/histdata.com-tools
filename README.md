@@ -331,10 +331,12 @@ manifests under a per-user, per-workspace runtime directory. Downloaded ZIP
 files, extracted CSV/XLSX files, cache IPC files, and merged API artifacts stay
 under the existing HistData data-directory policy.
 
-The current package artifacts include sidecar metadata and CLI entry points.
-Temporal server executables are still metadata-only until platform wheels
-bundle them, so development and operator smoke tests should pass
-`--executable /path/to/temporal` when starting the sidecar.
+Source distributions and universal fallback wheels include sidecar metadata and
+CLI entry points. Platform wheels can bundle the Temporal server executable
+under the sidecar package resources. On a bundled platform wheel,
+`histdatacom-sidecar start` works without `--executable`; on metadata-only
+artifacts and unsupported platforms, development and operator smoke tests
+should pass `--executable /path/to/temporal` when starting the sidecar.
 
 #### Lifecycle and Diagnostics
 
@@ -343,6 +345,7 @@ Use the lifecycle CLI to inspect and manage the local sidecar:
 ```sh
 histdatacom-sidecar doctor --json
 histdatacom-sidecar status --json
+histdatacom-sidecar start
 histdatacom-sidecar start --executable /path/to/temporal
 histdatacom-sidecar stop
 ```

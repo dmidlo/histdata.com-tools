@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
+import histdatacom.sidecar.resources as resource_module
 from histdatacom.sidecar.resources import (
+    SidecarManifest,
     SidecarExecutableUnavailable,
     UnsupportedSidecarPlatform,
     current_platform_key,
@@ -63,6 +67,55 @@ def test_declared_platform_without_binary_fails_clearly() -> None:
     assert "not bundled in this distribution" in message
     assert "platform-wheel-with-sdist-metadata-fallback" in message
     assert "bin/linux-x86_64/temporal" in message
+
+
+def test_bundled_platform_executable_resolves_from_resources(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Bundled platform wheels should expose an executable path."""
+    executable = tmp_path / "temporal"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    manifest = SidecarManifest.from_dict(
+        {
+            "schema_version": 1,
+            "sidecar": "temporal",
+            "distribution_strategy": (
+                "platform-wheel-with-sdist-metadata-fallback"
+            ),
+            "embedded_binary": True,
+            "resource_files": [
+                "README.md",
+                "manifest.json",
+                "runtime-defaults.json",
+                "bin/macos-arm64/temporal",
+            ],
+            "sdist_fallback": "metadata-only",
+            "platforms": {
+                "macos-arm64": {
+                    "bundled": True,
+                    "executable": "bin/macos-arm64/temporal",
+                    "wheel_tags": ["macosx_11_0_arm64"],
+                    "notes": "test bundled executable",
+                }
+            },
+        }
+    )
+
+    @contextmanager
+    def fake_as_file(asset):
+        yield asset
+
+    monkeypatch.setattr(
+        resource_module,
+        "sidecar_asset",
+        lambda relative_path: executable,
+    )
+    monkeypatch.setattr(resource_module.resources, "as_file", fake_as_file)
+
+    with sidecar_executable_path("macos-arm64", manifest) as resolved:
+        assert resolved == executable
 
 
 def test_unsupported_platform_fails_with_supported_keys() -> None:

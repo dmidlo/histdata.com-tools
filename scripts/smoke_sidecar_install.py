@@ -72,13 +72,17 @@ def _run_json(command: Sequence[str]) -> dict[str, Any]:
     return payload
 
 
-def install_wheel(wheel_dir: Path) -> Path:
+def install_wheel(
+    *,
+    wheel_dir: Path | None = None,
+    wheel_path: Path | None = None,
+) -> Path:
     """Install the built wheel into the active Python environment."""
-    wheel_path = _single_wheel(wheel_dir)
+    resolved_wheel = wheel_path or _single_wheel(wheel_dir or Path("dist"))
     subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", str(wheel_path)]
+        [sys.executable, "-m", "pip", "install", str(resolved_wheel)]
     )
-    return wheel_path
+    return resolved_wheel
 
 
 def check_package_metadata(*, expect_temporal_extra: bool) -> dict[str, Any]:
@@ -122,7 +126,11 @@ def check_package_metadata(*, expect_temporal_extra: bool) -> dict[str, Any]:
     }
 
 
-def check_sidecar_resources() -> dict[str, Any]:
+def check_sidecar_resources(
+    *,
+    require_bundled_current_platform: bool = False,
+    check_executable_version: bool = False,
+) -> dict[str, Any]:
     """Validate installed sidecar resources for the current platform."""
     from histdatacom.sidecar import (
         SidecarExecutableUnavailable,
@@ -145,13 +153,23 @@ def check_sidecar_resources() -> dict[str, Any]:
             f"current platform {platform_key!r} is not declared in sidecar "
             f"manifest. Supported platforms: {supported}"
         )
+    executable_version = ""
     if platform_resource.bundled:
         with sidecar_executable_path(platform_key) as executable_path:
             if not executable_path.is_file():
                 raise SystemExit(
                     f"bundled sidecar executable is missing: {executable_path}"
                 )
+            if check_executable_version:
+                completed = _run([str(executable_path), "--version"])
+                executable_version = (
+                    completed.stdout.strip() or completed.stderr.strip()
+                )
     else:
+        if require_bundled_current_platform:
+            raise SystemExit(
+                f"current platform {platform_key!r} is not bundled in this wheel"
+            )
         try:
             with sidecar_executable_path(platform_key):
                 raise SystemExit(
@@ -167,10 +185,16 @@ def check_sidecar_resources() -> dict[str, Any]:
         "embedded_binary": manifest.embedded_binary,
         "platform": platform_key,
         "platform_bundled": platform_resource.bundled,
+        "executable_version": executable_version,
     }
 
 
-def check_cli_smoke(state_dir: Path) -> dict[str, Any]:
+def check_cli_smoke(
+    state_dir: Path,
+    *,
+    require_bundled_current_platform: bool = False,
+    start_sidecar: bool = False,
+) -> dict[str, Any]:
     """Run offline CLI smoke checks against a temporary sidecar state dir."""
     state_dir.mkdir(parents=True, exist_ok=True)
     _run([_script_path("histdatacom"), "--version"])
@@ -201,9 +225,48 @@ def check_cli_smoke(state_dir: Path) -> dict[str, Any]:
     platform = doctor.get("platform", {})
     if not isinstance(platform, dict) or not platform.get("supported"):
         raise SystemExit(f"unexpected sidecar doctor payload: {doctor}")
+    if (
+        require_bundled_current_platform
+        and platform.get("executable_bundled") is not True
+    ):
+        raise SystemExit(
+            "sidecar doctor did not report a bundled current-platform "
+            f"executable: {doctor}"
+        )
+
+    start_state = ""
+    stop_state = ""
+    if start_sidecar:
+        start = _run_json(
+            [
+                sidecar_script,
+                "--state-dir",
+                str(state_dir),
+                "--json",
+                "start",
+                "--startup-timeout",
+                "20",
+            ]
+        )
+        start_state = str(start.get("state", ""))
+        if start_state != "running":
+            raise SystemExit(f"unexpected sidecar start payload: {start}")
+        stop = _run_json(
+            [
+                sidecar_script,
+                "--state-dir",
+                str(state_dir),
+                "--json",
+                "stop",
+            ]
+        )
+        stop_state = str(stop.get("state", ""))
     return {
         "status_state": status["state"],
         "doctor_supported": platform["supported"],
+        "doctor_executable_bundled": platform.get("executable_bundled"),
+        "start_state": start_state,
+        "stop_state": stop_state,
     }
 
 
@@ -214,6 +277,11 @@ def main() -> None:
         "--wheel-dir",
         type=Path,
         help="install the only histdatacom wheel from this directory first",
+    )
+    parser.add_argument(
+        "--wheel",
+        type=Path,
+        help="install this exact histdatacom wheel first",
     )
     parser.add_argument(
         "--state-dir",
@@ -230,11 +298,31 @@ def main() -> None:
         action="store_true",
         help="skip console command execution and validate import metadata only",
     )
+    parser.add_argument(
+        "--require-bundled-current-platform",
+        action="store_true",
+        help="require the installed wheel to bundle this platform executable",
+    )
+    parser.add_argument(
+        "--check-executable-version",
+        action="store_true",
+        help="run the packaged Temporal executable with --version",
+    )
+    parser.add_argument(
+        "--start-sidecar",
+        action="store_true",
+        help="start the sidecar without --executable and then stop it",
+    )
     args = parser.parse_args()
+    if args.wheel is not None and args.wheel_dir is not None:
+        parser.error("--wheel and --wheel-dir are mutually exclusive")
 
     wheel_name = ""
-    if args.wheel_dir is not None:
-        wheel_name = install_wheel(args.wheel_dir).name
+    if args.wheel_dir is not None or args.wheel is not None:
+        wheel_name = install_wheel(
+            wheel_dir=args.wheel_dir,
+            wheel_path=args.wheel,
+        ).name
 
     with tempfile.TemporaryDirectory() as temporary_dir:
         state_dir = args.state_dir or Path(temporary_dir) / "sidecar-state"
@@ -243,11 +331,22 @@ def main() -> None:
             "package": check_package_metadata(
                 expect_temporal_extra=args.expect_temporal_extra
             ),
-            "sidecar": check_sidecar_resources(),
+            "sidecar": check_sidecar_resources(
+                require_bundled_current_platform=(
+                    args.require_bundled_current_platform
+                ),
+                check_executable_version=args.check_executable_version,
+            ),
             "cli": None,
         }
         if not args.skip_cli:
-            report["cli"] = check_cli_smoke(state_dir)
+            report["cli"] = check_cli_smoke(
+                state_dir,
+                require_bundled_current_platform=(
+                    args.require_bundled_current_platform
+                ),
+                start_sidecar=args.start_sidecar,
+            )
 
     print(json.dumps(report, indent=2, sort_keys=True))  # noqa:T201
 

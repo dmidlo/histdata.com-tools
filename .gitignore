@@ -16,6 +16,7 @@ __pycache__
 build/
 dist/
 *.egg-info
+src/histdatacom/sidecar/assets/bin/
 influxdb.yaml
 prospector_results.json
 output.pstats

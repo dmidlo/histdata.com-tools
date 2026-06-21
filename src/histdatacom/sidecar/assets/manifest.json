@@ -8,7 +8,7 @@
     "manifest.json",
     "runtime-defaults.json"
   ],
-  "sdist_fallback": "metadata-only; no Temporal executable is bundled until platform wheels are built",
+  "sdist_fallback": "metadata-only; platform wheel builds patch this manifest with a bundled Temporal executable",
   "platforms": {
     "linux-x86_64": {
       "bundled": false,

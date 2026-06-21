@@ -25,12 +25,14 @@ job submission, job inspection, or workers:
 pip install "histdatacom[temporal]"
 ```
 
-`histdatacom[all]` also includes the Temporal dependency surface. The current
-wheel includes sidecar metadata, resource manifests, and CLI entry points. The
-Temporal server executable is still metadata-only in the current package
-artifacts, so development and operator smoke tests should pass an explicit
-Temporal executable path to `histdatacom-sidecar start --executable` until
-platform wheels bundle that binary.
+`histdatacom[all]` also includes the Temporal dependency surface. Source
+distributions and universal fallback wheels include sidecar metadata, resource
+manifests, and CLI entry points. Platform wheels can include the Temporal
+server executable as package data. On a bundled platform wheel,
+`histdatacom-sidecar start` resolves the packaged executable through
+`importlib.resources`; on metadata-only artifacts and unsupported platforms,
+development and operator smoke tests should pass an explicit Temporal
+executable path to `histdatacom-sidecar start --executable`.
 
 ## Runtime Model
 
@@ -122,8 +124,14 @@ Check status:
 histdatacom-sidecar status --json
 ```
 
-Start with an explicit Temporal executable while platform wheels are
-metadata-only:
+Start with the packaged executable on a bundled platform wheel:
+
+```sh
+histdatacom-sidecar start
+```
+
+Start with an explicit Temporal executable on metadata-only artifacts or when
+testing an operator-provided executable:
 
 ```sh
 histdatacom-sidecar start --executable /path/to/temporal
@@ -308,8 +316,8 @@ Temporal executable not bundled:
 
 - Symptom: `doctor` reports `executable_bundled: false`, or start cannot find a
   packaged executable.
-- Fix: pass `--executable /path/to/temporal` until platform wheels include the
-  sidecar binary.
+- Fix: install a platform wheel that bundles the current platform executable,
+  or pass `--executable /path/to/temporal` for development and operator tests.
 
 Sidecar unavailable:
 
@@ -373,9 +381,11 @@ Unit tests should keep most coverage independent from live Temporal and Influx:
 
 Live smoke tests belong behind explicit operator setup because they require a
 Temporal executable and, for import coverage, an Influx target. Package release
-smoke should keep validating metadata, console entry points, packaged sidecar
-resources, and offline `status`/`doctor` behavior until platform wheels bundle
-the executable.
+smoke should validate metadata, console entry points, packaged sidecar
+resources, and offline `status`/`doctor` behavior for every wheel. For bundled
+platform wheels, release smoke should also require
+`doctor.platform.executable_bundled == true`, run the packaged executable
+version probe, and start the sidecar without `--executable`.
 
 ## GUI Integration Notes
 

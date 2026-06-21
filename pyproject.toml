@@ -149,6 +149,7 @@ where = ["src"]
     "assets/README.md",
     "assets/manifest.json",
     "assets/runtime-defaults.json",
+    "assets/bin/*/*",
 ]
 
 [tool.setuptools.dynamic]

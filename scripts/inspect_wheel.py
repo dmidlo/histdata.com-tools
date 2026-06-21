@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 from email.parser import Parser
 from pathlib import Path
 from typing import Any
 from zipfile import ZipFile
 
-EXPECTED_SIDECAR_ASSETS = {
+EXPECTED_BASE_SIDECAR_ASSETS = {
     "histdatacom/sidecar/assets/README.md",
     "histdatacom/sidecar/assets/manifest.json",
     "histdatacom/sidecar/assets/runtime-defaults.json",
 }
-EXPECTED_SIDECAR_RESOURCE_FILES = {
+EXPECTED_BASE_SIDECAR_RESOURCE_FILES = {
     "README.md",
     "manifest.json",
     "runtime-defaults.json",
@@ -31,6 +32,32 @@ EXPECTED_CONSOLE_SCRIPTS = {
     "histdatacom-sidecar = histdatacom.sidecar.cli:main",
     "histdatacom-sidecar-worker = histdatacom.sidecar.worker:main",
 }
+
+
+def _current_platform_key(
+    system: str | None = None,
+    machine: str | None = None,
+) -> str:
+    """Return the sidecar manifest platform key for this machine."""
+    normalized_system = (system or platform.system()).strip().lower()
+    normalized_machine = (machine or platform.machine()).strip().lower()
+    system_aliases = {
+        "darwin": "macos",
+        "mac": "macos",
+        "macos": "macos",
+        "linux": "linux",
+        "windows": "windows",
+    }
+    machine_aliases = {
+        "amd64": "x86_64",
+        "x64": "x86_64",
+        "x86-64": "x86_64",
+        "aarch64": "arm64",
+    }
+    return (
+        f"{system_aliases.get(normalized_system, normalized_system)}-"
+        f"{machine_aliases.get(normalized_machine, normalized_machine)}"
+    )
 
 
 def _single_wheel(dist_dir: Path) -> Path:
@@ -54,24 +81,39 @@ def _requires_dist_contains(
     )
 
 
-def inspect_wheel(wheel_path: Path) -> dict[str, Any]:
+def inspect_wheel(
+    wheel_path: Path,
+    *,
+    require_bundled_platforms: set[str] | None = None,
+    require_current_platform_bundled: bool = False,
+) -> dict[str, Any]:
     """Validate wheel metadata, entry points, and sidecar resource payloads."""
+    required_bundled_platforms = set(require_bundled_platforms or set())
+    if require_current_platform_bundled:
+        required_bundled_platforms.add(_current_platform_key())
+
     with ZipFile(wheel_path) as wheel:
         names = set(wheel.namelist())
         metadata_path = next(
             name for name in names if name.endswith(".dist-info/METADATA")
+        )
+        wheel_metadata_path = next(
+            name for name in names if name.endswith(".dist-info/WHEEL")
         )
         entry_points_path = next(
             name
             for name in names
             if name.endswith(".dist-info/entry_points.txt")
         )
-        missing = sorted(EXPECTED_SIDECAR_ASSETS - names)
+        missing = sorted(EXPECTED_BASE_SIDECAR_ASSETS - names)
         if missing:
             raise SystemExit(f"wheel missing sidecar assets: {missing}")
 
         wheel_metadata = Parser().parsestr(
             wheel.read(metadata_path).decode("utf-8")
+        )
+        wheel_file_metadata = Parser().parsestr(
+            wheel.read(wheel_metadata_path).decode("utf-8")
         )
         entry_points = wheel.read(entry_points_path).decode("utf-8")
         manifest = json.loads(
@@ -88,21 +130,16 @@ def inspect_wheel(wheel_path: Path) -> dict[str, Any]:
                 "sidecar manifest is missing platform declarations: "
                 f"{missing_platforms}"
             )
-        unexpected_resource_files = sorted(
-            EXPECTED_SIDECAR_RESOURCE_FILES
-            ^ set(manifest.get("resource_files", []))
-        )
-        if unexpected_resource_files:
-            raise SystemExit(
-                "sidecar manifest resource_files drifted from packaged "
-                f"assets: {unexpected_resource_files}"
-            )
+        bundled_platforms: set[str] = set()
+        expected_resource_files = set(EXPECTED_BASE_SIDECAR_RESOURCE_FILES)
         for key, resource in dict(manifest["platforms"]).items():
             executable = resource.get("executable")
             if not executable:
                 raise SystemExit(f"sidecar platform {key} has no executable")
             executable_path = f"histdatacom/sidecar/assets/{executable}"
             if resource.get("bundled"):
+                bundled_platforms.add(str(key))
+                expected_resource_files.add(str(executable))
                 if executable_path not in names:
                     raise SystemExit(
                         f"sidecar executable missing for {key}: "
@@ -115,6 +152,19 @@ def inspect_wheel(wheel_path: Path) -> dict[str, Any]:
                         f"sidecar executable is not executable for {key}: "
                         f"{executable_path}"
                     )
+            elif executable_path in names:
+                raise SystemExit(
+                    f"sidecar executable is packaged but not declared bundled "
+                    f"for {key}: {executable_path}"
+                )
+        unexpected_resource_files = sorted(
+            expected_resource_files ^ set(manifest.get("resource_files", []))
+        )
+        if unexpected_resource_files:
+            raise SystemExit(
+                "sidecar manifest resource_files drifted from packaged "
+                f"assets: {unexpected_resource_files}"
+            )
 
     if wheel_metadata["Name"] != "histdatacom":
         raise SystemExit(f"unexpected wheel name: {wheel_metadata['Name']}")
@@ -152,9 +202,22 @@ def inspect_wheel(wheel_path: Path) -> dict[str, Any]:
         "platform-wheel-with-sdist-metadata-fallback"
     ):
         raise SystemExit("unexpected sidecar distribution strategy")
-    if manifest["embedded_binary"]:
+    embedded_binary = bool(manifest["embedded_binary"])
+    if embedded_binary != bool(bundled_platforms):
         raise SystemExit(
-            "metadata-only wheel should not claim bundled binaries"
+            "sidecar manifest embedded_binary does not match bundled "
+            f"platforms: {sorted(bundled_platforms)}"
+        )
+    missing_required = sorted(required_bundled_platforms - bundled_platforms)
+    if missing_required:
+        raise SystemExit(
+            "wheel is missing required bundled sidecar platforms: "
+            f"{missing_required}"
+        )
+    wheel_tags = list(wheel_file_metadata.get_all("Tag", []))
+    if embedded_binary and all(tag.endswith("-any") for tag in wheel_tags):
+        raise SystemExit(
+            "bundled sidecar executable wheels must use platform wheel tags"
         )
     return {
         "wheel": wheel_path.name,
@@ -162,13 +225,15 @@ def inspect_wheel(wheel_path: Path) -> dict[str, Any]:
         "requires_python": wheel_metadata["Requires-Python"],
         "provides_extra": sorted(provides_extra),
         "sidecar": {
-            "assets": sorted(EXPECTED_SIDECAR_ASSETS),
+            "assets": sorted(EXPECTED_BASE_SIDECAR_ASSETS),
+            "bundled_platforms": sorted(bundled_platforms),
             "distribution_strategy": manifest["distribution_strategy"],
             "embedded_binary": manifest["embedded_binary"],
             "platforms": sorted(manifest_platforms),
             "resource_files": list(manifest["resource_files"]),
         },
         "console_scripts": sorted(EXPECTED_CONSOLE_SCRIPTS),
+        "wheel_tags": wheel_tags,
     }
 
 
@@ -177,12 +242,33 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dist-dir", default="dist")
     parser.add_argument(
+        "--wheel",
+        type=Path,
+        help="inspect an explicit wheel instead of the only wheel in dist-dir",
+    )
+    parser.add_argument(
+        "--require-bundled-current-platform",
+        action="store_true",
+        help="require the current platform to have a bundled executable",
+    )
+    parser.add_argument(
+        "--require-bundled-platform",
+        action="append",
+        default=[],
+        help="require a specific manifest platform key to be bundled",
+    )
+    parser.add_argument(
         "--report",
         type=Path,
         help="write a JSON report describing inspected wheel metadata",
     )
     args = parser.parse_args()
-    report = inspect_wheel(_single_wheel(Path(args.dist_dir)))
+    wheel_path = args.wheel or _single_wheel(Path(args.dist_dir))
+    report = inspect_wheel(
+        wheel_path,
+        require_bundled_platforms=set(args.require_bundled_platform),
+        require_current_platform_bundled=args.require_bundled_current_platform,
+    )
     if args.report is not None:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(

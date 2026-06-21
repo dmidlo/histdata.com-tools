@@ -24,25 +24,92 @@ dev()
 
 inspect_wheel_metadata()
 {
-    python scripts/inspect_wheel.py --report dist/sidecar-wheel-report.json
+    local wheel
+    local wheels=(dist/histdatacom-*.whl)
+
+    if ((${#wheels[@]} == 0)); then
+        echo "pypi.sh: no wheels found in dist" >&2
+        exit 1
+    fi
+
+    for wheel in "${wheels[@]}"; do
+        python scripts/inspect_wheel.py \
+            --wheel "${wheel}" \
+            --report "dist/$(basename "${wheel%.whl}")-sidecar-wheel-report.json"
+    done
 }
 
 smoke_wheel_install()
 {
-    local smoke_dir
-    smoke_dir=$(mktemp -d)
+    local wheel
+    local wheels=(dist/histdatacom-*.whl)
 
-    (
-        trap 'rm -rf "${smoke_dir}"' EXIT
+    if ((${#wheels[@]} == 0)); then
+        echo "pypi.sh: no wheels found in dist" >&2
+        exit 1
+    fi
 
-        python -m venv "${smoke_dir}/venv"
-        # shellcheck source=/dev/null
-        source "${smoke_dir}/venv/bin/activate"
-        python -m pip install --upgrade pip
-        python "${project_root}/scripts/smoke_sidecar_install.py" \
-            --wheel-dir "${project_root}/dist" \
-            --state-dir "${smoke_dir}/sidecar-state"
-    )
+    for wheel in "${wheels[@]}"; do
+        local smoke_dir
+        smoke_dir=$(mktemp -d)
+
+        (
+            trap 'rm -rf "${smoke_dir}"' EXIT
+
+            python -m venv "${smoke_dir}/venv"
+            # shellcheck source=/dev/null
+            source "${smoke_dir}/venv/bin/activate"
+            python -m pip install --upgrade pip
+            python "${project_root}/scripts/smoke_sidecar_install.py" \
+                --wheel "${project_root}/${wheel}" \
+                --state-dir "${smoke_dir}/sidecar-state"
+        )
+    done
+}
+
+current_sidecar_platform()
+{
+    python - <<'PY'
+from histdatacom.sidecar.resources import current_platform_key
+
+print(current_platform_key())
+PY
+}
+
+sidecar_platform_wheel()
+{
+    local executable="${HISTDATACOM_SIDECAR_EXECUTABLE:-}"
+    local platform_key="${HISTDATACOM_SIDECAR_PLATFORM:-}"
+    local report="dist/sidecar-platform-wheel-build-report.json"
+    local wheel
+
+    if [[ -z "${executable}" ]]; then
+        echo "Set HISTDATACOM_SIDECAR_EXECUTABLE to build a bundled sidecar wheel." >&2
+        exit 2
+    fi
+
+    if [[ -z "${platform_key}" ]]; then
+        platform_key=$(current_sidecar_platform)
+    fi
+
+    python scripts/sidecar_platform_wheel.py \
+        --platform-key "${platform_key}" \
+        --executable "${executable}" \
+        --dist-dir dist \
+        --report "${report}"
+
+    wheel=$(python - "${report}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+print(Path(json.loads(Path(sys.argv[1]).read_text())["wheel"]))
+PY
+)
+    python scripts/inspect_wheel.py \
+        --wheel "${wheel}" \
+        --require-bundled-platform "${platform_key}" \
+        --report "dist/$(basename "${wheel%.whl}")-sidecar-wheel-report.json"
 }
 
 sign_dist_artifacts()
@@ -57,6 +124,9 @@ build()
     rm -rf ./dist
     install_release_frontend
     python -m build
+    if [[ -n "${HISTDATACOM_SIDECAR_EXECUTABLE:-}" ]]; then
+        sidecar_platform_wheel
+    fi
     python -m twine check dist/*
     inspect_wheel_metadata
     smoke_wheel_install
@@ -116,6 +186,10 @@ case "${1:-}" in
     build)
         build
         ;;
+    sidecar_wheel)
+        install_release_frontend
+        sidecar_platform_wheel
+        ;;
     pypi)
         build
         sign_dist_artifacts
@@ -141,7 +215,7 @@ case "${1:-}" in
         destroyenv
         ;;
     *)
-        echo "Usage: $0 {dev|build|pypi|testpypi|testpypi_install|pypi_install}" >&2
+        echo "Usage: $0 {dev|build|sidecar_wheel|pypi|testpypi|testpypi_install|pypi_install}" >&2
         exit 2
         ;;
 esac

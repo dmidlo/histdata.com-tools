@@ -81,10 +81,38 @@ support, and offline `histdatacom-sidecar status`/`doctor` behavior. Legacy
 `setup.py` commands are intentionally unsupported; this project is built from
 `pyproject.toml`.
 
-The current sidecar artifacts are metadata-only wheels. They must declare every
-supported platform and fail explicitly when a Temporal executable is requested
-from a wheel that does not bundle one. The smoke checks intentionally do not
-start Temporal until platform wheels include sidecar binaries.
+Source distributions and universal fallback wheels are metadata-only sidecar
+artifacts. They must declare every supported platform and fail explicitly when
+a Temporal executable is requested from an artifact that does not bundle one.
+Platform wheels are built from explicit Temporal executable artifacts and must
+set the current platform manifest entry to `bundled: true`.
+
+To build a platform wheel locally, provide the executable artifact:
+
+```sh
+HISTDATACOM_SIDECAR_EXECUTABLE=/path/to/temporal bash pypi.sh build
+```
+
+Set `HISTDATACOM_SIDECAR_PLATFORM` when cross-building from a prepared
+platform artifact, for example `linux-x86_64` or `windows-x86_64`. The helper
+uses `scripts/sidecar_platform_wheel.py` to stage a temporary source tree,
+patch `manifest.json`, include `assets/bin/<platform>/temporal`, and retag the
+wheel to the manifest platform tag. The source tree remains metadata-only and
+`src/histdatacom/sidecar/assets/bin/` is ignored by Git to prevent committing
+oversized executable artifacts.
+
+Bundled platform wheel smoke should install the built wheel directly:
+
+```sh
+python scripts/inspect_wheel.py \
+  --wheel dist/histdatacom-*-py3-none-<platform-tag>.whl \
+  --require-bundled-platform <platform-key>
+python scripts/smoke_sidecar_install.py \
+  --wheel dist/histdatacom-*-py3-none-<platform-tag>.whl \
+  --require-bundled-current-platform \
+  --check-executable-version \
+  --start-sidecar
+```
 
 Sidecar runtime documentation must be reviewed for every release that changes
 sidecar CLI flags, runtime paths, worker queues, package resources, or bundled

@@ -328,8 +328,9 @@ class SidecarSupervisor:
                 "supported": platform_resource is not None,
                 "executable_bundled": executable_bundled,
                 "message": (
-                    "Packaged Temporal executables are added by platform "
-                    "wheels in a later migration issue."
+                    "No packaged Temporal executable is available in this "
+                    "artifact. Install a bundled platform wheel or pass "
+                    "--executable."
                     if not executable_bundled
                     else "Packaged Temporal executable is available."
                 ),
