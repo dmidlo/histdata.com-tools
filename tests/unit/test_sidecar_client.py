@@ -816,6 +816,78 @@ def test_list_job_statuses_offline_reads_local_store(
     assert jobs.jobs[0].lifecycle == JobLifecycle.SUBMITTED
 
 
+@pytest.mark.parametrize(
+    ("raw_status", "expected"),
+    (
+        ("WORKFLOW_EXECUTION_STATUS_RUNNING", WorkStatus.UNKNOWN),
+        ("WORKFLOW_EXECUTION_STATUS_COMPLETED", WorkStatus.COMPLETED),
+        ("WORKFLOW_EXECUTION_STATUS_FAILED", WorkStatus.FAILED),
+        ("WORKFLOW_EXECUTION_STATUS_CANCELED", WorkStatus.CANCELLED),
+        ("WORKFLOW_EXECUTION_STATUS_TERMINATED", WorkStatus.FAILED),
+        ("WORKFLOW_EXECUTION_STATUS_TIMED_OUT", WorkStatus.FAILED),
+        ("WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW", WorkStatus.UNKNOWN),
+    ),
+)
+def test_status_from_temporal_description_normalizes_terminal_statuses(
+    raw_status: str,
+    expected: WorkStatus,
+) -> None:
+    """Temporal visibility statuses should map into package statuses."""
+    assert client._status_from_temporal_description(raw_status) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw_status", "expected_status", "expected_lifecycle"),
+    (
+        (
+            "WORKFLOW_EXECUTION_STATUS_CANCELED",
+            WorkStatus.CANCELLED,
+            JobLifecycle.CANCELLED,
+        ),
+        (
+            "WORKFLOW_EXECUTION_STATUS_TERMINATED",
+            WorkStatus.FAILED,
+            JobLifecycle.FAILED,
+        ),
+        (
+            "WORKFLOW_EXECUTION_STATUS_TIMED_OUT",
+            WorkStatus.FAILED,
+            JobLifecycle.FAILED,
+        ),
+    ),
+)
+def test_temporal_visibility_snapshot_preserves_raw_status_metadata(
+    tmp_path: Path,
+    raw_status: str,
+    expected_status: WorkStatus,
+    expected_lifecycle: JobLifecycle,
+) -> None:
+    """Listed jobs should preserve raw Temporal status for diagnostics."""
+    config = _config(tmp_path)
+    description = SimpleNamespace(
+        execution=SimpleNamespace(
+            workflow_id="histdatacom-run-terminal",
+            run_id="run-terminal",
+        ),
+        status=raw_status,
+    )
+
+    snapshot = client._snapshot_from_workflow_description(
+        description,
+        config=config,
+    )
+
+    assert snapshot.status == expected_status
+    assert snapshot.lifecycle == expected_lifecycle
+    assert snapshot.controls.cancel.available is False
+    assert snapshot.controls.retry.available is True
+    assert snapshot.controls.resume.available is True
+    assert snapshot.metadata["temporal_execution_status"] == {
+        "raw": raw_status,
+        "normalized": raw_status.removeprefix("WORKFLOW_EXECUTION_STATUS_"),
+    }
+
+
 def test_list_job_statuses_uses_temporal_visibility_list(
     tmp_path: Path,
 ) -> None:

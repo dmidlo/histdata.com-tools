@@ -44,7 +44,9 @@ def _normalized_status_text(value: str | "WorkStatus" | None) -> str:
     """Return the normalized text form used for status comparisons."""
     if isinstance(value, WorkStatus):
         return value.value
-    return (value or "").strip().upper()
+    return (
+        (value or "").strip().upper().removeprefix("WORKFLOW_EXECUTION_STATUS_")
+    )
 
 
 class WorkStatus(str, Enum):
@@ -76,11 +78,16 @@ class WorkStatus(str, Enum):
             return cls.PLANNED
 
         aliases = {
+            "CANCELED": cls.CANCELLED,
             "CSV": cls.CSV_FILE,
             "DONE": cls.COMPLETED,
             "COMPLETE": cls.COMPLETED,
             "MISSING": cls.URL_NO_REPO_DATA,
             "NO_DATA": cls.URL_NO_REPO_DATA,
+            "TERMINATED": cls.FAILED,
+            "TIMED_OUT": cls.FAILED,
+            "TIMEDOUT": cls.FAILED,
+            "TIMEOUT": cls.FAILED,
         }
         if normalized in aliases:
             return aliases[normalized]

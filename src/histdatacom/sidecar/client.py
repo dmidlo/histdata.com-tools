@@ -51,6 +51,8 @@ DEFAULT_RUN_WORKFLOW_NAME = "HistDataRunWorkflow"
 RUN_REQUEST_METADATA_KEY = "run_request"
 CONTROL_ATTEMPTS_METADATA_KEY = "control_attempts"
 CONTROL_EXECUTION_METADATA_KEY = "control_execution"
+TEMPORAL_EXECUTION_STATUS_PREFIX = "WORKFLOW_EXECUTION_STATUS_"
+TEMPORAL_EXECUTION_STATUS_METADATA_KEY = "temporal_execution_status"
 
 
 class TemporalDependencyError(RuntimeError):
@@ -1334,18 +1336,34 @@ def _snapshot_from_workflow_description(
         run_id=run_id,
         config=config,
     )
-    return SidecarJobSnapshot.from_handle(
-        handle,
-        lifecycle=lifecycle_from_work_status(status),
-        status=status,
+    return _snapshot_with_metadata(
+        SidecarJobSnapshot.from_handle(
+            handle,
+            lifecycle=lifecycle_from_work_status(status),
+            status=status,
+        ),
+        {
+            TEMPORAL_EXECUTION_STATUS_METADATA_KEY: {
+                "raw": raw_status,
+                "normalized": _normalized_temporal_description(raw_status),
+            }
+        },
     )
 
 
 def _status_from_temporal_description(raw_status: str) -> WorkStatus:
-    normalized = raw_status.upper().removeprefix("WORKFLOW_EXECUTION_STATUS_")
+    normalized = _normalized_temporal_description(raw_status)
     if normalized in {"RUNNING", "CONTINUED_AS_NEW"}:
         return WorkStatus.UNKNOWN
     return WorkStatus.from_value(normalized)
+
+
+def _normalized_temporal_description(raw_status: str) -> str:
+    return (
+        raw_status.strip()
+        .upper()
+        .removeprefix(TEMPORAL_EXECUTION_STATUS_PREFIX)
+    )
 
 
 def _sidecar_status(

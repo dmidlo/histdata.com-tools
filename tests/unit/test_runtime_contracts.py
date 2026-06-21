@@ -35,6 +35,17 @@ def test_work_status_normalizes_legacy_and_future_states() -> None:
     assert WorkStatus.from_value("RETRIED") is WorkStatus.RETRIED
     assert WorkStatus.from_value("SKIPPED") is WorkStatus.SKIPPED
     assert WorkStatus.from_value("CANCELLED") is WorkStatus.CANCELLED
+    assert WorkStatus.from_value("CANCELED") is WorkStatus.CANCELLED
+    assert (
+        WorkStatus.from_value("WORKFLOW_EXECUTION_STATUS_CANCELED")
+        is WorkStatus.CANCELLED
+    )
+    assert WorkStatus.from_value("TERMINATED") is WorkStatus.FAILED
+    assert WorkStatus.from_value("TIMED_OUT") is WorkStatus.FAILED
+    assert (
+        WorkStatus.from_value("WORKFLOW_EXECUTION_STATUS_TIMED_OUT")
+        is WorkStatus.FAILED
+    )
     assert WorkStatus.from_value("COMPLETED") is WorkStatus.COMPLETED
     assert WorkStatus.from_value("unexpected") is WorkStatus.UNKNOWN
     assert WorkStatus.COMPLETED.terminal
