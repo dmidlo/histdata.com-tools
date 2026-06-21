@@ -105,6 +105,7 @@ setup(
             "polars",
             "jupyter",
             "ipywidgets",
+            "build",
             "pytest",
             "mypy",
             "keyring",
@@ -153,6 +154,7 @@ setup(
             "flake8-type-checking",
             "isort",
             "sourcery-cli",
+            "twine",
         ],
     },
     classifiers=[
