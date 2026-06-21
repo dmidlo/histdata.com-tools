@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING
-
-from rich import print  # pylint: disable=redefined-builtin
 
 from histdatacom import config
 from histdatacom.activity_stages import (
@@ -50,10 +47,6 @@ class Csv:  # noqa:H601
             args (dict): from config.ARGS
             records_current (Records): config.CURRENT_QUEUE
             records_next (Records): config.NEXT_QUEUE
-
-        Raises:
-            OSError: OS Error.
-            SystemExit: exit on error
         """
         try:
             output = extract_csv_work_item(
@@ -61,9 +54,7 @@ class Csv:  # noqa:H601
                 args=args,
             )
             apply_stage_output_to_record(output, record)
-            records_next.put(record)
-        except SystemExit as err:
-            print("Unexpected error:", sys.exc_info())  # noqa:T201
-            raise err
+            if output.forward:
+                records_next.put(record)
         finally:
             records_current.task_done()

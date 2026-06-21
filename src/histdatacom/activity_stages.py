@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import ssl
 import zipfile
 from dataclasses import dataclass, replace
 from email.message import Message
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from ssl import SSLCertVerificationError
 from typing import Any, Callable, Iterable, Mapping, MutableMapping, Sequence
 from urllib.error import URLError
@@ -253,6 +254,47 @@ class ArchiveDownloadResult:
 
 class ArchiveDownloadError(Exception):
     """Structured archive download failure."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        retryable: bool,
+        detail: Mapping[str, JSONValue] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.detail = dict(detail or {})
+
+
+@dataclass(frozen=True, slots=True)
+class ArchiveExtractionResult:
+    """An extracted or reused CSV/XLSX artifact."""
+
+    filename: str
+    path: str
+    size_bytes: int
+    sha256: str
+    reused_existing: bool = False
+    zip_deleted: bool = False
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return JSON-compatible extraction metadata."""
+        return {
+            "filename": self.filename,
+            "path": self.path,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+            "reused_existing": self.reused_existing,
+            "zip_deleted": self.zip_deleted,
+        }
+
+
+class ArchiveExtractionError(Exception):
+    """Structured archive extraction failure."""
 
     def __init__(
         self,
@@ -839,6 +881,29 @@ def existing_archive_artifact(record: Record) -> ArchiveDownloadResult | None:
     return None
 
 
+def existing_extraction_artifact(
+    record: Record,
+    *,
+    zip_persist: bool,
+) -> ArchiveExtractionResult | None:
+    """Return an existing CSV/XLSX artifact and safe ZIP cleanup outcome."""
+    if not record.data_dir or not record.csv_filename:
+        return None
+
+    path = Path(record.data_dir, record.csv_filename)
+    if not path.exists():
+        return None
+
+    return archive_extraction_result_for_path(
+        path,
+        reused_existing=True,
+        zip_deleted=_delete_zip_after_extraction(
+            record,
+            zip_persist=zip_persist,
+        ),
+    )
+
+
 def extract_csv_work_item(
     work_item: WorkItem,
     *,
@@ -847,36 +912,182 @@ def extract_csv_work_item(
     """Extract one CSV/XLSX payload without touching global queues."""
     record = _record_from_work_item(work_item)
     try:
-        if WorkStatus.CSV_ZIP.value in record.status:
-            zip_path = Path(record.data_dir, record.zip_filename)
-
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                data_members = [
-                    name
-                    for name in zip_ref.namelist()
-                    if name.lower().endswith((".csv", ".xlsx"))
-                ]
-                if len(data_members) != 1:
-                    raise ValueError(
-                        "expected ZIP archive to contain one CSV/XLSX file"
-                    )
-                [record.csv_filename] = data_members
-                zip_ref.extract(record.csv_filename, path=record.data_dir)
-
-            zip_path.unlink()
+        _ensure_record_data_dir(record, args)
+        zip_persist = _zip_persist_enabled(args, record)
+        existing = existing_extraction_artifact(
+            record,
+            zip_persist=zip_persist,
+        )
+        if existing is not None:
             record.status = WorkStatus.CSV_FILE.value
             record.write_memento_file(base_dir=_default_download_dir(args))
+            updated = _work_item_from_record(record, work_item)
+            return _activity_output(
+                updated,
+                stage="extract_csv",
+                status=updated.status,
+                artifacts=_artifact_refs_for_record(record, "csv"),
+                metrics={
+                    "forward": True,
+                    "decision": "reuse_existing",
+                    **existing.to_dict(),
+                },
+                message="Existing CSV/XLSX artifact reused.",
+            )
+
+        if WorkStatus.CSV_ZIP.value in record.status:
+            extraction = extract_archive_to_record(
+                record,
+                zip_persist=zip_persist,
+            )
+            record.status = WorkStatus.CSV_FILE.value
+            record.write_memento_file(base_dir=_default_download_dir(args))
+            updated = _work_item_from_record(record, work_item)
+            return _activity_output(
+                updated,
+                stage="extract_csv",
+                status=updated.status,
+                artifacts=_artifact_refs_for_record(record, "csv"),
+                metrics={
+                    "forward": True,
+                    "decision": (
+                        "reuse_existing"
+                        if extraction.reused_existing
+                        else "extracted"
+                    ),
+                    **extraction.to_dict(),
+                },
+            )
 
         updated = _work_item_from_record(record, work_item)
         return _activity_output(
             updated,
             stage="extract_csv",
             status=updated.status,
-            artifacts=_artifact_refs_for_record(record, "csv"),
+            metrics={
+                "forward": True,
+                "decision": "skipped_not_ready",
+            },
         )
-    except (OSError, ValueError) as err:
+    except (ArchiveExtractionError, OSError, zipfile.BadZipFile) as err:
         record.delete_momento_file()
-        raise SystemExit(1) from err
+        failure = _archive_extraction_failure(err, record)
+        status = WorkStatus.RETRIED if failure.retryable else WorkStatus.FAILED
+        failed = _work_item_from_record(record, work_item).with_status(status)
+        return _activity_output(
+            failed,
+            stage="extract_csv",
+            status=status,
+            forward=False,
+            failure=failure,
+            metrics={
+                "forward": False,
+                "retryable": failure.retryable,
+            },
+            message=failure.message,
+        )
+
+
+def extract_archive_to_record(
+    record: Record,
+    *,
+    zip_persist: bool,
+) -> ArchiveExtractionResult:
+    """Extract the single CSV/XLSX member from a ZIP into record.data_dir."""
+    _validate_extraction_request(record)
+    zip_path = Path(record.data_dir, record.zip_filename)
+    if not zip_path.exists():
+        raise ArchiveExtractionError(
+            "ARCHIVE_NOT_FOUND",
+            "Archive extraction source ZIP does not exist.",
+            retryable=False,
+            detail={"path": str(zip_path), "url": record.url},
+        )
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            member = _single_data_member(zip_ref, zip_path)
+            filename = _safe_data_member_filename(member)
+            record.csv_filename = filename
+            target_path = Path(record.data_dir, filename)
+            reused_existing = target_path.exists()
+            if not reused_existing:
+                atomic_extract_archive_member(
+                    zip_ref,
+                    member,
+                    target_path,
+                    work_id=record.url or str(zip_path),
+                )
+    except zipfile.BadZipFile as err:
+        raise ArchiveExtractionError(
+            "INVALID_ARCHIVE_PAYLOAD",
+            str(err),
+            retryable=False,
+            detail={"path": str(zip_path)},
+        ) from err
+    except (KeyError, RuntimeError) as err:
+        raise ArchiveExtractionError(
+            "INVALID_ARCHIVE_PAYLOAD",
+            str(err),
+            retryable=False,
+            detail={"path": str(zip_path)},
+        ) from err
+    except OSError as err:
+        raise ArchiveExtractionError(
+            "EXTRACTION_FILESYSTEM_ERROR",
+            str(err),
+            retryable=False,
+            detail={"path": str(zip_path)},
+        ) from err
+
+    zip_deleted = _delete_zip_after_extraction(
+        record,
+        zip_persist=zip_persist,
+    )
+    return archive_extraction_result_for_path(
+        target_path,
+        reused_existing=reused_existing,
+        zip_deleted=zip_deleted,
+    )
+
+
+def archive_extraction_result_for_path(
+    path: Path,
+    *,
+    reused_existing: bool = False,
+    zip_deleted: bool = False,
+) -> ArchiveExtractionResult:
+    """Return extracted artifact metadata for a CSV/XLSX path."""
+    return ArchiveExtractionResult(
+        filename=path.name,
+        path=str(path),
+        size_bytes=path.stat().st_size,
+        sha256=_file_sha256(path),
+        reused_existing=reused_existing,
+        zip_deleted=zip_deleted,
+    )
+
+
+def atomic_extract_archive_member(
+    zip_ref: zipfile.ZipFile,
+    member: str,
+    target_path: Path,
+    *,
+    work_id: str,
+) -> Path:
+    """Extract one ZIP member through a temp file, then rename atomically."""
+    temp_path = target_path.with_name(
+        f".{target_path.name}.{derive_work_id(work_id).removeprefix('work-')}.tmp"
+    )
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with zip_ref.open(member, "r") as source, temp_path.open("wb") as sink:
+            shutil.copyfileobj(source, sink)
+        temp_path.replace(target_path)
+        return target_path
+    except (OSError, zipfile.BadZipFile, RuntimeError, KeyError):
+        _unlink_path(temp_path)
+        raise
 
 
 def build_cache_work_item(
@@ -1846,6 +2057,36 @@ def _archive_download_failure(
     )
 
 
+def _archive_extraction_failure(
+    err: Exception,
+    record: Record,
+) -> FailureInfo:
+    if isinstance(err, ArchiveExtractionError):
+        return FailureInfo(
+            code=err.code,
+            message=err.message,
+            retryable=err.retryable,
+            detail=err.detail,
+        )
+    if isinstance(err, zipfile.BadZipFile):
+        return FailureInfo(
+            code="INVALID_ARCHIVE_PAYLOAD",
+            message=str(err),
+            retryable=False,
+            detail={"url": record.url, "zip_filename": record.zip_filename},
+        )
+    return FailureInfo(
+        code="EXTRACTION_FILESYSTEM_ERROR",
+        message=str(err),
+        retryable=False,
+        detail={
+            "url": record.url,
+            "data_dir": record.data_dir,
+            "zip_filename": record.zip_filename,
+        },
+    )
+
+
 def _validate_archive_request(record: Record) -> None:
     missing = [
         field_name
@@ -1867,6 +2108,101 @@ def _validate_archive_request(record: Record) -> None:
             retryable=False,
             detail={"missing_fields": ",".join(missing), "url": record.url},
         )
+
+
+def _validate_extraction_request(record: Record) -> None:
+    missing = [
+        field_name
+        for field_name in ("data_dir", "zip_filename")
+        if not getattr(record, field_name)
+    ]
+    if missing:
+        raise ArchiveExtractionError(
+            "INVALID_EXTRACTION_REQUEST",
+            "Archive extraction request is missing required fields.",
+            retryable=False,
+            detail={"missing_fields": ",".join(missing), "url": record.url},
+        )
+
+
+def _single_data_member(zip_ref: zipfile.ZipFile, zip_path: Path) -> str:
+    data_members = [
+        name for name in zip_ref.namelist() if _is_data_archive_member(name)
+    ]
+    if len(data_members) != 1:
+        raise ArchiveExtractionError(
+            "INVALID_ARCHIVE_PAYLOAD",
+            "Archive must contain exactly one CSV/XLSX data member.",
+            retryable=False,
+            detail={
+                "path": str(zip_path),
+                "data_member_count": len(data_members),
+                "data_members": list(data_members[:10]),
+            },
+        )
+    return data_members[0]
+
+
+def _is_data_archive_member(member: str) -> bool:
+    member_name = member.replace("\\", "/")
+    if member_name.endswith("/"):
+        return False
+    filename = PurePosixPath(member_name).name
+    return filename.lower().endswith((".csv", ".xlsx"))
+
+
+def _safe_data_member_filename(member: str) -> str:
+    filename = PurePosixPath(member.replace("\\", "/")).name
+    if (
+        not filename
+        or filename in {".", ".."}
+        or not filename.lower().endswith((".csv", ".xlsx"))
+    ):
+        raise ArchiveExtractionError(
+            "INVALID_ARCHIVE_PAYLOAD",
+            "Archive data member does not have a safe CSV/XLSX filename.",
+            retryable=False,
+            detail={"member": member},
+        )
+    return filename
+
+
+def _delete_zip_after_extraction(
+    record: Record,
+    *,
+    zip_persist: bool,
+) -> bool:
+    if zip_persist or not record.data_dir or not record.zip_filename:
+        return False
+
+    zip_path = Path(record.data_dir, record.zip_filename)
+    if not zip_path.exists():
+        return False
+
+    try:
+        zip_path.unlink()
+    except OSError as err:
+        raise ArchiveExtractionError(
+            "EXTRACTION_FILESYSTEM_ERROR",
+            str(err),
+            retryable=False,
+            detail={"path": str(zip_path), "url": record.url},
+        ) from err
+    return True
+
+
+def _zip_persist_enabled(args: Mapping[str, Any], record: Record) -> bool:
+    return _truthy_config_value(args.get("zip_persist")) or (
+        _truthy_config_value(getattr(record, "zip_persist", ""))
+    )
+
+
+def _truthy_config_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _archive_post_headers(

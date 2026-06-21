@@ -580,7 +580,115 @@ def test_extract_csv_work_item_extracts_data_member(tmp_path: Path) -> None:
     assert output.work_item.csv_filename == "DAT_ASCII_EURUSD_M1_2022.csv"
     assert (tmp_path / output.work_item.csv_filename).read_bytes() == b"rows"
     assert not archive_path.exists()
+    assert output.result.status is WorkStatus.CSV_FILE
+    assert output.result.metrics["decision"] == "extracted"
+    assert output.result.metrics["filename"] == output.work_item.csv_filename
+    assert output.result.metrics["zip_deleted"] is True
+    assert output.result.artifacts[0].kind == "csv"
+    assert (
+        output.result.artifacts[0].sha256 == hashlib.sha256(b"rows").hexdigest()
+    )
     assert record.status == WorkStatus.CSV_ZIP.value
+
+
+def test_extract_csv_work_item_preserves_zip_when_configured(
+    tmp_path: Path,
+) -> None:
+    """zip_persist should keep the source archive after extraction."""
+    archive_path = tmp_path / "archive.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("DAT_ASCII_EURUSD_M1_2022.csv", b"rows")
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        zip_filename=archive_path.name,
+        status=WorkStatus.CSV_ZIP.value,
+    )
+
+    output = extract_csv_work_item(
+        WorkItem.from_record(record),
+        args={**_args(tmp_path), "zip_persist": True},
+    )
+
+    assert output.work_item.status is WorkStatus.CSV_FILE
+    assert archive_path.exists()
+    assert output.result.metrics["decision"] == "extracted"
+    assert output.result.metrics["zip_deleted"] is False
+
+
+def test_extract_csv_work_item_reuses_existing_csv(
+    tmp_path: Path,
+) -> None:
+    """Extraction retries should reuse an already extracted CSV."""
+    archive_path = tmp_path / "archive.zip"
+    archive_path.write_bytes(b"already consumed")
+    csv_path = tmp_path / "DAT_ASCII_EURUSD_M1_2022.csv"
+    csv_path.write_bytes(b"rows")
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        zip_filename=archive_path.name,
+        csv_filename=csv_path.name,
+        status=WorkStatus.CSV_ZIP.value,
+    )
+
+    output = extract_csv_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+    )
+
+    assert output.work_item.status is WorkStatus.CSV_FILE
+    assert output.result.metrics["decision"] == "reuse_existing"
+    assert output.result.metrics["reused_existing"] is True
+    assert output.result.metrics["zip_deleted"] is True
+    assert not archive_path.exists()
+    assert csv_path.read_bytes() == b"rows"
+
+
+def test_extract_csv_work_item_malformed_archive_is_failed(
+    tmp_path: Path,
+) -> None:
+    """Malformed archives should return structured extraction failures."""
+    archive_path = tmp_path / "bad.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("README.txt", "not market data")
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        zip_filename=archive_path.name,
+        status=WorkStatus.CSV_ZIP.value,
+    )
+
+    output = extract_csv_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+    )
+
+    assert not output.forward
+    assert output.work_item.status is WorkStatus.FAILED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "INVALID_ARCHIVE_PAYLOAD"
+    assert not output.result.failure.retryable
+    assert output.result.metrics["retryable"] is False
+    assert archive_path.exists()
+
+
+def test_extract_csv_work_item_bad_zip_is_failed(tmp_path: Path) -> None:
+    """Invalid ZIP bytes should be reported without raising SystemExit."""
+    archive_path = tmp_path / "bad.zip"
+    archive_path.write_bytes(b"not a zip")
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        zip_filename=archive_path.name,
+        status=WorkStatus.CSV_ZIP.value,
+    )
+
+    output = extract_csv_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+    )
+
+    assert not output.forward
+    assert output.work_item.status is WorkStatus.FAILED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "INVALID_ARCHIVE_PAYLOAD"
 
 
 def test_build_cache_work_item_writes_cache_from_csv(

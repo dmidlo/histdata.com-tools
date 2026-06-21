@@ -81,16 +81,18 @@ def test_extract_csv_rejects_archives_without_data_members(
         status="CSV_ZIP",
     )
     current = _RecordsStub()
+    next_records = _RecordsStub()
 
-    with pytest.raises(SystemExit):
-        Csv()._extract_csv(
-            record,
-            {"default_download_dir": str(tmp_path) + os.sep},
-            current,
-            _RecordsStub(),
-        )
+    Csv()._extract_csv(
+        record,
+        {"default_download_dir": str(tmp_path) + os.sep},
+        current,
+        next_records,
+    )
 
+    assert record.status == "FAILED"
     assert current.task_done_called
+    assert next_records.items == []
 
 
 def test_complete_future_propagates_worker_exceptions() -> None:

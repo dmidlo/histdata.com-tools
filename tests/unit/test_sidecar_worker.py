@@ -124,6 +124,7 @@ def test_run_temporal_worker_accepts_fake_temporal_classes(
         "dataset_plan_activity",
         "validate_urls_activity",
         "download_archives_activity",
+        "extract_csv_activity",
     }
 
 
@@ -150,6 +151,7 @@ def test_default_activities_include_repository_refresh() -> None:
         "dataset_plan_activity",
         "validate_urls_activity",
         "download_archives_activity",
+        "extract_csv_activity",
     ]
 
 

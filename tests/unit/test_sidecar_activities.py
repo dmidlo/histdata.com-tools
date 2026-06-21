@@ -11,6 +11,7 @@ from histdatacom.sidecar.activities import (
     dataset_plan_activity,
     default_activities,
     download_archives_activity,
+    extract_csv_activity,
     repository_refresh_activity,
     validate_urls_activity,
 )
@@ -76,6 +77,25 @@ def _download_payload(tmp_path) -> dict:
                 "http://www.histdata.com/download-free-forex-data/"
                 "?/ascii/1-minute-bar-quotes/eurusd/2022"
             ),
+            "data_dir": f"{tmp_path}/",
+            "zip_filename": zip_path.name,
+        },
+    }
+
+
+def _extraction_payload(tmp_path) -> dict:
+    """Return a minimal extraction activity payload with existing ZIP."""
+    zip_path = tmp_path / "DAT_ASCII_EURUSD_M1_2022.zip"
+    zip_path.write_bytes(_zip_bytes())
+    request = RunRequest(
+        request_id="run-extract",
+        data_directory=str(tmp_path),
+    )
+    return {
+        "request": request.to_dict(),
+        "work_item": {
+            "work_id": "work-extract",
+            "status": WorkStatus.CSV_ZIP.value,
             "data_dir": f"{tmp_path}/",
             "zip_filename": zip_path.name,
         },
@@ -229,6 +249,22 @@ def test_download_archives_activity_reuses_existing_zip(tmp_path) -> None:
     assert result["result"]["artifacts"][0]["sha256"]
 
 
+def test_extract_csv_activity_extracts_existing_zip(tmp_path) -> None:
+    """Archive extraction should be callable as a registered activity."""
+    result = extract_csv_activity(_extraction_payload(tmp_path))
+
+    assert result["result"]["stage"] == "extract_csv"
+    assert result["result"]["status"] == WorkStatus.CSV_FILE.value
+    assert result["result"]["metrics"]["decision"] == "extracted"
+    assert result["result"]["metrics"]["zip_deleted"] is True
+    assert result["work_item"]["status"] == WorkStatus.CSV_FILE.value
+    assert result["work_item"]["csv_filename"] == (
+        "DAT_ASCII_EURUSD_M1_2022.csv"
+    )
+    assert result["result"]["artifacts"][0]["kind"] == "csv"
+    assert result["result"]["artifacts"][0]["sha256"]
+
+
 def test_default_activities_register_operation_activities() -> None:
     """The worker default activity set should include migrated activities."""
     assert default_activities() == (
@@ -236,4 +272,5 @@ def test_default_activities_register_operation_activities() -> None:
         dataset_plan_activity,
         validate_urls_activity,
         download_archives_activity,
+        extract_csv_activity,
     )
