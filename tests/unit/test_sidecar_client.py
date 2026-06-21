@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
 
-from histdatacom.runtime_contracts import RunRequest
+from histdatacom.runtime_contracts import (
+    ArtifactRef,
+    RunRequest,
+    StatusEvent,
+    WorkStatus,
+)
+from histdatacom.sidecar.control import JobLifecycle
 from histdatacom.sidecar import client
 from histdatacom.sidecar.queues import build_sidecar_worker_config
 from histdatacom.sidecar.runtime import build_sidecar_runtime_policy
@@ -21,6 +28,8 @@ class _FakeTemporalClient:
 
     def __init__(self) -> None:
         self.started: list[dict[str, object]] = []
+        self.list_query = ""
+        self.handles: dict[str, _FakeWorkflowHandle] = {}
 
     @classmethod
     async def connect(cls, target_host: str, *, namespace: str):
@@ -47,7 +56,37 @@ class _FakeTemporalClient:
                 "task_queue": task_queue,
             }
         )
-        return _FakeWorkflowHandle(id=id, run_id="run-fake")
+        handle = _FakeWorkflowHandle(id=id, run_id="run-fake")
+        self.handles[id] = handle
+        return handle
+
+    def get_workflow_handle(
+        self,
+        workflow_id: str,
+        *,
+        run_id: str = "",
+    ) -> "_FakeWorkflowHandle":
+        """Return a fake handle for status/control calls."""
+        return self.handles.setdefault(
+            workflow_id,
+            _FakeWorkflowHandle(
+                id=workflow_id,
+                run_id=run_id or "run-fake",
+            ),
+        )
+
+    def list_workflows(self, *, query: str):
+        """Return fake workflow descriptions for list calls."""
+        self.list_query = query
+        return [
+            SimpleNamespace(
+                execution=SimpleNamespace(
+                    workflow_id="histdatacom-run-listed",
+                    run_id="run-listed",
+                ),
+                status="WORKFLOW_EXECUTION_STATUS_RUNNING",
+            )
+        ]
 
 
 class _FakeWorkflowHandle:
@@ -56,10 +95,42 @@ class _FakeWorkflowHandle:
     def __init__(self, *, id: str, run_id: str) -> None:
         self.id = id
         self.run_id = run_id
+        self.cancel_calls = 0
 
     async def result(self) -> dict[str, str]:
         """Return a fake workflow result payload."""
         return {"workflow_name": "HistDataRunWorkflow", "status": "COMPLETED"}
+
+    async def query(self, query_name: str) -> dict[str, object]:
+        """Return a fake workflow status query payload."""
+        assert query_name == "status"
+        return {
+            "workflow_name": "HistDataRunWorkflow",
+            "request_id": "run-test",
+            "status": WorkStatus.UNKNOWN.value,
+            "current_stage": "DownloadArchivesWorkflow",
+            "total_children": 3,
+            "completed_children": 1,
+            "planned_children": ["ValidateUrlsWorkflow"],
+            "completed_stages": ["ValidateUrlsWorkflow"],
+            "events": [
+                StatusEvent(
+                    status=WorkStatus.URL_VALID,
+                    stage="validate_urls",
+                    message="URLs validated",
+                ).to_dict()
+            ],
+            "artifacts": [
+                ArtifactRef(
+                    kind="manifest",
+                    path="/tmp/manifest.json",
+                ).to_dict()
+            ],
+        }
+
+    async def cancel(self) -> None:
+        """Record a fake cancellation request."""
+        self.cancel_calls += 1
 
 
 class _FakeSupervisor:
@@ -200,6 +271,8 @@ def test_submit_and_observe_reuses_running_sidecar(
         "workflow_name": "HistDataRunWorkflow",
         "status": "COMPLETED",
     }
+    assert result.snapshot is not None
+    assert result.snapshot.lifecycle == JobLifecycle.SUCCEEDED
     assert supervisor.status_calls == 1
     assert supervisor.start_calls == 0
     assert temporal_client.started[0]["id"] == "histdatacom-run-test"
@@ -225,6 +298,8 @@ def test_submit_and_observe_can_start_unavailable_sidecar(
     )
 
     assert result.status == "submitted"
+    assert result.snapshot is not None
+    assert result.snapshot.lifecycle == JobLifecycle.SUBMITTED
     assert supervisor.start_calls == 1
 
 
@@ -246,6 +321,65 @@ def test_submit_and_observe_fails_when_sidecar_is_unavailable(
         )
 
     assert supervisor.start_calls == 0
+
+
+def test_inspect_job_status_queries_workflow_status(tmp_path: Path) -> None:
+    """The client should expose workflow status as a control snapshot."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient()
+
+    snapshot = asyncio.run(
+        client.inspect_job_status(
+            "histdatacom-run-test",
+            config=config,
+            client=temporal_client,
+        )
+    )
+
+    assert snapshot.workflow_id == "histdatacom-run-test"
+    assert snapshot.lifecycle == JobLifecycle.RUNNING
+    assert snapshot.progress is not None
+    assert snapshot.progress.completed_children == 1
+    assert snapshot.logs[0].message == "URLs validated"
+    assert snapshot.artifacts[0].kind == "manifest"
+
+
+def test_cancel_job_requests_temporal_cancel_and_reports_state(
+    tmp_path: Path,
+) -> None:
+    """Cancellation should call Temporal and return explicit intent state."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient()
+    handle = temporal_client.get_workflow_handle("histdatacom-run-test")
+
+    snapshot = asyncio.run(
+        client.cancel_job(
+            "histdatacom-run-test",
+            reason="operator",
+            config=config,
+            client=temporal_client,
+        )
+    )
+
+    assert handle.cancel_calls == 1
+    assert snapshot.lifecycle == JobLifecycle.CANCEL_REQUESTED
+    assert snapshot.controls.cancel.reason == "operator"
+
+
+def test_list_job_statuses_uses_temporal_visibility_list(
+    tmp_path: Path,
+) -> None:
+    """Listing should expose job handles without querying workflow history."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient()
+
+    jobs = asyncio.run(
+        client.list_job_statuses(config=config, client=temporal_client)
+    )
+
+    assert temporal_client.list_query == "WorkflowType='HistDataRunWorkflow'"
+    assert jobs.jobs[0].workflow_id == "histdatacom-run-listed"
+    assert jobs.jobs[0].lifecycle == JobLifecycle.RUNNING
 
 
 def test_missing_temporal_dependency_has_optional_extra_hint(

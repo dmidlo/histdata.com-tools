@@ -5,8 +5,24 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Sequence
 
+from histdatacom.runtime_contracts import RunRequest
+from histdatacom.sidecar.client import (
+    cancel_job_sync,
+    get_job_result_sync,
+    inspect_job_status_sync,
+    list_job_statuses_sync,
+    resume_job_sync,
+    retry_job_sync,
+    submit_control_job_sync,
+)
+from histdatacom.sidecar.control import CONTROL_SCHEMA_VERSION
+from histdatacom.sidecar.queues import (
+    SidecarWorkerConfig,
+    build_sidecar_worker_config,
+)
 from histdatacom.sidecar.resources import SidecarResourceError
 from histdatacom.sidecar.runtime import (
     PortAllocationError,
@@ -126,6 +142,65 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser("doctor", help="show sidecar diagnostics")
     _add_common_args(doctor, include_defaults=False)
+
+    jobs = subparsers.add_parser(
+        "jobs",
+        help="submit, inspect, and control sidecar jobs",
+    )
+    _add_common_args(jobs, include_defaults=False)
+    job_subparsers = jobs.add_subparsers(
+        dest="jobs_command",
+        required=True,
+    )
+
+    submit = job_subparsers.add_parser(
+        "submit",
+        help="submit a serialized RunRequest JSON payload",
+    )
+    submit.add_argument(
+        "--request-json",
+        required=True,
+        help="path to a RunRequest JSON payload, or '-' for stdin",
+    )
+    submit.add_argument(
+        "--start",
+        action="store_true",
+        help="start the sidecar if it is not already running",
+    )
+    submit.add_argument(
+        "--submit-only",
+        action="store_true",
+        help="return after submission instead of waiting for the result",
+    )
+
+    list_jobs = job_subparsers.add_parser(
+        "list",
+        help="list known HistData sidecar jobs",
+    )
+    list_jobs.add_argument(
+        "--query",
+        default="",
+        help="Temporal workflow list query override",
+    )
+
+    for command, help_text in (
+        ("inspect", "inspect one sidecar job"),
+        ("progress", "show one job's progress view"),
+        ("logs", "show one job's event/log view"),
+        ("artifacts", "show one job's artifact view"),
+        ("result", "show one job's result payload"),
+        ("cancel", "request job cancellation"),
+        ("retry", "represent retry intent for a job"),
+        ("resume", "represent resume intent for a job"),
+    ):
+        job_parser = job_subparsers.add_parser(command, help=help_text)
+        _add_job_identity_args(job_parser)
+        if command in {"cancel", "retry", "resume"}:
+            job_parser.add_argument(
+                "--reason",
+                default="",
+                help="operator-visible reason for the control request",
+            )
     return parser
 
 
@@ -170,6 +245,140 @@ def _extra_args(args: Sequence[str]) -> tuple[str, ...]:
     if args and args[0] == "--":
         return tuple(args[1:])
     return tuple(args)
+
+
+def _add_job_identity_args(parser: argparse.ArgumentParser) -> None:
+    """Add common workflow identity arguments for job commands."""
+    parser.add_argument("workflow_id", help="Temporal workflow/job ID")
+    parser.add_argument(
+        "--run-id",
+        default="",
+        help="Temporal run ID when targeting a specific run",
+    )
+
+
+def _load_run_request(path: str) -> RunRequest:
+    """Load a RunRequest from JSON."""
+    payload = sys.stdin.read() if path == "-" else Path(path).read_text()
+    return RunRequest.from_dict(json.loads(payload))
+
+
+def _worker_config(args: argparse.Namespace) -> SidecarWorkerConfig:
+    """Create a sidecar worker config from CLI arguments."""
+    return build_sidecar_worker_config(
+        runtime_policy=_supervisor(args).runtime_policy
+    )
+
+
+def _write_control_payload(payload: dict, *, as_json: bool) -> None:
+    """Write a local-control API payload for CLI callers."""
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+        return
+    if "jobs" in payload:
+        print(f"jobs: {len(payload['jobs'])}")  # noqa:T201
+        return
+    workflow_id = payload.get("workflow_id") or payload.get("job_id", "")
+    lifecycle = payload.get("lifecycle", "")
+    status = payload.get("status", "")
+    print(f"{workflow_id}: {lifecycle} ({status})")  # noqa:T201
+
+
+def _run_jobs_command(args: argparse.Namespace) -> int:
+    """Run sidecar job control commands."""
+    config = _worker_config(args)
+    supervisor = _supervisor(args)
+    if args.jobs_command == "submit":
+        snapshot = submit_control_job_sync(
+            _load_run_request(args.request_json),
+            config=config,
+            supervisor=supervisor,
+            start_if_needed=args.start,
+            wait_for_result=not args.submit_only,
+        )
+        _write_control_payload(snapshot.to_dict(), as_json=args.json)
+        return 0
+    if args.jobs_command == "list":
+        jobs = list_job_statuses_sync(config=config, query=args.query)
+        _write_control_payload(jobs.to_dict(), as_json=args.json)
+        return 0
+
+    identity_kwargs = {
+        "run_id": args.run_id,
+        "config": config,
+        "supervisor": supervisor,
+    }
+    if args.jobs_command == "inspect":
+        snapshot = inspect_job_status_sync(args.workflow_id, **identity_kwargs)
+        _write_control_payload(snapshot.to_dict(), as_json=args.json)
+        return 0
+    if args.jobs_command == "progress":
+        snapshot = inspect_job_status_sync(args.workflow_id, **identity_kwargs)
+        payload = {
+            "schema_version": CONTROL_SCHEMA_VERSION,
+            "workflow_id": snapshot.workflow_id,
+            "progress": (
+                snapshot.progress.to_dict()
+                if snapshot.progress is not None
+                else None
+            ),
+        }
+        _write_control_payload(payload, as_json=args.json)
+        return 0
+    if args.jobs_command == "logs":
+        snapshot = inspect_job_status_sync(args.workflow_id, **identity_kwargs)
+        payload = {
+            "schema_version": CONTROL_SCHEMA_VERSION,
+            "workflow_id": snapshot.workflow_id,
+            "logs": [entry.to_dict() for entry in snapshot.logs],
+        }
+        _write_control_payload(payload, as_json=args.json)
+        return 0
+    if args.jobs_command == "artifacts":
+        snapshot = inspect_job_status_sync(args.workflow_id, **identity_kwargs)
+        payload = {
+            "schema_version": CONTROL_SCHEMA_VERSION,
+            "workflow_id": snapshot.workflow_id,
+            "artifacts": [
+                artifact.to_dict() for artifact in snapshot.artifacts
+            ],
+        }
+        _write_control_payload(payload, as_json=args.json)
+        return 0
+    if args.jobs_command == "result":
+        snapshot = get_job_result_sync(args.workflow_id, **identity_kwargs)
+        payload = {
+            "schema_version": CONTROL_SCHEMA_VERSION,
+            "workflow_id": snapshot.workflow_id,
+            "result": snapshot.result,
+        }
+        _write_control_payload(payload, as_json=args.json)
+        return 0
+    if args.jobs_command == "cancel":
+        snapshot = cancel_job_sync(
+            args.workflow_id,
+            reason=args.reason,
+            **identity_kwargs,
+        )
+        _write_control_payload(snapshot.to_dict(), as_json=args.json)
+        return 0
+    if args.jobs_command == "retry":
+        snapshot = retry_job_sync(
+            args.workflow_id,
+            reason=args.reason,
+            **identity_kwargs,
+        )
+        _write_control_payload(snapshot.to_dict(), as_json=args.json)
+        return 0
+    if args.jobs_command == "resume":
+        snapshot = resume_job_sync(
+            args.workflow_id,
+            reason=args.reason,
+            **identity_kwargs,
+        )
+        _write_control_payload(snapshot.to_dict(), as_json=args.json)
+        return 0
+    raise ValueError(f"unsupported jobs command: {args.jobs_command}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -221,6 +430,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 print(f"state_dir: {status['state_dir']}")  # noqa:T201
             return 0
+        if args.command == "jobs":
+            return _run_jobs_command(args)
         parser.error(f"unsupported sidecar command: {args.command}")
     except (
         RuntimeError,
