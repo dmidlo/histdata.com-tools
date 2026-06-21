@@ -23,6 +23,7 @@ from histdatacom.runtime_contracts import (
     RunRequest,
     StageResult,
     StatusEvent,
+    WorkItem,
     WorkStatus,
     derive_work_id,
 )
@@ -506,12 +507,18 @@ def build_run_child_invocations(
 def build_symbol_child_invocations(
     request: RunRequest,
     partition: Mapping[str, str],
+    work_items: tuple[WorkItem, ...] = (),
 ) -> tuple[WorkflowInvocation, ...]:
     """Plan operation-family child workflow calls for one partition."""
     invocations: list[WorkflowInvocation] = []
     for workflow_name in _operation_workflow_names(request):
         invocations.append(
-            _invocation(request, workflow_name, partition=partition)
+            _invocation(
+                request,
+                workflow_name,
+                partition=partition,
+                work_items=work_items,
+            )
         )
     return tuple(invocations)
 
@@ -547,12 +554,17 @@ async def execute_histdata_run_workflow(
 async def execute_symbol_timeframe_workflow(
     request: RunRequest,
     partition: Mapping[str, str],
+    work_items: tuple[WorkItem, ...] = (),
     *,
     executor: ChildWorkflowExecutor,
     progress: WorkflowProgress,
 ) -> dict[str, JSONValue]:
     """Execute operation children for one symbol/timeframe partition."""
-    invocations = build_symbol_child_invocations(request, partition)
+    invocations = build_symbol_child_invocations(
+        request,
+        partition,
+        work_items=work_items,
+    )
     return await _execute_child_plan(
         request,
         workflow_name="SymbolTimeframeWorkflow",
@@ -560,6 +572,7 @@ async def execute_symbol_timeframe_workflow(
         executor=executor,
         progress=progress,
         partition=partition,
+        work_items=work_items,
     )
 
 
@@ -575,6 +588,7 @@ async def execute_activity_workflow(
     spec = WORKFLOW_SPECS_BY_NAME[workflow_name]
     activity_name = OPERATION_ACTIVITIES[workflow_name]
     task_queue = _task_queue_for_lane(request, spec.lane)
+    activity_work_items = _work_items_from_payload(payload)
     stage_payload = {
         **dict(payload),
         "stage": activity_name,
@@ -585,14 +599,18 @@ async def execute_activity_workflow(
         request_id=request.request_id,
         planned_children=(activity_name,),
     )
+    activity_payload = await activity_executor.execute_activity(
+        activity_name,
+        stage_payload,
+        task_queue=task_queue,
+    )
     result = _stage_result_from_mapping(
-        await activity_executor.execute_activity(
-            activity_name,
-            stage_payload,
-            task_queue=task_queue,
-        ),
+        activity_payload,
         fallback_stage=activity_name,
     )
+    output_work_items = _forwarded_work_items(activity_payload)
+    if not _has_work_item_payload(activity_payload):
+        output_work_items = activity_work_items
     progress.record_child(activity_name, result)
     progress.finish(result.status)
     return _summary_payload(
@@ -601,6 +619,9 @@ async def execute_activity_workflow(
         progress=progress,
         stage_results=(result,),
         partition=_coerce_mapping(payload.get("partition", {})),
+        work_items=output_work_items,
+        include_work_items=_has_work_item_payload(activity_payload)
+        or bool(activity_work_items),
     )
 
 
@@ -649,9 +670,14 @@ class SymbolTimeframeWorkflow:
             _coerce_mapping(payload.get("request", {}))
         )
         partition = _string_mapping(payload.get("partition", {}))
+        work_items = _partition_work_items(
+            _work_items_from_payload(payload),
+            partition,
+        )
         return await execute_symbol_timeframe_workflow(
             request,
             partition,
+            work_items,
             executor=self._executor or TemporalChildWorkflowExecutor(),
             progress=self._progress,
         )
@@ -893,6 +919,7 @@ async def _execute_child_plan(
     executor: ChildWorkflowExecutor,
     progress: WorkflowProgress,
     partition: Mapping[str, str] | None = None,
+    work_items: tuple[WorkItem, ...] = (),
 ) -> dict[str, JSONValue]:
     progress.start(
         request_id=request.request_id,
@@ -901,16 +928,49 @@ async def _execute_child_plan(
         ),
     )
     results: list[StageResult] = []
+    current_work_items = tuple(work_items)
     for invocation in invocations:
-        result = _stage_result_from_mapping(
-            await executor.execute_child_workflow(
-                invocation.workflow_name,
+        invocation_partition = _string_mapping(
+            invocation.payload.get("partition", {})
+        )
+        invocation_work_items = _partition_work_items(
+            current_work_items,
+            invocation_partition,
+        )
+        if _requires_work_items(invocation.workflow_name):
+            if not invocation_work_items:
+                result = _skipped_workflow_result(
+                    invocation,
+                    reason="No forwardable work items for this stage.",
+                )
+                results.append(result)
+                progress.record_child(invocation.workflow_name, result)
+                continue
+            payload = _payload_with_work_items(
                 invocation.payload,
-                workflow_id=invocation.workflow_id,
-                task_queue=invocation.task_queue,
-            ),
+                invocation_work_items,
+            )
+        else:
+            payload = dict(invocation.payload)
+
+        result_payload = await executor.execute_child_workflow(
+            invocation.workflow_name,
+            payload,
+            workflow_id=invocation.workflow_id,
+            task_queue=invocation.task_queue,
+        )
+        result = _stage_result_from_mapping(
+            result_payload,
             fallback_stage=invocation.workflow_name,
         )
+        forwarded_work_items = _forwarded_work_items(result_payload)
+        if invocation.workflow_name == "DatasetPlanWorkflow":
+            current_work_items = forwarded_work_items
+        elif invocation.workflow_name == "SymbolTimeframeWorkflow":
+            pass
+        elif _requires_work_items(invocation.workflow_name):
+            if forwarded_work_items or _has_work_item_payload(result_payload):
+                current_work_items = forwarded_work_items
         results.append(result)
         progress.record_child(invocation.workflow_name, result)
         if result.status == WorkStatus.CANCELLED:
@@ -922,6 +982,8 @@ async def _execute_child_plan(
         progress=progress,
         stage_results=tuple(results),
         partition=partition,
+        work_items=current_work_items,
+        include_work_items=bool(work_items),
     )
 
 
@@ -932,6 +994,8 @@ def _summary_payload(
     progress: WorkflowProgress,
     stage_results: tuple[StageResult, ...],
     partition: Mapping[str, str] | None = None,
+    work_items: tuple[WorkItem, ...] = (),
+    include_work_items: bool = False,
 ) -> dict[str, JSONValue]:
     artifacts = [
         cast(JSONValue, artifact.to_dict())
@@ -950,6 +1014,11 @@ def _summary_payload(
     }
     if partition:
         payload["partition"] = cast(JSONValue, dict(partition))
+    if include_work_items or work_items:
+        payload["work_items"] = cast(
+            JSONValue,
+            [item.to_dict() for item in work_items],
+        )
     return payload
 
 
@@ -958,6 +1027,7 @@ def _invocation(
     workflow_name: str,
     *,
     partition: Mapping[str, str] | None = None,
+    work_items: tuple[WorkItem, ...] = (),
 ) -> WorkflowInvocation:
     spec = WORKFLOW_SPECS_BY_NAME[workflow_name]
     partition_payload = dict(partition or {})
@@ -970,6 +1040,11 @@ def _invocation(
         "partition": cast(JSONValue, partition_payload),
         "history_policy": spec.history_policy,
     }
+    if work_items:
+        payload["work_items"] = cast(
+            JSONValue,
+            [item.to_dict() for item in work_items],
+        )
     return WorkflowInvocation(
         workflow_name=workflow_name,
         workflow_id=workflow_id,
@@ -1013,6 +1088,13 @@ def _operation_workflow_names(request: RunRequest) -> tuple[str, ...]:
     return tuple(workflows)
 
 
+def _requires_work_items(workflow_name: str) -> bool:
+    return workflow_name in {
+        "SymbolTimeframeWorkflow",
+        *SYMBOL_CHILDREN,
+    }
+
+
 def _workflow_id(
     request: RunRequest,
     workflow_name: str,
@@ -1053,6 +1135,11 @@ def _stage_result_from_mapping(
     if "stage_results" in data:
         stage_results = data.get("stage_results") or []
         if isinstance(stage_results, list) and stage_results:
+            if "workflow_name" in data and "status" in data:
+                return _workflow_summary_stage_result(
+                    data,
+                    fallback_stage=fallback_stage,
+                )
             return StageResult.from_dict(_coerce_mapping(stage_results[-1]))
     if "stage" in data and "status" in data:
         return StageResult.from_dict(data)
@@ -1060,6 +1147,174 @@ def _stage_result_from_mapping(
         work_id=str(data.get("work_id", "")),
         stage=str(data.get("workflow_name", fallback_stage)),
         status=WorkStatus.from_value(data.get("status")),
+    )
+
+
+def _workflow_summary_stage_result(
+    data: Mapping[str, Any],
+    *,
+    fallback_stage: str,
+) -> StageResult:
+    stage_result_payloads = data.get("stage_results") or []
+    stage_results = (
+        tuple(
+            StageResult.from_dict(_coerce_mapping(stage_result))
+            for stage_result in stage_result_payloads
+            if isinstance(stage_result, Mapping)
+        )
+        if isinstance(stage_result_payloads, list)
+        else ()
+    )
+    artifacts = tuple(
+        ArtifactRef.from_dict(_coerce_mapping(artifact))
+        for artifact in data.get("artifacts", [])
+        if isinstance(artifact, Mapping)
+    )
+    return StageResult(
+        work_id=str(data.get("request_id", "")),
+        stage=str(data.get("workflow_name", fallback_stage)),
+        status=WorkStatus.from_value(data.get("status")),
+        artifacts=artifacts,
+        failure=next(
+            (
+                stage_result.failure
+                for stage_result in stage_results
+                if stage_result.failure is not None
+            ),
+            None,
+        ),
+        metrics={
+            "child_stage_count": len(stage_results),
+            "work_item_count": len(_work_items_from_payload(data)),
+        },
+    )
+
+
+def _payload_with_work_items(
+    payload: Mapping[str, JSONValue],
+    work_items: tuple[WorkItem, ...],
+) -> dict[str, JSONValue]:
+    updated = dict(payload)
+    updated["work_items"] = cast(
+        JSONValue,
+        [item.to_dict() for item in work_items],
+    )
+    return updated
+
+
+def _work_items_from_payload(
+    payload: Mapping[str, Any],
+) -> tuple[WorkItem, ...]:
+    work_item = payload.get("work_item")
+    if isinstance(work_item, Mapping):
+        return (WorkItem.from_dict(work_item),)
+
+    work_items = payload.get("work_items")
+    if isinstance(work_items, list):
+        return tuple(
+            WorkItem.from_dict(item)
+            for item in work_items
+            if isinstance(item, Mapping)
+        )
+    return ()
+
+
+def _forwarded_work_items(
+    payload: Mapping[str, Any],
+) -> tuple[WorkItem, ...]:
+    work_items = _work_items_from_payload(payload)
+    if not work_items:
+        return ()
+
+    forward_by_work_id = _forward_flags_by_work_id(payload)
+    top_level_forward = payload.get("forward")
+    if isinstance(top_level_forward, bool):
+        return work_items if top_level_forward else ()
+
+    return tuple(
+        item
+        for item in work_items
+        if forward_by_work_id.get(
+            item.work_id,
+            _work_item_is_forwardable(item),
+        )
+    )
+
+
+def _forward_flags_by_work_id(payload: Mapping[str, Any]) -> dict[str, bool]:
+    stage_results = payload.get("stage_results") or []
+    if not isinstance(stage_results, list):
+        return {}
+
+    flags: dict[str, bool] = {}
+    for stage_result in stage_results:
+        result = StageResult.from_dict(_coerce_mapping(stage_result))
+        forward = result.metrics.get("forward")
+        if isinstance(forward, bool) and result.work_id:
+            flags[result.work_id] = forward
+    return flags
+
+
+def _work_item_is_forwardable(item: WorkItem) -> bool:
+    return item.status not in {
+        WorkStatus.URL_NO_REPO_DATA,
+        WorkStatus.RETRIED,
+        WorkStatus.FAILED,
+        WorkStatus.CANCELLED,
+        WorkStatus.SKIPPED,
+        WorkStatus.COMPLETED,
+        WorkStatus.INFLUX_UPLOAD,
+    }
+
+
+def _has_work_item_payload(payload: Mapping[str, Any]) -> bool:
+    return "work_item" in payload or "work_items" in payload
+
+
+def _partition_work_items(
+    work_items: tuple[WorkItem, ...],
+    partition: Mapping[str, str],
+) -> tuple[WorkItem, ...]:
+    if not partition:
+        return work_items
+
+    pair = str(partition.get("pair", "") or "").lower()
+    timeframe = str(partition.get("timeframe", "") or "").lower()
+    return tuple(
+        item
+        for item in work_items
+        if (not pair or item.data_fxpair.lower() == pair)
+        and (not timeframe or item.data_timeframe.lower() == timeframe)
+    )
+
+
+def _skipped_workflow_result(
+    invocation: WorkflowInvocation,
+    *,
+    reason: str,
+) -> StageResult:
+    partition = _string_mapping(invocation.payload.get("partition", {}))
+    return StageResult(
+        work_id=invocation.workflow_id,
+        stage=invocation.workflow_name,
+        status=WorkStatus.SKIPPED,
+        events=(
+            StatusEvent(
+                status=WorkStatus.SKIPPED,
+                stage=invocation.workflow_name,
+                message=reason,
+                work_id=invocation.workflow_id,
+                metadata={
+                    "partition": cast(JSONValue, dict(partition)),
+                    "task_queue": invocation.task_queue,
+                },
+            ),
+        ),
+        metrics={
+            "forward": False,
+            "work_item_count": 0,
+            "skipped_empty_work_items": True,
+        },
     )
 
 

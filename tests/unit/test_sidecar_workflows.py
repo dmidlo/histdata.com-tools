@@ -11,6 +11,7 @@ from histdatacom.runtime_contracts import (
     JSONValue,
     RunRequest,
     StageResult,
+    WorkItem,
     WorkStatus,
 )
 from histdatacom.sidecar import workflows
@@ -40,6 +41,23 @@ class _RecordingChildExecutor:
                 "task_queue": task_queue,
             }
         )
+        if workflow_name == "DatasetPlanWorkflow":
+            return {
+                "result": StageResult(
+                    work_id=workflow_id,
+                    stage="dataset_plan",
+                    status=WorkStatus.COMPLETED,
+                    artifacts=(
+                        ArtifactRef(
+                            kind="manifest",
+                            path=f"{workflow_id}.json",
+                        ),
+                    ),
+                ).to_dict(),
+                "work_items": [
+                    item.to_dict() for item in _planned_work_items()
+                ],
+            }
         return StageResult(
             work_id=workflow_id,
             stage=workflow_name,
@@ -88,6 +106,101 @@ class _CancellingChildExecutor:
         ).to_dict()
 
 
+class _NoForwardChildExecutor:
+    """Fake child executor that marks the first stage non-forwardable."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def execute_child_workflow(
+        self,
+        workflow_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        workflow_id: str,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Record child calls and return no forwardable work after validate."""
+        self.calls.append(
+            {
+                "workflow_name": workflow_name,
+                "payload": dict(payload),
+                "workflow_id": workflow_id,
+                "task_queue": task_queue,
+            }
+        )
+        [work_item] = _work_items_from_payload(payload)
+        blocked = work_item.with_status(WorkStatus.URL_NO_REPO_DATA)
+        return {
+            "work_items": [blocked.to_dict()],
+            "stage_results": [
+                StageResult(
+                    work_id=blocked.work_id,
+                    stage="validate_urls",
+                    status=WorkStatus.URL_NO_REPO_DATA,
+                    metrics={"forward": False},
+                ).to_dict()
+            ],
+            "result": StageResult(
+                work_id="",
+                stage="validate_urls",
+                status=WorkStatus.COMPLETED,
+                metrics={"forward_count": 0},
+            ).to_dict(),
+        }
+
+
+class _FailingChildExecutor:
+    """Fake child executor that fails the first operation stage."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def execute_child_workflow(
+        self,
+        workflow_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        workflow_id: str,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Record child calls and return a failed non-forwarded item."""
+        self.calls.append(
+            {
+                "workflow_name": workflow_name,
+                "payload": dict(payload),
+                "workflow_id": workflow_id,
+                "task_queue": task_queue,
+            }
+        )
+        [work_item] = _work_items_from_payload(payload)
+        failed = work_item.with_status(WorkStatus.FAILED)
+        failure = FailureInfo(
+            code="VALIDATION_FAILED",
+            message="validation failed",
+            retryable=False,
+        )
+        return {
+            "work_items": [failed.to_dict()],
+            "stage_results": [
+                StageResult(
+                    work_id=failed.work_id,
+                    stage="validate_urls",
+                    status=WorkStatus.FAILED,
+                    failure=failure,
+                    metrics={"forward": False},
+                ).to_dict()
+            ],
+            "result": StageResult(
+                work_id="",
+                stage="validate_urls",
+                status=WorkStatus.FAILED,
+                failure=failure,
+                metrics={"forward_count": 0},
+            ).to_dict(),
+        }
+
+
 class _RecordingActivityExecutor:
     """Fake activity executor used by leaf workflow tests."""
 
@@ -120,6 +233,187 @@ class _RecordingActivityExecutor:
                 ),
             ),
         ).to_dict()
+
+
+class _ThreadingChildExecutor:
+    """Fake executor that threads work items through a full workflow chain."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def execute_child_workflow(
+        self,
+        workflow_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        workflow_id: str,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Run nested fake children while recording every call payload."""
+        self.calls.append(
+            {
+                "workflow_name": workflow_name,
+                "payload": dict(payload),
+                "workflow_id": workflow_id,
+                "task_queue": task_queue,
+            }
+        )
+        if workflow_name == "DatasetPlanWorkflow":
+            return {
+                "workflow_name": workflow_name,
+                "request_id": "run-topology",
+                "status": WorkStatus.COMPLETED.value,
+                "stage_results": [
+                    StageResult(
+                        work_id=workflow_id,
+                        stage="dataset_plan",
+                        status=WorkStatus.COMPLETED,
+                    ).to_dict()
+                ],
+                "work_items": [
+                    item.to_dict() for item in _planned_work_items()
+                ],
+                "artifacts": [],
+            }
+        if workflow_name == "SymbolTimeframeWorkflow":
+            workflow = workflows.SymbolTimeframeWorkflow(executor=self)
+            return await workflow.run(payload)
+        return _operation_payload(workflow_name, payload)
+
+
+def _planned_work_items() -> tuple[WorkItem, ...]:
+    return (
+        _work_item("EURUSD", "M1", "2022-01"),
+        _work_item("GBPUSD", "M1", "2022-01"),
+    )
+
+
+def _work_item(
+    pair: str,
+    timeframe: str,
+    datemonth: str,
+    *,
+    status: WorkStatus = WorkStatus.URL_NEW,
+) -> WorkItem:
+    pair_lower = pair.lower()
+    return WorkItem(
+        work_id=f"work-{pair_lower}-{timeframe.lower()}-{datemonth}",
+        status=status,
+        url=f"https://example.test/{pair_lower}/{timeframe}/{datemonth}",
+        data_format="ascii",
+        data_timeframe=timeframe,
+        data_fxpair=pair,
+        data_datemonth=datemonth,
+        data_dir=f"/tmp/{pair_lower}",
+    )
+
+
+def _operation_payload(
+    workflow_name: str,
+    payload: Mapping[str, JSONValue],
+) -> Mapping[str, object]:
+    raw_work_items = payload.get("work_items", [])
+    work_items = [
+        WorkItem.from_dict(item)
+        for item in (raw_work_items if isinstance(raw_work_items, list) else [])
+        if isinstance(item, Mapping)
+    ]
+    stage_status = {
+        "ValidateUrlsWorkflow": WorkStatus.URL_VALID,
+        "DownloadArchivesWorkflow": WorkStatus.CSV_ZIP,
+        "ExtractCsvWorkflow": WorkStatus.CSV_FILE,
+        "BuildCacheWorkflow": WorkStatus.CACHE_READY,
+        "ImportWorkflow": WorkStatus.INFLUX_UPLOAD,
+    }
+    if workflow_name == "MergeCacheWorkflow":
+        return {
+            "workflow_name": workflow_name,
+            "request_id": "run-topology",
+            "status": WorkStatus.COMPLETED.value,
+            "stage_results": [
+                StageResult(
+                    work_id="merge-work",
+                    stage="merge_cache",
+                    status=WorkStatus.COMPLETED,
+                    metrics={"work_item_count": len(work_items)},
+                ).to_dict()
+            ],
+            "artifacts": [],
+        }
+
+    next_status = stage_status[workflow_name]
+    forwarded_items = tuple(
+        _with_stage_metadata(item, next_status) for item in work_items
+    )
+    return {
+        "workflow_name": workflow_name,
+        "request_id": "run-topology",
+        "status": WorkStatus.COMPLETED.value,
+        "stage_results": [
+            StageResult(
+                work_id=item.work_id,
+                stage=str(payload.get("stage", workflow_name)),
+                status=next_status,
+                metrics={
+                    "forward": next_status is not WorkStatus.INFLUX_UPLOAD
+                },
+            ).to_dict()
+            for item in forwarded_items
+        ],
+        "work_items": [item.to_dict() for item in forwarded_items],
+        "artifacts": [],
+    }
+
+
+def _with_stage_metadata(item: WorkItem, status: WorkStatus) -> WorkItem:
+    if status == WorkStatus.CSV_ZIP:
+        return item.with_status(status)
+    if status == WorkStatus.CSV_FILE:
+        return item.with_status(status)
+    if status == WorkStatus.CACHE_READY:
+        return WorkItem.from_dict(
+            {
+                **item.to_dict(),
+                "status": status.value,
+                "cache_filename": "data.parquet",
+                "cache_line_count": "3",
+                "cache_start": "2022-01-01T00:00:00Z",
+                "cache_end": "2022-01-01T00:02:00Z",
+            }
+        )
+    return item.with_status(status)
+
+
+def _payload_work_items(call: Mapping[str, object]) -> list[Mapping[str, str]]:
+    payload = call["payload"]
+    assert isinstance(payload, Mapping)
+    raw_items = payload.get("work_items", [])
+    assert isinstance(raw_items, list)
+    return [item for item in raw_items if isinstance(item, Mapping)]
+
+
+def _work_items_from_payload(
+    payload: Mapping[str, JSONValue],
+) -> tuple[WorkItem, ...]:
+    raw_items = payload.get("work_items", [])
+    assert isinstance(raw_items, list)
+    return tuple(
+        WorkItem.from_dict(item)
+        for item in raw_items
+        if isinstance(item, Mapping)
+    )
+
+
+def _statuses_for_operation(
+    calls: list[dict[str, object]],
+    workflow_name: str,
+) -> set[str]:
+    return {
+        str(item["status"])
+        for call in calls
+        if call["workflow_name"] == workflow_name
+        for item in _payload_work_items(call)
+    }
 
 
 def _request(**overrides: object) -> RunRequest:
@@ -221,6 +515,54 @@ def test_parent_workflow_composes_symbol_timeframe_children() -> None:
     assert len(summary["artifacts"]) == 3
 
 
+def test_parent_workflow_threads_work_items_through_full_chain() -> None:
+    """A full fake chain should never submit empty operation work items."""
+    executor = _ThreadingChildExecutor()
+    workflow = workflows.HistDataRunWorkflow(executor=executor)
+    request = _request()
+
+    summary = asyncio.run(workflow.run(request.to_dict()))
+
+    symbol_calls = [
+        call
+        for call in executor.calls
+        if call["workflow_name"] == "SymbolTimeframeWorkflow"
+    ]
+    operation_calls = [
+        call
+        for call in executor.calls
+        if str(call["workflow_name"]).endswith("Workflow")
+        and call["workflow_name"]
+        not in {
+            "DatasetPlanWorkflow",
+            "SymbolTimeframeWorkflow",
+        }
+    ]
+
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert [
+        [item["data_fxpair"] for item in _payload_work_items(call)]
+        for call in symbol_calls
+    ] == [["EURUSD"], ["GBPUSD"]]
+    assert operation_calls
+    assert all(_payload_work_items(call) for call in operation_calls)
+    assert _statuses_for_operation(
+        operation_calls, "DownloadArchivesWorkflow"
+    ) == {WorkStatus.URL_VALID.value}
+    assert _statuses_for_operation(operation_calls, "ExtractCsvWorkflow") == {
+        WorkStatus.CSV_ZIP.value
+    }
+    assert _statuses_for_operation(operation_calls, "BuildCacheWorkflow") == {
+        WorkStatus.CSV_FILE.value
+    }
+    assert _statuses_for_operation(operation_calls, "MergeCacheWorkflow") == {
+        WorkStatus.CACHE_READY.value
+    }
+    assert _statuses_for_operation(operation_calls, "ImportWorkflow") == {
+        WorkStatus.CACHE_READY.value
+    }
+
+
 def test_symbol_timeframe_workflow_composes_operation_children() -> None:
     """Partition workflows should call operation-family child workflows."""
     executor = _RecordingChildExecutor()
@@ -232,6 +574,7 @@ def test_symbol_timeframe_workflow_composes_operation_children() -> None:
             {
                 "request": request.to_dict(),
                 "partition": {"pair": "EURUSD", "timeframe": "M1"},
+                "work_items": [_planned_work_items()[0].to_dict()],
             }
         )
     )
@@ -275,6 +618,7 @@ def test_symbol_timeframe_workflow_stops_after_cancelled_child() -> None:
             {
                 "request": request.to_dict(),
                 "partition": {"pair": "EURUSD", "timeframe": "M1"},
+                "work_items": [_planned_work_items()[0].to_dict()],
             }
         )
     )
@@ -285,6 +629,54 @@ def test_symbol_timeframe_workflow_stops_after_cancelled_child() -> None:
     assert summary["status"] == WorkStatus.CANCELLED.value
     assert summary["progress"]["completed_children"] == 1
     assert summary["progress"]["last_error"] == "operator cancelled"
+
+
+def test_symbol_timeframe_workflow_skips_after_no_forwardable_items() -> None:
+    """A non-forwarded stage should not launch empty downstream children."""
+    executor = _NoForwardChildExecutor()
+    workflow = workflows.SymbolTimeframeWorkflow(executor=executor)
+    request = _request()
+
+    summary = asyncio.run(
+        workflow.run(
+            {
+                "request": request.to_dict(),
+                "partition": {"pair": "EURUSD", "timeframe": "M1"},
+                "work_items": [_planned_work_items()[0].to_dict()],
+            }
+        )
+    )
+
+    assert [call["workflow_name"] for call in executor.calls] == [
+        "ValidateUrlsWorkflow"
+    ]
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert [result["status"] for result in summary["stage_results"][1:]] == [
+        WorkStatus.SKIPPED.value
+    ] * 5
+
+
+def test_symbol_timeframe_workflow_fails_without_empty_downstream() -> None:
+    """A failed stage should fail the partition and skip later child calls."""
+    executor = _FailingChildExecutor()
+    workflow = workflows.SymbolTimeframeWorkflow(executor=executor)
+    request = _request()
+
+    summary = asyncio.run(
+        workflow.run(
+            {
+                "request": request.to_dict(),
+                "partition": {"pair": "EURUSD", "timeframe": "M1"},
+                "work_items": [_planned_work_items()[0].to_dict()],
+            }
+        )
+    )
+
+    assert [call["workflow_name"] for call in executor.calls] == [
+        "ValidateUrlsWorkflow"
+    ]
+    assert summary["status"] == WorkStatus.FAILED.value
+    assert summary["progress"]["last_error"] == "validation failed"
 
 
 def test_leaf_workflow_uses_mocked_activity_executor() -> None:
