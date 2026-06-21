@@ -22,8 +22,10 @@ from histdatacom.manifest_store import (
     DATASET_PLAN_BATCHES_KEY,
     DATASET_PLAN_REF_KEY,
     ManifestStatusStore,
+    STATUS_STORE_REF_KEY,
 )
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
+from histdatacom.sidecar.control import SidecarJobSnapshot
 from histdatacom.sidecar.activities import (
     build_cache_activity,
     dataset_plan_activity,
@@ -513,6 +515,74 @@ def test_validate_urls_activity_emits_progress_heartbeat(
         "progress"
     )
     assert result["result"]["metrics"]["progress"]["stage"] == "validate_url"
+
+
+def test_validate_urls_activity_persists_live_status_without_inspect(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Activities should persist progress before any client inspect query."""
+    monkeypatch.setattr(
+        "histdatacom.activity_stages.fetch_histdata_page_data",
+        lambda url, timeout: {
+            "html": _form_html(),
+            "encoding": "gzip",
+            "bytes_length": "123",
+        },
+    )
+    store = ManifestStatusStore(tmp_path / "sidecar-status")
+    request = RunRequest(
+        request_id="run-live-status",
+        data_directory=str(tmp_path / "data"),
+        metadata={
+            STATUS_STORE_REF_KEY: store.status_store_ref(),
+            "sidecar_task_queues": {"orchestration": "test-queue"},
+        },
+    )
+    store.write_job_snapshot(
+        {
+            "job_id": "histdatacom-run-live-status",
+            "request_id": request.request_id,
+            "workflow_id": "histdatacom-run-live-status",
+            "lifecycle": "submitted",
+            "status": WorkStatus.PLANNED.value,
+            "metadata": {"run_request": request.to_dict()},
+        }
+    )
+    payload = {
+        "request": request.to_dict(),
+        "workflow_id": "validate-child-workflow",
+        "work_item": {
+            "work_id": "work-live-status",
+            "status": WorkStatus.URL_NEW.value,
+            "url": (
+                "http://www.histdata.com/download-free-forex-data/"
+                "?/ascii/1-minute-bar-quotes/eurusd/2022"
+            ),
+        },
+    }
+
+    result = validate_urls_activity(payload)
+
+    assert result["result"]["status"] == WorkStatus.URL_VALID.value
+    stored_item = store.get_work_item("work-live-status")
+    assert stored_item is not None
+    assert stored_item.status == WorkStatus.URL_VALID
+    stage_results = store.list_stage_results("work-live-status")
+    assert stage_results[-1]["stage"] == "validate_url"
+    stored_snapshot = store.get_job_snapshot("histdatacom-run-live-status")
+    assert stored_snapshot is not None
+    snapshot = SidecarJobSnapshot.from_dict(stored_snapshot)
+    assert snapshot.progress is not None
+    assert snapshot.lifecycle.value == "running"
+    assert snapshot.progress.current_stage == "validate_url"
+    assert snapshot.progress.completed_children == 1
+    assert snapshot.logs[-1].source == "validate_url"
+    assert snapshot.metadata["activity_workflow_id"] == (
+        "validate-child-workflow"
+    )
+    assert snapshot.metadata["run_request"]["request_id"] == "run-live-status"
+    assert snapshot.result["stage_result_count"] == 1
 
 
 def test_activity_context_helpers_ignore_absent_temporal_context(

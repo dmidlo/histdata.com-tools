@@ -281,6 +281,18 @@ control state, and workflow result metadata; rows, dataframe contents, archive
 bytes, and cache data remain on disk outside workflow history and outside the
 job snapshot payload.
 
+Run submissions also pass a compact `sidecar_status_store` reference through
+request metadata. Activities use that reference to persist work-item state,
+stage results, progress events, log entries, and artifact references after each
+work item or bounded aggregate activity. This means `jobs progress`, `jobs
+logs`, `jobs artifacts`, and `jobs result --offline` can still show the latest
+observed state after a client crash or sidecar shutdown, even when no later
+client-side inspect call ran. The write volume is proportional to work items and
+activity progress events: one work-item upsert, one stage-result insert, and one
+bounded job-snapshot merge per observed item or aggregate stage. Do not store
+dataframe rows, archive bytes, cache contents, or large result payloads in this
+SQLite database; use artifact references to point at those files on disk.
+
 Use offline mode to inspect recent persisted jobs without connecting to
 Temporal:
 

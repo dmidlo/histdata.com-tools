@@ -35,6 +35,8 @@ from histdatacom.manifest_store import (
     INLINE_WORK_ITEM_LIMIT_METADATA_KEY,
     MANIFEST_SCHEMA_VERSION,
     PLAN_SPILL_METADATA_KEY,
+    STATUS_STORE_REF_KEY,
+    STATUS_STORE_REF_KIND,
     ManifestStatusStore,
 )
 from histdatacom.observability import attach_progress_metadata
@@ -50,6 +52,7 @@ from histdatacom.runtime_contracts import (
     derive_work_id,
 )
 from histdatacom.utils import set_working_data_dir
+from histdatacom.sidecar.workflow_metadata import TASK_QUEUE_METADATA_KEY
 
 
 class _NoopActivityApi:
@@ -95,7 +98,7 @@ def repository_refresh_activity(
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     repo_path = _repo_local_path(request)
     if _activity_cancelled():
-        result = _observe_stage_result(
+        result = _observe_and_persist_stage_result(
             _cancelled_stage_result(
                 "repository_refresh",
                 work_id=request.request_id,
@@ -108,6 +111,8 @@ def repository_refresh_activity(
             completed=0,
             unit="operations",
             increment=0,
+            payload=payload,
+            request=request,
         )
         return cast(dict[str, Any], result.to_dict())
 
@@ -120,11 +125,13 @@ def repository_refresh_activity(
         available_remote_data=request.available_remote_data,
         update_remote_data=request.update_remote_data,
     )
-    result = _observe_stage_result(
+    result = _observe_and_persist_stage_result(
         output.result,
         total=1,
         completed=1,
         unit="operations",
+        payload=payload,
+        request=request,
     )
     return cast(dict[str, Any], result.to_dict())
 
@@ -135,7 +142,7 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     data_root = set_working_data_dir(request.data_directory)
     if _activity_cancelled():
-        result = _observe_stage_result(
+        result = _observe_and_persist_stage_result(
             _cancelled_stage_result(
                 "dataset_plan",
                 work_id=request.request_id,
@@ -144,6 +151,8 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
             completed=0,
             unit="work_items",
             increment=0,
+            payload=payload,
+            request=request,
         )
         return cast(
             dict[str, Any],
@@ -209,12 +218,14 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
     )
     output = replace(
         output,
-        result=_observe_stage_result(
+        result=_observe_and_persist_stage_result(
             output.result,
             total=len(output.work_items),
             completed=len(output.work_items),
             unit="work_items",
             increment=len(output.work_items),
+            payload=payload,
+            request=request,
         ),
     )
     output_payload: dict[str, Any] = output.to_dict()
@@ -233,12 +244,14 @@ def validate_urls_activity(payload: dict[str, Any]) -> dict[str, Any]:
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     work_items = _activity_work_items_from_payload(payload)
     if not work_items:
-        result = _observe_stage_result(
+        result = _observe_and_persist_stage_result(
             _missing_work_item_result(payload, "validate_urls"),
             total=0,
             completed=0,
             unit="work_items",
             increment=0,
+            payload=payload,
+            request=request,
         )
         return cast(
             dict[str, Any],
@@ -253,6 +266,8 @@ def validate_urls_activity(payload: dict[str, Any]) -> dict[str, Any]:
         "validate_url",
         work_items,
         lambda work_item: validate_url_work_item(work_item, args=args),
+        payload=payload,
+        request=request,
     )
     if len(outputs) == 1:
         output_payload: dict[str, Any] = outputs[0].to_dict()
@@ -279,12 +294,14 @@ def download_archives_activity(
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     work_items = _activity_work_items_from_payload(payload)
     if not work_items:
-        result = _observe_stage_result(
+        result = _observe_and_persist_stage_result(
             _missing_work_item_result(payload, "download_archives"),
             total=0,
             completed=0,
             unit="work_items",
             increment=0,
+            payload=payload,
+            request=request,
         )
         return cast(
             dict[str, Any],
@@ -300,6 +317,8 @@ def download_archives_activity(
         "download_archive",
         work_items,
         lambda work_item: download_archive_work_item(work_item, args=args),
+        payload=payload,
+        request=request,
     )
     if len(outputs) == 1:
         output_payload: dict[str, Any] = outputs[0].to_dict()
@@ -326,12 +345,14 @@ def extract_csv_activity(
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     work_items = _activity_work_items_from_payload(payload)
     if not work_items:
-        result = _observe_stage_result(
+        result = _observe_and_persist_stage_result(
             _missing_work_item_result(payload, "extract_csv"),
             total=0,
             completed=0,
             unit="work_items",
             increment=0,
+            payload=payload,
+            request=request,
         )
         return cast(
             dict[str, Any],
@@ -346,6 +367,8 @@ def extract_csv_activity(
         "extract_csv",
         work_items,
         lambda work_item: extract_csv_work_item(work_item, args=args),
+        payload=payload,
+        request=request,
     )
     if len(outputs) == 1:
         output_payload: dict[str, Any] = outputs[0].to_dict()
@@ -372,12 +395,14 @@ def build_cache_activity(
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     work_items = _activity_work_items_from_payload(payload)
     if not work_items:
-        result = _observe_stage_result(
+        result = _observe_and_persist_stage_result(
             _missing_work_item_result(payload, "build_cache"),
             total=0,
             completed=0,
             unit="work_items",
             increment=0,
+            payload=payload,
+            request=request,
         )
         return cast(
             dict[str, Any],
@@ -391,6 +416,8 @@ def build_cache_activity(
         "build_cache",
         work_items,
         lambda work_item: build_cache_work_item(work_item, args=args),
+        payload=payload,
+        request=request,
     )
     if len(outputs) == 1:
         output_payload: dict[str, Any] = outputs[0].to_dict()
@@ -414,14 +441,17 @@ def merge_cache_activity(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     """Assemble cache merge references without materializing dataframes."""
+    request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     work_items = _activity_work_items_from_payload(payload)
     if not work_items:
-        result = _observe_stage_result(
+        result = _observe_and_persist_stage_result(
             _missing_work_item_result(payload, "merge_cache"),
             total=0,
             completed=0,
             unit="work_items",
             increment=0,
+            payload=payload,
+            request=request,
         )
         return cast(
             dict[str, Any],
@@ -429,12 +459,14 @@ def merge_cache_activity(
         )
 
     if _activity_cancelled():
-        result = _observe_stage_result(
+        result = _observe_and_persist_stage_result(
             _cancelled_stage_result("merge_cache"),
             total=len(work_items),
             completed=0,
             unit="work_items",
             increment=0,
+            payload=payload,
+            request=request,
         )
         return cast(
             dict[str, Any],
@@ -447,12 +479,14 @@ def merge_cache_activity(
     )
     output = replace(
         output,
-        result=_observe_stage_result(
+        result=_observe_and_persist_stage_result(
             output.result,
             total=len(work_items),
             completed=len(work_items),
             unit="work_items",
             increment=len(work_items),
+            payload=payload,
+            request=request,
         ),
     )
     output_payload: dict[str, Any] = output.to_dict()
@@ -467,12 +501,14 @@ def import_to_influx_activity(
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     work_items = _activity_work_items_from_payload(payload)
     if not work_items:
-        result = _observe_stage_result(
+        result = _observe_and_persist_stage_result(
             _missing_work_item_result(payload, "import_to_influx"),
             total=0,
             completed=0,
             unit="work_items",
             increment=0,
+            payload=payload,
+            request=request,
         )
         return cast(
             dict[str, Any],
@@ -491,13 +527,17 @@ def import_to_influx_activity(
                     args=args,
                     writer=writer,
                 ),
+                payload=payload,
+                request=request,
             )
     except (Exception, SystemExit) as err:
         outputs = tuple(
-            _observe_activity_output(
+            _observe_and_persist_activity_output(
                 _influx_failure_output(work_item, err),
                 total=total,
                 completed=index,
+                payload=payload,
+                request=request,
             )
             for index, work_item in enumerate(work_items, start=1)
         )
@@ -558,7 +598,10 @@ def _dataset_plan_batches(
 ) -> tuple[dict[str, str], ...]:
     from histdatacom.sidecar.workflows import period_batch_partitions
 
-    return period_batch_partitions(request, work_items)
+    return cast(
+        tuple[dict[str, str], ...],
+        period_batch_partitions(request, work_items),
+    )
 
 
 def _dataset_plan_inline_limit(request: RunRequest) -> int:
@@ -686,25 +729,32 @@ def _cancellable_outputs(
     stage: str,
     work_items: tuple[WorkItem, ...],
     run_one: Callable[[WorkItem], ActivityStageOutput],
+    *,
+    payload: Mapping[str, Any],
+    request: RunRequest,
 ) -> tuple[ActivityStageOutput, ...]:
     total = len(work_items)
     outputs: list[ActivityStageOutput] = []
     for index, work_item in enumerate(work_items, start=1):
         if _activity_cancelled():
             outputs.append(
-                _observe_activity_output(
+                _observe_and_persist_activity_output(
                     _cancelled_activity_output(work_item, stage),
                     total=total,
                     completed=len(outputs),
                     increment=0,
+                    payload=payload,
+                    request=request,
                 )
             )
             break
         outputs.append(
-            _observe_activity_output(
+            _observe_and_persist_activity_output(
                 run_one(work_item),
                 total=total,
                 completed=index,
+                payload=payload,
+                request=request,
             )
         )
     return tuple(outputs)
@@ -784,6 +834,51 @@ def _observe_activity_output(
     )
 
 
+def _observe_and_persist_activity_output(
+    output: ActivityStageOutput,
+    *,
+    total: int,
+    completed: int,
+    payload: Mapping[str, Any],
+    request: RunRequest,
+    increment: int = 1,
+) -> ActivityStageOutput:
+    observed = _observe_activity_output(
+        output,
+        total=total,
+        completed=completed,
+        increment=increment,
+    )
+    _persist_activity_stage_update(
+        payload,
+        request,
+        observed.result,
+        work_item=observed.work_item,
+    )
+    return observed
+
+
+def _observe_and_persist_stage_result(
+    result: StageResult,
+    *,
+    total: int,
+    completed: int,
+    unit: str,
+    payload: Mapping[str, Any],
+    request: RunRequest,
+    increment: int = 1,
+) -> StageResult:
+    observed = _observe_stage_result(
+        result,
+        total=total,
+        completed=completed,
+        unit=unit,
+        increment=increment,
+    )
+    _persist_activity_stage_update(payload, request, observed)
+    return observed
+
+
 def _observe_stage_result(
     result: StageResult,
     *,
@@ -826,6 +921,62 @@ def _observe_stage_result(
     metrics = dict(result.metrics)
     metrics["progress"] = progress_metadata
     return replace(result, events=observed_events, metrics=metrics)
+
+
+def _persist_activity_stage_update(
+    payload: Mapping[str, Any],
+    request: RunRequest,
+    result: StageResult,
+    *,
+    work_item: WorkItem | None = None,
+) -> None:
+    store = _activity_status_store(request)
+    if store is None:
+        return
+    store.write_live_stage_update(
+        request_id=request.request_id,
+        job_id=_job_id_for_request(request),
+        workflow_id=_job_id_for_request(request),
+        result=result,
+        work_item=work_item,
+        task_queue=_activity_task_queue(request),
+        metadata=_activity_status_metadata(payload),
+    )
+
+
+def _activity_status_store(request: RunRequest) -> ManifestStatusStore | None:
+    ref = _mapping(request.metadata.get(STATUS_STORE_REF_KEY, {}))
+    if str(ref.get("kind", "") or "") != STATUS_STORE_REF_KIND:
+        return None
+    store_root = str(ref.get("store_root", "") or "")
+    if not store_root:
+        return None
+    return ManifestStatusStore(store_root)
+
+
+def _job_id_for_request(request: RunRequest) -> str:
+    request_id = request.request_id.strip() or "request"
+    return f"histdatacom-{request_id}"
+
+
+def _activity_task_queue(request: RunRequest) -> str:
+    task_queues = _mapping(request.metadata.get(TASK_QUEUE_METADATA_KEY, {}))
+    return str(task_queues.get("orchestration", "") or "")
+
+
+def _activity_status_metadata(
+    payload: Mapping[str, Any],
+) -> dict[str, JSONValue]:
+    metadata: dict[str, JSONValue] = {}
+    workflow_id = str(payload.get("workflow_id", "") or "")
+    if workflow_id:
+        metadata["activity_workflow_id"] = workflow_id
+    partition = _mapping(payload.get("partition", {}))
+    if partition:
+        metadata["partition"] = {
+            str(key): str(value) for key, value in partition.items()
+        }
+    return metadata
 
 
 def _influx_failure_output(

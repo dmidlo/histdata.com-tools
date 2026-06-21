@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from histdatacom.manifest_store import STATUS_STORE_REF_KEY
 from histdatacom.runtime_contracts import (
     ArtifactRef,
     RunRequest,
@@ -370,6 +371,11 @@ def test_submit_run_request_uses_orchestration_queue(
         config.task_queues.to_dict()
     )
     assert payload["metadata"]["workflow_topology_version"] == 1
+    status_store_ref = payload["metadata"][STATUS_STORE_REF_KEY]
+    assert status_store_ref["kind"] == "manifest_status_store"
+    assert status_store_ref["store_path"].endswith(
+        ".histdatacom/manifest-status.sqlite3"
+    )
     stored = client.sidecar_job_store(config).get_job_snapshot(
         "histdatacom-run-test"
     )

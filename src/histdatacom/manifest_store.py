@@ -24,9 +24,13 @@ MANIFEST_DB_FILENAME = "manifest-status.sqlite3"
 MANIFEST_SCHEMA_VERSION = 1
 DATASET_PLAN_REF_KEY = "dataset_plan_ref"
 DATASET_PLAN_BATCHES_KEY = "dataset_plan_batches"
+STATUS_STORE_REF_KEY = "sidecar_status_store"
+STATUS_STORE_REF_KIND = "manifest_status_store"
 DEFAULT_DATASET_PLAN_INLINE_WORK_ITEM_LIMIT = 64
 PLAN_SPILL_METADATA_KEY = "temporal_plan_spill"
 INLINE_WORK_ITEM_LIMIT_METADATA_KEY = "inline_work_item_limit"
+LIVE_SNAPSHOT_EVENT_LIMIT = 200
+LIVE_SNAPSHOT_ARTIFACT_LIMIT = 200
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +246,15 @@ class ManifestStatusStore:
         if work_item_count:
             ref["work_item_count"] = work_item_count
         return ref
+
+    def status_store_ref(self) -> dict[str, JSONValue]:
+        """Return a compact JSON-safe reference to this status store."""
+        return {
+            "kind": STATUS_STORE_REF_KIND,
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "store_root": str(self.root_dir),
+            "store_path": str(self.db_path),
+        }
 
     def get_dataset_plan(self, plan_id: str) -> dict[str, Any] | None:
         """Return one stored dataset plan payload."""
@@ -484,6 +497,42 @@ class ManifestStatusStore:
                     artifact=artifact,
                     created_at_utc=now,
                 )
+
+    def write_live_stage_update(
+        self,
+        *,
+        request_id: str,
+        job_id: str,
+        result: StageResult,
+        work_item: WorkItem | None = None,
+        workflow_id: str = "",
+        task_queue: str = "",
+        namespace: str = "",
+        metadata: Mapping[str, JSONValue] | None = None,
+    ) -> dict[str, Any]:
+        """Persist one activity result and merge it into a live job snapshot."""
+        if work_item is not None:
+            self.write_work_item(
+                work_item,
+                source=result.stage,
+                message=f"{result.stage} work item status stored.",
+            )
+        self.write_stage_result(result)
+
+        stored = self.get_job_snapshot(job_id) or {}
+        snapshot = _live_snapshot_payload(
+            stored,
+            request_id=request_id,
+            job_id=job_id,
+            workflow_id=workflow_id or job_id,
+            task_queue=task_queue,
+            namespace=namespace,
+            result=result,
+            work_item=work_item,
+            metadata=metadata,
+        )
+        self.write_job_snapshot(snapshot)
+        return snapshot
 
     def write_job_snapshot(self, snapshot: Any) -> None:
         """Persist a GUI-ready sidecar job snapshot."""
@@ -959,6 +1008,286 @@ def _coerce_list(value: Any) -> list[Any]:
     if isinstance(value, tuple):
         return list(value)
     return []
+
+
+def _live_snapshot_payload(
+    stored: Mapping[str, Any],
+    *,
+    request_id: str,
+    job_id: str,
+    workflow_id: str,
+    task_queue: str,
+    namespace: str,
+    result: StageResult,
+    work_item: WorkItem | None,
+    metadata: Mapping[str, JSONValue] | None,
+) -> dict[str, Any]:
+    stored_payload = dict(stored)
+    now = _utc_now()
+    progress_metadata = _coerce_mapping(result.metrics.get("progress"))
+    stored_progress = _coerce_mapping(stored_payload.get("progress"))
+    updated_at = str(
+        progress_metadata.get("updated_at_utc", "")
+        or stored_progress.get("updated_at_utc", "")
+        or now
+    )
+    started_at = str(
+        stored_progress.get("started_at_utc", "")
+        or progress_metadata.get("started_at_utc", "")
+        or updated_at
+    )
+    events = _bounded_events(
+        (
+            *_coerce_list(stored_progress.get("events")),
+            *(event.to_dict() for event in result.events),
+        )
+    )
+    logs = _bounded_logs(
+        (
+            *_coerce_list(stored_payload.get("logs")),
+            *(_log_from_event(event) for event in events),
+        )
+    )
+    artifacts = _bounded_artifacts(
+        (
+            *_coerce_list(stored_payload.get("artifacts")),
+            *_coerce_list(stored_progress.get("artifacts")),
+            *(artifact.to_dict() for artifact in result.artifacts),
+        )
+    )
+    status = result.status.value
+    progress = {
+        "workflow_name": str(
+            stored_progress.get("workflow_name", "") or "HistDataRunWorkflow"
+        ),
+        "request_id": request_id,
+        "status": status,
+        "current_stage": result.stage,
+        "total_children": _progress_int(
+            progress_metadata,
+            "total",
+            stored_progress.get("total_children", 0),
+        ),
+        "completed_children": _progress_int(
+            progress_metadata,
+            "completed",
+            stored_progress.get("completed_children", 0),
+        ),
+        "unit": str(
+            progress_metadata.get("unit", "")
+            or stored_progress.get("unit", "")
+            or "work_items"
+        ),
+        "started_at_utc": started_at,
+        "updated_at_utc": updated_at,
+        "rate_per_second": _progress_float(
+            progress_metadata.get("rate_per_second"),
+            stored_progress.get("rate_per_second", 0.0),
+        ),
+        "last_error": str(
+            result.failure.message
+            if result.failure is not None
+            else progress_metadata.get(
+                "last_error",
+                stored_progress.get("last_error", ""),
+            )
+            or ""
+        ),
+        "planned_children": _string_tuple(
+            _coerce_list(stored_progress.get("planned_children"))
+        ),
+        "completed_stages": _completed_stages(
+            stored_progress,
+            result.stage,
+        ),
+        "events": events,
+        "artifacts": artifacts,
+    }
+    stored_metadata = _coerce_mapping(stored_payload.get("metadata"))
+    live_metadata = dict(metadata or {})
+    live_metadata.setdefault("live_status_store", True)
+    live_metadata.setdefault("live_status_write_stage", result.stage)
+    if work_item is not None:
+        live_metadata.setdefault("live_status_work_id", work_item.work_id)
+
+    stored_result = _coerce_mapping(stored_payload.get("result"))
+    return {
+        "schema_version": int(
+            stored_payload.get("schema_version", MANIFEST_SCHEMA_VERSION) or 1
+        ),
+        "job_id": job_id,
+        "request_id": request_id,
+        "workflow_id": workflow_id or job_id,
+        "run_id": str(stored_payload.get("run_id", "") or ""),
+        "namespace": str(stored_payload.get("namespace", "") or namespace),
+        "task_queue": str(stored_payload.get("task_queue", "") or task_queue),
+        "lifecycle": _live_lifecycle(
+            result.status,
+            str(stored_payload.get("lifecycle", "") or ""),
+        ),
+        "status": status,
+        "progress": progress,
+        "controls": _coerce_mapping(stored_payload.get("controls")),
+        "logs": logs,
+        "artifacts": artifacts,
+        "result": {
+            "request_id": request_id,
+            "workflow_name": "HistDataRunWorkflow",
+            "status": status,
+            "stage_result_count": _stored_count(
+                stored_result,
+                "stage_result_count",
+            )
+            + 1,
+            "work_item_count": _stored_count(
+                stored_result,
+                "work_item_count",
+            )
+            + (1 if work_item is not None else 0),
+            "artifact_count": len(artifacts),
+            "progress": {
+                "current_stage": result.stage,
+                "status": status,
+                "event_count": len(events),
+                "artifact_count": len(artifacts),
+                "updated_at_utc": updated_at,
+            },
+        },
+        "sidecar_state": str(stored_payload.get("sidecar_state", "") or ""),
+        "sidecar_message": str(stored_payload.get("sidecar_message", "") or ""),
+        "updated_at_utc": updated_at,
+        "metadata": {
+            **stored_metadata,
+            **live_metadata,
+        },
+    }
+
+
+def _bounded_events(values: tuple[Any, ...]) -> list[dict[str, JSONValue]]:
+    events: list[dict[str, JSONValue]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for value in values:
+        payload = _coerce_mapping(value)
+        if not payload:
+            continue
+        key = (
+            str(payload.get("timestamp_utc", "") or ""),
+            str(payload.get("work_id", "") or ""),
+            str(payload.get("stage", "") or ""),
+            str(payload.get("status", "") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        events.append(payload)
+    return events[-LIVE_SNAPSHOT_EVENT_LIMIT:]
+
+
+def _bounded_artifacts(values: tuple[Any, ...]) -> list[dict[str, JSONValue]]:
+    artifacts: list[dict[str, JSONValue]] = []
+    seen: set[tuple[str, str]] = set()
+    for value in values:
+        payload = _coerce_mapping(value)
+        kind = str(payload.get("kind", "") or "")
+        path = str(payload.get("path", "") or "")
+        if not kind and not path:
+            continue
+        key = (kind, path)
+        if key in seen:
+            continue
+        seen.add(key)
+        artifacts.append(payload)
+    return artifacts[-LIVE_SNAPSHOT_ARTIFACT_LIMIT:]
+
+
+def _bounded_logs(values: tuple[Any, ...]) -> list[dict[str, JSONValue]]:
+    logs: list[dict[str, JSONValue]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for value in values:
+        payload = _coerce_mapping(value)
+        if not payload:
+            continue
+        key = (
+            str(payload.get("timestamp_utc", "") or ""),
+            str(payload.get("source", "") or ""),
+            str(payload.get("message", "") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        logs.append(payload)
+    return logs[-LIVE_SNAPSHOT_EVENT_LIMIT:]
+
+
+def _log_from_event(event: Mapping[str, Any]) -> dict[str, JSONValue]:
+    metadata = _coerce_mapping(event.get("metadata"))
+    status = str(event.get("status", "") or "")
+    return {
+        "source": str(metadata.get("source") or event.get("stage", "") or ""),
+        "level": str(
+            metadata.get("level")
+            or ("error" if status == WorkStatus.FAILED.value else "info")
+        ),
+        "message": str(event.get("message", "") or ""),
+        "timestamp_utc": str(event.get("timestamp_utc", "") or ""),
+        "metadata": metadata,
+    }
+
+
+def _completed_stages(
+    stored_progress: Mapping[str, Any],
+    stage: str,
+) -> list[str]:
+    stages = _string_tuple(
+        _coerce_list(stored_progress.get("completed_stages"))
+    )
+    if stage and stage not in stages:
+        stages = (*stages, stage)
+    return list(stages)
+
+
+def _string_tuple(values: list[Any]) -> tuple[str, ...]:
+    return tuple(str(value) for value in values if str(value or ""))
+
+
+def _progress_int(
+    progress_metadata: Mapping[str, Any],
+    key: str,
+    fallback: Any,
+) -> int:
+    value = progress_metadata.get(key, fallback)
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _progress_float(value: Any, fallback: Any) -> float:
+    try:
+        return float(value if value not in (None, "") else fallback or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _stored_count(payload: Mapping[str, Any], key: str) -> int:
+    try:
+        return max(0, int(payload.get(key, 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _live_lifecycle(status: WorkStatus, stored_lifecycle: str) -> str:
+    if status == WorkStatus.FAILED:
+        return "failed"
+    if status == WorkStatus.CANCELLED:
+        return "cancelled"
+    if stored_lifecycle in {
+        "cancel_requested",
+        "retry_requested",
+        "resume_requested",
+    }:
+        return stored_lifecycle
+    return "running"
 
 
 def _json_dumps(value: Any) -> str:

@@ -14,7 +14,10 @@ from histdatacom.cancellation import (
     cleanup_partial_artifacts,
     operation_resume_policy,
 )
-from histdatacom.manifest_store import ManifestStatusStore
+from histdatacom.manifest_store import (
+    STATUS_STORE_REF_KEY,
+    ManifestStatusStore,
+)
 from histdatacom.runtime_contracts import (
     ArtifactRef,
     JSONValue,
@@ -685,6 +688,9 @@ def run_request_payload(
     metadata = dict(payload.get("metadata") or {})
     metadata[TASK_QUEUE_METADATA_KEY] = config.task_queues.to_dict()
     metadata[TOPOLOGY_METADATA_KEY] = TOPOLOGY_SCHEMA_VERSION
+    metadata[STATUS_STORE_REF_KEY] = sidecar_job_store(
+        config
+    ).status_store_ref()
     payload["metadata"] = metadata
     return payload
 
