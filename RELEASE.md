@@ -158,10 +158,25 @@ The security workflow runs on pull requests, pushes to `main`, manual dispatch,
 and a weekly schedule. It has no publishing permissions. Dependency Review is
 enabled for pull requests on this public repository and fails when dependency
 changes introduce moderate, high, or critical vulnerabilities in runtime or
-development scopes. `pip-audit` installs the package with the pandas and arrow
-optional dependencies, audits the resulting Python environment, and uploads a
+development scopes. `pip-audit` installs the package with all optional runtime
+and integration extras, audits the resulting Python environment, and uploads a
 JSON report. CodeQL analyzes the Python source with no build step; it only has
 `security-events: write` so GitHub can receive code-scanning results.
+
+The package metadata intentionally separates dependency surfaces:
+
+- Runtime dependencies support ordinary `pip install histdatacom` users and use
+  lower bounds instead of lock-file pins so downstream applications can resolve
+  compatible environments.
+- Optional integrations live behind extras such as `histdatacom[pandas]`,
+  `histdatacom[arrow]`, `histdatacom[influx]`, and `histdatacom[jupyter]`.
+- `histdatacom[test]`, `histdatacom[lint]`, and `histdatacom[release]` split
+  contributor tooling by purpose. `histdatacom[dev]` aggregates those direct
+  tool pins plus optional integration dependencies for local development.
+- This project does not keep a committed lock file for runtime dependencies
+  because it is a published library package. For local reproducibility, create a
+  fresh virtual environment, install `.[dev]`, and use the pinned pre-commit
+  hook revisions and direct developer-tool pins.
 
 For a published PyPI package, triage vulnerability findings by affected install
 surface:
@@ -170,8 +185,9 @@ surface:
   should be patched with a minimum-version floor or compatible dependency range
   before publishing a patch release.
 - Optional dependency findings affect users who install extras such as
-  `histdatacom[pandas]` or `histdatacom[arrow]`; patch those ranges and mention
-  the affected extra in release notes.
+  `histdatacom[pandas]`, `histdatacom[arrow]`, `histdatacom[influx]`, or
+  `histdatacom[jupyter]`; patch those ranges and mention the affected extra in
+  release notes.
 - Development and build findings block contributor or release hygiene but do
   not automatically require a PyPI release unless the vulnerable package is
   included in built distributions or runtime metadata.

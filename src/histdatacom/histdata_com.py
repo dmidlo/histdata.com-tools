@@ -77,6 +77,7 @@ class _HistDataCom:  # noqa:R701
         )
 
         if config.ARGS["import_to_influxdb"]:
+            check_installed_module("influxdb_client")
             influx_yaml = load_influx_yaml()
             config.ARGS["INFLUX_ORG"] = influx_yaml["influxdb"]["org"]
             config.ARGS["INFLUX_BUCKET"] = influx_yaml["influxdb"]["bucket"]

@@ -3,8 +3,6 @@
 # pylint: disable=invalid-name
 from enum import Enum
 
-from influxdb_client import WritePrecision
-
 # Majors 7
 # eurusd usdjpy gbpusd usdcad usdchf audusd nzdusd
 
@@ -262,7 +260,7 @@ class TimeFormat(Enum):  # noqa:H601
 
 
 class TimePrecision(Enum):  # noqa:H601
-    """Enumerate list of public TimePrecisions for influxdb writer.
+    """Enumerate list of public InfluxDB write precisions.
 
     Args:
         Enum (Enum): Parent Class
@@ -273,14 +271,14 @@ class TimePrecision(Enum):  # noqa:H601
                 TimePrecision.list_values()
     """
 
-    MT_M1 = WritePrecision.S
-    ASCII_M1 = WritePrecision.S
-    ASCII_T = WritePrecision.MS
-    NT_M1 = WritePrecision.S
-    NT_T_LAST = WritePrecision.S
-    NT_T_BID = WritePrecision.S
-    NT_T_ASK = WritePrecision.S
-    MS_M1 = WritePrecision.S
+    MT_M1 = "s"
+    ASCII_M1 = "s"
+    ASCII_T = "ms"
+    NT_M1 = "s"
+    NT_T_LAST = "s"
+    NT_T_BID = "s"
+    NT_T_ASK = "s"
+    MS_M1 = "s"
 
     @classmethod
     def list_keys(cls) -> set:
