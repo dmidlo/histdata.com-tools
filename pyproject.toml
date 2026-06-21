@@ -65,12 +65,16 @@ jupyter = [
     "jupyter",
     "ipywidgets",
 ]
+temporal = [
+    "temporalio>=1.10,<2",
+]
 all = [
     "influxdb-client>=1.36",
     "ipywidgets",
     "jupyter",
     "pandas>=2.0",
     "pyarrow>=16.0",
+    "temporalio>=1.10,<2",
 ]
 test = [
     "coverage==7.14.2",
@@ -119,6 +123,7 @@ dev = [
     "ruff==0.15.18",
     "setuptools==80.10.2",
     "shellcheck-py==0.11.0.1",
+    "temporalio>=1.10,<2",
     "twine==6.2.0",
     "types-beautifulsoup4==4.12.0.20250516",
     "types-PyYAML==6.0.12.20260518",
@@ -132,6 +137,7 @@ Homepage = "https://github.com/dmidlo/histdata.com-tools"
 [project.scripts]
 histdatacom = "histdatacom.histdata_com:main"
 histdatacom-sidecar = "histdatacom.sidecar.cli:main"
+histdatacom-sidecar-worker = "histdatacom.sidecar.worker:main"
 
 [tool.setuptools.package-dir]
 "" = "src"

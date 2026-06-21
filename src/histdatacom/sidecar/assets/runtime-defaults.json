@@ -23,7 +23,7 @@
     "default_ui_port_offset": 1000,
     "default_port_window": 2000
   },
-  "owned_by_future_issues": {
+  "owned_by_issues": {
     "supervisor": "#147",
     "runtime_paths_and_ports": "#148",
     "worker_client": "#149"

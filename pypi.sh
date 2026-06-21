@@ -68,6 +68,7 @@ except SidecarExecutableUnavailable as err:
 PY
         histdatacom --version
         histdatacom-sidecar --help >/dev/null
+        histdatacom-sidecar-worker --help >/dev/null
     )
 }
 

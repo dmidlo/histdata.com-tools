@@ -80,6 +80,26 @@ def inspect_wheel(wheel_path: Path) -> None:
         raise SystemExit(
             "histdatacom-sidecar console script missing from wheel metadata"
         )
+    if (
+        "histdatacom-sidecar-worker = histdatacom.sidecar.worker:main"
+        not in entry_points
+    ):
+        raise SystemExit(
+            "histdatacom-sidecar-worker console script missing from "
+            "wheel metadata"
+        )
+    if "temporal" not in set(wheel_metadata.get_all("Provides-Extra", [])):
+        raise SystemExit("temporal optional extra missing from wheel metadata")
+    requires_dist = [
+        requirement.lower()
+        for requirement in wheel_metadata.get_all("Requires-Dist", [])
+    ]
+    if not any(
+        requirement.startswith("temporalio")
+        and 'extra == "temporal"' in requirement
+        for requirement in requires_dist
+    ):
+        raise SystemExit("temporalio dependency missing from temporal extra")
     if manifest["sidecar"] != "temporal":
         raise SystemExit("sidecar manifest does not describe Temporal")
     if manifest["distribution_strategy"] != (

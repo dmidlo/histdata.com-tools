@@ -1,0 +1,254 @@
+"""Temporal worker construction and sidecar-internal worker CLI."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import sys
+from importlib import import_module
+from inspect import isawaitable
+from typing import Any, Sequence
+
+from histdatacom.sidecar.client import (
+    TEMPORAL_EXTRA_HINT,
+    TemporalDependencyError,
+    connect_temporal_client,
+)
+from histdatacom.sidecar.queues import (
+    DEFAULT_TASK_QUEUE_PREFIX,
+    DEFAULT_TEMPORAL_NAMESPACE,
+    SidecarWorkerConfig,
+    TaskQueueLane,
+    build_sidecar_worker_config,
+)
+from histdatacom.sidecar.runtime import (
+    PortAllocationError,
+    SidecarPaths,
+    build_sidecar_runtime_policy,
+    default_sidecar_runtime_home,
+    default_sidecar_workspace,
+)
+
+
+def build_temporal_worker(
+    client: Any,
+    *,
+    config: SidecarWorkerConfig | None = None,
+    worker_class: Any | None = None,
+    workflows: Sequence[Any] = (),
+    activities: Sequence[Any] = (),
+    **worker_options: Any,
+) -> Any:
+    """Build a Temporal worker from centralized sidecar configuration."""
+    resolved_config = config or build_sidecar_worker_config()
+    temporal_worker_class = worker_class or _load_temporal_worker_class()
+    return temporal_worker_class(
+        client,
+        task_queue=resolved_config.task_queue,
+        workflows=list(workflows),
+        activities=list(activities),
+        **worker_options,
+    )
+
+
+async def run_temporal_worker(
+    *,
+    config: SidecarWorkerConfig | None = None,
+    client: Any | None = None,
+    client_class: Any | None = None,
+    worker_class: Any | None = None,
+    workflows: Sequence[Any] = (),
+    activities: Sequence[Any] = (),
+    **worker_options: Any,
+) -> Any:
+    """Connect to Temporal, build the configured worker, and run it."""
+    resolved_config = config or build_sidecar_worker_config()
+    temporal_client = client or await connect_temporal_client(
+        config=resolved_config,
+        client_class=client_class,
+    )
+    worker = build_temporal_worker(
+        temporal_client,
+        config=resolved_config,
+        worker_class=worker_class,
+        workflows=workflows,
+        activities=activities,
+        **worker_options,
+    )
+    run = getattr(worker, "run", None)
+    if run is None:
+        raise TypeError("Temporal worker object must define run()")
+    await _maybe_await(run())
+    return worker
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the sidecar worker argument parser."""
+    parser = argparse.ArgumentParser(prog="histdatacom-sidecar-worker")
+    _add_common_args(parser, include_defaults=True)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    config = subparsers.add_parser(
+        "config",
+        help="show Temporal worker configuration",
+    )
+    _add_common_args(config, include_defaults=False)
+    _add_worker_args(config)
+
+    run = subparsers.add_parser("run", help="run a Temporal sidecar worker")
+    _add_common_args(run, include_defaults=False)
+    _add_worker_args(run)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the sidecar worker command-line interface."""
+    parser = build_parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    try:
+        config = _config_from_args(args)
+        if args.command == "config":
+            _write_config(config, as_json=args.json)
+            return 0
+        if args.command == "run":
+            asyncio.run(run_temporal_worker(config=config))
+            return 0
+        parser.error(f"unsupported worker command: {args.command}")
+    except KeyboardInterrupt:
+        return 130
+    except (
+        RuntimeError,
+        TemporalDependencyError,
+        PortAllocationError,
+        OSError,
+        ValueError,
+    ) as err:
+        message = str(err)
+        if isinstance(err, TemporalDependencyError):
+            message = TEMPORAL_EXTRA_HINT
+        if args.json:
+            print(  # noqa:T201
+                json.dumps(
+                    {
+                        "state": "error",
+                        "message": message,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"error: {message}", file=sys.stderr)  # noqa:T201
+        return 1
+
+
+def _add_common_args(
+    parser: argparse.ArgumentParser,
+    *,
+    include_defaults: bool,
+) -> None:
+    workspace_default = (
+        str(default_sidecar_workspace())
+        if include_defaults
+        else argparse.SUPPRESS
+    )
+    runtime_home_default = (
+        str(default_sidecar_runtime_home())
+        if include_defaults
+        else argparse.SUPPRESS
+    )
+    state_dir_default = None if include_defaults else argparse.SUPPRESS
+    json_default = False if include_defaults else argparse.SUPPRESS
+    parser.add_argument(
+        "--workspace",
+        default=workspace_default,
+        help="workspace path used to scope sidecar runtime state",
+    )
+    parser.add_argument(
+        "--runtime-home",
+        default=runtime_home_default,
+        help="base directory for per-workspace sidecar runtime state",
+    )
+    parser.add_argument(
+        "--state-dir",
+        default=state_dir_default,
+        help="explicit state directory override for tests or manual recovery",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        default=json_default,
+        help="emit machine-readable JSON",
+    )
+
+
+def _add_worker_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--namespace",
+        default=DEFAULT_TEMPORAL_NAMESPACE,
+        help="Temporal namespace used by the local sidecar",
+    )
+    parser.add_argument(
+        "--task-queue-prefix",
+        default=DEFAULT_TASK_QUEUE_PREFIX,
+        help="prefix for workspace-scoped Temporal task queues",
+    )
+    parser.add_argument(
+        "--lane",
+        choices=[lane.value for lane in TaskQueueLane],
+        default=TaskQueueLane.ORCHESTRATION.value,
+        help="worker task queue lane to run",
+    )
+
+
+def _config_from_args(args: argparse.Namespace) -> SidecarWorkerConfig:
+    paths = (
+        SidecarPaths.from_state_dir(args.state_dir) if args.state_dir else None
+    )
+    runtime_policy = build_sidecar_runtime_policy(
+        workspace=args.workspace,
+        runtime_home=args.runtime_home,
+        paths=paths,
+    )
+    return build_sidecar_worker_config(
+        runtime_policy=runtime_policy,
+        namespace=args.namespace,
+        task_queue_prefix=args.task_queue_prefix,
+        lane=args.lane,
+    )
+
+
+def _write_config(
+    config: SidecarWorkerConfig,
+    *,
+    as_json: bool,
+) -> None:
+    payload = config.to_dict()
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+        return
+    print(f"namespace: {payload['namespace']}")  # noqa:T201
+    print(f"target_host: {payload['target_host']}")  # noqa:T201
+    print(f"lane: {payload['lane']}")  # noqa:T201
+    print(f"task_queue: {payload['task_queue']}")  # noqa:T201
+
+
+def _load_temporal_worker_class() -> Any:
+    try:
+        return getattr(import_module("temporalio.worker"), "Worker")
+    except ModuleNotFoundError as err:
+        if (err.name or "").split(".")[0] == "temporalio":
+            raise TemporalDependencyError(TEMPORAL_EXTRA_HINT) from err
+        raise
+
+
+async def _maybe_await(value: Any) -> Any:
+    if isawaitable(value):
+        return await value
+    return value
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
