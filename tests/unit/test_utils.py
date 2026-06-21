@@ -94,3 +94,68 @@ def test_load_influx_yaml_missing_config_exits_nonzero(
         load_influx_yaml()
 
     assert err.value.code == 1
+
+
+def test_influx_yaml_reads_safe_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Influx config should parse through the safe YAML loader.
+
+    Args:
+        tmp_path (Path): temporary test directory.
+        monkeypatch (pytest.MonkeyPatch): pytest monkeypatch fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    config_token = tmp_path.name
+    Path("influxdb.yaml").write_text(
+        "\n".join(
+            (
+                "influxdb:",
+                "  org: histdata",
+                "  bucket: forex",
+                "  url: http://localhost:8086",
+                f"  token: {config_token}",
+            ),
+        ),
+        encoding="UTF-8",
+    )
+
+    loaded_yaml = load_influx_yaml()  # act
+
+    assert loaded_yaml == {
+        "influxdb": {
+            "org": "histdata",
+            "bucket": "forex",
+            "url": "http://localhost:8086",
+            "token": config_token,
+        },
+    }
+
+
+def test_influx_yaml_blocks_python_tags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unsafe PyYAML object tags should not execute or deserialize.
+
+    Args:
+        tmp_path (Path): temporary test directory.
+        monkeypatch (pytest.MonkeyPatch): pytest monkeypatch fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    marker_path = tmp_path / "unsafe-yaml-executed"
+    Path("influxdb.yaml").write_text(
+        "\n".join(
+            (
+                "!!python/object/apply:os.system",
+                f'- "touch {marker_path}"',
+            ),
+        ),
+        encoding="UTF-8",
+    )
+
+    with pytest.raises(SystemExit):
+        load_influx_yaml()  # act
+
+    assert not marker_path.exists()
