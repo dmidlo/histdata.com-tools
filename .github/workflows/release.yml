@@ -58,6 +58,9 @@ jobs:
       - name: Check package artifacts
         run: python -m twine check dist/*
 
+      - name: Inspect wheel sidecar resources
+        run: python scripts/inspect_wheel.py
+
       - name: Generate artifact provenance attestation
         uses: actions/attest@v4.1.0
         with:

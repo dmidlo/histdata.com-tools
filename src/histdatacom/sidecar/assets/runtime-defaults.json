@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "sidecar": "temporal",
+  "persistence": {
+    "driver": "sqlite",
+    "filename": "temporal.db"
+  },
+  "command": {
+    "program": "temporal",
+    "args": [
+      "server",
+      "start-dev"
+    ]
+  },
+  "owned_by_future_issues": {
+    "supervisor": "#147",
+    "runtime_paths_and_ports": "#148",
+    "worker_client": "#149"
+  }
+}

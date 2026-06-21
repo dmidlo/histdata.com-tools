@@ -138,5 +138,12 @@ histdatacom = "histdatacom.histdata_com:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"histdatacom.sidecar" = [
+    "assets/README.md",
+    "assets/manifest.json",
+    "assets/runtime-defaults.json",
+]
+
 [tool.setuptools.dynamic]
 version = { attr = "histdatacom.__version__" }

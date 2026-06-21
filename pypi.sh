@@ -24,39 +24,7 @@ dev()
 
 inspect_wheel_metadata()
 {
-    python - <<'PY'
-from email.parser import Parser
-from pathlib import Path
-from zipfile import ZipFile
-
-wheels = sorted(Path("dist").glob("histdatacom-*.whl"))
-if len(wheels) != 1:
-    raise SystemExit(f"expected exactly one wheel, found {wheels}")
-
-with ZipFile(wheels[0]) as wheel:
-    metadata_paths = [
-        name for name in wheel.namelist() if name.endswith(".dist-info/METADATA")
-    ]
-    entry_point_paths = [
-        name for name in wheel.namelist() if name.endswith(".dist-info/entry_points.txt")
-    ]
-    if len(metadata_paths) != 1:
-        raise SystemExit(f"expected one METADATA file, found {metadata_paths}")
-    if len(entry_point_paths) != 1:
-        raise SystemExit(f"expected one entry_points.txt file, found {entry_point_paths}")
-
-    wheel_metadata = Parser().parsestr(wheel.read(metadata_paths[0]).decode("utf-8"))
-    entry_points = wheel.read(entry_point_paths[0]).decode("utf-8")
-
-if wheel_metadata["Name"] != "histdatacom":
-    raise SystemExit(f"unexpected wheel name: {wheel_metadata['Name']}")
-if wheel_metadata["Requires-Python"] != ">=3.10.0":
-    raise SystemExit(
-        f"unexpected Python requirement: {wheel_metadata['Requires-Python']}"
-    )
-if "histdatacom = histdatacom.histdata_com:main" not in entry_points:
-    raise SystemExit("histdatacom console script missing from wheel metadata")
-PY
+    python scripts/inspect_wheel.py
 }
 
 smoke_wheel_install()
@@ -76,11 +44,27 @@ smoke_wheel_install()
 from importlib import metadata
 
 import histdatacom
+from histdatacom.sidecar import (
+    SidecarExecutableUnavailable,
+    load_sidecar_manifest,
+    sidecar_asset,
+    sidecar_executable_path,
+)
 
 if metadata.version("histdatacom") != histdatacom.__version__:
     raise SystemExit(
         "installed package metadata version does not match imported package"
     )
+if not sidecar_asset("manifest.json").is_file():
+    raise SystemExit("sidecar manifest is not installed as package data")
+if load_sidecar_manifest().sidecar != "temporal":
+    raise SystemExit("sidecar manifest does not describe Temporal")
+try:
+    with sidecar_executable_path("linux-x86_64"):
+        raise SystemExit("metadata-only wheel exposed executable")
+except SidecarExecutableUnavailable as err:
+    if "not bundled in this distribution" not in str(err):
+        raise
 PY
         histdatacom --version
     )

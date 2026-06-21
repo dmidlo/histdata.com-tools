@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "sidecar": "temporal",
+  "distribution_strategy": "platform-wheel-with-sdist-metadata-fallback",
+  "embedded_binary": false,
+  "resource_files": [
+    "README.md",
+    "manifest.json",
+    "runtime-defaults.json"
+  ],
+  "sdist_fallback": "metadata-only; no Temporal executable is bundled until platform wheels are built",
+  "platforms": {
+    "linux-x86_64": {
+      "bundled": false,
+      "executable": "bin/linux-x86_64/temporal",
+      "wheel_tags": [
+        "manylinux_2_28_x86_64",
+        "musllinux_1_2_x86_64"
+      ],
+      "notes": "Planned platform wheel payload."
+    },
+    "linux-arm64": {
+      "bundled": false,
+      "executable": "bin/linux-arm64/temporal",
+      "wheel_tags": [
+        "manylinux_2_28_aarch64",
+        "musllinux_1_2_aarch64"
+      ],
+      "notes": "Planned platform wheel payload."
+    },
+    "macos-x86_64": {
+      "bundled": false,
+      "executable": "bin/macos-x86_64/temporal",
+      "wheel_tags": [
+        "macosx_11_0_x86_64"
+      ],
+      "notes": "Planned platform wheel payload."
+    },
+    "macos-arm64": {
+      "bundled": false,
+      "executable": "bin/macos-arm64/temporal",
+      "wheel_tags": [
+        "macosx_11_0_arm64"
+      ],
+      "notes": "Planned platform wheel payload."
+    },
+    "windows-x86_64": {
+      "bundled": false,
+      "executable": "bin/windows-x86_64/temporal.exe",
+      "wheel_tags": [
+        "win_amd64"
+      ],
+      "notes": "Planned platform wheel payload."
+    }
+  }
+}
