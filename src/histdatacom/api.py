@@ -26,9 +26,7 @@ from histdatacom.activity_stages import (
     merge_cache_records,
     merge_cache_work_items,
 )
-from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
 from histdatacom.histdata_ascii import (
-    CACHE_FILENAME,
     convert_polars_datetime_to_utc_ms,
     read_polars_cache,
     read_ascii_file_to_polars,
@@ -43,7 +41,7 @@ if TYPE_CHECKING:
     from polars import DataFrame as PolarsDataFrame
     from pyarrow import Table
 
-    from histdatacom.records import Record, Records
+    from histdatacom.records import Record
 
 
 class Api:  # noqa:H601
@@ -102,37 +100,25 @@ class Api:  # noqa:H601
         cls,
         record: Record,
         args: dict,
-        records_current: Records,
-        records_next: Records,
-    ) -> None:
+    ) -> Record | None:
         """Validate Cache prior to possible merge operation.
 
-           A Wrapper to be passed to an individual process within the process
-           pool to test for or create a Polars cache file based on a Record of
-           Work's information.  Receives a unit of work from the pool, performs
-           validation, readies the Record for further processing, and marks the
-           current work as complete.
+           Test for or create a Polars cache file based on a Record of Work's
+           information. Receives explicit work and returns the record when it is
+           ready for further processing.
 
         Args:
             record (Record): a Histdatacom.records.Record
             args (dict): arguments received from argparse
-            records_current (Records):
-                Current Work Records Queue
-            records_next (Records):
-                Records Queue for Further Work
 
         """
-        try:
-            output = build_cache_work_item(
-                WorkItem.from_record(record),
-                args=args,
-                download_file=Scraper.get_zip_file,
-            )
-            apply_stage_output_to_record(output, record)
-            if output.forward:
-                records_next.put(record)
-        finally:
-            records_current.task_done()
+        output = build_cache_work_item(
+            WorkItem.from_record(record),
+            args=args,
+            download_file=Scraper.get_zip_file,
+        )
+        apply_stage_output_to_record(output, record)
+        return record if output.forward else None
 
     @classmethod
     def _extract_single_value_from_frame(
@@ -159,7 +145,7 @@ class Api:  # noqa:H601
         # noqa: DAR402
 
         Args:
-            record (Record): a record from the work queue.
+            record (Record): a record to import.
             zip_path (Path): path to record's zip.
 
         Raises:
@@ -224,26 +210,24 @@ class Api:  # noqa:H601
         """
         return read_polars_cache(Path(cache_path))
 
-    def validate_caches(self) -> None:
-        """Initialize a process pool to validate cache files."""
-        pool = ProcessPool(
-            self._validate_cache,
-            config.ARGS,
-            "Staging",
-            "data files...",
-            get_pool_cpu_count(config.ARGS["cpu_utilization"]),
-        )
-        pool(config.CURRENT_QUEUE, config.NEXT_QUEUE)
+    def validate_caches(self, records: list[Record]) -> list[Record]:
+        """Validate explicit records and return cache-ready records."""
+        validated = [
+            self._validate_cache(record, config.ARGS) for record in records
+        ]
+        return [record for record in validated if record is not None]
 
-    def merge_caches(self) -> list | PolarsDataFrame | DataFrame | Table:
+    def merge_caches(
+        self,
+        records_to_merge: list[Record] | None = None,
+    ) -> list | PolarsDataFrame | DataFrame | Table:
         """Merge caches for start_yearmonth and end_yearmonth range.
 
         Returns:
             list | PolarsDataFrame | DataFrame | Table:
                 merged data for the configured API return type
         """
-        records_to_merge: list = self._dequeue_records_for_merge()
-        return self.merge_records(records_to_merge)
+        return self.merge_records(records_to_merge or [])
 
     def merge_records(
         self,
@@ -299,30 +283,6 @@ class Api:  # noqa:H601
             tp_set_dict["records"],
             return_type=config.ARGS["api_return_type"],
         )
-
-    def _dequeue_records_for_merge(self) -> list:
-        """Empty the queue of relevant records.
-
-        Empty the queue of relevant records and return records whose cache
-        files exist.
-
-        Returns:
-            list: records_to_merge
-        """
-        records_to_merge: list = []
-        while not config.CURRENT_QUEUE.empty():  # type: ignore
-            record = config.CURRENT_QUEUE.get()  # type: ignore
-
-            if record is None:
-                break
-
-            if (
-                record.cache_filename == CACHE_FILENAME
-                and Path(record.data_dir, record.cache_filename).exists()
-            ):
-                records_to_merge.append(record)
-
-        return records_to_merge
 
     def _collate_sets_to_merge(self, records_to_merge: list) -> list:
         """Organize records into pair/timeframe sets.

@@ -344,7 +344,6 @@ def test_merge_caches_converts_single_pair_timeframe_return_types(
 
     from histdatacom import config
     from histdatacom.api import Api
-    from histdatacom.records import Records
 
     source = Api._import_file_to_polars(
         SimpleNamespace(data_timeframe="M1"),
@@ -366,19 +365,13 @@ def test_merge_caches_converts_single_pair_timeframe_return_types(
         timeframe="M1",
         start=EXPECTED_M1_DATETIMES[1],
     )
-    records = Records()
-    records.put(second)
-    records.put(first)
     original_args = config.ARGS.copy()
-    original_current_queue = config.CURRENT_QUEUE
 
     try:
         config.ARGS["api_return_type"] = api_return_type
-        config.CURRENT_QUEUE = records
-        result = Api().merge_caches()
+        result = Api().merge_caches([second, first])
     finally:
         config.ARGS = original_args
-        config.CURRENT_QUEUE = original_current_queue
 
     if api_return_type == "polars":
         assert isinstance(result, pl.DataFrame)
@@ -401,7 +394,6 @@ def test_merge_caches_returns_only_observed_pair_timeframe_sets(
 
     from histdatacom import config
     from histdatacom.api import Api
-    from histdatacom.records import Records
 
     m1_source = Api._import_file_to_polars(
         SimpleNamespace(data_timeframe="M1"),
@@ -427,19 +419,13 @@ def test_merge_caches_returns_only_observed_pair_timeframe_sets(
         timeframe="M1",
         start=EXPECTED_M1_DATETIMES[0],
     )
-    records = Records()
-    records.put(tick_record)
-    records.put(m1_record)
     original_args = config.ARGS.copy()
-    original_current_queue = config.CURRENT_QUEUE
 
     try:
         config.ARGS["api_return_type"] = "polars"
-        config.CURRENT_QUEUE = records
-        result = Api().merge_caches()
+        result = Api().merge_caches([tick_record, m1_record])
     finally:
         config.ARGS = original_args
-        config.CURRENT_QUEUE = original_current_queue
 
     assert isinstance(result, list)
     assert [(item["timeframe"], item["pair"]) for item in result] == [
@@ -456,10 +442,9 @@ def test_merge_caches_returns_only_observed_pair_timeframe_sets(
 def test_merge_caches_returns_empty_list_when_no_cache_records(
     tmp_path: Path,
 ) -> None:
-    """Records without cache files should be ignored by merge_caches."""
+    """Inputs without cache files should be ignored by merge_caches."""
     from histdatacom import config
     from histdatacom.api import Api
-    from histdatacom.records import Records
 
     missing_cache = SimpleNamespace(
         data_dir=str(tmp_path) + os.sep,
@@ -467,17 +452,12 @@ def test_merge_caches_returns_empty_list_when_no_cache_records(
         data_fxpair="eurusd",
         data_timeframe="M1",
     )
-    records = Records()
-    records.put(missing_cache)
     original_args = config.ARGS.copy()
-    original_current_queue = config.CURRENT_QUEUE
 
     try:
         config.ARGS["api_return_type"] = "polars"
-        config.CURRENT_QUEUE = records
-        result = Api().merge_caches()
+        result = Api().merge_caches([missing_cache])
     finally:
         config.ARGS = original_args
-        config.CURRENT_QUEUE = original_current_queue
 
     assert result == []

@@ -4,7 +4,6 @@ Raises:
     SystemExit: Exit when complete.
 
 Returns:
-    QueueManager: multi-process serial communication manager
     repo_data (set): a set of repo pairs with start and end date ranges.
     Data (PolarsDataFrame | DataFrame | Table):
         a Polars DataFrame, pandas DataFrame, or pyarrow Table
@@ -32,13 +31,10 @@ from typing import TYPE_CHECKING
 import histdatacom
 from histdatacom import Options, config
 from histdatacom.cli import ArgParser
-from histdatacom.concurrency import QueueManager
-from histdatacom.csvs import Csv
+from histdatacom.foreground import run_foreground
 from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import RunRequest
-from histdatacom.scraper.repo import Repo
-from histdatacom.scraper.scraper import Scraper
 from histdatacom.sidecar.client import (
     SidecarUnavailableError,
     submit_run_request_and_observe_sync,
@@ -100,10 +96,6 @@ class _HistDataCom:  # noqa:R701
             config.ARGS["INFLUX_URL"] = influx_yaml["influxdb"]["url"]
             config.ARGS["INFLUX_TOKEN"] = influx_yaml["influxdb"]["token"]
 
-        self.repo = Repo()
-        self.scraper = Scraper()
-        self.csvs = Csv()
-
         if (
             config.ARGS["from_api"]
             and config.ARGS["api_return_type"]
@@ -112,24 +104,10 @@ class _HistDataCom:  # noqa:R701
             and not config.ARGS["update_remote_data"]
         ):
             check_installed_module(config.ARGS["api_return_type"])
-            from histdatacom.api import Api
-
-            self.api = Api()
 
         if config.ARGS["import_to_influxdb"]:
             config.ARGS["api_return_type"] = "polars"
             check_installed_module(config.ARGS["api_return_type"])
-            from histdatacom.influx import Influx
-
-            self.influx = Influx()
-
-        if (  # noqa:BLK100
-            config.ARGS["available_remote_data"]  # noqa:BLK100
-            or config.ARGS["update_remote_data"]
-        ):
-            if self.repo.test_for_repo_data_file():
-                self.repo.read_repo_data_file()
-            self.repo.update_repo_from_github()
 
     def run(  # noqa:CCR001,CFQ004,CCR001,R701
         self,
@@ -162,33 +140,9 @@ class _HistDataCom:  # noqa:R701
         if self._uses_sidecar():
             return self._run_sidecar_job()
 
-        if (  # noqa:BLK100
-            config.ARGS["available_remote_data"]  # noqa:BLK100
-            or config.ARGS["update_remote_data"]
-        ):
-            return self.repo.get_available_repo_data()
-        del self.repo  # noqa:WPS100
-
-        self.scraper.populate_initial_queue()
-
-        if config.ARGS["validate_urls"]:
-            self.scraper.validate_urls()
-
-        if config.ARGS["download_data_archives"]:
-            self.scraper.download_zips()
-            del self.scraper  # noqa:WPS100
-            if config.ARGS["from_api"] and config.ARGS["api_return_type"]:
-                self.api.validate_caches()
-                return self.api.merge_caches()
-
-        if config.ARGS["extract_csvs"]:
-            self.csvs.extract_csvs()
-        del self.csvs  # noqa:WPS100
-
-        if config.ARGS["import_to_influxdb"]:
-            self.influx.import_data()
-
-        return None
+        return run_foreground(
+            RunRequest.from_options(self.options), config.ARGS
+        )
 
     def _uses_sidecar(self) -> bool:
         """Return whether this foreground run should submit to the sidecar."""
@@ -271,20 +225,10 @@ def main(
 
     if not options:
         options = Options()
-        if _argv_requests_sidecar_job(sys.argv):
-            _HistDataCom(options).run()
-            return None
-        QueueManager(options)(_HistDataCom)
+        _HistDataCom(options).run()
         return None
     options.from_api = True
-    if options.use_sidecar:
-        return _HistDataCom(options).run()
-    return QueueManager(options)(_HistDataCom)
-
-
-def _argv_requests_sidecar_job(argv: list[str]) -> bool:
-    """Return whether the foreground CLI command should bypass queues."""
-    return "--sidecar" in argv
+    return _HistDataCom(options).run()
 
 
 def _cache_records_from_sidecar_payload(payload: dict) -> list[Record]:

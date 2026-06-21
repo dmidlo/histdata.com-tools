@@ -89,18 +89,7 @@ def test_update_remote_repo_data_preserves_api_return_shape(
     tmp_path: Path,
 ) -> None:
     """The -U API path should still validate, write, and return repo data."""
-    import histdatacom.scraper.repo as repo_module
-
     calls: list[str] = []
-
-    class FakeScraper:
-        """Minimal scraper double for update repo flow."""
-
-        def populate_initial_queue(self) -> None:
-            calls.append("populate")
-
-        def validate_urls(self) -> None:
-            calls.append("validate")
 
     args = _repo_args(tmp_path, pairs={"eurusd"})
     args["available_remote_data"] = False
@@ -113,10 +102,14 @@ def test_update_remote_repo_data_preserves_api_return_shape(
     )
     monkeypatch.setattr(config, "REPO_DATA_FILE_EXISTS", True)
     monkeypatch.setattr(config, "FILTER_PAIRS", None)
-    monkeypatch.setattr(repo_module, "Scraper", FakeScraper)
+    monkeypatch.setattr(
+        Repo,
+        "_validate_repository_coverage",
+        lambda self: calls.append("validate"),
+    )
 
     result = Repo().get_available_repo_data()
 
-    assert calls == ["populate", "validate"]
+    assert calls == ["validate"]
     assert result == {"eurusd": {"start": "200005", "end": "202212"}}
     assert (tmp_path / ".repo").exists()

@@ -329,10 +329,10 @@ def validate_url_work_item(
     scrape_record_info: RecordTransformer | None = None,
     check_for_valid_download: RecordAction | None = None,
     fetch_page_data: UrlPageFetcher | None = None,
-    check_if_queue_is_needed: NoArgBool | None = None,
+    repo_validation_needed: NoArgBool | None = None,
     set_repo_datum: RecordAction | None = None,
 ) -> ActivityStageOutput:
-    """Validate one HistData URL without touching global queues."""
+    """Validate one HistData URL with explicit repository hooks."""
     record = _record_from_work_item(work_item)
     updated = _work_item_from_record(record, work_item)
     try:
@@ -358,8 +358,8 @@ def validate_url_work_item(
                 record = _record_from_work_item(updated)
 
             if (
-                check_if_queue_is_needed is not None
-                and check_if_queue_is_needed()
+                repo_validation_needed is not None
+                and repo_validation_needed()
                 and set_repo_datum is not None
             ):
                 set_repo_datum(record)
@@ -576,7 +576,7 @@ def download_archive_work_item(
     download_file: RecordAction | None = None,
     post_archive: ArchivePoster | None = None,
 ) -> ActivityStageOutput:
-    """Download one ZIP archive without touching global queues."""
+    """Download one ZIP archive through an explicit work item."""
     record = _record_from_work_item(work_item)
     try:
         _ensure_record_data_dir(record, args)
@@ -906,7 +906,7 @@ def extract_csv_work_item(
     *,
     args: Mapping[str, Any],
 ) -> ActivityStageOutput:
-    """Extract one CSV/XLSX payload without touching global queues."""
+    """Extract one CSV/XLSX payload through an explicit work item."""
     record = _record_from_work_item(work_item)
     try:
         _ensure_record_data_dir(record, args)
@@ -1093,7 +1093,7 @@ def build_cache_work_item(
     args: Mapping[str, Any],
     download_file: RecordAction | None = None,
 ) -> ActivityStageOutput:
-    """Build or validate one Polars cache without touching global queues."""
+    """Build or validate one Polars cache through an explicit work item."""
     record = _record_from_work_item(work_item)
     try:
         _ensure_record_data_dir(record, args)
@@ -2021,13 +2021,13 @@ def repository_missing_pairs(
     return tuple(sorted(pairs - set(repository_pair_data(repo_data))))
 
 
-def repository_queue_needed(
+def repository_validation_needed(
     args: Mapping[str, Any],
     *,
     repo_file_exists: bool,
     filter_pairs: Iterable[str] | None,
 ) -> bool:
-    """Return whether legacy queue population is needed for repo metadata."""
+    """Return whether repository coverage validation is needed."""
     return bool(
         (
             not repo_file_exists
@@ -2044,7 +2044,7 @@ def repository_should_create_or_update(
     repo_file_exists: bool,
     filter_pairs: Iterable[str] | None,
 ) -> bool:
-    """Return whether a repo metadata file should be written from queues."""
+    """Return whether a repo metadata file should be written."""
     return bool(
         bool(args.get("update_remote_data", False))
         or not repo_file_exists

@@ -8,7 +8,7 @@ Returns:
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+
 from rich import print  # pylint: disable=redefined-builtin
 from rich import box
 from rich.table import Table
@@ -19,23 +19,22 @@ from histdatacom.activity_stages import (
     fetch_repository_data_from_url,
     filter_repository_data_by_pairs,
     hash_repository_data,
+    plan_dataset_work_items,
     read_repository_data_file,
     repository_data_with_record,
     repository_missing_pairs,
-    repository_queue_needed,
     repository_refresh_stage,
     repository_should_create_or_update,
+    repository_validation_needed,
     sort_repository_data,
+    validate_url_work_item,
     write_repository_data_file,
 )
-from histdatacom.scraper.scraper import Scraper
+from histdatacom.records import Record
 from histdatacom.utils import (
     get_year_from_datemonth,
     get_month_from_datemonth,
 )
-
-if TYPE_CHECKING:
-    from histdatacom.records import Record
 
 
 class Repo:  # noqa: H601
@@ -55,14 +54,14 @@ class Repo:  # noqa: H601
         )
 
     @staticmethod
-    def check_if_queue_is_needed() -> bool:
+    def check_if_repo_validation_is_needed() -> bool:
         # pylint: disable=line-too-long
-        """Conditions to populate queue for renewing repo data.
+        """Conditions to validate coverage for renewing repo data.
 
         Returns:
             bool: conditonal filter
         """
-        return repository_queue_needed(
+        return repository_validation_needed(
             config.ARGS,
             repo_file_exists=config.REPO_DATA_FILE_EXISTS,
             filter_pairs=config.FILTER_PAIRS,
@@ -153,12 +152,8 @@ class Repo:  # noqa: H601
             None if len(filter_pairs) == 0 else set(filter_pairs)
         )
 
-        if self.check_if_queue_is_needed():
-            scraper = Scraper()
-            scraper.populate_initial_queue()
-
         if self._check_for_create_or_update():
-            scraper.validate_urls()
+            self._validate_repository_coverage()
             self._write_repo_data_file()
 
         if config.ARGS["from_api"]:
@@ -187,6 +182,23 @@ class Repo:  # noqa: H601
         write_repository_data_file(config.REPO_DATA, self.repo_local_path)
         config.REPO_DATA = read_repository_data_file(self.repo_local_path)
         config.REPO_DATA_FILE_EXISTS = True
+
+    def _validate_repository_coverage(self) -> None:
+        """Validate planned URLs and update repository ranges."""
+        for work_item in plan_dataset_work_items(
+            start_yearmonth=config.ARGS["start_yearmonth"],
+            end_yearmonth=config.ARGS["end_yearmonth"],
+            formats=config.ARGS["formats"],
+            pairs=config.FILTER_PAIRS,
+            timeframes=config.ARGS["timeframes"],
+            default_download_dir=config.ARGS["default_download_dir"],
+            zip_persist=bool(config.ARGS["zip_persist"]),
+        ):
+            output = validate_url_work_item(work_item, args=config.ARGS)
+            if output.forward:
+                self.set_repo_datum(
+                    Record(**output.work_item.to_record_kwargs())
+                )
 
     def _hash_repo(self) -> None:
         """Sanitize global data repo and update hash and timestamp."""

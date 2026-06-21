@@ -8,7 +8,7 @@ import zipfile
 from pathlib import Path
 
 from histdatacom import config
-from histdatacom.records import Record, Records
+from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkStatus
 from histdatacom.scraper.scraper import Scraper
 from histdatacom.scraper.urls import Urls
@@ -43,17 +43,14 @@ def test_scraper() -> None:
 def _scraper_without_init() -> Scraper:
     """Return a Scraper instance without initializing repo/url collaborators."""
     scraper = object.__new__(Scraper)
-    scraper.check_if_queue_is_needed = lambda: False
+    scraper.check_if_repo_validation_is_needed = lambda: False
     scraper.check_for_repo_action = lambda: True
     scraper.set_repo_datum = lambda record: None
     return scraper
 
 
-def _configure_stage_queues(record: Record, tmp_path: Path) -> None:
-    """Install isolated global queues for current scheduler characterization."""
-    config.CURRENT_QUEUE = Records()
-    config.NEXT_QUEUE = Records()
-    config.CURRENT_QUEUE.put(record)
+def _configure_stage_args(tmp_path: Path) -> None:
+    """Install isolated args for direct stage characterization."""
     config.ARGS = {
         "default_download_dir": f"{tmp_path}{os.sep}",
         "from_api": False,
@@ -63,10 +60,10 @@ def _configure_stage_queues(record: Record, tmp_path: Path) -> None:
 def test_validate_url_transitions_new_record_to_valid_and_writes_meta(
     tmp_path: Path,
 ) -> None:
-    """Document validate stage success behavior before workflow migration."""
+    """Validate stage success should return the forwarded record."""
     scraper = _scraper_without_init()
     record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
-    _configure_stage_queues(record, tmp_path)
+    _configure_stage_args(tmp_path)
 
     scraper._get_page_data = lambda url, timeout: {  # type: ignore[method-assign]
         "html": _form_html(),
@@ -74,13 +71,13 @@ def test_validate_url_transitions_new_record_to_valid_and_writes_meta(
         "bytes_length": "123",
     }
 
-    scraper._validate_url(record, config.ARGS)
+    result = scraper._validate_url(record, config.ARGS)
 
     meta_path = Path(record.data_dir) / ".meta"
     metadata = json.loads(meta_path.read_text(encoding="UTF-8"))
 
+    assert result is record
     assert record.status == WorkStatus.URL_VALID.value
-    assert config.NEXT_QUEUE.get().status == WorkStatus.URL_VALID.value
     assert metadata["status"] == WorkStatus.URL_VALID.value
     assert metadata["data_tk"] == "token"
 
@@ -88,24 +85,24 @@ def test_validate_url_transitions_new_record_to_valid_and_writes_meta(
 def test_validate_url_transitions_missing_record_without_requeue(
     tmp_path: Path,
 ) -> None:
-    """Document current missing-data behavior before workflow migration."""
+    """Missing data should not be forwarded."""
     scraper = _scraper_without_init()
     scraper.check_for_repo_action = lambda: False
     record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
-    _configure_stage_queues(record, tmp_path)
+    _configure_stage_args(tmp_path)
     scraper._get_page_data = lambda url, timeout: {  # type: ignore[method-assign]
         "html": _form_html(token=""),
         "encoding": "gzip",
         "bytes_length": "123",
     }
 
-    scraper._validate_url(record, config.ARGS)
+    result = scraper._validate_url(record, config.ARGS)
 
     meta_path = Path(record.data_dir) / ".meta"
     metadata = json.loads(meta_path.read_text(encoding="UTF-8"))
 
+    assert result is None
     assert record.status == WorkStatus.URL_NO_REPO_DATA.value
-    assert config.NEXT_QUEUE.empty()
     assert metadata["status"] == WorkStatus.URL_NO_REPO_DATA.value
 
 
@@ -145,7 +142,7 @@ def test_request_file_uses_local_post_headers(monkeypatch) -> None:
 def test_download_zip_transitions_valid_record_to_csv_zip(
     tmp_path: Path,
 ) -> None:
-    """Document download stage success behavior before workflow migration."""
+    """Download stage success should return the forwarded record."""
     scraper = _scraper_without_init()
     data_dir = tmp_path / "ASCII" / "M1" / "eurusd" / "2022"
     data_dir.mkdir(parents=True)
@@ -157,26 +154,24 @@ def test_download_zip_transitions_valid_record_to_csv_zip(
     )
     with zipfile.ZipFile(data_dir / record.zip_filename, "w") as archive:
         archive.writestr("DAT_ASCII_EURUSD_M1_2022.csv", "rows")
-    _configure_stage_queues(record, tmp_path)
+    _configure_stage_args(tmp_path)
 
-    scraper._download_zip(record, config.ARGS)
+    result = scraper._download_zip(record, config.ARGS)
 
     meta_path = Path(record.data_dir) / ".meta"
     metadata = json.loads(meta_path.read_text(encoding="UTF-8"))
 
+    assert result is record
     assert record.status == WorkStatus.CSV_ZIP.value
-    assert config.NEXT_QUEUE.get().status == WorkStatus.CSV_ZIP.value
     assert metadata["status"] == WorkStatus.CSV_ZIP.value
 
 
-def test_populate_initial_queue_uses_deterministic_plan(
+def test_populate_initial_records_uses_deterministic_plan(
     tmp_path: Path,
 ) -> None:
-    """Legacy queue population should adapt planned work items to records."""
+    """Foreground planning should adapt planned work items to records."""
     scraper = _scraper_without_init()
     scraper.urls = Urls()
-    config.CURRENT_QUEUE = Records()
-    config.NEXT_QUEUE = Records()
     config.ARGS = {
         "start_yearmonth": "202201",
         "end_yearmonth": "202203",
@@ -187,11 +182,7 @@ def test_populate_initial_queue_uses_deterministic_plan(
     }
     config.FILTER_PAIRS = {"eurusd"}
 
-    scraper.populate_initial_queue()
-
-    records = []
-    while not config.CURRENT_QUEUE.empty():
-        records.append(config.CURRENT_QUEUE.get())
+    records = scraper.plan_initial_records()
 
     assert [record.url for record in records] == [
         "http://www.histdata.com/download-free-forex-data/"

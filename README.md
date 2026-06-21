@@ -1,6 +1,9 @@
 # histdata.com-tools
 
-A Multi-threaded/Multi-Process command-line utility and python ETL package that downloads currency exchange rates from Histdata.com. Optional InfluxDB and Jupyter integrations are available through extras. Works on MacOS, Linux & Windows Systems.
+A command-line utility and Python ETL package that downloads currency exchange
+rates from Histdata.com. Optional Temporal sidecar, InfluxDB, and Jupyter
+integrations are available through extras. Works on MacOS, Linux & Windows
+Systems.
 **Requires Python3.10+**
 
 **NEW:** Expanded API support!!!

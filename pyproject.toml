@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "histdatacom"
 dynamic = ["version"]
-description = "A Multi-threaded/Multi-Process command-line utility and python package that downloads currency exchange rates from Histdata.com. Optional InfluxDB and Jupyter integrations are available through extras."
+description = "A command-line utility and Python ETL package that downloads currency exchange rates from Histdata.com. Optional Temporal sidecar, InfluxDB, and Jupyter integrations are available through extras."
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10.0"
 license = "MIT"

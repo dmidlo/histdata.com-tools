@@ -7,7 +7,7 @@ Raises:
 
 import os
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, Callable, Iterable, cast
 
 import requests
 from rich import print  # pylint: disable=redefined-builtin
@@ -26,7 +26,6 @@ from histdatacom.activity_stages import (
     parse_histdata_form_metadata,
     validate_url_work_item,
 )
-from histdatacom.concurrency import ThreadPool, get_pool_cpu_count
 from histdatacom.observability import ProgressState
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkItem, WorkStatus
@@ -38,7 +37,7 @@ class Scraper:  # noqa:H601
 
     Attributes:
         set_repo_datum: static method from scraper.repo.Repo
-        check_if_queue_is_needed: static method from scraper.repo.Repo
+        check_if_repo_validation_is_needed: static method from scraper.repo.Repo
         check_for_repo_action: static method from scraper.repo.Repo
 
     Raises:
@@ -52,7 +51,9 @@ class Scraper:  # noqa:H601
         from histdatacom.scraper.repo import Repo  # noqa:WPS131
 
         self.set_repo_datum: Callable = Repo.set_repo_datum
-        self.check_if_queue_is_needed: Callable = Repo.check_if_queue_is_needed
+        self.check_if_repo_validation_is_needed: Callable = (
+            Repo.check_if_repo_validation_is_needed
+        )
         self.check_for_repo_action: Callable = Repo.check_for_repo_action
 
         # Setup
@@ -64,7 +65,7 @@ class Scraper:  # noqa:H601
         """Download and write zip file to disk.
 
         Args:
-            record (Record): a record from the work queue
+            record (Record): a record to download
         """
         download_histdata_archive_to_record(
             record,
@@ -89,7 +90,7 @@ class Scraper:  # noqa:H601
         """Write binary zip data to disk.
 
         Args:
-            record (Record): a record from the work queue.
+            record (Record): a record to write
             zip_content (bytes): binary zip data
         """
         atomic_write_zip_archive(
@@ -104,7 +105,7 @@ class Scraper:  # noqa:H601
         """Place a POST request for zip file to http://www.histdata.com/get.php.
 
         Args:
-            record (Record): a record from the work queue
+            record (Record): a record to request
             timeout (int): retry timeout for POST
 
         Returns:
@@ -126,8 +127,8 @@ class Scraper:  # noqa:H601
             timeout=timeout,
         )
 
-    def populate_initial_queue(self) -> None:
-        """Fill Current Queue with records to be acted on."""
+    def plan_initial_records(self) -> list[Record]:
+        """Return planned records to be acted on."""
         progress_state = ProgressState(
             stage="dataset_plan",
             total=0.0,
@@ -144,6 +145,7 @@ class Scraper:  # noqa:H601
             progress.add_task("waiting", total=0)
 
             planned_count = 0
+            records: list[Record] = []
             for work_item in plan_dataset_work_items(
                 start_yearmonth=config.ARGS["start_yearmonth"],
                 end_yearmonth=config.ARGS["end_yearmonth"],
@@ -168,37 +170,29 @@ class Scraper:  # noqa:H601
                         base_dir=config.ARGS["default_download_dir"]
                     )
                     if (  # noqa:BLK100
-                        self.check_if_queue_is_needed()  # noqa:BLK100
+                        self.check_if_repo_validation_is_needed()  # noqa:BLK100
                         and record.status != WorkStatus.URL_NEW.value
                     ):
                         self.set_repo_datum(record)
-                    config.NEXT_QUEUE.put(record)  # type: ignore
+                    records.append(record)
 
-            config.NEXT_QUEUE.dump_to_queue(config.CURRENT_QUEUE)  # type: ignore
+            return records
 
-    def validate_urls(self) -> None:
-        """Initialize and Execute a thread pool to validate generated URLs."""
-        pool = ThreadPool(
-            self._validate_url,
-            config.ARGS,
-            "Validating",
-            "URLs...",
-            get_pool_cpu_count(config.ARGS["cpu_utilization"]) * 3,
-        )
+    def validate_urls(self, records: Iterable[Record]) -> list[Record]:
+        """Validate generated URLs and return forwarded records."""
+        return [
+            output
+            for record in records
+            if (output := self._validate_url(record, config.ARGS)) is not None
+        ]
 
-        pool(config.CURRENT_QUEUE, config.NEXT_QUEUE)
-
-    def download_zips(self) -> None:
-        """Initialize and Execute a thread pool to download zip archives."""
-        pool = ThreadPool(
-            self._download_zip,
-            config.ARGS,
-            "Downloading",
-            "ZIPs...",
-            get_pool_cpu_count(config.ARGS["cpu_utilization"]) * 3,
-        )
-
-        pool(config.CURRENT_QUEUE, config.NEXT_QUEUE)
+    def download_zips(self, records: Iterable[Record]) -> list[Record]:
+        """Download zip archives and return forwarded records."""
+        return [
+            output
+            for record in records
+            if (output := self._download_zip(record, config.ARGS)) is not None
+        ]
 
     def _init_record(self, url: str) -> Record:
         """Create a new record for processing.
@@ -210,7 +204,7 @@ class Scraper:  # noqa:H601
             url (str): url as primary ID of record.
 
         Returns:
-            record (Record): a record for the work queue.
+            record (Record): a record for processing.
         """
         record = Record()
         record(url=url, status=WorkStatus.URL_NEW.value)
@@ -224,7 +218,7 @@ class Scraper:  # noqa:H601
         return record
 
     def _ensure_pairs(self) -> None:
-        """Normalize pairs input for initial queue."""
+        """Normalize pairs input for planning."""
         if (
             not (
                 config.ARGS["update_remote_data"]
@@ -234,13 +228,15 @@ class Scraper:  # noqa:H601
         ):
             config.FILTER_PAIRS = config.ARGS["pairs"]
 
-    def _validate_url(self, record: Record, args: dict) -> None:  # noqa:CCR001
+    def _validate_url(
+        self,
+        record: Record,
+        args: dict,
+    ) -> Record | None:  # noqa:CCR001
         """Scrape url for presence of downloadable zips and related metadata.
 
-        executed by the validate_urls thread pool.
-
         Args:
-            record (Record): a record from the work queue.
+            record (Record): a record to validate.
             args (dict): a global config.ARGS dict.
 
         Raises:
@@ -251,7 +247,7 @@ class Scraper:  # noqa:H601
                 WorkItem.from_record(record),
                 args=args,
                 fetch_page_data=self._get_page_data,
-                check_if_queue_is_needed=self.check_if_queue_is_needed,
+                repo_validation_needed=self.check_if_repo_validation_is_needed,
                 set_repo_datum=self.set_repo_datum,
             )
             apply_stage_output_to_record(output, record)
@@ -263,12 +259,11 @@ class Scraper:  # noqa:H601
                     f"Info: Histdata.com does not have: {record.url}"
                 )
             if output.forward:
-                config.NEXT_QUEUE.put(record)  # type: ignore
+                return record
+            return None
         except KeyboardInterrupt as exc_info:
             print("keyboard from _validate_url.")  # noqa:T201
             raise KeyboardInterrupt from exc_info
-        finally:
-            config.CURRENT_QUEUE.task_done()  # type: ignore
 
     def _scrape_record_info(self, record: Record) -> Record:
         """Scrape page for archive meta data and populate record with info.
@@ -277,7 +272,7 @@ class Scraper:  # noqa:H601
             record (Record): a Record with a url string in Record.url
 
         Returns:
-            Record: a record for the work queue.
+            Record: a populated record.
         """
         page_data: dict = self._get_page_data(  # noqa:BLK001
             record.url, config.REQUESTS_TIMEOUT
@@ -297,13 +292,15 @@ class Scraper:  # noqa:H601
         if record.data_tk == "":
             raise ValueError
 
-    def _download_zip(self, record: Record, args: dict) -> None:  # noqa:CCR001
+    def _download_zip(
+        self,
+        record: Record,
+        args: dict,
+    ) -> Record | None:  # noqa:CCR001
         """Download zip from record.url.
 
-        Executed by the download_zips thread pool.
-
         Args:
-            record (Record): a record from the queue.
+            record (Record): a record to download.
             args (dict): a global config.ARGS dict.
 
         Raises:
@@ -321,18 +318,17 @@ class Scraper:  # noqa:H601
                     output.result.failure.message,
                 )
             if output.forward:
-                config.NEXT_QUEUE.put(record)  # type: ignore
+                return record
+            return None
         except KeyboardInterrupt as exc_info:
             print("keyboard from _download_zip.")  # noqa:T201
             raise KeyboardInterrupt from exc_info
-        finally:
-            config.CURRENT_QUEUE.task_done()  # type: ignore
 
     def _check_for_existing_archives_on_disk(self, record: Record) -> bool:
         """Check for zip, csv, or cache file.
 
         Args:
-            record (Record): a record from the work queue.
+            record (Record): a record to inspect.
 
         Returns:
             bool: file exists.
@@ -365,10 +361,10 @@ class Scraper:  # noqa:H601
 
         Args:
             page_data (dict): dict from _get_page_data()
-            record (Record): record from the work queue.
+            record (Record): record to update.
 
         Returns:
-            Record: record for the work queue.
+            Record: updated record.
         """
         metadata = parse_histdata_form_metadata(page_data)
         work_item = apply_form_metadata_to_work_item(

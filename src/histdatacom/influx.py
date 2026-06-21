@@ -27,7 +27,7 @@ from histdatacom.runtime_contracts import WorkItem, WorkStatus
 from histdatacom.utils import check_installed_module, load_influx_yaml
 
 if TYPE_CHECKING:
-    from histdatacom.records import Record, Records
+    from histdatacom.records import Record
 
 LineSink = Callable[[list[str]], None]
 INFLUX_CONFIG_FIELDS = (
@@ -53,12 +53,10 @@ def _iter_polars_row_batches(
 class Influx:  # noqa:H601
     """Download (if needed), format, and import data to influxdb."""
 
-    def import_data(self) -> None:
-        """Upload queued cache records through direct activity-style batches."""
-        if config.CURRENT_QUEUE is None or config.NEXT_QUEUE is None:
-            raise ValueError("Influx import requires configured record queues.")
-
-        records_count = config.CURRENT_QUEUE.qsize()  # type: ignore
+    def import_data(self, records: Iterable[Record]) -> list[Record]:
+        """Upload explicit cache records through direct activity-style batches."""
+        records_to_import = list(records)
+        records_count = len(records_to_import)
         progress_state = ProgressState(
             stage="import_to_influx",
             total=float(records_count),
@@ -74,72 +72,57 @@ class Influx:  # noqa:H601
             ) as progress:
                 task_id = progress.add_task("uploading", total=records_count)
 
-                while not config.CURRENT_QUEUE.empty():  # type: ignore
-                    record = config.CURRENT_QUEUE.get()  # type: ignore
-                    if record is None:
-                        break
-
-                    self._import_file(
+                imported = []
+                for record in records_to_import:
+                    imported_record = self._import_file(
                         record,
                         config.ARGS,
-                        config.CURRENT_QUEUE,  # type: ignore[arg-type]
-                        config.NEXT_QUEUE,  # type: ignore[arg-type]
                         writer.write_lines,
                     )
+                    imported.append(imported_record)
                     event = progress_state.advance(
                         message="Uploaded cache record to InfluxDB."
                     )
                     progress.advance(task_id, progress_increment(event))
 
         print("[cyan] done.")  # noqa:T201
-        config.NEXT_QUEUE.dump_to_queue(config.CURRENT_QUEUE)  # type: ignore
+        return imported
 
     def _import_file(
         self,
         record: Record,
         args: dict,
-        records_current: Records,
-        records_next: Records,
         emit_lines: LineSink | Any,
-    ) -> None:
+    ) -> Record:
         """Import ASCII data to InfluxDB through an explicit line sink.
 
         Args:
-            record (Record): a record from the work queue
+            record (Record): a record to import
             args (dict): config.ARGS
-            records_current (Records): config.CURRENT_QUEUE
-            records_next (Records): config.NEXT_QUEUE
-            emit_lines (LineSink | Any): line sink or legacy queue
+            emit_lines (LineSink | Any): line sink
 
         Raises:
         """
-        try:
-            output = import_to_influx_work_item(
-                WorkItem.from_record(record),
-                args=args,
-                emit_lines=_line_sink(emit_lines),
-            )
-            apply_stage_output_to_record(output, record)
-            records_next.put(record)
-        finally:
-            records_current.task_done()
+        output = import_to_influx_work_item(
+            WorkItem.from_record(record),
+            args=args,
+            emit_lines=_line_sink(emit_lines),
+        )
+        apply_stage_output_to_record(output, record)
+        return record
 
     def _import_cache(
         self,
         record: Record,
         args: dict,
-        records_current: Records,  # noqa:W0613 # pylint: disable=W0613
-        records_next: Records,  # noqa:W0613 # pylint: disable=W0613
         emit_lines: LineSink | Any,
     ) -> None:
         """Import a cache file with bounded line-protocol batches.
 
         Args:
-            record (Record): a record from the work queue config.CURRENT_QUEUE
+            record (Record): a record to import
             args (dict): config.ARGS
-            records_current (Records): config.CURRENT_QUEUE
-            records_next (Records): config.NEXT_QUEUE
-            emit_lines (LineSink | Any): line sink or legacy queue
+            emit_lines (LineSink | Any): line sink
         """
         emit_influx_cache_batches(
             WorkItem.from_record(record),
@@ -154,7 +137,7 @@ class Influx:  # noqa:H601
 
         Args:
             iterable (Iterable): cached rows
-            record (Record): a record from the work queue.
+            record (Record): a record being imported.
         """
         map_func = partial(self._parse_cache_row, record=record)
         return list(map(map_func, iterable))
@@ -167,7 +150,7 @@ class Influx:  # noqa:H601
 
         Args:
             row (Tuple[Any]): row from cached dataframe
-            record (Record): record from the work queue
+            record (Record): record being imported
 
         Returns:
             str: line-protocol (influxdb)

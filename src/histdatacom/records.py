@@ -1,9 +1,8 @@
-"""Records queue and Record work object for queue."""
+"""Record work object used by foreground, sidecar, and cache code."""
 
 import json
 import os
 from pathlib import Path
-from queue import Queue
 from typing import Any
 
 from rich import print  # pylint: disable=redefined-builtin
@@ -21,7 +20,7 @@ from histdatacom.utils import (
 
 
 class Record:  # noqa:H601
-    """A work record for the queue."""
+    """A mutable work record DTO."""
 
     def __init__(self, **kwargs: str) -> None:
         """Initialize record attributes.
@@ -101,7 +100,7 @@ class Record:  # noqa:H601
             bool: True (success) | False (failure)
         """
         self._set_record_data_dir(base_dir)
-        return restore_record_from_manifest(self, base_dir=base_dir)
+        return bool(restore_record_from_manifest(self, base_dir=base_dir))
 
     def _to_dict(self) -> dict:
         """Return dict representation of Record.
@@ -216,44 +215,3 @@ class Record:  # noqa:H601
         for arg_name, arg_value in kwargs.items():
             setattr(self, arg_name, arg_value)
         return self
-
-
-class Records(Queue):  # noqa:H601
-    """Custom Queue class for Records and SyncManager."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """Inherit and initialize from queue.Queue.
-
-        Args:
-            args (Any): for compatibility with queue.Queue
-            kwargs (Any): for compatibility with queue.Queue
-        """
-        Queue.__init__(self, *args, **kwargs)
-
-    def dump_to_queue(  # noqa:CCR001
-        self, dst_queue: Queue, count: int | None = 0
-    ) -> None:
-        """Transfer queue contents from one queue to another.
-
-        Args:
-            dst_queue (Queue): destination queue
-            count (int): Dump N number of records. Defaults to 0.
-        """
-        counter = 0
-        if count == 0:
-            count = None
-
-        while not self.empty():
-            record = self.get()
-
-            if record is None:
-                break
-
-            if count is None:
-                dst_queue.put(record)
-            elif counter < count:
-                dst_queue.put(record)
-                counter += 1
-            else:
-                self.put(record)
-                break

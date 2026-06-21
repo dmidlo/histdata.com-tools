@@ -330,7 +330,7 @@ class PendingActivityExecutor:
         *,
         task_queue: str,
     ) -> Mapping[str, Any]:
-        """Return a planned result without executing legacy queue code."""
+        """Return a planned result until Temporal activity wiring exists."""
         stage = str(payload.get("stage", activity_name))
         result = StageResult(
             work_id=str(payload.get("work_id", "")),

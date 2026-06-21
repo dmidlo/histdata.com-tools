@@ -6,9 +6,9 @@ See `docs/temporal-sidecar-operations.md` for lifecycle commands, runtime
 paths, troubleshooting, and worker startup guidance. This page is limited to
 the performance baseline and lane sizing policy.
 
-## Current Runtime Baseline
+## Retired Runtime Baseline
 
-The legacy runtime has three distinct concurrency behaviors:
+The retired manager-backed runtime had three distinct concurrency behaviors:
 
 - URL validation and archive download use thread pools sized as
   `get_pool_cpu_count(cpu_utilization) * 3`.
@@ -17,9 +17,11 @@ The legacy runtime has three distinct concurrency behaviors:
 - Influx import uses bounded line-protocol batches and writes sequentially
   through one `InfluxBatchWriter`.
 
-The sidecar keeps those lanes separate as orchestration, network, CPU/file, and
-Influx task queues. Workflow payloads stay bounded to metadata, artifacts, and
-status events; downloaded archives, CSV files, and cache data remain on disk.
+The foreground runtime now uses the same explicit work-item stage functions as
+the sidecar, and the sidecar keeps those lanes separate as orchestration,
+network, CPU/file, and Influx task queues. Workflow payloads stay bounded to
+metadata, artifacts, and status events; downloaded archives, CSV files, and
+cache data remain on disk.
 
 ## Sidecar Worker Policy
 
@@ -78,6 +80,6 @@ concurrency conservative until idempotent external write behavior is validated
 under a live Influx target. Increase CPU/file workers only when cache builds are
 CPU-bound and memory headroom remains stable.
 
-Do not remove the legacy concurrency implementation until sidecar benchmarks
-are captured across realistic validate/download/cache/import runs and compared
-against this policy.
+Future sidecar benchmarks should compare realistic validate/download/cache/import
+runs against this retired-runtime policy so regressions are visible before
+worker defaults are changed.

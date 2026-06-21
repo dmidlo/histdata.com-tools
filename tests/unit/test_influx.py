@@ -89,7 +89,7 @@ def test_influx_polars_row_batches_honor_integer_batch_size(
 def test_influx_batch_size_requires_positive_integer(
     batch_size: object,
 ) -> None:
-    """Invalid Influx batch sizes should fail before queue processing."""
+    """Invalid Influx batch sizes should fail before import processing."""
     from histdatacom.influx import _coerce_batch_size
 
     with pytest.raises(ValueError, match="positive integer"):
@@ -102,7 +102,7 @@ def test_import_cache_batches_polars_rows_into_influx_sink(
     """Import batching should submit bounded row groups to a sink."""
     from histdatacom.influx import Influx
 
-    class FakeQueue:
+    class FakeSink:
         def __init__(self) -> None:
             self.items: list[list[str]] = []
 
@@ -115,7 +115,7 @@ def test_import_cache_batches_polars_rows_into_influx_sink(
         "DAT_ASCII_EURUSD_M1_201202.csv",
     )
     assert frame.height == 3
-    queue = FakeQueue()
+    sink = FakeSink()
     record = SimpleNamespace(
         data_dir=str(tmp_path) + "/",
         cache_filename=CACHE_FILENAME,
@@ -128,19 +128,17 @@ def test_import_cache_batches_polars_rows_into_influx_sink(
     Influx()._import_cache(
         record,
         args,
-        SimpleNamespace(),
-        SimpleNamespace(),
-        queue,  # type: ignore[arg-type]
+        sink,  # type: ignore[arg-type]
     )
 
-    assert [len(item) for item in queue.items] == [2, 1]
-    assert queue.items[0][0] == EXPECTED_M1_LINE
+    assert [len(item) for item in sink.items] == [2, 1]
+    assert sink.items[0][0] == EXPECTED_M1_LINE
 
 
 def test_influx_batch_writer_writes_direct_synchronous_batches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The direct writer should not require process or Rx queue plumbing."""
+    """The direct writer should not require process plumbing."""
     import histdatacom.influx as influx_module
 
     class FakePrecision:
