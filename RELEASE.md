@@ -86,6 +86,23 @@ supported platform and fail explicitly when a Temporal executable is requested
 from a wheel that does not bundle one. The smoke checks intentionally do not
 start Temporal until platform wheels include sidecar binaries.
 
+Sidecar runtime documentation must be reviewed for every release that changes
+sidecar CLI flags, runtime paths, worker queues, package resources, or bundled
+executable behavior:
+
+- `README.md` for the user-facing sidecar compatibility summary.
+- `docs/temporal-sidecar-operations.md` for lifecycle commands, state layout,
+  logs, SQLite persistence, troubleshooting, cancellation/resume behavior, and
+  GUI-oriented job control.
+- `docs/temporal-workflow-topology.md` for workflow, activity, task queue, and
+  testing boundaries.
+- `docs/temporal-sidecar-performance.md` for lane sizing and benchmark policy.
+
+Release notes should clearly state whether the published wheel is still
+metadata-only or includes a bundled Temporal executable for each supported
+platform. They should also call out the `histdatacom[temporal]` extra whenever
+sidecar client or worker dependency behavior changes.
+
 Package metadata is declared in `pyproject.toml`. Local release environments
 must use `setuptools>=77` so the built artifacts include current SPDX license
 metadata.

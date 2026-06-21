@@ -23,6 +23,10 @@ A Multi-threaded/Multi-Process command-line utility and python ETL package that 
   - [Import to InfluxDB](#import-to-influxdb)
     - [influxdb.yaml](#influxdbyaml)
   - [Temporal Sidecar Compatibility](#temporal-sidecar-compatibility)
+    - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
+    - [Lifecycle and Diagnostics](#lifecycle-and-diagnostics)
+    - [Sidecar Jobs and Automation](#sidecar-jobs-and-automation)
+    - [Sidecar Troubleshooting and Contributor Docs](#sidecar-troubleshooting-and-contributor-docs)
   - [API - Other Scripts, Modules, & Jupyter Support](#api-other-scripts-modules-jupyter-support)
     - [CLI Automation](#cli-automation)
     - [Jupyter and External Scripts](#jupyter-and-external-scripts)
@@ -305,7 +309,68 @@ curl "https://raw.githubusercontent.com/dmidlo/histdata.com-tools/main/influxdb.
 
 ### Temporal Sidecar Compatibility
 
-The legacy CLI and API examples remain the default foreground behavior. During the Temporal sidecar cutover, add `--sidecar` on the CLI or set `options.use_sidecar = True` to submit the same request to the local sidecar runtime.
+The legacy CLI and API examples remain the default foreground behavior. During
+the Temporal sidecar cutover, add `--sidecar` on the CLI or set
+`options.use_sidecar = True` to submit the same request to the local sidecar
+runtime.
+
+#### Runtime Model and Install Surface
+
+Install the Temporal dependency surface when using sidecar-backed jobs,
+workers, or job inspection:
+
+```sh
+pip install "histdatacom[temporal]"
+```
+
+The sidecar stores Temporal process state, SQLite history, logs, and runtime
+manifests under a per-user, per-workspace runtime directory. Downloaded ZIP
+files, extracted CSV/XLSX files, cache IPC files, and merged API artifacts stay
+under the existing HistData data-directory policy.
+
+The current package artifacts include sidecar metadata and CLI entry points.
+Temporal server executables are still metadata-only until platform wheels
+bundle them, so development and operator smoke tests should pass
+`--executable /path/to/temporal` when starting the sidecar.
+
+#### Lifecycle and Diagnostics
+
+Use the lifecycle CLI to inspect and manage the local sidecar:
+
+```sh
+histdatacom-sidecar doctor --json
+histdatacom-sidecar status --json
+histdatacom-sidecar start --executable /path/to/temporal
+histdatacom-sidecar stop
+```
+
+`histdatacom sidecar ...` is also routed through the top-level command. Use
+`--workspace` or `HISTDATACOM_SIDECAR_WORKSPACE` for cron, service managers,
+GUI launchers, and other contexts where the current working directory may not
+be stable.
+
+#### Sidecar Jobs and Automation
+
+Submit a foreground-equivalent job through the sidecar:
+
+```sh
+histdatacom --sidecar --sidecar-start -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+```
+
+Submit without waiting for completion:
+
+```sh
+histdatacom --sidecar --sidecar-start --sidecar-submit-only -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+```
+
+The JSON control surface supports job inspection and future GUI polling:
+
+```sh
+histdatacom-sidecar jobs list --json
+histdatacom-sidecar jobs progress histdatacom-<request-id> --json
+histdatacom-sidecar jobs artifacts histdatacom-<request-id> --json
+histdatacom-sidecar jobs cancel histdatacom-<request-id> --reason "operator stop"
+```
 
 - `histdatacom --version` stays local and does not require the sidecar.
 - `-A`, `-U`, `-V`, `-D`, `-X`, and `-I` keep their existing option semantics before a sidecar request is submitted.
@@ -313,6 +378,28 @@ The legacy CLI and API examples remain the default foreground behavior. During t
 - `--sidecar-submit-only` submits a job and returns job metadata instead of waiting for cache artifacts or workflow results.
 - API calls with `options.api_return_type` and `options.use_sidecar = True` return the requested `polars`, `pandas`, or `arrow` object after a completed sidecar job by materializing cache artifacts on disk.
 - If the sidecar is unavailable, CLI calls exit nonzero with a clear error and API calls raise `SidecarUnavailableError`.
+
+Sidecar-backed API calls use the same public `Options` object:
+
+```python
+options.use_sidecar = True
+options.sidecar_start = True
+options.sidecar_wait_result = True
+options.api_return_type = "polars"
+```
+
+Set `options.sidecar_wait_result = False` to submit a job and receive sidecar
+job metadata instead of a materialized API return object.
+
+#### Sidecar Troubleshooting and Contributor Docs
+
+See [Temporal Sidecar Operations](docs/temporal-sidecar-operations.md) for the
+runtime path layout, port policy, lifecycle commands, job controls,
+cancellation/resume behavior, and troubleshooting guidance. See
+[Temporal Workflow Topology](docs/temporal-workflow-topology.md) for workflow,
+activity, task queue, and testing boundaries. See
+[Temporal Sidecar Performance Baseline](docs/temporal-sidecar-performance.md)
+for lane sizing and benchmark policy.
 
 ---
 
@@ -361,6 +448,12 @@ options.start_yearmonth = "2021-04"
 options.end_yearmonth = "now"
 options.cpu_utilization = 100
 ```
+
+- To submit the same automation request to the sidecar, also set
+  `options.use_sidecar = True`. Use `options.sidecar_start = True` when the
+  automation should start a missing sidecar, and set
+  `options.sidecar_wait_result = False` when the caller only needs job
+  metadata.
 
 - when a behavior flag is included, `histdatacom` assumes it is being used for `CLI` automation **exclusively** and does **not** provide a return value.
 
@@ -635,6 +728,7 @@ InfluxDB import and notebook support are optional:
 ```sh
 pip install "histdatacom[influx]"
 pip install "histdatacom[jupyter]"
+pip install "histdatacom[temporal]"
 pip install "histdatacom[all]"
 ```
 

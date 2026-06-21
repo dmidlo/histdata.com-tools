@@ -1,5 +1,8 @@
 # Temporal Sidecar Runtime Policy
 
+This low-level policy is summarized for users and operators in
+`docs/temporal-sidecar-operations.md`.
+
 HistDataCom runs the Temporal developer server as a local sidecar. Runtime
 state is intentionally separate from HistData download and cache data.
 

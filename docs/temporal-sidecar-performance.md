@@ -2,6 +2,10 @@
 
 Issue: #166
 
+See `docs/temporal-sidecar-operations.md` for lifecycle commands, runtime
+paths, troubleshooting, and worker startup guidance. This page is limited to
+the performance baseline and lane sizing policy.
+
 ## Current Runtime Baseline
 
 The legacy runtime has three distinct concurrency behaviors:
@@ -37,6 +41,12 @@ lane policy from the existing `cpu_utilization` setting:
 
 The explicit `--max-concurrent-activities` flag overrides only the selected
 lane, so operators can tune a hot lane without changing the package.
+
+Inspect resolved worker settings with:
+
+```sh
+histdatacom-sidecar-worker config --lane network --json
+```
 
 ## Benchmark Coverage
 

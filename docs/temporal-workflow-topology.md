@@ -1,8 +1,11 @@
 # Temporal Workflow Topology
 
-Issue #150 establishes the Temporal workflow hierarchy without extracting the
-legacy queue-bound activities yet. The first runnable boundary is the parent
-`HistDataRunWorkflow`, which represents one user-visible CLI/API/GUI job.
+The Temporal topology is intentionally coarse-grained. Workflows carry request
+metadata, partition IDs, status events, and artifact references. Downloaded
+archives, extracted files, cache data, dataframes, and rows stay on disk.
+
+The parent runnable boundary is `HistDataRunWorkflow`, which represents one
+user-visible CLI/API/GUI job.
 
 ## Hierarchy
 
@@ -27,6 +30,42 @@ status events, and artifact references. Downloaded archives, CSVs, cache files,
 dataframes, and rows stay on disk and must be referenced through
 `ArtifactRef`/`StageResult` payloads.
 
+## Activities
+
+Leaf workflows call Temporal activities through `TemporalActivityExecutor`.
+The default activities are:
+
+- `repository_refresh`
+- `dataset_plan`
+- `validate_urls`
+- `download_archives`
+- `extract_csv`
+- `build_cache`
+- `merge_cache`
+- `import_to_influx`
+
+The activity functions delegate to queue-free stage helpers and return
+`StageResult`, `ArtifactRef`, progress metadata, cancellation metadata, and
+bounded operation summaries. They do not return rows, raw archive bytes, or
+materialized dataframes through Temporal history.
+
+## Task Queues
+
+Task queues are workspace-scoped and derived from the runtime policy:
+
+`histdatacom.<workspace-id>.<lane>`
+
+Known lanes:
+
+- `orchestration`
+- `network`
+- `cpu-file`
+- `influx`
+
+`histdatacom-sidecar-worker config --json` exposes the resolved namespace,
+target host, task queues, lane, and worker concurrency. See
+`docs/temporal-sidecar-performance.md` for the current lane sizing policy.
+
 ## Status Queries
 
 Parent and child workflow classes expose a `status` query. The query returns a
@@ -35,10 +74,17 @@ planned children, completed children, status events, and artifact references.
 This is the contract that later CLI and GUI surfaces can poll without importing
 activity implementation modules.
 
-## Current Activity Boundary
+## Control Surface
 
-Issue #151 owns extraction of queue-free activity implementations. Until then,
-leaf workflows use a pending activity executor by default and tests inject fake
-activity executors. This keeps the workflow composition testable without
-reaching into `QueueManager`, `config.CURRENT_QUEUE`, `Records`, or the legacy
-progress rendering code.
+`histdatacom-sidecar jobs inspect`, `progress`, `logs`, `artifacts`, `result`,
+`cancel`, `retry`, and `resume` use the same bounded status and artifact
+contracts. Workflow IDs use the format `histdatacom-<request-id>`.
+
+## Testing Strategy
+
+Workflow tests should exercise composition, metadata shape, status queries,
+task queue routing, fake child execution, and fake activity execution without a
+live Temporal server. Activity tests should use fixture HTML, CSV, cache, and
+fake Influx sinks where possible. Live Temporal and live Influx checks belong
+in explicit smoke tests because they require operator-provided services or
+executables.
