@@ -6,8 +6,17 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
-      publish_to_pypi:
-        description: "Publish the built distribution to PyPI using Trusted Publishing"
+      release_target:
+        description: "Build only, publish to TestPyPI, or publish to PyPI"
+        required: true
+        default: build-only
+        type: choice
+        options:
+          - build-only
+          - testpypi
+          - pypi
+      testpypi_dry_run_confirmed:
+        description: "Required for PyPI: confirm this version passed TestPyPI first"
         required: true
         default: false
         type: boolean
@@ -23,6 +32,10 @@ jobs:
   build:
     name: Build release artifacts
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - name: Check out source
@@ -45,6 +58,11 @@ jobs:
       - name: Check package artifacts
         run: python -m twine check dist/*
 
+      - name: Generate artifact provenance attestation
+        uses: actions/attest@v4.1.0
+        with:
+          subject-path: dist/*
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
@@ -52,14 +70,14 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  publish-pypi:
-    name: Publish to PyPI
+  publish-testpypi:
+    name: Publish to TestPyPI
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_to_pypi
+    if: github.event_name == 'workflow_dispatch' && inputs.release_target == 'testpypi'
     environment:
-      name: pypi
-      url: https://pypi.org/p/histdatacom
+      name: testpypi
+      url: https://test.pypi.org/p/histdatacom
     permissions:
       contents: read
       id-token: write
@@ -71,5 +89,39 @@ jobs:
           name: histdatacom-dist
           path: dist
 
-      - name: Publish package distributions
+      - name: Publish package distributions to TestPyPI
         uses: pypa/gh-action-pypi-publish@v1.14.0
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          print-hash: true
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.release_target == 'pypi'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/histdatacom
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Require TestPyPI dry-run confirmation
+        if: ${{ inputs.testpypi_dry_run_confirmed != true }}
+        run: |
+          echo "Set testpypi_dry_run_confirmed=true only after this version passes TestPyPI."
+          exit 1
+        shell: bash
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: histdatacom-dist
+          path: dist
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.14.0
+        with:
+          print-hash: true
