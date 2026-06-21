@@ -15,4 +15,3 @@ extend-ignore =
     I005,
     S101
 radon-max-cc = 10
-    

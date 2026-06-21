@@ -6,7 +6,7 @@ command_line = venv/bin/pytest
 relative_files = True
 
 [report]
-exclude_lines = 
+exclude_lines =
     pragma: no cover
     if TYPE_CHECKING:
     if __name__ == "__main__":
