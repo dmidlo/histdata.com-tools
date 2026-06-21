@@ -127,6 +127,7 @@ def test_run_temporal_worker_accepts_fake_temporal_classes(
         "extract_csv_activity",
         "build_cache_activity",
         "merge_cache_activity",
+        "import_to_influx_activity",
     }
 
 
@@ -156,6 +157,7 @@ def test_default_activities_include_repository_refresh() -> None:
         "extract_csv_activity",
         "build_cache_activity",
         "merge_cache_activity",
+        "import_to_influx_activity",
     ]
 
 

@@ -96,39 +96,11 @@ def test_influx_batch_size_requires_positive_integer(
         _coerce_batch_size(batch_size)
 
 
-def test_import_cache_batches_polars_rows_into_influx_queue(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_import_cache_batches_polars_rows_into_influx_sink(
+    tmp_path: Path,
 ) -> None:
-    """Import batching should submit bounded row groups to the queue flow."""
+    """Import batching should submit bounded row groups to a sink."""
     from histdatacom.influx import Influx
-    import histdatacom.influx as influx_module
-
-    class FakeFuture:
-        def result(self) -> None:
-            return None
-
-    class FakeExecutor:
-        def __init__(
-            self,
-            max_workers: int,
-            initializer: object,
-            initargs: tuple[object, ...],
-        ) -> None:
-            assert max_workers == 1
-            initializer(*initargs)  # type: ignore[operator]
-
-        def __enter__(self) -> "FakeExecutor":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            return None
-
-        def submit(
-            self, func: object, rows: list[tuple[object, ...]], record: object
-        ) -> FakeFuture:
-            submitted_batch_sizes.append(len(rows))
-            func(rows, record)  # type: ignore[operator]
-            return FakeFuture()
 
     class FakeQueue:
         def __init__(self) -> None:
@@ -152,12 +124,6 @@ def test_import_cache_batches_polars_rows_into_influx_queue(
         data_timeframe="M1",
     )
     args = {"batch_size": "2"}
-    submitted_batch_sizes: list[int] = []
-    monkeypatch.setattr(
-        influx_module,
-        "ProcessPoolExecutor",
-        FakeExecutor,
-    )
 
     Influx()._import_cache(
         record,
@@ -167,6 +133,78 @@ def test_import_cache_batches_polars_rows_into_influx_queue(
         queue,  # type: ignore[arg-type]
     )
 
-    assert submitted_batch_sizes == [2, 1]
     assert [len(item) for item in queue.items] == [2, 1]
     assert queue.items[0][0] == EXPECTED_M1_LINE
+
+
+def test_influx_batch_writer_writes_direct_synchronous_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The direct writer should not require process or Rx queue plumbing."""
+    import histdatacom.influx as influx_module
+
+    class FakePrecision:
+        MS = "ms"
+
+    class FakeWriteApi:
+        def __init__(self) -> None:
+            self.writes: list[dict[str, object]] = []
+            self.closed = False
+
+        def write(self, **kwargs: object) -> None:
+            self.writes.append(kwargs)
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeClient:
+        instances: list["FakeClient"] = []
+
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+            self.write_api_instance = FakeWriteApi()
+            self.write_options: object = None
+            self.closed = False
+            self.instances.append(self)
+
+        def write_api(self, *, write_options: object) -> FakeWriteApi:
+            self.write_options = write_options
+            return self.write_api_instance
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(
+        influx_module,
+        "_load_influx_client_api",
+        lambda: (FakeClient, FakePrecision, "sync-options"),
+    )
+
+    with influx_module.InfluxBatchWriter(
+        {
+            "INFLUX_ORG": "org",
+            "INFLUX_BUCKET": "bucket",
+            "INFLUX_URL": "http://localhost:8086",
+            "INFLUX_TOKEN": "token",
+        }
+    ) as writer:
+        writer.write_lines(["line-1", "line-2"])
+
+    [client] = FakeClient.instances
+    assert client.kwargs == {
+        "url": "http://localhost:8086",
+        "token": "token",
+        "org": "org",
+        "debug": False,
+    }
+    assert client.write_options == "sync-options"
+    assert client.write_api_instance.writes == [
+        {
+            "org": "org",
+            "bucket": "bucket",
+            "record": ["line-1", "line-2"],
+            "write_precision": "ms",
+        }
+    ]
+    assert client.write_api_instance.closed
+    assert client.closed

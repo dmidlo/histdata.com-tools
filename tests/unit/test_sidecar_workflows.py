@@ -360,6 +360,40 @@ def test_merge_cache_workflow_uses_activity_executor() -> None:
     assert workflow.status()["completed_children"] == 1
 
 
+def test_import_workflow_uses_activity_executor() -> None:
+    """The Influx import leaf workflow should execute its activity."""
+    activity_executor = _RecordingActivityExecutor()
+    workflow = workflows.ImportWorkflow(activity_executor=activity_executor)
+    request = _request(
+        validate_urls=False,
+        download_data_archives=False,
+        extract_csvs=False,
+        api_return_type="",
+        import_to_influxdb=True,
+    )
+    invocation = workflows.build_symbol_child_invocations(
+        request,
+        {"pair": "EURUSD", "timeframe": "M1"},
+    )[0]
+
+    summary = asyncio.run(workflow.run(invocation.payload))
+
+    assert activity_executor.calls == [
+        {
+            "activity_name": "import_to_influx",
+            "payload": {
+                **invocation.payload,
+                "activity": "import_to_influx",
+                "stage": "import_to_influx",
+                "task_queue": "queue-influx",
+            },
+            "task_queue": "queue-influx",
+        }
+    ]
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert workflow.status()["completed_children"] == 1
+
+
 def test_dataset_plan_workflow_uses_activity_executor() -> None:
     """Dataset planning should run through the activity executor seam."""
     activity_executor = _RecordingActivityExecutor()

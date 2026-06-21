@@ -17,7 +17,7 @@ from concurrent.futures import (
 )
 from functools import partial
 from math import ceil
-from multiprocessing import Queue, cpu_count, managers
+from multiprocessing import cpu_count, managers
 from typing import TYPE_CHECKING, Callable, Optional, Type
 
 from rich.progress import (
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from pyarrow import Table
 
     from histdatacom.histdata_com import _HistDataCom
-    from histdatacom.influx import InfluxDBWriter
+    from histdatacom.influx import InfluxBatchWriter
     from histdatacom.options import Options
 
 
@@ -165,17 +165,14 @@ class ProcessPool:
         self,
         records_current: Optional[Records],
         records_next: Optional[Records],
-        influx_chunks_queue: Optional[Queue] = None,
-        writer: InfluxDBWriter | None = None,
+        writer: InfluxBatchWriter | None = None,
     ) -> None:
         """Execute Process pool with rich.Progress bar.
 
         Args:
             records_current (Optional[Records]): _description_
             records_next (Optional[Records]): _description_
-            influx_chunks_queue (Optional[Queue], optional):
-                                    used for RxPY queue. Defaults to None.
-            writer (InfluxDBWriter | None): influxdb writer process.
+            writer (InfluxBatchWriter | None): InfluxDB batch writer.
         """
         if records_current is None or records_next is None:
             raise ValueError("records_current and records_next are required")
@@ -205,7 +202,6 @@ class ProcessPool:
                         records_current,
                         records_next,
                         self.args.copy(),
-                        influx_chunks_queue,
                     ),
                 ) as executor:
                     futures = []
@@ -216,23 +212,13 @@ class ProcessPool:
                         if record is None:
                             return
 
-                        if influx_chunks_queue is None:
-                            future = executor.submit(
-                                self.exec_func,
-                                record,
-                                self.args,
-                                records_current,
-                                records_next,
-                            )
-                        else:
-                            future = executor.submit(
-                                self.exec_func,
-                                record,
-                                self.args,
-                                records_current,
-                                records_next,
-                                influx_chunks_queue,
-                            )
+                        future = executor.submit(
+                            self.exec_func,
+                            record,
+                            self.args,
+                            records_current,
+                            records_next,
+                        )
 
                         progress.advance(task_id, 0.25)
                         futures.append(future)
@@ -331,8 +317,6 @@ class QueueManager:
 
         config.CURRENT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore
         config.NEXT_QUEUE = config.QUEUE_MANAGER.Records()  # type: ignore
-        config.INFLUX_CHUNKS_QUEUE = config.QUEUE_MANAGER.Queue()  # type: ignore
-
         histdatacom_runner = runner_(self.options)
 
         if self.options.from_api:
@@ -346,7 +330,6 @@ def _init_counters(
     records_current_: Records,
     records_next_: Records,
     args_: dict,
-    influx_chunks_queue_: Queue | None = None,
 ) -> None:
     """Initialize pool with access to these global variables.
 
@@ -354,14 +337,9 @@ def _init_counters(
         records_current_ (Records): config.CURRENT_QUEUE
         records_next_ (Records): config.NEXT_QUEUE
         args_ (dict): config.ARGS
-        influx_chunks_queue_ (Queue | None, optional): config.INFLUX_CHUNKS_QUEUE
     """
     # pylint: disable=global-variable-undefined
     args = args_  # noqa:F841
-
-    if influx_chunks_queue_ is not None:
-        global INFLUX_CHUNKS_QUEUE  # noqa:WPS100
-        INFLUX_CHUNKS_QUEUE = influx_chunks_queue_  # type: ignore
 
 
 def _complete_future(
@@ -387,7 +365,7 @@ def _on_keyboard_interrupt(
     executor: ThreadPoolExecutor | ProcessPoolExecutor,  # noqa:BLK100
     progress: Progress,
     exc_info: KeyboardInterrupt,
-    writer: InfluxDBWriter | None = None,
+    writer: InfluxBatchWriter | None = None,
 ) -> None:
     """Exit Handler for user exit during concurrency.
 
@@ -396,8 +374,8 @@ def _on_keyboard_interrupt(
             current pool executor
         progress (Progress): active rich.Progress bar to terminate.
         exc_info (KeyboardInterrupt): Keyboard Interrupt err info
-        writer (InfluxDBWriter | None, optional):
-            InfluxDBWriter. Defaults to None.
+        writer (InfluxBatchWriter | None, optional):
+            InfluxDB batch writer. Defaults to None.
 
     Raises:
         SystemExit: User Exit.

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
 from typing import Any, Callable, Mapping, TypeVar, cast
 
 from histdatacom.activity_stages import (
+    ActivityStageOutput,
     build_cache_work_item,
     dataset_plan_stage,
     download_archive_work_item,
     extract_csv_work_item,
+    import_to_influx_work_item,
     merge_cache_work_items,
     repository_refresh_stage,
     validate_url_work_item,
@@ -20,6 +23,7 @@ from histdatacom.runtime_contracts import (
     JSONValue,
     RunRequest,
     StageResult,
+    StatusEvent,
     WorkItem,
     WorkStatus,
 )
@@ -258,6 +262,51 @@ def merge_cache_activity(
     return output.to_dict()
 
 
+@activity_defn(name="import_to_influx")
+def import_to_influx_activity(
+    payload: dict[str, JSONValue],
+) -> dict[str, Any]:
+    """Upload cache batches to InfluxDB without queue-backed writers."""
+    request = RunRequest.from_dict(_mapping(payload.get("request", {})))
+    work_items = _work_items_from_payload(payload)
+    if not work_items:
+        return cast(
+            dict[str, Any],
+            _missing_work_item_result(payload, "import_to_influx").to_dict(),
+        )
+
+    args = _influx_args(request)
+    try:
+        with _influx_batch_writer(args) as writer:
+            outputs = tuple(
+                _import_to_influx_with_writer(
+                    work_item,
+                    args=args,
+                    writer=writer,
+                )
+                for work_item in work_items
+            )
+    except (Exception, SystemExit) as err:
+        outputs = tuple(
+            _influx_failure_output(work_item, err) for work_item in work_items
+        )
+
+    if len(outputs) == 1:
+        return outputs[0].to_dict()
+
+    return cast(
+        dict[str, Any],
+        {
+            "work_items": [output.work_item.to_dict() for output in outputs],
+            "stage_results": [output.result.to_dict() for output in outputs],
+            "result": _aggregate_activity_outputs(
+                outputs,
+                "import_to_influx",
+            ).to_dict(),
+        },
+    )
+
+
 def default_activities() -> tuple[Callable[..., Any], ...]:
     """Return default sidecar activities for worker registration."""
     return (
@@ -268,12 +317,152 @@ def default_activities() -> tuple[Callable[..., Any], ...]:
         extract_csv_activity,
         build_cache_activity,
         merge_cache_activity,
+        import_to_influx_activity,
     )
 
 
 def _repo_local_path(request: RunRequest) -> Path:
     data_dir = Path(set_working_data_dir(request.data_directory))
     return data_dir / ".repo"
+
+
+def _influx_args(request: RunRequest) -> dict[str, Any]:
+    return {
+        "default_download_dir": set_working_data_dir(request.data_directory),
+        "batch_size": request.batch_size,
+        "delete_after_influx": request.delete_after_influx,
+    }
+
+
+def _influx_batch_writer(args: Mapping[str, Any]) -> Any:
+    from histdatacom.influx import InfluxBatchWriter
+
+    return InfluxBatchWriter(dict(args))
+
+
+def _import_to_influx_with_writer(
+    work_item: WorkItem,
+    *,
+    args: Mapping[str, Any],
+    writer: Any,
+) -> ActivityStageOutput:
+    batch_events: list[StatusEvent] = []
+    batch_index = 0
+
+    def emit_lines(lines: list[str]) -> None:
+        nonlocal batch_index
+        writer.write_lines(lines)
+        batch_index += 1
+        metadata: dict[str, JSONValue] = {
+            "batch_index": batch_index,
+            "line_count": len(lines),
+            "cache_path": str(
+                Path(work_item.data_dir, work_item.cache_filename)
+            ),
+        }
+        _activity_heartbeat(metadata)
+        batch_events.append(
+            StatusEvent(
+                status=WorkStatus.INFLUX_UPLOAD,
+                stage="import_to_influx",
+                message="Uploaded InfluxDB line-protocol batch.",
+                work_id=work_item.work_id,
+                metadata=metadata,
+            )
+        )
+
+    try:
+        output = import_to_influx_work_item(
+            work_item,
+            args=args,
+            emit_lines=emit_lines,
+        )
+    except (Exception, SystemExit) as err:
+        return _influx_failure_output(work_item, err)
+
+    metrics = dict(output.result.metrics)
+    metrics["heartbeat_count"] = len(batch_events)
+    metrics["idempotency_key"] = (
+        f"{work_item.cache_filename}:"
+        f"{work_item.cache_start}:"
+        f"{work_item.cache_end}:"
+        f"{args.get('batch_size', '')}"
+    )
+    result = replace(
+        output.result,
+        events=(*output.result.events, *batch_events),
+        metrics=metrics,
+    )
+    return ActivityStageOutput(
+        work_item=output.work_item,
+        result=result,
+        forward=output.forward,
+    )
+
+
+def _activity_heartbeat(metadata: Mapping[str, JSONValue]) -> None:
+    heartbeat = getattr(activity, "heartbeat", None)
+    if callable(heartbeat):
+        heartbeat(dict(metadata))
+
+
+def _influx_failure_output(
+    work_item: WorkItem,
+    err: Exception | SystemExit,
+) -> ActivityStageOutput:
+    result = StageResult(
+        work_id=work_item.work_id,
+        stage="import_to_influx",
+        status=(
+            WorkStatus.RETRIED
+            if isinstance(err, OSError)
+            else WorkStatus.FAILED
+        ),
+        failure=_influx_failure_info(err),
+        metrics={"forward": False, "retryable": isinstance(err, OSError)},
+    )
+    return ActivityStageOutput(
+        work_item=work_item.with_status(result.status),
+        result=result,
+        forward=False,
+    )
+
+
+def _influx_failure_info(err: Exception | SystemExit) -> FailureInfo:
+    message = str(err)
+    if isinstance(err, OSError):
+        return FailureInfo(
+            code="INFLUX_IMPORT_RETRYABLE",
+            message=message,
+            retryable=True,
+            detail={"idempotent_retry": True},
+        )
+    if (
+        "histdatacom[influx]" in message
+        or "InfluxDB import not installed" in message
+    ):
+        return FailureInfo(
+            code="INFLUX_OPTIONAL_DEPENDENCY_MISSING",
+            message=message,
+            retryable=False,
+        )
+    if isinstance(err, (ModuleNotFoundError, ImportError)):
+        return FailureInfo(
+            code="INFLUX_OPTIONAL_DEPENDENCY_MISSING",
+            message=message,
+            retryable=False,
+        )
+    if isinstance(err, SystemExit):
+        return FailureInfo(
+            code="INFLUX_IMPORT_PRECONDITION_FAILED",
+            message=message,
+            retryable=False,
+        )
+    return FailureInfo(
+        code="INFLUX_IMPORT_FAILED",
+        message=message,
+        retryable=False,
+    )
 
 
 def _mapping(value: Any) -> dict[str, Any]:

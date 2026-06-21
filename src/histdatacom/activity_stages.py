@@ -1533,6 +1533,10 @@ def import_to_influx_work_item(
                     args=args,
                     emit_lines=emit_lines,
                 )
+            else:
+                raise FileNotFoundError(
+                    "Influx import requires a local Polars cache artifact."
+                )
 
         record.status = WorkStatus.INFLUX_UPLOAD.value
         record.write_memento_file(base_dir=_default_download_dir(args))

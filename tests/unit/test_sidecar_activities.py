@@ -21,6 +21,7 @@ from histdatacom.sidecar.activities import (
     default_activities,
     download_archives_activity,
     extract_csv_activity,
+    import_to_influx_activity,
     merge_cache_activity,
     repository_refresh_activity,
     validate_urls_activity,
@@ -28,6 +29,39 @@ from histdatacom.sidecar.activities import (
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
 EXPECTED_M1_DATETIMES = [1328072400000, 1328072460000, 1328072520000]
+EXPECTED_M1_LINE = (
+    "eurusd,source=histdata.com,format=ascii,timeframe=M1 "
+    "openbid=1.3066,highbid=1.3066,lowbid=1.30656,closebid=1.30656 "
+    "1328072400000"
+)
+EXPECTED_TICK_LINE = (
+    "eurusd,source=histdata.com,format=ascii,timeframe=T "
+    "bidquote=1.3066,askquote=1.30677 1328072403660"
+)
+
+
+class FakeInfluxWriter:
+    """Context-managed Influx writer test double."""
+
+    instances: list["FakeInfluxWriter"] = []
+    fail_with: Exception | None = None
+
+    def __init__(self, args: dict) -> None:
+        self.args = dict(args)
+        self.batches: list[list[str]] = []
+        self.closed = False
+        self.instances.append(self)
+
+    def __enter__(self) -> "FakeInfluxWriter":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.closed = True
+
+    def write_lines(self, lines: list[str]) -> None:
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.batches.append(list(lines))
 
 
 def _form_html(*, token: str = "token") -> str:
@@ -186,6 +220,48 @@ def _merge_payload(tmp_path) -> dict:
                 "data_fxpair": "eurusd",
             },
         ],
+    }
+
+
+def _influx_payload(
+    tmp_path,
+    *,
+    timeframe: str = "M1",
+    batch_size: str = "2",
+    delete_after_influx: bool = False,
+) -> dict:
+    """Return an Influx activity payload with a cache artifact."""
+    filename = f"DAT_ASCII_EURUSD_{timeframe}_201202.csv"
+    source = convert_polars_datetime_to_utc_ms(
+        read_ascii_file_to_polars(FIXTURES / filename, timeframe),
+        timeframe,
+    )
+    write_polars_cache(source, tmp_path / CACHE_FILENAME)
+    zip_filename = f"DAT_ASCII_EURUSD_{timeframe}_201202.zip"
+    if delete_after_influx:
+        (tmp_path / zip_filename).write_bytes(_zip_bytes())
+    request = RunRequest(
+        request_id=f"run-influx-{timeframe}",
+        data_directory=str(tmp_path),
+        batch_size=batch_size,
+        import_to_influxdb=True,
+        delete_after_influx=delete_after_influx,
+    )
+    return {
+        "request": request.to_dict(),
+        "work_item": {
+            "work_id": f"work-influx-{timeframe}",
+            "status": WorkStatus.CACHE_READY.value,
+            "data_dir": f"{tmp_path}/",
+            "cache_filename": CACHE_FILENAME,
+            "cache_line_count": "3",
+            "cache_start": str(EXPECTED_M1_DATETIMES[0]),
+            "cache_end": str(EXPECTED_M1_DATETIMES[-1]),
+            "zip_filename": zip_filename,
+            "data_format": "ascii",
+            "data_timeframe": timeframe,
+            "data_fxpair": "eurusd",
+        },
     }
 
 
@@ -396,6 +472,126 @@ def test_merge_cache_activity_returns_bounded_merge_metadata(tmp_path) -> None:
     ]
 
 
+def test_import_to_influx_activity_writes_m1_batches(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Influx activity should write bounded M1 line-protocol batches."""
+    FakeInfluxWriter.instances.clear()
+    FakeInfluxWriter.fail_with = None
+    monkeypatch.setattr(
+        "histdatacom.sidecar.activities._influx_batch_writer",
+        FakeInfluxWriter,
+    )
+
+    result = import_to_influx_activity(_influx_payload(tmp_path))
+
+    [writer] = FakeInfluxWriter.instances
+    assert writer.args["batch_size"] == "2"
+    assert [len(batch) for batch in writer.batches] == [2, 1]
+    assert writer.batches[0][0] == EXPECTED_M1_LINE
+    assert writer.closed
+    assert result["work_item"]["status"] == WorkStatus.INFLUX_UPLOAD.value
+    assert result["result"]["stage"] == "import_to_influx"
+    assert result["result"]["status"] == WorkStatus.INFLUX_UPLOAD.value
+    assert result["result"]["metrics"]["batch_count"] == 2
+    assert result["result"]["metrics"]["line_count"] == 3
+    assert result["result"]["metrics"]["heartbeat_count"] == 2
+    assert "data" not in result
+
+
+def test_import_to_influx_activity_writes_tick_batches(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Influx activity should preserve tick bid/ask line formatting."""
+    FakeInfluxWriter.instances.clear()
+    FakeInfluxWriter.fail_with = None
+    monkeypatch.setattr(
+        "histdatacom.sidecar.activities._influx_batch_writer",
+        FakeInfluxWriter,
+    )
+
+    result = import_to_influx_activity(
+        _influx_payload(tmp_path, timeframe="T", batch_size="2")
+    )
+
+    [writer] = FakeInfluxWriter.instances
+    assert [len(batch) for batch in writer.batches] == [2, 1]
+    assert writer.batches[0][0] == EXPECTED_TICK_LINE
+    assert result["result"]["metrics"]["line_count"] == 3
+
+
+def test_import_to_influx_activity_reports_retryable_write_failure(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Writer failures should be explicit and retry-aware."""
+    FakeInfluxWriter.instances.clear()
+    FakeInfluxWriter.fail_with = OSError("temporary influx failure")
+    monkeypatch.setattr(
+        "histdatacom.sidecar.activities._influx_batch_writer",
+        FakeInfluxWriter,
+    )
+
+    result = import_to_influx_activity(_influx_payload(tmp_path))
+
+    assert result["work_item"]["status"] == WorkStatus.RETRIED.value
+    assert result["result"]["status"] == WorkStatus.RETRIED.value
+    assert result["result"]["failure"]["code"] == "INFLUX_IMPORT_RETRYABLE"
+    assert result["result"]["failure"]["retryable"] is True
+    assert result["result"]["failure"]["detail"]["idempotent_retry"] is True
+    FakeInfluxWriter.fail_with = None
+
+
+def test_import_to_influx_activity_reports_optional_dependency_failure(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Missing Influx extra should remain explicit under the activity path."""
+
+    def missing_influx_writer(args: dict) -> FakeInfluxWriter:  # noqa: ARG001
+        raise SystemExit(
+            "InfluxDB import not installed. please run:\n\n  "
+            "pip install histdatacom[influx]"
+        )
+
+    monkeypatch.setattr(
+        "histdatacom.sidecar.activities._influx_batch_writer",
+        missing_influx_writer,
+    )
+
+    result = import_to_influx_activity(_influx_payload(tmp_path))
+
+    assert result["work_item"]["status"] == WorkStatus.FAILED.value
+    assert result["result"]["failure"]["code"] == (
+        "INFLUX_OPTIONAL_DEPENDENCY_MISSING"
+    )
+    assert "histdatacom[influx]" in result["result"]["failure"]["message"]
+
+
+def test_import_to_influx_activity_honors_delete_after_influx(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Successful imports should preserve existing cleanup behavior."""
+    FakeInfluxWriter.instances.clear()
+    FakeInfluxWriter.fail_with = None
+    monkeypatch.setattr(
+        "histdatacom.sidecar.activities._influx_batch_writer",
+        FakeInfluxWriter,
+    )
+    payload = _influx_payload(tmp_path, delete_after_influx=True)
+    zip_path = tmp_path / payload["work_item"]["zip_filename"]
+    cache_path = tmp_path / CACHE_FILENAME
+
+    result = import_to_influx_activity(payload)
+
+    assert result["result"]["status"] == WorkStatus.INFLUX_UPLOAD.value
+    assert not zip_path.exists()
+    assert not cache_path.exists()
+
+
 def test_default_activities_register_operation_activities() -> None:
     """The worker default activity set should include migrated activities."""
     assert default_activities() == (
@@ -406,4 +602,5 @@ def test_default_activities_register_operation_activities() -> None:
         extract_csv_activity,
         build_cache_activity,
         merge_cache_activity,
+        import_to_influx_activity,
     )

@@ -18,7 +18,6 @@ QUEUE_MANAGER: SyncManager | None = None
 
 CURRENT_QUEUE: Records | None = None
 NEXT_QUEUE: Records | None = None
-INFLUX_CHUNKS_QUEUE: None = None
 
 REQUESTS_TIMEOUT: int = 10
 
