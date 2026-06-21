@@ -110,6 +110,29 @@ def test_run_temporal_worker_accepts_fake_temporal_classes(
         {"target_host": config.target_host, "namespace": "default"}
     ]
     assert _FakeWorker.instances[0].task_queue == config.task_queue
+    assert {
+        workflow.__name__ for workflow in _FakeWorker.instances[0].workflows
+    } >= {
+        "HistDataRunWorkflow",
+        "SymbolTimeframeWorkflow",
+        "ValidateUrlsWorkflow",
+    }
+
+
+def test_default_workflows_include_topology_classes() -> None:
+    """Default worker registration should include the workflow hierarchy."""
+    assert [workflow.__name__ for workflow in worker.default_workflows()] == [
+        "HistDataRunWorkflow",
+        "RepositoryRefreshWorkflow",
+        "DatasetPlanWorkflow",
+        "SymbolTimeframeWorkflow",
+        "ValidateUrlsWorkflow",
+        "DownloadArchivesWorkflow",
+        "ExtractCsvWorkflow",
+        "BuildCacheWorkflow",
+        "MergeCacheWorkflow",
+        "ImportWorkflow",
+    ]
 
 
 def test_worker_config_cli_emits_queue_metadata(

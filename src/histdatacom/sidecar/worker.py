@@ -8,7 +8,7 @@ import json
 import sys
 from importlib import import_module
 from inspect import isawaitable
-from typing import Any, Sequence
+from typing import Any, Sequence, cast
 
 from histdatacom.sidecar.client import (
     TEMPORAL_EXTRA_HINT,
@@ -43,10 +43,13 @@ def build_temporal_worker(
     """Build a Temporal worker from centralized sidecar configuration."""
     resolved_config = config or build_sidecar_worker_config()
     temporal_worker_class = worker_class or _load_temporal_worker_class()
+    workflow_classes = (
+        list(workflows) if workflows else list(default_workflows())
+    )
     return temporal_worker_class(
         client,
         task_queue=resolved_config.task_queue,
-        workflows=list(workflows),
+        workflows=workflow_classes,
         activities=list(activities),
         **worker_options,
     )
@@ -242,6 +245,13 @@ def _load_temporal_worker_class() -> Any:
         if (err.name or "").split(".")[0] == "temporalio":
             raise TemporalDependencyError(TEMPORAL_EXTRA_HINT) from err
         raise
+
+
+def default_workflows() -> tuple[Any, ...]:
+    """Return default sidecar workflow classes without importing activities."""
+    from histdatacom.sidecar.workflows import DEFAULT_WORKFLOWS
+
+    return cast(tuple[Any, ...], DEFAULT_WORKFLOWS)
 
 
 async def _maybe_await(value: Any) -> Any:

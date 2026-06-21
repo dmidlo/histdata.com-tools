@@ -122,11 +122,16 @@ def test_submit_run_request_uses_orchestration_queue(
     assert temporal_client.started == [
         {
             "workflow": "HistDataRunWorkflow",
-            "payload": request.to_dict(),
+            "payload": client.run_request_payload(request, config),
             "id": "histdatacom-run-test",
             "task_queue": config.task_queues.orchestration,
         }
     ]
+    payload = temporal_client.started[0]["payload"]
+    assert payload["metadata"]["sidecar_task_queues"] == (
+        config.task_queues.to_dict()
+    )
+    assert payload["metadata"]["workflow_topology_version"] == 1
 
 
 def test_missing_temporal_dependency_has_optional_extra_hint(

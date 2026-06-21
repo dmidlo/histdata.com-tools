@@ -12,6 +12,11 @@ from histdatacom.sidecar.queues import (
     SidecarWorkerConfig,
     build_sidecar_worker_config,
 )
+from histdatacom.sidecar.workflow_metadata import (
+    TASK_QUEUE_METADATA_KEY,
+    TOPOLOGY_METADATA_KEY,
+    TOPOLOGY_SCHEMA_VERSION,
+)
 
 TEMPORAL_EXTRA_HINT = (
     "Temporal support requires the optional dependency surface. "
@@ -82,7 +87,7 @@ async def submit_run_request(
     handle = await _maybe_await(
         temporal_client.start_workflow(
             workflow,
-            request.to_dict(),
+            run_request_payload(request, resolved_config),
             id=workflow_id,
             task_queue=resolved_config.task_queues.orchestration,
         )
@@ -100,6 +105,19 @@ def workflow_id_for_request(request: RunRequest) -> str:
     """Return the stable Temporal workflow ID for a run request."""
     request_id = request.request_id.strip() or "request"
     return f"histdatacom-{request_id}"
+
+
+def run_request_payload(
+    request: RunRequest,
+    config: SidecarWorkerConfig,
+) -> dict[str, Any]:
+    """Return a request payload enriched with sidecar workflow metadata."""
+    payload: dict[str, Any] = request.to_dict()
+    metadata = dict(payload.get("metadata") or {})
+    metadata[TASK_QUEUE_METADATA_KEY] = config.task_queues.to_dict()
+    metadata[TOPOLOGY_METADATA_KEY] = TOPOLOGY_SCHEMA_VERSION
+    payload["metadata"] = metadata
+    return payload
 
 
 def _load_temporal_client_class() -> Any:
