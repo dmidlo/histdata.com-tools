@@ -20,7 +20,9 @@ The initial request shape starts from pair/timeframe intent. Once
 each pair/timeframe group into deterministic batches by pair, timeframe, data
 format, and ordered year-month periods. Batch partitions carry only bounded
 metadata such as `batch_key`, `batch_index`, `batch_count`, `work_item_count`,
-and a bounded `work_ids` list.
+and a bounded `work_ids` list. Independent `SymbolTimeframeWorkflow` batches
+are then started with deterministic bounded fan-out. Parent summaries still
+record child results in planned order.
 
 `SymbolTimeframeWorkflow` runs operation-family child workflows:
 
@@ -37,6 +39,10 @@ batch partition IDs, status events, and artifact references. Downloaded
 archives, CSVs, cache files, dataframes, and rows stay on disk and must be
 referenced through
 `ArtifactRef`/`StageResult` payloads.
+
+Operation-family workflows inside one `SymbolTimeframeWorkflow` remain
+sequential because validation, download, extraction, cache build, merge, and
+import depend on forwarded work-item state from the previous stage.
 
 ## Activities
 

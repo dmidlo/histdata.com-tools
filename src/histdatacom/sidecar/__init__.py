@@ -18,6 +18,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.workflows",
         "DEFAULT_MAX_WORK_ITEMS_PER_BATCH",
     ),
+    "DEFAULT_MAX_PARALLEL_CHILD_WORKFLOWS": (
+        "histdatacom.sidecar.workflows",
+        "DEFAULT_MAX_PARALLEL_CHILD_WORKFLOWS",
+    ),
     "DEFAULT_RUN_WORKFLOW_NAME": (
         "histdatacom.sidecar.client",
         "DEFAULT_RUN_WORKFLOW_NAME",
@@ -31,6 +35,14 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "DEFAULT_TEMPORAL_NAMESPACE",
     ),
     "DEFAULT_WORKFLOWS": ("histdatacom.sidecar.workflows", "DEFAULT_WORKFLOWS"),
+    "FANOUT_METADATA_KEY": (
+        "histdatacom.sidecar.workflows",
+        "FANOUT_METADATA_KEY",
+    ),
+    "MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY": (
+        "histdatacom.sidecar.workflows",
+        "MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY",
+    ),
     "MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY": (
         "histdatacom.sidecar.workflows",
         "MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY",
@@ -276,6 +288,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "max_work_items_per_batch": (
         "histdatacom.sidecar.workflows",
         "max_work_items_per_batch",
+    ),
+    "max_parallel_child_workflows": (
+        "histdatacom.sidecar.workflows",
+        "max_parallel_child_workflows",
     ),
     "merge_cache_activity": (
         "histdatacom.sidecar.activities",

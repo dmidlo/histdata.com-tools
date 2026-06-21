@@ -29,6 +29,7 @@ def test_default_throughput_matrix_covers_issue_180_operations(
     assert {
         "repository_refresh",
         "validate_urls",
+        "bounded_symbol_fanout",
         "download_archives",
         "extract_csv",
         "build_cache",
@@ -38,8 +39,23 @@ def test_default_throughput_matrix_covers_issue_180_operations(
     assert all(
         not scenario.request.import_to_influxdb for scenario in scenarios
     )
-    assert all(scenario.work_item_count == 1 for scenario in scenarios)
-    assert scenarios[-1].request.api_return_type == "polars"
+    assert all(scenario.work_item_count >= 1 for scenario in scenarios)
+    fanout = next(
+        scenario
+        for scenario in scenarios
+        if scenario.name == "multi-partition-validate-fanout"
+    )
+    cache = next(
+        scenario
+        for scenario in scenarios
+        if scenario.name == "cache-merge-no-influx"
+    )
+    assert fanout.work_item_count == 6
+    assert fanout.request.timeframes == ("T",)
+    assert fanout.request.metadata["temporal_fanout"] == {
+        "max_parallel_child_workflows": 2
+    }
+    assert cache.request.api_return_type == "polars"
 
 
 def test_throughput_report_serializes_performance_envelope(
@@ -91,6 +107,7 @@ def test_throughput_report_serializes_performance_envelope(
         payload["comparisons"][0]["sidecar_to_foreground_elapsed_ratio"] == 2.0
     )
     assert payload["accepted_envelope"]["batch_default"]
+    assert payload["accepted_envelope"]["fanout_default"]
     assert payload["concurrency_profile"]["network_workers"] >= 1
 
 

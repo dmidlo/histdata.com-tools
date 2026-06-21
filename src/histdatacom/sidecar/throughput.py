@@ -7,7 +7,7 @@ import json
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence, cast
 
 from histdatacom import config
 from histdatacom.foreground import ForegroundRun
@@ -37,10 +37,17 @@ from histdatacom.sidecar.queues import (
 )
 from histdatacom.sidecar.runtime import build_sidecar_runtime_policy
 from histdatacom.sidecar.supervisor import SidecarStatus, SidecarSupervisor
+from histdatacom.sidecar.workflows import (
+    BATCHING_METADATA_KEY,
+    FANOUT_METADATA_KEY,
+    MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY,
+    MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY,
+)
 
 LIVE_SIDECAR_THROUGHPUT_ENV = "HISTDATACOM_LIVE_SIDECAR_THROUGHPUT"
 DEFAULT_THROUGHPUT_REQUEST_PREFIX = "live-throughput"
 DEFAULT_THROUGHPUT_PERIOD = "202201"
+DEFAULT_THROUGHPUT_FANOUT_END_PERIOD = "202203"
 DEFAULT_THROUGHPUT_TIMEOUT_SECONDS = "30"
 
 SubmitObservedJob = Callable[..., Any]
@@ -182,15 +189,22 @@ def default_throughput_benchmark_matrix(
     data_directory: Path | str,
     request_id_prefix: str = DEFAULT_THROUGHPUT_REQUEST_PREFIX,
     period: str = DEFAULT_THROUGHPUT_PERIOD,
+    fanout_end_period: str = DEFAULT_THROUGHPUT_FANOUT_END_PERIOD,
     requests_timeout: str = DEFAULT_THROUGHPUT_TIMEOUT_SECONDS,
     max_work_items_per_batch: int = 1,
+    max_parallel_child_workflows: int = 2,
 ) -> tuple[ThroughputBenchmarkScenario, ...]:
-    """Return the issue-180 representative non-Influx benchmark matrix."""
+    """Return the issue-180/181 representative non-Influx benchmark matrix."""
     data_root = Path(data_directory).expanduser()
     metadata: dict[str, JSONValue] = {
         "requests_timeout": requests_timeout,
-        "temporal_batching": {
-            "max_work_items_per_batch": max_work_items_per_batch
+        BATCHING_METADATA_KEY: {
+            MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY: max_work_items_per_batch
+        },
+        FANOUT_METADATA_KEY: {
+            MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY: (
+                max_parallel_child_workflows
+            )
         },
         "benchmark_issue": 180,
     }
@@ -206,6 +220,25 @@ def default_throughput_benchmark_matrix(
             data_directory=str(data_root / name),
             zip_persist=True,
             metadata=dict(metadata),
+            **kwargs,
+        )
+
+    def fanout_request(name: str, **kwargs: Any) -> RunRequest:
+        fanout_metadata: dict[str, JSONValue] = {
+            **metadata,
+            "benchmark_issue": 181,
+            "benchmark_issues": cast(JSONValue, [180, 181]),
+        }
+        return RunRequest(
+            request_id=f"{request_id_prefix}-{name}",
+            pairs=("eurusd", "gbpusd"),
+            formats=("ascii",),
+            timeframes=("T",),
+            start_yearmonth=period,
+            end_yearmonth=fanout_end_period,
+            data_directory=str(data_root / name),
+            zip_persist=True,
+            metadata=fanout_metadata,
             **kwargs,
         )
 
@@ -226,6 +259,24 @@ def default_throughput_benchmark_matrix(
             operations=("dataset_plan", "validate_urls"),
             work_item_count=1,
             notes="One EURUSD M1 HistData archive page validation.",
+        ),
+        ThroughputBenchmarkScenario(
+            name="multi-partition-validate-fanout",
+            request=fanout_request(
+                "multi-partition-validate-fanout",
+                validate_urls=True,
+            ),
+            operations=(
+                "dataset_plan",
+                "bounded_symbol_fanout",
+                "validate_urls",
+            ),
+            work_item_count=2
+            * _yearmonth_span_count(period, fanout_end_period),
+            notes=(
+                "Two-pair, multi-month tick validation request that exercises "
+                "bounded parallel SymbolTimeframeWorkflow fan-out."
+            ),
         ),
         ThroughputBenchmarkScenario(
             name="download-extract",
@@ -269,8 +320,16 @@ def default_throughput_benchmark_matrix(
     )
 
 
+def _yearmonth_span_count(start: str, end: str) -> int:
+    start_year = int(start[:4])
+    start_month = int(start[4:])
+    end_year = int(end[:4])
+    end_month = int(end[4:])
+    return (end_year - start_year) * 12 + end_month - start_month + 1
+
+
 def accepted_performance_envelope() -> dict[str, JSONValue]:
-    """Return the documented issue-180 performance acceptance envelope."""
+    """Return the documented issue-180/181 performance acceptance envelope."""
     return {
         "lane_defaults": (
             "Keep orchestration=1, network=legacy CPU workers * 3, "
@@ -279,6 +338,15 @@ def accepted_performance_envelope() -> dict[str, JSONValue]:
         "batch_default": (
             "Keep max_work_items_per_batch=64 for production requests; "
             "the benchmark matrix uses 1 to force visible child handoff."
+        ),
+        "fanout_default": (
+            "Keep max_parallel_child_workflows=4 for production requests; "
+            "the live fan-out benchmark uses 2 to prove bounded windows."
+        ),
+        "fanout_policy": (
+            "Only independent SymbolTimeframeWorkflow period batches fan out. "
+            "Repository refresh, dataset planning, and operation-family child "
+            "workflows preserve stage order inside each partition."
         ),
         "sidecar_overhead": (
             "Live sidecar runs may be slower than foreground for single-item "

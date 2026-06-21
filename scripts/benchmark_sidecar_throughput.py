@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Sequence
 
 from histdatacom.sidecar.throughput import (
-    LIVE_SIDECAR_THROUGHPUT_ENV,
+    DEFAULT_THROUGHPUT_FANOUT_END_PERIOD,
     DEFAULT_THROUGHPUT_PERIOD,
+    LIVE_SIDECAR_THROUGHPUT_ENV,
     default_throughput_benchmark_matrix,
     run_live_sidecar_throughput_benchmark,
     write_throughput_report,
@@ -22,7 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Compare queue-free foreground runtime and live Temporal sidecar "
-            "runtime on the issue-180 non-Influx benchmark matrix."
+            "runtime on the issue-180/181 non-Influx benchmark matrix."
         )
     )
     parser.add_argument("--workspace", type=Path, required=True)
@@ -38,13 +39,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--period",
         default=DEFAULT_THROUGHPUT_PERIOD,
-        help="HistData period used for the one-period request matrix.",
+        help="HistData start period used for the request matrix.",
+    )
+    parser.add_argument(
+        "--fanout-end-period",
+        default=DEFAULT_THROUGHPUT_FANOUT_END_PERIOD,
+        help="HistData end period used for the multi-partition fan-out case.",
     )
     parser.add_argument(
         "--max-work-items-per-batch",
         type=int,
         default=1,
         help="Benchmark batch size; default forces visible child handoff.",
+    )
+    parser.add_argument(
+        "--max-parallel-child-workflows",
+        type=int,
+        default=2,
+        help="Benchmark fan-out window for independent child workflows.",
     )
     parser.add_argument(
         "--startup-timeout",
@@ -82,7 +94,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     scenarios = default_throughput_benchmark_matrix(
         data_directory=args.data_directory,
         period=args.period,
+        fanout_end_period=args.fanout_end_period,
         max_work_items_per_batch=args.max_work_items_per_batch,
+        max_parallel_child_workflows=args.max_parallel_child_workflows,
     )
     report = run_live_sidecar_throughput_benchmark(
         workspace=args.workspace,

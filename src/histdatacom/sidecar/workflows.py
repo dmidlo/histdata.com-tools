@@ -7,6 +7,7 @@ downloaded rows, dataframes, or queue payloads.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
 from importlib import import_module
@@ -19,6 +20,7 @@ from histdatacom.observability import (
 )
 from histdatacom.runtime_contracts import (
     ArtifactRef,
+    FailureInfo,
     JSONValue,
     RunRequest,
     StageResult,
@@ -271,6 +273,15 @@ class WorkflowProgress:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedChildInvocation:
+    """A child workflow call prepared for deterministic execution."""
+
+    invocation: WorkflowInvocation
+    payload: dict[str, JSONValue] | None = None
+    skipped_result: StageResult | None = None
+
+
 class ChildWorkflowExecutor(Protocol):
     """Execute one child workflow from a parent workflow."""
 
@@ -461,6 +472,9 @@ OPERATION_ACTIVITIES = {
 DEFAULT_MAX_WORK_ITEMS_PER_BATCH = 64
 BATCHING_METADATA_KEY = "temporal_batching"
 MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY = "max_work_items_per_batch"
+DEFAULT_MAX_PARALLEL_CHILD_WORKFLOWS = 4
+FANOUT_METADATA_KEY = "temporal_fanout"
+MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY = "max_parallel_child_workflows"
 SYMBOL_TIMEFRAME_WORKFLOW = "SymbolTimeframeWorkflow"
 
 
@@ -473,13 +487,19 @@ def workflow_topology_document() -> dict[str, JSONValue]:
             "topology_version": TOPOLOGY_METADATA_KEY,
             "batching": BATCHING_METADATA_KEY,
             "max_work_items_per_batch": (MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY),
+            "fanout": FANOUT_METADATA_KEY,
+            "max_parallel_child_workflows": (
+                MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY
+            ),
         },
         "history_policy": (
             "Workflow histories carry bounded metadata only. Stage outputs "
             "must return StageResult and ArtifactRef payloads rather than "
             "rows, dataframes, or archive bytes. Dataset work items are "
             "grouped into deterministic pair/timeframe/format/year-month "
-            "batches before operation workflows run."
+            "batches before operation workflows run. Independent "
+            "symbol/timeframe batch workflows are started with deterministic "
+            "bounded fan-out."
         ),
         "workflows": [spec.to_dict() for spec in WORKFLOW_TOPOLOGY],
     }
@@ -599,6 +619,24 @@ def max_work_items_per_batch(
     if value is None:
         return _positive_batch_size(default)
     return _positive_batch_size(value)
+
+
+def max_parallel_child_workflows(
+    request: RunRequest,
+    *,
+    default: int = DEFAULT_MAX_PARALLEL_CHILD_WORKFLOWS,
+) -> int:
+    """Return the configured maximum independent child workflow fan-out."""
+    metadata = request.metadata
+    fanout = metadata.get(FANOUT_METADATA_KEY)
+    value: object | None = None
+    if isinstance(fanout, Mapping):
+        value = fanout.get(MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY)
+    if value is None:
+        value = metadata.get(MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY)
+    if value is None:
+        return _positive_parallelism(default)
+    return _positive_parallelism(value)
 
 
 async def execute_histdata_run_workflow(
@@ -1000,47 +1038,44 @@ async def _execute_child_plan(
     index = 0
     while index < len(pending_invocations):
         invocation = pending_invocations[index]
-        invocation_partition = _string_mapping(
-            invocation.payload.get("partition", {})
-        )
-        invocation_work_items = _partition_work_items(
-            current_work_items,
-            invocation_partition,
-        )
-        if (
-            invocation.workflow_name == SYMBOL_TIMEFRAME_WORKFLOW
-            and not _is_period_batch_partition(invocation_partition)
-        ):
-            batch_invocations = build_symbol_batch_invocations(
+        if invocation.workflow_name == SYMBOL_TIMEFRAME_WORKFLOW:
+            pending_invocations, expanded = _expand_pending_symbol_invocations(
                 request,
-                invocation_partition,
-                invocation_work_items,
+                pending_invocations,
+                start_index=index,
+                current_work_items=current_work_items,
             )
-            if batch_invocations:
-                pending_invocations[index : index + 1] = list(batch_invocations)
+            if expanded:
                 _refresh_progress_plan(progress, tuple(pending_invocations))
-                continue
-
-        if _requires_work_items(invocation.workflow_name):
-            if not invocation_work_items:
-                result = _skipped_workflow_result(
-                    invocation,
-                    reason="No forwardable work items for this stage.",
-                )
-                results.append(result)
-                progress.record_child(invocation.workflow_name, result)
-                index += 1
-                continue
-            payload = _payload_with_work_items(
-                invocation.payload,
-                invocation_work_items,
+            symbol_invocations, next_index = _contiguous_invocations(
+                pending_invocations,
+                start_index=index,
+                workflow_name=SYMBOL_TIMEFRAME_WORKFLOW,
             )
-        else:
-            payload = dict(invocation.payload)
+            symbol_results = await _execute_parallel_symbol_invocations(
+                request,
+                invocations=symbol_invocations,
+                current_work_items=current_work_items,
+                executor=executor,
+                progress=progress,
+            )
+            results.extend(symbol_results)
+            index = next_index
+            if any(_stops_symbol_fanout(result) for result in symbol_results):
+                break
+            continue
+
+        prepared = _prepare_child_invocation(invocation, current_work_items)
+        if prepared.skipped_result is not None:
+            result = prepared.skipped_result
+            results.append(result)
+            progress.record_child(invocation.workflow_name, result)
+            index += 1
+            continue
 
         result_payload = await executor.execute_child_workflow(
             invocation.workflow_name,
-            payload,
+            prepared.payload or {},
             workflow_id=invocation.workflow_id,
             task_queue=invocation.task_queue,
         )
@@ -1070,6 +1105,203 @@ async def _execute_child_plan(
         partition=partition,
         work_items=current_work_items,
         include_work_items=bool(work_items),
+    )
+
+
+def _expand_pending_symbol_invocations(
+    request: RunRequest,
+    pending_invocations: list[WorkflowInvocation],
+    *,
+    start_index: int,
+    current_work_items: tuple[WorkItem, ...],
+) -> tuple[list[WorkflowInvocation], bool]:
+    expanded: list[WorkflowInvocation] = []
+    changed = False
+    for index, invocation in enumerate(pending_invocations):
+        if (
+            index < start_index
+            or invocation.workflow_name != SYMBOL_TIMEFRAME_WORKFLOW
+        ):
+            expanded.append(invocation)
+            continue
+
+        partition = _string_mapping(invocation.payload.get("partition", {}))
+        if _is_period_batch_partition(partition):
+            expanded.append(invocation)
+            continue
+
+        batch_invocations = build_symbol_batch_invocations(
+            request,
+            partition,
+            current_work_items,
+        )
+        if not batch_invocations:
+            expanded.append(invocation)
+            continue
+
+        expanded.extend(batch_invocations)
+        changed = True
+    return expanded, changed
+
+
+def _contiguous_invocations(
+    invocations: list[WorkflowInvocation],
+    *,
+    start_index: int,
+    workflow_name: str,
+) -> tuple[tuple[WorkflowInvocation, ...], int]:
+    group: list[WorkflowInvocation] = []
+    index = start_index
+    while (
+        index < len(invocations)
+        and invocations[index].workflow_name == workflow_name
+    ):
+        group.append(invocations[index])
+        index += 1
+    return tuple(group), index
+
+
+async def _execute_parallel_symbol_invocations(
+    request: RunRequest,
+    *,
+    invocations: tuple[WorkflowInvocation, ...],
+    current_work_items: tuple[WorkItem, ...],
+    executor: ChildWorkflowExecutor,
+    progress: WorkflowProgress,
+) -> tuple[StageResult, ...]:
+    max_parallel = max_parallel_child_workflows(request)
+    prepared = tuple(
+        _prepare_child_invocation(invocation, current_work_items)
+        for invocation in invocations
+    )
+    results: list[StageResult] = []
+    index = 0
+    while index < len(prepared):
+        window = prepared[index : index + max_parallel]
+        window_results = await _execute_prepared_child_window(
+            window,
+            executor=executor,
+        )
+        for prepared_child, result in zip(window, window_results):
+            results.append(result)
+            progress.record_child(
+                prepared_child.invocation.workflow_name,
+                result,
+            )
+        index += max_parallel
+        if any(_stops_symbol_fanout(result) for result in window_results):
+            break
+    return tuple(results)
+
+
+async def _execute_prepared_child_window(
+    window: tuple[_PreparedChildInvocation, ...],
+    *,
+    executor: ChildWorkflowExecutor,
+) -> tuple[StageResult, ...]:
+    result_by_position: dict[int, StageResult] = {}
+    executable_children: list[
+        tuple[int, WorkflowInvocation, dict[str, JSONValue]]
+    ] = []
+    for position, prepared in enumerate(window):
+        if prepared.skipped_result is not None:
+            result_by_position[position] = prepared.skipped_result
+            continue
+        payload = prepared.payload
+        if payload is None:
+            result_by_position[position] = _skipped_workflow_result(
+                prepared.invocation,
+                reason="No child workflow payload was prepared.",
+            )
+            continue
+        executable_children.append((position, prepared.invocation, payload))
+
+    child_payloads = await asyncio.gather(
+        *(
+            executor.execute_child_workflow(
+                invocation.workflow_name,
+                payload,
+                workflow_id=invocation.workflow_id,
+                task_queue=invocation.task_queue,
+            )
+            for _position, invocation, payload in executable_children
+        ),
+        return_exceptions=True,
+    )
+    for (position, invocation, _payload), payload_or_error in zip(
+        executable_children,
+        child_payloads,
+    ):
+        if isinstance(payload_or_error, asyncio.CancelledError):
+            raise payload_or_error
+        if isinstance(payload_or_error, BaseException):
+            result_by_position[position] = _child_exception_result(
+                invocation,
+                payload_or_error,
+            )
+            continue
+        result_by_position[position] = _stage_result_from_mapping(
+            payload_or_error,
+            fallback_stage=invocation.workflow_name,
+        )
+
+    return tuple(
+        result_by_position[position] for position in range(len(window))
+    )
+
+
+def _prepare_child_invocation(
+    invocation: WorkflowInvocation,
+    current_work_items: tuple[WorkItem, ...],
+) -> _PreparedChildInvocation:
+    partition = _string_mapping(invocation.payload.get("partition", {}))
+    work_items = _partition_work_items(current_work_items, partition)
+    if _requires_work_items(invocation.workflow_name):
+        if not work_items:
+            return _PreparedChildInvocation(
+                invocation=invocation,
+                skipped_result=_skipped_workflow_result(
+                    invocation,
+                    reason="No forwardable work items for this stage.",
+                ),
+            )
+        return _PreparedChildInvocation(
+            invocation=invocation,
+            payload=_payload_with_work_items(invocation.payload, work_items),
+        )
+    return _PreparedChildInvocation(
+        invocation=invocation,
+        payload=dict(invocation.payload),
+    )
+
+
+def _child_exception_result(
+    invocation: WorkflowInvocation,
+    error: BaseException,
+) -> StageResult:
+    message = str(error) or type(error).__name__
+    return StageResult(
+        work_id=invocation.workflow_id,
+        stage=invocation.workflow_name,
+        status=WorkStatus.FAILED,
+        failure=FailureInfo(
+            code="CHILD_WORKFLOW_FAILED",
+            message=message,
+            retryable=True,
+        ),
+        metrics={
+            "child_workflow_exception": type(error).__name__,
+            "workflow_id": invocation.workflow_id,
+        },
+    )
+
+
+def _stops_symbol_fanout(result: StageResult) -> bool:
+    if result.status == WorkStatus.CANCELLED:
+        return True
+    return (
+        result.failure is not None
+        and result.failure.code == "CHILD_WORKFLOW_FAILED"
     )
 
 
@@ -1529,6 +1761,24 @@ def _positive_batch_size(value: object) -> int:
         normalized = int(str(value))
     if normalized < 1:
         raise ValueError("max_work_items_per_batch must be a positive integer")
+    return normalized
+
+
+def _positive_parallelism(value: object) -> int:
+    if isinstance(value, bool):
+        raise ValueError(
+            "max_parallel_child_workflows must be a positive integer"
+        )
+    if isinstance(value, int):
+        normalized = value
+    elif isinstance(value, str):
+        normalized = int(value)
+    else:
+        normalized = int(str(value))
+    if normalized < 1:
+        raise ValueError(
+            "max_parallel_child_workflows must be a positive integer"
+        )
     return normalized
 
 

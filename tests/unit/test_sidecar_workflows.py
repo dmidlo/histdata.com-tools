@@ -73,6 +73,84 @@ class _RecordingChildExecutor:
         ).to_dict()
 
 
+class _BoundedFanoutChildExecutor:
+    """Fake child executor that tracks concurrent symbol batch execution."""
+
+    def __init__(
+        self,
+        work_items: tuple[WorkItem, ...],
+        *,
+        cancel_at_symbol_call: int | None = None,
+        raise_at_symbol_call: int | None = None,
+    ) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.work_items = work_items
+        self.cancel_at_symbol_call = cancel_at_symbol_call
+        self.raise_at_symbol_call = raise_at_symbol_call
+        self.active_symbol_children = 0
+        self.max_active_symbol_children = 0
+        self.symbol_call_count = 0
+
+    async def execute_child_workflow(
+        self,
+        workflow_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        workflow_id: str,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Record child calls and keep symbol children alive for one tick."""
+        self.calls.append(
+            {
+                "workflow_name": workflow_name,
+                "payload": dict(payload),
+                "workflow_id": workflow_id,
+                "task_queue": task_queue,
+            }
+        )
+        if workflow_name == "DatasetPlanWorkflow":
+            return {
+                "result": StageResult(
+                    work_id=workflow_id,
+                    stage="dataset_plan",
+                    status=WorkStatus.COMPLETED,
+                ).to_dict(),
+                "work_items": [item.to_dict() for item in self.work_items],
+            }
+
+        self.symbol_call_count += 1
+        call_number = self.symbol_call_count
+        self.active_symbol_children += 1
+        self.max_active_symbol_children = max(
+            self.max_active_symbol_children,
+            self.active_symbol_children,
+        )
+        try:
+            await asyncio.sleep(0.01)
+        finally:
+            self.active_symbol_children -= 1
+
+        if call_number == self.raise_at_symbol_call:
+            raise RuntimeError("child workflow exploded")
+
+        if call_number == self.cancel_at_symbol_call:
+            return StageResult(
+                work_id=workflow_id,
+                stage=workflow_name,
+                status=WorkStatus.CANCELLED,
+                failure=FailureInfo(
+                    code="OPERATION_CANCELLED",
+                    message="operator cancelled",
+                    retryable=False,
+                ),
+            ).to_dict()
+        return StageResult(
+            work_id=workflow_id,
+            stage=workflow_name,
+            status=WorkStatus.COMPLETED,
+        ).to_dict()
+
+
 class _RepositoryMetricsChildExecutor:
     """Fake child executor that returns repository stage metrics."""
 
@@ -502,6 +580,11 @@ def test_workflow_topology_documents_expected_hierarchy() -> None:
     specs = {item["name"]: item for item in document["workflows"]}
 
     assert document["schema_version"] == 1
+    assert document["metadata_keys"]["fanout"] == workflows.FANOUT_METADATA_KEY
+    assert (
+        document["metadata_keys"]["max_parallel_child_workflows"]
+        == workflows.MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY
+    )
     assert set(workflows.workflow_names()) == {
         "HistDataRunWorkflow",
         "RepositoryRefreshWorkflow",
@@ -685,6 +768,128 @@ def test_parent_workflow_expands_symbol_children_to_period_batches() -> None:
     ]
     assert all(partition["batch_key"] for partition in partitions)
     assert all(call["workflow_id"] != coarse_symbol_id for call in symbol_calls)
+
+
+def test_parent_workflow_runs_symbol_batches_with_bounded_fanout() -> None:
+    """Independent symbol batches should run in bounded parallel windows."""
+    request = _request(
+        pairs=("EURUSD",),
+        metadata={
+            **_request().metadata,
+            workflows.BATCHING_METADATA_KEY: {
+                workflows.MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY: 1
+            },
+            workflows.FANOUT_METADATA_KEY: {
+                workflows.MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY: 2
+            },
+        },
+    )
+    executor = _BoundedFanoutChildExecutor(
+        work_items=_multi_period_work_items(count=5)
+    )
+    workflow = workflows.HistDataRunWorkflow(executor=executor)
+
+    assert workflows.max_parallel_child_workflows(request) == 2
+
+    summary = asyncio.run(workflow.run(request.to_dict()))
+
+    symbol_calls = [
+        call
+        for call in executor.calls
+        if call["workflow_name"] == "SymbolTimeframeWorkflow"
+    ]
+    partitions = [
+        call["payload"]["partition"]
+        for call in symbol_calls
+        if isinstance(call["payload"], Mapping)
+    ]
+    symbol_result_ids = [
+        result["work_id"] for result in summary["stage_results"][1:]
+    ]
+
+    assert executor.max_active_symbol_children == 2
+    assert [partition["batch_index"] for partition in partitions] == [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+    ]
+    assert symbol_result_ids == [call["workflow_id"] for call in symbol_calls]
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert summary["progress"]["total_children"] == 6
+    assert summary["progress"]["completed_children"] == 6
+
+
+def test_parent_workflow_stops_fanout_after_cancelled_window() -> None:
+    """A cancelled symbol batch should prevent later windows from starting."""
+    request = _request(
+        pairs=("EURUSD",),
+        metadata={
+            **_request().metadata,
+            workflows.BATCHING_METADATA_KEY: {
+                workflows.MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY: 1
+            },
+            workflows.FANOUT_METADATA_KEY: {
+                workflows.MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY: 2
+            },
+        },
+    )
+    executor = _BoundedFanoutChildExecutor(
+        work_items=_multi_period_work_items(count=5),
+        cancel_at_symbol_call=1,
+    )
+    workflow = workflows.HistDataRunWorkflow(executor=executor)
+
+    summary = asyncio.run(workflow.run(request.to_dict()))
+
+    symbol_calls = [
+        call
+        for call in executor.calls
+        if call["workflow_name"] == "SymbolTimeframeWorkflow"
+    ]
+
+    assert executor.max_active_symbol_children == 2
+    assert len(symbol_calls) == 2
+    assert summary["status"] == WorkStatus.CANCELLED.value
+    assert summary["progress"]["total_children"] == 6
+    assert summary["progress"]["completed_children"] == 3
+    assert summary["progress"]["last_error"] == "operator cancelled"
+
+
+def test_parent_workflow_stops_fanout_after_child_exception() -> None:
+    """A child exception should be recorded after its window drains."""
+    request = _request(
+        pairs=("EURUSD",),
+        metadata={
+            **_request().metadata,
+            workflows.BATCHING_METADATA_KEY: {
+                workflows.MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY: 1
+            },
+            workflows.FANOUT_METADATA_KEY: {
+                workflows.MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY: 2
+            },
+        },
+    )
+    executor = _BoundedFanoutChildExecutor(
+        work_items=_multi_period_work_items(count=5),
+        raise_at_symbol_call=1,
+    )
+    workflow = workflows.HistDataRunWorkflow(executor=executor)
+
+    summary = asyncio.run(workflow.run(request.to_dict()))
+
+    symbol_calls = [
+        call
+        for call in executor.calls
+        if call["workflow_name"] == "SymbolTimeframeWorkflow"
+    ]
+
+    assert executor.max_active_symbol_children == 2
+    assert len(symbol_calls) == 2
+    assert summary["status"] == WorkStatus.FAILED.value
+    assert summary["progress"]["completed_children"] == 3
+    assert summary["progress"]["last_error"] == "child workflow exploded"
 
 
 def test_parent_workflow_threads_work_items_through_full_chain() -> None:

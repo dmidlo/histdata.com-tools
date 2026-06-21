@@ -1,6 +1,6 @@
 # Temporal Sidecar Performance Baseline
 
-Issues: #166, #180
+Issues: #166, #180, #181
 
 See `docs/temporal-sidecar-operations.md` for lifecycle commands, runtime
 paths, troubleshooting, and worker startup guidance. This page is limited to
@@ -111,6 +111,19 @@ metadata:
 }
 ```
 
+`HistDataRunWorkflow` starts independent `SymbolTimeframeWorkflow` period
+batches with bounded fan-out after `DatasetPlanWorkflow` returns the planned
+work items. The production default fan-out window is `4` child workflows.
+Requests can override it in metadata:
+
+```json
+{
+  "temporal_fanout": {
+    "max_parallel_child_workflows": 2
+  }
+}
+```
+
 Each batch partition includes `format`, `start_yearmonth`, `end_yearmonth`,
 `periods`, `batch_index`, `batch_count`, `batch_key`, `work_item_count`, and a
 bounded `work_ids` list. The child workflow ID is derived from those fields, so
@@ -120,6 +133,11 @@ This keeps throughput high by preserving lane-level concurrency while avoiding
 one large symbol/timeframe workflow carrying every monthly work item for a
 multi-year request. Cancellation and retry scope also become smaller: a failed
 batch can be reasoned about as a specific pair/timeframe/format/period slice.
+Fan-out applies only to independent symbol/timeframe batch workflows. Within a
+single batch, `ValidateUrlsWorkflow`, `DownloadArchivesWorkflow`,
+`ExtractCsvWorkflow`, `BuildCacheWorkflow`, `MergeCacheWorkflow`, and
+`ImportWorkflow` still run in dependency order so work-item forwarding remains
+correct.
 
 ## Tuning Guidance
 
@@ -146,10 +164,13 @@ python scripts/benchmark_sidecar_throughput.py \
   --temporal-executable /opt/local/bin/temporal
 ```
 
-The default matrix uses one EURUSD M1 period and covers:
+The default matrix uses one EURUSD M1 period for the single-item scenarios and
+a two-pair, three-month ASCII tick validation scenario for fan-out coverage. It
+covers:
 
 - repository refresh
 - dataset planning and URL validation
+- bounded multi-partition `SymbolTimeframeWorkflow` fan-out
 - archive download and CSV extraction
 - Polars cache build and cache merge
 - no-Influx import-skipped behavior, represented by a cache/merge request that
@@ -157,8 +178,23 @@ The default matrix uses one EURUSD M1 period and covers:
   and CPU/file worker lanes
 
 The benchmark uses `max_work_items_per_batch=1` to force visible child-workflow
-handoff in the one-period matrix. Production defaults remain
-`max_work_items_per_batch=64`.
+handoff and uses `max_parallel_child_workflows=2` to prove bounded fan-out
+windows. Production defaults remain `max_work_items_per_batch=64` and
+`max_parallel_child_workflows=4`.
+
+## Multi-Partition Envelope
+
+The accepted issue #181 envelope is:
+
+- Expand coarse pair/timeframe requests into deterministic period batches after
+  dataset planning.
+- Start only independent `SymbolTimeframeWorkflow` batches concurrently.
+- Keep the default production fan-out window at `4`.
+- Preserve ordered parent summary payloads by recording child results in plan
+  order, not completion order.
+- On cancellation, wait for the already-started bounded window to finish and
+  do not start later windows.
+- Do not fan out dependent operation workflows inside a symbol/timeframe batch.
 
 ## Live Result
 
@@ -167,17 +203,20 @@ Live run date: 2026-06-21. Temporal executable:
 
 | Scenario | Foreground elapsed | Sidecar elapsed | Ratio | Sidecar process CPU | Artifacts | Failures/retries |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| repository-refresh | 0.053s | 2.357s | 44.487x | 2.690s | 1 | 0/0 |
-| validate-url | 0.419s | 0.658s | 1.569x | 0.310s | 0 | 0/0 |
-| download-extract | 1.756s | 2.288s | 1.303x | 0.620s | 2 | 0/0 |
-| cache-merge-no-influx | 1.904s | 2.255s | 1.185x | 0.710s | 3 | 0/0 |
+| repository-refresh | 0.054s | 0.944s | 17.482x | 2.670s | 1 | 0/0 |
+| validate-url | 0.388s | 0.665s | 1.716x | 0.320s | 0 | 0/0 |
+| multi-partition-validate-fanout | 2.230s | 2.522s | 1.131x | 1.090s | 0 | 0/0 |
+| download-extract | 1.883s | 2.492s | 1.323x | 0.630s | 2 | 0/0 |
+| cache-merge-no-influx | 1.791s | 2.338s | 1.306x | 0.700s | 3 | 0/0 |
 
-Sidecar startup was 0.142s in this run. The sidecar path successfully forwarded
-planned work items through live Temporal child workflows and produced expected
-ZIP, CSV, and cache artifacts. The benchmark also caught and fixed a live SDK
-payload-boundary issue: activity entrypoints now use `dict[str, Any]` rather
-than the recursive `JSONValue` alias so Temporal's data converter preserves
-nested request payloads.
+Sidecar startup was 0.133s in this run. The fan-out scenario used EURUSD and
+GBPUSD ASCII tick data for 202201 through 202203 with
+`max_work_items_per_batch=1` and `max_parallel_child_workflows=2`. The sidecar
+summary reported six planned work items, six `SymbolTimeframeWorkflow` child
+results, seven total child stages including dataset planning, and no failures
+or retries. The sidecar path successfully forwarded planned work items through
+live Temporal child workflows and produced expected ZIP, CSV, and cache
+artifacts for the non-fan-out artifact scenarios.
 
 ## Accepted Envelope
 
@@ -188,6 +227,7 @@ No lane default changes are warranted from the issue #180 measurements:
 - Keep CPU/file workers at `get_pool_cpu_count(cpu_utilization)`.
 - Keep Influx workers at `1` until a live Influx target is available.
 - Keep the production batch default at `64` work items per child workflow.
+- Keep the production fan-out default at `4` parallel child workflows.
 
 The sidecar has fixed orchestration overhead, so repository-only and
 single-item jobs can be slower than foreground. That tradeoff is acceptable for
