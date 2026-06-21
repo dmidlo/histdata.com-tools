@@ -1,8 +1,8 @@
 """Temporal workflow topology for HistData sidecar jobs.
 
-The topology is intentionally coarse-grained so workflow histories carry
-request metadata, partition identifiers, status events, and artifact
-references instead of downloaded rows, dataframes, or queue payloads.
+The topology keeps workflow histories bounded so they carry request metadata,
+partition identifiers, status events, and artifact references instead of
+downloaded rows, dataframes, or queue payloads.
 """
 
 from __future__ import annotations
@@ -458,6 +458,10 @@ OPERATION_ACTIVITIES = {
     "MergeCacheWorkflow": "merge_cache",
     "ImportWorkflow": "import_to_influx",
 }
+DEFAULT_MAX_WORK_ITEMS_PER_BATCH = 64
+BATCHING_METADATA_KEY = "temporal_batching"
+MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY = "max_work_items_per_batch"
+SYMBOL_TIMEFRAME_WORKFLOW = "SymbolTimeframeWorkflow"
 
 
 def workflow_topology_document() -> dict[str, JSONValue]:
@@ -467,11 +471,15 @@ def workflow_topology_document() -> dict[str, JSONValue]:
         "metadata_keys": {
             "task_queues": TASK_QUEUE_METADATA_KEY,
             "topology_version": TOPOLOGY_METADATA_KEY,
+            "batching": BATCHING_METADATA_KEY,
+            "max_work_items_per_batch": (MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY),
         },
         "history_policy": (
             "Workflow histories carry bounded metadata only. Stage outputs "
             "must return StageResult and ArtifactRef payloads rather than "
-            "rows, dataframes, or archive bytes."
+            "rows, dataframes, or archive bytes. Dataset work items are "
+            "grouped into deterministic pair/timeframe/format/year-month "
+            "batches before operation workflows run."
         ),
         "workflows": [spec.to_dict() for spec in WORKFLOW_TOPOLOGY],
     }
@@ -523,6 +531,30 @@ def build_symbol_child_invocations(
     return tuple(invocations)
 
 
+def build_symbol_batch_invocations(
+    request: RunRequest,
+    partition: Mapping[str, str],
+    work_items: tuple[WorkItem, ...],
+    *,
+    max_work_items_per_batch: int | None = None,
+) -> tuple[WorkflowInvocation, ...]:
+    """Plan bounded symbol/timeframe child workflows for planned work items."""
+    partition_work_items = _partition_work_items(work_items, partition)
+    return tuple(
+        _invocation(
+            request,
+            SYMBOL_TIMEFRAME_WORKFLOW,
+            partition=batch_partition,
+            work_items=batch_work_items,
+        )
+        for batch_partition, batch_work_items in _work_item_batches(
+            request,
+            partition_work_items,
+            max_work_items_per_batch=max_work_items_per_batch,
+        )
+    )
+
+
 def request_partitions(request: RunRequest) -> tuple[dict[str, str], ...]:
     """Return coarse symbol/timeframe partitions for child workflows."""
     pairs = request.pairs or ("requested-pairs",)
@@ -532,6 +564,41 @@ def request_partitions(request: RunRequest) -> tuple[dict[str, str], ...]:
         for pair in pairs
         for timeframe in timeframes
     )
+
+
+def period_batch_partitions(
+    request: RunRequest,
+    work_items: tuple[WorkItem, ...],
+    *,
+    max_work_items_per_batch: int | None = None,
+) -> tuple[dict[str, str], ...]:
+    """Return deterministic pair/timeframe/format/year-month batches."""
+    return tuple(
+        partition
+        for partition, _batch_work_items in _work_item_batches(
+            request,
+            work_items,
+            max_work_items_per_batch=max_work_items_per_batch,
+        )
+    )
+
+
+def max_work_items_per_batch(
+    request: RunRequest,
+    *,
+    default: int = DEFAULT_MAX_WORK_ITEMS_PER_BATCH,
+) -> int:
+    """Return the configured maximum work items per child workflow batch."""
+    metadata = request.metadata
+    batching = metadata.get(BATCHING_METADATA_KEY)
+    value: object | None = None
+    if isinstance(batching, Mapping):
+        value = batching.get(MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY)
+    if value is None:
+        value = metadata.get(MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY)
+    if value is None:
+        return _positive_batch_size(default)
+    return _positive_batch_size(value)
 
 
 async def execute_histdata_run_workflow(
@@ -929,7 +996,10 @@ async def _execute_child_plan(
     )
     results: list[StageResult] = []
     current_work_items = tuple(work_items)
-    for invocation in invocations:
+    pending_invocations = list(invocations)
+    index = 0
+    while index < len(pending_invocations):
+        invocation = pending_invocations[index]
         invocation_partition = _string_mapping(
             invocation.payload.get("partition", {})
         )
@@ -937,6 +1007,20 @@ async def _execute_child_plan(
             current_work_items,
             invocation_partition,
         )
+        if (
+            invocation.workflow_name == SYMBOL_TIMEFRAME_WORKFLOW
+            and not _is_period_batch_partition(invocation_partition)
+        ):
+            batch_invocations = build_symbol_batch_invocations(
+                request,
+                invocation_partition,
+                invocation_work_items,
+            )
+            if batch_invocations:
+                pending_invocations[index : index + 1] = list(batch_invocations)
+                _refresh_progress_plan(progress, tuple(pending_invocations))
+                continue
+
         if _requires_work_items(invocation.workflow_name):
             if not invocation_work_items:
                 result = _skipped_workflow_result(
@@ -945,6 +1029,7 @@ async def _execute_child_plan(
                 )
                 results.append(result)
                 progress.record_child(invocation.workflow_name, result)
+                index += 1
                 continue
             payload = _payload_with_work_items(
                 invocation.payload,
@@ -973,6 +1058,7 @@ async def _execute_child_plan(
                 current_work_items = forwarded_work_items
         results.append(result)
         progress.record_child(invocation.workflow_name, result)
+        index += 1
         if result.status == WorkStatus.CANCELLED:
             break
     progress.finish(_execute_status(tuple(results)))
@@ -1090,7 +1176,7 @@ def _operation_workflow_names(request: RunRequest) -> tuple[str, ...]:
 
 def _requires_work_items(workflow_name: str) -> bool:
     return workflow_name in {
-        "SymbolTimeframeWorkflow",
+        SYMBOL_TIMEFRAME_WORKFLOW,
         *SYMBOL_CHILDREN,
     }
 
@@ -1105,6 +1191,11 @@ def _workflow_id(
         workflow_name,
         partition.get("pair", ""),
         partition.get("timeframe", ""),
+        partition.get("format", ""),
+        partition.get("start_yearmonth", ""),
+        partition.get("end_yearmonth", ""),
+        partition.get("batch_index", ""),
+        partition.get("batch_key", ""),
     )
     return (
         f"{request.request_id}-{workflow_name}-{work_id.removeprefix('work-')}"
@@ -1280,11 +1371,157 @@ def _partition_work_items(
 
     pair = str(partition.get("pair", "") or "").lower()
     timeframe = str(partition.get("timeframe", "") or "").lower()
+    data_format = str(partition.get("format", "") or "").lower()
+    work_ids = _partition_work_ids(partition)
     return tuple(
         item
         for item in work_items
         if (not pair or item.data_fxpair.lower() == pair)
         and (not timeframe or item.data_timeframe.lower() == timeframe)
+        and (not data_format or item.data_format.lower() == data_format)
+        and (not work_ids or item.work_id in work_ids)
+    )
+
+
+def _work_item_batches(
+    request: RunRequest,
+    work_items: tuple[WorkItem, ...],
+    *,
+    max_work_items_per_batch: int | None = None,
+) -> tuple[tuple[dict[str, str], tuple[WorkItem, ...]], ...]:
+    batch_size = (
+        max_work_items_per_batch
+        if max_work_items_per_batch is not None
+        else _max_work_items_per_batch_for_request(request)
+    )
+    normalized_batch_size = _positive_batch_size(batch_size)
+    grouped: dict[tuple[str, str, str], list[WorkItem]] = {}
+    for item in sorted(work_items, key=_work_item_sort_key):
+        key = (item.data_fxpair, item.data_timeframe, item.data_format)
+        grouped.setdefault(key, []).append(item)
+
+    batches: list[tuple[dict[str, str], tuple[WorkItem, ...]]] = []
+    for key in sorted(
+        grouped,
+        key=lambda values: tuple(value.lower() for value in values),
+    ):
+        items = tuple(grouped[key])
+        chunks = tuple(
+            items[index : index + normalized_batch_size]
+            for index in range(0, len(items), normalized_batch_size)
+        )
+        for batch_index, chunk in enumerate(chunks, start=1):
+            partition = _batch_partition(
+                key,
+                chunk,
+                batch_index=batch_index,
+                batch_count=len(chunks),
+            )
+            batches.append((partition, chunk))
+    return tuple(batches)
+
+
+def _max_work_items_per_batch_for_request(request: RunRequest) -> int:
+    """Internal alias kept short where batching helpers compose."""
+    return max_work_items_per_batch(request)
+
+
+def _batch_partition(
+    key: tuple[str, str, str],
+    work_items: tuple[WorkItem, ...],
+    *,
+    batch_index: int,
+    batch_count: int,
+) -> dict[str, str]:
+    pair, timeframe, data_format = key
+    periods = tuple(
+        dict.fromkeys(
+            period
+            for period in (_work_item_period(item) for item in work_items)
+            if period
+        )
+    )
+    start_yearmonth = periods[0] if periods else ""
+    end_yearmonth = periods[-1] if periods else start_yearmonth
+    work_ids = tuple(item.work_id for item in work_items)
+    batch_key = derive_work_id(
+        pair.lower(),
+        timeframe.lower(),
+        data_format.lower(),
+        start_yearmonth,
+        end_yearmonth,
+        str(batch_index),
+        ",".join(work_ids),
+    ).removeprefix("work-")
+    return {
+        "pair": pair,
+        "timeframe": timeframe,
+        "format": data_format,
+        "start_yearmonth": start_yearmonth,
+        "end_yearmonth": end_yearmonth,
+        "periods": ",".join(periods),
+        "batch_index": str(batch_index),
+        "batch_count": str(batch_count),
+        "batch_key": batch_key,
+        "work_item_count": str(len(work_items)),
+        "work_ids": ",".join(work_ids),
+    }
+
+
+def _work_item_sort_key(item: WorkItem) -> tuple[str, str, str, str, str]:
+    return (
+        item.data_fxpair.lower(),
+        item.data_timeframe.lower(),
+        item.data_format.lower(),
+        _work_item_period(item),
+        item.work_id,
+    )
+
+
+def _work_item_period(item: WorkItem) -> str:
+    if item.data_datemonth:
+        return str(item.data_datemonth)
+    if item.data_year and item.data_month:
+        return f"{item.data_year}{item.data_month}"
+    return str(item.data_year or item.data_month)
+
+
+def _partition_work_ids(partition: Mapping[str, str]) -> set[str]:
+    raw_work_ids = str(partition.get("work_ids", "") or "")
+    if not raw_work_ids:
+        return set()
+    return {
+        work_id.strip()
+        for work_id in raw_work_ids.split(",")
+        if work_id.strip()
+    }
+
+
+def _is_period_batch_partition(partition: Mapping[str, str]) -> bool:
+    return bool(partition.get("batch_key"))
+
+
+def _positive_batch_size(value: object) -> int:
+    if isinstance(value, bool):
+        raise ValueError("max_work_items_per_batch must be a positive integer")
+    if isinstance(value, int):
+        normalized = value
+    elif isinstance(value, str):
+        normalized = int(value)
+    else:
+        normalized = int(str(value))
+    if normalized < 1:
+        raise ValueError("max_work_items_per_batch must be a positive integer")
+    return normalized
+
+
+def _refresh_progress_plan(
+    progress: WorkflowProgress,
+    invocations: tuple[WorkflowInvocation, ...],
+) -> None:
+    progress.total_children = len(invocations)
+    progress.planned_children = tuple(
+        invocation.workflow_name for invocation in invocations
     )
 
 

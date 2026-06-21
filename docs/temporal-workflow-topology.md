@@ -9,11 +9,18 @@ user-visible CLI/API/GUI job.
 
 ## Hierarchy
 
-`HistDataRunWorkflow` runs coarse child workflows:
+`HistDataRunWorkflow` runs top-level child workflows:
 
 - `RepositoryRefreshWorkflow` for repository metadata refresh requests.
 - `DatasetPlanWorkflow` for bounded dataset planning metadata.
-- `SymbolTimeframeWorkflow` once per requested pair/timeframe partition.
+- `SymbolTimeframeWorkflow` for bounded dataset-period batches after planning.
+
+The initial request shape starts from pair/timeframe intent. Once
+`DatasetPlanWorkflow` returns planned `WorkItem` metadata, the parent expands
+each pair/timeframe group into deterministic batches by pair, timeframe, data
+format, and ordered year-month periods. Batch partitions carry only bounded
+metadata such as `batch_key`, `batch_index`, `batch_count`, `work_item_count`,
+and a bounded `work_ids` list.
 
 `SymbolTimeframeWorkflow` runs operation-family child workflows:
 
@@ -24,10 +31,11 @@ user-visible CLI/API/GUI job.
 - `MergeCacheWorkflow`
 - `ImportWorkflow`
 
-These boundaries are intentionally larger than individual files, rows, or
-records. The workflows pass request metadata, pair/timeframe partition IDs,
-status events, and artifact references. Downloaded archives, CSVs, cache files,
-dataframes, and rows stay on disk and must be referenced through
+These boundaries are intentionally larger than individual rows or records while
+remaining bounded by work-item batch size. The workflows pass request metadata,
+batch partition IDs, status events, and artifact references. Downloaded
+archives, CSVs, cache files, dataframes, and rows stay on disk and must be
+referenced through
 `ArtifactRef`/`StageResult` payloads.
 
 ## Activities

@@ -11,10 +11,12 @@ from histdatacom.activity_stages import (
     validate_url_work_item,
 )
 from histdatacom.histdata_ascii import CACHE_FILENAME
-from histdatacom.runtime_contracts import WorkItem, WorkStatus
+from histdatacom.runtime_contracts import RunRequest, WorkItem, WorkStatus
 from histdatacom.sidecar.performance import (
     benchmark_operation,
+    benchmark_partition_batching,
     build_sidecar_concurrency_profile,
+    compare_partition_batching,
     measure_startup,
 )
 
@@ -82,6 +84,40 @@ def test_benchmark_operation_tracks_throughput_resources_and_startup() -> None:
     assert payload["throughput_per_second"] >= 0.0
     assert payload["startup_seconds"] >= 0.0
     assert payload["metadata"] == {"lane": "network"}
+
+
+def test_partition_batching_benchmark_compares_coarse_and_period_batches() -> (
+    None
+):
+    """Batching benchmark metadata should expose bounded child fanout."""
+    request = _batch_request()
+    work_items = tuple(
+        _batch_work_item(f"2022-{month:02d}") for month in range(1, 6)
+    )
+
+    comparison = compare_partition_batching(
+        request,
+        work_items,
+        max_work_items_per_batch=2,
+    )
+    measurement = benchmark_partition_batching(
+        request,
+        work_items,
+        max_work_items_per_batch=2,
+    )
+
+    assert comparison == {
+        "coarse_partition_count": 1,
+        "period_batch_count": 3,
+        "work_item_count": 5,
+        "max_work_items_per_batch": 2,
+        "coarse_max_work_items_per_child": 5,
+        "period_batch_max_work_items_per_child": 2,
+        "max_child_work_item_reduction": 3,
+    }
+    assert measurement.name == "period-batch-partitioning"
+    assert measurement.work_item_count == 5
+    assert measurement.metadata == comparison
 
 
 def test_fixture_baseline_measurements_cover_representative_operations(
@@ -182,3 +218,25 @@ def _form_html(*, token: str = "token") -> str:
       </form>
     </html>
     """
+
+
+def _batch_request() -> RunRequest:
+    return RunRequest(
+        request_id="run-benchmark",
+        pairs=("EURUSD",),
+        formats=("ascii",),
+        timeframes=("M1",),
+        validate_urls=True,
+    )
+
+
+def _batch_work_item(datemonth: str) -> WorkItem:
+    return WorkItem(
+        work_id=f"work-eurusd-m1-{datemonth}",
+        status=WorkStatus.URL_NEW,
+        url=f"https://example.test/eurusd/M1/{datemonth}",
+        data_format="ascii",
+        data_timeframe="M1",
+        data_fxpair="EURUSD",
+        data_datemonth=datemonth,
+    )

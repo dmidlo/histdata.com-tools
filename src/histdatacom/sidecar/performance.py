@@ -10,7 +10,7 @@ from enum import Enum
 from typing import Any, Callable, Mapping
 
 from histdatacom.concurrency import get_pool_cpu_count
-from histdatacom.runtime_contracts import JSONValue
+from histdatacom.runtime_contracts import JSONValue, RunRequest, WorkItem
 
 DEFAULT_NETWORK_MULTIPLIER = 3
 DEFAULT_ORCHESTRATION_WORKERS = 1
@@ -209,6 +209,77 @@ def benchmark_operation(
     )
 
 
+def compare_partition_batching(
+    request: RunRequest,
+    work_items: tuple[WorkItem, ...],
+    *,
+    max_work_items_per_batch: int | None = None,
+) -> dict[str, JSONValue]:
+    """Compare coarse pair/timeframe fanout with period-batch fanout."""
+    from histdatacom.sidecar.workflows import (
+        max_work_items_per_batch as configured_batch_size,
+        period_batch_partitions,
+        request_partitions,
+    )
+
+    coarse_partitions = request_partitions(request)
+    period_batches = period_batch_partitions(
+        request,
+        work_items,
+        max_work_items_per_batch=max_work_items_per_batch,
+    )
+    batch_size = (
+        max_work_items_per_batch
+        if max_work_items_per_batch is not None
+        else configured_batch_size(request)
+    )
+    coarse_counts = [
+        _coarse_partition_work_item_count(work_items, partition)
+        for partition in coarse_partitions
+    ]
+    batch_counts = [
+        int(str(partition.get("work_item_count", "0") or "0"))
+        for partition in period_batches
+    ]
+    coarse_max = max(coarse_counts, default=0)
+    batch_max = max(batch_counts, default=0)
+    return {
+        "coarse_partition_count": len(coarse_partitions),
+        "period_batch_count": len(period_batches),
+        "work_item_count": len(work_items),
+        "max_work_items_per_batch": int(batch_size),
+        "coarse_max_work_items_per_child": coarse_max,
+        "period_batch_max_work_items_per_child": batch_max,
+        "max_child_work_item_reduction": max(0, coarse_max - batch_max),
+    }
+
+
+def benchmark_partition_batching(
+    request: RunRequest,
+    work_items: tuple[WorkItem, ...],
+    *,
+    max_work_items_per_batch: int | None = None,
+) -> BenchmarkMeasurement:
+    """Measure deterministic period-batch planning against coarse fanout."""
+    comparison: dict[str, JSONValue] = {}
+
+    def plan_batches() -> None:
+        comparison.update(
+            compare_partition_batching(
+                request,
+                work_items,
+                max_work_items_per_batch=max_work_items_per_batch,
+            )
+        )
+
+    return benchmark_operation(
+        "period-batch-partitioning",
+        plan_batches,
+        work_item_count=len(work_items),
+        metadata=comparison,
+    )
+
+
 def measure_startup(
     factory: Callable[[], Any],
 ) -> tuple[Any, float]:
@@ -256,3 +327,17 @@ def _nonnegative_int(value: int, *, field_name: str) -> int:
     if normalized < 0:
         raise ValueError(f"{field_name} must be nonnegative")
     return normalized
+
+
+def _coarse_partition_work_item_count(
+    work_items: tuple[WorkItem, ...],
+    partition: Mapping[str, str],
+) -> int:
+    pair = str(partition.get("pair", "") or "").lower()
+    timeframe = str(partition.get("timeframe", "") or "").lower()
+    return sum(
+        1
+        for item in work_items
+        if (not pair or item.data_fxpair.lower() == pair)
+        and (not timeframe or item.data_timeframe.lower() == timeframe)
+    )

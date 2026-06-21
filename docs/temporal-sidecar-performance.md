@@ -74,6 +74,53 @@ operations:
 This keeps the baseline runnable without HistData.com, Temporal server, or
 InfluxDB availability.
 
+`histdatacom.sidecar.performance.benchmark_partition_batching()` compares the
+old coarse pair/timeframe partition shape with the period-batch fanout used by
+the sidecar. Its metadata reports:
+
+- coarse partition count
+- period batch count
+- total work item count
+- configured maximum work items per batch
+- maximum work items carried by any coarse child
+- maximum work items carried by any period-batch child
+- the resulting maximum child payload reduction
+
+This benchmark is deterministic and fixture-friendly: it only plans workflow
+metadata and does not require a live Temporal server.
+
+## Dataset-Period Batching
+
+`DatasetPlanWorkflow` still produces bounded `WorkItem` metadata for the full
+request. Before operation workflows run, each coarse pair/timeframe partition
+is expanded into deterministic child workflow batches grouped by:
+
+- pair
+- timeframe
+- data format
+- ordered year-month periods
+
+The default maximum batch size is `64` work items. Requests can override it in
+metadata:
+
+```json
+{
+  "temporal_batching": {
+    "max_work_items_per_batch": 32
+  }
+}
+```
+
+Each batch partition includes `format`, `start_yearmonth`, `end_yearmonth`,
+`periods`, `batch_index`, `batch_count`, `batch_key`, `work_item_count`, and a
+bounded `work_ids` list. The child workflow ID is derived from those fields, so
+retry and resume behavior is deterministic for the same dataset plan.
+
+This keeps throughput high by preserving lane-level concurrency while avoiding
+one large symbol/timeframe workflow carrying every monthly work item for a
+multi-year request. Cancellation and retry scope also become smaller: a failed
+batch can be reasoned about as a specific pair/timeframe/format/period slice.
+
 ## Tuning Guidance
 
 Keep network activity concurrency higher than CPU/file work because validation

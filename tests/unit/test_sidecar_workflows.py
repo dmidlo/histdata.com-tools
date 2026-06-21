@@ -21,8 +21,12 @@ from histdatacom.sidecar.workflow_metadata import TASK_QUEUE_METADATA_KEY
 class _RecordingChildExecutor:
     """Fake child workflow executor used by composition tests."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        work_items: tuple[WorkItem, ...] | None = None,
+    ) -> None:
         self.calls: list[dict[str, object]] = []
+        self.work_items = work_items or _planned_work_items()
 
     async def execute_child_workflow(
         self,
@@ -54,9 +58,7 @@ class _RecordingChildExecutor:
                         ),
                     ),
                 ).to_dict(),
-                "work_items": [
-                    item.to_dict() for item in _planned_work_items()
-                ],
+                "work_items": [item.to_dict() for item in self.work_items],
             }
         return StageResult(
             work_id=workflow_id,
@@ -288,11 +290,30 @@ def _planned_work_items() -> tuple[WorkItem, ...]:
     )
 
 
+def _multi_period_work_items(
+    pair: str = "EURUSD",
+    *,
+    timeframe: str = "M1",
+    data_format: str = "ascii",
+    count: int = 5,
+) -> tuple[WorkItem, ...]:
+    return tuple(
+        _work_item(
+            pair,
+            timeframe,
+            f"2022-{month:02d}",
+            data_format=data_format,
+        )
+        for month in range(1, count + 1)
+    )
+
+
 def _work_item(
     pair: str,
     timeframe: str,
     datemonth: str,
     *,
+    data_format: str = "ascii",
     status: WorkStatus = WorkStatus.URL_NEW,
 ) -> WorkItem:
     pair_lower = pair.lower()
@@ -300,7 +321,7 @@ def _work_item(
         work_id=f"work-{pair_lower}-{timeframe.lower()}-{datemonth}",
         status=status,
         url=f"https://example.test/{pair_lower}/{timeframe}/{datemonth}",
-        data_format="ascii",
+        data_format=data_format,
         data_timeframe=timeframe,
         data_fxpair=pair,
         data_datemonth=datemonth,
@@ -513,6 +534,96 @@ def test_parent_workflow_composes_symbol_timeframe_children() -> None:
     assert summary["progress"]["completed_children"] == 3
     assert workflow.status()["status"] == WorkStatus.COMPLETED.value
     assert len(summary["artifacts"]) == 3
+
+
+def test_period_batch_partitions_split_by_format_period_and_size() -> None:
+    """Planned work items should batch by pair/timeframe/format/year-month."""
+    request = _request(
+        metadata={
+            **_request().metadata,
+            workflows.BATCHING_METADATA_KEY: {
+                workflows.MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY: 2
+            },
+        }
+    )
+    work_items = (
+        *_multi_period_work_items(count=5),
+        *_multi_period_work_items(
+            pair="EURUSD",
+            timeframe="M1",
+            data_format="zip",
+            count=2,
+        ),
+    )
+
+    partitions = workflows.period_batch_partitions(request, work_items)
+
+    assert [partition["format"] for partition in partitions] == [
+        "ascii",
+        "ascii",
+        "ascii",
+        "zip",
+    ]
+    assert [partition["work_item_count"] for partition in partitions] == [
+        "2",
+        "2",
+        "1",
+        "2",
+    ]
+    assert partitions[0]["periods"] == "2022-01,2022-02"
+    assert partitions[0]["batch_index"] == "1"
+    assert partitions[0]["batch_count"] == "3"
+    assert partitions[-1]["batch_count"] == "1"
+    assert all(partition["batch_key"] for partition in partitions)
+
+
+def test_parent_workflow_expands_symbol_children_to_period_batches() -> None:
+    """Large planned partitions should become bounded child workflows."""
+    request = _request(
+        pairs=("EURUSD",),
+        metadata={
+            **_request().metadata,
+            workflows.BATCHING_METADATA_KEY: {
+                workflows.MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY: 2
+            },
+        },
+    )
+    executor = _RecordingChildExecutor(
+        work_items=_multi_period_work_items(count=5)
+    )
+    workflow = workflows.HistDataRunWorkflow(executor=executor)
+    coarse_symbol_id = workflows.build_run_child_invocations(request)[
+        1
+    ].workflow_id
+
+    summary = asyncio.run(workflow.run(request.to_dict()))
+
+    symbol_calls = [
+        call
+        for call in executor.calls
+        if call["workflow_name"] == "SymbolTimeframeWorkflow"
+    ]
+    partitions = [
+        call["payload"]["partition"]
+        for call in symbol_calls
+        if isinstance(call["payload"], Mapping)
+    ]
+
+    assert len(symbol_calls) == 3
+    assert summary["progress"]["total_children"] == 4
+    assert summary["progress"]["completed_children"] == 4
+    assert [len(_payload_work_items(call)) for call in symbol_calls] == [
+        2,
+        2,
+        1,
+    ]
+    assert [partition["batch_index"] for partition in partitions] == [
+        "1",
+        "2",
+        "3",
+    ]
+    assert all(partition["batch_key"] for partition in partitions)
+    assert all(call["workflow_id"] != coarse_symbol_id for call in symbol_calls)
 
 
 def test_parent_workflow_threads_work_items_through_full_chain() -> None:
