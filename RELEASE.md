@@ -20,6 +20,11 @@ python -m build
 python -m twine check dist/*
 ```
 
+It also inspects the built wheel metadata directly and installs the wheel into
+a fresh virtual environment before any upload command can run. Legacy
+`setup.py` commands are intentionally unsupported; this project is built from
+`pyproject.toml`.
+
 Package metadata is declared in `pyproject.toml`. Local release environments
 must use `setuptools>=77` so the built artifacts include current SPDX license
 metadata.
