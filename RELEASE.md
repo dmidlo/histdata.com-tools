@@ -20,6 +20,10 @@ python -m build
 python -m twine check dist/*
 ```
 
+Package metadata is declared in `pyproject.toml`. Local release environments
+must use `setuptools>=77` so the built artifacts include current SPDX license
+metadata.
+
 The upload commands still use local `.pypirc` credentials and GPG detached
 signatures, matching the historical release process.
 
