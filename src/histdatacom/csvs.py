@@ -11,6 +11,7 @@ from rich import print  # pylint: disable=redefined-builtin
 
 from histdatacom import config
 from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
+from histdatacom.runtime_contracts import WorkStatus
 
 if TYPE_CHECKING:
     from histdatacom.records import Record, Records
@@ -53,7 +54,7 @@ class Csv:  # noqa:H601
             SystemExit: exit on error
         """
         try:
-            if "CSV_ZIP" in record.status:
+            if WorkStatus.CSV_ZIP.value in record.status:
                 zip_path = Path(record.data_dir, record.zip_filename)
 
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:
@@ -70,7 +71,7 @@ class Csv:  # noqa:H601
                     zip_ref.extract(record.csv_filename, path=record.data_dir)
 
                 zip_path.unlink()
-                record.status = "CSV_FILE"
+                record.status = WorkStatus.CSV_FILE.value
                 record.write_memento_file(base_dir=args["default_download_dir"])
             records_next.put(record)
         except (OSError, ValueError) as err:

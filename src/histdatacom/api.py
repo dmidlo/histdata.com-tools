@@ -28,6 +28,7 @@ from histdatacom.histdata_ascii import (
     read_ascii_file_to_polars,
     write_polars_cache,
 )
+from histdatacom.runtime_contracts import status_has_csv_artifact
 from histdatacom.scraper.scraper import Scraper
 from histdatacom.utils import check_installed_module
 
@@ -108,7 +109,7 @@ class Api:  # noqa:H601
         ]:
             cache_path = Path(record.data_dir, CACHE_FILENAME)
             if not cache_path.exists():
-                if "CSV" not in record.status:
+                if not status_has_csv_artifact(record.status):
                     Scraper.get_zip_file(record)
                 cls._create_cache(record, args)
 

@@ -20,6 +20,7 @@ from histdatacom import config
 from histdatacom.api import Api
 from histdatacom.concurrency import ProcessPool, get_pool_cpu_count
 from histdatacom.histdata_ascii import CACHE_FILENAME
+from histdatacom.runtime_contracts import WorkStatus, status_has_csv_artifact
 
 if TYPE_CHECKING:
     from histdatacom.records import Record, Records
@@ -132,7 +133,7 @@ class Influx:  # noqa:H601
         """
         try:
             if (
-                record.status != "INFLUX_UPLOAD"
+                record.status != WorkStatus.INFLUX_UPLOAD.value
                 and str.lower(record.data_format) == "ascii"
             ):
                 cache_path = Path(record.data_dir, CACHE_FILENAME)
@@ -144,7 +145,7 @@ class Influx:  # noqa:H601
                         records_next,
                         influx_chunks_queue,
                     )
-                elif "CSV" in record.status:
+                elif status_has_csv_artifact(record.status):
                     Api.test_for_cache_or_create(record, args)
                     self._import_cache(
                         record,
@@ -154,7 +155,7 @@ class Influx:  # noqa:H601
                         influx_chunks_queue,
                     )
 
-            record.status = "INFLUX_UPLOAD"
+            record.status = WorkStatus.INFLUX_UPLOAD.value
             record.write_memento_file(base_dir=args["default_download_dir"])
 
             if args["delete_after_influx"]:

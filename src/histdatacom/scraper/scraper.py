@@ -20,6 +20,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from histdatacom import config
 from histdatacom.concurrency import ThreadPool, get_pool_cpu_count
 from histdatacom.records import Record
+from histdatacom.runtime_contracts import WorkStatus
 from histdatacom.scraper.urls import Urls
 
 
@@ -131,13 +132,13 @@ class Scraper:  # noqa:H601
             ):
                 record = self._init_record(url)
 
-                if record.status != "URL_NO_REPO_DATA":
+                if record.status != WorkStatus.URL_NO_REPO_DATA.value:
                     record.write_memento_file(  # noqa:BLK100
                         base_dir=config.ARGS["default_download_dir"]
                     )
                     if (  # noqa:BLK100
                         self.check_if_queue_is_needed()  # noqa:BLK100
-                        and record.status != "URL_NEW"
+                        and record.status != WorkStatus.URL_NEW.value
                     ):
                         self.set_repo_datum(record)
                     config.NEXT_QUEUE.put(record)  # type: ignore
@@ -181,7 +182,7 @@ class Scraper:  # noqa:H601
             record (Record): a record for the work queue.
         """
         record = Record()
-        record(url=url, status="URL_NEW")
+        record(url=url, status=WorkStatus.URL_NEW.value)
         record.restore_momento(base_dir=config.ARGS["default_download_dir"])
         return record
 
@@ -210,14 +211,14 @@ class Scraper:  # noqa:H601
             SystemExit: On any undefined error from scraping
         """
         try:
-            if record.status == "URL_NEW":
+            if record.status == WorkStatus.URL_NEW.value:
                 record = self._scrape_record_info(record)
                 self._check_for_valid_download(record)
 
                 if self.check_if_queue_is_needed():
                     self.set_repo_datum(record)
 
-                record.status = "URL_VALID"
+                record.status = WorkStatus.URL_VALID.value
                 record.write_memento_file(base_dir=args["default_download_dir"])
 
             config.NEXT_QUEUE.put(record)  # type: ignore
@@ -227,7 +228,7 @@ class Scraper:  # noqa:H601
                     f"Info: Histdata.com does not have: {record.url}"
                 )
 
-            record.status = "URL_NO_REPO_DATA"
+            record.status = WorkStatus.URL_NO_REPO_DATA.value
             record.write_memento_file(base_dir=args["default_download_dir"])
         except KeyboardInterrupt as exc_info:
             print("keyboard from _validate_url.")  # noqa:T201
@@ -285,13 +286,15 @@ class Scraper:  # noqa:H601
             KeyboardInterrupt: User Exit.
         """
         try:
-            if "URL_VALID" in record.status or (
+            if WorkStatus.URL_VALID.value in record.status or (
                 args["from_api"]
                 and not self._check_for_existing_archives_on_disk(record)
             ):
                 self.get_zip_file(record)
                 record.status = (
-                    "CSV_ZIP" if record.status == "URL_VALID" else record.status
+                    WorkStatus.CSV_ZIP.value
+                    if record.status == WorkStatus.URL_VALID.value
+                    else record.status
                 )
                 record.write_memento_file(base_dir=args["default_download_dir"])
 
