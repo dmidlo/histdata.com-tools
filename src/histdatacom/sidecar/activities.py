@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping, TypeVar, cast
 
 from histdatacom.activity_stages import (
     dataset_plan_stage,
+    download_archive_work_item,
     repository_refresh_stage,
     validate_url_work_item,
 )
@@ -99,7 +100,8 @@ def validate_urls_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
     work_items = _work_items_from_payload(payload)
     if not work_items:
         return cast(
-            dict[str, Any], _missing_work_item_result(payload).to_dict()
+            dict[str, Any],
+            _missing_work_item_result(payload, "validate_urls").to_dict(),
         )
 
     args = {
@@ -117,7 +119,48 @@ def validate_urls_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
         {
             "work_items": [output.work_item.to_dict() for output in outputs],
             "stage_results": [output.result.to_dict() for output in outputs],
-            "result": _aggregate_validation_result(outputs).to_dict(),
+            "result": _aggregate_activity_outputs(
+                outputs,
+                "validate_urls",
+            ).to_dict(),
+        },
+    )
+
+
+@activity_defn(name="download_archives")
+def download_archives_activity(
+    payload: dict[str, JSONValue],
+) -> dict[str, Any]:
+    """Run idempotent archive download as an activity."""
+    request = RunRequest.from_dict(_mapping(payload.get("request", {})))
+    work_items = _work_items_from_payload(payload)
+    if not work_items:
+        return cast(
+            dict[str, Any],
+            _missing_work_item_result(payload, "download_archives").to_dict(),
+        )
+
+    args = {
+        "default_download_dir": set_working_data_dir(request.data_directory),
+        "requests_timeout": _request_timeout(request),
+        "from_api": bool(request.api_return_type),
+    }
+    outputs = tuple(
+        download_archive_work_item(work_item, args=args)
+        for work_item in work_items
+    )
+    if len(outputs) == 1:
+        return outputs[0].to_dict()
+
+    return cast(
+        dict[str, Any],
+        {
+            "work_items": [output.work_item.to_dict() for output in outputs],
+            "stage_results": [output.result.to_dict() for output in outputs],
+            "result": _aggregate_activity_outputs(
+                outputs,
+                "download_archives",
+            ).to_dict(),
         },
     )
 
@@ -128,6 +171,7 @@ def default_activities() -> tuple[Callable[..., Any], ...]:
         repository_refresh_activity,
         dataset_plan_activity,
         validate_urls_activity,
+        download_archives_activity,
     )
 
 
@@ -159,15 +203,18 @@ def _work_items_from_payload(
     return ()
 
 
-def _missing_work_item_result(payload: Mapping[str, Any]) -> StageResult:
+def _missing_work_item_result(
+    payload: Mapping[str, Any],
+    stage: str,
+) -> StageResult:
     workflow_id = str(payload.get("workflow_id", "") or "")
     return StageResult(
         work_id=workflow_id,
-        stage="validate_urls",
+        stage=stage,
         status=WorkStatus.FAILED,
         failure=FailureInfo(
             code="MISSING_WORK_ITEM",
-            message="validate_urls activity requires work_item or work_items.",
+            message=f"{stage} activity requires work_item or work_items.",
             retryable=False,
         ),
         metrics={"work_item_count": 0},
@@ -184,7 +231,10 @@ def _request_timeout(request: RunRequest) -> int:
         return 10
 
 
-def _aggregate_validation_result(outputs: tuple[Any, ...]) -> StageResult:
+def _aggregate_activity_outputs(
+    outputs: tuple[Any, ...],
+    stage: str,
+) -> StageResult:
     statuses = tuple(output.result.status for output in outputs)
     status = (
         WorkStatus.FAILED
@@ -197,7 +247,7 @@ def _aggregate_validation_result(outputs: tuple[Any, ...]) -> StageResult:
     )
     return StageResult(
         work_id="",
-        stage="validate_urls",
+        stage=stage,
         status=status,
         artifacts=tuple(
             artifact

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import ssl
 import zipfile
 from dataclasses import dataclass, replace
+from email.message import Message
 from pathlib import Path
 from ssl import SSLCertVerificationError
 from typing import Any, Callable, Iterable, Mapping, MutableMapping, Sequence
@@ -226,12 +228,54 @@ class HistDataNoDataError(UrlValidationError):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ArchiveDownloadResult:
+    """A downloaded or reused archive artifact."""
+
+    filename: str
+    path: str
+    size_bytes: int
+    sha256: str
+    reused_existing: bool = False
+    artifact_kind: str = "zip"
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return JSON-compatible archive metadata."""
+        return {
+            "filename": self.filename,
+            "path": self.path,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+            "reused_existing": self.reused_existing,
+            "artifact_kind": self.artifact_kind,
+        }
+
+
+class ArchiveDownloadError(Exception):
+    """Structured archive download failure."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        retryable: bool,
+        detail: Mapping[str, JSONValue] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.detail = dict(detail or {})
+
+
 RecordTransformer = Callable[[Record], Record]
 RecordAction = Callable[[Record], None]
 NoArgBool = Callable[[], bool]
 LineSink = Callable[[list[str]], None]
 RepositoryFetcher = Callable[[str], Mapping[str, Any]]
 UrlPageFetcher = Callable[[str, int], UrlPageData | Mapping[str, Any]]
+ArchivePoster = Callable[..., Any]
 
 
 def validate_url_work_item(
@@ -489,52 +533,310 @@ def download_archive_work_item(
     work_item: WorkItem,
     *,
     args: Mapping[str, Any],
-    download_file: RecordAction,
+    download_file: RecordAction | None = None,
+    post_archive: ArchivePoster | None = None,
 ) -> ActivityStageOutput:
     """Download one ZIP archive without touching global queues."""
     record = _record_from_work_item(work_item)
     try:
-        if WorkStatus.URL_VALID.value in record.status or (
-            bool(args.get("from_api"))
-            and not _existing_archive_artifact_on_disk(record)
-        ):
-            download_file(record)
-            record.status = (
-                WorkStatus.CSV_ZIP.value
-                if record.status == WorkStatus.URL_VALID.value
-                else record.status
-            )
+        _ensure_record_data_dir(record, args)
+        existing = existing_archive_artifact(record)
+        if existing is not None:
+            record.status = _status_for_archive_kind(
+                existing.artifact_kind
+            ).value
             record.write_memento_file(base_dir=_default_download_dir(args))
+            updated = _work_item_from_record(record, work_item)
+            return _activity_output(
+                updated,
+                stage="download_archive",
+                status=updated.status,
+                artifacts=_artifact_refs_for_record(
+                    record,
+                    existing.artifact_kind,
+                ),
+                metrics={
+                    "forward": True,
+                    "decision": "reuse_existing",
+                    "existing_artifact_kind": existing.artifact_kind,
+                    "filename": existing.filename,
+                    "size_bytes": existing.size_bytes,
+                    "sha256": existing.sha256,
+                },
+                message="Existing local archive artifact reused.",
+            )
+
+        should_download = WorkStatus.URL_VALID.value in record.status or bool(
+            args.get("from_api")
+        )
+        if should_download:
+            if download_file is None:
+                download_result = download_histdata_archive_to_record(
+                    record,
+                    timeout=_requests_timeout(args),
+                    post_archive=post_archive,
+                )
+            else:
+                download_file(record)
+                download_result = archive_download_result_for_record(record)
+
+            record.status = WorkStatus.CSV_ZIP.value
+            record.write_memento_file(base_dir=_default_download_dir(args))
+            updated = _work_item_from_record(record, work_item)
+            return _activity_output(
+                updated,
+                stage="download_archive",
+                status=updated.status,
+                artifacts=_artifact_refs_for_record(record, "zip"),
+                metrics={
+                    "forward": True,
+                    "decision": "downloaded",
+                    "filename": download_result.filename,
+                    "size_bytes": download_result.size_bytes,
+                    "sha256": download_result.sha256,
+                },
+            )
 
         updated = _work_item_from_record(record, work_item)
         return _activity_output(
             updated,
             stage="download_archive",
             status=updated.status,
-            artifacts=_artifact_refs_for_record(record, "zip"),
-            metrics={"forward": True},
+            metrics={
+                "forward": True,
+                "decision": "skipped_not_ready",
+            },
         )
-    except KeyError as err:
+    except (ArchiveDownloadError, KeyError, OSError, zipfile.BadZipFile) as err:
+        record.delete_momento_file()
+        failure = _archive_download_failure(err, record)
+        status = WorkStatus.RETRIED if failure.retryable else WorkStatus.FAILED
+        failed = _work_item_from_record(record, work_item).with_status(
+            status,
+        )
+        return _activity_output(
+            failed,
+            stage="download_archive",
+            status=status,
+            forward=False,
+            failure=failure,
+            metrics={
+                "forward": False,
+                "retryable": failure.retryable,
+            },
+            message=failure.message,
+        )
+    except Exception as err:
         record.delete_momento_file()
         failed = _work_item_from_record(record, work_item).with_status(
             WorkStatus.FAILED
+        )
+        failure = FailureInfo(
+            code="ARCHIVE_DOWNLOAD_FAILED",
+            message=str(err),
+            retryable=False,
+            detail={"url": record.url},
         )
         return _activity_output(
             failed,
             stage="download_archive",
             status=WorkStatus.FAILED,
             forward=False,
-            failure=FailureInfo(
-                code="INVALID_ZIP_RESPONSE",
-                message=str(err),
-                retryable=True,
-                detail={"url": record.url},
-            ),
-            metrics={"forward": False},
+            failure=failure,
+            metrics={"forward": False, "retryable": False},
+            message=failure.message,
         )
-    except Exception:
-        record.delete_momento_file()
-        raise
+
+
+def download_histdata_archive_to_record(
+    record: Record,
+    *,
+    timeout: int,
+    post_headers: Mapping[str, str] | None = None,
+    post_archive: ArchivePoster | None = None,
+) -> ArchiveDownloadResult:
+    """POST for a HistData ZIP and atomically persist it on success."""
+    response = post_histdata_archive(
+        record,
+        timeout=timeout,
+        post_headers=post_headers,
+        post_archive=post_archive,
+    )
+    filename = archive_filename_from_response(response)
+    content = _response_content_bytes(response)
+    target_path = atomic_write_zip_archive(
+        Path(record.data_dir),
+        filename,
+        content,
+        work_id=record.url,
+    )
+    record.zip_filename = target_path.name
+    return archive_download_result_for_path(target_path)
+
+
+def post_histdata_archive(
+    record: Record,
+    *,
+    timeout: int,
+    post_headers: Mapping[str, str] | None = None,
+    post_archive: ArchivePoster | None = None,
+) -> Any:
+    """Submit the HistData archive download form."""
+    _validate_archive_request(record)
+    headers = _archive_post_headers(record.url, post_headers)
+    post = post_archive or requests.post
+    try:
+        response = post(
+            "http://www.histdata.com/get.php",
+            data={
+                "tk": record.data_tk,
+                "date": record.data_date,
+                "datemonth": record.data_datemonth,
+                "platform": record.data_format,
+                "timeframe": record.data_timeframe,
+                "fxpair": record.data_fxpair,
+            },
+            headers=headers,
+            timeout=timeout,
+        )
+        raise_for_status = getattr(response, "raise_for_status", None)
+        if callable(raise_for_status):
+            raise_for_status()
+        return response
+    except requests.RequestException as err:
+        raise ArchiveDownloadError(
+            "ARCHIVE_NETWORK_ERROR",
+            str(err),
+            retryable=True,
+            detail={"url": record.url},
+        ) from err
+    except OSError as err:
+        raise ArchiveDownloadError(
+            "ARCHIVE_NETWORK_ERROR",
+            str(err),
+            retryable=True,
+            detail={"url": record.url},
+        ) from err
+
+
+def archive_filename_from_response(response: Any) -> str:
+    """Return a safe ZIP filename from Content-Disposition."""
+    headers = dict(getattr(response, "headers", {}) or {})
+    content_disposition = ""
+    for key, value in headers.items():
+        if str(key).lower() == "content-disposition":
+            content_disposition = str(value)
+            break
+    if not content_disposition:
+        raise ArchiveDownloadError(
+            "INVALID_CONTENT_DISPOSITION",
+            "Archive response is missing Content-Disposition.",
+            retryable=True,
+        )
+
+    message = Message()
+    message["Content-Disposition"] = content_disposition
+    filename = message.get_param(
+        "filename",
+        header="content-disposition",
+    )
+    filename = Path(str(filename or "")).name
+    if not filename:
+        raise ArchiveDownloadError(
+            "INVALID_CONTENT_DISPOSITION",
+            "Archive response does not include a filename.",
+            retryable=True,
+            detail={"content_disposition": content_disposition},
+        )
+    return filename
+
+
+def atomic_write_zip_archive(
+    data_dir: Path,
+    filename: str,
+    content: bytes,
+    *,
+    work_id: str,
+) -> Path:
+    """Write a ZIP through a temp file, validate it, then rename."""
+    target_path = data_dir / filename
+    temp_path = target_path.with_name(
+        f".{target_path.name}.{derive_work_id(work_id).removeprefix('work-')}.tmp"
+    )
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path.write_bytes(content)
+        _validate_zip_payload(temp_path)
+        temp_path.replace(target_path)
+        return target_path
+    except zipfile.BadZipFile as err:
+        _unlink_path(temp_path)
+        raise ArchiveDownloadError(
+            "INVALID_ZIP_PAYLOAD",
+            str(err),
+            retryable=True,
+            detail={"path": str(temp_path)},
+        ) from err
+    except OSError as err:
+        _unlink_path(temp_path)
+        raise ArchiveDownloadError(
+            "ARCHIVE_FILESYSTEM_ERROR",
+            str(err),
+            retryable=False,
+            detail={"path": str(target_path)},
+        ) from err
+
+
+def archive_download_result_for_record(record: Record) -> ArchiveDownloadResult:
+    """Return archive metadata for the ZIP path stored on a record."""
+    if not record.zip_filename:
+        raise ArchiveDownloadError(
+            "INVALID_CONTENT_DISPOSITION",
+            "Archive download did not set a ZIP filename.",
+            retryable=True,
+            detail={"url": record.url},
+        )
+    return archive_download_result_for_path(
+        Path(record.data_dir, record.zip_filename)
+    )
+
+
+def archive_download_result_for_path(
+    path: Path,
+    *,
+    reused_existing: bool = False,
+    artifact_kind: str = "zip",
+) -> ArchiveDownloadResult:
+    """Return size/hash metadata for an archive artifact path."""
+    return ArchiveDownloadResult(
+        filename=path.name,
+        path=str(path),
+        size_bytes=path.stat().st_size,
+        sha256=_file_sha256(path),
+        reused_existing=reused_existing,
+        artifact_kind=artifact_kind,
+    )
+
+
+def existing_archive_artifact(record: Record) -> ArchiveDownloadResult | None:
+    """Return the first existing ZIP/CSV/cache artifact for a record."""
+    if not record.data_dir:
+        return None
+    for artifact_kind, filename in (
+        ("zip", record.zip_filename),
+        ("csv", record.csv_filename),
+        ("cache", record.cache_filename),
+    ):
+        if not filename:
+            continue
+        path = Path(record.data_dir, filename)
+        if path.exists():
+            return archive_download_result_for_path(
+                path,
+                reused_existing=True,
+                artifact_kind=artifact_kind,
+            )
+    return None
 
 
 def extract_csv_work_item(
@@ -1495,6 +1797,120 @@ def _default_download_dir(args: Mapping[str, Any]) -> str:
     return str(args.get("default_download_dir", "") or "")
 
 
+def _ensure_record_data_dir(record: Record, args: Mapping[str, Any]) -> None:
+    if record.data_dir:
+        return
+    default_download_dir = _default_download_dir(args)
+    if default_download_dir:
+        record._set_record_data_dir(default_download_dir)  # noqa:SLF001
+
+
+def _status_for_archive_kind(artifact_kind: str) -> WorkStatus:
+    if artifact_kind == "cache":
+        return WorkStatus.CACHE_READY
+    if artifact_kind == "csv":
+        return WorkStatus.CSV_FILE
+    return WorkStatus.CSV_ZIP
+
+
+def _archive_download_failure(
+    err: Exception,
+    record: Record,
+) -> FailureInfo:
+    if isinstance(err, ArchiveDownloadError):
+        return FailureInfo(
+            code=err.code,
+            message=err.message,
+            retryable=err.retryable,
+            detail=err.detail,
+        )
+    if isinstance(err, KeyError):
+        return FailureInfo(
+            code="INVALID_CONTENT_DISPOSITION",
+            message=str(err),
+            retryable=True,
+            detail={"url": record.url},
+        )
+    if isinstance(err, zipfile.BadZipFile):
+        return FailureInfo(
+            code="INVALID_ZIP_PAYLOAD",
+            message=str(err),
+            retryable=True,
+            detail={"url": record.url},
+        )
+    return FailureInfo(
+        code="ARCHIVE_FILESYSTEM_ERROR",
+        message=str(err),
+        retryable=False,
+        detail={"url": record.url, "data_dir": record.data_dir},
+    )
+
+
+def _validate_archive_request(record: Record) -> None:
+    missing = [
+        field_name
+        for field_name in (
+            "data_tk",
+            "data_date",
+            "data_datemonth",
+            "data_format",
+            "data_timeframe",
+            "data_fxpair",
+            "data_dir",
+        )
+        if not getattr(record, field_name)
+    ]
+    if missing:
+        raise ArchiveDownloadError(
+            "INVALID_ARCHIVE_REQUEST",
+            "Archive download request is missing required fields.",
+            retryable=False,
+            detail={"missing_fields": ",".join(missing), "url": record.url},
+        )
+
+
+def _archive_post_headers(
+    referer: str,
+    post_headers: Mapping[str, str] | None,
+) -> dict[str, str]:
+    if post_headers is None:
+        from histdatacom import config as histdata_config
+
+        post_headers = histdata_config.POST_HEADERS
+    headers = dict(post_headers)
+    headers["Referer"] = referer
+    return headers
+
+
+def _response_content_bytes(response: Any) -> bytes:
+    content = getattr(response, "content", b"")
+    if isinstance(content, bytes):
+        return content
+    if isinstance(content, str):
+        return content.encode("utf-8")
+    return bytes(content or b"")
+
+
+def _validate_zip_payload(path: Path) -> None:
+    with zipfile.ZipFile(path, "r") as archive:
+        bad_member = archive.testzip()
+    if bad_member:
+        raise zipfile.BadZipFile(f"bad member in ZIP archive: {bad_member}")
+
+
+def _unlink_path(path: Path) -> None:
+    if path.exists():
+        path.unlink()
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _artifact_refs_for_record(
     record: Record, artifact_kind: str
 ) -> tuple[ArtifactRef, ...]:
@@ -1514,21 +1930,15 @@ def _artifact_refs_for_record(
                     kind=artifact_kind,
                     path=str(path),
                     size_bytes=path.stat().st_size,
+                    sha256=_file_sha256(path),
+                    metadata={"filename": filename},
                 )
             )
     return tuple(refs)
 
 
 def _existing_archive_artifact_on_disk(record: Record) -> bool:
-    return any(
-        Path(record.data_dir, filename).exists()
-        for filename in (
-            record.zip_filename,
-            record.csv_filename,
-            record.cache_filename,
-        )
-        if filename
-    )
+    return existing_archive_artifact(record) is not None
 
 
 def _supports_cache(record: Record) -> bool:

@@ -123,6 +123,7 @@ def test_run_temporal_worker_accepts_fake_temporal_classes(
         "repository_refresh_activity",
         "dataset_plan_activity",
         "validate_urls_activity",
+        "download_archives_activity",
     }
 
 
@@ -148,6 +149,7 @@ def test_default_activities_include_repository_refresh() -> None:
         "repository_refresh_activity",
         "dataset_plan_activity",
         "validate_urls_activity",
+        "download_archives_activity",
     ]
 
 

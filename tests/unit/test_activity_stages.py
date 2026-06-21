@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import io
 import shutil
 import zipfile
 from pathlib import Path
@@ -80,6 +82,14 @@ def _m1_frame() -> object:
         "M1",
     )
     return convert_polars_datetime_to_utc_ms(raw, "M1")
+
+
+def _zip_bytes(filename: str = "DAT_ASCII_EURUSD_M1_2022.csv") -> bytes:
+    """Return a minimal valid ZIP payload."""
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr(filename, "rows")
+    return stream.getvalue()
 
 
 def _form_html(*, token: str = "token") -> str:
@@ -281,7 +291,273 @@ def test_download_archive_work_item_returns_zip_artifact(
     assert output.work_item.status is WorkStatus.CSV_ZIP
     assert output.work_item.zip_filename == "DAT_ASCII_EURUSD_M1_2022.zip"
     assert output.result.artifacts[0].kind == "zip"
+    assert (
+        output.result.artifacts[0].sha256
+        == hashlib.sha256(b"zip-bytes").hexdigest()
+    )
+    assert output.result.metrics["decision"] == "downloaded"
     assert record.status == WorkStatus.URL_VALID.value
+
+
+def test_download_archive_work_item_atomically_writes_valid_zip(
+    tmp_path: Path,
+) -> None:
+    """Default archive download should write validated ZIP metadata."""
+    data_dir = tmp_path / "ASCII" / "M1" / "eurusd" / "2022"
+    payload = _zip_bytes()
+    record = Record(
+        url=ASCII_M1_URL,
+        status=WorkStatus.URL_VALID.value,
+        data_dir=f"{data_dir}{os.sep}",
+        data_tk="token",
+        data_date="2022",
+        data_datemonth="2022",
+        data_format="ASCII",
+        data_timeframe="M1",
+        data_fxpair="eurusd",
+    )
+
+    def post(url: str, *, data, headers, timeout):  # noqa:ANN001
+        assert headers["Referer"] == ASCII_M1_URL
+        return _FakeResponse(
+            headers={
+                "Content-Disposition": (
+                    'attachment; filename="DAT_ASCII_EURUSD_M1_2022.zip"'
+                ),
+            },
+            content=payload,
+        )
+
+    output = download_archive_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        post_archive=post,
+    )
+
+    zip_path = data_dir / "DAT_ASCII_EURUSD_M1_2022.zip"
+    assert zip_path.read_bytes() == payload
+    assert not list(data_dir.glob("*.tmp"))
+    assert output.forward
+    assert output.work_item.status is WorkStatus.CSV_ZIP
+    assert output.work_item.zip_filename == zip_path.name
+    assert output.result.artifacts[0].size_bytes == len(payload)
+    assert (
+        output.result.artifacts[0].sha256 == hashlib.sha256(payload).hexdigest()
+    )
+    assert output.result.metrics["filename"] == zip_path.name
+    assert output.result.metrics["decision"] == "downloaded"
+
+
+def test_download_archive_work_item_reuses_existing_zip(
+    tmp_path: Path,
+) -> None:
+    """Retrying a download should reuse an existing local ZIP."""
+    data_dir = tmp_path / "ASCII" / "M1" / "eurusd" / "2022"
+    data_dir.mkdir(parents=True)
+    zip_path = data_dir / "DAT_ASCII_EURUSD_M1_2022.zip"
+    zip_path.write_bytes(_zip_bytes())
+    record = Record(
+        url=ASCII_M1_URL,
+        status=WorkStatus.URL_VALID.value,
+        data_dir=f"{data_dir}{os.sep}",
+        zip_filename=zip_path.name,
+    )
+
+    output = download_archive_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        post_archive=lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("should not redownload existing ZIP")
+        ),
+    )
+
+    assert output.work_item.status is WorkStatus.CSV_ZIP
+    assert output.result.metrics["decision"] == "reuse_existing"
+    assert output.result.metrics["existing_artifact_kind"] == "zip"
+    assert output.result.artifacts[0].path == str(zip_path)
+
+
+def test_download_archive_work_item_reuses_existing_csv(
+    tmp_path: Path,
+) -> None:
+    """Existing CSV artifacts should be explicit skip/reuse decisions."""
+    data_dir = tmp_path / "ASCII" / "M1" / "eurusd" / "2022"
+    data_dir.mkdir(parents=True)
+    csv_path = data_dir / "DAT_ASCII_EURUSD_M1_2022.csv"
+    csv_path.write_text("rows", encoding="utf-8")
+    record = Record(
+        url=ASCII_M1_URL,
+        status=WorkStatus.URL_VALID.value,
+        data_dir=f"{data_dir}{os.sep}",
+        csv_filename=csv_path.name,
+    )
+
+    output = download_archive_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+    )
+
+    assert output.work_item.status is WorkStatus.CSV_FILE
+    assert output.result.metrics["decision"] == "reuse_existing"
+    assert output.result.metrics["existing_artifact_kind"] == "csv"
+    assert output.result.artifacts[0].kind == "csv"
+
+
+def test_download_archive_work_item_reuses_existing_cache(
+    tmp_path: Path,
+) -> None:
+    """Existing cache artifacts should be explicit skip/reuse decisions."""
+    data_dir = tmp_path / "ASCII" / "M1" / "eurusd" / "2022"
+    data_dir.mkdir(parents=True)
+    cache_path = data_dir / CACHE_FILENAME
+    cache_path.write_bytes(b"cache")
+    record = Record(
+        url=ASCII_M1_URL,
+        status=WorkStatus.URL_VALID.value,
+        data_dir=f"{data_dir}{os.sep}",
+        cache_filename=cache_path.name,
+    )
+
+    output = download_archive_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+    )
+
+    assert output.work_item.status is WorkStatus.CACHE_READY
+    assert output.result.metrics["decision"] == "reuse_existing"
+    assert output.result.metrics["existing_artifact_kind"] == "cache"
+    assert output.result.artifacts[0].kind == "cache"
+
+
+def test_download_archive_work_item_network_failure_is_retried(
+    tmp_path: Path,
+) -> None:
+    """HTTP/network errors should be retryable structured failures."""
+    record = Record(
+        url=ASCII_M1_URL,
+        status=WorkStatus.URL_VALID.value,
+        data_dir=f"{tmp_path}{os.sep}",
+        data_tk="token",
+        data_date="2022",
+        data_datemonth="2022",
+        data_format="ASCII",
+        data_timeframe="M1",
+        data_fxpair="eurusd",
+    )
+
+    def post(url: str, *, data, headers, timeout):  # noqa:ANN001
+        raise requests.Timeout("timeout")
+
+    output = download_archive_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        post_archive=post,
+    )
+
+    assert not output.forward
+    assert output.work_item.status is WorkStatus.RETRIED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "ARCHIVE_NETWORK_ERROR"
+    assert output.result.failure.retryable
+
+
+def test_download_archive_work_item_invalid_content_disposition_is_retried(
+    tmp_path: Path,
+) -> None:
+    """Missing archive filenames should be distinguished from bad ZIPs."""
+    record = Record(
+        url=ASCII_M1_URL,
+        status=WorkStatus.URL_VALID.value,
+        data_dir=f"{tmp_path}{os.sep}",
+        data_tk="token",
+        data_date="2022",
+        data_datemonth="2022",
+        data_format="ASCII",
+        data_timeframe="M1",
+        data_fxpair="eurusd",
+    )
+
+    output = download_archive_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        post_archive=lambda *args, **kwargs: _FakeResponse(
+            headers={},
+            content=_zip_bytes(),
+        ),
+    )
+
+    assert output.work_item.status is WorkStatus.RETRIED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "INVALID_CONTENT_DISPOSITION"
+
+
+def test_download_archive_work_item_invalid_zip_payload_is_retried(
+    tmp_path: Path,
+) -> None:
+    """Invalid ZIP payloads should not leave committed files behind."""
+    record = Record(
+        url=ASCII_M1_URL,
+        status=WorkStatus.URL_VALID.value,
+        data_dir=f"{tmp_path}{os.sep}",
+        data_tk="token",
+        data_date="2022",
+        data_datemonth="2022",
+        data_format="ASCII",
+        data_timeframe="M1",
+        data_fxpair="eurusd",
+    )
+
+    output = download_archive_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        post_archive=lambda *args, **kwargs: _FakeResponse(
+            headers={
+                "Content-Disposition": "attachment; filename=bad.zip",
+            },
+            content=b"not a zip",
+        ),
+    )
+
+    assert output.work_item.status is WorkStatus.RETRIED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "INVALID_ZIP_PAYLOAD"
+    assert not (tmp_path / "bad.zip").exists()
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_download_archive_work_item_filesystem_failure_is_failed(
+    tmp_path: Path,
+) -> None:
+    """Filesystem write failures should be non-retryable failures."""
+    data_dir = tmp_path / "not-a-directory"
+    data_dir.write_text("blocked", encoding="utf-8")
+    record = Record(
+        url=ASCII_M1_URL,
+        status=WorkStatus.URL_VALID.value,
+        data_dir=f"{data_dir}{os.sep}",
+        data_tk="token",
+        data_date="2022",
+        data_datemonth="2022",
+        data_format="ASCII",
+        data_timeframe="M1",
+        data_fxpair="eurusd",
+    )
+
+    output = download_archive_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        post_archive=lambda *args, **kwargs: _FakeResponse(
+            headers={
+                "Content-Disposition": "attachment; filename=archive.zip",
+            },
+            content=_zip_bytes(),
+        ),
+    )
+
+    assert output.work_item.status is WorkStatus.FAILED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "ARCHIVE_FILESYSTEM_ERROR"
+    assert not output.result.failure.retryable
 
 
 def test_extract_csv_work_item_extracts_data_member(tmp_path: Path) -> None:

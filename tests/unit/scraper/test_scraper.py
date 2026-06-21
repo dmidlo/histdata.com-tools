@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import zipfile
 from pathlib import Path
 
 from histdatacom import config
@@ -154,9 +155,9 @@ def test_download_zip_transitions_valid_record_to_csv_zip(
         data_dir=f"{data_dir}{os.sep}",
         zip_filename="DAT_ASCII_EURUSD_M1_2022.zip",
     )
+    with zipfile.ZipFile(data_dir / record.zip_filename, "w") as archive:
+        archive.writestr("DAT_ASCII_EURUSD_M1_2022.csv", "rows")
     _configure_stage_queues(record, tmp_path)
-
-    scraper.get_zip_file = lambda record_: None  # type: ignore[method-assign]
 
     scraper._download_zip(record, config.ARGS)
 

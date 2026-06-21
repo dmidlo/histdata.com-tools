@@ -684,8 +684,15 @@ class DownloadArchivesWorkflow(_ActivityWorkflowBase):
 
     @workflow_run
     async def run(self, payload: Mapping[str, JSONValue]) -> dict:
-        """Run archive download activity placeholder."""
-        return await self._run_activity(payload)
+        """Run archive download as a real activity."""
+        return await execute_activity_workflow(
+            self.workflow_name,
+            payload,
+            activity_executor=(
+                self._activity_executor or TemporalActivityExecutor()
+            ),
+            progress=self._progress,
+        )
 
     status = workflow_query(_ActivityWorkflowBase.status)
 

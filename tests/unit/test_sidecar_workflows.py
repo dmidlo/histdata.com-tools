@@ -285,6 +285,36 @@ def test_dataset_plan_workflow_uses_activity_executor() -> None:
     assert workflow.status()["planned_children"] == ["dataset_plan"]
 
 
+def test_download_archives_workflow_uses_activity_executor() -> None:
+    """Archive downloads should run through the activity executor seam."""
+    activity_executor = _RecordingActivityExecutor()
+    workflow = workflows.DownloadArchivesWorkflow(
+        activity_executor=activity_executor
+    )
+    request = _request()
+    invocation = workflows.build_symbol_child_invocations(
+        request,
+        {"pair": "EURUSD", "timeframe": "M1"},
+    )[1]
+
+    summary = asyncio.run(workflow.run(invocation.payload))
+
+    assert activity_executor.calls == [
+        {
+            "activity_name": "download_archives",
+            "payload": {
+                **invocation.payload,
+                "activity": "download_archives",
+                "stage": "download_archives",
+                "task_queue": "queue-network",
+            },
+            "task_queue": "queue-network",
+        }
+    ]
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert workflow.status()["planned_children"] == ["download_archives"]
+
+
 def test_repository_refresh_workflow_uses_activity_executor() -> None:
     """Repository refresh should run through the activity executor seam."""
     activity_executor = _RecordingActivityExecutor()

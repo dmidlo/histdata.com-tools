@@ -36,6 +36,7 @@ from histdatacom.sidecar.client import (
 from histdatacom.sidecar.activities import (
     dataset_plan_activity,
     default_activities,
+    download_archives_activity,
     repository_refresh_activity,
     validate_urls_activity,
 )
@@ -177,6 +178,7 @@ __all__ = [
     "default_sidecar_runtime_home",
     "default_sidecar_state_dir",
     "default_sidecar_workspace",
+    "download_archives_activity",
     "default_worker_activities",
     "default_workflows",
     "execute_histdata_run_workflow",

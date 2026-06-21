@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import io
+import zipfile
+
 from histdatacom.activity_stages import UrlValidationError
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
 from histdatacom.sidecar.activities import (
     dataset_plan_activity,
     default_activities,
+    download_archives_activity,
     repository_refresh_activity,
     validate_urls_activity,
 )
@@ -43,6 +47,37 @@ def _validation_payload(tmp_path) -> dict:
                 "http://www.histdata.com/download-free-forex-data/"
                 "?/ascii/1-minute-bar-quotes/eurusd/2022"
             ),
+        },
+    }
+
+
+def _zip_bytes() -> bytes:
+    """Return a minimal valid ZIP payload."""
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("DAT_ASCII_EURUSD_M1_2022.csv", "rows")
+    return stream.getvalue()
+
+
+def _download_payload(tmp_path) -> dict:
+    """Return a minimal download activity payload with existing ZIP."""
+    zip_path = tmp_path / "DAT_ASCII_EURUSD_M1_2022.zip"
+    zip_path.write_bytes(_zip_bytes())
+    request = RunRequest(
+        request_id="run-download",
+        data_directory=str(tmp_path),
+    )
+    return {
+        "request": request.to_dict(),
+        "work_item": {
+            "work_id": "work-download",
+            "status": WorkStatus.URL_VALID.value,
+            "url": (
+                "http://www.histdata.com/download-free-forex-data/"
+                "?/ascii/1-minute-bar-quotes/eurusd/2022"
+            ),
+            "data_dir": f"{tmp_path}/",
+            "zip_filename": zip_path.name,
         },
     }
 
@@ -182,10 +217,23 @@ def test_validate_urls_activity_returns_retried(monkeypatch, tmp_path) -> None:
     assert result["result"]["failure"]["retryable"]
 
 
+def test_download_archives_activity_reuses_existing_zip(tmp_path) -> None:
+    """Archive downloads should be callable as a registered activity."""
+    result = download_archives_activity(_download_payload(tmp_path))
+
+    assert result["result"]["stage"] == "download_archive"
+    assert result["result"]["status"] == WorkStatus.CSV_ZIP.value
+    assert result["result"]["metrics"]["decision"] == "reuse_existing"
+    assert result["work_item"]["status"] == WorkStatus.CSV_ZIP.value
+    assert result["result"]["artifacts"][0]["kind"] == "zip"
+    assert result["result"]["artifacts"][0]["sha256"]
+
+
 def test_default_activities_register_operation_activities() -> None:
     """The worker default activity set should include migrated activities."""
     assert default_activities() == (
         repository_refresh_activity,
         dataset_plan_activity,
         validate_urls_activity,
+        download_archives_activity,
     )

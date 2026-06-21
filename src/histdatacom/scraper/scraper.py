@@ -19,7 +19,10 @@ from histdatacom import config
 from histdatacom.activity_stages import (
     apply_stage_output_to_record,
     apply_form_metadata_to_work_item,
+    archive_filename_from_response,
+    atomic_write_zip_archive,
     download_archive_work_item,
+    download_histdata_archive_to_record,
     fetch_histdata_page_data,
     plan_dataset_work_items,
     parse_histdata_form_metadata,
@@ -64,9 +67,11 @@ class Scraper:  # noqa:H601
         Args:
             record (Record): a record from the work queue
         """
-        res = cls._request_file(record, config.REQUESTS_TIMEOUT)
-        record.zip_filename = cls._get_zip_file_name(res)
-        cls._write_file(record, res.content)
+        download_histdata_archive_to_record(
+            record,
+            timeout=config.REQUESTS_TIMEOUT,
+            post_headers=config.POST_HEADERS,
+        )
 
     @classmethod
     def _get_zip_file_name(cls, response: requests.Response) -> str:
@@ -78,8 +83,7 @@ class Scraper:  # noqa:H601
         Returns:
             str: *.zip file name
         """
-        content_disposition_header = response.headers["Content-Disposition"]
-        return str(content_disposition_header.split(";")[1].split("=")[1])
+        return archive_filename_from_response(response)
 
     @classmethod
     def _write_file(cls, record: Record, zip_content: bytes) -> None:
@@ -89,8 +93,12 @@ class Scraper:  # noqa:H601
             record (Record): a record from the work queue.
             zip_content (bytes): binary zip data
         """
-        zip_path = Path(record.data_dir, record.zip_filename)
-        zip_path.write_bytes(zip_content)
+        atomic_write_zip_archive(
+            Path(record.data_dir),
+            record.zip_filename,
+            zip_content,
+            work_id=record.url,
+        )
 
     @classmethod
     def _request_file(cls, record: Record, timeout: int) -> requests.Response:
@@ -301,7 +309,6 @@ class Scraper:  # noqa:H601
             output = download_archive_work_item(
                 WorkItem.from_record(record),
                 args=args,
-                download_file=self.get_zip_file,
             )
             apply_stage_output_to_record(output, record)
             if output.result.failure is not None:
