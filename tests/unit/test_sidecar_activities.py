@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import shutil
 import zipfile
 from pathlib import Path
+from typing import Any, get_type_hints
+
+import pytest
 
 from histdatacom.activity_stages import UrlValidationError
 from histdatacom.histdata_ascii import (
@@ -265,6 +269,22 @@ def _influx_payload(
     }
 
 
+def _decode_with_temporal_converter(
+    converter: Any,
+    payload: dict[str, Any],
+    *,
+    type_hint: type,
+) -> dict[str, Any]:
+    async def round_trip() -> dict[str, Any]:
+        encoded = await converter.encode([payload])
+        [decoded] = await converter.decode(encoded, type_hints=[type_hint])
+        return decoded
+
+    decoded_payload = asyncio.run(round_trip())
+    assert isinstance(decoded_payload, dict)
+    return decoded_payload
+
+
 def test_repository_refresh_activity_returns_stage_result(
     monkeypatch,
     tmp_path,
@@ -319,6 +339,39 @@ def test_dataset_plan_activity_returns_explicit_work_items(tmp_path) -> None:
         "?/ascii/1-minute-bar-quotes/eurusd/2022"
     )
     assert result["work_items"][0]["data_datemonth"] == "2022"
+
+
+def test_dataset_plan_activity_payload_survives_temporal_converter(
+    tmp_path,
+) -> None:
+    """Temporal's data converter must preserve nested request payloads."""
+    converter_module = pytest.importorskip("temporalio.converter")
+    request = RunRequest(
+        request_id="run-plan-converter",
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("M1",),
+        start_yearmonth="202201",
+        end_yearmonth="202201",
+        data_directory=str(tmp_path),
+        metadata={
+            "requests_timeout": "30",
+            "temporal_batching": {"max_work_items_per_batch": 1},
+        },
+    )
+    payload = {"request": request.to_dict(), "stage": "dataset_plan"}
+    parameter_hint = get_type_hints(dataset_plan_activity)["payload"]
+
+    decoded = _decode_with_temporal_converter(
+        converter_module.default(),
+        payload,
+        type_hint=parameter_hint,
+    )
+    result = dataset_plan_activity(decoded)
+
+    assert result["result"]["metrics"]["work_item_count"] == 1
+    assert len(result["work_items"]) == 1
+    assert result["work_items"][0]["data_fxpair"] == "eurusd"
 
 
 def test_validate_urls_activity_returns_form_metadata(

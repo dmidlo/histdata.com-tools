@@ -78,7 +78,7 @@ def activity_defn(**kwargs: Any) -> Callable[[_Callable], _Callable]:
 
 @activity_defn(name="repository_refresh")
 def repository_refresh_activity(
-    payload: dict[str, JSONValue],
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
     """Run repository refresh/listing as a Temporal activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
@@ -119,7 +119,7 @@ def repository_refresh_activity(
 
 
 @activity_defn(name="dataset_plan")
-def dataset_plan_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
+def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
     """Run deterministic URL and dataset planning as a Temporal activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     if _activity_cancelled():
@@ -162,7 +162,7 @@ def dataset_plan_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
 
 
 @activity_defn(name="validate_urls")
-def validate_urls_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
+def validate_urls_activity(payload: dict[str, Any]) -> dict[str, Any]:
     """Run URL validation and form metadata scraping as an activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     work_items = _work_items_from_payload(payload)
@@ -207,7 +207,7 @@ def validate_urls_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
 
 @activity_defn(name="download_archives")
 def download_archives_activity(
-    payload: dict[str, JSONValue],
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
     """Run idempotent archive download as an activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
@@ -254,7 +254,7 @@ def download_archives_activity(
 
 @activity_defn(name="extract_csv")
 def extract_csv_activity(
-    payload: dict[str, JSONValue],
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
     """Run idempotent archive extraction as an activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
@@ -300,7 +300,7 @@ def extract_csv_activity(
 
 @activity_defn(name="build_cache")
 def build_cache_activity(
-    payload: dict[str, JSONValue],
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
     """Run Polars cache build/validation as an activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
@@ -345,7 +345,7 @@ def build_cache_activity(
 
 @activity_defn(name="merge_cache")
 def merge_cache_activity(
-    payload: dict[str, JSONValue],
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
     """Assemble cache merge references without materializing dataframes."""
     work_items = _work_items_from_payload(payload)
@@ -395,7 +395,7 @@ def merge_cache_activity(
 
 @activity_defn(name="import_to_influx")
 def import_to_influx_activity(
-    payload: dict[str, JSONValue],
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
     """Upload cache batches to InfluxDB without queue-backed writers."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))

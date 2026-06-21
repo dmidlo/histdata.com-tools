@@ -1,6 +1,6 @@
 # Temporal Sidecar Performance Baseline
 
-Issue: #166
+Issues: #166, #180
 
 See `docs/temporal-sidecar-operations.md` for lifecycle commands, runtime
 paths, troubleshooting, and worker startup guidance. This page is limited to
@@ -129,6 +129,69 @@ concurrency conservative until idempotent external write behavior is validated
 under a live Influx target. Increase CPU/file workers only when cache builds are
 CPU-bound and memory headroom remains stable.
 
-Future sidecar benchmarks should compare realistic validate/download/cache/import
-runs against this retired-runtime policy so regressions are visible before
-worker defaults are changed.
+## Live Throughput Matrix
+
+Issue #180 adds an operator-gated benchmark script that compares the
+queue-free foreground runtime and a live Temporal sidecar on the same request
+matrix:
+
+```sh
+HISTDATACOM_LIVE_SIDECAR_THROUGHPUT=1 \
+HISTDATACOM_TEMPORAL_EXECUTABLE=/opt/local/bin/temporal \
+python scripts/benchmark_sidecar_throughput.py \
+  --workspace /tmp/histdatacom-issue180-benchmark/workspace \
+  --runtime-home /tmp/histdatacom-issue180-benchmark/runtime \
+  --data-directory /tmp/histdatacom-issue180-benchmark/data \
+  --output /tmp/histdatacom-issue180-benchmark/report.json \
+  --temporal-executable /opt/local/bin/temporal
+```
+
+The default matrix uses one EURUSD M1 period and covers:
+
+- repository refresh
+- dataset planning and URL validation
+- archive download and CSV extraction
+- Polars cache build and cache merge
+- no-Influx import-skipped behavior, represented by a cache/merge request that
+  intentionally omits `ImportWorkflow` and starts only orchestration, network,
+  and CPU/file worker lanes
+
+The benchmark uses `max_work_items_per_batch=1` to force visible child-workflow
+handoff in the one-period matrix. Production defaults remain
+`max_work_items_per_batch=64`.
+
+## Live Result
+
+Live run date: 2026-06-21. Temporal executable:
+`/opt/local/bin/temporal`. InfluxDB was intentionally unavailable and skipped.
+
+| Scenario | Foreground elapsed | Sidecar elapsed | Ratio | Sidecar process CPU | Artifacts | Failures/retries |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| repository-refresh | 0.053s | 2.357s | 44.487x | 2.690s | 1 | 0/0 |
+| validate-url | 0.419s | 0.658s | 1.569x | 0.310s | 0 | 0/0 |
+| download-extract | 1.756s | 2.288s | 1.303x | 0.620s | 2 | 0/0 |
+| cache-merge-no-influx | 1.904s | 2.255s | 1.185x | 0.710s | 3 | 0/0 |
+
+Sidecar startup was 0.142s in this run. The sidecar path successfully forwarded
+planned work items through live Temporal child workflows and produced expected
+ZIP, CSV, and cache artifacts. The benchmark also caught and fixed a live SDK
+payload-boundary issue: activity entrypoints now use `dict[str, Any]` rather
+than the recursive `JSONValue` alias so Temporal's data converter preserves
+nested request payloads.
+
+## Accepted Envelope
+
+No lane default changes are warranted from the issue #180 measurements:
+
+- Keep orchestration workers at `1`.
+- Keep network workers at `get_pool_cpu_count(cpu_utilization) * 3`.
+- Keep CPU/file workers at `get_pool_cpu_count(cpu_utilization)`.
+- Keep Influx workers at `1` until a live Influx target is available.
+- Keep the production batch default at `64` work items per child workflow.
+
+The sidecar has fixed orchestration overhead, so repository-only and
+single-item jobs can be slower than foreground. That tradeoff is acceptable for
+the Temporal migration because the live path now proves bounded workflow
+history, real activity handoff, artifact references instead of dataframes in
+history, and lane-isolated execution. Throughput tuning should happen on
+multi-period and multi-pair workloads before changing defaults.
