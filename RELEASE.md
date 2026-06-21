@@ -71,3 +71,36 @@ this project:
 
 The `pypi` environment should require manual approval in GitHub before publish
 jobs run.
+
+## Dependency And Security Triage
+
+Dependabot monitors GitHub Actions and Python packaging metadata weekly. Its
+pull requests should run the full CI and security workflows before merge.
+
+The security workflow runs on pull requests, pushes to `main`, manual dispatch,
+and a weekly schedule. It has no publishing permissions. Dependency Review is
+enabled for pull requests on this public repository and fails when dependency
+changes introduce moderate, high, or critical vulnerabilities in runtime or
+development scopes. `pip-audit` installs the package with the pandas and arrow
+optional dependencies, audits the resulting Python environment, and uploads a
+JSON report. CodeQL analyzes the Python source with no build step; it only has
+`security-events: write` so GitHub can receive code-scanning results.
+
+For a published PyPI package, triage vulnerability findings by affected install
+surface:
+
+- Runtime dependencies affect ordinary `pip install histdatacom` users and
+  should be patched with a minimum-version floor or compatible dependency range
+  before publishing a patch release.
+- Optional dependency findings affect users who install extras such as
+  `histdatacom[pandas]` or `histdatacom[arrow]`; patch those ranges and mention
+  the affected extra in release notes.
+- Development and build findings block contributor or release hygiene but do
+  not automatically require a PyPI release unless the vulnerable package is
+  included in built distributions or runtime metadata.
+- Transitive findings should be fixed by raising the direct dependency lower
+  bound when possible. Avoid pinning runtime dependencies more tightly than
+  needed for a library package.
+- If no fixed version exists, keep the finding open, document the exposure and
+  mitigation in the tracking issue, and avoid publishing a release that expands
+  the affected install surface.

@@ -22,6 +22,7 @@ result.json
 out.gv
 htmlcov/
 coverage.xml
+pip-audit.json
 .coverage
 .coverage.*
 
