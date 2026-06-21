@@ -859,7 +859,10 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         sidecar_args.add_argument(
             "--sidecar-start",
             action="store_true",
-            help="start the sidecar only when no healthy sidecar is running",
+            help=(
+                "start the sidecar server and worker fleet only when no "
+                "healthy sidecar is running"
+            ),
         )
         sidecar_args.add_argument(
             "--sidecar-submit-only",

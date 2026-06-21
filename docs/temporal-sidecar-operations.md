@@ -32,14 +32,17 @@ server executable as package data. On a bundled platform wheel,
 `histdatacom-sidecar start` resolves the packaged executable through
 `importlib.resources`; on metadata-only artifacts and unsupported platforms,
 development and operator smoke tests should pass an explicit Temporal
-executable path to `histdatacom-sidecar start --executable`.
+executable path to `histdatacom-sidecar start --executable`. The Temporal
+dependency extra is required for lifecycle start because the supervisor also
+launches the worker lane fleet.
 
 ## Runtime Model
 
-The sidecar runs a local Temporal developer server with SQLite persistence.
-The server is scoped by workspace so concurrent projects do not share process
-state, logs, task queues, or SQLite history unless they intentionally use the
-same workspace path.
+The sidecar runs a local Temporal developer server with SQLite persistence plus
+one worker process for each configured task-queue lane. The runtime is scoped
+by workspace so concurrent projects do not share process state, logs, task
+queues, or SQLite history unless they intentionally use the same workspace
+path.
 
 The sidecar stores only orchestration state:
 
@@ -81,10 +84,10 @@ Workspace runtime contents:
 
 | Path | Purpose |
 | --- | --- |
-| `state/sidecar.pid.json` | Persisted server PID, command, ports, and log paths |
+| `state/sidecar.pid.json` | Persisted component PIDs, commands, ports, worker fleet config, and log paths |
 | `state/sidecar.lock` | Transient supervisor lock while start/stop mutates state |
 | `logs/temporal-server.log` | Temporal server stdout/stderr |
-| `logs/temporal-worker.log` | Reserved worker log path for packaged worker supervision |
+| `logs/temporal-worker-<lane>.log` | Worker lane stdout/stderr |
 | `sqlite/temporal.db` | Temporal developer-server SQLite persistence |
 | `manifests/runtime-policy.json` | Resolved runtime path, port, and workspace policy |
 
@@ -143,6 +146,24 @@ Stop or restart:
 histdatacom-sidecar stop
 histdatacom-sidecar restart --executable /path/to/temporal
 ```
+
+Lifecycle `start` and `restart` start the Temporal server, wait until the
+frontend port accepts connections, and then launch the worker lane fleet.
+Worker lane settings can be passed to start/restart:
+
+```sh
+histdatacom-sidecar start \
+  --executable /path/to/temporal \
+  --namespace default \
+  --task-queue-prefix histdatacom \
+  --cpu-utilization medium \
+  --network-multiplier 3
+```
+
+`status --json` and `doctor --json` include component health for `server`,
+`worker:orchestration`, `worker:network`, `worker:cpu-file`, and
+`worker:influx`. A live server without all required worker lanes is reported as
+stale rather than healthy.
 
 Scope every lifecycle command to a stable workspace when running from cron,
 launchd, systemd, scheduled tasks, or a future GUI shell:
@@ -243,7 +264,8 @@ Inspect worker configuration:
 histdatacom-sidecar-worker config --lane network --json
 ```
 
-Run a worker lane:
+The lifecycle supervisor normally starts every worker lane. Run an individual
+worker lane manually only for debugging or targeted recovery:
 
 ```sh
 histdatacom-sidecar-worker run --lane orchestration
@@ -349,9 +371,9 @@ Corrupted SQLite or runtime state:
 Worker crashes:
 
 - Symptom: jobs remain queued or lane progress stops.
-- Fix: inspect `logs/temporal-worker.log`, run
-  `histdatacom-sidecar-worker config --lane <lane> --json`, then restart the
-  affected worker lane with the same workspace and runtime home.
+- Fix: inspect `histdatacom-sidecar doctor --json` and the affected
+  `logs/temporal-worker-<lane>.log`, then run `histdatacom-sidecar restart`
+  with the same workspace and runtime home.
 
 InfluxDB unavailable:
 

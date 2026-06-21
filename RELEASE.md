@@ -111,6 +111,7 @@ python scripts/smoke_sidecar_install.py \
   --wheel dist/histdatacom-*-py3-none-<platform-tag>.whl \
   --require-bundled-current-platform \
   --check-executable-version \
+  --expect-temporal-extra \
   --start-sidecar
 ```
 

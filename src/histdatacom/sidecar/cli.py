@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Sequence
 
 from histdatacom.runtime_contracts import RunRequest
+from histdatacom.sidecar.performance import (
+    DEFAULT_INFLUX_WORKERS,
+    DEFAULT_NETWORK_MULTIPLIER,
+    DEFAULT_ORCHESTRATION_WORKERS,
+)
 from histdatacom.sidecar.client import (
     cancel_job_sync,
     get_job_result_sync,
@@ -20,6 +25,8 @@ from histdatacom.sidecar.client import (
 )
 from histdatacom.sidecar.control import CONTROL_SCHEMA_VERSION
 from histdatacom.sidecar.queues import (
+    DEFAULT_TASK_QUEUE_PREFIX,
+    DEFAULT_TEMPORAL_NAMESPACE,
     SidecarWorkerConfig,
     build_sidecar_worker_config,
 )
@@ -98,6 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
         help="seconds to wait for the sidecar process to stay alive",
     )
+    _add_worker_fleet_args(start)
     start.add_argument(
         "extra_args",
         nargs=argparse.REMAINDER,
@@ -134,6 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_STOP_TIMEOUT_SECONDS,
         help="seconds to wait for process shutdown",
     )
+    _add_worker_fleet_args(restart)
     restart.add_argument(
         "extra_args",
         nargs=argparse.REMAINDER,
@@ -214,7 +223,31 @@ def _supervisor(args: argparse.Namespace) -> SidecarSupervisor:
         runtime_home=args.runtime_home,
         paths=paths,
     )
-    return SidecarSupervisor(runtime_policy=runtime_policy)
+    return SidecarSupervisor(
+        runtime_policy=runtime_policy,
+        namespace=getattr(args, "namespace", DEFAULT_TEMPORAL_NAMESPACE),
+        task_queue_prefix=getattr(
+            args,
+            "task_queue_prefix",
+            DEFAULT_TASK_QUEUE_PREFIX,
+        ),
+        cpu_utilization=getattr(args, "cpu_utilization", "medium"),
+        network_multiplier=getattr(
+            args,
+            "network_multiplier",
+            DEFAULT_NETWORK_MULTIPLIER,
+        ),
+        orchestration_workers=getattr(
+            args,
+            "orchestration_workers",
+            DEFAULT_ORCHESTRATION_WORKERS,
+        ),
+        influx_workers=getattr(
+            args,
+            "influx_workers",
+            DEFAULT_INFLUX_WORKERS,
+        ),
+    )
 
 
 def _write_payload(payload: dict, *, as_json: bool) -> None:
@@ -225,6 +258,8 @@ def _write_payload(payload: dict, *, as_json: bool) -> None:
     print(f"{payload['state']}: {payload['message']}")  # noqa:T201
     if payload.get("pids"):
         print(f"pids: {payload['pids']}")  # noqa:T201
+    if payload.get("components"):
+        print(f"components: {payload['components']}")  # noqa:T201
     if payload.get("ports"):
         ports = payload["ports"]
         print(  # noqa:T201
@@ -245,6 +280,46 @@ def _extra_args(args: Sequence[str]) -> tuple[str, ...]:
     if args and args[0] == "--":
         return tuple(args[1:])
     return tuple(args)
+
+
+def _add_worker_fleet_args(parser: argparse.ArgumentParser) -> None:
+    """Add worker fleet options for supervised sidecar lifecycle commands."""
+    parser.add_argument(
+        "--namespace",
+        default=DEFAULT_TEMPORAL_NAMESPACE,
+        help="Temporal namespace used by the local sidecar worker fleet",
+    )
+    parser.add_argument(
+        "--task-queue-prefix",
+        default=DEFAULT_TASK_QUEUE_PREFIX,
+        help="prefix for workspace-scoped Temporal task queues",
+    )
+    parser.add_argument(
+        "--cpu-utilization",
+        default="medium",
+        help=(
+            "legacy CPU policy used to derive sidecar worker concurrency "
+            "(low, medium, high, or percent 1-200)"
+        ),
+    )
+    parser.add_argument(
+        "--network-multiplier",
+        type=int,
+        default=DEFAULT_NETWORK_MULTIPLIER,
+        help="network lane multiplier applied to the legacy CPU worker count",
+    )
+    parser.add_argument(
+        "--orchestration-workers",
+        type=int,
+        default=DEFAULT_ORCHESTRATION_WORKERS,
+        help="max concurrent orchestration lane activities",
+    )
+    parser.add_argument(
+        "--influx-workers",
+        type=int,
+        default=DEFAULT_INFLUX_WORKERS,
+        help="max concurrent Influx lane activities",
+    )
 
 
 def _add_job_identity_args(parser: argparse.ArgumentParser) -> None:

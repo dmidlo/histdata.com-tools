@@ -117,7 +117,7 @@ System:
 
 Sidecar:
   --sidecar             submit this run to the local Temporal sidecar
-  --sidecar-start       start the sidecar only when no healthy sidecar is running
+  --sidecar-start       start the sidecar server and worker fleet only when no healthy sidecar is running
   --sidecar-submit-only
                         submit the sidecar job without waiting for its result
 
@@ -336,7 +336,9 @@ CLI entry points. Platform wheels can bundle the Temporal server executable
 under the sidecar package resources. On a bundled platform wheel,
 `histdatacom-sidecar start` works without `--executable`; on metadata-only
 artifacts and unsupported platforms, development and operator smoke tests
-should pass `--executable /path/to/temporal` when starting the sidecar.
+should pass `--executable /path/to/temporal` when starting the sidecar. The
+Temporal dependency extra is required because lifecycle start supervises both
+the local Temporal server and the worker lane fleet.
 
 #### Lifecycle and Diagnostics
 
@@ -349,6 +351,9 @@ histdatacom-sidecar start
 histdatacom-sidecar start --executable /path/to/temporal
 histdatacom-sidecar stop
 ```
+
+`status` and `doctor` report component health for the server and each worker
+lane: `orchestration`, `network`, `cpu-file`, and `influx`.
 
 `histdatacom sidecar ...` is also routed through the top-level command. Use
 `--workspace` or `HISTDATACOM_SIDECAR_WORKSPACE` for cron, service managers,
@@ -380,7 +385,7 @@ histdatacom-sidecar jobs cancel histdatacom-<request-id> --reason "operator stop
 
 - `histdatacom --version` stays local and does not require the sidecar.
 - `-A`, `-U`, `-V`, `-D`, `-X`, and `-I` keep their existing option semantics before a sidecar request is submitted.
-- `--sidecar-start` starts the sidecar only when no healthy sidecar is running.
+- `--sidecar-start` starts the server and worker lane fleet only when no healthy sidecar is running.
 - `--sidecar-submit-only` submits a job and returns job metadata instead of waiting for cache artifacts or workflow results.
 - API calls with `options.api_return_type` and `options.use_sidecar = True` return the requested `polars`, `pandas`, or `arrow` object after a completed sidecar job by materializing cache artifacts on disk.
 - If the sidecar is unavailable, CLI calls exit nonzero with a clear error and API calls raise `SidecarUnavailableError`.

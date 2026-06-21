@@ -76,11 +76,17 @@ def install_wheel(
     *,
     wheel_dir: Path | None = None,
     wheel_path: Path | None = None,
+    install_temporal_extra: bool = False,
 ) -> Path:
     """Install the built wheel into the active Python environment."""
     resolved_wheel = wheel_path or _single_wheel(wheel_dir or Path("dist"))
+    install_target = str(resolved_wheel)
+    if install_temporal_extra:
+        install_target = (
+            "histdatacom[temporal] @ " f"{resolved_wheel.resolve().as_uri()}"
+        )
     subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", str(resolved_wheel)]
+        [sys.executable, "-m", "pip", "install", install_target]
     )
     return resolved_wheel
 
@@ -316,12 +322,15 @@ def main() -> None:
     args = parser.parse_args()
     if args.wheel is not None and args.wheel_dir is not None:
         parser.error("--wheel and --wheel-dir are mutually exclusive")
+    if args.start_sidecar and not args.expect_temporal_extra:
+        parser.error("--start-sidecar requires --expect-temporal-extra")
 
     wheel_name = ""
     if args.wheel_dir is not None or args.wheel is not None:
         wheel_name = install_wheel(
             wheel_dir=args.wheel_dir,
             wheel_path=args.wheel,
+            install_temporal_extra=args.expect_temporal_extra,
         ).name
 
     with tempfile.TemporaryDirectory() as temporary_dir:

@@ -33,7 +33,9 @@ lane policy from the existing `cpu_utilization` setting:
 - cpu-file: `get_pool_cpu_count(cpu_utilization)`
 - influx: `1`
 
-`histdatacom-sidecar-worker` exposes:
+`histdatacom-sidecar start` and `histdatacom-sidecar restart` pass the same
+policy to every supervised worker lane. `histdatacom-sidecar-worker` exposes
+the same flags for manual lane debugging:
 
 - `--cpu-utilization`
 - `--network-multiplier`

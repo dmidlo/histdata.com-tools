@@ -182,6 +182,40 @@ def test_sidecar_lifecycle_cli_commands_delegate_to_supervisor(
     )
 
 
+def test_sidecar_start_supervisor_inherits_worker_fleet_options(
+    tmp_path: Path,
+) -> None:
+    """Lifecycle worker flags should flow into the constructed supervisor."""
+    args = cli.build_parser().parse_args(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "start",
+            "--namespace",
+            "histdatacom-test",
+            "--task-queue-prefix",
+            "histdatacom-test",
+            "--cpu-utilization",
+            "high",
+            "--network-multiplier",
+            "5",
+            "--orchestration-workers",
+            "2",
+            "--influx-workers",
+            "3",
+        ]
+    )
+
+    supervisor = cli._supervisor(args)
+
+    assert supervisor.namespace == "histdatacom-test"
+    assert supervisor.task_queue_prefix == "histdatacom-test"
+    assert supervisor.cpu_utilization == "high"
+    assert supervisor.network_multiplier == 5
+    assert supervisor.orchestration_workers == 2
+    assert supervisor.influx_workers == 3
+
+
 def test_histdatacom_main_dispatches_sidecar_command(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
