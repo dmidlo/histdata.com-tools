@@ -183,10 +183,18 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args.append("-I")
         if self.arg_namespace.delete_after_influx:
             args.append("-d")
+        if self.arg_namespace.use_sidecar:
+            args.append("--sidecar")
+        if self.arg_namespace.sidecar_start:
+            args.append("--sidecar-start")
+        if not self.arg_namespace.sidecar_wait_result:
+            args.append("--sidecar-submit-only")
         return args
 
     def _false_from_api_if_behavior_flag(self) -> None:
         """Null the API flag if a behavior flag has been set."""
+        if self.arg_namespace.use_sidecar:
+            return
         if (
             self.arg_namespace.validate_urls
             or self.arg_namespace.download_data_archives
@@ -696,6 +704,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         config_args = self.add_argument_group("Config")
         influx_args = self.add_argument_group("Influxdb")
         system_args = self.add_argument_group("System")
+        sidecar_args = self.add_argument_group("Sidecar")
         info_args = self.add_argument_group("Info")
 
         info_args.add_argument(
@@ -834,6 +843,23 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             "--data-directory",
             type=str,
             help='Directory Used to save data. default is "./data/"',
+        )
+        sidecar_args.add_argument(
+            "--sidecar",
+            dest="use_sidecar",
+            action="store_true",
+            help="submit this run to the local Temporal sidecar",
+        )
+        sidecar_args.add_argument(
+            "--sidecar-start",
+            action="store_true",
+            help="start the sidecar only when no healthy sidecar is running",
+        )
+        sidecar_args.add_argument(
+            "--sidecar-submit-only",
+            dest="sidecar_wait_result",
+            action="store_false",
+            help="submit the sidecar job without waiting for its result",
         )
 
     def _sanitize_input(self) -> None:  # noqa:DAR401

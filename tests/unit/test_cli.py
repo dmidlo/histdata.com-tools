@@ -82,3 +82,35 @@ def test_invalid_cli_inputs_exit_nonzero(
         ArgParser(Options())()
 
     assert err.value.code == 1
+
+
+def test_sidecar_cli_flags_are_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Foreground sidecar execution should preserve normal CLI validation."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--sidecar",
+            "--sidecar-start",
+            "--sidecar-submit-only",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.use_sidecar
+    assert options.sidecar_start
+    assert not options.sidecar_wait_result
+    assert options.validate_urls

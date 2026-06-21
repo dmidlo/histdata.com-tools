@@ -35,3 +35,6 @@ class Options:
         self.batch_size: str = "5000"
         self.delete_after_influx: bool = False
         self.zip_persist: bool = False
+        self.use_sidecar: bool = False
+        self.sidecar_start: bool = False
+        self.sidecar_wait_result: bool = True

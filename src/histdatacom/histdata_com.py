@@ -23,6 +23,7 @@ Returns:
 
 from __future__ import annotations
 
+import json
 import sys
 from typing import TYPE_CHECKING
 
@@ -31,8 +32,13 @@ from histdatacom import Options, config
 from histdatacom.cli import ArgParser
 from histdatacom.concurrency import QueueManager
 from histdatacom.csvs import Csv
+from histdatacom.runtime_contracts import RunRequest
 from histdatacom.scraper.repo import Repo
 from histdatacom.scraper.scraper import Scraper
+from histdatacom.sidecar.client import (
+    SidecarUnavailableError,
+    submit_run_request_and_observe_sync,
+)
 from histdatacom.utils import (
     load_influx_yaml,
     set_working_data_dir,
@@ -65,10 +71,11 @@ class _HistDataCom:  # noqa:R701
               - ArgParser._arg_list_to_set(...)
                   - Normalize iterable user arguments whose values are lists and
                     make them sets instead
-              - .copy(): decouple for GC using a hard copy of user args
+          - .copy(): decouple for GC using a hard copy of user args
         """
+        self.options = ArgParser(options)()
         config.ARGS = ArgParser.arg_list_to_set(  # noqa:BLK100
-            vars(ArgParser(options)())  # noqa:WPS110
+            vars(self.options)  # noqa:WPS110
         ).copy()
         config.ARGS["default_download_dir"] = set_working_data_dir(
             config.ARGS["data_directory"]
@@ -76,6 +83,10 @@ class _HistDataCom:  # noqa:R701
         config.ARGS["api_return_type"] = normalize_api_return_type(
             config.ARGS["api_return_type"]
         )
+        self.options.api_return_type = config.ARGS["api_return_type"]
+
+        if config.ARGS["version"] or self._uses_sidecar():
+            return
 
         if config.ARGS["import_to_influxdb"]:
             check_installed_module("influxdb_client")
@@ -144,6 +155,9 @@ class _HistDataCom:  # noqa:R701
                 print(histdatacom.__version__)  # noqa:T201
             return histdatacom.__version__
 
+        if self._uses_sidecar():
+            return self._run_sidecar_job()
+
         if (  # noqa:BLK100
             config.ARGS["available_remote_data"]  # noqa:BLK100
             or config.ARGS["update_remote_data"]
@@ -171,6 +185,30 @@ class _HistDataCom:  # noqa:R701
             self.influx.import_data()
 
         return None
+
+    def _uses_sidecar(self) -> bool:
+        """Return whether this foreground run should submit to the sidecar."""
+        return bool(config.ARGS.get("use_sidecar"))
+
+    def _run_sidecar_job(self) -> dict:
+        """Submit this run to the Temporal sidecar client boundary."""
+        request = RunRequest.from_options(self.options)
+        try:
+            result = submit_run_request_and_observe_sync(
+                request,
+                start_if_needed=bool(config.ARGS["sidecar_start"]),
+                wait_for_result=bool(config.ARGS["sidecar_wait_result"]),
+            )
+        except SidecarUnavailableError as err:
+            if config.ARGS["from_api"]:
+                raise
+            print(f"error: {err}", file=sys.stderr)  # noqa:T201
+            raise SystemExit(1) from err
+
+        payload = result.to_dict()
+        if not config.ARGS["from_api"]:
+            print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+        return payload
 
 
 def main(
@@ -204,10 +242,20 @@ def main(
 
     if not options:
         options = Options()
+        if _argv_requests_sidecar_job(sys.argv):
+            _HistDataCom(options).run()
+            return None
         QueueManager(options)(_HistDataCom)
         return None
     options.from_api = True
+    if options.use_sidecar:
+        return _HistDataCom(options).run()
     return QueueManager(options)(_HistDataCom)
+
+
+def _argv_requests_sidecar_job(argv: list[str]) -> bool:
+    """Return whether the foreground CLI command should bypass queues."""
+    return "--sidecar" in argv
 
 
 if __name__ == "__main__":
