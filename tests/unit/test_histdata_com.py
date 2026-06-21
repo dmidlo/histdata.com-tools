@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,6 +49,47 @@ def _job_result(*, status: str = "completed") -> SidecarJobResult:
     )
 
 
+def _sidecar_cache_result(tmp_path: Path) -> SidecarJobResult:
+    """Return a completed sidecar result with a cache artifact."""
+    from histdatacom.api import Api
+    from histdatacom.histdata_ascii import CACHE_FILENAME, write_polars_cache
+
+    source = Api._import_file_to_polars(
+        SimpleNamespace(data_timeframe="M1"),
+        Path("tests/fixtures/histdata_ascii/DAT_ASCII_EURUSD_M1_201202.csv"),
+    )
+    cache_path = tmp_path / CACHE_FILENAME
+    write_polars_cache(source, cache_path)
+    artifact = {
+        "kind": "cache",
+        "path": str(cache_path),
+        "metadata": {
+            "filename": CACHE_FILENAME,
+            "timeframe": "M1",
+            "pair": "eurusd",
+            "line_count": str(source.height),
+            "start": str(source.item(0, "datetime")),
+            "end": str(source.item(source.height - 1, "datetime")),
+            "work_id": "work-cache",
+        },
+    }
+    return SidecarJobResult(
+        handle=_job_result().handle,
+        status="completed",
+        result={
+            "workflow_name": "HistDataRunWorkflow",
+            "status": "COMPLETED",
+            "stage_results": [
+                {
+                    "stage": "merge_cache",
+                    "status": "COMPLETED",
+                    "artifacts": [artifact],
+                }
+            ],
+        },
+    )
+
+
 def test_api_options_can_submit_sidecar_job_and_return_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -75,6 +118,74 @@ def test_api_options_can_submit_sidecar_job_and_return_result(
     assert captured["kwargs"] == {
         "start_if_needed": False,
         "wait_for_result": True,
+    }
+
+
+def test_api_sidecar_dataframe_return_is_materialized_from_cache_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API sidecar runs should preserve the legacy dataframe return contract."""
+    import polars as pl
+
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _sidecar_cache_result(tmp_path)
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+
+    result = histdata_com.main(_sidecar_options())
+
+    assert isinstance(result, pl.DataFrame)
+    assert result.height == 3
+    assert captured["request"].api_return_type == "polars"
+    assert captured["kwargs"] == {
+        "start_if_needed": False,
+        "wait_for_result": True,
+    }
+
+
+def test_api_sidecar_submit_only_keeps_job_payload_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Submit-only sidecar API calls should not try to read cache artifacts."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return SidecarJobResult(
+            handle=_job_result().handle,
+            status="submitted",
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    options = _sidecar_options()
+    options.sidecar_wait_result = False
+
+    result = histdata_com.main(options)
+
+    assert result["status"] == "submitted"
+    assert result["result"] is None
+    assert captured["request"].api_return_type == "polars"
+    assert captured["kwargs"] == {
+        "start_if_needed": False,
+        "wait_for_result": False,
     }
 
 

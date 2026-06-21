@@ -144,7 +144,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             self.arg_namespace.extract_csvs = False
             self.arg_namespace.import_to_influxdb = False
             self.arg_namespace.formats = {"ascii"}
-            self.arg_namespace.timeframes = {"tick-data-quotes"}
+            self.arg_namespace.timeframes = {"T"}
 
     def _clean_from_api_args(self) -> list:  # noqa:CCR001
         """Build the args list from api Options.
@@ -326,6 +326,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
     def _validate_prerequisites(self) -> None:
         """Set prereqs for behavior flags -V -D -X -I."""
+        if (
+            self.arg_namespace.available_remote_data
+            or self.arg_namespace.update_remote_data
+        ):
+            return
+
         if self.arg_namespace.validate_urls:
             return
 
@@ -873,8 +879,6 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             self.print_help(sys.stdout)
             raise SystemExit(0)
 
-        self._adjust_for_repo_data_request()
-
         if "histdatacom" not in sys.argv[0] and self.arg_namespace.from_api:
             args = self._clean_from_api_args()
             self._false_from_api_if_behavior_flag()
@@ -883,6 +887,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             # Get the args from sys.argv
             self.parse_args(namespace=self.arg_namespace)
 
+        self._adjust_for_repo_data_request()
         self._check_datetime_input()
         self._check_for_ascii_if_influx()
         self._check_for_ascii_if_api()

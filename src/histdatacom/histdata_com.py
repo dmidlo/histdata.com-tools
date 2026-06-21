@@ -24,7 +24,9 @@ Returns:
 from __future__ import annotations
 
 import json
+import os
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import histdatacom
@@ -32,6 +34,8 @@ from histdatacom import Options, config
 from histdatacom.cli import ArgParser
 from histdatacom.concurrency import QueueManager
 from histdatacom.csvs import Csv
+from histdatacom.histdata_ascii import CACHE_FILENAME
+from histdatacom.records import Record
 from histdatacom.runtime_contracts import RunRequest
 from histdatacom.scraper.repo import Repo
 from histdatacom.scraper.scraper import Scraper
@@ -190,7 +194,9 @@ class _HistDataCom:  # noqa:R701
         """Return whether this foreground run should submit to the sidecar."""
         return bool(config.ARGS.get("use_sidecar"))
 
-    def _run_sidecar_job(self) -> dict:
+    def _run_sidecar_job(
+        self,
+    ) -> list | dict | PolarsDataFrame | DataFrame | Table:
         """Submit this run to the Temporal sidecar client boundary."""
         request = RunRequest.from_options(self.options)
         try:
@@ -206,9 +212,32 @@ class _HistDataCom:  # noqa:R701
             raise SystemExit(1) from err
 
         payload = result.to_dict()
+        if self._should_materialize_sidecar_api_return(payload):
+            records = _cache_records_from_sidecar_payload(payload)
+            if records:
+                return self._materialize_sidecar_api_return(records)
         if not config.ARGS["from_api"]:
             print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
         return payload
+
+    def _should_materialize_sidecar_api_return(self, payload: dict) -> bool:
+        """Return whether a completed sidecar run should mimic API returns."""
+        return bool(
+            config.ARGS["from_api"]
+            and config.ARGS["api_return_type"]
+            and config.ARGS["sidecar_wait_result"]
+            and payload.get("status") == "completed"
+            and payload.get("result")
+        )
+
+    def _materialize_sidecar_api_return(
+        self,
+        records: list[Record],
+    ) -> list | PolarsDataFrame | DataFrame | Table:
+        """Rebuild the legacy API dataframe return from sidecar cache artifacts."""
+        from histdatacom.api import Api
+
+        return Api().merge_records(records)
 
 
 def main(
@@ -256,6 +285,56 @@ def main(
 def _argv_requests_sidecar_job(argv: list[str]) -> bool:
     """Return whether the foreground CLI command should bypass queues."""
     return "--sidecar" in argv
+
+
+def _cache_records_from_sidecar_payload(payload: dict) -> list[Record]:
+    """Return legacy records reconstructed from sidecar cache artifacts."""
+    records: list[Record] = []
+    seen_paths: set[str] = set()
+    for artifact in _iter_artifact_payloads(payload):
+        if artifact.get("kind") != "cache":
+            continue
+        path = Path(str(artifact.get("path", "")))
+        if path.name != CACHE_FILENAME or not path.is_file():
+            continue
+        resolved_path = str(path.resolve())
+        if resolved_path in seen_paths:
+            continue
+        seen_paths.add(resolved_path)
+        records.append(_record_from_cache_artifact(path, artifact))
+    return records
+
+
+def _record_from_cache_artifact(
+    path: Path,
+    artifact: dict,
+) -> Record:
+    metadata = dict(artifact.get("metadata") or {})
+    return Record(
+        status="CACHE_READY",
+        data_dir=f"{path.parent}{os.sep}",
+        cache_filename=path.name,
+        cache_line_count=str(metadata.get("line_count", "") or ""),
+        cache_start=str(metadata.get("start", "") or ""),
+        cache_end=str(metadata.get("end", "") or ""),
+        data_timeframe=str(metadata.get("timeframe", "") or ""),
+        data_fxpair=str(metadata.get("pair", "") or ""),
+        data_format="ascii",
+    )
+
+
+def _iter_artifact_payloads(value: object) -> list[dict]:
+    """Collect artifact dictionaries from nested sidecar result payloads."""
+    artifacts: list[dict] = []
+    if isinstance(value, dict):
+        if "kind" in value and "path" in value:
+            artifacts.append(value)
+        for item in value.values():
+            artifacts.extend(_iter_artifact_payloads(item))
+    elif isinstance(value, list):
+        for item in value:
+            artifacts.extend(_iter_artifact_payloads(item))
+    return artifacts
 
 
 if __name__ == "__main__":

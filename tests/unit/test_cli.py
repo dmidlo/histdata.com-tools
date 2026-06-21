@@ -114,3 +114,104 @@ def test_sidecar_cli_flags_are_opt_in(
     assert options.sidecar_start
     assert not options.sidecar_wait_result
     assert options.validate_urls
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected"),
+    (
+        (
+            "-A",
+            {
+                "available_remote_data": True,
+                "update_remote_data": False,
+                "validate_urls": False,
+                "download_data_archives": False,
+                "extract_csvs": False,
+                "import_to_influxdb": False,
+            },
+        ),
+        (
+            "-U",
+            {
+                "available_remote_data": False,
+                "update_remote_data": True,
+                "validate_urls": False,
+                "download_data_archives": False,
+                "extract_csvs": False,
+                "import_to_influxdb": False,
+            },
+        ),
+        (
+            "-V",
+            {
+                "available_remote_data": False,
+                "update_remote_data": False,
+                "validate_urls": True,
+                "download_data_archives": False,
+                "extract_csvs": False,
+                "import_to_influxdb": False,
+            },
+        ),
+        (
+            "-D",
+            {
+                "available_remote_data": False,
+                "update_remote_data": False,
+                "validate_urls": True,
+                "download_data_archives": True,
+                "extract_csvs": False,
+                "import_to_influxdb": False,
+            },
+        ),
+        (
+            "-X",
+            {
+                "available_remote_data": False,
+                "update_remote_data": False,
+                "validate_urls": True,
+                "download_data_archives": True,
+                "extract_csvs": True,
+                "import_to_influxdb": False,
+            },
+        ),
+        (
+            "-I",
+            {
+                "available_remote_data": False,
+                "update_remote_data": False,
+                "validate_urls": True,
+                "download_data_archives": True,
+                "extract_csvs": False,
+                "import_to_influxdb": True,
+            },
+        ),
+    ),
+)
+def test_legacy_behavior_flags_keep_sidecar_request_shape(
+    flag: str,
+    expected: dict[str, bool],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy CLI flags should parse the same before sidecar submission."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--sidecar",
+            flag,
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    for name, value in expected.items():
+        assert getattr(options, name) is value

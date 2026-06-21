@@ -22,6 +22,7 @@ A Multi-threaded/Multi-Process command-line utility and python ETL package that 
   - [CPU Utilization](#cpu-utilization)
   - [Import to InfluxDB](#import-to-influxdb)
     - [influxdb.yaml](#influxdbyaml)
+  - [Temporal Sidecar Compatibility](#temporal-sidecar-compatibility)
   - [API - Other Scripts, Modules, & Jupyter Support](#api-other-scripts-modules-jupyter-support)
     - [CLI Automation](#cli-automation)
     - [Jupyter and External Scripts](#jupyter-and-external-scripts)
@@ -70,7 +71,7 @@ histdatacom -h
 ```txt
 histdatacom -h
 usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION]
-                   [--data-directory DATA_DIRECTORY]
+                   [--data-directory DATA_DIRECTORY] [--sidecar] [--sidecar-start] [--sidecar-submit-only]
 
 options:
   -h, --help            show this help message and exit
@@ -106,6 +107,12 @@ System:
                         "low", "medium", "high". High uses all available CPUs OR integer percent 1-200
   --data-directory DATA_DIRECTORY
                         Directory Used to save data. default is "./data/"
+
+Sidecar:
+  --sidecar             submit this run to the local Temporal sidecar
+  --sidecar-start       start the sidecar only when no healthy sidecar is running
+  --sidecar-submit-only
+                        submit the sidecar job without waiting for its result
 
 Info:
   -A, --available_remote_data
@@ -293,6 +300,19 @@ influxdb:
 ```shell
 curl "https://raw.githubusercontent.com/dmidlo/histdata.com-tools/main/influxdb.sample.yaml" --output influxdb.yaml
 ```
+
+---
+
+### Temporal Sidecar Compatibility
+
+The legacy CLI and API examples remain the default foreground behavior. During the Temporal sidecar cutover, add `--sidecar` on the CLI or set `options.use_sidecar = True` to submit the same request to the local sidecar runtime.
+
+- `histdatacom --version` stays local and does not require the sidecar.
+- `-A`, `-U`, `-V`, `-D`, `-X`, and `-I` keep their existing option semantics before a sidecar request is submitted.
+- `--sidecar-start` starts the sidecar only when no healthy sidecar is running.
+- `--sidecar-submit-only` submits a job and returns job metadata instead of waiting for cache artifacts or workflow results.
+- API calls with `options.api_return_type` and `options.use_sidecar = True` return the requested `polars`, `pandas`, or `arrow` object after a completed sidecar job by materializing cache artifacts on disk.
+- If the sidecar is unavailable, CLI calls exit nonzero with a clear error and API calls raise `SidecarUnavailableError`.
 
 ---
 
