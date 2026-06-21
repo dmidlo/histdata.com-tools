@@ -157,7 +157,8 @@ def dataset_plan_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
             increment=len(output.work_items),
         ),
     )
-    return output.to_dict()
+    output_payload: dict[str, Any] = output.to_dict()
+    return output_payload
 
 
 @activity_defn(name="validate_urls")
@@ -188,7 +189,8 @@ def validate_urls_activity(payload: dict[str, JSONValue]) -> dict[str, Any]:
         lambda work_item: validate_url_work_item(work_item, args=args),
     )
     if len(outputs) == 1:
-        return outputs[0].to_dict()
+        output_payload: dict[str, Any] = outputs[0].to_dict()
+        return output_payload
 
     return cast(
         dict[str, Any],
@@ -234,7 +236,8 @@ def download_archives_activity(
         lambda work_item: download_archive_work_item(work_item, args=args),
     )
     if len(outputs) == 1:
-        return outputs[0].to_dict()
+        output_payload: dict[str, Any] = outputs[0].to_dict()
+        return output_payload
 
     return cast(
         dict[str, Any],
@@ -279,7 +282,8 @@ def extract_csv_activity(
         lambda work_item: extract_csv_work_item(work_item, args=args),
     )
     if len(outputs) == 1:
-        return outputs[0].to_dict()
+        output_payload: dict[str, Any] = outputs[0].to_dict()
+        return output_payload
 
     return cast(
         dict[str, Any],
@@ -323,7 +327,8 @@ def build_cache_activity(
         lambda work_item: build_cache_work_item(work_item, args=args),
     )
     if len(outputs) == 1:
-        return outputs[0].to_dict()
+        output_payload: dict[str, Any] = outputs[0].to_dict()
+        return output_payload
 
     return cast(
         dict[str, Any],
@@ -384,7 +389,8 @@ def merge_cache_activity(
             increment=len(work_items),
         ),
     )
-    return output.to_dict()
+    output_payload: dict[str, Any] = output.to_dict()
+    return output_payload
 
 
 @activity_defn(name="import_to_influx")
@@ -431,7 +437,8 @@ def import_to_influx_activity(
         )
 
     if len(outputs) == 1:
-        return outputs[0].to_dict()
+        output_payload: dict[str, Any] = outputs[0].to_dict()
+        return output_payload
 
     return cast(
         dict[str, Any],
@@ -542,7 +549,12 @@ def _import_to_influx_with_writer(
 def _activity_heartbeat(metadata: Mapping[str, JSONValue]) -> None:
     heartbeat = getattr(activity, "heartbeat", None)
     if callable(heartbeat):
-        heartbeat(dict(metadata))
+        try:
+            heartbeat(dict(metadata))
+        except RuntimeError as err:
+            if _outside_activity_context(err):
+                return
+            raise
 
 
 def _activity_cancelled() -> bool:
@@ -553,10 +565,20 @@ def _activity_cancelled() -> bool:
     ):
         value = getattr(activity, attribute, None)
         if callable(value):
-            return bool(value())
+            try:
+                return bool(value())
+            except RuntimeError as err:
+                if _outside_activity_context(err):
+                    continue
+                raise
         if isinstance(value, bool):
             return value
     return False
+
+
+def _outside_activity_context(err: RuntimeError) -> bool:
+    """Return whether Temporal reports that no activity context is active."""
+    return "not in activity context" in str(err).lower()
 
 
 def _cancellable_outputs(

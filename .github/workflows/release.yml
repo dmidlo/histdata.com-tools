@@ -59,7 +59,15 @@ jobs:
         run: python -m twine check dist/*
 
       - name: Inspect wheel sidecar resources
-        run: python scripts/inspect_wheel.py
+        run: python scripts/inspect_wheel.py --report dist/sidecar-wheel-report.json
+
+      - name: Smoke release wheel sidecar install
+        run: |
+          python -m venv .wheel-smoke
+          . .wheel-smoke/bin/activate
+          python -m pip install --upgrade pip
+          python scripts/smoke_sidecar_install.py --wheel-dir dist --state-dir .sidecar-smoke
+        shell: bash
 
       - name: Generate artifact provenance attestation
         uses: actions/attest@v4.1.0

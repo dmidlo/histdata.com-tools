@@ -24,7 +24,7 @@ dev()
 
 inspect_wheel_metadata()
 {
-    python scripts/inspect_wheel.py
+    python scripts/inspect_wheel.py --report dist/sidecar-wheel-report.json
 }
 
 smoke_wheel_install()
@@ -39,36 +39,9 @@ smoke_wheel_install()
         # shellcheck source=/dev/null
         source "${smoke_dir}/venv/bin/activate"
         python -m pip install --upgrade pip
-        python -m pip install dist/*.whl
-        python - <<'PY'
-from importlib import metadata
-
-import histdatacom
-from histdatacom.sidecar import (
-    SidecarExecutableUnavailable,
-    load_sidecar_manifest,
-    sidecar_asset,
-    sidecar_executable_path,
-)
-
-if metadata.version("histdatacom") != histdatacom.__version__:
-    raise SystemExit(
-        "installed package metadata version does not match imported package"
-    )
-if not sidecar_asset("manifest.json").is_file():
-    raise SystemExit("sidecar manifest is not installed as package data")
-if load_sidecar_manifest().sidecar != "temporal":
-    raise SystemExit("sidecar manifest does not describe Temporal")
-try:
-    with sidecar_executable_path("linux-x86_64"):
-        raise SystemExit("metadata-only wheel exposed executable")
-except SidecarExecutableUnavailable as err:
-    if "not bundled in this distribution" not in str(err):
-        raise
-PY
-        histdatacom --version
-        histdatacom-sidecar --help >/dev/null
-        histdatacom-sidecar-worker --help >/dev/null
+        python "${project_root}/scripts/smoke_sidecar_install.py" \
+            --wheel-dir "${project_root}/dist" \
+            --state-dir "${smoke_dir}/sidecar-state"
     )
 }
 
@@ -115,12 +88,25 @@ destroyenv()
 
 histdatacom_test()
 {
-    echo "${bold}testing histdatacom -h test pip environment${normal}"
-    histdatacom -h
-    echo "${bold}testing histdatacom -D test pip environment${normal}"
-    histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
-    echo "${bold}testing histdatacom --version test pip environment${normal}"
-    histdatacom --version
+    (
+        local sidecar_state
+
+        sidecar_state=$(mktemp -d)
+        trap 'rm -rf "${sidecar_state}"' EXIT
+
+        echo "${bold}testing histdatacom -h test pip environment${normal}"
+        histdatacom -h
+        echo "${bold}testing histdatacom -D test pip environment${normal}"
+        histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
+        echo "${bold}testing histdatacom --version test pip environment${normal}"
+        histdatacom --version
+        echo "${bold}testing histdatacom-sidecar status test pip environment${normal}"
+        histdatacom-sidecar --state-dir "${sidecar_state}" --json status >/dev/null
+        echo "${bold}testing histdatacom-sidecar doctor test pip environment${normal}"
+        histdatacom-sidecar --state-dir "${sidecar_state}" --json doctor >/dev/null
+        echo "${bold}testing histdatacom-sidecar-worker help test pip environment${normal}"
+        histdatacom-sidecar-worker --help >/dev/null
+    )
 }
 
 case "${1:-}" in

@@ -74,9 +74,17 @@ python -m twine check dist/*
 ```
 
 It also inspects the built wheel metadata directly and installs the wheel into
-a fresh virtual environment before any upload command can run. Legacy
+a fresh virtual environment before any upload command can run. The smoke check
+uses `scripts/smoke_sidecar_install.py`, which validates package metadata,
+console entry points, packaged sidecar resources, current-platform manifest
+support, and offline `histdatacom-sidecar status`/`doctor` behavior. Legacy
 `setup.py` commands are intentionally unsupported; this project is built from
 `pyproject.toml`.
+
+The current sidecar artifacts are metadata-only wheels. They must declare every
+supported platform and fail explicitly when a Temporal executable is requested
+from a wheel that does not bundle one. The smoke checks intentionally do not
+start Temporal until platform wheels include sidecar binaries.
 
 Package metadata is declared in `pyproject.toml`. Local release environments
 must use `setuptools>=77` so the built artifacts include current SPDX license
@@ -102,6 +110,12 @@ bash pypi.sh pypi_install
 
 The CI workflow builds and tests the package on pull requests, pushes to
 `main`, and manual dispatches.
+
+CI inspects the built wheel with `scripts/inspect_wheel.py`, writes
+`dist/sidecar-wheel-report.json`, uploads that report with the distribution
+artifacts, and then installs the built wheel on Ubuntu, macOS, and Windows.
+Those platform smoke checks verify the sidecar resource manifest and the
+offline sidecar CLI probes against the artifact that would be published.
 
 CI also runs `actionlint` against every workflow. The same workflow lint is
 available locally through pre-commit, so workflow syntax and common GitHub
@@ -137,6 +151,10 @@ does not publish automatically on tag push. Publishing to TestPyPI or PyPI
 requires a manual workflow dispatch, a matching protected environment approval,
 and OIDC Trusted Publishing configured on the target index.
 
+Release artifact provenance covers everything under `dist/`, including the
+sidecar wheel inspection report. The release build runs the same sidecar wheel
+smoke used by local `pypi.sh build` before attestations and artifact upload.
+
 ## Rollback And Yank Guidance
 
 Published package files are immutable. If a release is bad, publish a fixed
@@ -160,8 +178,12 @@ enabled for pull requests on this public repository and fails when dependency
 changes introduce moderate, high, or critical vulnerabilities in runtime or
 development scopes. `pip-audit` installs the package with all optional runtime
 and integration extras, audits the resulting Python environment, and uploads a
-JSON report. CodeQL analyzes the Python source with no build step; it only has
-`security-events: write` so GitHub can receive code-scanning results.
+JSON report. Before `pip-audit` runs, the workflow verifies that the `all`
+extra installed the Temporal runtime dependency and that sidecar package
+resources import correctly, so the new sidecar dependency surface is included
+in the audit environment. CodeQL analyzes the Python source with no build step;
+it only has `security-events: write` so GitHub can receive code-scanning
+results.
 
 The package metadata intentionally separates dependency surfaces:
 
@@ -169,7 +191,8 @@ The package metadata intentionally separates dependency surfaces:
   lower bounds instead of lock-file pins so downstream applications can resolve
   compatible environments.
 - Optional integrations live behind extras such as `histdatacom[pandas]`,
-  `histdatacom[arrow]`, `histdatacom[influx]`, and `histdatacom[jupyter]`.
+  `histdatacom[arrow]`, `histdatacom[influx]`, `histdatacom[jupyter]`, and
+  `histdatacom[temporal]`.
 - `histdatacom[test]`, `histdatacom[lint]`, and `histdatacom[release]` split
   contributor tooling by purpose. `histdatacom[dev]` aggregates those direct
   tool pins plus optional integration dependencies for local development.
@@ -187,7 +210,8 @@ surface:
 - Optional dependency findings affect users who install extras such as
   `histdatacom[pandas]`, `histdatacom[arrow]`, `histdatacom[influx]`, or
   `histdatacom[jupyter]`; patch those ranges and mention the affected extra in
-  release notes.
+  release notes. Treat `histdatacom[temporal]` the same way once sidecar
+  runtime dependencies are involved in a finding.
 - Development and build findings block contributor or release hygiene but do
   not automatically require a PyPI release unless the vulnerable package is
   included in built distributions or runtime metadata.

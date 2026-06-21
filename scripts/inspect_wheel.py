@@ -6,12 +6,30 @@ import argparse
 import json
 from email.parser import Parser
 from pathlib import Path
+from typing import Any
 from zipfile import ZipFile
 
 EXPECTED_SIDECAR_ASSETS = {
     "histdatacom/sidecar/assets/README.md",
     "histdatacom/sidecar/assets/manifest.json",
     "histdatacom/sidecar/assets/runtime-defaults.json",
+}
+EXPECTED_SIDECAR_RESOURCE_FILES = {
+    "README.md",
+    "manifest.json",
+    "runtime-defaults.json",
+}
+EXPECTED_SIDECAR_PLATFORMS = {
+    "linux-arm64",
+    "linux-x86_64",
+    "macos-arm64",
+    "macos-x86_64",
+    "windows-x86_64",
+}
+EXPECTED_CONSOLE_SCRIPTS = {
+    "histdatacom = histdatacom.histdata_com:main",
+    "histdatacom-sidecar = histdatacom.sidecar.cli:main",
+    "histdatacom-sidecar-worker = histdatacom.sidecar.worker:main",
 }
 
 
@@ -22,7 +40,21 @@ def _single_wheel(dist_dir: Path) -> Path:
     return wheels[0]
 
 
-def inspect_wheel(wheel_path: Path) -> None:
+def _requires_dist_contains(
+    requires_dist: list[str],
+    *,
+    dependency: str,
+    extra: str,
+) -> bool:
+    """Return whether a normalized requirement names a dependency extra."""
+    expected_extra = f'extra == "{extra}"'
+    return any(
+        requirement.startswith(dependency) and expected_extra in requirement
+        for requirement in requires_dist
+    )
+
+
+def inspect_wheel(wheel_path: Path) -> dict[str, Any]:
     """Validate wheel metadata, entry points, and sidecar resource payloads."""
     with ZipFile(wheel_path) as wheel:
         names = set(wheel.namelist())
@@ -47,6 +79,24 @@ def inspect_wheel(wheel_path: Path) -> None:
                 "utf-8"
             )
         )
+        manifest_platforms = set(dict(manifest["platforms"]))
+        missing_platforms = sorted(
+            EXPECTED_SIDECAR_PLATFORMS - manifest_platforms
+        )
+        if missing_platforms:
+            raise SystemExit(
+                "sidecar manifest is missing platform declarations: "
+                f"{missing_platforms}"
+            )
+        unexpected_resource_files = sorted(
+            EXPECTED_SIDECAR_RESOURCE_FILES
+            ^ set(manifest.get("resource_files", []))
+        )
+        if unexpected_resource_files:
+            raise SystemExit(
+                "sidecar manifest resource_files drifted from packaged "
+                f"assets: {unexpected_resource_files}"
+            )
         for key, resource in dict(manifest["platforms"]).items():
             executable = resource.get("executable")
             if not executable:
@@ -72,34 +122,30 @@ def inspect_wheel(wheel_path: Path) -> None:
         raise SystemExit(
             f"unexpected Python requirement: {wheel_metadata['Requires-Python']}"
         )
-    if "histdatacom = histdatacom.histdata_com:main" not in entry_points:
-        raise SystemExit(
-            "histdatacom console script missing from wheel metadata"
-        )
-    if "histdatacom-sidecar = histdatacom.sidecar.cli:main" not in entry_points:
-        raise SystemExit(
-            "histdatacom-sidecar console script missing from wheel metadata"
-        )
-    if (
-        "histdatacom-sidecar-worker = histdatacom.sidecar.worker:main"
-        not in entry_points
-    ):
-        raise SystemExit(
-            "histdatacom-sidecar-worker console script missing from "
-            "wheel metadata"
-        )
-    if "temporal" not in set(wheel_metadata.get_all("Provides-Extra", [])):
+    for console_script in sorted(EXPECTED_CONSOLE_SCRIPTS):
+        if console_script not in entry_points:
+            raise SystemExit(
+                f"console script missing from wheel metadata: {console_script}"
+            )
+    provides_extra = set(wheel_metadata.get_all("Provides-Extra", []))
+    if "temporal" not in provides_extra:
         raise SystemExit("temporal optional extra missing from wheel metadata")
     requires_dist = [
         requirement.lower()
         for requirement in wheel_metadata.get_all("Requires-Dist", [])
     ]
-    if not any(
-        requirement.startswith("temporalio")
-        and 'extra == "temporal"' in requirement
-        for requirement in requires_dist
+    if not _requires_dist_contains(
+        requires_dist,
+        dependency="temporalio",
+        extra="temporal",
     ):
         raise SystemExit("temporalio dependency missing from temporal extra")
+    if not _requires_dist_contains(
+        requires_dist,
+        dependency="temporalio",
+        extra="all",
+    ):
+        raise SystemExit("temporalio dependency missing from all extra")
     if manifest["sidecar"] != "temporal":
         raise SystemExit("sidecar manifest does not describe Temporal")
     if manifest["distribution_strategy"] != (
@@ -110,16 +156,39 @@ def inspect_wheel(wheel_path: Path) -> None:
         raise SystemExit(
             "metadata-only wheel should not claim bundled binaries"
         )
-    if "linux-x86_64" not in manifest["platforms"]:
-        raise SystemExit("sidecar manifest is missing linux-x86_64")
+    return {
+        "wheel": wheel_path.name,
+        "name": wheel_metadata["Name"],
+        "requires_python": wheel_metadata["Requires-Python"],
+        "provides_extra": sorted(provides_extra),
+        "sidecar": {
+            "assets": sorted(EXPECTED_SIDECAR_ASSETS),
+            "distribution_strategy": manifest["distribution_strategy"],
+            "embedded_binary": manifest["embedded_binary"],
+            "platforms": sorted(manifest_platforms),
+            "resource_files": list(manifest["resource_files"]),
+        },
+        "console_scripts": sorted(EXPECTED_CONSOLE_SCRIPTS),
+    }
 
 
 def main() -> None:
     """Inspect the wheel in a distribution directory."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--dist-dir", default="dist")
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="write a JSON report describing inspected wheel metadata",
+    )
     args = parser.parse_args()
-    inspect_wheel(_single_wheel(Path(args.dist_dir)))
+    report = inspect_wheel(_single_wheel(Path(args.dist_dir)))
+    if args.report is not None:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
 
 if __name__ == "__main__":

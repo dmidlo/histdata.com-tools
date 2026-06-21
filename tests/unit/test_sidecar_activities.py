@@ -378,6 +378,36 @@ def test_validate_urls_activity_emits_progress_heartbeat(
     assert result["result"]["metrics"]["progress"]["stage"] == "validate_url"
 
 
+def test_activity_context_helpers_ignore_absent_temporal_context(
+    monkeypatch,
+) -> None:
+    """Temporal API probes should be local-call safe outside a worker."""
+    import histdatacom.sidecar.activities as activities
+
+    def heartbeat(metadata: dict) -> None:
+        raise RuntimeError("Not in activity context")
+
+    def is_cancelled() -> bool:
+        raise RuntimeError("Not in activity context")
+
+    monkeypatch.setattr(
+        activities.activity,
+        "heartbeat",
+        heartbeat,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        activities.activity,
+        "is_cancelled",
+        is_cancelled,
+        raising=False,
+    )
+
+    activities._activity_heartbeat({"stage": "validate_url"})
+
+    assert activities._activity_cancelled() is False
+
+
 def test_validate_urls_activity_returns_no_data(monkeypatch, tmp_path) -> None:
     """Missing tokens should flow through the registered activity."""
     monkeypatch.setattr(
