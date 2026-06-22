@@ -24,6 +24,7 @@ Works on MacOS, Linux & Windows Systems.
   - [Multiple Datasets](#multiple-datasets)
   - [CPU Utilization](#cpu-utilization)
   - [Import to InfluxDB](#import-to-influxdb)
+    - [Docker-backed InfluxDB Smoke](#docker-backed-influxdb-smoke)
     - [influxdb.yaml](#influxdbyaml)
   - [Temporal Sidecar Compatibility](#temporal-sidecar-compatibility)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
@@ -291,6 +292,21 @@ pip install "histdatacom[influx]"
 ```txt
 histdatacom -I -p eurusd -f ascii -t tick-data-quotes -s start -e now
 ```
+
+#### Docker-backed InfluxDB Smoke
+
+When Docker is available, contributors can run a disposable InfluxDB v2 smoke
+without a user-managed `influxdb.yaml`:
+
+```sh
+python scripts/smoke_influx_docker.py
+```
+
+The smoke starts `influxdb:2.7-alpine`, writes representative HistData M1 and
+tick line-protocol batches through the real `InfluxBatchWriter`, queries the
+bucket, reports the field count, and removes the container. It is intentionally
+not part of default pytest because it depends on Docker and a pullable InfluxDB
+image.
 
 #### influxdb.yaml
 
