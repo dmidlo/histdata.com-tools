@@ -53,9 +53,15 @@ class Scraper:  # noqa:H601
         from histdatacom.scraper.repo import Repo  # noqa:WPS131
 
         self.args: dict[str, Any] = helper_runtime_args(args)
-        self.set_repo_datum: Callable = Repo.set_repo_datum
+        self.repo = Repo(self.args)
+        self.filter_pairs: set[str] | None = None
+        self.set_repo_datum: Callable = self.repo.set_repo_datum
         self.check_if_repo_validation_is_needed: Callable = (
-            lambda: Repo.check_if_repo_validation_is_needed(self.args)
+            lambda: Repo.check_if_repo_validation_is_needed(
+                self.args,
+                repo_file_exists=self.repo.repo_file_exists,
+                filter_pairs=self.repo.filter_pairs,
+            )
         )
         self.check_for_repo_action: Callable = (
             lambda: Repo.check_for_repo_action(self.args)
@@ -159,7 +165,7 @@ class Scraper:  # noqa:H601
                 start_yearmonth=runtime_args["start_yearmonth"],
                 end_yearmonth=runtime_args["end_yearmonth"],
                 formats=runtime_args["formats"],
-                pairs=config.FILTER_PAIRS,
+                pairs=self.filter_pairs,
                 timeframes=runtime_args["timeframes"],
                 default_download_dir=runtime_args["default_download_dir"],
                 base_url=self.urls.base_url,
@@ -251,14 +257,17 @@ class Scraper:  # noqa:H601
 
     def _ensure_pairs(self) -> None:
         """Normalize pairs input for planning."""
-        if (
-            not (
-                self.args["update_remote_data"]
-                and self.args["available_remote_data"]
-            )
-            and config.FILTER_PAIRS is None
-        ):
-            config.FILTER_PAIRS = self.args["pairs"]
+        self._sync_filter_pairs(self.args)
+
+    def _sync_filter_pairs(self, args: Mapping[str, Any]) -> None:
+        """Sync pair filters into the scraper and its repo helper."""
+        if args["update_remote_data"] and args["available_remote_data"]:
+            return
+
+        self.filter_pairs = set(args["pairs"])
+        if hasattr(self, "repo"):
+            self.repo._runtime_args(args)
+            self.repo.filter_pairs = self.filter_pairs
 
     def _validate_url(
         self,
@@ -417,4 +426,5 @@ class Scraper:  # noqa:H601
             args,
         )
         self.args = runtime_args
+        self._sync_filter_pairs(runtime_args)
         return self.args

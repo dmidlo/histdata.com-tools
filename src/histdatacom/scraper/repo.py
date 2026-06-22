@@ -15,7 +15,6 @@ from rich import print  # pylint: disable=redefined-builtin
 from rich import box
 from rich.table import Table
 
-from histdatacom import config
 from histdatacom.activity_stages import (
     DEFAULT_REPOSITORY_URL,
     fetch_repository_data_from_url,
@@ -25,6 +24,7 @@ from histdatacom.activity_stages import (
     read_repository_data_file,
     repository_data_with_record,
     repository_missing_pairs,
+    repository_pair_data,
     repository_refresh_stage,
     repository_should_create_or_update,
     repository_validation_needed,
@@ -54,6 +54,9 @@ class Repo:  # noqa: H601
         self.args: dict[str, Any] = helper_runtime_args(args)
         self.repo_url = DEFAULT_REPOSITORY_URL
         self.repo_local_path = self._repo_local_path(self.args)
+        self.repo_data: dict[str, Any] = {}
+        self.repo_file_exists = self.repo_local_path.exists()
+        self.filter_pairs: set[str] | None = None
 
     @staticmethod
     def check_if_repo_validation_is_needed(
@@ -72,16 +75,8 @@ class Repo:  # noqa: H601
         return bool(
             repository_validation_needed(
                 runtime_args,
-                repo_file_exists=(
-                    config.REPO_DATA_FILE_EXISTS
-                    if repo_file_exists is None
-                    else repo_file_exists
-                ),
-                filter_pairs=(
-                    config.FILTER_PAIRS
-                    if filter_pairs is None
-                    else filter_pairs
-                ),
+                repo_file_exists=bool(repo_file_exists),
+                filter_pairs=filter_pairs,
             ),
         )
 
@@ -98,34 +93,31 @@ class Repo:  # noqa: H601
             or runtime_args["update_remote_data"]
         )
 
-    @staticmethod
-    def set_repo_datum(record: "Record") -> None:
+    def set_repo_datum(self, record: "Record") -> None:
         """Create and sort individual date ranges for repo.
 
         Args:
             record (Record): a single downloadable record
                              of pair, year, and month
         """
-        config.REPO_DATA = repository_data_with_record(
-            config.REPO_DATA,
+        self.repo_data = repository_data_with_record(
+            self.repo_data,
             record,
         )
 
     def test_for_repo_data_file(self) -> bool:
-        """Test for repo data file and update global boolean.
+        """Test for repo data file and update instance state.
 
         Returns:
             bool: existence of repo data file.
         """
-        if self.repo_local_path.exists():
-            config.REPO_DATA_FILE_EXISTS = True
-            return True
-        config.REPO_DATA_FILE_EXISTS = False
-        return False
+        self.repo_file_exists = self.repo_local_path.exists()
+        return self.repo_file_exists
 
     def read_repo_data_file(self) -> None:
-        """Read local file repo data. Append/update global working repo data."""
-        config.REPO_DATA.update(read_repository_data_file(self.repo_local_path))
+        """Read local file repo data into this helper's working state."""
+        self.repo_data.update(read_repository_data_file(self.repo_local_path))
+        self.repo_file_exists = self.repo_local_path.exists()
 
     def update_repo_from_github(
         self,
@@ -139,8 +131,8 @@ class Repo:  # noqa: H601
         """
         runtime_args = self._runtime_args(args)
         output = repository_refresh_stage(
-            repo_data=config.REPO_DATA,
-            repo_file_exists=config.REPO_DATA_FILE_EXISTS,
+            repo_data=self.repo_data,
+            repo_file_exists=self.repo_file_exists,
             repo_local_path=self.repo_local_path,
             repo_url=self.repo_url,
             pairs=runtime_args["pairs"],
@@ -153,8 +145,9 @@ class Repo:  # noqa: H601
             self._print_refresh_failure(output.result.failure.code)
             return
 
-        config.REPO_DATA = output.repo_data
-        config.REPO_DATA_FILE_EXISTS = output.repo_file_exists
+        self.repo_data = output.repo_data
+        self.repo_file_exists = output.repo_file_exists
+        self.filter_pairs = set(output.filter_pairs) or None
 
     def get_available_repo_data(
         self,
@@ -171,12 +164,14 @@ class Repo:  # noqa: H601
               ...}
         """
         runtime_args = self._runtime_args(args)
+        self._ensure_repo_data_loaded()
         filter_pairs = repository_missing_pairs(
-            config.REPO_DATA,
+            self.repo_data,
             runtime_args["pairs"],
         )
-        config.FILTER_PAIRS = (
-            None if len(filter_pairs) == 0 else set(filter_pairs)
+        self.filter_pairs = self._filter_pairs_for_action(
+            runtime_args,
+            missing_pairs=filter_pairs,
         )
 
         if self._check_for_create_or_update(runtime_args):
@@ -185,7 +180,7 @@ class Repo:  # noqa: H601
 
         if runtime_args["from_api"]:
             return self._sort_repo_dict_by(
-                config.REPO_DATA.copy(),
+                self.repo_data.copy(),
                 runtime_args["pairs"],
                 by=runtime_args.get("by"),
             )
@@ -206,16 +201,16 @@ class Repo:  # noqa: H601
         return bool(
             repository_should_create_or_update(
                 runtime_args,
-                repo_file_exists=config.REPO_DATA_FILE_EXISTS,
-                filter_pairs=config.FILTER_PAIRS,
+                repo_file_exists=self.repo_file_exists,
+                filter_pairs=self.filter_pairs,
             )
         )
 
     def _write_repo_data_file(self) -> None:
         """Write repository data file with hash. Create directories if needed."""
-        write_repository_data_file(config.REPO_DATA, self.repo_local_path)
-        config.REPO_DATA = read_repository_data_file(self.repo_local_path)
-        config.REPO_DATA_FILE_EXISTS = True
+        write_repository_data_file(self.repo_data, self.repo_local_path)
+        self.repo_data = read_repository_data_file(self.repo_local_path)
+        self.repo_file_exists = True
 
     def _validate_repository_coverage(
         self,
@@ -227,7 +222,7 @@ class Repo:  # noqa: H601
             start_yearmonth=runtime_args["start_yearmonth"],
             end_yearmonth=runtime_args["end_yearmonth"],
             formats=runtime_args["formats"],
-            pairs=config.FILTER_PAIRS,
+            pairs=self.filter_pairs,
             timeframes=runtime_args["timeframes"],
             default_download_dir=runtime_args["default_download_dir"],
             zip_persist=bool(runtime_args["zip_persist"]),
@@ -239,8 +234,8 @@ class Repo:  # noqa: H601
                 )
 
     def _hash_repo(self) -> None:
-        """Sanitize global data repo and update hash and timestamp."""
-        config.REPO_DATA = hash_repository_data(config.REPO_DATA)
+        """Sanitize helper repo data and update hash and timestamp."""
+        self.repo_data = hash_repository_data(self.repo_data)
 
     def _sort_repo_dict_by(
         self,
@@ -308,14 +303,14 @@ class Repo:  # noqa: H601
         table.add_column("End -e")
 
         for row in self._sort_repo_dict_by(  # pylint: disable=not-an-iterable
-            config.REPO_DATA.copy(),
+            self.repo_data.copy(),
             runtime_args["pairs"],
             by=runtime_args.get("by"),
         ):
-            start = config.REPO_DATA[row]["start"]
+            start = self.repo_data[row]["start"]
             start_year = get_year_from_datemonth(start)
             start_month = get_month_from_datemonth(start)
-            end = config.REPO_DATA[row]["end"]
+            end = self.repo_data[row]["end"]
             end_year = get_year_from_datemonth(end)
             end_month = get_month_from_datemonth(end)
             table.add_row(
@@ -330,14 +325,38 @@ class Repo:  # noqa: H601
         args: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         runtime_args: dict[str, Any] = helper_runtime_args(self.args, args)
+        repo_local_path = self._repo_local_path(runtime_args)
+        if repo_local_path != self.repo_local_path:
+            self.repo_data = {}
         self.args = runtime_args
-        self.repo_local_path = self._repo_local_path(runtime_args)
+        self.repo_local_path = repo_local_path
+        self.repo_file_exists = self.repo_local_path.exists()
         return runtime_args
 
     @staticmethod
     def _repo_local_path(args: Mapping[str, Any]) -> Path:
         runtime_args = helper_runtime_args(args)
         return Path(str(runtime_args["default_download_dir"]), ".repo")
+
+    def _ensure_repo_data_loaded(self) -> None:
+        """Load local repository metadata once when this helper needs it."""
+        if self.repo_data or not self.repo_local_path.exists():
+            self.repo_file_exists = self.repo_local_path.exists()
+            return
+        self.read_repo_data_file()
+
+    def _filter_pairs_for_action(
+        self,
+        args: Mapping[str, Any],
+        *,
+        missing_pairs: tuple[str, ...],
+    ) -> set[str] | None:
+        """Return pair filters that should be validated for this repo action."""
+        runtime_args = helper_runtime_args(args)
+        requested_pairs = set(runtime_args["pairs"])
+        if runtime_args["update_remote_data"]:
+            return requested_pairs or set(repository_pair_data(self.repo_data))
+        return set(missing_pairs) or None
 
     def _print_refresh_failure(self, code: str) -> None:
         if code == "REPOSITORY_NETWORK_ERROR":

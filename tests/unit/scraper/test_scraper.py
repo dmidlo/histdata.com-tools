@@ -45,6 +45,7 @@ def _scraper_without_init(args: dict | None = None) -> Scraper:
     """Return a Scraper instance without initializing repo/url collaborators."""
     scraper = object.__new__(Scraper)
     scraper.args = helper_runtime_args(args)
+    scraper.filter_pairs = set(scraper.args["pairs"]) or None
     scraper.check_if_repo_validation_is_needed = lambda: False
     scraper.check_for_repo_action = lambda: True
     scraper.set_repo_datum = lambda record: None
@@ -180,13 +181,13 @@ def test_populate_initial_records_uses_deterministic_plan(
         "start_yearmonth": "202201",
         "end_yearmonth": "202203",
         "formats": {"ascii"},
+        "pairs": {"eurusd"},
         "timeframes": {"T"},
         "default_download_dir": f"{tmp_path}{os.sep}",
         "zip_persist": False,
     }
     scraper = _scraper_without_init(args)
     scraper.urls = Urls()
-    config.FILTER_PAIRS = {"eurusd"}
 
     records = scraper.plan_initial_records(args)
 
@@ -209,3 +210,47 @@ def test_populate_initial_records_uses_deterministic_plan(
     assert not meta_path.exists()
     assert item.status is WorkStatus.URL_NEW
     assert item.data_format == "ASCII"
+
+
+def test_plan_initial_records_resyncs_runtime_pair_filter(
+    tmp_path: Path,
+) -> None:
+    """Explicit runtime args should not reuse a stale helper pair filter."""
+    args = {
+        "start_yearmonth": "202201",
+        "end_yearmonth": "202201",
+        "formats": {"ascii"},
+        "pairs": {"eurusd"},
+        "timeframes": {"T"},
+        "default_download_dir": f"{tmp_path}{os.sep}",
+        "zip_persist": False,
+    }
+    scraper = _scraper_without_init(args)
+    scraper.urls = Urls()
+
+    records = scraper.plan_initial_records({**args, "pairs": {"gbpusd"}})
+
+    assert scraper.filter_pairs == {"gbpusd"}
+    assert [record.data_fxpair for record in records] == ["gbpusd"]
+    assert records[0].url.endswith("/gbpusd/2022/1")
+
+
+def test_scraper_instances_keep_pair_filters_isolated(tmp_path: Path) -> None:
+    """Scraper helper filters should not bleed through module globals."""
+    first = Scraper(
+        {
+            "default_download_dir": f"{tmp_path / 'first'}{os.sep}",
+            "pairs": {"eurusd"},
+        }
+    )
+    second = Scraper(
+        {
+            "default_download_dir": f"{tmp_path / 'second'}{os.sep}",
+            "pairs": {"gbpusd"},
+        }
+    )
+
+    assert first.filter_pairs == {"eurusd"}
+    assert second.filter_pairs == {"gbpusd"}
+    assert first.repo.filter_pairs == {"eurusd"}
+    assert second.repo.filter_pairs == {"gbpusd"}

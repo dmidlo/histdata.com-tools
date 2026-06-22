@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 ARGS: dict = {}
-REPO_DATA: dict = {}
-REPO_DATA_FILE_EXISTS: bool = False
-FILTER_PAIRS: set | None = None
 
 REQUESTS_TIMEOUT: int = 10
 
