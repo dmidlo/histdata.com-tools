@@ -170,6 +170,85 @@ def test_api_options_can_submit_sidecar_job_and_return_result(
     }
 
 
+def test_api_default_runtime_uses_foreground_not_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API calls should stay on foreground unless sidecar is explicit."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("sidecar should not be used by default")
+
+    def fake_foreground(request, args: dict) -> dict[str, object]:
+        captured["request"] = request
+        captured["args"] = args
+        return {"runtime": "foreground"}
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(histdata_com, "run_foreground", fake_foreground)
+    options = Options()
+    options.pairs = {"eurusd"}
+    options.formats = {"ascii"}
+    options.timeframes = {"M1"}
+    options.start_yearmonth = "2022-12"
+
+    result = histdata_com.main(options)
+
+    assert result == {"runtime": "foreground"}
+    assert captured["request"].pairs == ("eurusd",)
+    assert captured["args"]["use_sidecar"] is False
+
+
+def test_cli_default_runtime_uses_foreground_not_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI calls should keep foreground behavior unless --sidecar is set."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("sidecar should not be used by default")
+
+    def fake_foreground(request, args: dict) -> dict[str, object]:
+        captured["request"] = request
+        captured["args"] = args
+        return {"runtime": "foreground"}
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(histdata_com, "run_foreground", fake_foreground)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    assert histdata_com.main() is None
+    assert captured["request"].pairs == ("eurusd",)
+    assert captured["args"]["use_sidecar"] is False
+
+
 @pytest.mark.parametrize(
     ("api_return_type", "expected_module", "expected_name"),
     (

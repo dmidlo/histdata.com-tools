@@ -43,6 +43,7 @@ from histdatacom.sidecar.client import (
     SidecarUnavailableError,
     submit_run_request_and_observe_sync,
 )
+from histdatacom.sidecar.cutover import should_submit_to_sidecar
 from histdatacom.utils import (
     load_influx_yaml,
     set_working_data_dir,
@@ -150,7 +151,7 @@ class _HistDataCom:  # noqa:R701
 
     def _uses_sidecar(self) -> bool:
         """Return whether this foreground run should submit to the sidecar."""
-        return bool(config.ARGS.get("use_sidecar"))
+        return should_submit_to_sidecar(config.ARGS)
 
     def _run_sidecar_job(
         self,

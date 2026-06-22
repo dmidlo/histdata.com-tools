@@ -19,6 +19,7 @@ from histdatacom.sidecar.control import JobLifecycle
 from histdatacom.sidecar.control import SidecarJobSnapshot
 from histdatacom.sidecar import client
 from histdatacom.sidecar.queues import build_sidecar_worker_config
+from histdatacom.sidecar.resources import SidecarExecutableUnavailable
 from histdatacom.sidecar.runtime import build_sidecar_runtime_policy
 from histdatacom.sidecar.supervisor import SidecarStatus
 
@@ -212,6 +213,18 @@ class _FakeSupervisor:
         """Record a start attempt and return the configured status."""
         self.start_calls += 1
         return _status(self.started_state)
+
+
+class _ResourceFailingSupervisor(_FakeSupervisor):
+    """Supervisor that simulates metadata-only or unsupported artifacts."""
+
+    def start(self) -> SidecarStatus:
+        """Fail as packaged executable lookup would fail."""
+        self.start_calls += 1
+        raise SidecarExecutableUnavailable(
+            "Temporal sidecar executable for platform 'linux-x86_64' "
+            "is not bundled in this distribution."
+        )
 
 
 def _config(tmp_path: Path):
@@ -469,6 +482,30 @@ def test_submit_and_observe_fails_when_sidecar_is_unavailable(
         )
 
     assert supervisor.start_calls == 0
+
+
+def test_submit_and_observe_wraps_sidecar_resource_failures(
+    tmp_path: Path,
+) -> None:
+    """Metadata-only and unsupported artifacts should fail as unavailable."""
+    config = _config(tmp_path)
+    supervisor = _ResourceFailingSupervisor(current_state="stopped")
+
+    with pytest.raises(
+        client.SidecarUnavailableError,
+        match="not bundled in this distribution",
+    ):
+        asyncio.run(
+            client.submit_run_request_and_observe(
+                RunRequest(request_id="run-metadata-only"),
+                config=config,
+                client=_FakeTemporalClient(),
+                supervisor=supervisor,  # type: ignore[arg-type]
+                start_if_needed=True,
+            )
+        )
+
+    assert supervisor.start_calls == 1
 
 
 def test_inspect_job_status_queries_workflow_status(tmp_path: Path) -> None:

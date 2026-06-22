@@ -9,14 +9,24 @@ the runtime foundation is stable.
 
 ## Current Packaging Status
 
-The ordinary foreground CLI and API path remains the default:
+The ordinary foreground CLI and API path remains the production default:
 
 ```sh
 histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
 Sidecar-backed execution is opt-in through `--sidecar` or
-`Options.use_sidecar = True`.
+`Options.use_sidecar = True`. This is the current cutover policy for the
+published PyPI package: the sidecar is the migration target, but it does not
+become the default runtime until bundled platform artifacts, worker coverage,
+and operator smoke coverage are ready to support a default-runtime flip.
+
+Foreground execution and `config.ARGS` remain supported compatibility surfaces
+during this phase. New orchestration behavior should be expressed as
+`RunRequest` payloads, Temporal workflows, and Temporal activities. A later
+cutover issue must provide release notes, deprecation timing, and fallback
+criteria before removing the foreground path or changing `Options.use_sidecar`
+from opt-in to default.
 
 Install the Temporal client and worker dependency surface when using sidecar
 job submission, job inspection, or workers:
@@ -51,6 +61,17 @@ wheel is bad after publish, yank the affected platform wheel and cut a
 replacement release. The sdist and universal fallback wheel are metadata-only
 recovery artifacts; they keep the package installable while operators provide
 an explicit Temporal executable path.
+
+Default-runtime failure policy:
+
+- Foreground CLI/API runs do not probe sidecar resources.
+- Explicit sidecar runs require a running sidecar, or `--sidecar-start` /
+  `Options.sidecar_start = True` to start one.
+- Metadata-only wheels and unsupported platforms fail explicit sidecar starts
+  with a `SidecarUnavailableError`/nonzero CLI exit unless an operator supplies
+  `histdatacom-sidecar start --executable /path/to/temporal`.
+- The runtime never silently falls back from an explicit sidecar request to
+  foreground execution.
 
 ## Runtime Model
 

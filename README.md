@@ -312,10 +312,13 @@ curl "https://raw.githubusercontent.com/dmidlo/histdata.com-tools/main/influxdb.
 
 ### Temporal Sidecar Compatibility
 
-The legacy CLI and API examples remain the default foreground behavior. During
-the Temporal sidecar cutover, add `--sidecar` on the CLI or set
+The production default remains the foreground CLI/API runtime while the
+Temporal sidecar cutover is completed. This is a deliberate compatibility
+policy for the published PyPI package: add `--sidecar` on the CLI or set
 `options.use_sidecar = True` to submit the same request to the local sidecar
-runtime.
+runtime. Explicit sidecar requests fail clearly when the sidecar cannot be
+started; ordinary foreground requests do not depend on bundled Temporal
+artifacts.
 
 #### Runtime Model and Install Surface
 
@@ -339,6 +342,11 @@ artifacts and unsupported platforms, development and operator smoke tests
 should pass `--executable /path/to/temporal` when starting the sidecar. The
 Temporal dependency extra is required because lifecycle start supervises both
 the local Temporal server and the worker lane fleet.
+
+The foreground runtime and `config.ARGS` global argument state are now treated
+as compatibility surfaces. New orchestration work should use `RunRequest`,
+sidecar workflows, and sidecar activities; removal of foreground compatibility
+requires a later default-runtime flip with release notes and deprecation timing.
 
 #### Lifecycle and Diagnostics
 

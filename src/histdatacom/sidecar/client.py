@@ -36,6 +36,7 @@ from histdatacom.sidecar.queues import (
     SidecarWorkerConfig,
     build_sidecar_worker_config,
 )
+from histdatacom.sidecar.resources import SidecarResourceError
 from histdatacom.sidecar.supervisor import SidecarStatus, SidecarSupervisor
 from histdatacom.sidecar.workflow_metadata import (
     TASK_QUEUE_METADATA_KEY,
@@ -1174,7 +1175,10 @@ def _ensure_sidecar_available(
             "Temporal sidecar is not running. Start it with "
             "`histdatacom sidecar start` or enable sidecar_start."
         )
-    started = supervisor.start()
+    try:
+        started = supervisor.start()
+    except SidecarResourceError as err:
+        raise SidecarUnavailableError(str(err)) from err
     if started.running:
         return started
     raise SidecarUnavailableError(
