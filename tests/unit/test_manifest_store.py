@@ -104,7 +104,7 @@ def test_restore_imports_legacy_meta_without_manifest(
     [item] = store.list_work_items()
     history = store.status_history(item.work_id, owner_kind="work_item")
 
-    assert restored.status == "CSV_FILE"
+    assert restored.status is WorkStatus.CSV_FILE
     assert restored.zip_filename == "legacy.zip"
     assert restored.data_dir == current_data_dir
     assert item.data_dir == current_data_dir

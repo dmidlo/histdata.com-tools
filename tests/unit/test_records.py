@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from histdatacom.records import Record
+from histdatacom.runtime_contracts import WorkStatus
 
 ASCII_M1_URL = (
     "http://www.histdata.com/download-free-forex-data/"
@@ -44,6 +45,26 @@ def test_record_data_dir_accepts_base_dir_without_trailing_separator(
     record.write_memento_file(base_dir=str(tmp_path))
 
     assert record.data_dir == _expected_ascii_m1_dir(tmp_path)
+
+
+def test_record_status_is_normalized_to_work_status() -> None:
+    """Record status should no longer be stored as an untyped string."""
+    record = Record(url=ASCII_M1_URL, status="CSV_FILE")
+
+    assert record.status is WorkStatus.CSV_FILE
+    assert record == record(status="url_valid")
+    assert record.status is WorkStatus.URL_VALID
+    assert record.legacy_status == "URL_VALID"
+
+
+def test_record_preserves_unknown_legacy_status_text() -> None:
+    """Unknown legacy statuses should stay serializable for migration."""
+    record = Record(url=ASCII_M1_URL, status="CUSTOM_STATUS")
+
+    assert record.status is WorkStatus.UNKNOWN
+    assert record.status_text == "CUSTOM_STATUS"
+    assert record.legacy_status == "CUSTOM_STATUS"
+    assert record._to_dict()["status"] == "CUSTOM_STATUS"
 
 
 def test_memento_files_do_not_persist_absolute_data_dir(
@@ -92,6 +113,6 @@ def test_restore_momento_ignores_stale_persisted_data_dir(
     )
 
     assert restored.restore_momento(f"{current_base}{os.sep}")
-    assert restored.status == "CSV_FILE"
+    assert restored.status is WorkStatus.CSV_FILE
     assert restored.zip_filename == "stale.zip"
     assert restored.data_dir == current_data_dir

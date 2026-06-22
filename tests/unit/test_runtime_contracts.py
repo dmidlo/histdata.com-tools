@@ -100,6 +100,9 @@ def test_work_item_preserves_unknown_legacy_status_text() -> None:
     """Unknown legacy strings should not be discarded during migration."""
     record = Record(url=ASCII_M1_URL, status="CUSTOM_STATUS")
 
+    assert record.status is WorkStatus.UNKNOWN
+    assert record.status_text == "CUSTOM_STATUS"
+
     item = WorkItem.from_record(record)
 
     assert item.status is WorkStatus.UNKNOWN

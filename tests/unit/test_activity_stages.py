@@ -138,7 +138,7 @@ def test_validate_url_work_item_returns_updated_item_without_queue(
     assert output.result.status is WorkStatus.URL_VALID
     assert output.work_item.status is WorkStatus.URL_VALID
     assert output.work_item.data_tk == "token"
-    assert record.status == WorkStatus.URL_NEW.value
+    assert record.status is WorkStatus.URL_NEW
     assert (Path(output.work_item.data_dir) / ".meta").exists()
 
 
@@ -299,7 +299,7 @@ def test_download_archive_work_item_returns_zip_artifact(
         == hashlib.sha256(b"zip-bytes").hexdigest()
     )
     assert output.result.metrics["decision"] == "downloaded"
-    assert record.status == WorkStatus.URL_VALID.value
+    assert record.status is WorkStatus.URL_VALID
 
 
 def test_download_archive_work_item_atomically_writes_valid_zip(
@@ -591,7 +591,7 @@ def test_extract_csv_work_item_extracts_data_member(tmp_path: Path) -> None:
     assert (
         output.result.artifacts[0].sha256 == hashlib.sha256(b"rows").hexdigest()
     )
-    assert record.status == WorkStatus.CSV_ZIP.value
+    assert record.status is WorkStatus.CSV_ZIP
 
 
 def test_extract_csv_work_item_preserves_zip_when_configured(

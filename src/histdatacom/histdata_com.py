@@ -38,7 +38,7 @@ from histdatacom.foreground import (
 )
 from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.records import Record
-from histdatacom.runtime_contracts import RunRequest
+from histdatacom.runtime_contracts import RunRequest, WorkStatus
 from histdatacom.sidecar.client import (
     SidecarUnavailableError,
     submit_run_request_and_observe_sync,
@@ -151,7 +151,7 @@ class _HistDataCom:  # noqa:R701
 
     def _uses_sidecar(self) -> bool:
         """Return whether this foreground run should submit to the sidecar."""
-        return should_submit_to_sidecar(config.ARGS)
+        return bool(should_submit_to_sidecar(config.ARGS))
 
     def _run_sidecar_job(
         self,
@@ -332,7 +332,7 @@ def _record_from_cache_artifact(
 ) -> Record:
     metadata = dict(artifact.get("metadata") or {})
     return Record(
-        status="CACHE_READY",
+        status=WorkStatus.CACHE_READY,
         data_dir=f"{path.parent}{os.sep}",
         cache_filename=path.name,
         cache_line_count=str(metadata.get("line_count", "") or ""),

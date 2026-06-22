@@ -165,13 +165,13 @@ class Scraper:  # noqa:H601
                 )
                 record = self._init_record_from_work_item(work_item)
 
-                if record.status != WorkStatus.URL_NO_REPO_DATA.value:
+                if record.status is not WorkStatus.URL_NO_REPO_DATA:
                     record.write_memento_file(  # noqa:BLK100
                         base_dir=config.ARGS["default_download_dir"]
                     )
                     if (  # noqa:BLK100
                         self.check_if_repo_validation_is_needed()  # noqa:BLK100
-                        and record.status != WorkStatus.URL_NEW.value
+                        and record.status is not WorkStatus.URL_NEW
                     ):
                         self.set_repo_datum(record)
                     records.append(record)
@@ -207,7 +207,7 @@ class Scraper:  # noqa:H601
             record (Record): a record for processing.
         """
         record = Record()
-        record(url=url, status=WorkStatus.URL_NEW.value)
+        record(url=url, status=WorkStatus.URL_NEW)
         record.restore_momento(base_dir=config.ARGS["default_download_dir"])
         return record
 

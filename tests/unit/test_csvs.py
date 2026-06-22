@@ -6,6 +6,8 @@ import os
 import zipfile
 from pathlib import Path
 
+from histdatacom.runtime_contracts import WorkStatus
+
 
 def test_csvs() -> None:
     """Test pytest path resolution."""
@@ -32,7 +34,7 @@ def test_extract_csv_accepts_xlsx_members(tmp_path: Path) -> None:
     )
 
     assert result is record
-    assert record.status == "CSV_FILE"
+    assert record.status is WorkStatus.CSV_FILE
     assert record.csv_filename == "DAT_XLSX_EURUSD_M1_2022.xlsx"
     assert (tmp_path / record.csv_filename).read_bytes() == b"spreadsheet"
     assert not archive_path.exists()
@@ -60,4 +62,4 @@ def test_extract_csv_rejects_archives_without_data_members(
     )
 
     assert result is None
-    assert record.status == "FAILED"
+    assert record.status is WorkStatus.FAILED

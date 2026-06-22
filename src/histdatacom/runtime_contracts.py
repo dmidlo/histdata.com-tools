@@ -263,8 +263,15 @@ class WorkItem:
             field_name: str(getattr(record, field_name, "") or "")
             for field_name in RECORD_FIELDS
         }
-        raw_status = str(getattr(record, "status", "") or "")
+        raw_status = getattr(record, "status", WorkStatus.PLANNED)
         status = WorkStatus.from_value(raw_status)
+        status_text = str(getattr(record, "status_text", "") or "")
+        if (
+            not status_text
+            and status == WorkStatus.UNKNOWN
+            and not isinstance(raw_status, WorkStatus)
+        ):
+            status_text = str(raw_status or "")
         return cls(
             work_id=work_id
             or derive_work_id(
@@ -275,7 +282,7 @@ class WorkItem:
                 values["data_datemonth"],
             ),
             status=status,
-            status_text="" if status != WorkStatus.UNKNOWN else raw_status,
+            status_text=status_text if status == WorkStatus.UNKNOWN else "",
             **_record_field_kwargs(values),
         )
 

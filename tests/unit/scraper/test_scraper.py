@@ -77,7 +77,7 @@ def test_validate_url_transitions_new_record_to_valid_and_writes_meta(
     metadata = json.loads(meta_path.read_text(encoding="UTF-8"))
 
     assert result is record
-    assert record.status == WorkStatus.URL_VALID.value
+    assert record.status is WorkStatus.URL_VALID
     assert metadata["status"] == WorkStatus.URL_VALID.value
     assert metadata["data_tk"] == "token"
 
@@ -102,7 +102,7 @@ def test_validate_url_transitions_missing_record_without_requeue(
     metadata = json.loads(meta_path.read_text(encoding="UTF-8"))
 
     assert result is None
-    assert record.status == WorkStatus.URL_NO_REPO_DATA.value
+    assert record.status is WorkStatus.URL_NO_REPO_DATA
     assert metadata["status"] == WorkStatus.URL_NO_REPO_DATA.value
 
 
@@ -162,7 +162,7 @@ def test_download_zip_transitions_valid_record_to_csv_zip(
     metadata = json.loads(meta_path.read_text(encoding="UTF-8"))
 
     assert result is record
-    assert record.status == WorkStatus.CSV_ZIP.value
+    assert record.status is WorkStatus.CSV_ZIP
     assert metadata["status"] == WorkStatus.CSV_ZIP.value
 
 

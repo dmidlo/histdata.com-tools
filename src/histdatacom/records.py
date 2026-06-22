@@ -13,41 +13,71 @@ from histdatacom.manifest_store import (
     delete_record_from_manifest,
     restore_record_from_manifest,
 )
+from histdatacom.runtime_contracts import WorkStatus
 from histdatacom.utils import (
     create_full_path,
     get_query_string,
 )
 
 
+def _record_text(value: Any) -> str:
+    """Return a normalized text value for legacy record fields."""
+    return "" if value is None else str(value)
+
+
 class Record:  # noqa:H601
     """A mutable work record DTO."""
 
-    def __init__(self, **kwargs: str) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         """Initialize record attributes.
 
         Args:
             kwargs (str): record attributes
         """
-        self.url = kwargs.get("url", "")
-        self.status = kwargs.get("status", "")
-        self.encoding = kwargs.get("encoding", "")
-        self.bytes_length = kwargs.get("bytes_length", "")
-        self.data_date = kwargs.get("data_date", "")
-        self.data_year = kwargs.get("data_year", "")
-        self.data_month = kwargs.get("data_month", "")
-        self.data_datemonth = kwargs.get("data_datemonth", "")
-        self.data_format = kwargs.get("data_format", "")
-        self.data_timeframe = kwargs.get("data_timeframe", "")
-        self.data_fxpair = kwargs.get("data_fxpair", "")
-        self.data_dir = kwargs.get("data_dir", "")
-        self.data_tk = kwargs.get("data_tk", "")
-        self.zip_filename = kwargs.get("zip_filename", "")
-        self.csv_filename = kwargs.get("csv_filename", "")
-        self.cache_filename = kwargs.get("cache_filename", "")
-        self.cache_line_count = kwargs.get("cache_line_count", "")
-        self.cache_start = kwargs.get("cache_start", "")
-        self.cache_end = kwargs.get("cache_end", "")
-        self.zip_persist = kwargs.get("zip_persist", "")
+        self.url = _record_text(kwargs.get("url", ""))
+        self._status = WorkStatus.PLANNED
+        self.status_text = ""
+        self.status = kwargs.get("status", WorkStatus.PLANNED)
+        self.encoding = _record_text(kwargs.get("encoding", ""))
+        self.bytes_length = _record_text(kwargs.get("bytes_length", ""))
+        self.data_date = _record_text(kwargs.get("data_date", ""))
+        self.data_year = _record_text(kwargs.get("data_year", ""))
+        self.data_month = _record_text(kwargs.get("data_month", ""))
+        self.data_datemonth = _record_text(kwargs.get("data_datemonth", ""))
+        self.data_format = _record_text(kwargs.get("data_format", ""))
+        self.data_timeframe = _record_text(kwargs.get("data_timeframe", ""))
+        self.data_fxpair = _record_text(kwargs.get("data_fxpair", ""))
+        self.data_dir = _record_text(kwargs.get("data_dir", ""))
+        self.data_tk = _record_text(kwargs.get("data_tk", ""))
+        self.zip_filename = _record_text(kwargs.get("zip_filename", ""))
+        self.csv_filename = _record_text(kwargs.get("csv_filename", ""))
+        self.cache_filename = _record_text(kwargs.get("cache_filename", ""))
+        self.cache_line_count = _record_text(kwargs.get("cache_line_count", ""))
+        self.cache_start = _record_text(kwargs.get("cache_start", ""))
+        self.cache_end = _record_text(kwargs.get("cache_end", ""))
+        self.zip_persist = _record_text(kwargs.get("zip_persist", ""))
+
+    @property
+    def status(self) -> WorkStatus:
+        """Return the normalized work status enum."""
+        return self._status
+
+    @status.setter
+    def status(self, value: str | WorkStatus | None) -> None:
+        """Normalize legacy status strings into ``WorkStatus`` values."""
+        self._status = WorkStatus.from_value(value)
+        if self._status == WorkStatus.UNKNOWN and not isinstance(
+            value,
+            WorkStatus,
+        ):
+            self.status_text = str(value or "")
+        else:
+            self.status_text = ""
+
+    @property
+    def legacy_status(self) -> str:
+        """Return the string status representation used by legacy metadata."""
+        return self.status_text or self.status.value
 
     def write_memento_file(self, base_dir: str = "") -> None:
         """Write record to disk.
@@ -110,7 +140,7 @@ class Record:  # noqa:H601
         """
         return {
             "url": self.url,
-            "status": self.status,
+            "status": self.legacy_status,
             "encoding": self.encoding,
             "bytes_length": self.bytes_length,
             "data_date": self.data_date,
@@ -203,7 +233,7 @@ class Record:  # noqa:H601
             )
             raise SystemExit(1) from err
 
-    def __call__(self, **kwargs: str) -> Any:
+    def __call__(self, **kwargs: Any) -> Any:
         """Set instance attribute by kwargs.
 
         Args:

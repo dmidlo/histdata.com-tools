@@ -12,7 +12,14 @@ from dataclasses import dataclass, replace
 from email.message import Message
 from pathlib import Path, PurePosixPath
 from ssl import SSLCertVerificationError
-from typing import Any, Callable, Iterable, Mapping, MutableMapping, Sequence
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    Mapping,
+    MutableMapping,
+    Sequence,
+)
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -336,7 +343,7 @@ def validate_url_work_item(
     record = _record_from_work_item(work_item)
     updated = _work_item_from_record(record, work_item)
     try:
-        if record.status == WorkStatus.URL_NEW.value:
+        if record.status is WorkStatus.URL_NEW:
             if scrape_record_info is not None:
                 record = scrape_record_info(record)
                 if check_for_valid_download is None:
@@ -364,7 +371,7 @@ def validate_url_work_item(
             ):
                 set_repo_datum(record)
 
-            record.status = WorkStatus.URL_VALID.value
+            record.status = WorkStatus.URL_VALID
             record.write_memento_file(base_dir=_default_download_dir(args))
             updated = _work_item_from_record(record, updated)
 
@@ -379,7 +386,7 @@ def validate_url_work_item(
             },
         )
     except (HistDataNoDataError, ValueError) as err:
-        record.status = WorkStatus.URL_NO_REPO_DATA.value
+        record.status = WorkStatus.URL_NO_REPO_DATA
         record.write_memento_file(base_dir=_default_download_dir(args))
         updated = _work_item_from_record(record, work_item)
         return _activity_output(
@@ -606,7 +613,7 @@ def download_archive_work_item(
                 message="Existing local archive artifact reused.",
             )
 
-        should_download = WorkStatus.URL_VALID.value in record.status or bool(
+        should_download = record.status is WorkStatus.URL_VALID or bool(
             args.get("from_api")
         )
         if should_download:
@@ -620,7 +627,7 @@ def download_archive_work_item(
                 download_file(record)
                 download_result = archive_download_result_for_record(record)
 
-            record.status = WorkStatus.CSV_ZIP.value
+            record.status = WorkStatus.CSV_ZIP
             record.write_memento_file(base_dir=_default_download_dir(args))
             updated = _work_item_from_record(record, work_item)
             return _activity_output(
@@ -916,7 +923,7 @@ def extract_csv_work_item(
             zip_persist=zip_persist,
         )
         if existing is not None:
-            record.status = WorkStatus.CSV_FILE.value
+            record.status = WorkStatus.CSV_FILE
             record.write_memento_file(base_dir=_default_download_dir(args))
             updated = _work_item_from_record(record, work_item)
             return _activity_output(
@@ -932,12 +939,12 @@ def extract_csv_work_item(
                 message="Existing CSV/XLSX artifact reused.",
             )
 
-        if WorkStatus.CSV_ZIP.value in record.status:
+        if record.status is WorkStatus.CSV_ZIP:
             extraction = extract_archive_to_record(
                 record,
                 zip_persist=zip_persist,
             )
-            record.status = WorkStatus.CSV_FILE.value
+            record.status = WorkStatus.CSV_FILE
             record.write_memento_file(base_dir=_default_download_dir(args))
             updated = _work_item_from_record(record, work_item)
             return _activity_output(
@@ -1138,7 +1145,7 @@ def build_cache_work_item(
             created = True
             cache_result = cache_build_result_for_record(record)
 
-        record.status = WorkStatus.CACHE_READY.value
+        record.status = WorkStatus.CACHE_READY
         record.write_memento_file(base_dir=_default_download_dir(args))
         updated = _work_item_from_record(record, work_item)
         metrics = {
@@ -1422,7 +1429,7 @@ def import_to_influx_work_item(
     line_count = 0
     try:
         if (
-            record.status != WorkStatus.INFLUX_UPLOAD.value
+            record.status is not WorkStatus.INFLUX_UPLOAD
             and str.lower(record.data_format) == "ascii"
         ):
             cache_path = Path(record.data_dir, CACHE_FILENAME)
@@ -1448,7 +1455,7 @@ def import_to_influx_work_item(
                     "Influx import requires a local Polars cache artifact."
                 )
 
-        record.status = WorkStatus.INFLUX_UPLOAD.value
+        record.status = WorkStatus.INFLUX_UPLOAD
         record.write_memento_file(base_dir=_default_download_dir(args))
 
         if bool(args.get("delete_after_influx")):
@@ -2234,10 +2241,11 @@ def _archive_download_failure(
     record: Record,
 ) -> FailureInfo:
     if isinstance(err, ArchiveDownloadError):
-        return failure_info_from_exception(
+        failure: FailureInfo = failure_info_from_exception(
             err,
             detail={"url": record.url, "data_dir": record.data_dir},
         )
+        return failure
     if isinstance(err, KeyError):
         return FailureInfo(
             code="INVALID_CONTENT_DISPOSITION",
@@ -2265,7 +2273,7 @@ def _archive_extraction_failure(
     record: Record,
 ) -> FailureInfo:
     if isinstance(err, ArchiveExtractionError):
-        return failure_info_from_exception(
+        failure: FailureInfo = failure_info_from_exception(
             err,
             detail={
                 "url": record.url,
@@ -2273,6 +2281,7 @@ def _archive_extraction_failure(
                 "zip_filename": record.zip_filename,
             },
         )
+        return failure
     if isinstance(err, zipfile.BadZipFile):
         return FailureInfo(
             code="INVALID_ARCHIVE_PAYLOAD",
@@ -2297,7 +2306,7 @@ def _cache_build_failure(
     record: Record,
 ) -> FailureInfo:
     if isinstance(err, CacheBuildError):
-        return failure_info_from_exception(
+        failure: FailureInfo = failure_info_from_exception(
             err,
             detail={
                 "data_dir": record.data_dir,
@@ -2306,6 +2315,7 @@ def _cache_build_failure(
                 "cache_filename": record.cache_filename,
             },
         )
+        return failure
     return FailureInfo(
         code="CACHE_BUILD_FAILED",
         message=str(err),
