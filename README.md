@@ -823,6 +823,24 @@ PYTHONNOUSERSITE=1 python -m pip install -e ".[dev]"
 PYTHONNOUSERSITE=1 pre-commit install --install-hooks
 ```
 
+On Windows, use the same project-local environment contract with PowerShell:
+
+```powershell
+py -m venv venv
+.\venv\Scripts\Activate.ps1
+$env:PYTHONNOUSERSITE = "1"
+python -m pip install -e ".[dev]"
+pre-commit install --install-hooks
+```
+
+The local Git hooks are designed to run from normal `git commit` and
+`git push` commands after setup, even when the shell has not activated the
+virtual environment. Hook wrappers resolve developer tools from
+`HISTDATACOM_DEV_VENV`, the active `VIRTUAL_ENV`, `./venv`, or `./.venv` in
+that order. Keep the project virtual environment in place after installing the
+hooks; do not rely on user-local Python packages to satisfy `histdatacom`,
+`coverage`, or other release gates.
+
 The dependency surfaces are split by purpose:
 
 - `.[test]` installs pytest, coverage, pandas, pyarrow, InfluxDB support, and

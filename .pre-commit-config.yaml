@@ -67,7 +67,7 @@ repos:
   rev: v1.7.12
 - hooks:
   - id: histdatacom
-    entry: histdatacom
+    entry: scripts/run_dev_tool.py histdatacom
     language: system
     name: histdatacom
     pass_filenames: false
@@ -79,7 +79,7 @@ repos:
       - --version
   - id: coverage-run
     name: coverage-run
-    entry: coverage
+    entry: scripts/run_dev_tool.py coverage
     language: system
     args: ["run"]
     pass_filenames: false
@@ -88,7 +88,7 @@ repos:
       - python
   - id: coverage-combine
     name: coverage-combine
-    entry: coverage
+    entry: scripts/run_dev_tool.py coverage
     language: system
     args: ["combine"]
     pass_filenames: false
@@ -97,7 +97,7 @@ repos:
       - python
   - id: coverage-report
     name: coverage-report
-    entry: coverage
+    entry: scripts/run_dev_tool.py coverage
     language: system
     args: ["report"]
     pass_filenames: false
@@ -107,9 +107,9 @@ repos:
       - python
   - id: coverage-rm
     name: coverage-rm
-    entry: rm
+    entry: scripts/run_dev_tool.py
     language: system
-    args: ["-f", ".coverage"]
+    args: ["--remove", ".coverage"]
     pass_filenames: false
     always_run: True
   repo: local
