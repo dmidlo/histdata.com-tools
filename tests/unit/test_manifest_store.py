@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from pathlib import Path
+
+import pytest
 
 from histdatacom.manifest_store import (
     MANIFEST_DB_FILENAME,
     MANIFEST_DIRECTORY,
+    MANIFEST_SCHEMA_VERSION,
     ManifestStatusStore,
 )
 from histdatacom.records import Record
@@ -56,6 +60,47 @@ def test_record_write_creates_manifest_without_legacy_meta(
     assert item.status is WorkStatus.CSV_FILE
     assert item.data_dir == _expected_ascii_m1_dir(tmp_path)
     assert history[-1]["stage"] == "record_memento"
+
+
+def test_manifest_store_sets_user_version_for_unversioned_database(
+    tmp_path: Path,
+) -> None:
+    """Opening a legacy unversioned SQLite store should mark schema v1."""
+    db_path = tmp_path / MANIFEST_DIRECTORY / MANIFEST_DB_FILENAME
+    db_path.parent.mkdir(parents=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE legacy_marker (id INTEGER PRIMARY KEY)")
+        conn.execute("PRAGMA user_version = 0")
+
+    before = ManifestStatusStore.inspect_schema(tmp_path)
+    store = ManifestStatusStore(tmp_path)
+    after = store.schema_status()
+
+    assert before["state"] == "legacy_unversioned"
+    assert after["state"] == "current"
+    assert after["schema_version"] == MANIFEST_SCHEMA_VERSION
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == (
+            MANIFEST_SCHEMA_VERSION
+        )
+
+
+def test_manifest_store_rejects_future_user_version(
+    tmp_path: Path,
+) -> None:
+    """Opening a newer manifest schema should fail without mutation."""
+    db_path = tmp_path / MANIFEST_DIRECTORY / MANIFEST_DB_FILENAME
+    db_path.parent.mkdir(parents=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(f"PRAGMA user_version = {MANIFEST_SCHEMA_VERSION + 1}")
+
+    inspection = ManifestStatusStore.inspect_schema(tmp_path)
+
+    with pytest.raises(ValueError, match="Unsupported manifest/status schema"):
+        ManifestStatusStore(tmp_path)
+
+    assert inspection["state"] == "unsupported"
+    assert inspection["schema_version"] == MANIFEST_SCHEMA_VERSION + 1
 
 
 def test_record_delete_clears_current_manifest_state(

@@ -64,6 +64,31 @@ class ManifestStatusStore:
         )
 
     @classmethod
+    def inspect_schema(cls, root_dir: str | Path) -> dict[str, Any]:
+        """Return manifest/status SQLite schema diagnostics without mutation."""
+        db_path = cls.path_for_root(root_dir)
+        if not db_path.exists():
+            return _manifest_schema_status(db_path, exists=False)
+        try:
+            with sqlite3.connect(
+                f"file:{db_path}?mode=ro",
+                uri=True,
+            ) as conn:
+                user_version = _read_user_version(conn)
+        except sqlite3.DatabaseError as err:
+            return _manifest_schema_status(
+                db_path,
+                exists=True,
+                state="error",
+                error=str(err),
+            )
+        return _manifest_schema_status(
+            db_path,
+            exists=True,
+            user_version=user_version,
+        )
+
+    @classmethod
     def existing_for_record(
         cls,
         record: Any,
@@ -461,6 +486,10 @@ class ManifestStatusStore:
             self.import_meta_file(path) for path in sorted(root.rglob(".meta"))
         )
 
+    def schema_status(self) -> dict[str, Any]:
+        """Return manifest/status SQLite schema diagnostics."""
+        return self.inspect_schema(self.root_dir)
+
     def write_stage_result(self, result: StageResult) -> None:
         """Persist activity stage output metadata outside workflow history."""
         payload = result.to_dict()
@@ -840,6 +869,13 @@ class ManifestStatusStore:
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
+            user_version = _read_user_version(conn)
+            if user_version > MANIFEST_SCHEMA_VERSION:
+                raise ValueError(
+                    "Unsupported manifest/status schema version "
+                    f"{user_version}; expected <= {MANIFEST_SCHEMA_VERSION}. "
+                    "Upgrade histdatacom before opening this store."
+                )
             conn.executescript("""
                 PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS work_items (
@@ -931,6 +967,7 @@ class ManifestStatusStore:
                 CREATE INDEX IF NOT EXISTS idx_jobs_request_id
                     ON jobs(request_id);
                 """)
+            _migrate_manifest_schema(conn, user_version)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -1504,6 +1541,63 @@ def _live_lifecycle(status: WorkStatus, stored_lifecycle: str) -> str:
     }:
         return stored_lifecycle
     return "running"
+
+
+def _read_user_version(conn: sqlite3.Connection) -> int:
+    row = conn.execute("PRAGMA user_version").fetchone()
+    return int(row[0] if row is not None else 0)
+
+
+def _set_user_version(conn: sqlite3.Connection, version: int) -> None:
+    conn.execute(f"PRAGMA user_version = {int(version)}")
+
+
+def _migrate_manifest_schema(
+    conn: sqlite3.Connection,
+    user_version: int,
+) -> None:
+    if user_version == MANIFEST_SCHEMA_VERSION:
+        return
+    if user_version > MANIFEST_SCHEMA_VERSION:
+        raise ValueError(
+            "Unsupported manifest/status schema version "
+            f"{user_version}; expected <= {MANIFEST_SCHEMA_VERSION}."
+        )
+    _set_user_version(conn, MANIFEST_SCHEMA_VERSION)
+
+
+def _manifest_schema_status(
+    db_path: Path,
+    *,
+    exists: bool,
+    user_version: int = 0,
+    state: str = "",
+    error: str = "",
+) -> dict[str, Any]:
+    if not exists:
+        resolved_state = "missing"
+    elif state:
+        resolved_state = state
+    elif user_version > MANIFEST_SCHEMA_VERSION:
+        resolved_state = "unsupported"
+        error = (
+            "Unsupported manifest/status schema version "
+            f"{user_version}; expected <= {MANIFEST_SCHEMA_VERSION}."
+        )
+    elif user_version == MANIFEST_SCHEMA_VERSION:
+        resolved_state = "current"
+    elif user_version == 0:
+        resolved_state = "legacy_unversioned"
+    else:
+        resolved_state = "migration_required"
+    return {
+        "path": str(db_path),
+        "exists": exists,
+        "schema_version": user_version,
+        "expected_schema_version": MANIFEST_SCHEMA_VERSION,
+        "state": resolved_state,
+        "error": error,
+    }
 
 
 def _json_dumps(value: Any) -> str:

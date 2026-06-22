@@ -5,7 +5,10 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from histdatacom.manifest_store import ManifestStatusStore
+from histdatacom.manifest_store import (
+    MANIFEST_SCHEMA_VERSION,
+    ManifestStatusStore,
+)
 from histdatacom.runtime_contracts import (
     ArtifactRef,
     StageResult,
@@ -75,6 +78,8 @@ def test_sidecar_maintenance_rotates_logs_and_prunes_status_store(
     assert payload["temporal_sqlite"]["action"] == "preserved"
     assert payload["temporal_sqlite"]["within_limit"] is False
     assert runtime_policy.paths.sqlite_db.exists()
+    assert payload["status_store"]["schema_state"] == "current"
+    assert payload["status_store"]["schema_version"] == MANIFEST_SCHEMA_VERSION
     assert _table_count(store.db_path, "jobs") == 1
     assert _table_count(store.db_path, "stage_results") == 1
     assert _table_count(store.db_path, "dataset_plans") == 1
@@ -126,6 +131,32 @@ def test_sidecar_maintenance_skips_mutation_while_running(
     )
     assert _table_count(store.db_path, "jobs") == 3
     assert _table_count(store.db_path, "stage_results") == 3
+
+
+def test_sidecar_maintenance_reports_future_status_store_schema(
+    tmp_path: Path,
+) -> None:
+    """Unsupported manifest DB versions should surface as maintenance errors."""
+    runtime_policy = build_sidecar_runtime_policy(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+    )
+    store_path = ManifestStatusStore.path_for_root(
+        runtime_policy.paths.manifests_dir
+    )
+    store_path.parent.mkdir(parents=True)
+    with sqlite3.connect(store_path) as conn:
+        conn.execute(f"PRAGMA user_version = {MANIFEST_SCHEMA_VERSION + 1}")
+
+    result = run_sidecar_maintenance(runtime_policy, sidecar_state="stopped")
+    payload = result.to_dict()
+
+    assert result.state == "error"
+    assert payload["status_store"]["action"] == "error"
+    assert payload["status_store"]["schema_state"] == "unsupported"
+    assert payload["status_store"]["schema_version"] == (
+        MANIFEST_SCHEMA_VERSION + 1
+    )
 
 
 def _write_retained_rows(

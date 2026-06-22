@@ -15,6 +15,7 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, cast
 
+from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.sidecar.performance import (
     DEFAULT_INFLUX_WORKERS,
     DEFAULT_NETWORK_MULTIPLIER,
@@ -136,6 +137,54 @@ def _load_runtime_defaults() -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise ValueError("runtime-defaults.json must contain an object")
     return cast(dict[str, Any], loaded)
+
+
+def _sidecar_state_schema_version(state: Mapping[str, Any]) -> int:
+    return int(
+        state.get("schema_version", SIDECAR_STATE_SCHEMA_VERSION)
+        or SIDECAR_STATE_SCHEMA_VERSION
+    )
+
+
+def _sidecar_state_schema_status(
+    path: Path,
+    *,
+    exists: bool,
+    version: int = 0,
+    missing_version: bool = False,
+    state: str = "",
+    error: str = "",
+) -> dict[str, Any]:
+    if not exists:
+        resolved_state = "missing"
+    elif state:
+        resolved_state = state
+    elif missing_version:
+        resolved_state = "legacy_unversioned"
+        version = 0
+    elif version > SIDECAR_STATE_SCHEMA_VERSION:
+        resolved_state = "unsupported"
+        error = (
+            "Unsupported sidecar state schema version "
+            f"{version}; expected <= {SIDECAR_STATE_SCHEMA_VERSION}."
+        )
+    elif version == SIDECAR_STATE_SCHEMA_VERSION:
+        resolved_state = "current"
+    elif version < 1:
+        resolved_state = "invalid"
+        error = (
+            "Invalid sidecar state schema version " f"{version}; expected >= 1."
+        )
+    else:
+        resolved_state = "migration_required"
+    return {
+        "path": str(path),
+        "exists": exists,
+        "schema_version": version,
+        "expected_schema_version": SIDECAR_STATE_SCHEMA_VERSION,
+        "state": resolved_state,
+        "error": error,
+    }
 
 
 def build_temporal_start_command(
@@ -510,6 +559,12 @@ class SidecarSupervisor:
             },
             "runtime_defaults": _load_runtime_defaults(),
             "runtime_policy": runtime_policy.to_dict(),
+            "persistence": {
+                "status_store": ManifestStatusStore.inspect_schema(
+                    self.paths.manifests_dir
+                ),
+                "sidecar_state": self._state_schema_diagnostics(),
+            },
         }
 
     def _start_process(
@@ -644,13 +699,78 @@ class SidecarSupervisor:
         loaded = json.loads(self.paths.pid_file.read_text(encoding="utf-8"))
         if not isinstance(loaded, dict):
             raise ValueError("sidecar state must contain an object")
-        return cast(dict[str, Any], loaded)
+        return self._normalize_state_schema(cast(dict[str, Any], loaded))
 
     def _write_state(self, state: Mapping[str, Any]) -> None:
         """Write persisted sidecar process state."""
         self.paths.pid_file.write_text(
             json.dumps(dict(state), indent=2, sort_keys=True),
             encoding="utf-8",
+        )
+
+    def _normalize_state_schema(
+        self,
+        state: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return persisted state normalized to the current schema version."""
+        try:
+            version = _sidecar_state_schema_version(state)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"Invalid sidecar state schema version: {err}"
+            ) from err
+        if version > SIDECAR_STATE_SCHEMA_VERSION:
+            raise ValueError(
+                "Unsupported sidecar state schema version "
+                f"{version}; expected <= {SIDECAR_STATE_SCHEMA_VERSION}. "
+                "Upgrade histdatacom before reusing this state."
+            )
+        if version < 1:
+            raise ValueError(
+                "Invalid sidecar state schema version "
+                f"{version}; expected >= 1."
+            )
+        normalized = dict(state)
+        normalized["schema_version"] = SIDECAR_STATE_SCHEMA_VERSION
+        return normalized
+
+    def _state_schema_diagnostics(self) -> dict[str, Any]:
+        """Return sidecar state JSON schema diagnostics without mutation."""
+        if not self.paths.pid_file.exists():
+            return _sidecar_state_schema_status(
+                self.paths.pid_file,
+                exists=False,
+            )
+        try:
+            loaded = json.loads(self.paths.pid_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as err:
+            return _sidecar_state_schema_status(
+                self.paths.pid_file,
+                exists=True,
+                state="error",
+                error=str(err),
+            )
+        if not isinstance(loaded, Mapping):
+            return _sidecar_state_schema_status(
+                self.paths.pid_file,
+                exists=True,
+                state="error",
+                error="sidecar state must contain an object",
+            )
+        try:
+            version = _sidecar_state_schema_version(loaded)
+        except (TypeError, ValueError) as err:
+            return _sidecar_state_schema_status(
+                self.paths.pid_file,
+                exists=True,
+                state="error",
+                error=f"invalid schema_version: {err}",
+            )
+        return _sidecar_state_schema_status(
+            self.paths.pid_file,
+            exists=True,
+            version=version,
+            missing_version="schema_version" not in loaded,
         )
 
     def _state_pids(self, state: Mapping[str, Any]) -> dict[str, int]:

@@ -766,6 +766,43 @@ def test_doctor_reports_frontend_and_worker_lane_health(
     assert doctor["workers"]["cpu-file"]["log"].endswith(
         "temporal-worker-cpu-file.log"
     )
+    assert doctor["persistence"]["sidecar_state"]["state"] == (
+        "legacy_unversioned"
+    )
+    assert doctor["persistence"]["sidecar_state"]["schema_version"] == 0
+
+
+def test_future_sidecar_state_schema_is_reported_stale(
+    tmp_path: Path,
+) -> None:
+    """Newer state JSON should fail clearly without deleting state."""
+    policy = _policy(tmp_path)
+    policy.paths.state_dir.mkdir(parents=True)
+    policy.paths.pid_file.write_text(
+        json.dumps(
+            {
+                "schema_version": SIDECAR_STATE_SCHEMA_VERSION + 1,
+                "pids": {"server": 100},
+                "command": ["/tmp/temporal", "server", "start-dev"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: True,
+    )
+
+    status = supervisor.status()
+    doctor = supervisor.doctor()
+
+    assert status.state == "stale"
+    assert "Unsupported sidecar state schema version" in status.message
+    assert policy.paths.pid_file.exists()
+    assert doctor["persistence"]["sidecar_state"]["state"] == "unsupported"
+    assert doctor["persistence"]["sidecar_state"]["schema_version"] == (
+        SIDECAR_STATE_SCHEMA_VERSION + 1
+    )
 
 
 def test_doctor_checks_persisted_running_frontend_port(

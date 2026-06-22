@@ -342,6 +342,22 @@ past the warning threshold, preserve `logs/` and `sqlite/temporal.db` for
 diagnosis, stop the sidecar, and reset the workspace runtime directory only as
 an explicit recovery action.
 
+### Persistence Schema Handling
+
+The sidecar manifest/status SQLite store tracks its schema with
+`PRAGMA user_version`. Opening an unversioned v1 store marks it as the current
+schema in place; opening a store with a newer unsupported schema fails clearly
+without pruning rows. `maintenance --json` reports `status_store.schema_state`,
+`status_store.schema_version`, and `status_store.expected_schema_version`.
+
+The sidecar PID/state JSON also carries a schema version. Missing v1-era
+`schema_version` values are treated as legacy state for compatibility, while
+newer unsupported versions make `status --json` report stale state and
+`doctor --json` report `persistence.sidecar_state.schema_state` as
+`"unsupported"`. Operators should upgrade HistData.com Tools before reusing a
+newer state file, or stop the sidecar and move the affected workspace runtime
+directory aside after preserving logs and SQLite files for diagnosis.
+
 ## Sidecar Job Submission
 
 Submit through the default sidecar runtime and start it if no healthy server is
@@ -653,6 +669,18 @@ Corrupted SQLite or runtime state:
 - Fix: stop the sidecar, preserve `logs/` and `sqlite/temporal.db` for
   diagnosis, then move aside or delete the workspace runtime directory. HistData
   ZIP, CSV, and cache artifacts are outside this runtime directory.
+
+Unsupported persistence schema:
+
+- Symptom: `status --json` reports stale state with an unsupported sidecar
+  schema version, `doctor --json` reports
+  `persistence.sidecar_state.schema_state: "unsupported"`, or
+  `maintenance --json` reports `status_store.schema_state: "unsupported"`.
+- Fix: upgrade HistData.com Tools to a version that supports the newer schema.
+  If the state came from a failed downgrade, stop the sidecar and move the
+  workspace runtime directory aside only after preserving `logs/`,
+  `sqlite/temporal.db`, and `manifests/.histdatacom/manifest-status.sqlite3`
+  for diagnosis.
 
 Worker crashes:
 

@@ -7,7 +7,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from histdatacom.manifest_store import ManifestStatusStore
+from histdatacom.manifest_store import (
+    MANIFEST_SCHEMA_VERSION,
+    ManifestStatusStore,
+)
 from histdatacom.sidecar.runtime import SidecarRuntimePolicy
 
 MAINTENANCE_SCHEMA_VERSION = 1
@@ -99,6 +102,9 @@ class StatusStoreMaintenanceResult:
     rows_deleted: dict[str, int] = field(default_factory=dict)
     reason: str = ""
     error: str = ""
+    schema_version: int = 0
+    expected_schema_version: int = MANIFEST_SCHEMA_VERSION
+    schema_state: str = "missing"
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible result."""
@@ -109,6 +115,9 @@ class StatusStoreMaintenanceResult:
             "rows_deleted": dict(self.rows_deleted),
             "reason": self.reason,
             "error": self.error,
+            "schema_version": self.schema_version,
+            "expected_schema_version": self.expected_schema_version,
+            "schema_state": self.schema_state,
         }
 
 
@@ -360,6 +369,8 @@ def _status_store_result(
 ) -> StatusStoreMaintenanceResult:
     store_root = runtime_policy.paths.manifests_dir
     store_path = ManifestStatusStore.path_for_root(store_root)
+    schema = ManifestStatusStore.inspect_schema(store_root)
+    schema_fields = _status_store_schema_fields(schema)
     if not store_path.exists():
         return StatusStoreMaintenanceResult(
             path=str(store_path),
@@ -367,6 +378,7 @@ def _status_store_result(
             action="missing",
             rows_deleted=_zero_row_counts(),
             reason="Manifest/status store does not exist.",
+            **schema_fields,
         )
     if skip_reason:
         return StatusStoreMaintenanceResult(
@@ -375,6 +387,16 @@ def _status_store_result(
             action="skipped",
             rows_deleted=_zero_row_counts(),
             reason=skip_reason,
+            **schema_fields,
+        )
+    if schema["state"] in {"unsupported", "error"}:
+        return StatusStoreMaintenanceResult(
+            path=str(store_path),
+            exists=True,
+            action="error",
+            rows_deleted=_zero_row_counts(),
+            error=str(schema.get("error", "")),
+            **schema_fields,
         )
     try:
         store = ManifestStatusStore(store_root)
@@ -389,6 +411,7 @@ def _status_store_result(
                 policy.max_dataset_plans_per_request
             ),
         )
+        schema_fields = _status_store_schema_fields(store.schema_status())
     except (OSError, sqlite3.DatabaseError, ValueError) as err:
         return StatusStoreMaintenanceResult(
             path=str(store_path),
@@ -396,6 +419,7 @@ def _status_store_result(
             action="error",
             rows_deleted=_zero_row_counts(),
             error=str(err),
+            **schema_fields,
         )
     return StatusStoreMaintenanceResult(
         path=str(store_path),
@@ -403,6 +427,7 @@ def _status_store_result(
         action="pruned",
         rows_deleted=rows_deleted,
         reason="Manifest/status rows were pruned to retention limits.",
+        **schema_fields,
     )
 
 
@@ -413,6 +438,17 @@ def _zero_row_counts() -> dict[str, int]:
         "stage_results": 0,
         "artifacts": 0,
         "dataset_plans": 0,
+    }
+
+
+def _status_store_schema_fields(schema: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": int(schema.get("schema_version", 0) or 0),
+        "expected_schema_version": int(
+            schema.get("expected_schema_version", MANIFEST_SCHEMA_VERSION)
+            or MANIFEST_SCHEMA_VERSION
+        ),
+        "schema_state": str(schema.get("state", "") or "missing"),
     }
 
 
