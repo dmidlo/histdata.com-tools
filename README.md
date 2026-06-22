@@ -797,8 +797,8 @@ PYTHONNOUSERSITE=1 pre-commit install --install-hooks
 
 The dependency surfaces are split by purpose:
 
-- `.[test]` installs pytest, coverage, pandas, pyarrow, and InfluxDB support
-  used by the test suite.
+- `.[test]` installs pytest, coverage, pandas, pyarrow, InfluxDB support, and
+  Temporal SDK support used by the test suite.
 - `.[lint]` installs pre-commit and direct lint/type/doc hygiene tools.
 - `.[release]` installs build and publish tooling.
 - `.[dev]` is the aggregate local contributor environment with test, lint,
@@ -848,6 +848,12 @@ CI runs pytest through `pytest-cov`, enforces the `.coveragerc` threshold, and
 uploads `coverage.xml` plus the `htmlcov/` report for every Python and OS matrix
 leg. The first-pass gate is total-only. Per-package or domain thresholds belong
 with the broader testing work tracked in issues #9 and #68.
+
+The live Temporal sidecar smoke is not collected by default pytest because it
+requires a real Temporal executable and starts local worker processes. Run it
+explicitly through `scripts/smoke_sidecar_install.py --live-sidecar-smoke`
+during bundled platform-wheel release smoke, where missing prerequisites are
+hard failures rather than skipped tests.
 
 ---
 

@@ -11,10 +11,8 @@ from histdatacom.runtime_contracts import ArtifactRef, RunRequest, WorkStatus
 from histdatacom.sidecar.control import JobLifecycle, SidecarJobSnapshot
 from histdatacom.sidecar.live_smoke import (
     DEFAULT_LIVE_SIDECAR_SMOKE_LANES,
-    LIVE_SIDECAR_SMOKE_ENV,
     LiveSidecarSmokeError,
     default_live_sidecar_smoke_request,
-    live_sidecar_smoke_skip_reason,
     run_live_sidecar_smoke,
 )
 from histdatacom.sidecar.queues import TaskQueueLane
@@ -114,30 +112,6 @@ def test_default_live_sidecar_smoke_request_is_minimal_non_influx(
     assert request.pairs == ("eurusd",)
     assert request.formats == ("ascii",)
     assert request.timeframes == ("M1",)
-
-
-def test_live_sidecar_smoke_skip_reason_requires_operator_gate() -> None:
-    assert LIVE_SIDECAR_SMOKE_ENV in live_sidecar_smoke_skip_reason(environ={})
-
-
-def test_live_sidecar_smoke_skip_reason_accepts_provided_executable(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    executable = tmp_path / "temporal"
-    executable.write_text("#!/bin/sh\n", encoding="utf-8")
-    executable.chmod(0o755)
-    monkeypatch.setattr(
-        "histdatacom.sidecar.live_smoke.importlib.util.find_spec",
-        lambda name: object() if name == "temporalio" else None,
-    )
-
-    reason = live_sidecar_smoke_skip_reason(
-        environ={LIVE_SIDECAR_SMOKE_ENV: "1"},
-        temporal_executable=executable,
-    )
-
-    assert reason == ""
 
 
 def test_run_live_sidecar_smoke_uses_non_influx_lanes_and_stops(

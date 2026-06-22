@@ -60,7 +60,10 @@ install on its matching GitHub-hosted runner, run
 sidecar without `--executable`, and run the installed-wheel live sidecar smoke
 job. The live smoke uses a minimal non-Influx request, waits for job completion,
 validates the status snapshot and artifact references, and prints server/worker
-diagnostics if the job fails.
+diagnostics if the job fails. This live smoke is executed through
+`scripts/smoke_sidecar_install.py --live-sidecar-smoke`, not as a default
+pytest test, so missing Temporal executables fail the explicit smoke command
+instead of appearing as skipped tests in the normal suite.
 
 Rollback behavior is intentionally conservative. If a platform executable or
 wheel is bad after publish, yank the affected platform wheel and cut a

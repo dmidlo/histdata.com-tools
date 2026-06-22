@@ -82,6 +82,7 @@ test = [
     "pyarrow>=16.0",
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
+    "temporalio>=1.10,<2",
 ]
 lint = [
     "black==26.5.1",

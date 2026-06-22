@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 import json
 import os
 import time
@@ -21,18 +20,12 @@ from histdatacom.sidecar.queues import (
     TaskQueueLane,
     build_sidecar_worker_config,
 )
-from histdatacom.sidecar.resources import (
-    SidecarExecutableUnavailable,
-    UnsupportedSidecarPlatform,
-    sidecar_executable_path,
-)
 from histdatacom.sidecar.runtime import (
     SidecarRuntimePolicy,
     build_sidecar_runtime_policy,
 )
 from histdatacom.sidecar.supervisor import SidecarStatus, SidecarSupervisor
 
-LIVE_SIDECAR_SMOKE_ENV = "HISTDATACOM_LIVE_SIDECAR_SMOKE"
 TEMPORAL_EXECUTABLE_ENV = "HISTDATACOM_TEMPORAL_EXECUTABLE"
 LIVE_INFLUX_SMOKE_ENV = "HISTDATACOM_LIVE_SIDECAR_INFLUX"
 DEFAULT_LIVE_SIDECAR_SMOKE_REQUEST_ID = "live-sidecar-smoke"
@@ -89,14 +82,6 @@ class LiveSidecarSmokeResult:
         }
 
 
-def live_sidecar_smoke_enabled(
-    environ: Mapping[str, str] | None = None,
-) -> bool:
-    """Return whether the operator explicitly enabled live sidecar smoke."""
-    env = environ if environ is not None else os.environ
-    return _truthy(env.get(LIVE_SIDECAR_SMOKE_ENV, ""))
-
-
 def live_influx_smoke_status(
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, bool | str]:
@@ -110,36 +95,6 @@ def live_influx_smoke_status(
             "" if configured else f"{LIVE_INFLUX_SMOKE_ENV} is not enabled."
         ),
     }
-
-
-def live_sidecar_smoke_skip_reason(
-    *,
-    environ: Mapping[str, str] | None = None,
-    temporal_executable: Path | str | None = None,
-) -> str:
-    """Return a skip reason, or an empty string when live smoke can run."""
-    env = environ if environ is not None else os.environ
-    if not live_sidecar_smoke_enabled(env):
-        return f"{LIVE_SIDECAR_SMOKE_ENV}=1 is required."
-
-    if importlib.util.find_spec("temporalio") is None:
-        return "temporalio is not installed; install histdatacom[temporal]."
-
-    executable = _temporal_executable_from_inputs(
-        temporal_executable=temporal_executable,
-        environ=env,
-    )
-    if executable is not None:
-        return _provided_executable_skip_reason(executable)
-
-    try:
-        with sidecar_executable_path():
-            return ""
-    except (SidecarExecutableUnavailable, UnsupportedSidecarPlatform) as err:
-        return (
-            f"{TEMPORAL_EXECUTABLE_ENV} is not set and no packaged Temporal "
-            f"executable is available: {err}"
-        )
 
 
 def default_live_sidecar_smoke_request(
@@ -393,14 +348,6 @@ def _temporal_executable_from_inputs(
     if executable is None or str(executable).strip() == "":
         return None
     return Path(executable).expanduser()
-
-
-def _provided_executable_skip_reason(executable: Path) -> str:
-    if not executable.is_file():
-        return f"Temporal executable is not a file: {executable}"
-    if os.name != "nt" and not os.access(executable, os.X_OK):
-        return f"Temporal executable is not executable: {executable}"
-    return ""
 
 
 def _diagnostic_log_paths(

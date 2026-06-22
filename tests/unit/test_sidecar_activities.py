@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from importlib import import_module
 import io
 import shutil
 import zipfile
@@ -431,7 +432,7 @@ def test_dataset_plan_activity_payload_survives_temporal_converter(
     tmp_path,
 ) -> None:
     """Temporal's data converter must preserve nested request payloads."""
-    converter_module = pytest.importorskip("temporalio.converter")
+    converter_module = import_module("temporalio.converter")
     request = RunRequest(
         request_id="run-plan-converter",
         pairs=("eurusd",),

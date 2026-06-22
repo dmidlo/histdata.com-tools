@@ -6,9 +6,8 @@ import asyncio
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
+from importlib import import_module
 from pathlib import Path
-
-import pytest
 
 from histdatacom.sidecar import worker
 from histdatacom.sidecar.queues import (
@@ -217,8 +216,8 @@ def test_default_workflows_include_topology_classes() -> None:
 
 def test_default_workflows_validate_in_temporal_sandbox() -> None:
     """Workflow imports should not drag activity-only dependencies into sandbox."""
-    temporal_workflow = pytest.importorskip("temporalio.workflow")
-    sandbox = pytest.importorskip("temporalio.worker.workflow_sandbox")
+    temporal_workflow = import_module("temporalio.workflow")
+    sandbox = import_module("temporalio.worker.workflow_sandbox")
 
     async def validate() -> None:
         for workflow_class in worker.default_workflows():
