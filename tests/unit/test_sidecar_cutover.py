@@ -18,7 +18,7 @@ def test_cutover_policy_uses_sidecar_as_default_runtime() -> None:
     assert "removed" in policy["foreground_lifecycle"]
     assert "--foreground" in policy["foreground_lifecycle"]
     assert "rejected" in policy["foreground_lifecycle"]
-    assert "config.ARGS" in policy["config_globals_lifecycle"]
+    assert "ambient parser state" in policy["config_globals_lifecycle"]
     assert "RunRequest" in policy["config_globals_lifecycle"]
 
 

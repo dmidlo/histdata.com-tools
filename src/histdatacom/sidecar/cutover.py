@@ -40,8 +40,8 @@ DEFAULT_CUTOVER_POLICY = RuntimeCutoverPolicy(
     ),
     config_globals_lifecycle=(
         "CLI/API runtime selection uses resolved runtime context and "
-        "RunRequest, not config.ARGS; remaining config.ARGS users are legacy "
-        "helper surfaces with explicit arguments"
+        "RunRequest payloads; legacy helper surfaces accept explicit "
+        "argument mappings instead of ambient parser state"
     ),
     unavailable_sidecar_behavior=(
         "default sidecar requests start the bundled local sidecar when "

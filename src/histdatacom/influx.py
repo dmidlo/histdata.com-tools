@@ -3,13 +3,13 @@
 # pylint: disable=redefined-outer-name
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import partial
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Tuple
 
 from rich import print  # pylint: disable=redefined-builtin
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
-from histdatacom import config
 from histdatacom.activity_stages import (
     apply_stage_output_to_record,
     coerce_batch_size,
@@ -22,6 +22,7 @@ from histdatacom.exceptions import (
     InfluxDependencyError,
 )
 from histdatacom.histdata_ascii import format_influx_line
+from histdatacom.legacy_runtime import helper_runtime_args
 from histdatacom.observability import ProgressState, progress_increment
 from histdatacom.runtime_contracts import WorkItem, WorkStatus
 from histdatacom.utils import check_installed_module, load_influx_yaml
@@ -53,8 +54,17 @@ def _iter_polars_row_batches(
 class Influx:  # noqa:H601
     """Download (if needed), format, and import data to influxdb."""
 
-    def import_data(self, records: Iterable[Record]) -> list[Record]:
+    def __init__(self, args: Mapping[str, Any] | None = None) -> None:
+        """Initialize the helper with explicit runtime arguments."""
+        self.args: dict[str, Any] = helper_runtime_args(args)
+
+    def import_data(
+        self,
+        records: Iterable[Record],
+        args: Mapping[str, Any] | None = None,
+    ) -> list[Record]:
         """Upload explicit cache records through direct activity-style batches."""
+        runtime_args = helper_runtime_args(self.args, args)
         records_to_import = list(records)
         records_count = len(records_to_import)
         progress_state = ProgressState(
@@ -63,7 +73,7 @@ class Influx:  # noqa:H601
             unit="records",
             status=WorkStatus.INFLUX_UPLOAD,
         )
-        with InfluxBatchWriter(config.ARGS) as writer:
+        with InfluxBatchWriter(runtime_args) as writer:
             with Progress(
                 TextColumn(text_format="[cyan]Uploading to InfluxDB"),
                 BarColumn(),
@@ -76,7 +86,7 @@ class Influx:  # noqa:H601
                 for record in records_to_import:
                     imported_record = self._import_file(
                         record,
-                        config.ARGS,
+                        runtime_args,
                         writer.write_lines,
                     )
                     imported.append(imported_record)
@@ -91,14 +101,14 @@ class Influx:  # noqa:H601
     def _import_file(
         self,
         record: Record,
-        args: dict,
+        args: Mapping[str, Any],
         emit_lines: LineSink | Any,
     ) -> Record:
         """Import ASCII data to InfluxDB through an explicit line sink.
 
         Args:
             record (Record): a record to import
-            args (dict): config.ARGS
+            args (Mapping[str, Any]): explicit runtime arguments
             emit_lines (LineSink | Any): line sink
 
         Raises:
@@ -114,14 +124,14 @@ class Influx:  # noqa:H601
     def _import_cache(
         self,
         record: Record,
-        args: dict,
+        args: Mapping[str, Any],
         emit_lines: LineSink | Any,
     ) -> None:
         """Import a cache file with bounded line-protocol batches.
 
         Args:
             record (Record): a record to import
-            args (dict): config.ARGS
+            args (Mapping[str, Any]): explicit runtime arguments
             emit_lines (LineSink | Any): line sink
         """
         emit_influx_cache_batches(
@@ -168,7 +178,7 @@ class Influx:  # noqa:H601
 class InfluxBatchWriter:
     """Write bounded line-protocol batches directly to InfluxDB."""
 
-    def __init__(self, args: dict):
+    def __init__(self, args: Mapping[str, Any]):
         """Initialize an InfluxDB client for direct batch writes."""
         self.args = _args_with_influx_config(args)
         client_class, write_precision, write_options = _load_influx_client_api()
@@ -225,7 +235,7 @@ def _line_sink(emit_lines: LineSink | Any) -> LineSink:
     return put_sink
 
 
-def _args_with_influx_config(args: dict) -> dict:
+def _args_with_influx_config(args: Mapping[str, Any]) -> dict:
     values = dict(args)
     missing = [key for key in INFLUX_CONFIG_FIELDS if not values.get(key)]
     if not missing:

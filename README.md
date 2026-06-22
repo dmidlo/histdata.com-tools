@@ -363,10 +363,10 @@ installs provide the SDK, while bundled platform wheels provide the local
 Temporal server executable.
 
 Default sidecar submissions are built from resolved runtime context and
-`RunRequest`, not `config.ARGS`. New orchestration work should use
-`RunRequest`, sidecar workflows, and sidecar activities. Remaining
-`config.ARGS` usage belongs to legacy helper surfaces that still accept
-explicit argument dictionaries; it is not part of runtime selection.
+`RunRequest` payloads. New orchestration work should use `RunRequest`,
+sidecar workflows, and sidecar activities. Legacy helper surfaces now accept
+explicit argument dictionaries rather than ambient parser state; parser globals
+are not part of runtime selection.
 
 #### Lifecycle and Diagnostics
 

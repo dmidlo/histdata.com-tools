@@ -7,7 +7,9 @@ Returns:
     dict: _description_
 """
 
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, cast
 
 from rich import print  # pylint: disable=redefined-builtin
 from rich import box
@@ -30,6 +32,7 @@ from histdatacom.activity_stages import (
     validate_url_work_item,
     write_repository_data_file,
 )
+from histdatacom.legacy_runtime import helper_runtime_args
 from histdatacom.records import Record
 from histdatacom.utils import (
     get_year_from_datemonth,
@@ -46,37 +49,53 @@ class Repo:  # noqa: H601
 
     """
 
-    def __init__(self) -> None:
+    def __init__(self, args: Mapping[str, Any] | None = None) -> None:
         """Initialize repo class with remote url."""
+        self.args: dict[str, Any] = helper_runtime_args(args)
         self.repo_url = DEFAULT_REPOSITORY_URL
-        self.repo_local_path = Path(  # noqa:BLK100
-            config.ARGS["default_download_dir"], ".repo"
-        )
+        self.repo_local_path = self._repo_local_path(self.args)
 
     @staticmethod
-    def check_if_repo_validation_is_needed() -> bool:
+    def check_if_repo_validation_is_needed(
+        args: Mapping[str, Any],
+        *,
+        repo_file_exists: bool | None = None,
+        filter_pairs: set | None = None,
+    ) -> bool:
         # pylint: disable=line-too-long
         """Conditions to validate coverage for renewing repo data.
 
         Returns:
             bool: conditonal filter
         """
-        return repository_validation_needed(
-            config.ARGS,
-            repo_file_exists=config.REPO_DATA_FILE_EXISTS,
-            filter_pairs=config.FILTER_PAIRS,
+        runtime_args = helper_runtime_args(args)
+        return bool(
+            repository_validation_needed(
+                runtime_args,
+                repo_file_exists=(
+                    config.REPO_DATA_FILE_EXISTS
+                    if repo_file_exists is None
+                    else repo_file_exists
+                ),
+                filter_pairs=(
+                    config.FILTER_PAIRS
+                    if filter_pairs is None
+                    else filter_pairs
+                ),
+            ),
         )
 
     @staticmethod
-    def check_for_repo_action() -> bool:
+    def check_for_repo_action(args: Mapping[str, Any]) -> bool:
         """Check to see if -A or -U has been used.
 
         Returns:
             bool: general truth case for repo actions
         """
+        runtime_args = helper_runtime_args(args)
         return bool(
-            config.ARGS["available_remote_data"]  # noqa:BLK100
-            or config.ARGS["update_remote_data"]
+            runtime_args["available_remote_data"]
+            or runtime_args["update_remote_data"]
         )
 
     @staticmethod
@@ -108,22 +127,26 @@ class Repo:  # noqa: H601
         """Read local file repo data. Append/update global working repo data."""
         config.REPO_DATA.update(read_repository_data_file(self.repo_local_path))
 
-    def update_repo_from_github(self) -> None:
+    def update_repo_from_github(
+        self,
+        args: Mapping[str, Any] | None = None,
+    ) -> None:
         """Fetch remote repo data.
 
         Diffs hash of current repo data with remote. If hash is different and
         remote timestamp is more recent than local file timestamp, overwrite
         local data with remote data.
         """
+        runtime_args = self._runtime_args(args)
         output = repository_refresh_stage(
             repo_data=config.REPO_DATA,
             repo_file_exists=config.REPO_DATA_FILE_EXISTS,
             repo_local_path=self.repo_local_path,
             repo_url=self.repo_url,
-            pairs=config.ARGS["pairs"],
-            by=config.ARGS.get("by"),
-            available_remote_data=config.ARGS["available_remote_data"],
-            update_remote_data=config.ARGS["update_remote_data"],
+            pairs=runtime_args["pairs"],
+            by=runtime_args.get("by"),
+            available_remote_data=runtime_args["available_remote_data"],
+            update_remote_data=runtime_args["update_remote_data"],
             fetch_remote_repository=fetch_repository_data_from_url,
         )
         if output.result.failure is not None:
@@ -133,7 +156,10 @@ class Repo:  # noqa: H601
         config.REPO_DATA = output.repo_data
         config.REPO_DATA_FILE_EXISTS = output.repo_file_exists
 
-    def get_available_repo_data(self) -> dict | None:
+    def get_available_repo_data(
+        self,
+        args: Mapping[str, Any] | None = None,
+    ) -> dict | None:
         """Fetch available data based on -p Pairs filter.
 
         Raises:
@@ -144,37 +170,45 @@ class Repo:  # noqa: H601
               {'pair': {'start': 'datemonth', 'end': 'datemonth'}
               ...}
         """
+        runtime_args = self._runtime_args(args)
         filter_pairs = repository_missing_pairs(
             config.REPO_DATA,
-            config.ARGS["pairs"],
+            runtime_args["pairs"],
         )
         config.FILTER_PAIRS = (
             None if len(filter_pairs) == 0 else set(filter_pairs)
         )
 
-        if self._check_for_create_or_update():
-            self._validate_repository_coverage()
+        if self._check_for_create_or_update(runtime_args):
+            self._validate_repository_coverage(runtime_args)
             self._write_repo_data_file()
 
-        if config.ARGS["from_api"]:
+        if runtime_args["from_api"]:
             return self._sort_repo_dict_by(
                 config.REPO_DATA.copy(),
-                config.ARGS["pairs"],
+                runtime_args["pairs"],
+                by=runtime_args.get("by"),
             )
 
-        self._print_repo_data_table()
+        self._print_repo_data_table(runtime_args)
         raise SystemExit(0)
 
-    def _check_for_create_or_update(self) -> bool:
+    def _check_for_create_or_update(
+        self,
+        args: Mapping[str, Any],
+    ) -> bool:
         """Conditions for creating or updating repo data.
 
         Returns:
             bool: conditonal filter
         """
-        return repository_should_create_or_update(
-            config.ARGS,
-            repo_file_exists=config.REPO_DATA_FILE_EXISTS,
-            filter_pairs=config.FILTER_PAIRS,
+        runtime_args = helper_runtime_args(args)
+        return bool(
+            repository_should_create_or_update(
+                runtime_args,
+                repo_file_exists=config.REPO_DATA_FILE_EXISTS,
+                filter_pairs=config.FILTER_PAIRS,
+            )
         )
 
     def _write_repo_data_file(self) -> None:
@@ -183,18 +217,22 @@ class Repo:  # noqa: H601
         config.REPO_DATA = read_repository_data_file(self.repo_local_path)
         config.REPO_DATA_FILE_EXISTS = True
 
-    def _validate_repository_coverage(self) -> None:
+    def _validate_repository_coverage(
+        self,
+        args: Mapping[str, Any],
+    ) -> None:
         """Validate planned URLs and update repository ranges."""
+        runtime_args = helper_runtime_args(args)
         for work_item in plan_dataset_work_items(
-            start_yearmonth=config.ARGS["start_yearmonth"],
-            end_yearmonth=config.ARGS["end_yearmonth"],
-            formats=config.ARGS["formats"],
+            start_yearmonth=runtime_args["start_yearmonth"],
+            end_yearmonth=runtime_args["end_yearmonth"],
+            formats=runtime_args["formats"],
             pairs=config.FILTER_PAIRS,
-            timeframes=config.ARGS["timeframes"],
-            default_download_dir=config.ARGS["default_download_dir"],
-            zip_persist=bool(config.ARGS["zip_persist"]),
+            timeframes=runtime_args["timeframes"],
+            default_download_dir=runtime_args["default_download_dir"],
+            zip_persist=bool(runtime_args["zip_persist"]),
         ):
-            output = validate_url_work_item(work_item, args=config.ARGS)
+            output = validate_url_work_item(work_item, args=runtime_args)
             if output.forward:
                 self.set_repo_datum(
                     Record(**output.work_item.to_record_kwargs())
@@ -205,7 +243,11 @@ class Repo:  # noqa: H601
         config.REPO_DATA = hash_repository_data(config.REPO_DATA)
 
     def _sort_repo_dict_by(
-        self, repo_dict_copy: dict, filter_pairs: set
+        self,
+        repo_dict_copy: dict,
+        filter_pairs: set,
+        *,
+        by: str | None = None,
     ) -> dict:  # noqa: LN001
         # pylint: disable=line-too-long
         """Sorts the output/return according to argument "--by".
@@ -225,10 +267,13 @@ class Repo:  # noqa: H601
               {'pair': {'start': 'datemonth', 'end': 'datemonth'}
               ...}
         """
-        return sort_repository_data(
-            repo_dict_copy,
-            filter_pairs,
-            config.ARGS.get("by"),
+        return cast(
+            dict[Any, Any],
+            sort_repository_data(
+                repo_dict_copy,
+                filter_pairs,
+                by or self.args.get("by"),
+            ),
         )
 
     def _filter_repo_dict_by_pairs(
@@ -246,10 +291,14 @@ class Repo:  # noqa: H601
               {'pair': {'start': 'datemonth', 'end': 'datemonth'}
               ...}
         """
-        return filter_repository_data_by_pairs(repo_dict_copy, filter_pairs)
+        return cast(
+            dict[Any, Any],
+            filter_repository_data_by_pairs(repo_dict_copy, filter_pairs),
+        )
 
-    def _print_repo_data_table(self) -> None:
+    def _print_repo_data_table(self, args: Mapping[str, Any]) -> None:
         """Print filtered repo info to terminal."""
+        runtime_args = helper_runtime_args(args)
         table = Table(
             title="Data and date ranges available from HistData.com",
             box=box.MARKDOWN,
@@ -260,7 +309,8 @@ class Repo:  # noqa: H601
 
         for row in self._sort_repo_dict_by(  # pylint: disable=not-an-iterable
             config.REPO_DATA.copy(),
-            config.ARGS["pairs"],
+            runtime_args["pairs"],
+            by=runtime_args.get("by"),
         ):
             start = config.REPO_DATA[row]["start"]
             start_year = get_year_from_datemonth(start)
@@ -274,6 +324,20 @@ class Repo:  # noqa: H601
                 f"{end_year}-{end_month}",
             )
         print(table)  # noqa: T201
+
+    def _runtime_args(
+        self,
+        args: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        runtime_args: dict[str, Any] = helper_runtime_args(self.args, args)
+        self.args = runtime_args
+        self.repo_local_path = self._repo_local_path(runtime_args)
+        return runtime_args
+
+    @staticmethod
+    def _repo_local_path(args: Mapping[str, Any]) -> Path:
+        runtime_args = helper_runtime_args(args)
+        return Path(str(runtime_args["default_download_dir"]), ".repo")
 
     def _print_refresh_failure(self, code: str) -> None:
         if code == "REPOSITORY_NETWORK_ERROR":

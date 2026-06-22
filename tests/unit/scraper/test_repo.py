@@ -33,7 +33,7 @@ def test_get_available_repo_data_filters_api_result_without_queue(
     tmp_path: Path,
 ) -> None:
     """The -A API path should keep returning filtered repo metadata."""
-    monkeypatch.setattr(config, "ARGS", _repo_args(tmp_path, pairs={"eurusd"}))
+    args = _repo_args(tmp_path, pairs={"eurusd"})
     monkeypatch.setattr(
         config,
         "REPO_DATA",
@@ -47,7 +47,7 @@ def test_get_available_repo_data_filters_api_result_without_queue(
     monkeypatch.setattr(config, "REPO_DATA_FILE_EXISTS", True)
     monkeypatch.setattr(config, "FILTER_PAIRS", None)
 
-    result = Repo().get_available_repo_data()
+    result = Repo(args).get_available_repo_data()
 
     assert result == {"eurusd": {"start": "200005", "end": "202212"}}
     assert config.FILTER_PAIRS is None
@@ -65,7 +65,7 @@ def test_update_repo_from_github_uses_explicit_refresh_stage(
         "hash": "remote",
         "hash_utc": 10.0,
     }
-    monkeypatch.setattr(config, "ARGS", _repo_args(tmp_path))
+    args = _repo_args(tmp_path)
     monkeypatch.setattr(config, "REPO_DATA", {})
     monkeypatch.setattr(config, "REPO_DATA_FILE_EXISTS", False)
     monkeypatch.setattr(
@@ -74,7 +74,7 @@ def test_update_repo_from_github_uses_explicit_refresh_stage(
         lambda url: remote_repo,
     )
 
-    Repo().update_repo_from_github()
+    Repo(args).update_repo_from_github()
 
     assert config.REPO_DATA["eurusd"] == {
         "start": "200005",
@@ -94,7 +94,6 @@ def test_update_remote_repo_data_preserves_api_return_shape(
     args = _repo_args(tmp_path, pairs={"eurusd"})
     args["available_remote_data"] = False
     args["update_remote_data"] = True
-    monkeypatch.setattr(config, "ARGS", args)
     monkeypatch.setattr(
         config,
         "REPO_DATA",
@@ -105,10 +104,10 @@ def test_update_remote_repo_data_preserves_api_return_shape(
     monkeypatch.setattr(
         Repo,
         "_validate_repository_coverage",
-        lambda self: calls.append("validate"),
+        lambda self, args: calls.append("validate"),
     )
 
-    result = Repo().get_available_repo_data()
+    result = Repo(args).get_available_repo_data()
 
     assert calls == ["validate"]
     assert result == {"eurusd": {"start": "200005", "end": "202212"}}

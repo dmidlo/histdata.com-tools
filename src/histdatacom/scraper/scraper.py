@@ -6,6 +6,7 @@ Raises:
 """
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable, Iterable, cast
 
@@ -26,6 +27,7 @@ from histdatacom.activity_stages import (
     parse_histdata_form_metadata,
     validate_url_work_item,
 )
+from histdatacom.legacy_runtime import helper_runtime_args
 from histdatacom.observability import ProgressState
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkItem, WorkStatus
@@ -45,16 +47,19 @@ class Scraper:  # noqa:H601
         SystemExit: On any undefined error from scraping
     """
 
-    def __init__(self) -> None:
+    def __init__(self, args: Mapping[str, Any] | None = None) -> None:
         """Initialize parameters for requests."""
         # pylint: disable-next=import-outside-toplevel
         from histdatacom.scraper.repo import Repo  # noqa:WPS131
 
+        self.args: dict[str, Any] = helper_runtime_args(args)
         self.set_repo_datum: Callable = Repo.set_repo_datum
         self.check_if_repo_validation_is_needed: Callable = (
-            Repo.check_if_repo_validation_is_needed
+            lambda: Repo.check_if_repo_validation_is_needed(self.args)
         )
-        self.check_for_repo_action: Callable = Repo.check_for_repo_action
+        self.check_for_repo_action: Callable = (
+            lambda: Repo.check_for_repo_action(self.args)
+        )
 
         # Setup
         self.urls = Urls()
@@ -127,8 +132,12 @@ class Scraper:  # noqa:H601
             timeout=timeout,
         )
 
-    def plan_initial_records(self) -> list[Record]:
+    def plan_initial_records(
+        self,
+        args: Mapping[str, Any] | None = None,
+    ) -> list[Record]:
         """Return planned records to be acted on."""
+        runtime_args = self._runtime_args(args)
         progress_state = ProgressState(
             stage="dataset_plan",
             total=0.0,
@@ -147,14 +156,14 @@ class Scraper:  # noqa:H601
             planned_count = 0
             records: list[Record] = []
             for work_item in plan_dataset_work_items(
-                start_yearmonth=config.ARGS["start_yearmonth"],
-                end_yearmonth=config.ARGS["end_yearmonth"],
-                formats=config.ARGS["formats"],
+                start_yearmonth=runtime_args["start_yearmonth"],
+                end_yearmonth=runtime_args["end_yearmonth"],
+                formats=runtime_args["formats"],
                 pairs=config.FILTER_PAIRS,
-                timeframes=config.ARGS["timeframes"],
-                default_download_dir=config.ARGS["default_download_dir"],
+                timeframes=runtime_args["timeframes"],
+                default_download_dir=runtime_args["default_download_dir"],
                 base_url=self.urls.base_url,
-                zip_persist=bool(config.ARGS["zip_persist"]),
+                zip_persist=bool(runtime_args["zip_persist"]),
             ):
                 planned_count += 1
                 progress_state.advance(
@@ -163,11 +172,14 @@ class Scraper:  # noqa:H601
                     current=work_item.url,
                     metadata={"planned_count": planned_count},
                 )
-                record = self._init_record_from_work_item(work_item)
+                record = self._init_record_from_work_item(
+                    work_item,
+                    runtime_args,
+                )
 
                 if record.status is not WorkStatus.URL_NO_REPO_DATA:
                     record.write_memento_file(  # noqa:BLK100
-                        base_dir=config.ARGS["default_download_dir"]
+                        base_dir=runtime_args["default_download_dir"]
                     )
                     if (  # noqa:BLK100
                         self.check_if_repo_validation_is_needed()  # noqa:BLK100
@@ -178,23 +190,37 @@ class Scraper:  # noqa:H601
 
             return records
 
-    def validate_urls(self, records: Iterable[Record]) -> list[Record]:
+    def validate_urls(
+        self,
+        records: Iterable[Record],
+        args: Mapping[str, Any] | None = None,
+    ) -> list[Record]:
         """Validate generated URLs and return forwarded records."""
+        runtime_args = self._runtime_args(args)
         return [
             output
             for record in records
-            if (output := self._validate_url(record, config.ARGS)) is not None
+            if (output := self._validate_url(record, runtime_args)) is not None
         ]
 
-    def download_zips(self, records: Iterable[Record]) -> list[Record]:
+    def download_zips(
+        self,
+        records: Iterable[Record],
+        args: Mapping[str, Any] | None = None,
+    ) -> list[Record]:
         """Download zip archives and return forwarded records."""
+        runtime_args = self._runtime_args(args)
         return [
             output
             for record in records
-            if (output := self._download_zip(record, config.ARGS)) is not None
+            if (output := self._download_zip(record, runtime_args)) is not None
         ]
 
-    def _init_record(self, url: str) -> Record:
+    def _init_record(
+        self,
+        url: str,
+        args: Mapping[str, Any] | None = None,
+    ) -> Record:
         """Create a new record for processing.
 
         Create a placeholder record, and if the record is already on disk,
@@ -206,46 +232,53 @@ class Scraper:  # noqa:H601
         Returns:
             record (Record): a record for processing.
         """
+        runtime_args = self._runtime_args(args)
         record = Record()
         record(url=url, status=WorkStatus.URL_NEW)
-        record.restore_momento(base_dir=config.ARGS["default_download_dir"])
+        record.restore_momento(base_dir=runtime_args["default_download_dir"])
         return record
 
-    def _init_record_from_work_item(self, work_item: WorkItem) -> Record:
+    def _init_record_from_work_item(
+        self,
+        work_item: WorkItem,
+        args: Mapping[str, Any] | None = None,
+    ) -> Record:
         """Create a legacy record from a planned work item."""
+        runtime_args = self._runtime_args(args)
         record = Record(**work_item.to_record_kwargs())
-        record.restore_momento(base_dir=config.ARGS["default_download_dir"])
+        record.restore_momento(base_dir=runtime_args["default_download_dir"])
         return record
 
     def _ensure_pairs(self) -> None:
         """Normalize pairs input for planning."""
         if (
             not (
-                config.ARGS["update_remote_data"]
-                and config.ARGS["available_remote_data"]
+                self.args["update_remote_data"]
+                and self.args["available_remote_data"]
             )
             and config.FILTER_PAIRS is None
         ):
-            config.FILTER_PAIRS = config.ARGS["pairs"]
+            config.FILTER_PAIRS = self.args["pairs"]
 
     def _validate_url(
         self,
         record: Record,
-        args: dict,
+        args: Mapping[str, Any],
     ) -> Record | None:  # noqa:CCR001
         """Scrape url for presence of downloadable zips and related metadata.
 
         Args:
             record (Record): a record to validate.
-            args (dict): a global config.ARGS dict.
+            args (Mapping[str, Any]): explicit runtime arguments.
 
         Raises:
             KeyboardInterrupt: User Exit.
         """
+        runtime_args = self._runtime_args(args)
         try:
             output = validate_url_work_item(
                 WorkItem.from_record(record),
-                args=args,
+                args=runtime_args,
                 fetch_page_data=self._get_page_data,
                 repo_validation_needed=self.check_if_repo_validation_is_needed,
                 set_repo_datum=self.set_repo_datum,
@@ -295,21 +328,22 @@ class Scraper:  # noqa:H601
     def _download_zip(
         self,
         record: Record,
-        args: dict,
+        args: Mapping[str, Any],
     ) -> Record | None:  # noqa:CCR001
         """Download zip from record.url.
 
         Args:
             record (Record): a record to download.
-            args (dict): a global config.ARGS dict.
+            args (Mapping[str, Any]): explicit runtime arguments.
 
         Raises:
             KeyboardInterrupt: User Exit.
         """
+        runtime_args = self._runtime_args(args)
         try:
             output = download_archive_work_item(
                 WorkItem.from_record(record),
-                args=args,
+                args=runtime_args,
             )
             apply_stage_output_to_record(output, record)
             if output.result.failure is not None:
@@ -373,3 +407,14 @@ class Scraper:  # noqa:H601
         )
         record(**work_item.to_record_kwargs())
         return record
+
+    def _runtime_args(
+        self,
+        args: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        runtime_args: dict[str, Any] = helper_runtime_args(
+            getattr(self, "args", None),
+            args,
+        )
+        self.args = runtime_args
+        return self.args

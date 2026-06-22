@@ -224,10 +224,9 @@ def test_merge_records_reads_polars_cache_files(
     """Merge should read the replacement cache format from disk."""
     import polars as pl
 
-    from histdatacom import config
     from histdatacom.api import Api
 
-    api = Api()
+    api = Api(return_type="polars")
     source = Api._import_file_to_polars(
         SimpleNamespace(data_timeframe="M1"),
         FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
@@ -248,19 +247,13 @@ def test_merge_records_reads_polars_cache_files(
         timeframe="M1",
         start=EXPECTED_M1_DATETIMES[1],
     )
-    original_args = config.ARGS.copy()
-
-    try:
-        config.ARGS["api_return_type"] = "polars"
-        tp_set = {
-            "timeframe": "M1",
-            "pair": "eurusd",
-            "records": [second, first],
-            "data": None,
-        }
-        api._merge_records(tp_set)
-    finally:
-        config.ARGS = original_args
+    tp_set = {
+        "timeframe": "M1",
+        "pair": "eurusd",
+        "records": [second, first],
+        "data": None,
+    }
+    api._merge_records(tp_set)
 
     assert isinstance(tp_set["data"], pl.DataFrame)
     assert tp_set["data"].select("datetime").to_series().to_list() == (
@@ -274,7 +267,6 @@ def test_merge_records_accepts_explicit_records_without_queue(
     """API merge assembly should work from explicit cache records."""
     import polars as pl
 
-    from histdatacom import config
     from histdatacom.api import Api
 
     source = Api._import_file_to_polars(
@@ -297,13 +289,7 @@ def test_merge_records_accepts_explicit_records_without_queue(
         timeframe="M1",
         start=EXPECTED_M1_DATETIMES[1],
     )
-    original_args = config.ARGS.copy()
-
-    try:
-        config.ARGS["api_return_type"] = "polars"
-        result = Api().merge_records([second, first])
-    finally:
-        config.ARGS = original_args
+    result = Api(return_type="polars").merge_records([second, first])
 
     assert isinstance(result, pl.DataFrame)
     assert result.select("datetime").to_series().to_list() == (
@@ -311,26 +297,48 @@ def test_merge_records_accepts_explicit_records_without_queue(
     )
 
 
-def test_merge_records_empty_set_returns_empty_polars_dataframe() -> None:
-    """Empty merge sets should produce an intentional empty Polars frame."""
+def test_merge_records_ignores_stale_global_args(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Explicit helper return types should not read stale parser globals."""
     import polars as pl
 
     from histdatacom import config
     from histdatacom.api import Api
 
-    original_args = config.ARGS.copy()
+    source = Api._import_file_to_polars(
+        SimpleNamespace(data_timeframe="M1"),
+        FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+    )
+    record = _write_cache_record(
+        tmp_path,
+        "stale-global",
+        source.slice(0, 1),
+        pair="eurusd",
+        timeframe="M1",
+        start=EXPECTED_M1_DATETIMES[0],
+    )
+    monkeypatch.setattr(config, "ARGS", {"api_return_type": "arrow"})
 
-    try:
-        config.ARGS["api_return_type"] = "polars"
-        tp_set = {
-            "timeframe": "M1",
-            "pair": "eurusd",
-            "records": [],
-            "data": None,
-        }
-        Api()._merge_records(tp_set)
-    finally:
-        config.ARGS = original_args
+    result = Api(return_type="polars").merge_records([record])
+
+    assert isinstance(result, pl.DataFrame)
+
+
+def test_merge_records_empty_set_returns_empty_polars_dataframe() -> None:
+    """Empty merge sets should produce an intentional empty Polars frame."""
+    import polars as pl
+
+    from histdatacom.api import Api
+
+    tp_set = {
+        "timeframe": "M1",
+        "pair": "eurusd",
+        "records": [],
+        "data": None,
+    }
+    Api(return_type="polars")._merge_records(tp_set)
 
     assert isinstance(tp_set["data"], pl.DataFrame)
     assert tp_set["data"].is_empty()
@@ -348,7 +356,6 @@ def test_merge_caches_converts_single_pair_timeframe_return_types(
     import polars as pl
     import pyarrow as pa
 
-    from histdatacom import config
     from histdatacom.api import Api
 
     source = Api._import_file_to_polars(
@@ -371,13 +378,7 @@ def test_merge_caches_converts_single_pair_timeframe_return_types(
         timeframe="M1",
         start=EXPECTED_M1_DATETIMES[1],
     )
-    original_args = config.ARGS.copy()
-
-    try:
-        config.ARGS["api_return_type"] = api_return_type
-        result = Api().merge_caches([second, first])
-    finally:
-        config.ARGS = original_args
+    result = Api(return_type=api_return_type).merge_caches([second, first])
 
     if api_return_type == "polars":
         assert isinstance(result, pl.DataFrame)
@@ -398,7 +399,6 @@ def test_merge_caches_returns_only_observed_pair_timeframe_sets(
     """Merge collation should not emit empty cross-product result sets."""
     import polars as pl
 
-    from histdatacom import config
     from histdatacom.api import Api
 
     m1_source = Api._import_file_to_polars(
@@ -425,13 +425,7 @@ def test_merge_caches_returns_only_observed_pair_timeframe_sets(
         timeframe="M1",
         start=EXPECTED_M1_DATETIMES[0],
     )
-    original_args = config.ARGS.copy()
-
-    try:
-        config.ARGS["api_return_type"] = "polars"
-        result = Api().merge_caches([tick_record, m1_record])
-    finally:
-        config.ARGS = original_args
+    result = Api(return_type="polars").merge_caches([tick_record, m1_record])
 
     assert isinstance(result, list)
     assert [(item["timeframe"], item["pair"]) for item in result] == [
@@ -449,7 +443,6 @@ def test_merge_caches_returns_empty_list_when_no_cache_records(
     tmp_path: Path,
 ) -> None:
     """Inputs without cache files should be ignored by merge_caches."""
-    from histdatacom import config
     from histdatacom.api import Api
 
     missing_cache = SimpleNamespace(
@@ -458,12 +451,6 @@ def test_merge_caches_returns_empty_list_when_no_cache_records(
         data_fxpair="eurusd",
         data_timeframe="M1",
     )
-    original_args = config.ARGS.copy()
-
-    try:
-        config.ARGS["api_return_type"] = "polars"
-        result = Api().merge_caches([missing_cache])
-    finally:
-        config.ARGS = original_args
+    result = Api(return_type="polars").merge_caches([missing_cache])
 
     assert result == []

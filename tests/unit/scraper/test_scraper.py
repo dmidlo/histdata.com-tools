@@ -7,6 +7,7 @@ import zipfile
 from pathlib import Path
 
 from histdatacom import config
+from histdatacom.legacy_runtime import helper_runtime_args
 from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkStatus
@@ -40,18 +41,19 @@ def test_scraper() -> None:
     assert True  # noqa:S101 # sourcery skip # act
 
 
-def _scraper_without_init() -> Scraper:
+def _scraper_without_init(args: dict | None = None) -> Scraper:
     """Return a Scraper instance without initializing repo/url collaborators."""
     scraper = object.__new__(Scraper)
+    scraper.args = helper_runtime_args(args)
     scraper.check_if_repo_validation_is_needed = lambda: False
     scraper.check_for_repo_action = lambda: True
     scraper.set_repo_datum = lambda record: None
     return scraper
 
 
-def _configure_stage_args(tmp_path: Path) -> None:
-    """Install isolated args for direct stage characterization."""
-    config.ARGS = {
+def _stage_args(tmp_path: Path) -> dict:
+    """Return isolated args for direct stage characterization."""
+    return {
         "default_download_dir": f"{tmp_path}{os.sep}",
         "from_api": False,
     }
@@ -61,9 +63,9 @@ def test_validate_url_transitions_new_record_to_valid_manifest(
     tmp_path: Path,
 ) -> None:
     """Validate stage success should return the forwarded record."""
-    scraper = _scraper_without_init()
+    args = _stage_args(tmp_path)
+    scraper = _scraper_without_init(args)
     record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
-    _configure_stage_args(tmp_path)
 
     scraper._get_page_data = lambda url, timeout: {  # type: ignore[method-assign]
         "html": _form_html(),
@@ -71,7 +73,7 @@ def test_validate_url_transitions_new_record_to_valid_manifest(
         "bytes_length": "123",
     }
 
-    result = scraper._validate_url(record, config.ARGS)
+    result = scraper._validate_url(record, args)
 
     meta_path = Path(record.data_dir) / ".meta"
     [item] = ManifestStatusStore(tmp_path).list_work_items()
@@ -87,17 +89,17 @@ def test_validate_url_transitions_missing_record_without_requeue(
     tmp_path: Path,
 ) -> None:
     """Missing data should not be forwarded."""
-    scraper = _scraper_without_init()
+    args = _stage_args(tmp_path)
+    scraper = _scraper_without_init(args)
     scraper.check_for_repo_action = lambda: False
     record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
-    _configure_stage_args(tmp_path)
     scraper._get_page_data = lambda url, timeout: {  # type: ignore[method-assign]
         "html": _form_html(token=""),
         "encoding": "gzip",
         "bytes_length": "123",
     }
 
-    result = scraper._validate_url(record, config.ARGS)
+    result = scraper._validate_url(record, args)
 
     meta_path = Path(record.data_dir) / ".meta"
     [item] = ManifestStatusStore(tmp_path).list_work_items()
@@ -156,9 +158,10 @@ def test_download_zip_transitions_valid_record_to_csv_zip(
     )
     with zipfile.ZipFile(data_dir / record.zip_filename, "w") as archive:
         archive.writestr("DAT_ASCII_EURUSD_M1_2022.csv", "rows")
-    _configure_stage_args(tmp_path)
+    args = _stage_args(tmp_path)
+    scraper.args = helper_runtime_args(args)
 
-    result = scraper._download_zip(record, config.ARGS)
+    result = scraper._download_zip(record, args)
 
     meta_path = Path(record.data_dir) / ".meta"
     [item] = ManifestStatusStore(tmp_path).list_work_items()
@@ -173,9 +176,7 @@ def test_populate_initial_records_uses_deterministic_plan(
     tmp_path: Path,
 ) -> None:
     """Dataset planning should adapt planned work items to records."""
-    scraper = _scraper_without_init()
-    scraper.urls = Urls()
-    config.ARGS = {
+    args = {
         "start_yearmonth": "202201",
         "end_yearmonth": "202203",
         "formats": {"ascii"},
@@ -183,9 +184,11 @@ def test_populate_initial_records_uses_deterministic_plan(
         "default_download_dir": f"{tmp_path}{os.sep}",
         "zip_persist": False,
     }
+    scraper = _scraper_without_init(args)
+    scraper.urls = Urls()
     config.FILTER_PAIRS = {"eurusd"}
 
-    records = scraper.plan_initial_records()
+    records = scraper.plan_initial_records(args)
 
     assert [record.url for record in records] == [
         "http://www.histdata.com/download-free-forex-data/"
