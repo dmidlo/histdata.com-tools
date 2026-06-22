@@ -745,6 +745,99 @@ class ManifestStatusStore:
             for row in rows
         )
 
+    def prune_retention(
+        self,
+        *,
+        max_job_snapshots: int,
+        max_status_events_per_owner: int,
+        max_stage_results_per_work_item: int,
+        max_artifacts_per_owner: int,
+        max_dataset_plans_per_request: int,
+    ) -> dict[str, int]:
+        """Prune append-only sidecar rows while preserving current work items."""
+        _validate_retention_limit("max_job_snapshots", max_job_snapshots)
+        _validate_retention_limit(
+            "max_status_events_per_owner",
+            max_status_events_per_owner,
+        )
+        _validate_retention_limit(
+            "max_stage_results_per_work_item",
+            max_stage_results_per_work_item,
+        )
+        _validate_retention_limit(
+            "max_artifacts_per_owner",
+            max_artifacts_per_owner,
+        )
+        _validate_retention_limit(
+            "max_dataset_plans_per_request",
+            max_dataset_plans_per_request,
+        )
+        deleted = {
+            "jobs": 0,
+            "status_events": 0,
+            "stage_results": 0,
+            "artifacts": 0,
+            "dataset_plans": 0,
+        }
+        with self._connect() as conn:
+            deleted_job_ids = _older_key_values(
+                conn,
+                table="jobs",
+                key_column="job_id",
+                keep=max_job_snapshots,
+                order_by="updated_at_utc DESC, job_id ASC",
+            )
+            deleted["jobs"] += _delete_text_values(
+                conn,
+                table="jobs",
+                column="job_id",
+                values=deleted_job_ids,
+            )
+            if deleted_job_ids:
+                deleted["status_events"] += _delete_owner_rows(
+                    conn,
+                    table="status_events",
+                    owner_kind="job",
+                    owner_ids=deleted_job_ids,
+                )
+                deleted["artifacts"] += _delete_owner_rows(
+                    conn,
+                    table="artifacts",
+                    owner_kind="job",
+                    owner_ids=deleted_job_ids,
+                )
+
+            deleted["status_events"] += _delete_group_overflow_rows(
+                conn,
+                table="status_events",
+                id_column="id",
+                group_columns=("owner_kind", "owner_id"),
+                keep=max_status_events_per_owner,
+            )
+            deleted["stage_results"] += _delete_group_overflow_rows(
+                conn,
+                table="stage_results",
+                id_column="id",
+                group_columns=("work_id",),
+                keep=max_stage_results_per_work_item,
+            )
+            deleted["artifacts"] += _delete_group_overflow_rows(
+                conn,
+                table="artifacts",
+                id_column="id",
+                group_columns=("owner_kind", "owner_id"),
+                keep=max_artifacts_per_owner,
+            )
+            deleted["dataset_plans"] += _delete_group_overflow_rows(
+                conn,
+                table="dataset_plans",
+                id_column="plan_id",
+                group_columns=("request_id",),
+                keep=max_dataset_plans_per_request,
+                order_by="updated_at_utc DESC, plan_id ASC",
+            )
+        return deleted
+
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
             conn.executescript("""
@@ -1016,6 +1109,121 @@ def _coerce_list(value: Any) -> list[Any]:
     if isinstance(value, tuple):
         return list(value)
     return []
+
+
+def _validate_retention_limit(name: str, value: int) -> None:
+    if value < 0:
+        raise ValueError(f"{name} must be greater than or equal to zero.")
+
+
+def _older_key_values(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    key_column: str,
+    keep: int,
+    order_by: str,
+) -> tuple[str, ...]:
+    rows = conn.execute(
+        f"SELECT {key_column} FROM {table} ORDER BY {order_by}"
+    ).fetchall()
+    return tuple(str(row[key_column]) for row in rows[keep:])
+
+
+def _delete_text_values(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    column: str,
+    values: tuple[str, ...],
+) -> int:
+    if not values:
+        return 0
+    placeholders = ",".join("?" for _ in values)
+    cursor = conn.execute(
+        f"DELETE FROM {table} WHERE {column} IN ({placeholders})",
+        values,
+    )
+    return _rowcount(cursor)
+
+
+def _delete_owner_rows(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    owner_kind: str,
+    owner_ids: tuple[str, ...],
+) -> int:
+    if not owner_ids:
+        return 0
+    placeholders = ",".join("?" for _ in owner_ids)
+    cursor = conn.execute(
+        f"""
+        DELETE FROM {table}
+        WHERE owner_kind = ? AND owner_id IN ({placeholders})
+        """,
+        (owner_kind, *owner_ids),
+    )
+    return _rowcount(cursor)
+
+
+def _delete_group_overflow_rows(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    id_column: str,
+    group_columns: tuple[str, ...],
+    keep: int,
+    order_by: str | None = None,
+) -> int:
+    overflow_ids = _group_overflow_ids(
+        conn,
+        table=table,
+        id_column=id_column,
+        group_columns=group_columns,
+        keep=keep,
+        order_by=order_by or f"{id_column} DESC",
+    )
+    return _delete_text_values(
+        conn,
+        table=table,
+        column=id_column,
+        values=overflow_ids,
+    )
+
+
+def _group_overflow_ids(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    id_column: str,
+    group_columns: tuple[str, ...],
+    keep: int,
+    order_by: str,
+) -> tuple[str, ...]:
+    select_columns = ", ".join(group_columns)
+    groups = conn.execute(
+        f"SELECT {select_columns} FROM {table} GROUP BY {select_columns}"
+    ).fetchall()
+    ids: list[str] = []
+    where = " AND ".join(f"{column} = ?" for column in group_columns)
+    for group in groups:
+        params = tuple(group[column] for column in group_columns)
+        rows = conn.execute(
+            f"""
+            SELECT {id_column}
+            FROM {table}
+            WHERE {where}
+            ORDER BY {order_by}
+            """,
+            params,
+        ).fetchall()
+        ids.extend(str(row[id_column]) for row in rows[keep:])
+    return tuple(ids)
+
+
+def _rowcount(cursor: sqlite3.Cursor) -> int:
+    return max(0, int(cursor.rowcount))
 
 
 def _live_snapshot_payload(

@@ -34,6 +34,38 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.workflows",
         "DEFAULT_MAX_PARALLEL_CHILD_WORKFLOWS",
     ),
+    "DEFAULT_MAX_ARTIFACTS_PER_OWNER": (
+        "histdatacom.sidecar.maintenance",
+        "DEFAULT_MAX_ARTIFACTS_PER_OWNER",
+    ),
+    "DEFAULT_MAX_DATASET_PLANS_PER_REQUEST": (
+        "histdatacom.sidecar.maintenance",
+        "DEFAULT_MAX_DATASET_PLANS_PER_REQUEST",
+    ),
+    "DEFAULT_MAX_JOB_SNAPSHOTS": (
+        "histdatacom.sidecar.maintenance",
+        "DEFAULT_MAX_JOB_SNAPSHOTS",
+    ),
+    "DEFAULT_MAX_LOG_BYTES": (
+        "histdatacom.sidecar.maintenance",
+        "DEFAULT_MAX_LOG_BYTES",
+    ),
+    "DEFAULT_MAX_ROTATED_LOGS": (
+        "histdatacom.sidecar.maintenance",
+        "DEFAULT_MAX_ROTATED_LOGS",
+    ),
+    "DEFAULT_MAX_STAGE_RESULTS_PER_WORK_ITEM": (
+        "histdatacom.sidecar.maintenance",
+        "DEFAULT_MAX_STAGE_RESULTS_PER_WORK_ITEM",
+    ),
+    "DEFAULT_MAX_STATUS_EVENTS_PER_OWNER": (
+        "histdatacom.sidecar.maintenance",
+        "DEFAULT_MAX_STATUS_EVENTS_PER_OWNER",
+    ),
+    "DEFAULT_MAX_TEMPORAL_SQLITE_BYTES": (
+        "histdatacom.sidecar.maintenance",
+        "DEFAULT_MAX_TEMPORAL_SQLITE_BYTES",
+    ),
     "DEFAULT_RUN_WORKFLOW_NAME": (
         "histdatacom.sidecar.client",
         "DEFAULT_RUN_WORKFLOW_NAME",
@@ -105,6 +137,14 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.control",
         "JobProgressSnapshot",
     ),
+    "LogMaintenanceResult": (
+        "histdatacom.sidecar.maintenance",
+        "LogMaintenanceResult",
+    ),
+    "MAINTENANCE_SCHEMA_VERSION": (
+        "histdatacom.sidecar.maintenance",
+        "MAINTENANCE_SCHEMA_VERSION",
+    ),
     "PortAllocationError": (
         "histdatacom.sidecar.runtime",
         "PortAllocationError",
@@ -125,6 +165,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "SidecarJobSnapshot",
     ),
     "SidecarManifest": ("histdatacom.sidecar.resources", "SidecarManifest"),
+    "SidecarMaintenanceResult": (
+        "histdatacom.sidecar.maintenance",
+        "SidecarMaintenanceResult",
+    ),
     "SidecarPaths": ("histdatacom.sidecar.runtime", "SidecarPaths"),
     "SidecarPlatformResource": (
         "histdatacom.sidecar.resources",
@@ -134,6 +178,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "SidecarResourceError": (
         "histdatacom.sidecar.resources",
         "SidecarResourceError",
+    ),
+    "SidecarRetentionPolicy": (
+        "histdatacom.sidecar.maintenance",
+        "SidecarRetentionPolicy",
     ),
     "SidecarRuntimePolicy": (
         "histdatacom.sidecar.runtime",
@@ -153,7 +201,15 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.queues",
         "SidecarWorkerConfig",
     ),
+    "StatusStoreMaintenanceResult": (
+        "histdatacom.sidecar.maintenance",
+        "StatusStoreMaintenanceResult",
+    ),
     "TaskQueueLane": ("histdatacom.sidecar.queues", "TaskQueueLane"),
+    "TemporalSqliteMaintenanceResult": (
+        "histdatacom.sidecar.maintenance",
+        "TemporalSqliteMaintenanceResult",
+    ),
     "TemporalActivityExecutor": (
         "histdatacom.sidecar.workflows",
         "TemporalActivityExecutor",
@@ -340,6 +396,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "run_temporal_worker": (
         "histdatacom.sidecar.worker",
         "run_temporal_worker",
+    ),
+    "run_sidecar_maintenance": (
+        "histdatacom.sidecar.maintenance",
+        "run_sidecar_maintenance",
     ),
     "sidecar_asset": ("histdatacom.sidecar.resources", "sidecar_asset"),
     "sidecar_executable_path": (

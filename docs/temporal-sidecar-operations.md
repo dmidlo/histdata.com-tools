@@ -228,6 +228,62 @@ launchd, systemd, scheduled tasks, or a future GUI shell:
 histdatacom-sidecar --workspace /path/to/project status --json
 ```
 
+## Maintenance And Retention
+
+Long-running PyPI installs and future GUI bundles should run sidecar maintenance
+periodically for the same workspace they use to start jobs:
+
+```sh
+histdatacom-sidecar --workspace /path/to/project maintenance --json
+```
+
+`cleanup` is accepted as an alias for `maintenance`. The JSON payload is stable
+for GUI use and reports log actions, status-store row counts, Temporal SQLite
+size, warnings, and the data-directory policy. The safe default refuses to
+mutate logs or SQLite-backed status rows while the sidecar is running; stop the
+sidecar first, or pass `--allow-running` only when an operator intentionally
+accepts active file-handle risk.
+
+Default retention policy:
+
+| State | Default |
+| --- | --- |
+| Active log file size | Rotate after 10 MiB |
+| Rotated logs per log file | Keep 5 |
+| Temporal SQLite history | Preserve by default, warn after 512 MiB |
+| Durable job snapshots | Keep 500 newest jobs |
+| Status events | Keep 1,000 newest rows per job or work item |
+| Stage results | Keep 500 newest rows per work item |
+| Artifact references | Keep 500 newest rows per job or work item |
+| Spilled dataset plans | Keep 50 newest plans per request |
+
+Each limit can be overridden on the maintenance command:
+
+```sh
+histdatacom-sidecar maintenance \
+  --max-log-bytes 10485760 \
+  --max-rotated-logs 5 \
+  --max-job-snapshots 500 \
+  --max-status-events-per-owner 1000 \
+  --max-stage-results-per-work-item 500 \
+  --max-artifacts-per-owner 500 \
+  --max-dataset-plans-per-request 50 \
+  --json
+```
+
+Maintenance is workspace-scoped and only mutates sidecar runtime state:
+
+- log files under `logs/`
+- durable sidecar manifest/status rows under
+  `manifests/.histdatacom/manifest-status.sqlite3`
+
+It does not remove downloaded HistData ZIP files, extracted CSV/XLSX files,
+cache IPC files, merged API-return artifacts, or files referenced by artifact
+rows. Temporal SQLite history is measured and preserved by default. If it grows
+past the warning threshold, preserve `logs/` and `sqlite/temporal.db` for
+diagnosis, stop the sidecar, and reset the workspace runtime directory only as
+an explicit recovery action.
+
 ## Sidecar Job Submission
 
 Submit through the default sidecar runtime and start it if no healthy server is

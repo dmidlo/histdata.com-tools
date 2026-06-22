@@ -24,6 +24,10 @@ from histdatacom.sidecar.client import (
     submit_control_job_sync,
 )
 from histdatacom.sidecar.control import CONTROL_SCHEMA_VERSION
+from histdatacom.sidecar.maintenance import (
+    SidecarRetentionPolicy,
+    run_sidecar_maintenance,
+)
 from histdatacom.sidecar.queues import (
     DEFAULT_TASK_QUEUE_PREFIX,
     DEFAULT_TEMPORAL_NAMESPACE,
@@ -151,6 +155,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser("doctor", help="show sidecar diagnostics")
     _add_common_args(doctor, include_defaults=False)
+
+    maintenance = subparsers.add_parser(
+        "maintenance",
+        aliases=("cleanup",),
+        help="prune sidecar logs and status metadata",
+    )
+    _add_common_args(maintenance, include_defaults=False)
+    _add_maintenance_args(maintenance)
 
     jobs = subparsers.add_parser(
         "jobs",
@@ -352,6 +364,74 @@ def _add_job_identity_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_maintenance_args(parser: argparse.ArgumentParser) -> None:
+    """Add retention options for sidecar maintenance."""
+    defaults = SidecarRetentionPolicy()
+    parser.add_argument(
+        "--allow-running",
+        action="store_true",
+        help="allow cleanup while the sidecar is running",
+    )
+    parser.add_argument(
+        "--max-log-bytes",
+        type=_non_negative_int,
+        default=defaults.max_log_bytes,
+        help="maximum active bytes per log before rotation",
+    )
+    parser.add_argument(
+        "--max-rotated-logs",
+        type=_non_negative_int,
+        default=defaults.max_rotated_logs,
+        help="number of rotated log files to retain per active log",
+    )
+    parser.add_argument(
+        "--max-temporal-sqlite-bytes",
+        type=_non_negative_int,
+        default=defaults.max_temporal_sqlite_bytes,
+        help="warning threshold for Temporal SQLite history bytes",
+    )
+    parser.add_argument(
+        "--max-job-snapshots",
+        type=_non_negative_int,
+        default=defaults.max_job_snapshots,
+        help="maximum durable job snapshots to retain",
+    )
+    parser.add_argument(
+        "--max-status-events-per-owner",
+        type=_non_negative_int,
+        default=defaults.max_status_events_per_owner,
+        help="maximum status events to retain per job or work item",
+    )
+    parser.add_argument(
+        "--max-stage-results-per-work-item",
+        type=_non_negative_int,
+        default=defaults.max_stage_results_per_work_item,
+        help="maximum stage results to retain per work item",
+    )
+    parser.add_argument(
+        "--max-artifacts-per-owner",
+        type=_non_negative_int,
+        default=defaults.max_artifacts_per_owner,
+        help="maximum artifact references to retain per job or work item",
+    )
+    parser.add_argument(
+        "--max-dataset-plans-per-request",
+        type=_non_negative_int,
+        default=defaults.max_dataset_plans_per_request,
+        help="maximum spilled dataset plans to retain per request",
+    )
+
+
+def _non_negative_int(value: str) -> int:
+    """Parse an argparse integer that cannot be negative."""
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(
+            "value must be greater than or equal to 0"
+        )
+    return parsed
+
+
 def _load_run_request(path: str) -> RunRequest:
     """Load a RunRequest from JSON."""
     payload = sys.stdin.read() if path == "-" else Path(path).read_text()
@@ -377,6 +457,37 @@ def _write_control_payload(payload: dict, *, as_json: bool) -> None:
     lifecycle = payload.get("lifecycle", "")
     status = payload.get("status", "")
     print(f"{workflow_id}: {lifecycle} ({status})")  # noqa:T201
+
+
+def _retention_policy(args: argparse.Namespace) -> SidecarRetentionPolicy:
+    """Create a sidecar retention policy from CLI arguments."""
+    return SidecarRetentionPolicy(
+        max_log_bytes=args.max_log_bytes,
+        max_rotated_logs=args.max_rotated_logs,
+        max_temporal_sqlite_bytes=args.max_temporal_sqlite_bytes,
+        max_job_snapshots=args.max_job_snapshots,
+        max_status_events_per_owner=args.max_status_events_per_owner,
+        max_stage_results_per_work_item=args.max_stage_results_per_work_item,
+        max_artifacts_per_owner=args.max_artifacts_per_owner,
+        max_dataset_plans_per_request=args.max_dataset_plans_per_request,
+    )
+
+
+def _write_maintenance_payload(payload: dict, *, as_json: bool) -> None:
+    """Write a sidecar maintenance payload."""
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+        return
+    print(f"{payload['state']}: {payload['message']}")  # noqa:T201
+    log_actions = [
+        item.get("action", "")
+        for item in payload.get("logs", [])
+        if item.get("action")
+    ]
+    rows_deleted = payload.get("status_store", {}).get("rows_deleted", {})
+    print(f"logs: {log_actions}")  # noqa:T201
+    print(f"rows_deleted: {rows_deleted}")  # noqa:T201
+    print(f"state_dir: {payload['paths']['state_dir']}")  # noqa:T201
 
 
 def _run_jobs_command(args: argparse.Namespace) -> int:
@@ -533,6 +644,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 print(f"state_dir: {status['state_dir']}")  # noqa:T201
             return 0
+        if args.command in {"maintenance", "cleanup"}:
+            status = supervisor.status(repair=False)
+            result = run_sidecar_maintenance(
+                supervisor.runtime_policy,
+                _retention_policy(args),
+                sidecar_state=status.state,
+                allow_running=args.allow_running,
+            )
+            _write_maintenance_payload(result.to_dict(), as_json=args.json)
+            return 0 if result.state == "completed" else 1
         if args.command == "jobs":
             return _run_jobs_command(args)
         parser.error(f"unsupported sidecar command: {args.command}")

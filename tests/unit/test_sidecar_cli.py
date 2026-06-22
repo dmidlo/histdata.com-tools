@@ -60,6 +60,14 @@ class _LifecycleSupervisor(_StatusOnlySupervisor):
         return _FakeStatus("running")
 
 
+class _MaintenanceSupervisor(_StatusOnlySupervisor):
+    """Test double for sidecar maintenance commands."""
+
+    def __init__(self, runtime_policy, state: str = "stopped") -> None:
+        super().__init__(state)
+        self.runtime_policy = runtime_policy
+
+
 class _FakeStatus:
     """Minimal status object consumed by the CLI."""
 
@@ -217,6 +225,42 @@ def test_sidecar_start_supervisor_inherits_worker_fleet_options(
     assert supervisor.network_multiplier == 5
     assert supervisor.orchestration_workers == 2
     assert supervisor.influx_workers == 3
+
+
+def test_sidecar_maintenance_cli_emits_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Maintenance should expose a GUI-ready JSON payload."""
+    runtime_policy = build_sidecar_runtime_policy(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+    )
+    runtime_policy.paths.logs_dir.mkdir(parents=True)
+    runtime_policy.paths.server_log.write_text("x" * 16, encoding="utf-8")
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _MaintenanceSupervisor(runtime_policy),
+    )
+
+    exit_code = cli.main(
+        [
+            "maintenance",
+            "--json",
+            "--max-log-bytes",
+            "4",
+            "--max-rotated-logs",
+            "1",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["state"] == "completed"
+    assert payload["logs"][0]["action"] == "rotated"
+    assert payload["downloaded_artifacts_removed"] is False
 
 
 def test_histdatacom_main_dispatches_sidecar_command(
