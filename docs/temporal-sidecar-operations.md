@@ -697,7 +697,10 @@ InfluxDB unavailable:
   `-I/--import_to_influxdb`. The sidecar does not provide an InfluxDB service.
   Local contract tests replace only the final writer and do not prove live
   credentials, bucket permissions, network latency, or server-side write
-  rejection behavior.
+  rejection behavior. When Docker is available, run
+  `python scripts/smoke_influx_docker.py` to start a disposable InfluxDB v2
+  container, write representative HistData line protocol through the real
+  `InfluxBatchWriter`, query the bucket, and tear the container down.
 
 Data-quality checks:
 
@@ -720,7 +723,8 @@ Unit tests should keep most coverage independent from live Temporal and Influx:
 - performance profile and benchmark fixture tests
 
 Live smoke tests belong behind explicit operator setup because they require a
-Temporal executable, and live import coverage requires a real Influx target.
+Temporal executable, and live import coverage requires a real Influx target or
+the Docker-backed `scripts/smoke_influx_docker.py` helper.
 Package release smoke should validate metadata, console entry points, packaged
 sidecar resources, and offline `status`/`doctor` behavior for every wheel. For
 bundled platform wheels, release smoke should also require

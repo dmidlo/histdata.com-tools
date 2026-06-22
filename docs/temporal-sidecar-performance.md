@@ -178,7 +178,8 @@ with a local writer. This proves:
 This does not prove live Influx authentication, bucket permissions, network
 latency, server-side write rejection behavior, or production retention policy.
 Those remain operator-gated live checks requiring `histdatacom[influx]`, a real
-`influxdb.yaml`, and a disposable target bucket.
+`influxdb.yaml`, a disposable target bucket, or the Docker-backed
+`python scripts/smoke_influx_docker.py` helper.
 
 ## Tuning Guidance
 
@@ -244,8 +245,10 @@ The accepted issue #181 envelope is:
 
 Live run date: 2026-06-21. Temporal executable:
 `/opt/local/bin/temporal`. InfluxDB was intentionally unavailable for the live
-matrix. Influx behavior is covered by the issue #187 contract-backed workflow
-test described above.
+matrix at that time. Influx behavior is covered by the issue #187
+contract-backed workflow test described above, and Docker-backed live
+writer/query validation is available through
+`python scripts/smoke_influx_docker.py`.
 
 | Scenario | Retired baseline elapsed | Sidecar elapsed | Ratio | Sidecar process CPU | Artifacts | Failures/retries |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
