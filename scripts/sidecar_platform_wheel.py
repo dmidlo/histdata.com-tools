@@ -368,7 +368,7 @@ def prepare_sidecar_binary(
 
     return {
         "platform": platform_key,
-        "executable": str(target.relative_to(resolved_source / ASSET_ROOT)),
+        "executable": relative_executable,
         "source_executable": str(resolved_executable),
         "size_bytes": target.stat().st_size,
         "version": version,
