@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
@@ -23,6 +24,7 @@ from histdatacom.sidecar.queues import (
     TaskQueueLane,
     build_sidecar_worker_config,
 )
+from histdatacom.sidecar.readiness import write_worker_readiness
 from histdatacom.sidecar.runtime import (
     PortAllocationError,
     SidecarPaths,
@@ -97,7 +99,28 @@ async def run_temporal_worker(
     run = getattr(worker, "run", None)
     if run is None:
         raise TypeError("Temporal worker object must define run()")
-    await _maybe_await(run())
+    run_result = run()
+    if isawaitable(run_result):
+        run_task = asyncio.ensure_future(run_result)
+        await asyncio.sleep(0)
+        if run_task.done():
+            await run_task
+            return worker
+        write_worker_readiness(
+            resolved_config,
+            pid=os.getpid(),
+            state="ready",
+            message="Worker connected and entering run loop.",
+        )
+        await run_task
+        return worker
+    write_worker_readiness(
+        resolved_config,
+        pid=os.getpid(),
+        state="ready",
+        message="Worker connected and entering run loop.",
+    )
+    await _maybe_await(run_result)
     return worker
 
 

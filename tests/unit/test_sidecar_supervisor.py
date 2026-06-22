@@ -18,6 +18,7 @@ from histdatacom.sidecar.queues import (
     TaskQueueLane,
     build_sidecar_worker_config,
 )
+from histdatacom.sidecar.readiness import write_worker_readiness_payload
 from histdatacom.sidecar.runtime import (
     SidecarRuntimePolicy,
     build_sidecar_runtime_policy,
@@ -34,6 +35,20 @@ class _FakeProcess:
     def poll(self) -> int | None:
         """Return the fake process return code."""
         return self.returncode
+
+
+class _LateCrashingProcess(_FakeProcess):
+    """Fake process that survives the launch check and then exits."""
+
+    def __init__(self, pid: int, *, live_polls: int = 1) -> None:
+        super().__init__(pid)
+        self.live_polls = live_polls
+        self.polls = 0
+
+    def poll(self) -> int | None:
+        """Return running for a bounded number of polls, then exited."""
+        self.polls += 1
+        return None if self.polls <= self.live_polls else 1
 
 
 def _executable(tmp_path: Path) -> Path:
@@ -60,6 +75,7 @@ def _supervisor(
     process_exists=lambda pid: False,
     process_terminate=lambda pid: None,
     process_factory=lambda command, **kwargs: _FakeProcess(1234),
+    worker_lanes=tuple(TaskQueueLane),
 ) -> SidecarSupervisor:
     """Create a supervisor with deterministic fake readiness probes."""
     return SidecarSupervisor(
@@ -72,7 +88,34 @@ def _supervisor(
         frontend_ready=lambda runtime_policy: True,
         worker_dependency_available=lambda: True,
         sleep=lambda seconds: None,
+        worker_lanes=worker_lanes,
     )
+
+
+def _write_ready_marker(state_dir: Path | str, lane: str, pid: int) -> None:
+    """Write a deterministic fake readiness marker."""
+    write_worker_readiness_payload(
+        state_dir,
+        lane,
+        {
+            "component": f"worker:{lane}",
+            "pid": pid,
+            "state": "ready",
+            "message": "fake worker ready",
+            "namespace": "default",
+            "task_queue": f"histdatacom.test.{lane}",
+            "target_host": "127.0.0.1:17233",
+        },
+    )
+
+
+def _write_ready_marker_from_command(command: list[str], pid: int) -> None:
+    """Write a fake readiness marker for worker subprocess commands."""
+    if "histdatacom.sidecar.worker" not in command or "--lane" not in command:
+        return
+    lane = command[command.index("--lane") + 1]
+    state_dir = command[command.index("--state-dir") + 1]
+    _write_ready_marker(state_dir, lane, pid)
 
 
 def test_build_temporal_start_command_uses_runtime_defaults(
@@ -145,6 +188,7 @@ def test_start_writes_state_and_is_idempotent_for_running_sidecar(
         pid = next(next_pid)
         live_pids.add(pid)
         calls.append(command)
+        _write_ready_marker_from_command(command, pid)
         return _FakeProcess(pid)
 
     supervisor = _supervisor(
@@ -186,6 +230,12 @@ def test_start_writes_state_and_is_idempotent_for_running_sidecar(
         "cpu-file",
         "influx",
     ]
+    assert all(
+        readiness["state"] == "ready"
+        for readiness in first.worker_readiness.values()
+    )
+    assert state["worker_readiness"]["network"]["pid"] == 1236
+    assert first.to_dict()["worker_readiness"]["network"]["ready"] is True
     assert first.components == {
         "server": "running",
         "worker:orchestration": "running",
@@ -218,6 +268,7 @@ def test_start_repairs_stale_pid_and_lock_files(tmp_path: Path) -> None:
     def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
         pid = next(next_pid)
         live_pids.add(pid)
+        _write_ready_marker_from_command(command, pid)
         return _FakeProcess(pid)
 
     supervisor = _supervisor(
@@ -238,6 +289,115 @@ def test_start_repairs_stale_pid_and_lock_files(tmp_path: Path) -> None:
     }
     assert state["pids"] == status.pids
     assert not paths.lock_file.exists()
+
+
+def test_start_fails_when_worker_lane_never_reports_ready(
+    tmp_path: Path,
+) -> None:
+    """Startup should fail clearly when a live worker never becomes ready."""
+    executable = _executable(tmp_path)
+    policy = _policy(tmp_path)
+    live_pids: set[int] = set()
+    terminated: list[int] = []
+    next_pid = iter(range(400, 403))
+
+    def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
+        pid = next(next_pid)
+        live_pids.add(pid)
+        return _FakeProcess(pid)
+
+    def terminate(pid: int) -> None:
+        terminated.append(pid)
+        live_pids.discard(pid)
+
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: pid in live_pids,
+        process_terminate=terminate,
+        process_factory=process_factory,
+        worker_lanes=(TaskQueueLane.NETWORK,),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="worker lane 'network' did not report readiness",
+    ):
+        supervisor.start(executable=executable, startup_timeout=0.01)
+
+    assert terminated == [401, 400]
+    assert not policy.paths.pid_file.exists()
+
+
+def test_start_fails_when_worker_crashes_before_ready(
+    tmp_path: Path,
+) -> None:
+    """A worker that exits after launch but before readiness is unhealthy."""
+    executable = _executable(tmp_path)
+    policy = _policy(tmp_path)
+    live_pids = {500, 501}
+    calls = 0
+
+    def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
+        nonlocal calls
+        calls += 1
+        if "histdatacom.sidecar.worker" in command:
+            return _LateCrashingProcess(501, live_polls=1)
+        return _FakeProcess(500)
+
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: pid in live_pids,
+        process_factory=process_factory,
+        worker_lanes=(TaskQueueLane.NETWORK,),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="worker lane 'network' exited before readiness",
+    ):
+        supervisor.start(executable=executable, startup_timeout=0.1)
+
+    assert calls == 2
+
+
+def test_start_fails_when_required_lane_is_partially_ready(
+    tmp_path: Path,
+) -> None:
+    """Partial worker readiness should not be accepted as a running fleet."""
+    executable = _executable(tmp_path)
+    policy = _policy(tmp_path)
+    live_pids: set[int] = set()
+    terminated: list[int] = []
+    next_pid = iter(range(600, 604))
+
+    def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
+        pid = next(next_pid)
+        live_pids.add(pid)
+        if "--lane" in command:
+            lane = command[command.index("--lane") + 1]
+            if lane == "orchestration":
+                _write_ready_marker_from_command(command, pid)
+        return _FakeProcess(pid)
+
+    def terminate(pid: int) -> None:
+        terminated.append(pid)
+        live_pids.discard(pid)
+
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: pid in live_pids,
+        process_terminate=terminate,
+        process_factory=process_factory,
+        worker_lanes=(TaskQueueLane.ORCHESTRATION, TaskQueueLane.NETWORK),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="worker lane 'network' did not report readiness",
+    ):
+        supervisor.start(executable=executable, startup_timeout=0.01)
+
+    assert terminated == [601, 602, 600]
 
 
 def test_start_fails_before_server_when_worker_dependency_missing(
@@ -306,6 +466,35 @@ def test_status_reports_stale_state_when_worker_lane_missing(
     assert status.components["server"] == "running"
     assert status.components["worker:network"] == "missing"
     assert "missing components" in status.message
+
+
+def test_status_reports_stale_state_when_worker_not_ready(
+    tmp_path: Path,
+) -> None:
+    """Live worker PIDs should still be stale until readiness is reported."""
+    paths = SidecarPaths.from_state_dir(tmp_path / "state")
+    paths.state_dir.mkdir(parents=True)
+    paths.pid_file.write_text(
+        json.dumps(
+            {
+                "pids": {"server": 100, "worker:network": 200},
+                "command": ["/tmp/temporal", "server", "start-dev"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    supervisor = _supervisor(
+        paths=paths,
+        process_exists=lambda pid: True,
+        worker_lanes=(TaskQueueLane.NETWORK,),
+    )
+
+    status = supervisor.status()
+
+    assert status.state == "stale"
+    assert status.components["worker:network"] == "not_ready"
+    assert status.worker_readiness["network"]["state"] == "not_ready"
+    assert "workers not ready" in status.message
 
 
 def test_status_repairs_state_without_valid_pids(tmp_path: Path) -> None:
@@ -401,6 +590,7 @@ def test_restart_stops_existing_fleet_and_starts_new_fleet(
         pid = next(next_pid)
         live_pids.add(pid)
         launched_commands.append(command)
+        _write_ready_marker_from_command(command, pid)
         return _FakeProcess(pid)
 
     supervisor = _supervisor(
@@ -446,6 +636,13 @@ def test_doctor_reports_frontend_and_worker_lane_health(
         ),
         encoding="utf-8",
     )
+    for lane, pid in {
+        "orchestration": 200,
+        "network": 300,
+        "cpu-file": 400,
+        "influx": 500,
+    }.items():
+        _write_ready_marker(paths.state_dir, lane, pid)
     supervisor = _supervisor(paths=paths, process_exists=lambda pid: True)
 
     doctor = supervisor.doctor()
@@ -453,6 +650,8 @@ def test_doctor_reports_frontend_and_worker_lane_health(
     assert doctor["frontend"]["ready"] is True
     assert doctor["components"]["server"] == "running"
     assert doctor["workers"]["orchestration"]["state"] == "running"
+    assert doctor["workers"]["orchestration"]["ready"] is True
+    assert doctor["workers"]["orchestration"]["readiness_state"] == "ready"
     assert doctor["workers"]["network"]["component"] == "worker:network"
     assert doctor["workers"]["cpu-file"]["log"].endswith(
         "temporal-worker-cpu-file.log"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from histdatacom.sidecar.queues import (
     TaskQueueLane,
     build_sidecar_worker_config,
 )
+from histdatacom.sidecar.readiness import read_worker_readiness
 from histdatacom.sidecar.runtime import build_sidecar_runtime_policy
 
 
@@ -42,6 +44,7 @@ class _FakeWorker:
     async def run(self) -> None:
         """Record that the worker run loop was invoked."""
         self.ran = True
+        await asyncio.sleep(0)
 
 
 class _FakeClient:
@@ -167,6 +170,14 @@ def test_run_temporal_worker_accepts_fake_temporal_classes(
         {"target_host": config.target_host, "namespace": "default"}
     ]
     assert _FakeWorker.instances[0].task_queue == config.task_queue
+    readiness = read_worker_readiness(
+        config.runtime_policy.paths.state_dir,
+        config.lane,
+    )
+    assert readiness is not None
+    assert readiness["state"] == "ready"
+    assert readiness["pid"] == os.getpid()
+    assert readiness["task_queue"] == config.task_queue
     assert {
         workflow.__name__ for workflow in _FakeWorker.instances[0].workflows
     } >= {

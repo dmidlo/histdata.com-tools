@@ -27,6 +27,11 @@ from histdatacom.sidecar.queues import (
     TaskQueueLane,
     build_sidecar_worker_config,
 )
+from histdatacom.sidecar.readiness import (
+    read_worker_readiness,
+    remove_worker_readiness,
+    worker_readiness_path,
+)
 from histdatacom.sidecar.resources import (
     current_platform_key,
     load_sidecar_manifest,
@@ -70,6 +75,7 @@ class SidecarStatus:
     command: tuple[str, ...] = ()
     ports: dict[str, int | str | list[int]] = field(default_factory=dict)
     components: dict[str, str] = field(default_factory=dict)
+    worker_readiness: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
     def running(self) -> bool:
@@ -89,6 +95,10 @@ class SidecarStatus:
             "command": list(self.command),
             "ports": dict(self.ports),
             "components": dict(self.components),
+            "worker_readiness": {
+                lane: dict(readiness)
+                for lane, readiness in self.worker_readiness.items()
+            },
         }
 
 
@@ -280,7 +290,8 @@ class SidecarSupervisor:
                 logs=logs,
             )
 
-        component_states = self._component_states(pids)
+        worker_readiness = self._worker_readiness_states(pids)
+        component_states = self._component_states(pids, worker_readiness)
         missing_required = tuple(
             component
             for component in self._required_components()
@@ -291,7 +302,14 @@ class SidecarSupervisor:
             for component, pid in pids.items()
             if not self._process_exists(pid)
         }
-        if not missing and not missing_required:
+        not_ready_required = tuple(
+            self._worker_component(lane)
+            for lane in self.worker_lanes
+            if self._worker_component(lane) in pids
+            and self._worker_component(lane) not in missing
+            and worker_readiness.get(lane.value, {}).get("state") != "ready"
+        )
+        if not missing and not missing_required and not not_ready_required:
             return self._status(
                 "running",
                 "Sidecar server and worker lanes are running.",
@@ -300,6 +318,7 @@ class SidecarSupervisor:
                 ports,
                 logs=logs,
                 components=component_states,
+                worker_readiness=worker_readiness,
             )
 
         if repair:
@@ -310,6 +329,8 @@ class SidecarSupervisor:
             details.append(f"missing components: {list(missing_required)}")
         if missing:
             details.append(f"dead processes: {missing}")
+        if not_ready_required:
+            details.append(f"workers not ready: {list(not_ready_required)}")
         return self._status(
             "stale",
             f"Sidecar state is incomplete: {'; '.join(details)}.",
@@ -318,6 +339,7 @@ class SidecarSupervisor:
             ports,
             logs=logs,
             components=component_states,
+            worker_readiness=worker_readiness,
         )
 
     def start(
@@ -338,6 +360,7 @@ class SidecarSupervisor:
                 current.ports,
                 logs=current.logs,
                 components=current.components,
+                worker_readiness=current.worker_readiness,
             )
 
         self.paths.state_dir.mkdir(parents=True, exist_ok=True)
@@ -431,7 +454,11 @@ class SidecarSupervisor:
         executable_bundled = (
             bool(platform_resource.bundled) if platform_resource else False
         )
-        worker_status = self._worker_status(status.pids, status.components)
+        worker_status = self._worker_status(
+            status.pids,
+            status.components,
+            status.worker_readiness,
+        )
         return {
             "status": status.to_dict(),
             "paths": self._path_dict(),
@@ -488,8 +515,10 @@ class SidecarSupervisor:
         pids: dict[str, int] = {}
         commands: dict[str, list[str]] = {}
         logs: dict[str, str] = {"server": str(self.paths.server_log)}
+        worker_readiness: dict[str, dict[str, Any]] = {}
         deadline = time.monotonic() + startup_timeout
         try:
+            remove_worker_readiness(self.paths.state_dir)
             server_process = self._launch_component(
                 server_command,
                 self.paths.server_log,
@@ -511,6 +540,7 @@ class SidecarSupervisor:
                 )
                 component = self._worker_component(lane)
                 log_path = self._worker_log_path(lane)
+                remove_worker_readiness(self.paths.state_dir, lane)
                 worker_process = self._launch_component(
                     worker_command,
                     log_path,
@@ -523,6 +553,13 @@ class SidecarSupervisor:
                 pids[component] = int(worker_process.pid)
                 commands[component] = list(worker_command)
                 logs[component] = str(log_path)
+                worker_readiness[lane.value] = self._wait_for_worker_ready(
+                    lane,
+                    int(worker_process.pid),
+                    worker_process,
+                    deadline,
+                    log_path,
+                )
 
             state = {
                 "schema_version": SIDECAR_STATE_SCHEMA_VERSION,
@@ -533,10 +570,11 @@ class SidecarSupervisor:
                 "ports": runtime_policy.ports.to_dict(),
                 "runtime_policy": runtime_policy.to_dict(),
                 "worker_fleet": self._worker_fleet_metadata(base_worker_config),
+                "worker_readiness": worker_readiness,
                 "logs": logs,
             }
             self._write_state(state)
-            components = self._component_states(pids)
+            components = self._component_states(pids, worker_readiness)
             return self._status(
                 "running",
                 "Sidecar server and worker lanes started.",
@@ -544,6 +582,7 @@ class SidecarSupervisor:
                 server_command,
                 logs=logs,
                 components=components,
+                worker_readiness=worker_readiness,
             )
         except Exception:
             self._terminate_pids(pids)
@@ -695,6 +734,35 @@ class SidecarSupervisor:
             "Temporal frontend did not become ready before startup timeout."
         )
 
+    def _wait_for_worker_ready(
+        self,
+        lane: TaskQueueLane,
+        pid: int,
+        worker_process: Any,
+        deadline: float,
+        log_path: Path,
+    ) -> dict[str, Any]:
+        """Wait until a worker lane publishes a valid readiness marker."""
+        while time.monotonic() < deadline:
+            if not self._process_running(worker_process):
+                raise RuntimeError(
+                    f"Temporal worker lane {lane.value!r} exited before "
+                    f"readiness. See log: {log_path}"
+                )
+            readiness = self._worker_readiness_state(lane, pid)
+            if readiness["state"] == "ready":
+                return readiness
+            self._sleep(0.05)
+        if not self._process_running(worker_process):
+            raise RuntimeError(
+                f"Temporal worker lane {lane.value!r} exited before "
+                f"readiness. See log: {log_path}"
+            )
+        raise RuntimeError(
+            f"Temporal worker lane {lane.value!r} did not report readiness "
+            f"before startup timeout. See log: {log_path}"
+        )
+
     def _required_components(self) -> tuple[str, ...]:
         """Return component IDs required for a healthy sidecar."""
         return (
@@ -702,15 +770,31 @@ class SidecarSupervisor:
             *(self._worker_component(lane) for lane in self.worker_lanes),
         )
 
-    def _component_states(self, pids: Mapping[str, int]) -> dict[str, str]:
+    def _component_states(
+        self,
+        pids: Mapping[str, int],
+        worker_readiness: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> dict[str, str]:
         """Return component health by required and known component ID."""
         states: dict[str, str] = {}
         for component in self._required_components():
             pid = pids.get(component)
+            if pid is None or not self._process_exists(pid):
+                states[component] = "missing"
+                continue
+            lane = self._component_lane(component)
+            if lane is None or worker_readiness is None:
+                states[component] = "running"
+                continue
             states[component] = (
                 "running"
-                if pid is not None and self._process_exists(pid)
-                else "missing"
+                if worker_readiness.get(lane.value, {}).get("state") == "ready"
+                else str(
+                    worker_readiness.get(lane.value, {}).get(
+                        "state",
+                        "not_ready",
+                    )
+                )
             )
         for component, pid in pids.items():
             if component in states:
@@ -724,18 +808,111 @@ class SidecarSupervisor:
         self,
         pids: Mapping[str, int],
         component_states: Mapping[str, str],
-    ) -> dict[str, dict[str, int | str]]:
+        worker_readiness: Mapping[str, Mapping[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
         """Return worker lane diagnostics for doctor output."""
-        workers: dict[str, dict[str, int | str]] = {}
+        workers: dict[str, dict[str, Any]] = {}
         for lane in self.worker_lanes:
             component = self._worker_component(lane)
+            readiness = dict(
+                worker_readiness.get(lane.value)
+                or self._worker_readiness_state(
+                    lane,
+                    int(pids.get(component, 0)),
+                )
+            )
             workers[lane.value] = {
                 "component": component,
                 "pid": int(pids.get(component, 0)),
                 "state": str(component_states.get(component, "missing")),
                 "log": str(self._worker_log_path(lane)),
+                "ready": bool(readiness.get("ready")),
+                "readiness_state": str(readiness.get("state", "missing")),
+                "readiness": readiness,
             }
         return workers
+
+    def _worker_readiness_states(
+        self,
+        pids: Mapping[str, int],
+    ) -> dict[str, dict[str, Any]]:
+        """Return readiness diagnostics for all configured worker lanes."""
+        return {
+            lane.value: self._worker_readiness_state(
+                lane,
+                int(pids.get(self._worker_component(lane), 0)),
+            )
+            for lane in self.worker_lanes
+        }
+
+    def _worker_readiness_state(
+        self,
+        lane: TaskQueueLane,
+        pid: int,
+    ) -> dict[str, Any]:
+        """Return a validated worker readiness state for one lane."""
+        component = self._worker_component(lane)
+        marker_path = worker_readiness_path(self.paths.state_dir, lane)
+        base: dict[str, Any] = {
+            "component": component,
+            "lane": lane.value,
+            "pid": int(pid),
+            "path": str(marker_path),
+            "ready": False,
+        }
+        if pid <= 0:
+            return {
+                **base,
+                "state": "missing",
+                "message": "Worker PID is missing.",
+            }
+        if not self._process_exists(pid):
+            return {
+                **base,
+                "state": "dead",
+                "message": f"Worker PID {pid} is not running.",
+            }
+        payload = read_worker_readiness(self.paths.state_dir, lane)
+        if payload is None:
+            return {
+                **base,
+                "state": "not_ready",
+                "message": "Worker readiness marker has not been written.",
+            }
+        payload_pid = self._readiness_pid(payload)
+        payload_lane = str(payload.get("lane", ""))
+        if payload_pid != pid or payload_lane != lane.value:
+            return {
+                **base,
+                "state": "stale",
+                "message": (
+                    "Worker readiness marker does not match the live "
+                    "worker lane and PID."
+                ),
+                "marker": payload,
+            }
+        if str(payload.get("state", "")) != "ready":
+            return {
+                **base,
+                "state": "not_ready",
+                "message": str(payload.get("message", "Worker is not ready.")),
+                "marker": payload,
+            }
+        return {
+            **base,
+            **payload,
+            "pid": pid,
+            "state": "ready",
+            "ready": True,
+            "path": str(marker_path),
+        }
+
+    def _readiness_pid(self, payload: Mapping[str, Any]) -> int:
+        """Return a parsed readiness PID, or zero when malformed."""
+        try:
+            return int(payload.get("pid", 0))
+        except (TypeError, ValueError):
+            return 0
 
     def _worker_fleet_metadata(
         self,
@@ -753,6 +930,17 @@ class SidecarSupervisor:
     def _worker_component(self, lane: TaskQueueLane) -> str:
         """Return the persisted component name for a worker lane."""
         return f"{WORKER_COMPONENT_PREFIX}{lane.value}"
+
+    def _component_lane(self, component: str) -> TaskQueueLane | None:
+        """Return the worker lane for a component ID when applicable."""
+        if not component.startswith(WORKER_COMPONENT_PREFIX):
+            return None
+        try:
+            return TaskQueueLane.from_value(
+                component.removeprefix(WORKER_COMPONENT_PREFIX)
+            )
+        except ValueError:
+            return None
 
     def _worker_log_path(self, lane: TaskQueueLane) -> Path:
         """Return the lane-specific worker log path."""
@@ -809,8 +997,14 @@ class SidecarSupervisor:
         ports: Mapping[str, int | str | list[int]] | None = None,
         logs: Mapping[str, str] | None = None,
         components: Mapping[str, str] | None = None,
+        worker_readiness: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> SidecarStatus:
         """Create a sidecar status object."""
+        readiness = (
+            {lane: dict(payload) for lane, payload in worker_readiness.items()}
+            if worker_readiness is not None
+            else self._worker_readiness_states(pids)
+        )
         return SidecarStatus(
             state=state,
             message=message,
@@ -827,7 +1021,10 @@ class SidecarSupervisor:
                     self.runtime_policy.ports.to_dict(),
                 )
             ),
-            components=dict(components or self._component_states(pids)),
+            components=dict(
+                components or self._component_states(pids, readiness)
+            ),
+            worker_readiness=readiness,
         )
 
     def _path_dict(self) -> dict[str, str]:
