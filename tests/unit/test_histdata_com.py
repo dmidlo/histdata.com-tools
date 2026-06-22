@@ -142,15 +142,23 @@ def test_api_options_can_submit_sidecar_job_and_return_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """API callers should submit sidecar-backed jobs by default."""
+    from histdatacom import config
     import histdatacom.histdata_com as histdata_com
 
     captured: dict[str, object] = {}
+    stale_args = {
+        "api_return_type": "pandas",
+        "from_api": False,
+        "sidecar_start": False,
+        "sidecar_wait_result": False,
+    }
 
     def fake_submit(request, **kwargs: object) -> SidecarJobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _job_result()
 
+    monkeypatch.setattr(config, "ARGS", dict(stale_args))
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
@@ -167,6 +175,58 @@ def test_api_options_can_submit_sidecar_job_and_return_result(
         "start_if_needed": True,
         "wait_for_result": True,
     }
+    assert config.ARGS == stale_args
+
+
+def test_back_to_back_sidecar_api_calls_do_not_leak_global_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sidecar submissions should use per-call context, not global args."""
+    from histdatacom import config
+    import histdatacom.histdata_com as histdata_com
+
+    captured: list[tuple[object, dict[str, object]]] = []
+    stale_args = {
+        "api_return_type": "pandas",
+        "from_api": False,
+        "sidecar_start": False,
+        "sidecar_wait_result": False,
+    }
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured.append((request, kwargs))
+        return _job_result()
+
+    monkeypatch.setattr(config, "ARGS", dict(stale_args))
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    first_options = _sidecar_options("polars")
+    first_options.sidecar_start = False
+    first_options.sidecar_wait_result = False
+    second_options = _sidecar_options("arrow")
+    second_options.sidecar_start = True
+    second_options.sidecar_wait_result = True
+
+    first_result = histdata_com.main(first_options)
+    second_result = histdata_com.main(second_options)
+
+    assert first_result["status"] == "completed"
+    assert second_result["status"] == "completed"
+    assert len(captured) == 2
+    assert captured[0][0].api_return_type == "polars"
+    assert captured[0][1] == {
+        "start_if_needed": False,
+        "wait_for_result": False,
+    }
+    assert captured[1][0].api_return_type == "arrow"
+    assert captured[1][1] == {
+        "start_if_needed": True,
+        "wait_for_result": True,
+    }
+    assert config.ARGS == stale_args
 
 
 def test_api_default_runtime_uses_sidecar(
@@ -345,15 +405,18 @@ def test_api_sidecar_dataframe_return_is_materialized_from_cache_artifacts(
     """API sidecar runs should preserve the legacy dataframe return contract."""
     import importlib
 
+    from histdatacom import config
     import histdatacom.histdata_com as histdata_com
 
     captured: dict[str, object] = {}
+    stale_return_type = "pandas" if api_return_type != "pandas" else "polars"
 
     def fake_submit(request, **kwargs: object) -> SidecarJobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _sidecar_cache_result(tmp_path)
 
+    monkeypatch.setattr(config, "ARGS", {"api_return_type": stale_return_type})
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
@@ -372,6 +435,7 @@ def test_api_sidecar_dataframe_return_is_materialized_from_cache_artifacts(
         "start_if_needed": True,
         "wait_for_result": True,
     }
+    assert config.ARGS == {"api_return_type": stale_return_type}
 
 
 def test_api_sidecar_repository_request_returns_available_data(

@@ -20,13 +20,15 @@ Default requests submit a `RunRequest` to the sidecar and start the bundled
 local sidecar when no healthy sidecar is running. `--sidecar` remains accepted
 as a compatibility alias for scripts that already passed it during migration.
 
-Foreground execution and `config.ARGS` remain supported compatibility surfaces.
-Use `--foreground` on the CLI or `Options.use_sidecar = False` in API code when
-an operator needs the queue-free foreground runtime for rollback or platform
-recovery. New orchestration behavior should be expressed as `RunRequest`
-payloads, Temporal workflows, and Temporal activities. Removing foreground
-compatibility is a later deprecation step and requires a separate release note,
-migration window, and rollback plan.
+Default sidecar submissions are built from resolved runtime context and
+`RunRequest`, not `config.ARGS`. Foreground execution and `config.ARGS` remain
+supported only as explicit compatibility surfaces. Use `--foreground` on the CLI
+or `Options.use_sidecar = False` in API code when an operator needs the
+queue-free foreground runtime for rollback or platform recovery. New
+orchestration behavior should be expressed as `RunRequest` payloads, Temporal
+workflows, and Temporal activities. Removing foreground compatibility is a
+later deprecation step and requires a separate release note, migration window,
+and rollback plan.
 
 The base package install includes the Temporal Python SDK because sidecar job
 submission, job inspection, and workers are the default runtime surface:

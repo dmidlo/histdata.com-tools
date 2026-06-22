@@ -232,14 +232,17 @@ class Api:  # noqa:H601
     def merge_records(
         self,
         records_to_merge: list,
+        *,
+        return_type: str | None = None,
     ) -> list | PolarsDataFrame | DataFrame | Table:
         """Merge explicit cache records into the configured API return type."""
         if not records_to_merge:
             return []
+        resolved_return_type = return_type or config.ARGS["api_return_type"]
 
         merge_output = merge_cache_work_items(
             [WorkItem.from_record(record) for record in records_to_merge],
-            return_type=config.ARGS["api_return_type"],
+            return_type=resolved_return_type,
             materialize=True,
         )
         if merge_output.result.status is WorkStatus.SKIPPED:

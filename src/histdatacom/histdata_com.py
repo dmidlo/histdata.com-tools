@@ -22,10 +22,12 @@ Returns:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import os
 import sys
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Mapping
 
 import histdatacom
@@ -57,6 +59,29 @@ if TYPE_CHECKING:
     from pyarrow import Table
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeContext:
+    """Resolved launch context for sidecar or foreground execution."""
+
+    args: Mapping[str, Any]
+    request: RunRequest
+    version: bool
+    from_api: bool
+    use_sidecar: bool
+    sidecar_start: bool
+    sidecar_wait_result: bool
+    api_return_type: str | None
+    available_remote_data: bool
+    update_remote_data: bool
+    import_to_influxdb: bool
+
+    def foreground_args(self) -> dict[str, Any]:
+        """Return a mutable copy for the legacy foreground adapter."""
+        return {
+            key: _thaw_runtime_arg(value) for key, value in self.args.items()
+        }
+
+
 class _HistDataCom:  # noqa:R701
     """Pull market data from histdata.com and import it into influxDB."""
 
@@ -79,19 +104,17 @@ class _HistDataCom:  # noqa:R701
           - .copy(): decouple for GC using a hard copy of user args
         """
         self.options = ArgParser(options)()
-        config.ARGS = ArgParser.arg_list_to_set(  # noqa:BLK100
-            vars(self.options)  # noqa:WPS110
-        ).copy()
-        config.ARGS["default_download_dir"] = set_working_data_dir(
-            config.ARGS["data_directory"]
-        )
-        config.ARGS["api_return_type"] = normalize_api_return_type(
-            config.ARGS["api_return_type"]
-        )
-        self.options.api_return_type = config.ARGS["api_return_type"]
+        self.context = _resolve_runtime_context(self.options)
+        self.options.api_return_type = self.context.api_return_type
 
-        if config.ARGS["version"] or self._uses_sidecar():
+        if self.context.version or self.context.use_sidecar:
             return
+
+        self._configure_foreground_compatibility()
+
+    def _configure_foreground_compatibility(self) -> None:
+        """Populate legacy globals only for explicit foreground execution."""
+        config.ARGS = self.context.foreground_args()  # noqa:BLK100
 
         if config.ARGS["import_to_influxdb"]:
             check_installed_module("influxdb_client")
@@ -137,35 +160,32 @@ class _HistDataCom:  # noqa:R701
 
 
         """
-        if config.ARGS["version"]:
-            if not config.ARGS["from_api"]:
+        if self.context.version:
+            if not self.context.from_api:
                 print(histdatacom.__version__)  # noqa:T201
             return histdatacom.__version__
 
         if self._uses_sidecar():
             return self._run_sidecar_job()
 
-        return run_foreground(
-            RunRequest.from_options(self.options), config.ARGS
-        )
+        return run_foreground(self.context.request, config.ARGS)
 
     def _uses_sidecar(self) -> bool:
-        """Return whether this foreground run should submit to the sidecar."""
-        return bool(should_submit_to_sidecar(config.ARGS))
+        """Return whether this run should submit to the sidecar."""
+        return self.context.use_sidecar
 
     def _run_sidecar_job(
         self,
     ) -> list | dict | PolarsDataFrame | DataFrame | Table:
         """Submit this run to the Temporal sidecar client boundary."""
-        request = RunRequest.from_options(self.options)
         try:
             result = submit_run_request_and_observe_sync(
-                request,
-                start_if_needed=bool(config.ARGS["sidecar_start"]),
-                wait_for_result=bool(config.ARGS["sidecar_wait_result"]),
+                self.context.request,
+                start_if_needed=self.context.sidecar_start,
+                wait_for_result=self.context.sidecar_wait_result,
             )
         except SidecarUnavailableError as err:
-            if config.ARGS["from_api"]:
+            if self.context.from_api:
                 raise
             print(f"error: {err}", file=sys.stderr)  # noqa:T201
             raise SystemExit(1) from err
@@ -173,7 +193,7 @@ class _HistDataCom:  # noqa:R701
         payload = result.to_dict()
         if self._should_materialize_sidecar_repository_return():
             if _sidecar_repository_payload_failed(payload):
-                if config.ARGS["from_api"]:
+                if self.context.from_api:
                     return (
                         _repository_available_data_from_sidecar_payload(payload)
                         or {}
@@ -187,7 +207,7 @@ class _HistDataCom:  # noqa:R701
                 payload
             )
             if available_data is not None:
-                if config.ARGS["from_api"]:
+                if self.context.from_api:
                     return available_data
                 print_repository_table(available_data)
                 raise SystemExit(0)
@@ -196,26 +216,26 @@ class _HistDataCom:  # noqa:R701
             records = _cache_records_from_sidecar_payload(payload)
             if records:
                 return self._materialize_sidecar_api_return(records)
-        if not config.ARGS["from_api"]:
+        if not self.context.from_api:
             print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
         return payload
 
     def _should_materialize_sidecar_repository_return(self) -> bool:
         """Return whether a waited sidecar repo request should mimic legacy IO."""
         return bool(
-            config.ARGS["sidecar_wait_result"]
+            self.context.sidecar_wait_result
             and (
-                config.ARGS["available_remote_data"]
-                or config.ARGS["update_remote_data"]
+                self.context.available_remote_data
+                or self.context.update_remote_data
             )
         )
 
     def _should_materialize_sidecar_api_return(self, payload: dict) -> bool:
         """Return whether a completed sidecar run should mimic API returns."""
         return bool(
-            config.ARGS["from_api"]
-            and config.ARGS["api_return_type"]
-            and config.ARGS["sidecar_wait_result"]
+            self.context.from_api
+            and self.context.api_return_type
+            and self.context.sidecar_wait_result
             and payload.get("status") == "completed"
             and payload.get("result")
         )
@@ -227,7 +247,59 @@ class _HistDataCom:  # noqa:R701
         """Rebuild the legacy API dataframe return from sidecar cache artifacts."""
         from histdatacom.api import Api
 
-        return Api().merge_records(records)
+        return Api().merge_records(
+            records,
+            return_type=str(self.context.api_return_type or ""),
+        )
+
+
+def _resolve_runtime_context(options: Options) -> RuntimeContext:
+    """Resolve launch values without touching process-global config."""
+    args = ArgParser.arg_list_to_set(vars(options)).copy()
+    args["default_download_dir"] = set_working_data_dir(args["data_directory"])
+    args["api_return_type"] = normalize_api_return_type(args["api_return_type"])
+    options.api_return_type = args["api_return_type"]
+    request = RunRequest.from_options(options)
+    frozen_args = MappingProxyType(
+        {key: _freeze_runtime_arg(value) for key, value in args.items()}
+    )
+    return RuntimeContext(
+        args=frozen_args,
+        request=request,
+        version=bool(args["version"]),
+        from_api=bool(args["from_api"]),
+        use_sidecar=bool(should_submit_to_sidecar(args)),
+        sidecar_start=bool(args["sidecar_start"]),
+        sidecar_wait_result=bool(args["sidecar_wait_result"]),
+        api_return_type=args["api_return_type"],
+        available_remote_data=bool(args["available_remote_data"]),
+        update_remote_data=bool(args["update_remote_data"]),
+        import_to_influxdb=bool(args["import_to_influxdb"]),
+    )
+
+
+def _freeze_runtime_arg(value: Any) -> Any:
+    """Return an immutable equivalent for container-like runtime args."""
+    if isinstance(value, set):
+        return frozenset(value)
+    if isinstance(value, list):
+        return tuple(value)
+    if isinstance(value, dict):
+        return MappingProxyType(
+            {key: _freeze_runtime_arg(item) for key, item in value.items()}
+        )
+    return value
+
+
+def _thaw_runtime_arg(value: Any) -> Any:
+    """Return a foreground-compatible mutable equivalent of a runtime arg."""
+    if isinstance(value, frozenset):
+        return set(value)
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, Mapping):
+        return {key: _thaw_runtime_arg(item) for key, item in value.items()}
+    return value
 
 
 def main(

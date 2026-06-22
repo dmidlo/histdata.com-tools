@@ -17,6 +17,8 @@ def test_cutover_policy_uses_sidecar_as_default_runtime() -> None:
     assert "default" in policy["sidecar_activation"]
     assert "compatibility" in policy["foreground_lifecycle"]
     assert "config.ARGS" in policy["config_globals_lifecycle"]
+    assert "explicit foreground" in policy["config_globals_lifecycle"]
+    assert "default sidecar" in policy["config_globals_lifecycle"]
 
 
 def test_runtime_selection_allows_explicit_foreground_opt_out() -> None:

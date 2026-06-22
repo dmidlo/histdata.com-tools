@@ -355,8 +355,10 @@ an explicit foreground opt-out. The bundled executable and the Python Temporal
 SDK are separate concerns: base installs provide the SDK, while bundled platform
 wheels provide the local Temporal server executable.
 
-The foreground runtime and `config.ARGS` global argument state are now treated
-as compatibility surfaces. New orchestration work should use `RunRequest`,
+Default sidecar submissions are built from resolved runtime context and
+`RunRequest`, not `config.ARGS`. The foreground runtime and `config.ARGS` global
+argument state are explicit compatibility surfaces for `--foreground` and
+legacy foreground behavior. New orchestration work should use `RunRequest`,
 sidecar workflows, and sidecar activities. Foreground removal is a later
 deprecation step and requires a separate release note, migration window, and
 rollback plan.

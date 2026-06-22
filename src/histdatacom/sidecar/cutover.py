@@ -36,8 +36,9 @@ DEFAULT_CUTOVER_POLICY = RuntimeCutoverPolicy(
         "Options.use_sidecar = False while downstream callers migrate"
     ),
     config_globals_lifecycle=(
-        "config.ARGS remains a compatibility adapter for foreground and "
-        "legacy API behavior while sidecar requests use RunRequest"
+        "config.ARGS is limited to explicit foreground and legacy "
+        "compatibility paths; default sidecar requests use resolved runtime "
+        "context and RunRequest"
     ),
     unavailable_sidecar_behavior=(
         "default sidecar requests start the bundled local sidecar when "
