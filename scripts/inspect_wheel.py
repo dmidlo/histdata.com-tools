@@ -32,6 +32,12 @@ EXPECTED_CONSOLE_SCRIPTS = {
     "histdatacom-sidecar = histdatacom.sidecar.cli:main",
     "histdatacom-sidecar-worker = histdatacom.sidecar.worker:main",
 }
+EXPECTED_METADATA_CLASSIFIERS = {
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX",
+    "Operating System :: POSIX :: Linux",
+}
 
 
 def _current_platform_key(
@@ -192,6 +198,15 @@ def inspect_wheel(
     provides_extra = set(wheel_metadata.get_all("Provides-Extra", []))
     if "temporal" not in provides_extra:
         raise SystemExit("temporal optional extra missing from wheel metadata")
+    classifiers = set(wheel_metadata.get_all("Classifier", []))
+    missing_classifiers = sorted(
+        EXPECTED_METADATA_CLASSIFIERS - classifiers
+    )
+    if missing_classifiers:
+        raise SystemExit(
+            "wheel metadata missing platform classifiers: "
+            f"{missing_classifiers}"
+        )
     requires_dist = [
         requirement.lower()
         for requirement in wheel_metadata.get_all("Requires-Dist", [])
@@ -238,6 +253,7 @@ def inspect_wheel(
         )
     return {
         "wheel": wheel_path.name,
+        "classifiers": sorted(classifiers),
         "name": wheel_metadata["Name"],
         "requires_python": wheel_metadata["Requires-Python"],
         "provides_extra": sorted(provides_extra),

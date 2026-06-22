@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+from setuptools.config.pyprojecttoml import read_configuration
 import yaml
 
 
@@ -33,6 +34,14 @@ def _release_workflow() -> dict[str, object]:
         Path(__file__).resolve().parents[2] / ".github/workflows/release.yml"
     )
     loaded = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict)
+    return loaded
+
+
+def _pyproject_config() -> dict[str, object]:
+    """Return parsed pyproject metadata through setuptools' TOML reader."""
+    pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    loaded = read_configuration(pyproject_path)
     assert isinstance(loaded, dict)
     return loaded
 
@@ -110,3 +119,17 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
     }
     assert jobs["publish-testpypi"]["needs"] == "assemble-release-artifacts"
     assert jobs["publish-pypi"]["needs"] == "assemble-release-artifacts"
+
+
+def test_package_metadata_advertises_platform_wheel_support() -> None:
+    """PyPI metadata should match the sidecar platform wheel support matrix."""
+    project = _pyproject_config()["project"]
+    assert isinstance(project, dict)
+    classifiers = set(project["classifiers"])
+
+    assert {
+        "Operating System :: MacOS",
+        "Operating System :: Microsoft :: Windows",
+        "Operating System :: POSIX",
+        "Operating System :: POSIX :: Linux",
+    } <= classifiers

@@ -73,6 +73,10 @@ def test_inspect_wheel_accepts_bundled_platform_executable(
                     "Name: histdatacom",
                     "Version: 1.0.0",
                     "Requires-Python: >=3.10.0",
+                    "Classifier: Operating System :: MacOS",
+                    "Classifier: Operating System :: Microsoft :: Windows",
+                    "Classifier: Operating System :: POSIX",
+                    "Classifier: Operating System :: POSIX :: Linux",
                     "Provides-Extra: temporal",
                     "Provides-Extra: all",
                     "Requires-Dist: temporalio>=1.10,<2",
@@ -118,4 +122,7 @@ def test_inspect_wheel_accepts_bundled_platform_executable(
 
     assert report["sidecar"]["embedded_binary"] is True
     assert report["sidecar"]["bundled_platforms"] == ["macos-arm64"]
+    assert set(module.EXPECTED_METADATA_CLASSIFIERS) <= set(
+        report["classifiers"]
+    )
     assert report["wheel_tags"] == ["py3-none-macosx_11_0_arm64"]
