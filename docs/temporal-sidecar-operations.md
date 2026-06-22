@@ -9,24 +9,24 @@ the runtime foundation is stable.
 
 ## Current Packaging Status
 
-The ordinary foreground CLI and API path remains the production default:
+The local Temporal sidecar is now the production default for ordinary CLI and
+API runs:
 
 ```sh
 histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
-Sidecar-backed execution is opt-in through `--sidecar` or
-`Options.use_sidecar = True`. This is the current cutover policy for the
-published PyPI package: the sidecar is the migration target, but it does not
-become the default runtime until bundled platform artifacts, worker coverage,
-and operator smoke coverage are ready to support a default-runtime flip.
+Default requests submit a `RunRequest` to the sidecar and start the bundled
+local sidecar when no healthy sidecar is running. `--sidecar` remains accepted
+as a compatibility alias for scripts that already passed it during migration.
 
-Foreground execution and `config.ARGS` remain supported compatibility surfaces
-during this phase. New orchestration behavior should be expressed as
-`RunRequest` payloads, Temporal workflows, and Temporal activities. A later
-cutover issue must provide release notes, deprecation timing, and fallback
-criteria before removing the foreground path or changing `Options.use_sidecar`
-from opt-in to default.
+Foreground execution and `config.ARGS` remain supported compatibility surfaces.
+Use `--foreground` on the CLI or `Options.use_sidecar = False` in API code when
+an operator needs the queue-free foreground runtime for rollback or platform
+recovery. New orchestration behavior should be expressed as `RunRequest`
+payloads, Temporal workflows, and Temporal activities. Removing foreground
+compatibility is a later deprecation step and requires a separate release note,
+migration window, and rollback plan.
 
 Install the Temporal client and worker dependency surface when using sidecar
 job submission, job inspection, or workers:
@@ -63,18 +63,19 @@ Rollback behavior is intentionally conservative. If a platform executable or
 wheel is bad after publish, yank the affected platform wheel and cut a
 replacement release. The sdist and universal fallback wheel are metadata-only
 recovery artifacts; they keep the package installable while operators provide
-an explicit Temporal executable path.
+an explicit Temporal executable path, or temporarily opt out with
+`--foreground` / `Options.use_sidecar = False`.
 
 Default-runtime failure policy:
 
-- Foreground CLI/API runs do not probe sidecar resources.
-- Explicit sidecar runs require a running sidecar, or `--sidecar-start` /
-  `Options.sidecar_start = True` to start one.
-- Metadata-only wheels and unsupported platforms fail explicit sidecar starts
-  with a `SidecarUnavailableError`/nonzero CLI exit unless an operator supplies
+- Default CLI/API runs use the sidecar and start it when no healthy sidecar is
+  running.
+- `--foreground` / `Options.use_sidecar = False` runs through the compatibility
+  foreground path and does not probe sidecar resources.
+- Metadata-only wheels and unsupported platforms fail sidecar starts with a
+  `SidecarUnavailableError`/nonzero CLI exit unless an operator supplies
   `histdatacom-sidecar start --executable /path/to/temporal`.
-- The runtime never silently falls back from an explicit sidecar request to
-  foreground execution.
+- The runtime never silently falls back from sidecar to foreground execution.
 
 ## Runtime Model
 
@@ -215,17 +216,23 @@ histdatacom-sidecar --workspace /path/to/project status --json
 
 ## Sidecar Job Submission
 
-Foreground behavior stays unchanged unless `--sidecar` is set:
+Submit through the default sidecar runtime and start it if no healthy server is
+already running:
 
 ```sh
 histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
-Submit the same request through the sidecar and start it if no healthy server
-is already running:
+Pass `--sidecar` when existing automation still includes the old explicit flag:
 
 ```sh
 histdatacom --sidecar --sidecar-start -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+```
+
+Require an already-running sidecar instead of autostarting one:
+
+```sh
+histdatacom --no-sidecar-start -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
 Submit without waiting for the workflow result:
@@ -234,15 +241,19 @@ Submit without waiting for the workflow result:
 histdatacom --sidecar --sidecar-start --sidecar-submit-only -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
-Sidecar-backed API calls use the same public options:
+Run through the compatibility foreground runtime:
+
+```sh
+histdatacom --foreground -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+```
+
+Sidecar-backed API calls use the same public options and sidecar defaults:
 
 ```python
 import histdatacom
 from histdatacom.options import Options
 
 options = Options()
-options.use_sidecar = True
-options.sidecar_start = True
 options.sidecar_wait_result = True
 options.api_return_type = "polars"
 options.formats = {"ascii"}
@@ -252,6 +263,10 @@ options.start_yearmonth = "now"
 
 data = histdatacom(options)
 ```
+
+Set `options.sidecar_start = False` when an API caller should require a
+pre-started sidecar instead of starting one. Set `options.use_sidecar = False`
+only for explicit foreground compatibility runs.
 
 When `sidecar_wait_result` is `True`, API calls with `api_return_type` return
 the requested `polars`, `pandas`, or `arrow` object by materializing completed
@@ -481,8 +496,10 @@ Temporal executable not bundled:
 Sidecar unavailable:
 
 - Symptom: CLI exits nonzero or API raises `SidecarUnavailableError`.
-- Fix: run `histdatacom-sidecar status --json`, start the sidecar manually, or
-  use `--sidecar-start` / `Options.sidecar_start = True`.
+- Fix: run `histdatacom-sidecar status --json` and `histdatacom-sidecar doctor
+  --json`, start the sidecar manually with an explicit executable when using a
+  metadata-only artifact, or use `--foreground` / `Options.use_sidecar = False`
+  as a compatibility rollback.
 
 Port collisions:
 

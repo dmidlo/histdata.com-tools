@@ -9,18 +9,20 @@ from histdatacom.sidecar.cutover import (
 )
 
 
-def test_cutover_policy_keeps_foreground_as_default_runtime() -> None:
-    """The production default should stay explicit while migration continues."""
+def test_cutover_policy_uses_sidecar_as_default_runtime() -> None:
+    """The production default should now be the sidecar runtime."""
     policy = cutover_policy_payload()
 
-    assert policy["default_runtime"] == FOREGROUND_RUNTIME
-    assert "explicit" in policy["sidecar_activation"]
+    assert policy["default_runtime"] == SIDECAR_RUNTIME
+    assert "default" in policy["sidecar_activation"]
     assert "compatibility" in policy["foreground_lifecycle"]
     assert "config.ARGS" in policy["config_globals_lifecycle"]
 
 
-def test_runtime_selection_requires_explicit_sidecar_flag() -> None:
-    """CLI/API cutover selection should be controlled by use_sidecar."""
+def test_runtime_selection_allows_explicit_foreground_opt_out() -> None:
+    """CLI/API cutover selection should allow foreground opt-out."""
+    assert should_submit_to_sidecar({})
+    assert selected_runtime({}) == SIDECAR_RUNTIME
     assert not should_submit_to_sidecar({"use_sidecar": False})
     assert selected_runtime({"use_sidecar": False}) == FOREGROUND_RUNTIME
     assert should_submit_to_sidecar({"use_sidecar": True})

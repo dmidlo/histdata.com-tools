@@ -25,7 +25,6 @@ def test_histdata_com() -> None:
 def _sidecar_options(api_return_type: str = "polars") -> Options:
     """Return a small API request configured for sidecar execution."""
     options = Options()
-    options.use_sidecar = True
     options.pairs = {"eurusd"}
     options.formats = {"ascii"}
     options.timeframes = {"M1"}
@@ -37,7 +36,6 @@ def _sidecar_options(api_return_type: str = "polars") -> Options:
 def _sidecar_repository_options() -> Options:
     """Return an API repository request configured for sidecar execution."""
     options = Options()
-    options.use_sidecar = True
     options.available_remote_data = True
     options.pairs = {"eurusd", "gbpusd"}
     options.by = "start_dsc"
@@ -142,7 +140,7 @@ def _sidecar_cache_result(tmp_path: Path) -> SidecarJobResult:
 def test_api_options_can_submit_sidecar_job_and_return_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """API callers should be able to opt into sidecar-backed execution."""
+    """API callers should submit sidecar-backed jobs by default."""
     import histdatacom.histdata_com as histdata_com
 
     captured: dict[str, object] = {}
@@ -165,33 +163,29 @@ def test_api_options_can_submit_sidecar_job_and_return_result(
     assert captured["request"].pairs == ("eurusd",)
     assert captured["request"].api_return_type == "polars"
     assert captured["kwargs"] == {
-        "start_if_needed": False,
+        "start_if_needed": True,
         "wait_for_result": True,
     }
 
 
-def test_api_default_runtime_uses_foreground_not_sidecar(
+def test_api_default_runtime_uses_sidecar(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """API calls should stay on foreground unless sidecar is explicit."""
+    """API calls should submit to sidecar by default."""
     import histdatacom.histdata_com as histdata_com
 
     captured: dict[str, object] = {}
 
-    def fail_submit(*args: object, **kwargs: object) -> object:
-        raise AssertionError("sidecar should not be used by default")
-
-    def fake_foreground(request, args: dict) -> dict[str, object]:
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
         captured["request"] = request
-        captured["args"] = args
-        return {"runtime": "foreground"}
+        captured["kwargs"] = kwargs
+        return _job_result()
 
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
-        fail_submit,
+        fake_submit,
     )
-    monkeypatch.setattr(histdata_com, "run_foreground", fake_foreground)
     options = Options()
     options.pairs = {"eurusd"}
     options.formats = {"ascii"}
@@ -200,33 +194,32 @@ def test_api_default_runtime_uses_foreground_not_sidecar(
 
     result = histdata_com.main(options)
 
-    assert result == {"runtime": "foreground"}
+    assert result["status"] == "completed"
     assert captured["request"].pairs == ("eurusd",)
-    assert captured["args"]["use_sidecar"] is False
+    assert captured["kwargs"] == {
+        "start_if_needed": True,
+        "wait_for_result": True,
+    }
 
 
-def test_cli_default_runtime_uses_foreground_not_sidecar(
+def test_cli_default_runtime_uses_sidecar(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CLI calls should keep foreground behavior unless --sidecar is set."""
+    """CLI calls should submit to sidecar by default."""
     import histdatacom.histdata_com as histdata_com
 
     captured: dict[str, object] = {}
 
-    def fail_submit(*args: object, **kwargs: object) -> object:
-        raise AssertionError("sidecar should not be used by default")
-
-    def fake_foreground(request, args: dict) -> dict[str, object]:
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
         captured["request"] = request
-        captured["args"] = args
-        return {"runtime": "foreground"}
+        captured["kwargs"] = kwargs
+        return _job_result()
 
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
-        fail_submit,
+        fake_submit,
     )
-    monkeypatch.setattr(histdata_com, "run_foreground", fake_foreground)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -245,6 +238,90 @@ def test_cli_default_runtime_uses_foreground_not_sidecar(
     )
 
     assert histdata_com.main() is None
+    assert captured["request"].pairs == ("eurusd",)
+    assert captured["kwargs"] == {
+        "start_if_needed": True,
+        "wait_for_result": True,
+    }
+
+
+def test_cli_foreground_opt_out_uses_compatibility_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI callers should be able to explicitly run the foreground runtime."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("foreground opt-out should not submit sidecar")
+
+    def fake_foreground(request, args: dict) -> dict[str, object]:
+        captured["request"] = request
+        captured["args"] = args
+        return {"runtime": "foreground"}
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(histdata_com, "run_foreground", fake_foreground)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--foreground",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    assert histdata_com.main() is None
+    assert captured["request"].pairs == ("eurusd",)
+    assert captured["args"]["use_sidecar"] is False
+
+
+def test_api_foreground_opt_out_uses_compatibility_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API callers should be able to opt out of sidecar execution."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("foreground opt-out should not submit sidecar")
+
+    def fake_foreground(request, args: dict) -> dict[str, object]:
+        captured["request"] = request
+        captured["args"] = args
+        return {"runtime": "foreground"}
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(histdata_com, "run_foreground", fake_foreground)
+    options = Options()
+    options.use_sidecar = False
+    options.pairs = {"eurusd"}
+    options.formats = {"ascii"}
+    options.timeframes = {"M1"}
+    options.start_yearmonth = "2022-12"
+
+    result = histdata_com.main(options)
+
+    assert result == {"runtime": "foreground"}
     assert captured["request"].pairs == ("eurusd",)
     assert captured["args"]["use_sidecar"] is False
 
@@ -291,7 +368,7 @@ def test_api_sidecar_dataframe_return_is_materialized_from_cache_artifacts(
     assert len(result) == 3
     assert captured["request"].api_return_type == api_return_type
     assert captured["kwargs"] == {
-        "start_if_needed": False,
+        "start_if_needed": True,
         "wait_for_result": True,
     }
 
@@ -322,7 +399,7 @@ def test_api_sidecar_repository_request_returns_available_data(
     assert captured["request"].available_remote_data is True
     assert captured["request"].metadata["repo_sort"] == "start_dsc"
     assert captured["kwargs"] == {
-        "start_if_needed": False,
+        "start_if_needed": True,
         "wait_for_result": True,
     }
 
@@ -443,7 +520,7 @@ def test_api_sidecar_repository_submit_only_keeps_job_payload_return(
     assert result["result"] is None
     assert captured["request"].available_remote_data is True
     assert captured["kwargs"] == {
-        "start_if_needed": False,
+        "start_if_needed": True,
         "wait_for_result": False,
     }
 
@@ -478,7 +555,7 @@ def test_api_sidecar_submit_only_keeps_job_payload_return(
     assert result["result"] is None
     assert captured["request"].api_return_type == "polars"
     assert captured["kwargs"] == {
-        "start_if_needed": False,
+        "start_if_needed": True,
         "wait_for_result": False,
     }
 

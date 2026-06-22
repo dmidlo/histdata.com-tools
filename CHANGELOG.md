@@ -1,3 +1,12 @@
+## Unreleased
+
+### Changed
+
+- **temporal-sidecar**: make the Temporal sidecar the default CLI/API runtime.
+  The foreground runtime remains available as a compatibility rollback through
+  `--foreground` or `Options.use_sidecar = False`, and default sidecar runs
+  start the bundled local sidecar when needed.
+
 ## 0.78.4 (2022-12-13)
 
 ### Fix

@@ -76,6 +76,7 @@ repos:
     types:
       - python
     args:
+      - --foreground
       - -A
   - id: coverage-run
     name: coverage-run

@@ -185,6 +185,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args.append("-d")
         if self.arg_namespace.use_sidecar:
             args.append("--sidecar")
+        else:
+            args.append("--foreground")
         if self.arg_namespace.sidecar_start:
             args.append("--sidecar-start")
         if not self.arg_namespace.sidecar_wait_result:
@@ -854,14 +856,36 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             "--sidecar",
             dest="use_sidecar",
             action="store_true",
-            help="submit this run to the local Temporal sidecar",
+            help=(
+                "submit this run to the local Temporal sidecar "
+                "(default runtime)"
+            ),
+        )
+        sidecar_args.add_argument(
+            "--foreground",
+            dest="use_sidecar",
+            action="store_false",
+            help=(
+                "run through the compatibility foreground runtime instead "
+                "of the default sidecar runtime"
+            ),
         )
         sidecar_args.add_argument(
             "--sidecar-start",
+            dest="sidecar_start",
             action="store_true",
             help=(
                 "start the sidecar server and worker fleet only when no "
                 "healthy sidecar is running"
+            ),
+        )
+        sidecar_args.add_argument(
+            "--no-sidecar-start",
+            dest="sidecar_start",
+            action="store_false",
+            help=(
+                "submit to the sidecar only when a healthy sidecar is already "
+                "running"
             ),
         )
         sidecar_args.add_argument(

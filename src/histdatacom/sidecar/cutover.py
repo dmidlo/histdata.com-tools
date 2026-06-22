@@ -26,38 +26,47 @@ class RuntimeCutoverPolicy:
 
 
 DEFAULT_CUTOVER_POLICY = RuntimeCutoverPolicy(
-    default_runtime=FOREGROUND_RUNTIME,
-    sidecar_activation="explicit --sidecar or Options.use_sidecar opt-in",
+    default_runtime=SIDECAR_RUNTIME,
+    sidecar_activation=(
+        "default CLI/API runtime; --sidecar remains accepted as a "
+        "compatibility alias"
+    ),
     foreground_lifecycle=(
-        "supported compatibility runtime until a later issue flips the "
-        "production default"
+        "supported compatibility runtime through --foreground or "
+        "Options.use_sidecar = False while downstream callers migrate"
     ),
     config_globals_lifecycle=(
         "config.ARGS remains a compatibility adapter for foreground and "
         "legacy API behavior while sidecar requests use RunRequest"
     ),
     unavailable_sidecar_behavior=(
-        "explicit sidecar requests fail clearly; non-sidecar requests keep "
-        "using foreground"
+        "default sidecar requests start the bundled local sidecar when "
+        "needed; startup or connection failures raise SidecarUnavailableError "
+        "or exit nonzero with a clear message"
     ),
     unsupported_artifact_behavior=(
-        "metadata-only wheels and unsupported platforms do not auto-select "
-        "sidecar; explicit start requests require a bundled or operator "
-        "provided Temporal executable"
+        "metadata-only wheels and unsupported platforms require an operator "
+        "provided Temporal executable for sidecar startup, or explicit "
+        "foreground opt-out for compatibility execution"
     ),
 )
 
 
 def should_submit_to_sidecar(args: Mapping[str, object]) -> bool:
     """Return whether parsed CLI/API args request the sidecar runtime."""
-    return bool(args.get("use_sidecar"))
+    return bool(
+        args.get(
+            "use_sidecar",
+            DEFAULT_CUTOVER_POLICY.default_runtime == SIDECAR_RUNTIME,
+        )
+    )
 
 
 def selected_runtime(args: Mapping[str, object]) -> str:
     """Return the selected runtime for parsed CLI/API args."""
     if should_submit_to_sidecar(args):
         return SIDECAR_RUNTIME
-    return DEFAULT_CUTOVER_POLICY.default_runtime
+    return FOREGROUND_RUNTIME
 
 
 def cutover_policy_payload() -> dict[str, str]:

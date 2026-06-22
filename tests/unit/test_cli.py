@@ -84,10 +84,10 @@ def test_invalid_cli_inputs_exit_nonzero(
     assert err.value.code == 1
 
 
-def test_sidecar_cli_flags_are_opt_in(
+def test_sidecar_cli_flags_preserve_default_runtime_controls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Foreground sidecar execution should preserve normal CLI validation."""
+    """Sidecar flags should preserve normal CLI validation."""
     monkeypatch.setattr(
         sys,
         "argv",
@@ -113,6 +113,64 @@ def test_sidecar_cli_flags_are_opt_in(
     assert options.use_sidecar
     assert options.sidecar_start
     assert not options.sidecar_wait_result
+    assert options.validate_urls
+
+
+def test_foreground_cli_flag_opts_out_of_default_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Operators should have an explicit foreground rollback switch."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--foreground",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert not options.use_sidecar
+    assert options.sidecar_start
+    assert options.validate_urls
+
+
+def test_no_sidecar_start_cli_flag_requires_running_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Operators should be able to disable default sidecar autostart."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--no-sidecar-start",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.use_sidecar
+    assert not options.sidecar_start
     assert options.validate_urls
 
 
