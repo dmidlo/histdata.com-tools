@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Mapping
+from typing import Any, Mapping
 
+import pytest
+
+from histdatacom.exceptions import RetryPolicyName
 from histdatacom.manifest_store import (
     DATASET_PLAN_BATCHES_KEY,
     DATASET_PLAN_REF_KEY,
@@ -642,6 +645,9 @@ def test_workflow_topology_documents_expected_hierarchy() -> None:
     """Topology docs should list the parent and child workflow hierarchy."""
     document = workflows.workflow_topology_document()
     specs = {item["name"]: item for item in document["workflows"]}
+    activity_policies = {
+        item["activity_name"]: item for item in document["activity_policies"]
+    }
 
     assert document["schema_version"] == 1
     assert document["metadata_keys"]["fanout"] == workflows.FANOUT_METADATA_KEY
@@ -680,6 +686,85 @@ def test_workflow_topology_documents_expected_hierarchy() -> None:
         "ImportWorkflow",
     ]
     assert "rows" in str(document["history_policy"])
+    assert set(activity_policies) == set(
+        workflows.OPERATION_ACTIVITIES.values()
+    )
+    assert (
+        activity_policies["validate_urls"]["retry_policy"]["name"]
+        == RetryPolicyName.NETWORK.value
+    )
+    assert (
+        activity_policies["import_to_influx"]["retry_policy"]["name"]
+        == RetryPolicyName.IDEMPOTENT_WRITE.value
+    )
+    assert (
+        activity_policies["dataset_plan"]["retry_policy"]["name"]
+        == RetryPolicyName.NONE.value
+    )
+    assert (
+        activity_policies["download_archives"]["heartbeat_timeout_seconds"]
+        == 60
+    )
+
+
+def test_activity_execution_policy_rejects_unknown_activity() -> None:
+    """Activity policy lookups should fail loudly for missing metadata."""
+    with pytest.raises(ValueError, match="unknown activity policy"):
+        workflows.activity_execution_policy("unknown_activity")
+
+
+def test_config_or_local_only_activity_policies_do_not_retry() -> None:
+    """Config/local validation stages should not receive Temporal retries."""
+    for activity_name in ("dataset_plan", "extract_csv", "build_cache"):
+        policy = workflows.activity_execution_policy(activity_name)
+        assert policy.retry_policy.name is RetryPolicyName.NONE
+        assert policy.retry_policy.maximum_attempts == 1
+
+
+def test_temporal_activity_executor_passes_stage_policy_options(
+    monkeypatch,
+) -> None:
+    """Temporal activity calls should receive timeout, heartbeat, and retry options."""
+    captured: dict[str, Any] = {}
+
+    async def execute_activity(
+        activity_name: str,
+        payload: Mapping[str, JSONValue],
+        **options: Any,
+    ) -> Mapping[str, object]:
+        captured["activity_name"] = activity_name
+        captured["payload"] = dict(payload)
+        captured["options"] = dict(options)
+        return StageResult(
+            work_id="download-work",
+            stage="download_archives",
+            status=WorkStatus.COMPLETED,
+        ).to_dict()
+
+    monkeypatch.setattr(
+        workflows.workflow,
+        "execute_activity",
+        execute_activity,
+    )
+
+    result = asyncio.run(
+        workflows.TemporalActivityExecutor().execute_activity(
+            "download_archives",
+            {"stage": "download_archives"},
+            task_queue="queue-network",
+        )
+    )
+
+    options = captured["options"]
+    assert isinstance(options, dict)
+    assert captured["activity_name"] == "download_archives"
+    assert options["task_queue"] == "queue-network"
+    assert options["start_to_close_timeout"].total_seconds() == 3600
+    assert options["heartbeat_timeout"].total_seconds() == 60
+    retry_policy = options["retry_policy"]
+    assert retry_policy.maximum_attempts == 5
+    assert retry_policy.initial_interval.total_seconds() == 2.0
+    assert result["status"] == WorkStatus.COMPLETED.value
 
 
 def test_repository_only_request_only_plans_repository_refresh() -> None:

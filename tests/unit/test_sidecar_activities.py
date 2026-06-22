@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, get_type_hints
 
 import pytest
+from temporalio.exceptions import ApplicationError
 
 from histdatacom.activity_stages import UrlValidationError
 from histdatacom.histdata_ascii import (
@@ -652,8 +653,11 @@ def test_validate_urls_activity_returns_failed(monkeypatch, tmp_path) -> None:
     assert not result["result"]["failure"]["retryable"]
 
 
-def test_validate_urls_activity_returns_retried(monkeypatch, tmp_path) -> None:
-    """Retryable validation failures should flow through the activity."""
+def test_validate_urls_activity_raises_retryable_temporal_error(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Retryable validation failures should be retried by Temporal."""
 
     def fetch(url: str, timeout: int):
         raise UrlValidationError(
@@ -667,11 +671,15 @@ def test_validate_urls_activity_returns_retried(monkeypatch, tmp_path) -> None:
         fetch,
     )
 
-    result = validate_urls_activity(_validation_payload(tmp_path))
+    with pytest.raises(ApplicationError) as raised:
+        validate_urls_activity(_validation_payload(tmp_path))
 
-    assert result["result"]["status"] == WorkStatus.RETRIED.value
-    assert result["result"]["failure"]["code"] == "URL_FETCH_RETRYABLE"
-    assert result["result"]["failure"]["retryable"]
+    assert raised.value.type == "URL_FETCH_RETRYABLE"
+    assert raised.value.non_retryable is False
+    [detail] = raised.value.details
+    assert detail["stage_result"]["status"] == WorkStatus.RETRIED.value
+    assert detail["stage_result"]["failure"]["retryable"] is True
+    assert detail["retry_policy"]["name"] == "network"
 
 
 def test_validate_urls_activity_returns_cancelled_when_requested(
@@ -855,11 +863,11 @@ def test_import_to_influx_activity_writes_tick_batches(
     assert result["result"]["metrics"]["line_count"] == 3
 
 
-def test_import_to_influx_activity_reports_retryable_write_failure(
+def test_import_to_influx_activity_raises_retryable_write_failure(
     monkeypatch,
     tmp_path,
 ) -> None:
-    """Writer failures should be explicit and retry-aware."""
+    """Writer failures should be explicit and retried by Temporal."""
     FakeInfluxWriter.instances.clear()
     FakeInfluxWriter.fail_with = OSError("temporary influx failure")
     monkeypatch.setattr(
@@ -867,13 +875,18 @@ def test_import_to_influx_activity_reports_retryable_write_failure(
         FakeInfluxWriter,
     )
 
-    result = import_to_influx_activity(_influx_payload(tmp_path))
+    with pytest.raises(ApplicationError) as raised:
+        import_to_influx_activity(_influx_payload(tmp_path))
 
-    assert result["work_item"]["status"] == WorkStatus.RETRIED.value
-    assert result["result"]["status"] == WorkStatus.RETRIED.value
-    assert result["result"]["failure"]["code"] == "INFLUX_IMPORT_RETRYABLE"
-    assert result["result"]["failure"]["retryable"] is True
-    assert result["result"]["failure"]["detail"]["idempotent_retry"] is True
+    assert raised.value.type == "INFLUX_IMPORT_RETRYABLE"
+    assert raised.value.non_retryable is False
+    [detail] = raised.value.details
+    assert detail["stage_result"]["status"] == WorkStatus.RETRIED.value
+    assert detail["stage_result"]["failure"]["retryable"] is True
+    assert (
+        detail["stage_result"]["failure"]["detail"]["idempotent_retry"] is True
+    )
+    assert detail["retry_policy"]["name"] == "idempotent_write"
     FakeInfluxWriter.fail_with = None
 
 

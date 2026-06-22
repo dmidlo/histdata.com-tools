@@ -27,6 +27,7 @@ from histdatacom.cancellation import (
 from histdatacom.exceptions import (
     CancellationOperationError,
     influx_failure_info,
+    retry_policy_for_error,
 )
 from histdatacom.manifest_store import (
     DATASET_PLAN_BATCHES_KEY,
@@ -133,6 +134,7 @@ def repository_refresh_activity(
         payload=payload,
         request=request,
     )
+    _raise_for_retryable_activity_result(result)
     return cast(dict[str, Any], result.to_dict())
 
 
@@ -235,6 +237,7 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
     ]
     if spilled:
         output_payload.pop("work_items", None)
+    _raise_for_retryable_activity_result(output.result)
     return output_payload
 
 
@@ -270,20 +273,14 @@ def validate_urls_activity(payload: dict[str, Any]) -> dict[str, Any]:
         request=request,
     )
     if len(outputs) == 1:
-        output_payload: dict[str, Any] = outputs[0].to_dict()
-        return output_payload
+        return _activity_output_payload(outputs[0])
 
-    return cast(
-        dict[str, Any],
-        {
-            "work_items": [output.work_item.to_dict() for output in outputs],
-            "stage_results": [output.result.to_dict() for output in outputs],
-            "result": _aggregate_activity_outputs(
-                outputs,
-                "validate_urls",
-            ).to_dict(),
-        },
+    aggregate = _aggregate_activity_outputs(
+        outputs,
+        "validate_urls",
     )
+    _raise_for_retryable_activity_result(aggregate)
+    return _activity_batch_payload(outputs, aggregate)
 
 
 @activity_defn(name="download_archives")
@@ -321,20 +318,14 @@ def download_archives_activity(
         request=request,
     )
     if len(outputs) == 1:
-        output_payload: dict[str, Any] = outputs[0].to_dict()
-        return output_payload
+        return _activity_output_payload(outputs[0])
 
-    return cast(
-        dict[str, Any],
-        {
-            "work_items": [output.work_item.to_dict() for output in outputs],
-            "stage_results": [output.result.to_dict() for output in outputs],
-            "result": _aggregate_activity_outputs(
-                outputs,
-                "download_archives",
-            ).to_dict(),
-        },
+    aggregate = _aggregate_activity_outputs(
+        outputs,
+        "download_archives",
     )
+    _raise_for_retryable_activity_result(aggregate)
+    return _activity_batch_payload(outputs, aggregate)
 
 
 @activity_defn(name="extract_csv")
@@ -371,20 +362,14 @@ def extract_csv_activity(
         request=request,
     )
     if len(outputs) == 1:
-        output_payload: dict[str, Any] = outputs[0].to_dict()
-        return output_payload
+        return _activity_output_payload(outputs[0])
 
-    return cast(
-        dict[str, Any],
-        {
-            "work_items": [output.work_item.to_dict() for output in outputs],
-            "stage_results": [output.result.to_dict() for output in outputs],
-            "result": _aggregate_activity_outputs(
-                outputs,
-                "extract_csv",
-            ).to_dict(),
-        },
+    aggregate = _aggregate_activity_outputs(
+        outputs,
+        "extract_csv",
     )
+    _raise_for_retryable_activity_result(aggregate)
+    return _activity_batch_payload(outputs, aggregate)
 
 
 @activity_defn(name="build_cache")
@@ -420,20 +405,14 @@ def build_cache_activity(
         request=request,
     )
     if len(outputs) == 1:
-        output_payload: dict[str, Any] = outputs[0].to_dict()
-        return output_payload
+        return _activity_output_payload(outputs[0])
 
-    return cast(
-        dict[str, Any],
-        {
-            "work_items": [output.work_item.to_dict() for output in outputs],
-            "stage_results": [output.result.to_dict() for output in outputs],
-            "result": _aggregate_activity_outputs(
-                outputs,
-                "build_cache",
-            ).to_dict(),
-        },
+    aggregate = _aggregate_activity_outputs(
+        outputs,
+        "build_cache",
     )
+    _raise_for_retryable_activity_result(aggregate)
+    return _activity_batch_payload(outputs, aggregate)
 
 
 @activity_defn(name="merge_cache")
@@ -490,6 +469,7 @@ def merge_cache_activity(
         ),
     )
     output_payload: dict[str, Any] = output.to_dict()
+    _raise_for_retryable_activity_result(output.result)
     return output_payload
 
 
@@ -543,20 +523,14 @@ def import_to_influx_activity(
         )
 
     if len(outputs) == 1:
-        output_payload: dict[str, Any] = outputs[0].to_dict()
-        return output_payload
+        return _activity_output_payload(outputs[0])
 
-    return cast(
-        dict[str, Any],
-        {
-            "work_items": [output.work_item.to_dict() for output in outputs],
-            "stage_results": [output.result.to_dict() for output in outputs],
-            "result": _aggregate_activity_outputs(
-                outputs,
-                "import_to_influx",
-            ).to_dict(),
-        },
+    aggregate = _aggregate_activity_outputs(
+        outputs,
+        "import_to_influx",
     )
+    _raise_for_retryable_activity_result(aggregate)
+    return _activity_batch_payload(outputs, aggregate)
 
 
 def default_activities() -> tuple[Callable[..., Any], ...]:
@@ -858,6 +832,40 @@ def _observe_and_persist_activity_output(
         work_item=observed.work_item,
     )
     return observed
+
+
+def _activity_output_payload(output: ActivityStageOutput) -> dict[str, Any]:
+    _raise_for_retryable_activity_result(output.result)
+    payload: dict[str, Any] = output.to_dict()
+    return payload
+
+
+def _activity_batch_payload(
+    outputs: tuple[ActivityStageOutput, ...],
+    aggregate: StageResult,
+) -> dict[str, Any]:
+    return {
+        "work_items": [output.work_item.to_dict() for output in outputs],
+        "stage_results": [output.result.to_dict() for output in outputs],
+        "result": aggregate.to_dict(),
+    }
+
+
+def _raise_for_retryable_activity_result(result: StageResult) -> None:
+    failure = result.failure
+    if failure is None or not failure.retryable:
+        return
+    from temporalio.exceptions import ApplicationError
+
+    raise ApplicationError(
+        failure.message,
+        {
+            "stage_result": result.to_dict(),
+            "retry_policy": retry_policy_for_error(failure).to_dict(),
+        },
+        type=failure.code,
+        non_retryable=False,
+    )
 
 
 def _observe_and_persist_stage_result(

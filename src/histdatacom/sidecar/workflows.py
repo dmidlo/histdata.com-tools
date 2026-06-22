@@ -13,6 +13,13 @@ from datetime import timedelta
 from importlib import import_module
 from typing import Any, Callable, Mapping, Protocol, TypeVar, cast
 
+from histdatacom.exceptions import (
+    ActivityRetryPolicy,
+    IDEMPOTENT_WRITE_RETRY_POLICY,
+    NETWORK_RETRY_POLICY,
+    NO_RETRY_POLICY,
+    STANDARD_RETRY_POLICY,
+)
 from histdatacom.manifest_store import (
     DATASET_PLAN_BATCHES_KEY,
     DATASET_PLAN_REF_KEY,
@@ -122,6 +129,27 @@ class WorkflowSpec:
             "operation_family": self.operation_family,
             "children": list(self.children),
             "history_policy": self.history_policy,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ActivityExecutionPolicy:
+    """Temporal activity policy metadata for one operation activity."""
+
+    activity_name: str
+    start_to_close_timeout_seconds: int
+    heartbeat_timeout_seconds: int
+    retry_policy: ActivityRetryPolicy
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return JSON-compatible activity execution policy metadata."""
+        return {
+            "activity_name": self.activity_name,
+            "start_to_close_timeout_seconds": (
+                self.start_to_close_timeout_seconds
+            ),
+            "heartbeat_timeout_seconds": self.heartbeat_timeout_seconds,
+            "retry_policy": self.retry_policy.to_dict(),
         }
 
 
@@ -385,8 +413,15 @@ class TemporalActivityExecutor:
         task_queue: str,
     ) -> Mapping[str, Any]:
         """Run an operation activity using Temporal's workflow API."""
+        policy = activity_execution_policy(activity_name)
         options: dict[str, Any] = {
-            "start_to_close_timeout": timedelta(minutes=30),
+            "start_to_close_timeout": timedelta(
+                seconds=policy.start_to_close_timeout_seconds,
+            ),
+            "heartbeat_timeout": timedelta(
+                seconds=policy.heartbeat_timeout_seconds,
+            ),
+            "retry_policy": _temporal_retry_policy(policy.retry_policy),
         }
         if task_queue:
             options["task_queue"] = task_queue
@@ -476,6 +511,56 @@ OPERATION_ACTIVITIES = {
     "MergeCacheWorkflow": "merge_cache",
     "ImportWorkflow": "import_to_influx",
 }
+ACTIVITY_EXECUTION_POLICIES = {
+    "repository_refresh": ActivityExecutionPolicy(
+        activity_name="repository_refresh",
+        start_to_close_timeout_seconds=600,
+        heartbeat_timeout_seconds=30,
+        retry_policy=NETWORK_RETRY_POLICY,
+    ),
+    "dataset_plan": ActivityExecutionPolicy(
+        activity_name="dataset_plan",
+        start_to_close_timeout_seconds=300,
+        heartbeat_timeout_seconds=30,
+        retry_policy=NO_RETRY_POLICY,
+    ),
+    "validate_urls": ActivityExecutionPolicy(
+        activity_name="validate_urls",
+        start_to_close_timeout_seconds=600,
+        heartbeat_timeout_seconds=30,
+        retry_policy=NETWORK_RETRY_POLICY,
+    ),
+    "download_archives": ActivityExecutionPolicy(
+        activity_name="download_archives",
+        start_to_close_timeout_seconds=3600,
+        heartbeat_timeout_seconds=60,
+        retry_policy=NETWORK_RETRY_POLICY,
+    ),
+    "extract_csv": ActivityExecutionPolicy(
+        activity_name="extract_csv",
+        start_to_close_timeout_seconds=900,
+        heartbeat_timeout_seconds=30,
+        retry_policy=NO_RETRY_POLICY,
+    ),
+    "build_cache": ActivityExecutionPolicy(
+        activity_name="build_cache",
+        start_to_close_timeout_seconds=1800,
+        heartbeat_timeout_seconds=30,
+        retry_policy=NO_RETRY_POLICY,
+    ),
+    "merge_cache": ActivityExecutionPolicy(
+        activity_name="merge_cache",
+        start_to_close_timeout_seconds=1800,
+        heartbeat_timeout_seconds=30,
+        retry_policy=STANDARD_RETRY_POLICY,
+    ),
+    "import_to_influx": ActivityExecutionPolicy(
+        activity_name="import_to_influx",
+        start_to_close_timeout_seconds=3600,
+        heartbeat_timeout_seconds=30,
+        retry_policy=IDEMPOTENT_WRITE_RETRY_POLICY,
+    ),
+}
 DEFAULT_MAX_WORK_ITEMS_PER_BATCH = 64
 BATCHING_METADATA_KEY = "temporal_batching"
 MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY = "max_work_items_per_batch"
@@ -503,6 +588,9 @@ def workflow_topology_document() -> dict[str, JSONValue]:
             "plan_spill": PLAN_SPILL_METADATA_KEY,
             "inline_work_item_limit": INLINE_WORK_ITEM_LIMIT_METADATA_KEY,
         },
+        "activity_policies": [
+            policy.to_dict() for policy in ACTIVITY_EXECUTION_POLICIES.values()
+        ],
         "history_policy": (
             "Workflow histories carry bounded metadata only. Stage outputs "
             "must return StageResult and ArtifactRef payloads rather than "
@@ -522,6 +610,30 @@ def workflow_topology_document() -> dict[str, JSONValue]:
 def workflow_names() -> tuple[str, ...]:
     """Return all registered workflow class names in topology order."""
     return tuple(spec.name for spec in WORKFLOW_TOPOLOGY)
+
+
+def activity_execution_policy(activity_name: str) -> ActivityExecutionPolicy:
+    """Return Temporal execution policy metadata for an activity."""
+    try:
+        return ACTIVITY_EXECUTION_POLICIES[activity_name]
+    except KeyError as err:
+        raise ValueError(f"unknown activity policy: {activity_name}") from err
+
+
+def _temporal_retry_policy(policy: ActivityRetryPolicy) -> Any:
+    from temporalio.common import RetryPolicy
+
+    return RetryPolicy(
+        initial_interval=timedelta(
+            seconds=policy.initial_interval_seconds,
+        ),
+        backoff_coefficient=policy.backoff_coefficient,
+        maximum_interval=timedelta(
+            seconds=policy.maximum_interval_seconds,
+        ),
+        maximum_attempts=policy.maximum_attempts,
+        non_retryable_error_types=policy.non_retryable_error_types,
+    )
 
 
 def build_run_child_invocations(

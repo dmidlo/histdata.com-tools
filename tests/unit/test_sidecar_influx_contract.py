@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import pytest
+from temporalio.exceptions import ApplicationError
 
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
@@ -136,18 +137,22 @@ def test_import_workflow_contract_classifies_retryable_influx_failures(
     executor = _LocalImportActivityExecutor()
     workflow = workflows.ImportWorkflow(activity_executor=executor)
 
-    summary = asyncio.run(workflow.run(payload))
+    with pytest.raises(ApplicationError) as raised:
+        asyncio.run(workflow.run(payload))
 
     [writer] = _FakeInfluxWriter.instances
-    result = summary["stage_results"][0]
+    [detail] = raised.value.details
+    result = detail["stage_result"]
     failure = result["failure"]
     assert writer.closed
     assert writer.batches == []
-    assert summary["status"] == WorkStatus.RETRIED.value
+    assert raised.value.type == "INFLUX_IMPORT_RETRYABLE"
+    assert raised.value.non_retryable is False
     assert result["status"] == WorkStatus.RETRIED.value
     assert failure["code"] == "INFLUX_IMPORT_RETRYABLE"
     assert failure["retryable"] is True
     assert failure["detail"]["idempotent_retry"] is True
+    assert detail["retry_policy"]["name"] == "idempotent_write"
     assert (tmp_path / CACHE_FILENAME).exists()
     _FakeInfluxWriter.fail_with = None
 
