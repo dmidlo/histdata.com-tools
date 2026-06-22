@@ -174,6 +174,29 @@ def test_no_sidecar_start_cli_flag_requires_running_sidecar(
     assert options.validate_urls
 
 
+def test_api_options_ignore_ambient_process_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API parsing should not depend on the executable path or pytest flags."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "/tmp/histdatacom-py310-ci/bin/python",
+            "--cov=histdatacom",
+            "--cov-report=xml",
+        ],
+    )
+    options = Options()
+    options.from_api = True
+    options.version = True
+
+    parsed = ArgParser(options)()
+
+    assert parsed.version is True
+    assert parsed.from_api is True
+
+
 def test_argparser_bare_construction_uses_fresh_option_namespace(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

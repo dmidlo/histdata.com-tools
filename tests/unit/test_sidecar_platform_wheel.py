@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import hashlib
+import json
+import os
 from pathlib import Path
 from types import ModuleType
 
@@ -133,7 +134,8 @@ def test_prepare_sidecar_binary_patches_manifest_and_copies_executable(
     )
     provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     assert bundled.is_file()
-    assert bundled.stat().st_mode & 0o111
+    if os.name != "nt":
+        assert bundled.stat().st_mode & 0o111
     assert provenance_path.is_file()
     assert manifest["embedded_binary"] is True
     assert manifest["platforms"]["macos-arm64"]["bundled"] is True

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import os
 import sys
 import tarfile
 import zipfile
@@ -77,7 +78,8 @@ def test_extract_executable_from_tar_archive(tmp_path: Path) -> None:
     )
 
     assert executable.read_bytes() == b"#!/bin/sh\n"
-    assert executable.stat().st_mode & 0o111
+    if os.name != "nt":
+        assert executable.stat().st_mode & 0o111
 
 
 def test_extract_executable_from_zip_archive(tmp_path: Path) -> None:

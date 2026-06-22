@@ -882,7 +882,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             self.print_help(sys.stdout)
             raise SystemExit(0)
 
-        if "histdatacom" not in sys.argv[0] and self.arg_namespace.from_api:
+        if self.arg_namespace.from_api:
             args = self._clean_from_api_args()
             self.parse_args(args, namespace=self.arg_namespace)
         else:

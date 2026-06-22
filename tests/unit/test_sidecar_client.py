@@ -532,8 +532,9 @@ def test_submit_run_request_uses_orchestration_queue(
     assert payload["metadata"]["workflow_topology_version"] == 1
     status_store_ref = payload["metadata"][STATUS_STORE_REF_KEY]
     assert status_store_ref["kind"] == "manifest_status_store"
-    assert status_store_ref["store_path"].endswith(
-        ".histdatacom/manifest-status.sqlite3"
+    assert Path(status_store_ref["store_path"]).parts[-2:] == (
+        ".histdatacom",
+        "manifest-status.sqlite3",
     )
     stored = client.sidecar_job_store(config).get_job_snapshot(
         "histdatacom-run-test"
