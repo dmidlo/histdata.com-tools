@@ -89,27 +89,26 @@ from histdatacom.utils import (
     replace_date_punct,
 )
 
-default_options = Options()
-
 
 class ArgParser(argparse.ArgumentParser):  # noqa:H601
     """Encapsulation class for argparse related operations."""
 
-    def __init__(self, options: Options = default_options):
+    def __init__(self, options: Options | None = None):
         """Set up argparse.
 
         bring in defaults DTO, setup cli params, receive
         and overwrite defaults with user cli args.
 
         Args:
-            options (Options): _description_. Defaults to default_options.
+            options (Options): runtime option namespace. A fresh namespace is
+                allocated when omitted.
         """
         # init _HistDataCom.ArgParser to extend argparse.ArgumentParser
         argparse.ArgumentParser.__init__(self, prog="histdatacom")
         # bring in the defaults arg DTO from outer class, use the
         # __dict__ representation of it to set argparse argument defaults.
 
-        self.arg_namespace = options
+        self.arg_namespace = options if options is not None else Options()
         self._default_args = self.arg_namespace.__dict__
         self.set_defaults(**self._default_args)
 

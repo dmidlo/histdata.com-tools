@@ -306,6 +306,95 @@ def test_cli_default_runtime_uses_sidecar(
     }
 
 
+def test_back_to_back_cli_sidecar_requests_use_fresh_parser_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI sidecar requests should not reuse parser state in one process."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: list[tuple[object, dict[str, object]]] = []
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured.append((request, kwargs))
+        return _job_result()
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--no-sidecar-start",
+            "--sidecar-submit-only",
+            "-I",
+            "-d",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "1-minute-bar-quotes",
+            "-s",
+            "2022-12",
+            "--data-directory",
+            str(tmp_path / "first"),
+        ],
+    )
+
+    first_result = histdata_com.main()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "-p",
+            "gbpusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2021-11",
+            "--data-directory",
+            str(tmp_path / "second"),
+        ],
+    )
+
+    second_result = histdata_com.main()
+
+    assert first_result is None
+    assert second_result is None
+    assert len(captured) == 2
+    first_request, first_kwargs = captured[0]
+    second_request, second_kwargs = captured[1]
+    assert first_request.pairs == ("eurusd",)
+    assert first_request.timeframes == ("M1",)
+    assert first_request.data_directory == str(tmp_path / "first")
+    assert first_request.import_to_influxdb
+    assert first_request.delete_after_influx
+    assert first_kwargs == {
+        "start_if_needed": False,
+        "wait_for_result": False,
+    }
+    assert second_request.pairs == ("gbpusd",)
+    assert second_request.timeframes == ("T",)
+    assert second_request.data_directory == str(tmp_path / "second")
+    assert second_request.validate_urls
+    assert not second_request.download_data_archives
+    assert not second_request.import_to_influxdb
+    assert not second_request.delete_after_influx
+    assert second_kwargs == {
+        "start_if_needed": True,
+        "wait_for_result": True,
+    }
+
+
 def test_cli_foreground_flag_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

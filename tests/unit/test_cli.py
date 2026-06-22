@@ -1,5 +1,6 @@
 """Pytest unit tests for histdatacom.cli.py."""
 
+from pathlib import Path
 import sys
 
 import pytest
@@ -171,6 +172,81 @@ def test_no_sidecar_start_cli_flag_requires_running_sidecar(
     assert options.use_sidecar
     assert not options.sidecar_start
     assert options.validate_urls
+
+
+def test_argparser_bare_construction_uses_fresh_option_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Repeated default parser construction should not share CLI state."""
+    first_data_dir = tmp_path / "first"
+    second_data_dir = tmp_path / "second"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--no-sidecar-start",
+            "--sidecar-submit-only",
+            "-I",
+            "-d",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "1-minute-bar-quotes",
+            "-s",
+            "2022-12",
+            "--data-directory",
+            str(first_data_dir),
+        ],
+    )
+
+    first_options = ArgParser()()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "-p",
+            "gbpusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2021-11",
+            "--data-directory",
+            str(second_data_dir),
+        ],
+    )
+
+    second_options = ArgParser()()
+
+    assert first_options.pairs == ["eurusd"]
+    assert first_options.formats == ["ascii"]
+    assert first_options.timeframes == ["M1"]
+    assert first_options.data_directory == str(first_data_dir)
+    assert first_options.validate_urls
+    assert first_options.download_data_archives
+    assert first_options.import_to_influxdb
+    assert first_options.delete_after_influx
+    assert not first_options.sidecar_start
+    assert not first_options.sidecar_wait_result
+
+    assert second_options.pairs == ["gbpusd"]
+    assert second_options.formats == ["ascii"]
+    assert second_options.timeframes == ["T"]
+    assert second_options.data_directory == str(second_data_dir)
+    assert second_options.validate_urls
+    assert not second_options.download_data_archives
+    assert not second_options.extract_csvs
+    assert not second_options.import_to_influxdb
+    assert not second_options.delete_after_influx
+    assert second_options.sidecar_start
+    assert second_options.sidecar_wait_result
 
 
 @pytest.mark.parametrize(
