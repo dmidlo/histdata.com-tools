@@ -242,6 +242,7 @@ def _influx_payload(
     timeframe: str = "M1",
     batch_size: str = "2",
     delete_after_influx: bool = False,
+    influx_config: dict | None = None,
 ) -> dict:
     """Return an Influx activity payload with a cache artifact."""
     filename = f"DAT_ASCII_EURUSD_{timeframe}_201202.csv"
@@ -259,6 +260,7 @@ def _influx_payload(
         batch_size=batch_size,
         import_to_influxdb=True,
         delete_after_influx=delete_after_influx,
+        metadata={"influx_config": influx_config} if influx_config else {},
     )
     return {
         "request": request.to_dict(),
@@ -839,6 +841,38 @@ def test_import_to_influx_activity_writes_m1_batches(
     assert result["result"]["metrics"]["line_count"] == 3
     assert result["result"]["metrics"]["heartbeat_count"] == 2
     assert "data" not in result
+
+
+def test_import_to_influx_activity_uses_request_influx_config(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Sidecar workers should use caller-resolved Influx connection config."""
+    FakeInfluxWriter.instances.clear()
+    FakeInfluxWriter.fail_with = None
+    monkeypatch.setattr(
+        "histdatacom.sidecar.activities._influx_batch_writer",
+        FakeInfluxWriter,
+    )
+
+    result = import_to_influx_activity(
+        _influx_payload(
+            tmp_path,
+            influx_config={
+                "INFLUX_ORG": "org",
+                "INFLUX_BUCKET": "bucket",
+                "INFLUX_URL": "http://127.0.0.1:8086",
+                "INFLUX_TOKEN": "token",
+            },
+        )
+    )
+
+    [writer] = FakeInfluxWriter.instances
+    assert writer.args["INFLUX_ORG"] == "org"
+    assert writer.args["INFLUX_BUCKET"] == "bucket"
+    assert writer.args["INFLUX_URL"] == "http://127.0.0.1:8086"
+    assert writer.args["INFLUX_TOKEN"] == "token"
+    assert result["result"]["status"] == WorkStatus.INFLUX_UPLOAD.value
 
 
 def test_import_to_influx_activity_writes_tick_batches(

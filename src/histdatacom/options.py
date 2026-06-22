@@ -38,3 +38,4 @@ class Options:
         self.use_sidecar: bool = True
         self.sidecar_start: bool = True
         self.sidecar_wait_result: bool = True
+        self.metadata: dict = {}

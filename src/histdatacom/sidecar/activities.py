@@ -553,11 +553,25 @@ def _repo_local_path(request: RunRequest) -> Path:
 
 
 def _influx_args(request: RunRequest) -> dict[str, Any]:
-    return {
+    args = {
         "default_download_dir": set_working_data_dir(request.data_directory),
         "batch_size": request.batch_size,
         "delete_after_influx": request.delete_after_influx,
     }
+    influx_config = request.metadata.get("influx_config")
+    if isinstance(influx_config, Mapping):
+        args.update(
+            {
+                key: str(influx_config.get(key, "") or "")
+                for key in (
+                    "INFLUX_ORG",
+                    "INFLUX_BUCKET",
+                    "INFLUX_URL",
+                    "INFLUX_TOKEN",
+                )
+            }
+        )
+    return args
 
 
 def _influx_batch_writer(args: Mapping[str, Any]) -> Any:

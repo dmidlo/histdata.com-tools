@@ -200,6 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="return after submission instead of waiting for the result",
     )
+    _add_job_command_common_args(submit, include_offline=False)
 
     list_jobs = job_subparsers.add_parser(
         "list",
@@ -216,6 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="maximum stored jobs to return in offline/fallback mode",
     )
+    _add_job_command_common_args(list_jobs, include_offline=True)
 
     for command, help_text in (
         ("inspect", "inspect one sidecar job"),
@@ -229,6 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         job_parser = job_subparsers.add_parser(command, help=help_text)
         _add_job_identity_args(job_parser)
+        _add_job_command_common_args(job_parser, include_offline=True)
         if command in {"cancel", "retry", "resume"}:
             job_parser.add_argument(
                 "--reason",
@@ -364,6 +367,27 @@ def _add_job_identity_args(parser: argparse.ArgumentParser) -> None:
         default="",
         help="Temporal run ID when targeting a specific run",
     )
+
+
+def _add_job_command_common_args(
+    parser: argparse.ArgumentParser,
+    *,
+    include_offline: bool,
+) -> None:
+    """Accept shared jobs options after a job subcommand."""
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="emit machine-readable JSON",
+    )
+    if include_offline:
+        parser.add_argument(
+            "--offline",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="read persisted local job snapshots without querying Temporal",
+        )
 
 
 def _add_maintenance_args(parser: argparse.ArgumentParser) -> None:

@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 import histdatacom
 from histdatacom import Options
 from histdatacom.cli import ArgParser
+from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.repository_output import (
     print_repository_failure,
     print_repository_table,
@@ -49,6 +50,7 @@ from histdatacom.sidecar.cutover import (
     should_submit_to_sidecar,
 )
 from histdatacom.utils import (
+    load_influx_yaml,
     set_working_data_dir,
     normalize_api_return_type,
 )
@@ -226,6 +228,7 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
     args["default_download_dir"] = set_working_data_dir(args["data_directory"])
     args["api_return_type"] = normalize_api_return_type(args["api_return_type"])
     options.api_return_type = args["api_return_type"]
+    _attach_influx_config_metadata(options, args)
     try:
         should_submit_to_sidecar(args)
     except ValueError as err:
@@ -246,6 +249,56 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         update_remote_data=bool(args["update_remote_data"]),
         import_to_influxdb=bool(args["import_to_influxdb"]),
     )
+
+
+def _attach_influx_config_metadata(
+    options: Options,
+    args: dict[str, Any],
+) -> None:
+    """Snapshot caller-local Influx config before sidecar handoff."""
+    if not bool(args.get("import_to_influxdb")):
+        return
+    metadata = dict(getattr(options, "metadata", {}) or {})
+    if isinstance(metadata.get("influx_config"), Mapping):
+        _validate_influx_metadata_config(metadata["influx_config"])
+        options.metadata = metadata
+        args["metadata"] = metadata
+        return
+    influx_yaml = load_influx_yaml()
+    influx_config = dict(influx_yaml.get("influxdb") or {})
+    missing = [
+        key
+        for key in ("org", "bucket", "url", "token")
+        if not influx_config.get(key)
+    ]
+    if missing:
+        missing_text = ", ".join(missing)
+        raise InfluxConfigurationError(
+            "influxdb.yaml is missing required influxdb keys: "
+            f"{missing_text}."
+        )
+    metadata["influx_config"] = {
+        "INFLUX_ORG": str(influx_config.get("org", "") or ""),
+        "INFLUX_BUCKET": str(influx_config.get("bucket", "") or ""),
+        "INFLUX_URL": str(influx_config.get("url", "") or ""),
+        "INFLUX_TOKEN": str(influx_config.get("token", "") or ""),
+    }
+    options.metadata = metadata
+    args["metadata"] = metadata
+
+
+def _validate_influx_metadata_config(config: Mapping[str, Any]) -> None:
+    """Validate serialized sidecar Influx connection keys."""
+    missing = [
+        key
+        for key in ("INFLUX_ORG", "INFLUX_BUCKET", "INFLUX_URL", "INFLUX_TOKEN")
+        if not config.get(key)
+    ]
+    if missing:
+        missing_text = ", ".join(missing)
+        raise InfluxConfigurationError(
+            "influx metadata is missing required keys: " f"{missing_text}."
+        )
 
 
 def _freeze_runtime_arg(value: Any) -> Any:

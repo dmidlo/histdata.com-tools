@@ -332,6 +332,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         if self.arg_namespace.import_to_influxdb:
             self.arg_namespace.validate_urls = True
             self.arg_namespace.download_data_archives = True
+            self.arg_namespace.extract_csvs = True
 
         if (
             not self.arg_namespace.download_data_archives

@@ -254,6 +254,7 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
     assert first_options.data_directory == str(first_data_dir)
     assert first_options.validate_urls
     assert first_options.download_data_archives
+    assert first_options.extract_csvs
     assert first_options.import_to_influxdb
     assert first_options.delete_after_influx
     assert not first_options.sidecar_start
@@ -337,7 +338,7 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
                 "update_remote_data": False,
                 "validate_urls": True,
                 "download_data_archives": True,
-                "extract_csvs": False,
+                "extract_csvs": True,
                 "import_to_influxdb": True,
             },
         ),

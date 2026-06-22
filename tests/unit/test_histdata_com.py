@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import histdatacom
+from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.options import Options
 from histdatacom.runtime_contracts import WorkStatus
 from histdatacom.sidecar.client import (
@@ -351,6 +352,19 @@ def test_back_to_back_cli_sidecar_requests_use_fresh_parser_state(
         "submit_run_request_and_observe_sync",
         fake_submit,
     )
+    (tmp_path / "influxdb.yaml").write_text(
+        "\n".join(
+            [
+                "influxdb:",
+                "  org: org",
+                "  bucket: bucket",
+                "  url: http://127.0.0.1:8086",
+                "  token: token",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -403,8 +417,14 @@ def test_back_to_back_cli_sidecar_requests_use_fresh_parser_state(
     assert first_request.pairs == ("eurusd",)
     assert first_request.timeframes == ("M1",)
     assert first_request.data_directory == str(tmp_path / "first")
+    assert first_request.validate_urls
+    assert first_request.download_data_archives
+    assert first_request.extract_csvs
     assert first_request.import_to_influxdb
     assert first_request.delete_after_influx
+    assert first_request.metadata["influx_config"]["INFLUX_BUCKET"] == (
+        "bucket"
+    )
     assert first_kwargs == {
         "start_if_needed": False,
         "wait_for_result": False,
@@ -599,6 +619,95 @@ def test_api_sidecar_repository_request_returns_available_data(
         "start_if_needed": True,
         "wait_for_result": True,
     }
+
+
+def test_influx_cli_config_is_captured_before_sidecar_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Influx imports should use the caller cwd, not the worker cwd."""
+    import histdatacom.histdata_com as histdata_com
+
+    (tmp_path / "influxdb.yaml").write_text(
+        "\n".join(
+            [
+                "influxdb:",
+                "  org: org",
+                "  bucket: bucket",
+                "  url: http://127.0.0.1:8086",
+                "  token: token",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _job_result()
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    options = _sidecar_options()
+    options.import_to_influxdb = True
+
+    histdata_com.main(options)
+
+    request = captured["request"]
+    assert request.validate_urls is True
+    assert request.download_data_archives is True
+    assert request.extract_csvs is True
+    assert request.import_to_influxdb is True
+    assert request.metadata["influx_config"] == {
+        "INFLUX_ORG": "org",
+        "INFLUX_BUCKET": "bucket",
+        "INFLUX_URL": "http://127.0.0.1:8086",
+        "INFLUX_TOKEN": "token",
+    }
+    assert captured["kwargs"] == {
+        "start_if_needed": True,
+        "wait_for_result": True,
+    }
+
+
+def test_influx_cli_config_validation_happens_before_sidecar_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Malformed Influx config should fail in the caller process."""
+    import histdatacom.histdata_com as histdata_com
+
+    (tmp_path / "influxdb.yaml").write_text(
+        "\n".join(
+            [
+                "influxdb:",
+                "  org: org",
+                "  bucket: bucket",
+                "  url: http://127.0.0.1:8086",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    def fail_submit(*args: object, **kwargs: object) -> None:
+        raise AssertionError("malformed config should not submit to sidecar")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    options = _sidecar_options()
+    options.import_to_influxdb = True
+
+    with pytest.raises(InfluxConfigurationError, match="token"):
+        histdata_com.main(options)
 
 
 def test_api_sidecar_repository_failure_returns_available_data(
