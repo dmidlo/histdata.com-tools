@@ -1,4 +1,4 @@
-"""Record work object used by foreground, sidecar, and cache code."""
+"""Record work object used by sidecar, legacy helpers, and cache code."""
 
 import os
 from pathlib import Path

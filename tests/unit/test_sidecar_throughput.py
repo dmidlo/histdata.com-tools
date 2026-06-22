@@ -61,11 +61,10 @@ def test_default_throughput_matrix_covers_issue_180_operations(
 def test_throughput_report_serializes_performance_envelope(
     tmp_path: Path,
 ) -> None:
-    """Reports should include comparison metrics and tuning policy."""
+    """Reports should include sidecar metrics and tuning policy."""
     [scenario, *_] = default_throughput_benchmark_matrix(
         data_directory=tmp_path
     )
-    foreground = _runtime_result("foreground", scenario.name, 1.0, 0.5)
     sidecar = _runtime_result("sidecar", scenario.name, 2.0, 0.75)
     runtime_policy = build_sidecar_runtime_policy(
         workspace=tmp_path / "workspace",
@@ -85,7 +84,6 @@ def test_throughput_report_serializes_performance_envelope(
         comparisons=(
             ThroughputComparison(
                 scenario=scenario,
-                foreground=foreground,
                 sidecar=sidecar,
             ),
         ),
@@ -103,9 +101,8 @@ def test_throughput_report_serializes_performance_envelope(
     payload = report.to_dict()
 
     assert payload["issue"] == 180
-    assert (
-        payload["comparisons"][0]["sidecar_to_foreground_elapsed_ratio"] == 2.0
-    )
+    assert payload["comparisons"][0]["sidecar"]["runtime"] == "sidecar"
+    assert "baseline" not in payload["comparisons"][0]
     assert payload["accepted_envelope"]["batch_default"]
     assert payload["accepted_envelope"]["influx_batch_default"]
     assert payload["accepted_envelope"]["fanout_default"]

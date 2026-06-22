@@ -1,4 +1,4 @@
-"""Reproducible foreground versus live sidecar throughput benchmarks."""
+"""Reproducible live sidecar throughput benchmarks."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, cast
 
-from histdatacom import config
-from histdatacom.foreground import ForegroundRun
 from histdatacom.runtime_contracts import JSONValue, RunRequest, StageResult
 from histdatacom.sidecar.client import submit_run_request_and_observe
 from histdatacom.sidecar.control import JobLifecycle
@@ -114,37 +112,41 @@ class RuntimeBenchmarkResult:
 
 @dataclass(frozen=True, slots=True)
 class ThroughputComparison:
-    """Foreground and sidecar measurements for the same scenario."""
+    """Sidecar measurement for one benchmark scenario."""
 
     scenario: ThroughputBenchmarkScenario
-    foreground: RuntimeBenchmarkResult
     sidecar: RuntimeBenchmarkResult
+    baseline: RuntimeBenchmarkResult | None = None
 
     @property
-    def sidecar_to_foreground_elapsed_ratio(self) -> float:
-        """Return sidecar elapsed seconds divided by foreground seconds."""
-        foreground_elapsed = self.foreground.measurement.elapsed_seconds
-        if foreground_elapsed <= 0:
+    def sidecar_to_baseline_elapsed_ratio(self) -> float | None:
+        """Return sidecar elapsed seconds divided by an optional baseline."""
+        if self.baseline is None:
+            return None
+        baseline_elapsed = self.baseline.measurement.elapsed_seconds
+        if baseline_elapsed <= 0:
             return 0.0
         return float(self.sidecar.measurement.elapsed_seconds) / float(
-            foreground_elapsed
+            baseline_elapsed
         )
 
     def to_dict(self) -> dict[str, JSONValue]:
-        """Return JSON-compatible comparison metadata."""
-        return {
+        """Return JSON-compatible measurement metadata."""
+        payload: dict[str, JSONValue] = {
             "scenario": self.scenario.to_dict(),
-            "foreground": self.foreground.to_dict(),
             "sidecar": self.sidecar.to_dict(),
-            "sidecar_to_foreground_elapsed_ratio": (
-                self.sidecar_to_foreground_elapsed_ratio
-            ),
         }
+        if self.baseline is not None:
+            payload["baseline"] = self.baseline.to_dict()
+            payload["sidecar_to_baseline_elapsed_ratio"] = (
+                self.sidecar_to_baseline_elapsed_ratio
+            )
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
 class ThroughputBenchmarkReport:
-    """Complete issue-180 throughput benchmark report."""
+    """Complete live sidecar throughput benchmark report."""
 
     comparisons: tuple[ThroughputComparison, ...]
     sidecar_startup: BenchmarkMeasurement
@@ -353,10 +355,10 @@ def accepted_performance_envelope() -> dict[str, JSONValue]:
             "workflows preserve stage order inside each partition."
         ),
         "sidecar_overhead": (
-            "Live sidecar runs may be slower than foreground for single-item "
-            "requests because Temporal startup and workflow bookkeeping are "
-            "fixed costs; throughput judgment should focus on bounded "
-            "history, successful artifact handoff, and lane concurrency."
+            "Live sidecar single-item requests include fixed Temporal startup "
+            "and workflow bookkeeping costs; throughput judgment should focus "
+            "on bounded history, successful artifact handoff, and lane "
+            "concurrency."
         ),
         "known_tradeoffs": [
             "Repository and HistData network timings are externally variable.",
@@ -368,53 +370,6 @@ def accepted_performance_envelope() -> dict[str, JSONValue]:
             "Parent workflow summaries intentionally omit full leaf histories.",
         ],
     }
-
-
-def benchmark_foreground_matrix(
-    scenarios: Sequence[ThroughputBenchmarkScenario],
-) -> tuple[RuntimeBenchmarkResult, ...]:
-    """Run all scenarios through the queue-free foreground runtime."""
-    return tuple(
-        benchmark_foreground_scenario(scenario) for scenario in scenarios
-    )
-
-
-def benchmark_foreground_scenario(
-    scenario: ThroughputBenchmarkScenario,
-) -> RuntimeBenchmarkResult:
-    """Run one scenario through the queue-free foreground runtime."""
-    captured: dict[str, Any] = {}
-
-    def run() -> None:
-        _reset_foreground_globals()
-        runner = ForegroundRun(
-            scenario.request,
-            _foreground_args(scenario.request),
-        )
-        captured["output"] = runner.run()
-        captured["stage_results"] = runner.stage_results
-
-    measurement = benchmark_operation(
-        f"foreground:{scenario.name}",
-        run,
-        work_item_count=scenario.work_item_count,
-        metadata={
-            "runtime": "foreground",
-            "operations": list(scenario.operations),
-        },
-    )
-    stage_results = tuple(captured.get("stage_results") or ())
-    return RuntimeBenchmarkResult(
-        runtime="foreground",
-        scenario=scenario.name,
-        measurement=measurement,
-        status=_status_from_stage_results(stage_results),
-        stage_counts=_stage_counts(stage_results),
-        artifact_count=_artifact_count(stage_results),
-        failure_count=_failure_count(stage_results),
-        retry_count=_retry_count(stage_results),
-        metadata={"output_type": type(captured.get("output")).__name__},
-    )
 
 
 def run_live_sidecar_throughput_benchmark(
@@ -436,16 +391,12 @@ def run_live_sidecar_throughput_benchmark(
     supervisor_factory: Callable[..., SidecarSupervisor] = SidecarSupervisor,
     submit_job: SubmitObservedJob | None = None,
 ) -> ThroughputBenchmarkReport:
-    """Run foreground and live sidecar throughput comparisons."""
+    """Run live sidecar throughput measurements."""
     scenario_matrix = tuple(
         scenarios
         if scenarios is not None
         else default_throughput_benchmark_matrix(data_directory=data_directory)
     )
-    foreground_results = {
-        result.scenario: result
-        for result in benchmark_foreground_matrix(scenario_matrix)
-    }
     env = dict(environ or {})
     executable = _temporal_executable_from_inputs(
         temporal_executable=temporal_executable,
@@ -518,7 +469,6 @@ def run_live_sidecar_throughput_benchmark(
     comparisons = tuple(
         ThroughputComparison(
             scenario=scenario,
-            foreground=foreground_results[scenario.name],
             sidecar=sidecar_results[scenario.name],
         )
         for scenario in scenario_matrix
@@ -647,51 +597,11 @@ def _sidecar_payload(result: Any) -> Mapping[str, Any]:
     return {}
 
 
-def _foreground_args(request: RunRequest) -> dict[str, Any]:
-    return {
-        "default_download_dir": _data_dir_arg(request.data_directory),
-        "requests_timeout": request.metadata.get(
-            "requests_timeout",
-            DEFAULT_THROUGHPUT_TIMEOUT_SECONDS,
-        ),
-        "from_api": bool(request.api_return_type)
-        or request.available_remote_data,
-        "batch_size": request.batch_size,
-        "delete_after_influx": request.delete_after_influx,
-        "by": str(request.metadata.get("repo_sort", "") or ""),
-    }
-
-
-def _data_dir_arg(path: str) -> str:
-    value = str(Path(path).expanduser())
-    return value if value.endswith("/") else f"{value}/"
-
-
-def _reset_foreground_globals() -> None:
-    config.REPO_DATA = {}
-    config.REPO_DATA_FILE_EXISTS = False
-    config.FILTER_PAIRS = None
-
-
-def _status_from_stage_results(
-    stage_results: Sequence[StageResult],
-) -> str:
-    if any(result.failure is not None for result in stage_results):
-        return "FAILED"
-    if any(result.status.value == "RETRIED" for result in stage_results):
-        return "RETRIED"
-    return "COMPLETED"
-
-
 def _stage_counts(stage_results: Sequence[StageResult]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for result in stage_results:
         counts[result.stage] = counts.get(result.stage, 0) + 1
     return counts
-
-
-def _artifact_count(stage_results: Sequence[StageResult]) -> int:
-    return sum(len(result.artifacts) for result in stage_results)
 
 
 def _failure_count(stage_results: Sequence[StageResult]) -> int:

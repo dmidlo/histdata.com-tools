@@ -31,9 +31,8 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Mapping
 
 import histdatacom
-from histdatacom import Options, config
+from histdatacom import Options
 from histdatacom.cli import ArgParser
-from histdatacom.foreground import run_foreground
 from histdatacom.repository_output import (
     print_repository_failure,
     print_repository_table,
@@ -46,13 +45,11 @@ from histdatacom.sidecar.client import (
     submit_run_request_and_observe_sync,
 )
 from histdatacom.sidecar.cutover import (
+    FOREGROUND_RUNTIME_REMOVED_MESSAGE,
     should_submit_to_sidecar,
-    warn_foreground_deprecated,
 )
 from histdatacom.utils import (
-    load_influx_yaml,
     set_working_data_dir,
-    check_installed_module,
     normalize_api_return_type,
 )
 
@@ -64,25 +61,18 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeContext:
-    """Resolved launch context for sidecar or foreground execution."""
+    """Resolved launch context for sidecar execution."""
 
     args: Mapping[str, Any]
     request: RunRequest
     version: bool
     from_api: bool
-    use_sidecar: bool
     sidecar_start: bool
     sidecar_wait_result: bool
     api_return_type: str | None
     available_remote_data: bool
     update_remote_data: bool
     import_to_influxdb: bool
-
-    def foreground_args(self) -> dict[str, Any]:
-        """Return a mutable copy for the legacy foreground adapter."""
-        return {
-            key: _thaw_runtime_arg(value) for key, value in self.args.items()
-        }
 
 
 class _HistDataCom:  # noqa:R701
@@ -109,37 +99,6 @@ class _HistDataCom:  # noqa:R701
         self.options = ArgParser(options)()
         self.context = _resolve_runtime_context(self.options)
         self.options.api_return_type = self.context.api_return_type
-
-        if self.context.version or self.context.use_sidecar:
-            return
-
-        self._configure_foreground_compatibility()
-
-    def _configure_foreground_compatibility(self) -> None:
-        """Populate legacy globals only for explicit foreground execution."""
-        warn_foreground_deprecated(stacklevel=4)
-        config.ARGS = self.context.foreground_args()  # noqa:BLK100
-
-        if config.ARGS["import_to_influxdb"]:
-            check_installed_module("influxdb_client")
-            influx_yaml = load_influx_yaml()
-            config.ARGS["INFLUX_ORG"] = influx_yaml["influxdb"]["org"]
-            config.ARGS["INFLUX_BUCKET"] = influx_yaml["influxdb"]["bucket"]
-            config.ARGS["INFLUX_URL"] = influx_yaml["influxdb"]["url"]
-            config.ARGS["INFLUX_TOKEN"] = influx_yaml["influxdb"]["token"]
-
-        if (
-            config.ARGS["from_api"]
-            and config.ARGS["api_return_type"]
-            and not config.ARGS["version"]
-            and not config.ARGS["available_remote_data"]
-            and not config.ARGS["update_remote_data"]
-        ):
-            check_installed_module(config.ARGS["api_return_type"])
-
-        if config.ARGS["import_to_influxdb"]:
-            config.ARGS["api_return_type"] = "polars"
-            check_installed_module(config.ARGS["api_return_type"])
 
     def run(  # noqa:CCR001,CFQ004,CCR001,R701
         self,
@@ -169,14 +128,7 @@ class _HistDataCom:  # noqa:R701
                 print(histdatacom.__version__)  # noqa:T201
             return histdatacom.__version__
 
-        if self._uses_sidecar():
-            return self._run_sidecar_job()
-
-        return run_foreground(self.context.request, config.ARGS)
-
-    def _uses_sidecar(self) -> bool:
-        """Return whether this run should submit to the sidecar."""
-        return self.context.use_sidecar
+        return self._run_sidecar_job()
 
     def _run_sidecar_job(
         self,
@@ -263,6 +215,10 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
     args["default_download_dir"] = set_working_data_dir(args["data_directory"])
     args["api_return_type"] = normalize_api_return_type(args["api_return_type"])
     options.api_return_type = args["api_return_type"]
+    try:
+        should_submit_to_sidecar(args)
+    except ValueError as err:
+        raise ValueError(FOREGROUND_RUNTIME_REMOVED_MESSAGE) from err
     request = RunRequest.from_options(options)
     frozen_args = MappingProxyType(
         {key: _freeze_runtime_arg(value) for key, value in args.items()}
@@ -272,7 +228,6 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         request=request,
         version=bool(args["version"]),
         from_api=bool(args["from_api"]),
-        use_sidecar=bool(should_submit_to_sidecar(args)),
         sidecar_start=bool(args["sidecar_start"]),
         sidecar_wait_result=bool(args["sidecar_wait_result"]),
         api_return_type=args["api_return_type"],
@@ -292,17 +247,6 @@ def _freeze_runtime_arg(value: Any) -> Any:
         return MappingProxyType(
             {key: _freeze_runtime_arg(item) for key, item in value.items()}
         )
-    return value
-
-
-def _thaw_runtime_arg(value: Any) -> Any:
-    """Return a foreground-compatible mutable equivalent of a runtime arg."""
-    if isinstance(value, frozenset):
-        return set(value)
-    if isinstance(value, tuple):
-        return list(value)
-    if isinstance(value, Mapping):
-        return {key: _thaw_runtime_arg(item) for key, item in value.items()}
     return value
 
 

@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import asdict, dataclass
 from typing import Mapping
 
-FOREGROUND_RUNTIME = "foreground"
 SIDECAR_RUNTIME = "sidecar"
-FOREGROUND_DEPRECATION_MESSAGE = (
-    "The foreground compatibility runtime is deprecated and will be removed "
-    "after the documented release window. Use the default Temporal sidecar "
-    "runtime instead."
+FOREGROUND_RUNTIME_REMOVED_MESSAGE = (
+    "The foreground compatibility runtime has been removed. Use the default "
+    "Temporal sidecar runtime instead."
 )
 
 
@@ -38,14 +35,13 @@ DEFAULT_CUTOVER_POLICY = RuntimeCutoverPolicy(
         "compatibility alias"
     ),
     foreground_lifecycle=(
-        "deprecated compatibility runtime retained for one release window "
-        "through --foreground or Options.use_sidecar = False; not a "
-        "long-term supported execution model"
+        "removed after the documented release window; --foreground is no "
+        "longer accepted and Options.use_sidecar = False is rejected"
     ),
     config_globals_lifecycle=(
-        "config.ARGS is limited to explicit foreground and legacy "
-        "compatibility paths; default sidecar requests use resolved runtime "
-        "context and RunRequest"
+        "CLI/API runtime selection uses resolved runtime context and "
+        "RunRequest, not config.ARGS; remaining config.ARGS users are legacy "
+        "helper surfaces with explicit arguments"
     ),
     unavailable_sidecar_behavior=(
         "default sidecar requests start the bundled local sidecar when "
@@ -54,36 +50,22 @@ DEFAULT_CUTOVER_POLICY = RuntimeCutoverPolicy(
     ),
     unsupported_artifact_behavior=(
         "metadata-only wheels and unsupported platforms require an operator "
-        "provided Temporal executable for sidecar startup, or explicit "
-        "foreground opt-out for compatibility execution"
+        "provided Temporal executable for sidecar startup"
     ),
 )
 
 
-def warn_foreground_deprecated(*, stacklevel: int = 2) -> None:
-    """Emit the foreground-runtime deprecation warning for opt-out callers."""
-    warnings.warn(
-        FOREGROUND_DEPRECATION_MESSAGE,
-        FutureWarning,
-        stacklevel=stacklevel,
-    )
-
-
 def should_submit_to_sidecar(args: Mapping[str, object]) -> bool:
     """Return whether parsed CLI/API args request the sidecar runtime."""
-    return bool(
-        args.get(
-            "use_sidecar",
-            DEFAULT_CUTOVER_POLICY.default_runtime == SIDECAR_RUNTIME,
-        )
-    )
+    if args.get("use_sidecar") is False:
+        raise ValueError(FOREGROUND_RUNTIME_REMOVED_MESSAGE)
+    return True
 
 
 def selected_runtime(args: Mapping[str, object]) -> str:
     """Return the selected runtime for parsed CLI/API args."""
-    if should_submit_to_sidecar(args):
-        return SIDECAR_RUNTIME
-    return FOREGROUND_RUNTIME
+    should_submit_to_sidecar(args)
+    return SIDECAR_RUNTIME
 
 
 def cutover_policy_payload() -> dict[str, str]:

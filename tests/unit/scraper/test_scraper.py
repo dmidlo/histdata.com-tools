@@ -172,7 +172,7 @@ def test_download_zip_transitions_valid_record_to_csv_zip(
 def test_populate_initial_records_uses_deterministic_plan(
     tmp_path: Path,
 ) -> None:
-    """Foreground planning should adapt planned work items to records."""
+    """Dataset planning should adapt planned work items to records."""
     scraper = _scraper_without_init()
     scraper.urls = Urls()
     config.ARGS = {

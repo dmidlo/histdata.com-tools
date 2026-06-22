@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Run the issue-180 foreground versus live Temporal throughput benchmark."""
+"""Run the issue-180 live Temporal sidecar throughput benchmark."""
 
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the throughput benchmark parser."""
     parser = argparse.ArgumentParser(
         description=(
-            "Compare queue-free foreground runtime and live Temporal sidecar "
-            "runtime on the issue-180/181 non-Influx benchmark matrix."
+            "Run the live Temporal sidecar runtime on the issue-180/181 "
+            "non-Influx benchmark matrix."
         )
     )
     parser.add_argument("--workspace", type=Path, required=True)

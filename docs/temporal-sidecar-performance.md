@@ -17,11 +17,9 @@ The retired manager-backed runtime had three distinct concurrency behaviors:
 - Influx import uses bounded line-protocol batches and writes sequentially
   through one `InfluxBatchWriter`.
 
-The deprecated foreground runtime uses the same explicit work-item stage
-functions as the sidecar during the release-window rollback period. The sidecar
-keeps those lanes separate as orchestration, network, CPU/file, and Influx task
-queues. Workflow payloads stay bounded to metadata, artifacts, and status
-events; downloaded archives, CSV files, and cache data remain on disk.
+The sidecar keeps those lanes separate as orchestration, network, CPU/file, and
+Influx task queues. Workflow payloads stay bounded to metadata, artifacts, and
+status events; downloaded archives, CSV files, and cache data remain on disk.
 
 ## Sidecar Worker Policy
 
@@ -196,9 +194,8 @@ cache builds are CPU-bound and memory headroom remains stable.
 
 ## Live Throughput Matrix
 
-Issue #180 adds an operator-gated benchmark script that compares the
-queue-free foreground runtime and a live Temporal sidecar on the same request
-matrix:
+Issue #180 added an operator-gated benchmark script for the live Temporal
+sidecar request matrix:
 
 ```sh
 HISTDATACOM_LIVE_SIDECAR_THROUGHPUT=1 \
@@ -250,7 +247,7 @@ Live run date: 2026-06-21. Temporal executable:
 matrix. Influx behavior is covered by the issue #187 contract-backed workflow
 test described above.
 
-| Scenario | Foreground elapsed | Sidecar elapsed | Ratio | Sidecar process CPU | Artifacts | Failures/retries |
+| Scenario | Retired baseline elapsed | Sidecar elapsed | Ratio | Sidecar process CPU | Artifacts | Failures/retries |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | repository-refresh | 0.054s | 0.944s | 17.482x | 2.670s | 1 | 0/0 |
 | validate-url | 0.388s | 0.665s | 1.716x | 0.320s | 0 | 0/0 |
@@ -283,9 +280,8 @@ No lane default changes are warranted from the issue #180 measurements:
 - Keep the production fan-out default at `4` parallel child workflows.
 
 The sidecar has fixed orchestration overhead, so repository-only and
-single-item jobs can be slower than the deprecated foreground comparison path.
-That tradeoff is acceptable for the Temporal migration because the live path
-now proves bounded workflow history, real activity handoff, artifact references
-instead of dataframes in history, and lane-isolated execution. Throughput tuning
-should happen on multi-period and multi-pair workloads before changing
-defaults.
+single-item jobs include startup and workflow bookkeeping costs. That tradeoff
+is acceptable for the Temporal migration because the live path proves bounded
+workflow history, real activity handoff, artifact references instead of
+dataframes in history, and lane-isolated execution. Throughput tuning should
+happen on multi-period and multi-pair workloads before changing defaults.

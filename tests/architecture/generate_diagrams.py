@@ -12,7 +12,7 @@ from pycallgraph2 import PyCallGraph  # noqa:I900
 from pycallgraph2.output import GraphvizOutput  # noqa:I900
 
 import histdatacom
-from histdatacom import Options, Pairs
+from histdatacom import Options
 from histdatacom.api import Api
 from histdatacom.histdata_ascii import CACHE_FILENAME
 
@@ -49,10 +49,6 @@ class Pycallgraphhistdatacom:  # noqa:H601
     def check_py_api():  # noqa:D102,DC102
         tester = Pycallgraphhistdatacom()
         print(tester.check_py_api_version())  # noqa:T201
-        del tester  # noqa:WPS100
-
-        tester = Pycallgraphhistdatacom()
-        print(tester.check_py_api_available_remote_data())  # noqa:T201
         del tester  # noqa:WPS100
 
         tester = Pycallgraphhistdatacom()
@@ -97,13 +93,6 @@ class Pycallgraphhistdatacom:  # noqa:H601
         print("Checking histdatacom version from api.")  # noqa:T201
         self.options.version = True
         self.method_result = histdatacom(self.options)
-        return self.method_result
-
-    def check_py_api_available_remote_data(self):  # noqa:D102,DC102
-        print("Checking histdatacom -A from api.")  # noqa:T201
-        self.options.available_remote_data = True
-        self.options.pairs = Pairs.list_keys()
-        self.method_result = histdatacom(self.options)  # pylint: disable=E1102
         return self.method_result
 
     def check_py_api_polars_ingest(self):  # noqa:D102,DC102

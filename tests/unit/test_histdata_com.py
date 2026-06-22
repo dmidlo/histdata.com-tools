@@ -306,28 +306,17 @@ def test_cli_default_runtime_uses_sidecar(
     }
 
 
-def test_cli_foreground_opt_out_uses_compatibility_runtime(
+def test_cli_foreground_flag_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CLI callers should be able to explicitly run the foreground runtime."""
+    """The retired CLI foreground flag should fail before runtime dispatch."""
     import histdatacom.histdata_com as histdata_com
-
-    captured: dict[str, object] = {}
-
-    def fail_submit(*args: object, **kwargs: object) -> object:
-        raise AssertionError("foreground opt-out should not submit sidecar")
-
-    def fake_foreground(request, args: dict) -> dict[str, object]:
-        captured["request"] = request
-        captured["args"] = args
-        return {"runtime": "foreground"}
 
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
-        fail_submit,
+        lambda *args, **kwargs: pytest.fail("sidecar should not be submitted"),
     )
-    monkeypatch.setattr(histdata_com, "run_foreground", fake_foreground)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -346,34 +335,26 @@ def test_cli_foreground_opt_out_uses_compatibility_runtime(
         ],
     )
 
-    with pytest.warns(FutureWarning, match="foreground compatibility runtime"):
-        assert histdata_com.main() is None
-    assert captured["request"].pairs == ("eurusd",)
-    assert captured["args"]["use_sidecar"] is False
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    assert err.value.code == 2
 
 
-def test_api_foreground_opt_out_uses_compatibility_runtime(
+def test_api_foreground_opt_out_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """API callers should be able to opt out of sidecar execution."""
+    """API callers should get a clear error for the removed runtime."""
     import histdatacom.histdata_com as histdata_com
 
-    captured: dict[str, object] = {}
-
     def fail_submit(*args: object, **kwargs: object) -> object:
-        raise AssertionError("foreground opt-out should not submit sidecar")
-
-    def fake_foreground(request, args: dict) -> dict[str, object]:
-        captured["request"] = request
-        captured["args"] = args
-        return {"runtime": "foreground"}
+        raise AssertionError("removed foreground opt-out should not submit")
 
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
         fail_submit,
     )
-    monkeypatch.setattr(histdata_com, "run_foreground", fake_foreground)
     options = Options()
     options.use_sidecar = False
     options.pairs = {"eurusd"}
@@ -381,12 +362,8 @@ def test_api_foreground_opt_out_uses_compatibility_runtime(
     options.timeframes = {"M1"}
     options.start_yearmonth = "2022-12"
 
-    with pytest.warns(FutureWarning, match="foreground compatibility runtime"):
-        result = histdata_com.main(options)
-
-    assert result == {"runtime": "foreground"}
-    assert captured["request"].pairs == ("eurusd",)
-    assert captured["args"]["use_sidecar"] is False
+    with pytest.raises(ValueError, match="foreground compatibility runtime"):
+        histdata_com.main(options)
 
 
 @pytest.mark.parametrize(
@@ -474,7 +451,7 @@ def test_api_sidecar_repository_request_returns_available_data(
 def test_api_sidecar_repository_failure_returns_available_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Repository API failure behavior should match foreground compatibility."""
+    """Repository API failure behavior should preserve output parity."""
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> SidecarJobResult:
@@ -530,7 +507,7 @@ def test_cli_sidecar_repository_failure_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Repository CLI failure behavior should match foreground compatibility."""
+    """Repository CLI failure behavior should preserve output parity."""
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> SidecarJobResult:

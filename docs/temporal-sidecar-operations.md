@@ -21,15 +21,11 @@ local sidecar when no healthy sidecar is running. `--sidecar` remains accepted
 as a compatibility alias for scripts that already passed it during migration.
 
 Default sidecar submissions are built from resolved runtime context and
-`RunRequest`, not `config.ARGS`. Foreground execution and `config.ARGS` are
-deprecated explicit compatibility surfaces. Use `--foreground` on the CLI or
-`Options.use_sidecar = False` in API code only when an operator needs the
-queue-free foreground runtime for rollback or platform recovery during the
-release window. Opt-out callers receive a `FutureWarning`. New orchestration
-behavior should be expressed as `RunRequest` payloads, Temporal workflows, and
-Temporal activities. Foreground is not a long-term supported execution model and
-is eligible for removal after the documented release window and final release
-note.
+`RunRequest`, not `config.ARGS`. The foreground rollback runtime has been
+removed after its release-window deprecation period: `--foreground` is no
+longer accepted, and API code that sets `Options.use_sidecar = False` receives
+a clear `ValueError`. New orchestration behavior should be expressed as
+`RunRequest` payloads, Temporal workflows, and Temporal activities.
 
 The base package install includes the Temporal Python SDK because sidecar job
 submission, job inspection, and workers are the default runtime surface:
@@ -70,21 +66,18 @@ Rollback behavior is intentionally conservative. If a platform executable or
 wheel is bad after publish, yank the affected platform wheel and cut a
 replacement release. The sdist and universal fallback wheel are metadata-only
 recovery artifacts; they keep the package installable while operators provide
-an explicit Temporal executable path, or temporarily opt out with
-deprecated `--foreground` / `Options.use_sidecar = False` during the release
-window.
+an explicit Temporal executable path.
 
 Default-runtime failure policy:
 
 - Default CLI/API runs use the sidecar and start it when no healthy sidecar is
   running.
-- `--foreground` / `Options.use_sidecar = False` is deprecated, emits a
-  `FutureWarning`, runs through the compatibility foreground path, and does not
-  probe sidecar resources.
+- `--foreground` is rejected by the CLI.
+- `Options.use_sidecar = False` is rejected by API runtime resolution.
 - Metadata-only wheels and unsupported platforms fail sidecar starts with a
   `SidecarUnavailableError`/nonzero CLI exit unless an operator supplies
   `histdatacom-sidecar start --executable /path/to/temporal`.
-- The runtime never silently falls back from sidecar to foreground execution.
+- The runtime never silently falls back from sidecar execution.
 
 ## Runtime Model
 
@@ -106,8 +99,8 @@ Downloaded ZIP files, extracted CSV/XLSX files, cache IPC files, and merged
 API-return artifacts stay under the existing HistData data-directory policy.
 They are not moved into the sidecar runtime home.
 
-Record status metadata is manifest-only for new writes. Normal foreground,
-sidecar, and API paths update `.histdatacom/manifest-status.sqlite3` under the
+Record status metadata is manifest-only for new writes. Sidecar and API paths
+update `.histdatacom/manifest-status.sqlite3` under the
 resolved data or sidecar status root and no longer create new hidden `.meta`
 files beside individual records. Existing `.meta` files are migration inputs:
 successful restore/import operations write the manifest row and remove the
@@ -258,12 +251,6 @@ Submit without waiting for the workflow result:
 histdatacom --sidecar --sidecar-start --sidecar-submit-only -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
-Run through the deprecated compatibility foreground runtime:
-
-```sh
-histdatacom --foreground -p eurusd -f ascii -t 1-minute-bar-quotes -s now
-```
-
 Sidecar-backed API calls use the same public options and sidecar defaults:
 
 ```python
@@ -282,16 +269,16 @@ data = histdatacom(options)
 ```
 
 Set `options.sidecar_start = False` when an API caller should require a
-pre-started sidecar instead of starting one. Set `options.use_sidecar = False`
-only for deprecated foreground compatibility runs during the release window.
+pre-started sidecar instead of starting one. `options.use_sidecar = False` is
+no longer supported.
 
 When `sidecar_wait_result` is `True`, API calls with `api_return_type` return
 the requested `polars`, `pandas`, or `arrow` object by materializing completed
 cache artifacts on disk. When `sidecar_wait_result` is `False`, the call
 returns the sidecar job payload instead.
 
-Waited sidecar repository requests preserve the foreground compatibility
-surface. API calls using `available_remote_data` or `update_remote_data` return
+Waited sidecar repository requests preserve the historical output surface. API
+calls using `available_remote_data` or `update_remote_data` return
 the available-data dictionary, while CLI calls using `-A` or `-U` render the
 repository table and use the same repository failure exit behavior. Submit-only
 repository requests still return sidecar job metadata.
@@ -518,8 +505,7 @@ Sidecar unavailable:
 - Symptom: CLI exits nonzero or API raises `SidecarUnavailableError`.
 - Fix: run `histdatacom-sidecar status --json` and `histdatacom-sidecar doctor
   --json`, start the sidecar manually with an explicit executable when using a
-  metadata-only artifact, or use deprecated `--foreground` /
-  `Options.use_sidecar = False` as a release-window compatibility rollback.
+  metadata-only artifact, and inspect server/worker logs from the doctor output.
 
 Port collisions:
 

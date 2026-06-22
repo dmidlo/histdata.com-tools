@@ -185,25 +185,11 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args.append("-d")
         if self.arg_namespace.use_sidecar:
             args.append("--sidecar")
-        else:
-            args.append("--foreground")
         if self.arg_namespace.sidecar_start:
             args.append("--sidecar-start")
         if not self.arg_namespace.sidecar_wait_result:
             args.append("--sidecar-submit-only")
         return args
-
-    def _false_from_api_if_behavior_flag(self) -> None:
-        """Null the API flag if a behavior flag has been set."""
-        if self.arg_namespace.use_sidecar:
-            return
-        if (
-            self.arg_namespace.validate_urls
-            or self.arg_namespace.download_data_archives
-            or self.arg_namespace.extract_csvs
-            or self.arg_namespace.import_to_influxdb
-        ):
-            self.arg_namespace.from_api = False
 
     def _check_for_ascii_if_influx(self) -> None:
         """Verify ascii csv_format type for influxdb import.
@@ -862,15 +848,6 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             ),
         )
         sidecar_args.add_argument(
-            "--foreground",
-            dest="use_sidecar",
-            action="store_false",
-            help=(
-                "DEPRECATED: run through the compatibility foreground "
-                "runtime instead of the default sidecar runtime"
-            ),
-        )
-        sidecar_args.add_argument(
             "--sidecar-start",
             dest="sidecar_start",
             action="store_true",
@@ -908,7 +885,6 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
         if "histdatacom" not in sys.argv[0] and self.arg_namespace.from_api:
             args = self._clean_from_api_args()
-            self._false_from_api_if_behavior_flag()
             self.parse_args(args, namespace=self.arg_namespace)
         else:
             # Get the args from sys.argv
@@ -925,7 +901,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         """Collect and process settings from CLI or API.
 
         Returns:
-            Options: arg_namespace for config.ARGS
+            Options: parsed runtime namespace
         """
         self._set_args()
         self._sanitize_input()

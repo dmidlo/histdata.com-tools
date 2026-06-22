@@ -116,10 +116,10 @@ def test_sidecar_cli_flags_preserve_default_runtime_controls(
     assert options.validate_urls
 
 
-def test_foreground_cli_flag_opts_out_of_default_sidecar(
+def test_foreground_cli_flag_is_no_longer_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Operators should have an explicit foreground rollback switch."""
+    """The retired foreground rollback switch should fail at parse time."""
     monkeypatch.setattr(
         sys,
         "argv",
@@ -138,11 +138,10 @@ def test_foreground_cli_flag_opts_out_of_default_sidecar(
         ],
     )
 
-    options = ArgParser(Options())()
+    with pytest.raises(SystemExit) as err:
+        ArgParser(Options())()
 
-    assert not options.use_sidecar
-    assert options.sidecar_start
-    assert options.validate_urls
+    assert err.value.code == 2
 
 
 def test_no_sidecar_start_cli_flag_requires_running_sidecar(
