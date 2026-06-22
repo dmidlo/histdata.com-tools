@@ -107,8 +107,8 @@ class ManifestStatusStore:
         self,
         record: Any,
         *,
-        source: str = "record_memento",
-        message: str = "Record metadata stored.",
+        source: str = "record_manifest_status",
+        message: str = "Record manifest/status metadata stored.",
     ) -> WorkItem:
         """Upsert a legacy Record into manifest storage."""
         item = WorkItem.from_record(record)

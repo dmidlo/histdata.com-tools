@@ -47,7 +47,7 @@ def test_record_write_creates_manifest_without_legacy_meta(
     """Record writes should upsert the manifest without legacy sidecars."""
     record = Record(url=ASCII_M1_URL, status=WorkStatus.CSV_FILE.value)
 
-    record.write_memento_file(base_dir=str(tmp_path))
+    record.write_manifest_status(base_dir=str(tmp_path))
 
     db_path = tmp_path / MANIFEST_DIRECTORY / MANIFEST_DB_FILENAME
     meta_path = Path(record.data_dir) / ".meta"
@@ -59,7 +59,7 @@ def test_record_write_creates_manifest_without_legacy_meta(
     assert not meta_path.exists()
     assert item.status is WorkStatus.CSV_FILE
     assert item.data_dir == _expected_ascii_m1_dir(tmp_path)
-    assert history[-1]["stage"] == "record_memento"
+    assert history[-1]["stage"] == "record_manifest_status"
 
 
 def test_manifest_store_sets_user_version_for_unversioned_database(
@@ -106,15 +106,15 @@ def test_manifest_store_rejects_future_user_version(
 def test_record_delete_clears_current_manifest_state(
     tmp_path: Path,
 ) -> None:
-    """Deleting mementos should clear manifest and existing legacy metadata."""
+    """Deleting status should clear manifest and existing legacy metadata."""
     record = Record(url=ASCII_M1_URL, status=WorkStatus.CSV_FILE.value)
-    record.write_memento_file(base_dir=str(tmp_path))
+    record.write_manifest_status(base_dir=str(tmp_path))
     meta_path = Path(record.data_dir) / ".meta"
     meta_path.write_text("{}", encoding="UTF-8")
     store = ManifestStatusStore(tmp_path)
     assert store.list_work_items()
 
-    record.delete_momento_file()
+    record.delete_manifest_status()
 
     assert not meta_path.exists()
     assert not store.list_work_items()
@@ -143,7 +143,7 @@ def test_restore_imports_legacy_meta_without_manifest(
     )
     restored = Record(url=ASCII_M1_URL)
 
-    assert restored.restore_momento(str(current_base))
+    assert restored.restore_manifest_status(str(current_base))
 
     store = ManifestStatusStore(current_base)
     [item] = store.list_work_items()
@@ -168,8 +168,8 @@ def test_missing_or_corrupt_legacy_meta_is_graceful(
     corrupt_meta.parent.mkdir(parents=True)
     corrupt_meta.write_text("{not-json", encoding="UTF-8")
 
-    assert not missing.restore_momento(str(tmp_path / "missing"))
-    assert not corrupt.restore_momento(str(tmp_path / "corrupt"))
+    assert not missing.restore_manifest_status(str(tmp_path / "missing"))
+    assert not corrupt.restore_manifest_status(str(tmp_path / "corrupt"))
 
     result = ManifestStatusStore(tmp_path).import_meta_file(
         tmp_path / "does-not-exist" / ".meta"

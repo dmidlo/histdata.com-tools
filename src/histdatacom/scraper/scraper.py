@@ -187,7 +187,7 @@ class Scraper:  # noqa:H601
                 )
 
                 if record.status is not WorkStatus.URL_NO_REPO_DATA:
-                    record.write_memento_file(  # noqa:BLK100
+                    record.write_manifest_status(  # noqa:BLK100
                         base_dir=runtime_args["default_download_dir"]
                     )
                     if (  # noqa:BLK100
@@ -246,7 +246,9 @@ class Scraper:  # noqa:H601
         runtime_args = self._runtime_args(args)
         record = Record()
         record(url=url, status=WorkStatus.URL_NEW)
-        record.restore_momento(base_dir=runtime_args["default_download_dir"])
+        record.restore_manifest_status(
+            base_dir=runtime_args["default_download_dir"]
+        )
         return record
 
     def _init_record_from_work_item(
@@ -257,7 +259,9 @@ class Scraper:  # noqa:H601
         """Create a legacy record from a planned work item."""
         runtime_args = self._runtime_args(args)
         record = Record(**work_item.to_record_kwargs())
-        record.restore_momento(base_dir=runtime_args["default_download_dir"])
+        record.restore_manifest_status(
+            base_dir=runtime_args["default_download_dir"]
+        )
         return record
 
     def _ensure_pairs(self) -> None:

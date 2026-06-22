@@ -372,7 +372,7 @@ def validate_url_work_item(
                 set_repo_datum(record)
 
             record.status = WorkStatus.URL_VALID
-            record.write_memento_file(base_dir=_default_download_dir(args))
+            record.write_manifest_status(base_dir=_default_download_dir(args))
             updated = _work_item_from_record(record, updated)
 
         return _activity_output(
@@ -387,7 +387,7 @@ def validate_url_work_item(
         )
     except (HistDataNoDataError, ValueError) as err:
         record.status = WorkStatus.URL_NO_REPO_DATA
-        record.write_memento_file(base_dir=_default_download_dir(args))
+        record.write_manifest_status(base_dir=_default_download_dir(args))
         updated = _work_item_from_record(record, work_item)
         return _activity_output(
             updated,
@@ -592,7 +592,7 @@ def download_archive_work_item(
             record.status = _status_for_archive_kind(
                 existing.artifact_kind
             ).value
-            record.write_memento_file(base_dir=_default_download_dir(args))
+            record.write_manifest_status(base_dir=_default_download_dir(args))
             updated = _work_item_from_record(record, work_item)
             return _activity_output(
                 updated,
@@ -628,7 +628,7 @@ def download_archive_work_item(
                 download_result = archive_download_result_for_record(record)
 
             record.status = WorkStatus.CSV_ZIP
-            record.write_memento_file(base_dir=_default_download_dir(args))
+            record.write_manifest_status(base_dir=_default_download_dir(args))
             updated = _work_item_from_record(record, work_item)
             return _activity_output(
                 updated,
@@ -655,7 +655,7 @@ def download_archive_work_item(
             },
         )
     except (ArchiveDownloadError, KeyError, OSError, zipfile.BadZipFile) as err:
-        record.delete_momento_file()
+        record.delete_manifest_status()
         failure = _archive_download_failure(err, record)
         status = WorkStatus.RETRIED if failure.retryable else WorkStatus.FAILED
         failed = _work_item_from_record(record, work_item).with_status(
@@ -674,7 +674,7 @@ def download_archive_work_item(
             message=failure.message,
         )
     except Exception as err:
-        record.delete_momento_file()
+        record.delete_manifest_status()
         failed = _work_item_from_record(record, work_item).with_status(
             WorkStatus.FAILED
         )
@@ -924,7 +924,7 @@ def extract_csv_work_item(
         )
         if existing is not None:
             record.status = WorkStatus.CSV_FILE
-            record.write_memento_file(base_dir=_default_download_dir(args))
+            record.write_manifest_status(base_dir=_default_download_dir(args))
             updated = _work_item_from_record(record, work_item)
             return _activity_output(
                 updated,
@@ -945,7 +945,7 @@ def extract_csv_work_item(
                 zip_persist=zip_persist,
             )
             record.status = WorkStatus.CSV_FILE
-            record.write_memento_file(base_dir=_default_download_dir(args))
+            record.write_manifest_status(base_dir=_default_download_dir(args))
             updated = _work_item_from_record(record, work_item)
             return _activity_output(
                 updated,
@@ -974,7 +974,7 @@ def extract_csv_work_item(
             },
         )
     except (ArchiveExtractionError, OSError, zipfile.BadZipFile) as err:
-        record.delete_momento_file()
+        record.delete_manifest_status()
         failure = _archive_extraction_failure(err, record)
         status = WorkStatus.RETRIED if failure.retryable else WorkStatus.FAILED
         failed = _work_item_from_record(record, work_item).with_status(status)
@@ -1146,7 +1146,7 @@ def build_cache_work_item(
             cache_result = cache_build_result_for_record(record)
 
         record.status = WorkStatus.CACHE_READY
-        record.write_memento_file(base_dir=_default_download_dir(args))
+        record.write_manifest_status(base_dir=_default_download_dir(args))
         updated = _work_item_from_record(record, work_item)
         metrics = {
             "forward": True,
@@ -1167,7 +1167,7 @@ def build_cache_work_item(
             metrics=metrics,
         )
     except (CacheBuildError, OSError, ValueError) as err:
-        record.delete_momento_file()
+        record.delete_manifest_status()
         failure = _cache_build_failure(err, record)
         status = WorkStatus.RETRIED if failure.retryable else WorkStatus.FAILED
         failed = _work_item_from_record(record, work_item).with_status(status)
@@ -1184,7 +1184,7 @@ def build_cache_work_item(
             message=failure.message,
         )
     except SystemExit as err:
-        record.delete_momento_file()
+        record.delete_manifest_status()
         failure = failure_info_from_exception(
             err,
             default_code="CACHE_BUILD_INTERRUPTED",
@@ -1456,7 +1456,7 @@ def import_to_influx_work_item(
                 )
 
         record.status = WorkStatus.INFLUX_UPLOAD
-        record.write_memento_file(base_dir=_default_download_dir(args))
+        record.write_manifest_status(base_dir=_default_download_dir(args))
 
         if bool(args.get("delete_after_influx")):
             _unlink_if_present(record.data_dir, record.zip_filename)
@@ -1470,7 +1470,7 @@ def import_to_influx_work_item(
             metrics={"batch_count": batch_count, "line_count": line_count},
         )
     except Exception:
-        record.delete_momento_file()
+        record.delete_manifest_status()
         raise
 
 
@@ -2623,7 +2623,7 @@ def create_cache_file(record: Record, args: Mapping[str, Any]) -> None:
     record.cache_end = str(
         _extract_single_value(file_data, file_data.height - 1, "datetime")
     )
-    record.write_memento_file(base_dir=_default_download_dir(args))
+    record.write_manifest_status(base_dir=_default_download_dir(args))
 
 
 def _import_source_to_polars(record: Record, source_path: Path) -> Any:

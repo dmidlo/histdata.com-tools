@@ -1,6 +1,7 @@
 """Record work object used by sidecar, legacy helpers, and cache code."""
 
 import os
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,22 @@ from histdatacom.utils import (
 def _record_text(value: Any) -> str:
     """Return a normalized text value for legacy record fields."""
     return "" if value is None else str(value)
+
+
+class LegacyManifestStatusAliasWarning(RuntimeWarning):
+    """Warn when legacy memento/momento aliases are used."""
+
+
+def _warn_legacy_manifest_status_alias(alias: str, replacement: str) -> None:
+    """Warn when legacy memento/momento aliases are used."""
+    warnings.warn(
+        (
+            f"Record.{alias}(...) is a legacy compatibility alias. "
+            f"Use Record.{replacement}(...) for manifest/status storage."
+        ),
+        LegacyManifestStatusAliasWarning,
+        stacklevel=3,
+    )
 
 
 class Record:  # noqa:H601
@@ -78,8 +95,8 @@ class Record:  # noqa:H601
         """Return the string status representation used by legacy metadata."""
         return self.status_text or self.status.value
 
-    def write_memento_file(self, base_dir: str = "") -> None:
-        """Write record to disk.
+    def write_manifest_status(self, base_dir: str = "") -> None:
+        """Write record to manifest/status storage.
 
         # noqa: DAR402
 
@@ -108,15 +125,31 @@ class Record:  # noqa:H601
             )
             raise SystemExit(1) from err
 
-    def delete_momento_file(self, base_dir: str = "") -> None:
-        """Delete memento file."""
-        momento_path = Path(self.data_dir, ".meta")
-        if momento_path.exists():
-            momento_path.unlink()
+    def write_memento_file(self, base_dir: str = "") -> None:
+        """Deprecated alias for :meth:`write_manifest_status`."""
+        _warn_legacy_manifest_status_alias(
+            "write_memento_file",
+            "write_manifest_status",
+        )
+        self.write_manifest_status(base_dir=base_dir)
+
+    def delete_manifest_status(self, base_dir: str = "") -> None:
+        """Delete manifest/status state and any legacy ``.meta`` sidecar."""
+        meta_path = Path(self.data_dir, ".meta")
+        if meta_path.exists():
+            meta_path.unlink()
         delete_record_from_manifest(self, base_dir=base_dir)
 
-    def restore_momento(self, base_dir: str) -> bool:
-        """Restore momento from .meta file.
+    def delete_momento_file(self, base_dir: str = "") -> None:
+        """Deprecated alias for :meth:`delete_manifest_status`."""
+        _warn_legacy_manifest_status_alias(
+            "delete_momento_file",
+            "delete_manifest_status",
+        )
+        self.delete_manifest_status(base_dir=base_dir)
+
+    def restore_manifest_status(self, base_dir: str) -> bool:
+        """Restore record from manifest/status storage or legacy ``.meta``.
 
         Args:
             base_dir (str): base data directory
@@ -126,6 +159,14 @@ class Record:  # noqa:H601
         """
         self._set_record_data_dir(base_dir)
         return bool(restore_record_from_manifest(self, base_dir=base_dir))
+
+    def restore_momento(self, base_dir: str) -> bool:
+        """Deprecated alias for :meth:`restore_manifest_status`."""
+        _warn_legacy_manifest_status_alias(
+            "restore_momento",
+            "restore_manifest_status",
+        )
+        return self.restore_manifest_status(base_dir=base_dir)
 
     def _to_dict(self) -> dict:
         """Return dict representation of Record.

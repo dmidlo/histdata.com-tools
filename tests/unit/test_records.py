@@ -4,7 +4,9 @@ import json
 import os
 from pathlib import Path
 
-from histdatacom.records import Record
+import pytest
+
+from histdatacom.records import LegacyManifestStatusAliasWarning, Record
 from histdatacom.runtime_contracts import WorkStatus
 
 ASCII_M1_URL = (
@@ -42,7 +44,7 @@ def test_record_data_dir_accepts_base_dir_without_trailing_separator(
     """
     record = Record(url=ASCII_M1_URL)
 
-    record.write_memento_file(base_dir=str(tmp_path))
+    record.write_manifest_status(base_dir=str(tmp_path))
 
     assert record.data_dir == _expected_ascii_m1_dir(tmp_path)
 
@@ -67,7 +69,7 @@ def test_record_preserves_unknown_legacy_status_text() -> None:
     assert record._to_dict()["status"] == "CUSTOM_STATUS"
 
 
-def test_memento_writes_do_not_create_legacy_meta_file(
+def test_manifest_status_writes_do_not_create_legacy_meta_file(
     tmp_path: Path,
 ) -> None:
     """New metadata writes should use the manifest, not legacy `.meta`.
@@ -77,14 +79,51 @@ def test_memento_writes_do_not_create_legacy_meta_file(
     """
     record = Record(url=ASCII_M1_URL, status="CSV_FILE")
 
-    record.write_memento_file(base_dir=f"{tmp_path}{os.sep}")
+    record.write_manifest_status(base_dir=f"{tmp_path}{os.sep}")
 
     meta_path = tmp_path / "ASCII" / "M1" / "eurusd" / "2022" / ".meta"
 
     assert not meta_path.exists()
 
 
-def test_restore_momento_ignores_stale_persisted_data_dir(
+def test_legacy_manifest_status_aliases_remain_compatible(
+    tmp_path: Path,
+) -> None:
+    """Deprecated memento/momento aliases should forward with warnings."""
+    record = Record(url=ASCII_M1_URL, status=WorkStatus.CSV_FILE)
+
+    with pytest.warns(
+        LegacyManifestStatusAliasWarning,
+        match="write_memento_file",
+    ):
+        record.write_memento_file(base_dir=str(tmp_path))
+
+    meta_path = Path(record.data_dir) / ".meta"
+    meta_path.write_text("{}", encoding="UTF-8")
+
+    with pytest.warns(
+        LegacyManifestStatusAliasWarning,
+        match="delete_momento_file",
+    ):
+        record.delete_momento_file()
+
+    assert not meta_path.exists()
+
+    record.write_manifest_status(base_dir=str(tmp_path))
+    restored = Record(url=ASCII_M1_URL)
+
+    with pytest.warns(
+        LegacyManifestStatusAliasWarning,
+        match="restore_momento",
+    ):
+        restored_ok = restored.restore_momento(str(tmp_path))
+
+    assert restored_ok
+    assert restored.status is WorkStatus.CSV_FILE
+    assert restored.data_dir == _expected_ascii_m1_dir(tmp_path)
+
+
+def test_restore_manifest_status_ignores_stale_persisted_data_dir(
     tmp_path: Path,
 ) -> None:
     """Moved data directories should restore records under the current base.
@@ -111,7 +150,7 @@ def test_restore_momento_ignores_stale_persisted_data_dir(
         encoding="UTF-8",
     )
 
-    assert restored.restore_momento(f"{current_base}{os.sep}")
+    assert restored.restore_manifest_status(f"{current_base}{os.sep}")
     assert restored.status is WorkStatus.CSV_FILE
     assert restored.zip_filename == "stale.zip"
     assert restored.data_dir == current_data_dir
