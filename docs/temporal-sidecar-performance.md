@@ -17,11 +17,11 @@ The retired manager-backed runtime had three distinct concurrency behaviors:
 - Influx import uses bounded line-protocol batches and writes sequentially
   through one `InfluxBatchWriter`.
 
-The foreground runtime now uses the same explicit work-item stage functions as
-the sidecar, and the sidecar keeps those lanes separate as orchestration,
-network, CPU/file, and Influx task queues. Workflow payloads stay bounded to
-metadata, artifacts, and status events; downloaded archives, CSV files, and
-cache data remain on disk.
+The deprecated foreground runtime uses the same explicit work-item stage
+functions as the sidecar during the release-window rollback period. The sidecar
+keeps those lanes separate as orchestration, network, CPU/file, and Influx task
+queues. Workflow payloads stay bounded to metadata, artifacts, and status
+events; downloaded archives, CSV files, and cache data remain on disk.
 
 ## Sidecar Worker Policy
 
@@ -283,8 +283,9 @@ No lane default changes are warranted from the issue #180 measurements:
 - Keep the production fan-out default at `4` parallel child workflows.
 
 The sidecar has fixed orchestration overhead, so repository-only and
-single-item jobs can be slower than foreground. That tradeoff is acceptable for
-the Temporal migration because the live path now proves bounded workflow
-history, real activity handoff, artifact references instead of dataframes in
-history, and lane-isolated execution. Throughput tuning should happen on
-multi-period and multi-pair workloads before changing defaults.
+single-item jobs can be slower than the deprecated foreground comparison path.
+That tradeoff is acceptable for the Temporal migration because the live path
+now proves bounded workflow history, real activity handoff, artifact references
+instead of dataframes in history, and lane-isolated execution. Throughput tuning
+should happen on multi-period and multi-pair workloads before changing
+defaults.

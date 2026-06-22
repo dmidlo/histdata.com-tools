@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import asdict, dataclass
 from typing import Mapping
 
 FOREGROUND_RUNTIME = "foreground"
 SIDECAR_RUNTIME = "sidecar"
+FOREGROUND_DEPRECATION_MESSAGE = (
+    "The foreground compatibility runtime is deprecated and will be removed "
+    "after the documented release window. Use the default Temporal sidecar "
+    "runtime instead."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,8 +38,9 @@ DEFAULT_CUTOVER_POLICY = RuntimeCutoverPolicy(
         "compatibility alias"
     ),
     foreground_lifecycle=(
-        "supported compatibility runtime through --foreground or "
-        "Options.use_sidecar = False while downstream callers migrate"
+        "deprecated compatibility runtime retained for one release window "
+        "through --foreground or Options.use_sidecar = False; not a "
+        "long-term supported execution model"
     ),
     config_globals_lifecycle=(
         "config.ARGS is limited to explicit foreground and legacy "
@@ -51,6 +58,15 @@ DEFAULT_CUTOVER_POLICY = RuntimeCutoverPolicy(
         "foreground opt-out for compatibility execution"
     ),
 )
+
+
+def warn_foreground_deprecated(*, stacklevel: int = 2) -> None:
+    """Emit the foreground-runtime deprecation warning for opt-out callers."""
+    warnings.warn(
+        FOREGROUND_DEPRECATION_MESSAGE,
+        FutureWarning,
+        stacklevel=stacklevel,
+    )
 
 
 def should_submit_to_sidecar(args: Mapping[str, object]) -> bool:

@@ -866,8 +866,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             dest="use_sidecar",
             action="store_false",
             help=(
-                "run through the compatibility foreground runtime instead "
-                "of the default sidecar runtime"
+                "DEPRECATED: run through the compatibility foreground "
+                "runtime instead of the default sidecar runtime"
             ),
         )
         sidecar_args.add_argument(

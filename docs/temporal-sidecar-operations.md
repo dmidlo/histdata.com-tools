@@ -21,14 +21,15 @@ local sidecar when no healthy sidecar is running. `--sidecar` remains accepted
 as a compatibility alias for scripts that already passed it during migration.
 
 Default sidecar submissions are built from resolved runtime context and
-`RunRequest`, not `config.ARGS`. Foreground execution and `config.ARGS` remain
-supported only as explicit compatibility surfaces. Use `--foreground` on the CLI
-or `Options.use_sidecar = False` in API code when an operator needs the
-queue-free foreground runtime for rollback or platform recovery. New
-orchestration behavior should be expressed as `RunRequest` payloads, Temporal
-workflows, and Temporal activities. Removing foreground compatibility is a
-later deprecation step and requires a separate release note, migration window,
-and rollback plan.
+`RunRequest`, not `config.ARGS`. Foreground execution and `config.ARGS` are
+deprecated explicit compatibility surfaces. Use `--foreground` on the CLI or
+`Options.use_sidecar = False` in API code only when an operator needs the
+queue-free foreground runtime for rollback or platform recovery during the
+release window. Opt-out callers receive a `FutureWarning`. New orchestration
+behavior should be expressed as `RunRequest` payloads, Temporal workflows, and
+Temporal activities. Foreground is not a long-term supported execution model and
+is eligible for removal after the documented release window and final release
+note.
 
 The base package install includes the Temporal Python SDK because sidecar job
 submission, job inspection, and workers are the default runtime surface:
@@ -70,14 +71,16 @@ wheel is bad after publish, yank the affected platform wheel and cut a
 replacement release. The sdist and universal fallback wheel are metadata-only
 recovery artifacts; they keep the package installable while operators provide
 an explicit Temporal executable path, or temporarily opt out with
-`--foreground` / `Options.use_sidecar = False`.
+deprecated `--foreground` / `Options.use_sidecar = False` during the release
+window.
 
 Default-runtime failure policy:
 
 - Default CLI/API runs use the sidecar and start it when no healthy sidecar is
   running.
-- `--foreground` / `Options.use_sidecar = False` runs through the compatibility
-  foreground path and does not probe sidecar resources.
+- `--foreground` / `Options.use_sidecar = False` is deprecated, emits a
+  `FutureWarning`, runs through the compatibility foreground path, and does not
+  probe sidecar resources.
 - Metadata-only wheels and unsupported platforms fail sidecar starts with a
   `SidecarUnavailableError`/nonzero CLI exit unless an operator supplies
   `histdatacom-sidecar start --executable /path/to/temporal`.
@@ -255,7 +258,7 @@ Submit without waiting for the workflow result:
 histdatacom --sidecar --sidecar-start --sidecar-submit-only -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
-Run through the compatibility foreground runtime:
+Run through the deprecated compatibility foreground runtime:
 
 ```sh
 histdatacom --foreground -p eurusd -f ascii -t 1-minute-bar-quotes -s now
@@ -280,7 +283,7 @@ data = histdatacom(options)
 
 Set `options.sidecar_start = False` when an API caller should require a
 pre-started sidecar instead of starting one. Set `options.use_sidecar = False`
-only for explicit foreground compatibility runs.
+only for deprecated foreground compatibility runs during the release window.
 
 When `sidecar_wait_result` is `True`, API calls with `api_return_type` return
 the requested `polars`, `pandas`, or `arrow` object by materializing completed
@@ -515,8 +518,8 @@ Sidecar unavailable:
 - Symptom: CLI exits nonzero or API raises `SidecarUnavailableError`.
 - Fix: run `histdatacom-sidecar status --json` and `histdatacom-sidecar doctor
   --json`, start the sidecar manually with an explicit executable when using a
-  metadata-only artifact, or use `--foreground` / `Options.use_sidecar = False`
-  as a compatibility rollback.
+  metadata-only artifact, or use deprecated `--foreground` /
+  `Options.use_sidecar = False` as a release-window compatibility rollback.
 
 Port collisions:
 

@@ -33,10 +33,10 @@ from typing import TYPE_CHECKING, Any, Mapping
 import histdatacom
 from histdatacom import Options, config
 from histdatacom.cli import ArgParser
-from histdatacom.foreground import (
+from histdatacom.foreground import run_foreground
+from histdatacom.repository_output import (
     print_repository_failure,
     print_repository_table,
-    run_foreground,
 )
 from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.records import Record
@@ -45,7 +45,10 @@ from histdatacom.sidecar.client import (
     SidecarUnavailableError,
     submit_run_request_and_observe_sync,
 )
-from histdatacom.sidecar.cutover import should_submit_to_sidecar
+from histdatacom.sidecar.cutover import (
+    should_submit_to_sidecar,
+    warn_foreground_deprecated,
+)
 from histdatacom.utils import (
     load_influx_yaml,
     set_working_data_dir,
@@ -114,6 +117,7 @@ class _HistDataCom:  # noqa:R701
 
     def _configure_foreground_compatibility(self) -> None:
         """Populate legacy globals only for explicit foreground execution."""
+        warn_foreground_deprecated(stacklevel=4)
         config.ARGS = self.context.foreground_args()  # noqa:BLK100
 
         if config.ARGS["import_to_influxdb"]:

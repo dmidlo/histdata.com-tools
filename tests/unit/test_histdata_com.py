@@ -346,7 +346,8 @@ def test_cli_foreground_opt_out_uses_compatibility_runtime(
         ],
     )
 
-    assert histdata_com.main() is None
+    with pytest.warns(FutureWarning, match="foreground compatibility runtime"):
+        assert histdata_com.main() is None
     assert captured["request"].pairs == ("eurusd",)
     assert captured["args"]["use_sidecar"] is False
 
@@ -380,7 +381,8 @@ def test_api_foreground_opt_out_uses_compatibility_runtime(
     options.timeframes = {"M1"}
     options.start_yearmonth = "2022-12"
 
-    result = histdata_com.main(options)
+    with pytest.warns(FutureWarning, match="foreground compatibility runtime"):
+        result = histdata_com.main(options)
 
     assert result == {"runtime": "foreground"}
     assert captured["request"].pairs == ("eurusd",)

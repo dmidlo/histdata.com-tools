@@ -117,7 +117,7 @@ System:
 
 Sidecar:
   --sidecar             submit this run to the local Temporal sidecar (default runtime)
-  --foreground          run through the compatibility foreground runtime instead of the default sidecar runtime
+  --foreground          DEPRECATED: run through the compatibility foreground runtime instead of the default sidecar runtime
   --sidecar-start       start the sidecar server and worker fleet only when no healthy sidecar is running
   --no-sidecar-start    submit to the sidecar only when a healthy sidecar is already running
   --sidecar-submit-only
@@ -320,11 +320,12 @@ local sidecar when no healthy sidecar is running. The `--sidecar` flag remains
 accepted as an explicit compatibility alias for automation that already passed
 it during the migration.
 
-The foreground runtime remains available as a compatibility rollback through
-`--foreground` on the CLI or `options.use_sidecar = False` in API code. If the
-sidecar cannot be started or contacted, CLI calls exit nonzero with a clear
-error and API calls raise `SidecarUnavailableError`; the runtime does not
-silently fall back from sidecar to foreground.
+The foreground runtime is deprecated. It remains available for one release
+window as an explicit rollback through `--foreground` on the CLI or
+`options.use_sidecar = False` in API code. Opt-out callers receive a
+`FutureWarning`. If the sidecar cannot be started or contacted, CLI calls exit
+nonzero with a clear error and API calls raise `SidecarUnavailableError`; the
+runtime does not silently fall back from sidecar to foreground.
 
 #### Runtime Model and Install Surface
 
@@ -365,10 +366,10 @@ wheels provide the local Temporal server executable.
 Default sidecar submissions are built from resolved runtime context and
 `RunRequest`, not `config.ARGS`. The foreground runtime and `config.ARGS` global
 argument state are explicit compatibility surfaces for `--foreground` and
-legacy foreground behavior. New orchestration work should use `RunRequest`,
-sidecar workflows, and sidecar activities. Foreground removal is a later
-deprecation step and requires a separate release note, migration window, and
-rollback plan.
+legacy foreground behavior only during the deprecation window. New
+orchestration work should use `RunRequest`, sidecar workflows, and sidecar
+activities. Foreground is not a long-term supported execution model and is
+eligible for removal after the documented release window and final release note.
 
 #### Lifecycle and Diagnostics
 
@@ -404,7 +405,7 @@ Submit without waiting for completion:
 histdatacom --sidecar-submit-only -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
-Run through the compatibility foreground runtime:
+Run through the deprecated compatibility foreground runtime:
 
 ```sh
 histdatacom --foreground -p eurusd -f ascii -t 1-minute-bar-quotes -s now
@@ -421,8 +422,8 @@ histdatacom-sidecar jobs cancel histdatacom-<request-id> --reason "operator stop
 
 - `histdatacom --version` stays local and does not require the sidecar.
 - `-A`, `-U`, `-V`, `-D`, `-X`, and `-I` keep their existing option semantics before a sidecar request is submitted.
-- `--foreground` runs through the compatibility foreground runtime and is the
-  documented rollback switch for operators.
+- `--foreground` is deprecated, emits a `FutureWarning`, and runs through the
+  compatibility foreground runtime only as a release-window rollback switch.
 - `--sidecar-start` starts the server and worker lane fleet only when no healthy sidecar is running.
 - `--no-sidecar-start` requires an already-running healthy sidecar and fails
   clearly instead of starting one.
@@ -443,7 +444,7 @@ Set `options.sidecar_wait_result = False` to submit a job and receive sidecar
 job metadata instead of a materialized API return object. Set
 `options.sidecar_start = False` when a caller requires a pre-started sidecar,
 or set `options.use_sidecar = False` only when a caller intentionally needs the
-compatibility foreground runtime.
+deprecated compatibility foreground runtime during the release window.
 
 #### Sidecar Troubleshooting and Contributor Docs
 
@@ -507,7 +508,7 @@ options.cpu_utilization = 100
   bundled sidecar when needed. Set `options.sidecar_wait_result = False` when
   the caller only needs job metadata, set `options.sidecar_start = False` when
   a caller requires a pre-started sidecar, or set `options.use_sidecar = False`
-  for an explicit foreground compatibility run.
+  only for a deprecated foreground compatibility run during the release window.
 
 - when a behavior flag is included, `histdatacom` assumes it is being used for `CLI` automation **exclusively** and does **not** provide a return value.
 
