@@ -1,6 +1,5 @@
 """Record work object used by foreground, sidecar, and cache code."""
 
-import json
 import os
 from pathlib import Path
 from typing import Any
@@ -102,10 +101,6 @@ class Record:  # noqa:H601
                 create_full_path(self.data_dir)
 
             ManifestStatusStore(base_dir or self.data_dir).write_record(self)
-            momento_path = Path(self.data_dir, ".meta")
-
-            with momento_path.open("w", encoding="UTF-8") as target:
-                json.dump(self._to_dict(), target)
 
         except ValueError as err:
             print(  # noqa:T201,BLK100

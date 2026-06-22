@@ -161,7 +161,9 @@ def test_create_cache_writes_polars_cache_and_record_metadata(
     import polars as pl
 
     from histdatacom.api import Api
+    from histdatacom.manifest_store import ManifestStatusStore
     from histdatacom.records import Record
+    from histdatacom.runtime_contracts import WorkStatus
 
     filename = "DAT_ASCII_EURUSD_M1_201202.csv"
     shutil.copyfile(FIXTURES / filename, tmp_path / filename)
@@ -186,7 +188,11 @@ def test_create_cache_writes_polars_cache_and_record_metadata(
     assert record.cache_start == str(EXPECTED_M1_DATETIMES[0])
     assert record.cache_end == str(EXPECTED_M1_DATETIMES[-1])
     assert (tmp_path / CACHE_FILENAME).exists()
-    assert (tmp_path / ".meta").exists()
+    assert not (tmp_path / ".meta").exists()
+    [item] = ManifestStatusStore(tmp_path).list_work_items()
+    assert item.status is WorkStatus.CSV_FILE
+    assert item.cache_filename == CACHE_FILENAME
+    assert item.cache_line_count == "3"
     assert isinstance(cache_frame, pl.DataFrame)
     assert cache_frame.schema["datetime"] == pl.Int64
     assert cache_frame.select("datetime").to_series().to_list() == (

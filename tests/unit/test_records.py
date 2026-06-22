@@ -67,10 +67,10 @@ def test_record_preserves_unknown_legacy_status_text() -> None:
     assert record._to_dict()["status"] == "CUSTOM_STATUS"
 
 
-def test_memento_files_do_not_persist_absolute_data_dir(
+def test_memento_writes_do_not_create_legacy_meta_file(
     tmp_path: Path,
 ) -> None:
-    """New metadata should not contain machine-specific data directories.
+    """New metadata writes should use the manifest, not legacy `.meta`.
 
     Args:
         tmp_path (Path): temporary test directory.
@@ -80,9 +80,8 @@ def test_memento_files_do_not_persist_absolute_data_dir(
     record.write_memento_file(base_dir=f"{tmp_path}{os.sep}")
 
     meta_path = tmp_path / "ASCII" / "M1" / "eurusd" / "2022" / ".meta"
-    metadata = json.loads(meta_path.read_text(encoding="UTF-8"))
 
-    assert "data_dir" not in metadata
+    assert not meta_path.exists()
 
 
 def test_restore_momento_ignores_stale_persisted_data_dir(

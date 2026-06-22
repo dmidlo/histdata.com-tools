@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import os
 import zipfile
 from pathlib import Path
 
 from histdatacom import config
+from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkStatus
 from histdatacom.scraper.scraper import Scraper
@@ -57,7 +57,7 @@ def _configure_stage_args(tmp_path: Path) -> None:
     }
 
 
-def test_validate_url_transitions_new_record_to_valid_and_writes_meta(
+def test_validate_url_transitions_new_record_to_valid_manifest(
     tmp_path: Path,
 ) -> None:
     """Validate stage success should return the forwarded record."""
@@ -74,12 +74,13 @@ def test_validate_url_transitions_new_record_to_valid_and_writes_meta(
     result = scraper._validate_url(record, config.ARGS)
 
     meta_path = Path(record.data_dir) / ".meta"
-    metadata = json.loads(meta_path.read_text(encoding="UTF-8"))
+    [item] = ManifestStatusStore(tmp_path).list_work_items()
 
     assert result is record
     assert record.status is WorkStatus.URL_VALID
-    assert metadata["status"] == WorkStatus.URL_VALID.value
-    assert metadata["data_tk"] == "token"
+    assert not meta_path.exists()
+    assert item.status is WorkStatus.URL_VALID
+    assert item.data_tk == "token"
 
 
 def test_validate_url_transitions_missing_record_without_requeue(
@@ -99,11 +100,12 @@ def test_validate_url_transitions_missing_record_without_requeue(
     result = scraper._validate_url(record, config.ARGS)
 
     meta_path = Path(record.data_dir) / ".meta"
-    metadata = json.loads(meta_path.read_text(encoding="UTF-8"))
+    [item] = ManifestStatusStore(tmp_path).list_work_items()
 
     assert result is None
     assert record.status is WorkStatus.URL_NO_REPO_DATA
-    assert metadata["status"] == WorkStatus.URL_NO_REPO_DATA.value
+    assert not meta_path.exists()
+    assert item.status is WorkStatus.URL_NO_REPO_DATA
 
 
 def test_request_file_uses_local_post_headers(monkeypatch) -> None:
@@ -159,11 +161,12 @@ def test_download_zip_transitions_valid_record_to_csv_zip(
     result = scraper._download_zip(record, config.ARGS)
 
     meta_path = Path(record.data_dir) / ".meta"
-    metadata = json.loads(meta_path.read_text(encoding="UTF-8"))
+    [item] = ManifestStatusStore(tmp_path).list_work_items()
 
     assert result is record
     assert record.status is WorkStatus.CSV_ZIP
-    assert metadata["status"] == WorkStatus.CSV_ZIP.value
+    assert not meta_path.exists()
+    assert item.status is WorkStatus.CSV_ZIP
 
 
 def test_populate_initial_records_uses_deterministic_plan(
@@ -198,6 +201,8 @@ def test_populate_initial_records_uses_deterministic_plan(
         "202203",
     ]
     meta_path = Path(records[0].data_dir) / ".meta"
-    metadata = json.loads(meta_path.read_text(encoding="UTF-8"))
-    assert metadata["status"] == WorkStatus.URL_NEW.value
-    assert metadata["data_format"] == "ASCII"
+    item = ManifestStatusStore(tmp_path).get_work_item_for_record(records[0])
+    assert item is not None
+    assert not meta_path.exists()
+    assert item.status is WorkStatus.URL_NEW
+    assert item.data_format == "ASCII"

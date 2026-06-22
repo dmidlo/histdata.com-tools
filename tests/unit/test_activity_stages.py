@@ -35,6 +35,7 @@ from histdatacom.histdata_ascii import (
     read_ascii_file_to_polars,
     write_polars_cache,
 )
+from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkItem, WorkStatus, derive_work_id
 
@@ -114,7 +115,7 @@ def _form_html(*, token: str = "token") -> str:
 def test_validate_url_work_item_returns_updated_item_without_queue(
     tmp_path: Path,
 ) -> None:
-    """URL validation should return an updated work item and memento."""
+    """URL validation should return an updated work item and manifest state."""
     record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
 
     def scrape(record_: Record) -> Record:
@@ -139,7 +140,10 @@ def test_validate_url_work_item_returns_updated_item_without_queue(
     assert output.work_item.status is WorkStatus.URL_VALID
     assert output.work_item.data_tk == "token"
     assert record.status is WorkStatus.URL_NEW
-    assert (Path(output.work_item.data_dir) / ".meta").exists()
+    [stored_item] = ManifestStatusStore(tmp_path).list_work_items()
+    assert stored_item.status is WorkStatus.URL_VALID
+    assert stored_item.data_tk == "token"
+    assert not (Path(output.work_item.data_dir) / ".meta").exists()
 
 
 def test_validate_url_work_item_parses_form_metadata(
@@ -187,7 +191,12 @@ def test_validate_url_work_item_missing_data_does_not_forward(
     assert output.result.status is WorkStatus.URL_NO_REPO_DATA
     assert output.work_item.status is WorkStatus.URL_NO_REPO_DATA
     assert output.result.metrics["missing_repo_data"] is True
-    assert (Path(output.work_item.data_dir) / ".meta").exists()
+    stored_item = ManifestStatusStore(tmp_path).get_work_item(
+        output.work_item.work_id
+    )
+    assert stored_item is not None
+    assert stored_item.status is WorkStatus.URL_NO_REPO_DATA
+    assert not (Path(output.work_item.data_dir) / ".meta").exists()
 
 
 def test_validate_url_work_item_missing_token_is_no_data(

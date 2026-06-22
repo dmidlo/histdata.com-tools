@@ -37,10 +37,10 @@ def _expected_ascii_m1_dir(base_dir: Path) -> str:
     return f"{base_dir / data_path}{os.sep}"
 
 
-def test_record_write_creates_manifest_and_legacy_meta(
+def test_record_write_creates_manifest_without_legacy_meta(
     tmp_path: Path,
 ) -> None:
-    """Record writes should upsert the manifest and mirror legacy metadata."""
+    """Record writes should upsert the manifest without legacy sidecars."""
     record = Record(url=ASCII_M1_URL, status=WorkStatus.CSV_FILE.value)
 
     record.write_memento_file(base_dir=str(tmp_path))
@@ -50,28 +50,28 @@ def test_record_write_creates_manifest_and_legacy_meta(
     store = ManifestStatusStore(tmp_path)
     [item] = store.list_work_items()
     history = store.status_history(item.work_id, owner_kind="work_item")
-    legacy_payload = json.loads(meta_path.read_text(encoding="UTF-8"))
 
     assert db_path.exists()
-    assert meta_path.exists()
+    assert not meta_path.exists()
     assert item.status is WorkStatus.CSV_FILE
     assert item.data_dir == _expected_ascii_m1_dir(tmp_path)
     assert history[-1]["stage"] == "record_memento"
-    assert "data_dir" not in legacy_payload
 
 
 def test_record_delete_clears_current_manifest_state(
     tmp_path: Path,
 ) -> None:
-    """Deleting legacy mementos should also clear current manifest state."""
+    """Deleting mementos should clear manifest and existing legacy metadata."""
     record = Record(url=ASCII_M1_URL, status=WorkStatus.CSV_FILE.value)
     record.write_memento_file(base_dir=str(tmp_path))
+    meta_path = Path(record.data_dir) / ".meta"
+    meta_path.write_text("{}", encoding="UTF-8")
     store = ManifestStatusStore(tmp_path)
     assert store.list_work_items()
 
     record.delete_momento_file()
 
-    assert not (Path(record.data_dir) / ".meta").exists()
+    assert not meta_path.exists()
     assert not store.list_work_items()
 
 
@@ -107,6 +107,7 @@ def test_restore_imports_legacy_meta_without_manifest(
     assert restored.status is WorkStatus.CSV_FILE
     assert restored.zip_filename == "legacy.zip"
     assert restored.data_dir == current_data_dir
+    assert not meta_path.exists()
     assert item.data_dir == current_data_dir
     assert history[-1]["stage"] == "legacy_meta_import"
 
@@ -136,6 +137,7 @@ def test_missing_or_corrupt_legacy_meta_is_graceful(
     assert not result.migrated
     assert corrupt_result.reason == "corrupt"
     assert not corrupt_result.migrated
+    assert corrupt_meta.exists()
 
 
 def test_manifest_store_persists_stage_result_details(

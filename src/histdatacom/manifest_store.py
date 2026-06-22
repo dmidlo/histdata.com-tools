@@ -432,11 +432,19 @@ class ManifestStatusStore:
             source="legacy_meta_import",
             message="Legacy .meta metadata imported.",
         )
+        cleanup_error = ""
+        try:
+            path.unlink()
+        except OSError as err:
+            cleanup_error = str(err)
         return ManifestMigrationResult(
             path=str(path),
             migrated=True,
-            reason="imported",
+            reason=(
+                "imported" if not cleanup_error else "imported_cleanup_failed"
+            ),
             work_id=item.work_id,
+            error=cleanup_error,
         )
 
     def import_legacy_meta_files(

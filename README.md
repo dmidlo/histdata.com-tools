@@ -345,6 +345,13 @@ manifests under a per-user, per-workspace runtime directory. Downloaded ZIP
 files, extracted CSV/XLSX files, cache IPC files, and merged API artifacts stay
 under the existing HistData data-directory policy.
 
+Record status metadata is manifest-only for new writes. Normal CLI/API and
+sidecar paths update `.histdatacom/manifest-status.sqlite3` under the relevant
+data or sidecar status root and no longer create new hidden `.meta` files beside
+records. Existing `.meta` files remain readable as migration inputs; successful
+imports write the manifest row and remove the legacy file, while missing or
+corrupt legacy files are reported without blocking manifest-backed operation.
+
 Source distributions and universal fallback wheels include sidecar metadata and
 CLI entry points. Platform wheels can bundle the Temporal server executable
 under the sidecar package resources. On a bundled platform wheel,

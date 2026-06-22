@@ -103,6 +103,14 @@ Downloaded ZIP files, extracted CSV/XLSX files, cache IPC files, and merged
 API-return artifacts stay under the existing HistData data-directory policy.
 They are not moved into the sidecar runtime home.
 
+Record status metadata is manifest-only for new writes. Normal foreground,
+sidecar, and API paths update `.histdatacom/manifest-status.sqlite3` under the
+resolved data or sidecar status root and no longer create new hidden `.meta`
+files beside individual records. Existing `.meta` files are migration inputs:
+successful restore/import operations write the manifest row and remove the
+legacy file, while missing or corrupt legacy files are reported and otherwise
+ignored.
+
 ## Runtime Paths
 
 The default runtime home is per user and platform-specific:
