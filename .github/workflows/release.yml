@@ -216,7 +216,6 @@ jobs:
           python scripts/smoke_sidecar_install.py
           --wheel-dir dist-platform
           --state-dir .sidecar-smoke
-          --expect-temporal-extra
           --require-bundled-current-platform
           --check-executable-version
           --start-sidecar

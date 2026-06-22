@@ -1,9 +1,9 @@
 # histdata.com-tools
 
 A command-line utility and Python ETL package that downloads currency exchange
-rates from Histdata.com. Optional Temporal sidecar, InfluxDB, and Jupyter
-integrations are available through extras. Works on MacOS, Linux & Windows
-Systems.
+rates from Histdata.com. The Temporal sidecar is the default runtime; InfluxDB,
+Jupyter, and alternate dataframe return formats are available through extras.
+Works on MacOS, Linux & Windows Systems.
 **Requires Python3.10+**
 
 **NEW:** Expanded API support!!!
@@ -328,17 +328,17 @@ silently fall back from sidecar to foreground.
 
 #### Runtime Model and Install Surface
 
-Install the Temporal dependency surface when using sidecar-backed jobs,
-workers, or job inspection:
+The base install includes the Temporal Python SDK because the sidecar is the
+default runtime:
 
 ```sh
-pip install "histdatacom[temporal]"
+pip install histdatacom
 ```
 
-Temporal remains an opt-in extra instead of a core install dependency. Base
-installs keep package metadata, CLI entry points, version/status checks, and
-the foreground compatibility runtime available; sidecar-backed work fails
-nonzero with install guidance until `histdatacom[temporal]` is installed.
+`histdatacom[temporal]` remains accepted as a backwards-compatible extra name
+for automation that installed the sidecar dependency surface during migration,
+but it does not change the default runtime contract: base installs include the
+Temporal SDK needed by sidecar clients and workers.
 
 The sidecar stores Temporal process state, SQLite history, logs, and runtime
 manifests under a per-user, per-workspace runtime directory. Downloaded ZIP
@@ -351,9 +351,9 @@ under the sidecar package resources. On a bundled platform wheel,
 `histdatacom-sidecar start` works without `--executable`; on metadata-only
 artifacts and unsupported platforms, default sidecar startup requires an
 operator-provided Temporal executable through the sidecar lifecycle command or
-an explicit foreground opt-out. The Temporal dependency extra is required
-because lifecycle start supervises both the local Temporal server and the
-worker lane fleet.
+an explicit foreground opt-out. The bundled executable and the Python Temporal
+SDK are separate concerns: base installs provide the SDK, while bundled platform
+wheels provide the local Temporal server executable.
 
 The foreground runtime and `config.ARGS` global argument state are now treated
 as compatibility surfaces. New orchestration work should use `RunRequest`,
@@ -773,9 +773,12 @@ InfluxDB import and notebook support are optional:
 ```sh
 pip install "histdatacom[influx]"
 pip install "histdatacom[jupyter]"
-pip install "histdatacom[temporal]"
 pip install "histdatacom[all]"
 ```
+
+`histdatacom[temporal]` remains a compatibility alias for migration-era install
+scripts, but the Temporal Python SDK is part of the base package dependency
+set because sidecar execution is the default runtime.
 
 to install latest development version
 
@@ -798,7 +801,7 @@ PYTHONNOUSERSITE=1 pre-commit install --install-hooks
 The dependency surfaces are split by purpose:
 
 - `.[test]` installs pytest, coverage, pandas, pyarrow, InfluxDB support, and
-  Temporal SDK support used by the test suite.
+  test-only support around the base Temporal SDK dependency.
 - `.[lint]` installs pre-commit and direct lint/type/doc hygiene tools.
 - `.[release]` installs build and publish tooling.
 - `.[dev]` is the aggregate local contributor environment with test, lint,
@@ -831,7 +834,7 @@ uploaded separately as release reports.
 If a bundled platform wheel fails after release, prefer yanking the affected
 file on PyPI and cutting a replacement release. The sdist and universal fallback
 wheel intentionally remain metadata-only rollback artifacts: users can still
-install `histdatacom[temporal]` and start the sidecar with
+install `histdatacom` and start the sidecar with
 `histdatacom-sidecar start --executable /path/to/temporal` until a corrected
 platform wheel is available.
 

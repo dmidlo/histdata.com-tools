@@ -143,6 +143,18 @@ jobs:
           python scripts/smoke_sidecar_install.py --wheel-dir dist --state-dir .sidecar-smoke
         shell: bash
 
+      - name: Smoke wheel temporal compatibility extra install
+        run: |
+          python -m venv .wheel-temporal-smoke
+          . .wheel-temporal-smoke/bin/activate
+          python -m pip install --upgrade pip
+          python scripts/smoke_sidecar_install.py \
+            --wheel-dir dist \
+            --state-dir .sidecar-temporal-smoke \
+            --expect-temporal-extra \
+            --skip-cli
+        shell: bash
+
       - name: Smoke wheel extras install
         run: |
           python -m venv .wheel-extras-smoke

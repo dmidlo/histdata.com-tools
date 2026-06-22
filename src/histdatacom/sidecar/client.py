@@ -45,8 +45,9 @@ from histdatacom.sidecar.workflow_metadata import (
 )
 
 TEMPORAL_EXTRA_HINT = (
-    "Temporal support requires the optional dependency surface. "
-    "Install histdatacom[temporal] to use sidecar client and worker features."
+    "Temporal support requires temporalio. Base histdatacom installs include "
+    "this dependency; reinstall histdatacom with dependencies enabled or "
+    "install the temporal compatibility extra."
 )
 DEFAULT_RUN_WORKFLOW_NAME = "HistDataRunWorkflow"
 RUN_REQUEST_METADATA_KEY = "run_request"
@@ -1193,7 +1194,8 @@ def _ensure_sidecar_available(
 def _is_missing_temporal_dependency_error(err: RuntimeError) -> bool:
     message = str(err)
     return (
-        "histdatacom[temporal]" in message
+        "temporalio" in message
+        or "histdatacom[temporal]" in message
         or "Temporal worker support requires" in message
     )
 

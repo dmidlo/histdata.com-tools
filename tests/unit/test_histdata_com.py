@@ -623,13 +623,11 @@ def test_cli_sidecar_unavailable_exits_nonzero(
 def test_api_temporal_dependency_error_is_sidecar_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """API callers should catch missing Temporal extras as sidecar unavailable."""
+    """API callers should catch missing Temporal SDK as sidecar unavailable."""
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> object:
-        raise TemporalDependencyError(
-            "Temporal support requires histdatacom[temporal]."
-        )
+        raise TemporalDependencyError("Temporal support requires temporalio.")
 
     monkeypatch.setattr(
         histdata_com,
@@ -637,7 +635,7 @@ def test_api_temporal_dependency_error_is_sidecar_unavailable(
         fake_submit,
     )
 
-    with pytest.raises(SidecarUnavailableError, match="histdatacom"):
+    with pytest.raises(SidecarUnavailableError, match="temporalio"):
         histdata_com.main(_sidecar_options())
 
 
@@ -645,13 +643,11 @@ def test_cli_temporal_dependency_error_exits_nonzero_without_traceback(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """CLI missing-extra failures should be shell-friendly."""
+    """CLI missing-SDK failures should be shell-friendly."""
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> object:
-        raise TemporalDependencyError(
-            "Temporal support requires histdatacom[temporal]."
-        )
+        raise TemporalDependencyError("Temporal support requires temporalio.")
 
     monkeypatch.setattr(
         histdata_com,
@@ -680,10 +676,7 @@ def test_cli_temporal_dependency_error_exits_nonzero_without_traceback(
 
     captured = capsys.readouterr()
     assert err.value.code == 1
-    assert (
-        "error: Temporal support requires histdatacom[temporal]."
-        in captured.err
-    )
+    assert "error: Temporal support requires temporalio." in captured.err
     assert "Traceback" not in captured.err
 
 

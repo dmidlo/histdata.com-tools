@@ -274,12 +274,12 @@ def test_worker_config_cli_emits_queue_metadata(
     assert payload["concurrency"]["network_workers"] == 12
 
 
-def test_worker_run_cli_reports_missing_temporal_extra(
+def test_worker_run_cli_reports_missing_temporal_dependency(
     monkeypatch,
     tmp_path: Path,
     capsys,
 ) -> None:
-    """Running the real worker without temporalio should fail with the extra."""
+    """Running the real worker without temporalio should fail clearly."""
 
     async def fake_connect_temporal_client(**kwargs: object) -> object:
         return object()
@@ -310,4 +310,4 @@ def test_worker_run_cli_reports_missing_temporal_extra(
     output = capsys.readouterr()
 
     assert exit_code == 1
-    assert "histdatacom[temporal]" in output.err
+    assert "temporalio" in output.err

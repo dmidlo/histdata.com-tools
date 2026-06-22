@@ -501,8 +501,10 @@ class SidecarSupervisor:
         """Start the Temporal server and worker lane fleet."""
         if self.worker_lanes and not self._worker_dependency_available():
             raise RuntimeError(
-                "Temporal worker support requires histdatacom[temporal]. "
-                "Install the Temporal extra before starting the sidecar "
+                "Temporal worker support requires temporalio. Base "
+                "histdatacom installs include this dependency; reinstall "
+                "histdatacom with dependencies enabled or install the "
+                "temporal compatibility extra before starting the sidecar "
                 "worker fleet."
             )
 

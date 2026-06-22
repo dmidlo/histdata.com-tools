@@ -75,6 +75,7 @@ def test_inspect_wheel_accepts_bundled_platform_executable(
                     "Requires-Python: >=3.10.0",
                     "Provides-Extra: temporal",
                     "Provides-Extra: all",
+                    "Requires-Dist: temporalio>=1.10,<2",
                     'Requires-Dist: temporalio>=1.10,<2; extra == "temporal"',
                     'Requires-Dist: temporalio>=1.10,<2; extra == "all"',
                     "",

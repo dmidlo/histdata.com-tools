@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -103,43 +102,60 @@ def test_check_live_sidecar_smoke_returns_live_report(
     assert captured["stop_timeout"] == 5.0
 
 
-def test_check_missing_temporal_extra_failure_requires_clean_json_error(
+def test_check_package_metadata_requires_core_temporal_dependency(
     monkeypatch,
-    tmp_path: Path,
 ) -> None:
-    """Base-install smoke should exercise missing temporalio startup behavior."""
-    module = _module()
-    captured: dict[str, Any] = {}
+    """Base-install smoke should require temporalio as a core dependency."""
+    import histdatacom
 
-    def fake_run(command: list[str], **kwargs: Any) -> object:
-        captured["command"] = command
-        captured["kwargs"] = kwargs
-        return SimpleNamespace(
-            returncode=1,
-            stdout=json.dumps(
-                {
-                    "state": "error",
-                    "message": (
-                        "Temporal worker support requires "
-                        "histdatacom[temporal]. Install the Temporal extra."
-                    ),
-                }
-            ),
-            stderr="",
+    module = _module()
+
+    class _Metadata(dict):
+        def get_all(
+            self,
+            key: str,
+            default: list[str] | None = None,
+        ) -> list[str]:
+            value = self.get(key, default or [])
+            return list(value) if isinstance(value, list) else [str(value)]
+
+    class _Distribution:
+        metadata = _Metadata(
+            {
+                "Name": "histdatacom",
+                "Provides-Extra": ["temporal"],
+            }
         )
 
+    class _EntryPoints(list):
+        def select(self, *, group: str) -> "_EntryPoints":
+            return self
+
     monkeypatch.setattr(module, "_script_path", lambda name: name)
-    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        module.metadata,
+        "distribution",
+        lambda name: _Distribution(),
+    )
+    monkeypatch.setattr(
+        module.metadata,
+        "entry_points",
+        lambda: _EntryPoints(
+            SimpleNamespace(name=name, value=value)
+            for name, value in module.EXPECTED_CONSOLE_SCRIPTS.items()
+        ),
+    )
+    monkeypatch.setattr(
+        module.metadata,
+        "version",
+        lambda name: (
+            histdatacom.__version__ if name == "histdatacom" else "1.10.0"
+        ),
+    )
+    monkeypatch.setattr(
+        module.importlib.util, "find_spec", lambda name: object()
+    )
 
-    payload = module.check_missing_temporal_extra_failure(tmp_path / "state")
+    report = module.check_package_metadata(expect_temporal_extra=False)
 
-    assert payload["state"] == "error"
-    assert payload["exit_code"] == 1
-    assert "histdatacom[temporal]" in payload["message"]
-    assert captured["command"][:5] == [
-        "histdatacom-sidecar",
-        "--state-dir",
-        str(tmp_path / "state"),
-        "--json",
-        "start",
-    ]
+    assert report["temporalio_version"] == "1.10.0"

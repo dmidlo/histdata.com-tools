@@ -228,14 +228,14 @@ class _ResourceFailingSupervisor(_FakeSupervisor):
 
 
 class _DependencyFailingSupervisor(_FakeSupervisor):
-    """Supervisor that simulates a base install missing temporalio."""
+    """Supervisor that simulates a broken install missing temporalio."""
 
     def start(self) -> SidecarStatus:
         """Fail as worker dependency lookup would fail."""
         self.start_calls += 1
         raise RuntimeError(
-            "Temporal worker support requires histdatacom[temporal]. "
-            "Install the Temporal extra before starting the sidecar worker fleet."
+            "Temporal worker support requires temporalio. Base histdatacom "
+            "installs include this dependency."
         )
 
 
@@ -529,20 +529,20 @@ def test_submit_and_observe_wraps_sidecar_resource_failures(
     assert supervisor.start_calls == 1
 
 
-def test_submit_and_observe_wraps_missing_temporal_extra_failures(
+def test_submit_and_observe_wraps_missing_temporal_dependency_failures(
     tmp_path: Path,
 ) -> None:
-    """Base installs missing temporalio should use the unavailable contract."""
+    """Broken installs missing temporalio should use the unavailable contract."""
     config = _config(tmp_path)
     supervisor = _DependencyFailingSupervisor(current_state="stopped")
 
     with pytest.raises(
         client.SidecarUnavailableError,
-        match=r"histdatacom\[temporal\]",
+        match="temporalio",
     ):
         asyncio.run(
             client.submit_run_request_and_observe(
-                RunRequest(request_id="run-missing-extra"),
+                RunRequest(request_id="run-missing-temporalio"),
                 config=config,
                 client=_FakeTemporalClient(),
                 supervisor=supervisor,  # type: ignore[arg-type]
@@ -556,7 +556,7 @@ def test_submit_and_observe_wraps_missing_temporal_extra_failures(
 def test_submit_and_observe_does_not_hide_unrelated_runtime_failures(
     tmp_path: Path,
 ) -> None:
-    """Only known missing-extra startup errors should be normalized."""
+    """Only known missing-dependency startup errors should be normalized."""
     config = _config(tmp_path)
     supervisor = _RuntimeFailingSupervisor(current_state="stopped")
 
@@ -1007,7 +1007,7 @@ def test_list_job_statuses_uses_temporal_visibility_list(
     assert jobs.jobs[0].lifecycle == JobLifecycle.RUNNING
 
 
-def test_missing_temporal_dependency_has_optional_extra_hint(
+def test_missing_temporal_dependency_has_core_dependency_hint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Using the real client loader without temporalio should fail clearly."""
@@ -1023,4 +1023,4 @@ def test_missing_temporal_dependency_has_optional_extra_hint(
     with pytest.raises(client.TemporalDependencyError) as err:
         client._load_temporal_client_class()
 
-    assert "histdatacom[temporal]" in str(err.value)
+    assert "temporalio" in str(err.value)

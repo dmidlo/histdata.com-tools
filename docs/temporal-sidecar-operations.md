@@ -28,26 +28,24 @@ payloads, Temporal workflows, and Temporal activities. Removing foreground
 compatibility is a later deprecation step and requires a separate release note,
 migration window, and rollback plan.
 
-Install the Temporal client and worker dependency surface when using sidecar
-job submission, job inspection, or workers:
+The base package install includes the Temporal Python SDK because sidecar job
+submission, job inspection, and workers are the default runtime surface:
 
 ```sh
-pip install "histdatacom[temporal]"
+pip install histdatacom
 ```
 
-`histdatacom[all]` also includes the Temporal dependency surface. Source
-distributions and universal fallback wheels include sidecar metadata, resource
-manifests, and CLI entry points. Platform wheels can include the Temporal
-server executable as package data. On a bundled platform wheel,
+`histdatacom[temporal]` remains accepted as a backwards-compatible extra for
+automation written during migration, and `histdatacom[all]` still includes the
+same SDK dependency. Source distributions and universal fallback wheels include
+sidecar metadata, resource manifests, and CLI entry points. Platform wheels can
+include the Temporal server executable as package data. On a bundled platform wheel,
 `histdatacom-sidecar start` resolves the packaged executable through
 `importlib.resources`; on metadata-only artifacts and unsupported platforms,
 development and operator smoke tests should pass an explicit Temporal
-executable path to `histdatacom-sidecar start --executable`. The Temporal
-dependency surface remains an opt-in extra rather than a core install
-dependency. Base installs retain package metadata, CLI entry points,
-version/status checks, and foreground compatibility, but sidecar-backed work
-fails nonzero with `histdatacom[temporal]` guidance because lifecycle start
-also launches the worker lane fleet.
+executable path to `histdatacom-sidecar start --executable`. The Python SDK and
+the server executable are separate distribution concerns: base installs provide
+the SDK, while bundled platform wheels provide the executable.
 
 Release automation builds the metadata-only sdist/fallback wheel first, then
 builds bundled Temporal platform wheels for Linux x86_64, Linux arm64, macOS
@@ -489,8 +487,11 @@ to avoid promoting partial artifacts:
 
 Dependency install problems:
 
-- Symptom: `Temporal support requires the optional dependency surface`.
-- Fix: install `histdatacom[temporal]` in the active virtual environment.
+- Symptom: `Temporal support requires temporalio`.
+- Fix: reinstall `histdatacom` with dependencies enabled in the active virtual
+  environment. This usually means avoiding `--no-deps`; the compatibility
+  extra `histdatacom[temporal]` remains accepted for migration-era install
+  scripts.
 
 Temporal executable not bundled:
 

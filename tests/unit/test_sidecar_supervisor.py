@@ -415,7 +415,7 @@ def test_start_fails_before_server_when_worker_dependency_missing(
         sleep=lambda seconds: None,
     )
 
-    with pytest.raises(RuntimeError, match="histdatacom\\[temporal\\]"):
+    with pytest.raises(RuntimeError, match="temporalio"):
         supervisor.start(executable=executable)
 
     assert calls == []

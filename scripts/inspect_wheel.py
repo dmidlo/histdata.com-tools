@@ -81,6 +81,18 @@ def _requires_dist_contains(
     )
 
 
+def _requires_dist_core_contains(
+    requires_dist: list[str],
+    *,
+    dependency: str,
+) -> bool:
+    """Return whether a normalized requirement names a core dependency."""
+    return any(
+        requirement.startswith(dependency) and "extra ==" not in requirement
+        for requirement in requires_dist
+    )
+
+
 def inspect_wheel(
     wheel_path: Path,
     *,
@@ -184,6 +196,11 @@ def inspect_wheel(
         requirement.lower()
         for requirement in wheel_metadata.get_all("Requires-Dist", [])
     ]
+    if not _requires_dist_core_contains(
+        requires_dist,
+        dependency="temporalio",
+    ):
+        raise SystemExit("temporalio dependency missing from core metadata")
     if not _requires_dist_contains(
         requires_dist,
         dependency="temporalio",
