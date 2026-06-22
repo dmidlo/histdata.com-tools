@@ -1,15 +1,18 @@
 """Pytest unit tests for histdatacom.utils.py."""
 
+from datetime import datetime, timezone
 import importlib.util
 import os
 from pathlib import Path
 import sys
+import warnings
 
 import pytest
 
 from histdatacom.utils import (
     SUPPORTED_API_RETURN_TYPES,
     check_installed_module,
+    get_now_utc_timestamp,
     load_influx_yaml,
     normalize_api_return_type,
     set_working_data_dir,
@@ -59,6 +62,20 @@ def test_api_return_type_contract_is_explicit() -> None:
         "pandas",
         "polars",
     }
+
+
+def test_get_now_utc_timestamp_uses_aware_utc_without_warnings() -> None:
+    """Current UTC timestamp should not rely on naive datetime helpers."""
+    before = datetime.now(timezone.utc).timestamp()
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        timestamp = get_now_utc_timestamp()
+
+    after = datetime.now(timezone.utc).timestamp()
+
+    assert before <= timestamp <= after
+    assert caught == []
 
 
 def test_check_installed_module_accepts_polars_return_type() -> None:

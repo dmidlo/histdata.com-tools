@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import pytz
@@ -200,7 +200,7 @@ def get_now_utc_timestamp() -> float:
     Returns:
         float: UTC timestamp
     """
-    return datetime.utcnow().timestamp()  # sourcery skip
+    return datetime.now(timezone.utc).timestamp()
 
 
 def normalize_api_return_type(return_type: Optional[str]) -> Optional[str]:
