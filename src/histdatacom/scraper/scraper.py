@@ -27,7 +27,7 @@ from histdatacom.activity_stages import (
     parse_histdata_form_metadata,
     validate_url_work_item,
 )
-from histdatacom.legacy_runtime import helper_runtime_args
+from histdatacom.helper_args import helper_runtime_args
 from histdatacom.observability import ProgressState
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkItem, WorkStatus

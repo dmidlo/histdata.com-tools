@@ -22,7 +22,7 @@ from histdatacom.exceptions import (
     InfluxDependencyError,
 )
 from histdatacom.histdata_ascii import format_influx_line
-from histdatacom.legacy_runtime import helper_runtime_args
+from histdatacom.helper_args import helper_runtime_args
 from histdatacom.observability import ProgressState, progress_increment
 from histdatacom.runtime_contracts import WorkItem, WorkStatus
 from histdatacom.utils import check_installed_module, load_influx_yaml

@@ -23,7 +23,7 @@ LANE_INFLUX = "influx"
 
 @dataclass(frozen=True, slots=True)
 class SidecarConcurrencyProfile:
-    """Worker concurrency policy derived from the legacy CPU setting."""
+    """Worker concurrency policy derived from the configured CPU setting."""
 
     cpu_utilization: str
     base_workers: int
@@ -32,7 +32,7 @@ class SidecarConcurrencyProfile:
     cpu_file_workers: int
     influx_workers: int
     network_multiplier: int = DEFAULT_NETWORK_MULTIPLIER
-    source: str = "legacy_cpu_policy"
+    source: str = "configured_cpu_policy"
 
     def workers_for_lane(self, lane: object) -> int:
         """Return max concurrent activities for a task queue lane."""
@@ -148,7 +148,7 @@ def build_sidecar_concurrency_profile(
     influx_workers: int = DEFAULT_INFLUX_WORKERS,
     lane_overrides: Mapping[Any, int] | None = None,
 ) -> SidecarConcurrencyProfile:
-    """Build sidecar worker concurrency from the legacy CPU policy."""
+    """Build sidecar worker concurrency from configured CPU policy."""
     base_workers = get_pool_cpu_count(cpu_utilization)
     multiplier = _positive_int(
         network_multiplier,

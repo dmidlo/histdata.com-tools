@@ -318,7 +318,7 @@ def _add_worker_fleet_args(parser: argparse.ArgumentParser) -> None:
         "--cpu-utilization",
         default="medium",
         help=(
-            "legacy CPU policy used to derive sidecar worker concurrency "
+            "CPU policy used to derive sidecar worker concurrency "
             "(low, medium, high, or percent 1-200)"
         ),
     )
@@ -326,7 +326,7 @@ def _add_worker_fleet_args(parser: argparse.ArgumentParser) -> None:
         "--network-multiplier",
         type=int,
         default=DEFAULT_NETWORK_MULTIPLIER,
-        help="network lane multiplier applied to the legacy CPU worker count",
+        help="network lane multiplier applied to the CPU worker count",
     )
     parser.add_argument(
         "--orchestration-workers",

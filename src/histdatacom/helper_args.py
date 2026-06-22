@@ -1,4 +1,4 @@
-"""Explicit runtime arguments for legacy helper surfaces."""
+"""Explicit argument defaults for API and helper surfaces."""
 
 from __future__ import annotations
 

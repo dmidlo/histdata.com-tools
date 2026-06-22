@@ -9,7 +9,7 @@ from histdatacom.activity_stages import (
     apply_stage_output_to_record,
     extract_csv_work_item,
 )
-from histdatacom.legacy_runtime import helper_runtime_args
+from histdatacom.helper_args import helper_runtime_args
 from histdatacom.runtime_contracts import WorkItem
 
 if TYPE_CHECKING:

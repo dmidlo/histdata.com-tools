@@ -32,7 +32,7 @@ from histdatacom.histdata_ascii import (
     read_ascii_file_to_polars,
     write_polars_cache,
 )
-from histdatacom.legacy_runtime import helper_runtime_args
+from histdatacom.helper_args import helper_runtime_args
 from histdatacom.observability import ProgressState, progress_increment
 from histdatacom.runtime_contracts import WorkItem, WorkStatus
 from histdatacom.scraper.scraper import Scraper

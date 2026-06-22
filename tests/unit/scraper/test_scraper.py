@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 from histdatacom import config
-from histdatacom.legacy_runtime import helper_runtime_args
+from histdatacom.helper_args import helper_runtime_args
 from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkStatus

@@ -32,7 +32,7 @@ from histdatacom.activity_stages import (
     validate_url_work_item,
     write_repository_data_file,
 )
-from histdatacom.legacy_runtime import helper_runtime_args
+from histdatacom.helper_args import helper_runtime_args
 from histdatacom.records import Record
 from histdatacom.utils import (
     get_year_from_datemonth,

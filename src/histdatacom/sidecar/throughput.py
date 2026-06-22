@@ -334,8 +334,8 @@ def accepted_performance_envelope() -> dict[str, JSONValue]:
     """Return the documented issue-180/181 performance acceptance envelope."""
     return {
         "lane_defaults": (
-            "Keep orchestration=1, network=legacy CPU workers * 3, "
-            "cpu-file=legacy CPU workers, influx=1."
+            "Keep orchestration=1, network=configured CPU workers * 3, "
+            "cpu-file=configured CPU workers, influx=1."
         ),
         "batch_default": (
             "Keep max_work_items_per_batch=64 for production requests; "
