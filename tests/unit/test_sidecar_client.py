@@ -227,6 +227,27 @@ class _ResourceFailingSupervisor(_FakeSupervisor):
         )
 
 
+class _DependencyFailingSupervisor(_FakeSupervisor):
+    """Supervisor that simulates a base install missing temporalio."""
+
+    def start(self) -> SidecarStatus:
+        """Fail as worker dependency lookup would fail."""
+        self.start_calls += 1
+        raise RuntimeError(
+            "Temporal worker support requires histdatacom[temporal]. "
+            "Install the Temporal extra before starting the sidecar worker fleet."
+        )
+
+
+class _RuntimeFailingSupervisor(_FakeSupervisor):
+    """Supervisor that simulates an unrelated startup failure."""
+
+    def start(self) -> SidecarStatus:
+        """Fail with an unrelated runtime error."""
+        self.start_calls += 1
+        raise RuntimeError("worker lane crashed during startup")
+
+
 def _config(tmp_path: Path):
     policy = build_sidecar_runtime_policy(
         workspace=tmp_path / "workspace",
@@ -498,6 +519,51 @@ def test_submit_and_observe_wraps_sidecar_resource_failures(
         asyncio.run(
             client.submit_run_request_and_observe(
                 RunRequest(request_id="run-metadata-only"),
+                config=config,
+                client=_FakeTemporalClient(),
+                supervisor=supervisor,  # type: ignore[arg-type]
+                start_if_needed=True,
+            )
+        )
+
+    assert supervisor.start_calls == 1
+
+
+def test_submit_and_observe_wraps_missing_temporal_extra_failures(
+    tmp_path: Path,
+) -> None:
+    """Base installs missing temporalio should use the unavailable contract."""
+    config = _config(tmp_path)
+    supervisor = _DependencyFailingSupervisor(current_state="stopped")
+
+    with pytest.raises(
+        client.SidecarUnavailableError,
+        match=r"histdatacom\[temporal\]",
+    ):
+        asyncio.run(
+            client.submit_run_request_and_observe(
+                RunRequest(request_id="run-missing-extra"),
+                config=config,
+                client=_FakeTemporalClient(),
+                supervisor=supervisor,  # type: ignore[arg-type]
+                start_if_needed=True,
+            )
+        )
+
+    assert supervisor.start_calls == 1
+
+
+def test_submit_and_observe_does_not_hide_unrelated_runtime_failures(
+    tmp_path: Path,
+) -> None:
+    """Only known missing-extra startup errors should be normalized."""
+    config = _config(tmp_path)
+    supervisor = _RuntimeFailingSupervisor(current_state="stopped")
+
+    with pytest.raises(RuntimeError, match="worker lane crashed"):
+        asyncio.run(
+            client.submit_run_request_and_observe(
+                RunRequest(request_id="run-runtime-failure"),
                 config=config,
                 client=_FakeTemporalClient(),
                 supervisor=supervisor,  # type: ignore[arg-type]

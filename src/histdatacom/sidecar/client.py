@@ -56,12 +56,12 @@ TEMPORAL_EXECUTION_STATUS_PREFIX = "WORKFLOW_EXECUTION_STATUS_"
 TEMPORAL_EXECUTION_STATUS_METADATA_KEY = "temporal_execution_status"
 
 
-class TemporalDependencyError(RuntimeError):
-    """Raised when Temporal SDK functionality is used without temporalio."""
-
-
 class SidecarUnavailableError(RuntimeError):
     """Raised when a sidecar-backed run is requested but unavailable."""
+
+
+class TemporalDependencyError(SidecarUnavailableError):
+    """Raised when Temporal SDK functionality is used without temporalio."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1179,10 +1179,22 @@ def _ensure_sidecar_available(
         started = supervisor.start()
     except SidecarResourceError as err:
         raise SidecarUnavailableError(str(err)) from err
+    except RuntimeError as err:
+        if _is_missing_temporal_dependency_error(err):
+            raise SidecarUnavailableError(str(err)) from err
+        raise
     if started.running:
         return started
     raise SidecarUnavailableError(
         "Temporal sidecar could not be started: " f"{started.message}"
+    )
+
+
+def _is_missing_temporal_dependency_error(err: RuntimeError) -> bool:
+    message = str(err)
+    return (
+        "histdatacom[temporal]" in message
+        or "Temporal worker support requires" in message
     )
 
 

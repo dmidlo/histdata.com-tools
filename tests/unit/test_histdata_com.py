@@ -14,6 +14,7 @@ from histdatacom.sidecar.client import (
     SidecarJobHandle,
     SidecarJobResult,
     SidecarUnavailableError,
+    TemporalDependencyError,
 )
 
 
@@ -617,6 +618,73 @@ def test_cli_sidecar_unavailable_exits_nonzero(
 
     assert err.value.code == 1
     assert "not running" in capsys.readouterr().err
+
+
+def test_api_temporal_dependency_error_is_sidecar_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API callers should catch missing Temporal extras as sidecar unavailable."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fake_submit(*args: object, **kwargs: object) -> object:
+        raise TemporalDependencyError(
+            "Temporal support requires histdatacom[temporal]."
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+
+    with pytest.raises(SidecarUnavailableError, match="histdatacom"):
+        histdata_com.main(_sidecar_options())
+
+
+def test_cli_temporal_dependency_error_exits_nonzero_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI missing-extra failures should be shell-friendly."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fake_submit(*args: object, **kwargs: object) -> object:
+        raise TemporalDependencyError(
+            "Temporal support requires histdatacom[temporal]."
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    captured = capsys.readouterr()
+    assert err.value.code == 1
+    assert (
+        "error: Temporal support requires histdatacom[temporal]."
+        in captured.err
+    )
+    assert "Traceback" not in captured.err
 
 
 def test_version_does_not_submit_sidecar_job(

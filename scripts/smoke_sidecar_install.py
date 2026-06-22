@@ -70,6 +70,41 @@ def _run_json(command: Sequence[str]) -> dict[str, Any]:
     return payload
 
 
+def _run_expected_failure_json(command: Sequence[str]) -> dict[str, Any]:
+    """Run a command that should fail cleanly with JSON and no traceback."""
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if completed.returncode == 0:
+        raise SystemExit(
+            f"command unexpectedly passed: {' '.join(command)}\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
+    combined_output = f"{completed.stdout}\n{completed.stderr}"
+    if "Traceback" in combined_output:
+        raise SystemExit(
+            f"command emitted a traceback: {' '.join(command)}\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as err:
+        raise SystemExit(
+            f"command did not emit valid JSON: {' '.join(command)}\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        ) from err
+    if not isinstance(payload, dict):
+        raise SystemExit(f"command emitted non-object JSON: {' '.join(command)}")
+    payload["exit_code"] = completed.returncode
+    return payload
+
+
 def install_wheel(
     *,
     wheel_dir: Path | None = None,
@@ -270,6 +305,33 @@ def check_cli_smoke(
     }
 
 
+def check_missing_temporal_extra_failure(state_dir: Path) -> dict[str, Any]:
+    """Validate base installs fail cleanly when sidecar workers need temporalio."""
+    state_dir.mkdir(parents=True, exist_ok=True)
+    payload = _run_expected_failure_json(
+        [
+            _script_path("histdatacom-sidecar"),
+            "--state-dir",
+            str(state_dir),
+            "--json",
+            "start",
+            "--executable",
+            str(state_dir / "fake-temporal"),
+        ]
+    )
+    message = str(payload.get("message", "") or "")
+    if "histdatacom[temporal]" not in message:
+        raise SystemExit(
+            "missing Temporal extra smoke did not report the expected "
+            f"dependency guidance: {payload}"
+        )
+    return {
+        "state": str(payload.get("state", "")),
+        "message": message,
+        "exit_code": int(payload.get("exit_code", 0) or 0),
+    }
+
+
 def check_live_sidecar_smoke(
     *,
     workspace: Path,
@@ -426,6 +488,7 @@ def main() -> None:
                 check_executable_version=args.check_executable_version,
             ),
             "cli": None,
+            "missing_temporal_extra": None,
             "live_sidecar": None,
         }
         if not args.skip_cli:
@@ -436,6 +499,10 @@ def main() -> None:
                 ),
                 start_sidecar=args.start_sidecar,
             )
+            if not args.expect_temporal_extra:
+                report["missing_temporal_extra"] = (
+                    check_missing_temporal_extra_failure(state_dir)
+                )
         if args.live_sidecar_smoke:
             live_workspace = args.live_workspace or Path(temporary_dir) / (
                 "live-workspace"

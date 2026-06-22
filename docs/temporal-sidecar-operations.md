@@ -43,8 +43,11 @@ server executable as package data. On a bundled platform wheel,
 `importlib.resources`; on metadata-only artifacts and unsupported platforms,
 development and operator smoke tests should pass an explicit Temporal
 executable path to `histdatacom-sidecar start --executable`. The Temporal
-dependency extra is required for lifecycle start because the supervisor also
-launches the worker lane fleet.
+dependency surface remains an opt-in extra rather than a core install
+dependency. Base installs retain package metadata, CLI entry points,
+version/status checks, and foreground compatibility, but sidecar-backed work
+fails nonzero with `histdatacom[temporal]` guidance because lifecycle start
+also launches the worker lane fleet.
 
 Release automation builds the metadata-only sdist/fallback wheel first, then
 builds bundled Temporal platform wheels for Linux x86_64, Linux arm64, macOS

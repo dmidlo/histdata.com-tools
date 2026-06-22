@@ -335,6 +335,11 @@ workers, or job inspection:
 pip install "histdatacom[temporal]"
 ```
 
+Temporal remains an opt-in extra instead of a core install dependency. Base
+installs keep package metadata, CLI entry points, version/status checks, and
+the foreground compatibility runtime available; sidecar-backed work fails
+nonzero with install guidance until `histdatacom[temporal]` is installed.
+
 The sidecar stores Temporal process state, SQLite history, logs, and runtime
 manifests under a per-user, per-workspace runtime directory. Downloaded ZIP
 files, extracted CSV/XLSX files, cache IPC files, and merged API artifacts stay
