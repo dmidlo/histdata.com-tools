@@ -367,41 +367,6 @@ class TemporalChildWorkflowExecutor:
         return _coerce_mapping(result)
 
 
-class PendingActivityExecutor:
-    """Placeholder activity executor until Temporal activity wiring exists."""
-
-    async def execute_activity(
-        self,
-        activity_name: str,
-        payload: Mapping[str, JSONValue],
-        *,
-        task_queue: str,
-    ) -> Mapping[str, Any]:
-        """Return a planned result until Temporal activity wiring exists."""
-        stage = str(payload.get("stage", activity_name))
-        result = StageResult(
-            work_id=str(payload.get("work_id", "")),
-            stage=stage,
-            status=WorkStatus.PLANNED,
-            events=(
-                StatusEvent(
-                    status=WorkStatus.PLANNED,
-                    stage=stage,
-                    message=(
-                        "Temporal activity wiring is pending; queue-free "
-                        "stage functions are available for implementation."
-                    ),
-                    metadata={
-                        "activity": activity_name,
-                        "task_queue": task_queue,
-                    },
-                ),
-            ),
-            metrics={"activity_pending": True},
-        )
-        return dict(result.to_dict())
-
-
 class TemporalActivityExecutor:
     """Temporal-backed activity executor."""
 
@@ -940,13 +905,14 @@ class _ActivityWorkflowBase:
         self._activity_executor = activity_executor
         self._progress = WorkflowProgress(self.workflow_name)
 
+    def _activity_executor_or_default(self) -> ActivityExecutor:
+        return self._activity_executor or TemporalActivityExecutor()
+
     async def _run_activity(self, payload: dict[str, Any]) -> dict:
         return await execute_activity_workflow(
             self.workflow_name,
             payload,
-            activity_executor=(
-                self._activity_executor or PendingActivityExecutor()
-            ),
+            activity_executor=self._activity_executor_or_default(),
             progress=self._progress,
         )
 
@@ -967,9 +933,7 @@ class RepositoryRefreshWorkflow(_ActivityWorkflowBase):
         return await execute_activity_workflow(
             self.workflow_name,
             payload,
-            activity_executor=(
-                self._activity_executor or TemporalActivityExecutor()
-            ),
+            activity_executor=self._activity_executor_or_default(),
             progress=self._progress,
         )
 
@@ -988,9 +952,7 @@ class DatasetPlanWorkflow(_ActivityWorkflowBase):
         return await execute_activity_workflow(
             self.workflow_name,
             payload,
-            activity_executor=(
-                self._activity_executor or TemporalActivityExecutor()
-            ),
+            activity_executor=self._activity_executor_or_default(),
             progress=self._progress,
         )
 
@@ -1009,9 +971,7 @@ class ValidateUrlsWorkflow(_ActivityWorkflowBase):
         return await execute_activity_workflow(
             self.workflow_name,
             payload,
-            activity_executor=(
-                self._activity_executor or TemporalActivityExecutor()
-            ),
+            activity_executor=self._activity_executor_or_default(),
             progress=self._progress,
         )
 
@@ -1030,9 +990,7 @@ class DownloadArchivesWorkflow(_ActivityWorkflowBase):
         return await execute_activity_workflow(
             self.workflow_name,
             payload,
-            activity_executor=(
-                self._activity_executor or TemporalActivityExecutor()
-            ),
+            activity_executor=self._activity_executor_or_default(),
             progress=self._progress,
         )
 
@@ -1051,9 +1009,7 @@ class ExtractCsvWorkflow(_ActivityWorkflowBase):
         return await execute_activity_workflow(
             self.workflow_name,
             payload,
-            activity_executor=(
-                self._activity_executor or TemporalActivityExecutor()
-            ),
+            activity_executor=self._activity_executor_or_default(),
             progress=self._progress,
         )
 
@@ -1072,9 +1028,7 @@ class BuildCacheWorkflow(_ActivityWorkflowBase):
         return await execute_activity_workflow(
             self.workflow_name,
             payload,
-            activity_executor=(
-                self._activity_executor or TemporalActivityExecutor()
-            ),
+            activity_executor=self._activity_executor_or_default(),
             progress=self._progress,
         )
 
@@ -1093,9 +1047,7 @@ class MergeCacheWorkflow(_ActivityWorkflowBase):
         return await execute_activity_workflow(
             self.workflow_name,
             payload,
-            activity_executor=(
-                self._activity_executor or TemporalActivityExecutor()
-            ),
+            activity_executor=self._activity_executor_or_default(),
             progress=self._progress,
         )
 
@@ -1114,9 +1066,7 @@ class ImportWorkflow(_ActivityWorkflowBase):
         return await execute_activity_workflow(
             self.workflow_name,
             payload,
-            activity_executor=(
-                self._activity_executor or TemporalActivityExecutor()
-            ),
+            activity_executor=self._activity_executor_or_default(),
             progress=self._progress,
         )
 

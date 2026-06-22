@@ -1287,6 +1287,54 @@ def test_leaf_workflow_uses_mocked_activity_executor() -> None:
     assert workflow.status()["completed_children"] == 1
 
 
+def test_leaf_workflow_defaults_to_temporal_activity_executor(
+    monkeypatch,
+) -> None:
+    """Leaf workflows without test executors should invoke Temporal activities."""
+    captured: dict[str, Any] = {}
+
+    async def execute_activity(
+        activity_name: str,
+        payload: Mapping[str, JSONValue],
+        **options: Any,
+    ) -> Mapping[str, object]:
+        captured["activity_name"] = activity_name
+        captured["payload"] = dict(payload)
+        captured["options"] = dict(options)
+        return StageResult(
+            work_id="default-activity-work",
+            stage=activity_name,
+            status=WorkStatus.COMPLETED,
+            metrics={"source": "temporal-default"},
+        ).to_dict()
+
+    monkeypatch.setattr(
+        workflows.workflow,
+        "execute_activity",
+        execute_activity,
+    )
+
+    request = _request()
+    invocation = workflows.build_symbol_child_invocations(
+        request,
+        {"pair": "EURUSD", "timeframe": "M1"},
+    )[0]
+    workflow = workflows.ValidateUrlsWorkflow()
+
+    summary = asyncio.run(workflow.run(invocation.payload))
+
+    pending_metric = "activity" + "_pending"
+    assert not hasattr(workflows, "Pending" "ActivityExecutor")
+    assert captured["activity_name"] == "validate_urls"
+    assert captured["options"]["task_queue"] == "queue-network"
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert pending_metric not in summary["stage_results"][0].get(
+        "metrics",
+        {},
+    )
+    assert workflow.status()["completed_children"] == 1
+
+
 def test_extract_csv_workflow_uses_activity_executor() -> None:
     """The extraction leaf workflow should execute its registered activity."""
     activity_executor = _RecordingActivityExecutor()
