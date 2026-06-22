@@ -83,7 +83,7 @@ class Scraper:  # noqa:H601
         download_histdata_archive_to_record(
             record,
             timeout=config.REQUESTS_TIMEOUT,
-            post_headers=config.POST_HEADERS,
+            post_headers=config.default_post_headers(),
         )
 
     @classmethod
@@ -124,7 +124,7 @@ class Scraper:  # noqa:H601
         Returns:
             requests.Response: zip file response
         """
-        post_headers = dict(config.POST_HEADERS)
+        post_headers = config.default_post_headers()
         post_headers["Referer"] = record.url
         return requests.post(
             "http://www.histdata.com/get.php",

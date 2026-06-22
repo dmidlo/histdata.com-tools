@@ -2454,7 +2454,7 @@ def _archive_post_headers(
     if post_headers is None:
         from histdatacom import config as histdata_config
 
-        post_headers = histdata_config.POST_HEADERS
+        post_headers = histdata_config.default_post_headers()
     headers = dict(post_headers)
     headers["Referer"] = referer
     return headers

@@ -298,14 +298,12 @@ def test_merge_records_accepts_explicit_records_without_queue(
     )
 
 
-def test_merge_records_ignores_stale_global_args(
-    monkeypatch: pytest.MonkeyPatch,
+def test_merge_records_uses_explicit_return_type_without_parser_globals(
     tmp_path: Path,
 ) -> None:
-    """Explicit helper return types should not read stale parser globals."""
+    """Explicit helper return types should not require parser globals."""
     import polars as pl
 
-    from histdatacom import config
     from histdatacom.api import Api
 
     source = Api._import_file_to_polars(
@@ -320,7 +318,6 @@ def test_merge_records_ignores_stale_global_args(
         timeframe="M1",
         start=EXPECTED_M1_DATETIMES[0],
     )
-    monkeypatch.setattr(config, "ARGS", {"api_return_type": "arrow"})
 
     result = Api(return_type="polars").merge_records([record])
 
