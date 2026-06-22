@@ -1,6 +1,6 @@
 # Temporal Sidecar Performance Baseline
 
-Issues: #166, #180, #181
+Issues: #166, #180, #181, #187
 
 See `docs/temporal-sidecar-operations.md` for lifecycle commands, runtime
 paths, troubleshooting, and worker startup guidance. This page is limited to
@@ -70,6 +70,8 @@ operations:
 - `validate_url_work_item` with fake HistData form HTML
 - `build_cache_work_item` with checked-in M1 CSV fixture data
 - `import_to_influx_work_item` with a local line sink instead of live Influx
+- `ImportWorkflow` with the real Influx activity and a local
+  contract-backed writer
 
 This keeps the baseline runnable without HistData.com, Temporal server, or
 InfluxDB availability.
@@ -156,13 +158,41 @@ single batch, `ValidateUrlsWorkflow`, `DownloadArchivesWorkflow`,
 `ImportWorkflow` still run in dependency order so work-item forwarding remains
 correct.
 
+## Influx Sidecar Contract
+
+Issue #187 accepts deterministic contract-backed Influx coverage when no real
+InfluxDB service is available. The contract test executes `ImportWorkflow`
+through the same activity-executor seam used by Temporal workers, calls the real
+`import_to_influx_activity`, and replaces only the final `InfluxBatchWriter`
+with a local writer. This proves:
+
+- Influx work is routed to the `influx` task queue.
+- `batch_size=2` emits bounded line-protocol batches of `2` and `1` rows for
+  the checked-in EURUSD M1 fixture.
+- the generated line protocol keeps the existing HistData ESTnoDST-to-UTC
+  timestamp conversion and field names.
+- retryable writer failures preserve `INFLUX_IMPORT_RETRYABLE`,
+  `retryable=true`, and `idempotent_retry=true` metadata at workflow-summary
+  level.
+- `delete_after_influx=true` removes local ZIP/cache artifacts only after a
+  successful import.
+
+This does not prove live Influx authentication, bucket permissions, network
+latency, server-side write rejection behavior, or production retention policy.
+Those remain operator-gated live checks requiring `histdatacom[influx]`, a real
+`influxdb.yaml`, and a disposable target bucket.
+
 ## Tuning Guidance
 
 Keep network activity concurrency higher than CPU/file work because validation
 and archive downloads spend most time waiting on remote I/O. Keep Influx
-concurrency conservative until idempotent external write behavior is validated
-under a live Influx target. Increase CPU/file workers only when cache builds are
-CPU-bound and memory headroom remains stable.
+concurrency at `1` by default: contract coverage proves batch formation,
+idempotent retry metadata, and cleanup behavior, but real Influx service
+throughput should be tuned against a live target before raising lane
+concurrency. Use the existing CLI/API `batch_size` default of `5000` for normal
+imports; lower it only for memory-constrained runs, diagnostics, or test
+fixtures that need visible batch boundaries. Increase CPU/file workers only when
+cache builds are CPU-bound and memory headroom remains stable.
 
 ## Live Throughput Matrix
 
@@ -216,7 +246,9 @@ The accepted issue #181 envelope is:
 ## Live Result
 
 Live run date: 2026-06-21. Temporal executable:
-`/opt/local/bin/temporal`. InfluxDB was intentionally unavailable and skipped.
+`/opt/local/bin/temporal`. InfluxDB was intentionally unavailable for the live
+matrix. Influx behavior is covered by the issue #187 contract-backed workflow
+test described above.
 
 | Scenario | Foreground elapsed | Sidecar elapsed | Ratio | Sidecar process CPU | Artifacts | Failures/retries |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -242,7 +274,11 @@ No lane default changes are warranted from the issue #180 measurements:
 - Keep orchestration workers at `1`.
 - Keep network workers at `get_pool_cpu_count(cpu_utilization) * 3`.
 - Keep CPU/file workers at `get_pool_cpu_count(cpu_utilization)`.
-- Keep Influx workers at `1` until a live Influx target is available.
+- Keep Influx workers at `1`; the contract-backed test proves workflow handoff,
+  batching, retry metadata, and cleanup, while live service throughput remains
+  target-specific.
+- Keep the CLI/API Influx `batch_size` default at `5000`; use smaller values
+  only for constrained memory, debugging, or fixtures.
 - Keep the production batch default at `64` work items per child workflow.
 - Keep the production fan-out default at `4` parallel child workflows.
 

@@ -339,6 +339,10 @@ def accepted_performance_envelope() -> dict[str, JSONValue]:
             "Keep max_work_items_per_batch=64 for production requests; "
             "the benchmark matrix uses 1 to force visible child handoff."
         ),
+        "influx_batch_default": (
+            "Keep the CLI/API Influx batch_size default at 5000; use smaller "
+            "values only for constrained memory, diagnostics, or fixtures."
+        ),
         "fanout_default": (
             "Keep max_parallel_child_workflows=4 for production requests; "
             "the live fan-out benchmark uses 2 to prove bounded windows."
@@ -356,7 +360,11 @@ def accepted_performance_envelope() -> dict[str, JSONValue]:
         ),
         "known_tradeoffs": [
             "Repository and HistData network timings are externally variable.",
-            "Influx import remains explicitly skipped without a live target.",
+            (
+                "Influx import has contract-backed workflow coverage without "
+                "a live target; live Influx auth, permissions, latency, and "
+                "server-side rejection behavior remain target-specific."
+            ),
             "Parent workflow summaries intentionally omit full leaf histories.",
         ],
     }

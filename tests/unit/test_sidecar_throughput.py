@@ -107,6 +107,7 @@ def test_throughput_report_serializes_performance_envelope(
         payload["comparisons"][0]["sidecar_to_foreground_elapsed_ratio"] == 2.0
     )
     assert payload["accepted_envelope"]["batch_default"]
+    assert payload["accepted_envelope"]["influx_batch_default"]
     assert payload["accepted_envelope"]["fanout_default"]
     assert payload["concurrency_profile"]["network_workers"] >= 1
 

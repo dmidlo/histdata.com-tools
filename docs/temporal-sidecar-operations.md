@@ -494,6 +494,9 @@ InfluxDB unavailable:
   configured.
 - Fix: install `histdatacom[influx]`, provide `influxdb.yaml`, or skip
   `-I/--import_to_influxdb`. The sidecar does not provide an InfluxDB service.
+  Local contract tests replace only the final writer and do not prove live
+  credentials, bucket permissions, network latency, or server-side write
+  rejection behavior.
 
 Data-quality checks:
 
@@ -511,14 +514,15 @@ Unit tests should keep most coverage independent from live Temporal and Influx:
 - queue and worker configuration tests
 - workflow topology and status-query tests
 - activity tests with fixture HTML/CSV/cache data
+- contract-backed `ImportWorkflow` tests with a local Influx writer substitute
 - control API and job payload tests
 - performance profile and benchmark fixture tests
 
 Live smoke tests belong behind explicit operator setup because they require a
-Temporal executable and, for import coverage, an Influx target. Package release
-smoke should validate metadata, console entry points, packaged sidecar
-resources, and offline `status`/`doctor` behavior for every wheel. For bundled
-platform wheels, release smoke should also require
+Temporal executable, and live import coverage requires a real Influx target.
+Package release smoke should validate metadata, console entry points, packaged
+sidecar resources, and offline `status`/`doctor` behavior for every wheel. For
+bundled platform wheels, release smoke should also require
 `doctor.platform.executable_bundled == true`, run the packaged executable
 version probe, and start the sidecar without `--executable`.
 
