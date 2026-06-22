@@ -237,7 +237,7 @@ async def submit_run_request_and_observe(
     )
     return SidecarJobResult(
         handle=handle,
-        status="completed",
+        status=_observed_job_result_status(result, snapshot),
         result=result,
         sidecar_status=sidecar_status,
         snapshot=snapshot,
@@ -250,6 +250,28 @@ def submit_run_request_and_observe_sync(
 ) -> SidecarJobResult:
     """Synchronously submit and observe a sidecar run for CLI/API callers."""
     return asyncio.run(submit_run_request_and_observe(request, **kwargs))
+
+
+def _observed_job_result_status(
+    result: Any,
+    snapshot: SidecarJobSnapshot,
+) -> str:
+    """Return the public status for an awaited sidecar workflow result."""
+    result_status = (
+        WorkStatus.from_value(result.get("status"))
+        if isinstance(result, Mapping)
+        else None
+    )
+    for status in (result_status, snapshot.status):
+        if status == WorkStatus.FAILED:
+            return "failed"
+        if status == WorkStatus.CANCELLED:
+            return "cancelled"
+    if snapshot.lifecycle == JobLifecycle.FAILED:
+        return "failed"
+    if snapshot.lifecycle == JobLifecycle.CANCELLED:
+        return "cancelled"
+    return "completed"
 
 
 async def submit_control_job(

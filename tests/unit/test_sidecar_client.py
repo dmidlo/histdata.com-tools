@@ -29,11 +29,16 @@ class _FakeTemporalClient:
 
     connect_calls: list[dict[str, str]] = []
 
-    def __init__(self, status_payload: dict[str, object] | None = None) -> None:
+    def __init__(
+        self,
+        status_payload: dict[str, object] | None = None,
+        result_payload: dict[str, object] | None = None,
+    ) -> None:
         self.started: list[dict[str, object]] = []
         self.list_query = ""
         self.handles: dict[str, _FakeWorkflowHandle] = {}
         self.status_payload = status_payload
+        self.result_payload = result_payload
 
     @classmethod
     async def connect(cls, target_host: str, *, namespace: str):
@@ -64,6 +69,7 @@ class _FakeTemporalClient:
             id=id,
             run_id="run-fake",
             status_payload=self.status_payload,
+            result_payload=self.result_payload,
         )
         self.handles[id] = handle
         return handle
@@ -81,6 +87,7 @@ class _FakeTemporalClient:
                 id=workflow_id,
                 run_id=run_id or "run-fake",
                 status_payload=self.status_payload,
+                result_payload=self.result_payload,
             ),
         )
 
@@ -107,54 +114,19 @@ class _FakeWorkflowHandle:
         id: str,
         run_id: str,
         status_payload: dict[str, object] | None = None,
+        result_payload: dict[str, object] | None = None,
     ) -> None:
         self.id = id
         self.run_id = run_id
         self.cancel_calls = 0
         self.status_payload = status_payload
+        self.result_payload = result_payload
 
     async def result(self) -> dict[str, object]:
         """Return a fake workflow result payload."""
-        return {
-            "workflow_name": "HistDataRunWorkflow",
-            "request_id": "run-test",
-            "status": "COMPLETED",
-            "progress": {
-                "workflow_name": "HistDataRunWorkflow",
-                "request_id": "run-test",
-                "status": "COMPLETED",
-                "current_stage": "finished",
-                "total_children": 1,
-                "completed_children": 1,
-                "planned_children": ["ValidateUrlsWorkflow"],
-                "completed_stages": ["ValidateUrlsWorkflow"],
-                "events": [
-                    StatusEvent(
-                        status=WorkStatus.COMPLETED,
-                        stage="finished",
-                    ).to_dict()
-                ],
-                "artifacts": [
-                    ArtifactRef(
-                        kind="manifest",
-                        path="/tmp/manifest.json",
-                    ).to_dict()
-                ],
-            },
-            "stage_results": [
-                {
-                    "work_id": "work-1",
-                    "stage": "validate_urls",
-                    "status": "COMPLETED",
-                }
-            ],
-            "work_items": [{"work_id": "work-1"}],
-            "artifacts": [
-                ArtifactRef(
-                    kind="manifest", path="/tmp/manifest.json"
-                ).to_dict()
-            ],
-        }
+        if self.result_payload is not None:
+            return self.result_payload
+        return _workflow_result_payload()
 
     async def query(self, query_name: str) -> dict[str, object]:
         """Return a fake workflow status query payload."""
@@ -179,8 +151,7 @@ class _FakeWorkflowHandle:
             ],
             "artifacts": [
                 ArtifactRef(
-                    kind="manifest",
-                    path="/tmp/manifest.json",
+                    kind="manifest", path="/tmp/manifest.json"
                 ).to_dict()
             ],
         }
@@ -188,6 +159,71 @@ class _FakeWorkflowHandle:
     async def cancel(self) -> None:
         """Record a fake cancellation request."""
         self.cancel_calls += 1
+
+
+def _workflow_result_payload(
+    status: WorkStatus = WorkStatus.COMPLETED,
+) -> dict[str, object]:
+    """Return a fake workflow result payload with a chosen terminal status."""
+    message = ""
+    failure = None
+    if status == WorkStatus.FAILED:
+        message = "validation failed"
+        failure = {
+            "code": "VALIDATION_FAILED",
+            "message": message,
+            "retryable": True,
+            "detail": {},
+        }
+    elif status == WorkStatus.CANCELLED:
+        message = "cancelled by caller"
+        failure = {
+            "code": "CANCELLED",
+            "message": message,
+            "retryable": True,
+            "detail": {},
+        }
+    stage_result: dict[str, object] = {
+        "work_id": "work-1",
+        "stage": "validate_urls",
+        "status": status.value,
+    }
+    if failure is not None:
+        stage_result["failure"] = failure
+    return {
+        "workflow_name": "HistDataRunWorkflow",
+        "request_id": "run-test",
+        "status": status.value,
+        "progress": {
+            "workflow_name": "HistDataRunWorkflow",
+            "request_id": "run-test",
+            "status": status.value,
+            "current_stage": "finished",
+            "total_children": 1,
+            "completed_children": 1,
+            "planned_children": ["ValidateUrlsWorkflow"],
+            "completed_stages": ["ValidateUrlsWorkflow"],
+            "last_error": message,
+            "events": [
+                StatusEvent(
+                    status=status,
+                    stage="finished",
+                    message=message,
+                ).to_dict()
+            ],
+            "artifacts": [
+                ArtifactRef(
+                    kind="manifest",
+                    path="/tmp/manifest.json",
+                ).to_dict()
+            ],
+        },
+        "stage_results": [stage_result],
+        "work_items": [{"work_id": "work-1"}],
+        "artifacts": [
+            ArtifactRef(kind="manifest", path="/tmp/manifest.json").to_dict()
+        ],
+    }
 
 
 class _FakeSupervisor:
@@ -453,6 +489,50 @@ def test_submit_and_observe_reuses_running_sidecar(
     assert supervisor.status_calls == 1
     assert supervisor.start_calls == 0
     assert temporal_client.started[0]["id"] == "histdatacom-run-test"
+
+
+@pytest.mark.parametrize(
+    ("workflow_status", "expected_status", "expected_lifecycle"),
+    (
+        (WorkStatus.FAILED, "failed", JobLifecycle.FAILED),
+        (WorkStatus.CANCELLED, "cancelled", JobLifecycle.CANCELLED),
+    ),
+)
+def test_submit_and_observe_derives_terminal_status_from_workflow_result(
+    tmp_path: Path,
+    workflow_status: WorkStatus,
+    expected_status: str,
+    expected_lifecycle: JobLifecycle,
+) -> None:
+    """Waited jobs should expose failed/cancelled workflow status."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient(
+        result_payload=_workflow_result_payload(workflow_status)
+    )
+    supervisor = _FakeSupervisor(current_state="running")
+    request = RunRequest(request_id="run-test")
+
+    result = asyncio.run(
+        client.submit_run_request_and_observe(
+            request,
+            config=config,
+            client=temporal_client,
+            supervisor=supervisor,  # type: ignore[arg-type]
+        )
+    )
+
+    assert result.status == expected_status
+    assert result.result["status"] == workflow_status.value
+    assert result.snapshot is not None
+    assert result.snapshot.status == workflow_status
+    assert result.snapshot.lifecycle == expected_lifecycle
+    stored = client.sidecar_job_store(config).get_job_snapshot(
+        "histdatacom-run-test"
+    )
+    assert stored is not None
+    assert stored["status"] == workflow_status.value
+    assert stored["lifecycle"] == expected_lifecycle.value
+    assert stored["result"]["status"] == workflow_status.value
 
 
 def test_submit_and_observe_can_start_unavailable_sidecar(

@@ -10,6 +10,7 @@ import pytest
 
 import histdatacom
 from histdatacom.options import Options
+from histdatacom.runtime_contracts import WorkStatus
 from histdatacom.sidecar.client import (
     SidecarJobHandle,
     SidecarJobResult,
@@ -134,6 +135,50 @@ def _sidecar_cache_result(tmp_path: Path) -> SidecarJobResult:
                     "artifacts": [artifact],
                 }
             ],
+        },
+    )
+
+
+def _sidecar_terminal_result(
+    status: WorkStatus,
+    tmp_path: Path | None = None,
+) -> SidecarJobResult:
+    """Return a failed or cancelled sidecar result payload."""
+    message = (
+        "validation failed"
+        if status == WorkStatus.FAILED
+        else "cancelled by caller"
+    )
+    failure = {
+        "code": status.value,
+        "message": message,
+        "retryable": True,
+        "detail": {},
+    }
+    stage_result: dict[str, object] = {
+        "stage": "validate_urls",
+        "status": status.value,
+        "failure": failure,
+    }
+    if tmp_path is not None:
+        cache_result = _sidecar_cache_result(tmp_path)
+        stage_result["stage"] = "merge_cache"
+        stage_result["artifacts"] = cache_result.result["stage_results"][0][
+            "artifacts"
+        ]
+    return SidecarJobResult(
+        handle=_job_result().handle,
+        status=status.value.lower(),
+        result={
+            "workflow_name": "HistDataRunWorkflow",
+            "status": status.value,
+            "progress": {
+                "workflow_name": "HistDataRunWorkflow",
+                "status": status.value,
+                "last_error": message,
+            },
+            "stage_results": [stage_result],
+            "artifacts": [],
         },
     )
 
@@ -506,6 +551,47 @@ def test_api_sidecar_dataframe_return_is_materialized_from_cache_artifacts(
     assert config.ARGS == {"api_return_type": stale_return_type}
 
 
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    (
+        (WorkStatus.FAILED, "failed"),
+        (WorkStatus.CANCELLED, "cancelled"),
+    ),
+)
+def test_api_waited_sidecar_terminal_failure_returns_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status: WorkStatus,
+    expected: str,
+) -> None:
+    """API waited terminal failures should not materialize cache artifacts."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _sidecar_terminal_result(status, tmp_path)
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+
+    result = histdata_com.main(_sidecar_options("polars"))
+
+    assert isinstance(result, dict)
+    assert result["status"] == expected
+    assert result["result"]["status"] == status.value
+    assert result["result"]["stage_results"][0]["artifacts"]
+    assert captured["kwargs"] == {
+        "start_if_needed": True,
+        "wait_for_result": True,
+    }
+
+
 def test_api_sidecar_repository_request_returns_available_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -590,6 +676,59 @@ def test_cli_sidecar_repository_request_prints_legacy_table(
     assert "from HistData.com" in output
     assert "eurusd" in output
     assert '"status"' not in output
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    (
+        (WorkStatus.FAILED, "failed"),
+        (WorkStatus.CANCELLED, "cancelled"),
+    ),
+)
+def test_cli_waited_sidecar_terminal_failure_exits_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    status: WorkStatus,
+    expected: str,
+) -> None:
+    """CLI waited terminal failures should be shell-friendly."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fake_submit(*args: object, **kwargs: object) -> SidecarJobResult:
+        return _sidecar_terminal_result(status)
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--sidecar",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    captured = capsys.readouterr()
+    assert err.value.code == 1
+    assert f'"status": "{expected}"' in captured.out
+    assert f'"status": "{status.value}"' in captured.out
+    assert f"error: sidecar job {expected}" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_cli_sidecar_repository_failure_exits_nonzero(

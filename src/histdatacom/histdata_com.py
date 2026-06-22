@@ -168,6 +168,17 @@ class _HistDataCom:  # noqa:R701
                 print_repository_table(available_data)
                 raise SystemExit(0)
 
+        if self.context.sidecar_wait_result and _sidecar_payload_failed(
+            payload
+        ):
+            if not self.context.from_api:
+                print(
+                    json.dumps(payload, indent=2, sort_keys=True)
+                )  # noqa:T201
+                _print_sidecar_payload_failure(payload)
+                raise SystemExit(1)
+            return payload
+
         if self._should_materialize_sidecar_api_return(payload):
             records = _cache_records_from_sidecar_payload(payload)
             if records:
@@ -330,6 +341,57 @@ def _sidecar_repository_payload_failed(payload: Mapping[str, Any]) -> bool:
         if status in {"failed", "cancelled"}:
             return True
     return bool(_repository_failure_code_from_sidecar_payload(payload))
+
+
+def _sidecar_payload_failed(payload: Mapping[str, Any]) -> bool:
+    """Return whether a waited sidecar result represents failed work."""
+    return _sidecar_failure_status(payload) in {
+        WorkStatus.FAILED,
+        WorkStatus.CANCELLED,
+    }
+
+
+def _sidecar_failure_status(
+    payload: Mapping[str, Any],
+) -> WorkStatus | None:
+    """Return the terminal failure status from a sidecar payload."""
+    candidates: list[Any] = [payload.get("status")]
+    result = payload.get("result")
+    if isinstance(result, Mapping):
+        candidates.append(result.get("status"))
+    snapshot = payload.get("snapshot")
+    if isinstance(snapshot, Mapping):
+        candidates.append(snapshot.get("status"))
+        candidates.append(snapshot.get("lifecycle"))
+
+    for candidate in candidates:
+        status = WorkStatus.from_value(candidate)
+        if status in {WorkStatus.FAILED, WorkStatus.CANCELLED}:
+            return status
+    return None
+
+
+def _print_sidecar_payload_failure(payload: Mapping[str, Any]) -> None:
+    """Print a concise CLI error for failed waited sidecar jobs."""
+    status = _sidecar_failure_status(payload) or WorkStatus.FAILED
+    message = _sidecar_failure_message(payload)
+    suffix = f": {message}" if message else ""
+    print(
+        f"error: sidecar job {status.value.lower()}{suffix}",
+        file=sys.stderr,
+    )  # noqa:T201
+
+
+def _sidecar_failure_message(payload: Mapping[str, Any]) -> str:
+    """Return the first useful failure message from a sidecar payload."""
+    for item in _iter_mapping_payloads(payload):
+        failure = item.get("failure")
+        if isinstance(failure, Mapping) and failure.get("message"):
+            return str(failure.get("message"))
+        last_error = item.get("last_error")
+        if last_error:
+            return str(last_error)
+    return ""
 
 
 def _repository_failure_code_from_sidecar_payload(
