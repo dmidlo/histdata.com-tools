@@ -53,8 +53,11 @@ CLI `1.7.2` release artifacts and verify SHA-256 checksums before bundling.
 Every bundled wheel must pass `scripts/inspect_wheel.py --require-bundled-platform`,
 install on its matching GitHub-hosted runner, run
 `histdatacom-sidecar doctor --json` with
-`platform.executable_bundled == true`, probe the executable version, and start
-the sidecar without `--executable`.
+`platform.executable_bundled == true`, probe the executable version, start the
+sidecar without `--executable`, and run the installed-wheel live sidecar smoke
+job. The live smoke uses a minimal non-Influx request, waits for job completion,
+validates the status snapshot and artifact references, and prints server/worker
+diagnostics if the job fails.
 
 Rollback behavior is intentionally conservative. If a platform executable or
 wheel is bad after publish, yank the affected platform wheel and cut a

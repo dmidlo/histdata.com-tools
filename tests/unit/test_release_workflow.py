@@ -37,6 +37,32 @@ def _release_workflow() -> dict[str, object]:
     return loaded
 
 
+def _step_run(job: dict[str, object], step_name: str) -> str:
+    """Return the shell command for a named workflow step."""
+    steps = job["steps"]
+    assert isinstance(steps, list)
+    for step in steps:
+        assert isinstance(step, dict)
+        if step.get("name") == step_name:
+            run = step["run"]
+            assert isinstance(run, str)
+            return run
+    raise AssertionError(f"missing workflow step: {step_name}")
+
+
+def _step_env(job: dict[str, object], step_name: str) -> dict[str, object]:
+    """Return the environment block for a named workflow step."""
+    steps = job["steps"]
+    assert isinstance(steps, list)
+    for step in steps:
+        assert isinstance(step, dict)
+        if step.get("name") == step_name:
+            env = step.get("env", {})
+            assert isinstance(env, dict)
+            return env
+    raise AssertionError(f"missing workflow step: {step_name}")
+
+
 def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
     """Release CI should build and smoke every bundled sidecar platform."""
     workflow = _release_workflow()
@@ -76,6 +102,19 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
     assert smoke_runners["linux-arm64"] == "ubuntu-24.04-arm"
     assert smoke_runners["macos-x86_64"] == "macos-15-intel"
     assert smoke_runners["macos-arm64"] == "macos-15"
+    smoke_command = _step_run(smoke_platform, "Smoke bundled sidecar install")
+    smoke_env = _step_env(smoke_platform, "Smoke bundled sidecar install")
+    assert smoke_env["HISTDATACOM_LIVE_SIDECAR_SMOKE"] == "1"
+    assert "--require-bundled-current-platform" in smoke_command
+    assert "--check-executable-version" in smoke_command
+    assert "--start-sidecar" in smoke_command
+    assert "--live-sidecar-smoke" in smoke_command
+    assert "--live-workspace .sidecar-live-workspace" in smoke_command
+    assert "--live-runtime-home .sidecar-live-runtime" in smoke_command
+    assert "--live-data-dir .sidecar-live-data" in smoke_command
+    assert "--live-startup-timeout 45" in smoke_command
+    assert "--live-completion-timeout 240" in smoke_command
+    assert "--live-stop-timeout 45" in smoke_command
 
     assemble = jobs["assemble-release-artifacts"]
     assert isinstance(assemble, dict)

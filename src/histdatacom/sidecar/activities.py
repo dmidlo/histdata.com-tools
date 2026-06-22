@@ -598,10 +598,11 @@ def _dataset_plan_batches(
 ) -> tuple[dict[str, str], ...]:
     from histdatacom.sidecar.workflows import period_batch_partitions
 
-    return cast(
-        tuple[dict[str, str], ...],
-        period_batch_partitions(request, work_items),
+    batches: tuple[dict[str, str], ...] = period_batch_partitions(
+        request,
+        work_items,
     )
+    return batches
 
 
 def _dataset_plan_inline_limit(request: RunRequest) -> int:
@@ -612,7 +613,8 @@ def _dataset_plan_inline_limit(request: RunRequest) -> int:
     if value is None:
         value = request.metadata.get(INLINE_WORK_ITEM_LIMIT_METADATA_KEY)
     if value is None:
-        return DEFAULT_DATASET_PLAN_INLINE_WORK_ITEM_LIMIT
+        default_limit: int = DEFAULT_DATASET_PLAN_INLINE_WORK_ITEM_LIMIT
+        return default_limit
     return _positive_inline_limit(value)
 
 
@@ -1044,10 +1046,13 @@ def _work_items_from_dataset_plan_ref(
         return ()
     partition = _mapping(payload.get("partition", {}))
     work_ids = _partition_work_ids(partition)
-    return ManifestStatusStore(store_root).get_dataset_plan_work_items(
+    work_items: tuple[WorkItem, ...] = ManifestStatusStore(
+        store_root
+    ).get_dataset_plan_work_items(
         plan_id,
         work_ids=work_ids,
     )
+    return work_items
 
 
 def _partition_work_ids(partition: Mapping[str, Any]) -> tuple[str, ...]:
