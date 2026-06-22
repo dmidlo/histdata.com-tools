@@ -820,9 +820,10 @@ Tagged releases and manual release runs build a metadata-only sdist/fallback
 wheel plus bundled Temporal sidecar wheels for Linux x86_64, Linux arm64, macOS
 Intel, macOS arm64, and Windows x86_64. The release workflow downloads Temporal
 CLI `1.7.2` from the pinned upstream release, verifies SHA-256 checksums before
-bundling, inspects every wheel with the sidecar manifest checker, smoke-installs
-each platform wheel on a matching GitHub-hosted runner, and attaches artifact
-provenance before upload or publish.
+bundling, embeds local `temporal-cli-provenance.json` plus Temporal CLI
+notice/license resources in bundled platform wheels, inspects every wheel with
+the sidecar manifest checker, smoke-installs each platform wheel on a matching
+GitHub-hosted runner, and attaches artifact provenance before upload or publish.
 
 Use `release_target=build-only` for dry runs, `release_target=testpypi` for the
 first publish rehearsal, and `release_target=pypi` only after setting

@@ -83,6 +83,12 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
         str(item["platform_key"]) for item in build_matrix["include"]
     }
     assert built_platforms == expected_platforms
+    build_command = _step_run(build_platform, "Build bundled platform wheel")
+    assert "--fetch-report" in build_command
+    assert (
+        '"release-reports/temporal-cli-${{ matrix.platform_key }}.json"'
+        in build_command
+    )
 
     smoke_platform = jobs["smoke-platform-wheels"]
     assert isinstance(smoke_platform, dict)

@@ -6,8 +6,20 @@
   "resource_files": [
     "README.md",
     "manifest.json",
-    "runtime-defaults.json"
+    "runtime-defaults.json",
+    "third-party/temporal-cli/LICENSE",
+    "third-party/temporal-cli/NOTICE.md"
   ],
+  "third_party_notices": {
+    "temporal_cli": {
+      "name": "Temporal CLI",
+      "license": "MIT",
+      "upstream_repository": "https://github.com/temporalio/cli",
+      "license_file": "third-party/temporal-cli/LICENSE",
+      "notice_file": "third-party/temporal-cli/NOTICE.md",
+      "bundled_provenance_file": "temporal-cli-provenance.json"
+    }
+  },
   "sdist_fallback": "metadata-only; platform wheel builds patch this manifest with a bundled Temporal executable",
   "platforms": {
     "linux-x86_64": {

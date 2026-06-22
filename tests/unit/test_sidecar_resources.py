@@ -33,6 +33,8 @@ def test_sidecar_manifest_loads_packaged_strategy() -> None:
     )
     assert not manifest.embedded_binary
     assert "runtime-defaults.json" in manifest.resource_files
+    assert "third-party/temporal-cli/LICENSE" in manifest.resource_files
+    assert "third-party/temporal-cli/NOTICE.md" in manifest.resource_files
     assert "linux-x86_64" in manifest.platforms
 
 
@@ -40,10 +42,14 @@ def test_sidecar_assets_are_readable_from_importlib_resources() -> None:
     """Editable and wheel installs should expose sidecar package data."""
     manifest_text = read_sidecar_asset_text("manifest.json")
     defaults_text = read_sidecar_asset_text("runtime-defaults.json")
+    license_text = read_sidecar_asset_text("third-party/temporal-cli/LICENSE")
+    notice_text = read_sidecar_asset_text("third-party/temporal-cli/NOTICE.md")
 
     assert sidecar_asset("README.md").is_file()
     assert json.loads(manifest_text)["sidecar"] == "temporal"
     assert json.loads(defaults_text)["persistence"]["driver"] == "sqlite"
+    assert "MIT License" in license_text
+    assert "Temporal CLI" in notice_text
 
 
 def test_platform_key_normalizes_common_targets() -> None:

@@ -51,9 +51,12 @@ the SDK, while bundled platform wheels provide the executable.
 Release automation builds the metadata-only sdist/fallback wheel first, then
 builds bundled Temporal platform wheels for Linux x86_64, Linux arm64, macOS
 Intel, macOS arm64, and Windows x86_64. The bundled wheels use pinned Temporal
-CLI `1.7.2` release artifacts and verify SHA-256 checksums before bundling.
-Every bundled wheel must pass `scripts/inspect_wheel.py --require-bundled-platform`,
-install on its matching GitHub-hosted runner, run
+CLI `1.7.2` release artifacts and verify SHA-256 checksums before bundling. The
+platform wheel payload includes `temporal-cli-provenance.json` plus the Temporal
+CLI notice and MIT license under `third-party/temporal-cli/`; metadata-only
+fallback artifacts intentionally omit executable provenance. Every bundled wheel
+must pass `scripts/inspect_wheel.py --require-bundled-platform`, install on its
+matching GitHub-hosted runner, run
 `histdatacom-sidecar doctor --json` with
 `platform.executable_bundled == true`, probe the executable version, start the
 sidecar without `--executable`, and run the installed-wheel live sidecar smoke

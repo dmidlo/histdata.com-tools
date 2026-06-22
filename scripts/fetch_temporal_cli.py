@@ -18,6 +18,9 @@ DEFAULT_TEMPORAL_CLI_VERSION = "1.7.2"
 TEMPORAL_CLI_RELEASE_BASE = (
     "https://github.com/temporalio/cli/releases/download"
 )
+TEMPORAL_CLI_REPOSITORY = "https://github.com/temporalio/cli"
+TEMPORAL_CLI_LICENSE = "MIT"
+TEMPORAL_CLI_LICENSE_URL = "https://github.com/temporalio/cli/blob/main/LICENSE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +188,9 @@ def fetch_temporal_cli(
         "version": version,
         "asset": asset.asset_name(version),
         "url": asset.url(version),
+        "upstream_repository": TEMPORAL_CLI_REPOSITORY,
+        "license": TEMPORAL_CLI_LICENSE,
+        "license_url": TEMPORAL_CLI_LICENSE_URL,
         "archive": str(archive_path),
         "executable": str(executable_path),
         "sha256": actual_sha256,

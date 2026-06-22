@@ -41,6 +41,9 @@ def test_temporal_cli_asset_table_covers_declared_platforms() -> None:
         "macos-x86_64",
         "windows-x86_64",
     }
+    assert module.TEMPORAL_CLI_REPOSITORY == "https://github.com/temporalio/cli"
+    assert module.TEMPORAL_CLI_LICENSE == "MIT"
+    assert module.TEMPORAL_CLI_LICENSE_URL.endswith("/LICENSE")
     for platform_key, asset in module.TEMPORAL_CLI_ASSETS.items():
         assert asset.platform_key == platform_key
         assert len(asset.sha256) == 64

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import hashlib
 from pathlib import Path
 from types import ModuleType
 
@@ -29,6 +30,15 @@ def _write_manifest(source_root: Path) -> None:
     """Write a minimal sidecar manifest into a temporary source tree."""
     asset_root = source_root / "src/histdatacom/sidecar/assets"
     asset_root.mkdir(parents=True)
+    (asset_root / "third-party/temporal-cli").mkdir(parents=True)
+    (asset_root / "third-party/temporal-cli/LICENSE").write_text(
+        "MIT\n",
+        encoding="utf-8",
+    )
+    (asset_root / "third-party/temporal-cli/NOTICE.md").write_text(
+        "Temporal CLI notice\n",
+        encoding="utf-8",
+    )
     (asset_root / "manifest.json").write_text(
         json.dumps(
             {
@@ -42,7 +52,21 @@ def _write_manifest(source_root: Path) -> None:
                     "README.md",
                     "manifest.json",
                     "runtime-defaults.json",
+                    "third-party/temporal-cli/LICENSE",
+                    "third-party/temporal-cli/NOTICE.md",
                 ],
+                "third_party_notices": {
+                    "temporal_cli": {
+                        "name": "Temporal CLI",
+                        "license": "MIT",
+                        "upstream_repository": "https://github.com/temporalio/cli",
+                        "license_file": "third-party/temporal-cli/LICENSE",
+                        "notice_file": "third-party/temporal-cli/NOTICE.md",
+                        "bundled_provenance_file": (
+                            "temporal-cli-provenance.json"
+                        ),
+                    }
+                },
                 "sdist_fallback": "metadata-only",
                 "platforms": {
                     "macos-arm64": {
@@ -56,6 +80,25 @@ def _write_manifest(source_root: Path) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _fetch_report() -> dict[str, str]:
+    """Return a verified Temporal CLI fetch report fixture."""
+    checksum = "1" * 64
+    return {
+        "platform": "macos-arm64",
+        "version": "1.7.2",
+        "asset": "temporal_cli_1.7.2_darwin_arm64.tar.gz",
+        "url": (
+            "https://github.com/temporalio/cli/releases/download/v1.7.2/"
+            "temporal_cli_1.7.2_darwin_arm64.tar.gz"
+        ),
+        "sha256": checksum,
+        "expected_sha256": checksum,
+        "upstream_repository": "https://github.com/temporalio/cli",
+        "license": "MIT",
+        "license_url": "https://github.com/temporalio/cli/blob/main/LICENSE",
+    }
 
 
 def test_prepare_sidecar_binary_patches_manifest_and_copies_executable(
@@ -73,20 +116,51 @@ def test_prepare_sidecar_binary_patches_manifest_and_copies_executable(
         source_root=source_root,
         platform_key="macos-arm64",
         executable=executable,
+        fetch_report=_fetch_report(),
     )
 
     bundled = (
         source_root / "src/histdatacom/sidecar/assets/bin/macos-arm64/temporal"
+    )
+    provenance_path = (
+        source_root
+        / "src/histdatacom/sidecar/assets/temporal-cli-provenance.json"
     )
     manifest = json.loads(
         (
             source_root / "src/histdatacom/sidecar/assets/manifest.json"
         ).read_text(encoding="utf-8")
     )
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     assert bundled.is_file()
     assert bundled.stat().st_mode & 0o111
+    assert provenance_path.is_file()
     assert manifest["embedded_binary"] is True
     assert manifest["platforms"]["macos-arm64"]["bundled"] is True
+    assert manifest["platforms"]["macos-arm64"]["provenance"] == (
+        "temporal-cli-provenance.json"
+    )
+    assert manifest["platforms"]["macos-arm64"]["license"] == (
+        "third-party/temporal-cli/LICENSE"
+    )
+    assert manifest["platforms"]["macos-arm64"]["notice"] == (
+        "third-party/temporal-cli/NOTICE.md"
+    )
     assert "bin/macos-arm64/temporal" in manifest["resource_files"]
+    assert "temporal-cli-provenance.json" in manifest["resource_files"]
+    assert "third-party/temporal-cli/LICENSE" in manifest["resource_files"]
+    assert "third-party/temporal-cli/NOTICE.md" in manifest["resource_files"]
+    assert provenance["platform"] == "macos-arm64"
+    assert provenance["version"] == "1.7.2"
+    assert provenance["release_asset"]["sha256_verified"] is True
+    assert (
+        provenance["executable"]["resource_path"] == "bin/macos-arm64/temporal"
+    )
+    assert (
+        provenance["executable"]["sha256"]
+        == hashlib.sha256(b"#!/bin/sh\n").hexdigest()
+    )
     assert report["platform"] == "macos-arm64"
     assert report["executable"] == "bin/macos-arm64/temporal"
+    assert report["provenance"] == "temporal-cli-provenance.json"
+    assert report["archive_sha256"] == "1" * 64

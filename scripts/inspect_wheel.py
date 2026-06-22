@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import platform
 from email.parser import Parser
@@ -14,12 +15,19 @@ EXPECTED_BASE_SIDECAR_ASSETS = {
     "histdatacom/sidecar/assets/README.md",
     "histdatacom/sidecar/assets/manifest.json",
     "histdatacom/sidecar/assets/runtime-defaults.json",
+    "histdatacom/sidecar/assets/third-party/temporal-cli/LICENSE",
+    "histdatacom/sidecar/assets/third-party/temporal-cli/NOTICE.md",
 }
 EXPECTED_BASE_SIDECAR_RESOURCE_FILES = {
     "README.md",
     "manifest.json",
     "runtime-defaults.json",
+    "third-party/temporal-cli/LICENSE",
+    "third-party/temporal-cli/NOTICE.md",
 }
+TEMPORAL_CLI_PROVENANCE_RESOURCE = "temporal-cli-provenance.json"
+TEMPORAL_CLI_LICENSE_RESOURCE = "third-party/temporal-cli/LICENSE"
+TEMPORAL_CLI_NOTICE_RESOURCE = "third-party/temporal-cli/NOTICE.md"
 EXPECTED_SIDECAR_PLATFORMS = {
     "linux-arm64",
     "linux-x86_64",
@@ -99,6 +107,197 @@ def _requires_dist_core_contains(
     )
 
 
+def _sha256_bytes(payload: bytes) -> str:
+    """Return the SHA-256 digest for in-wheel bytes."""
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _manifest_mapping(
+    data: dict[str, Any],
+    key: str,
+    *,
+    context: str,
+) -> dict[str, Any]:
+    """Return a required nested manifest/provenance mapping."""
+    value = data.get(key)
+    if not isinstance(value, dict):
+        raise SystemExit(f"{context} must define an object field: {key}")
+    return value
+
+
+def _require_string(
+    data: dict[str, Any],
+    key: str,
+    *,
+    context: str,
+) -> str:
+    """Return a required non-empty string field."""
+    value = data.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise SystemExit(f"{context} must define a string field: {key}")
+    return value
+
+
+def _validate_sha256(value: str, *, context: str, field: str) -> None:
+    """Fail if a provenance checksum is not a SHA-256 hex digest."""
+    if len(value) != 64:
+        raise SystemExit(f"{context} field {field!r} is not a SHA-256 digest")
+    try:
+        int(value, 16)
+    except ValueError as err:
+        raise SystemExit(f"{context} field {field!r} is not hex") from err
+
+
+def _validate_third_party_notice_manifest(manifest: dict[str, Any]) -> None:
+    """Validate top-level third-party notice metadata."""
+    notices = _manifest_mapping(
+        manifest,
+        "third_party_notices",
+        context="sidecar manifest",
+    )
+    temporal_cli = _manifest_mapping(
+        notices,
+        "temporal_cli",
+        context="sidecar manifest third_party_notices",
+    )
+    if temporal_cli.get("license") != "MIT":
+        raise SystemExit("Temporal CLI third-party notice must declare MIT")
+    if temporal_cli.get("license_file") != TEMPORAL_CLI_LICENSE_RESOURCE:
+        raise SystemExit("Temporal CLI third-party notice has wrong license file")
+    if temporal_cli.get("notice_file") != TEMPORAL_CLI_NOTICE_RESOURCE:
+        raise SystemExit("Temporal CLI third-party notice has wrong notice file")
+    if (
+        temporal_cli.get("bundled_provenance_file")
+        != TEMPORAL_CLI_PROVENANCE_RESOURCE
+    ):
+        raise SystemExit(
+            "Temporal CLI third-party notice has wrong bundled provenance file"
+        )
+
+
+def _validate_temporal_cli_provenance(
+    *,
+    wheel: ZipFile,
+    names: set[str],
+    platform_key: str,
+    executable_resource: str,
+    executable_path: str,
+    provenance_resource: str,
+) -> dict[str, Any]:
+    """Validate packaged provenance for one bundled platform executable."""
+    if provenance_resource != TEMPORAL_CLI_PROVENANCE_RESOURCE:
+        raise SystemExit(
+            f"sidecar platform {platform_key} has unexpected provenance "
+            f"resource: {provenance_resource}"
+        )
+    provenance_path = f"histdatacom/sidecar/assets/{provenance_resource}"
+    if provenance_path not in names:
+        raise SystemExit(
+            f"sidecar provenance missing for {platform_key}: {provenance_path}"
+        )
+    for required_resource in (
+        TEMPORAL_CLI_LICENSE_RESOURCE,
+        TEMPORAL_CLI_NOTICE_RESOURCE,
+    ):
+        required_path = f"histdatacom/sidecar/assets/{required_resource}"
+        if required_path not in names:
+            raise SystemExit(
+                f"sidecar third-party notice resource missing: {required_path}"
+            )
+
+    loaded = json.loads(wheel.read(provenance_path).decode("utf-8"))
+    if not isinstance(loaded, dict):
+        raise SystemExit(f"sidecar provenance must be an object: {provenance_path}")
+    provenance: dict[str, Any] = loaded
+    if provenance.get("schema_version") != 1:
+        raise SystemExit("Temporal CLI provenance schema_version must be 1")
+    if provenance.get("component") != "temporal-cli":
+        raise SystemExit("Temporal CLI provenance component mismatch")
+    if provenance.get("bundled") is not True:
+        raise SystemExit("Temporal CLI provenance must declare bundled true")
+    if provenance.get("platform") != platform_key:
+        raise SystemExit(
+            f"Temporal CLI provenance platform mismatch for {platform_key}"
+        )
+    _require_string(provenance, "version", context="Temporal CLI provenance")
+
+    upstream = _manifest_mapping(
+        provenance,
+        "upstream",
+        context="Temporal CLI provenance",
+    )
+    if upstream.get("license") != "MIT":
+        raise SystemExit("Temporal CLI provenance must declare MIT license")
+    if upstream.get("license_file") != TEMPORAL_CLI_LICENSE_RESOURCE:
+        raise SystemExit("Temporal CLI provenance has wrong license file")
+    if upstream.get("notice_file") != TEMPORAL_CLI_NOTICE_RESOURCE:
+        raise SystemExit("Temporal CLI provenance has wrong notice file")
+    _require_string(upstream, "repository", context="Temporal CLI provenance")
+    _require_string(upstream, "license_url", context="Temporal CLI provenance")
+
+    release_asset = _manifest_mapping(
+        provenance,
+        "release_asset",
+        context="Temporal CLI provenance",
+    )
+    _require_string(release_asset, "name", context="Temporal CLI provenance")
+    _require_string(release_asset, "url", context="Temporal CLI provenance")
+    expected_sha = _require_string(
+        release_asset,
+        "sha256_expected",
+        context="Temporal CLI provenance",
+    )
+    actual_sha = _require_string(
+        release_asset,
+        "sha256_actual",
+        context="Temporal CLI provenance",
+    )
+    _validate_sha256(
+        expected_sha,
+        context="Temporal CLI provenance",
+        field="release_asset.sha256_expected",
+    )
+    _validate_sha256(
+        actual_sha,
+        context="Temporal CLI provenance",
+        field="release_asset.sha256_actual",
+    )
+    if expected_sha.lower() != actual_sha.lower():
+        raise SystemExit("Temporal CLI release asset checksum was not verified")
+    if release_asset.get("sha256_verified") is not True:
+        raise SystemExit("Temporal CLI release asset must be marked verified")
+
+    executable = _manifest_mapping(
+        provenance,
+        "executable",
+        context="Temporal CLI provenance",
+    )
+    if executable.get("resource_path") != executable_resource:
+        raise SystemExit(
+            f"Temporal CLI provenance executable path mismatch for {platform_key}"
+        )
+    executable_bytes = wheel.read(executable_path)
+    executable_sha = _require_string(
+        executable,
+        "sha256",
+        context="Temporal CLI provenance",
+    )
+    _validate_sha256(
+        executable_sha,
+        context="Temporal CLI provenance",
+        field="executable.sha256",
+    )
+    if executable_sha.lower() != _sha256_bytes(executable_bytes):
+        raise SystemExit(
+            f"Temporal CLI provenance executable checksum mismatch for {platform_key}"
+        )
+    if executable.get("size_bytes") != len(executable_bytes):
+        raise SystemExit(
+            f"Temporal CLI provenance executable size mismatch for {platform_key}"
+        )
+    return provenance
+
+
 def inspect_wheel(
     wheel_path: Path,
     *,
@@ -139,6 +338,7 @@ def inspect_wheel(
                 "utf-8"
             )
         )
+        _validate_third_party_notice_manifest(manifest)
         manifest_platforms = set(dict(manifest["platforms"]))
         missing_platforms = sorted(
             EXPECTED_SIDECAR_PLATFORMS - manifest_platforms
@@ -149,6 +349,7 @@ def inspect_wheel(
                 f"{missing_platforms}"
             )
         bundled_platforms: set[str] = set()
+        provenance_reports: dict[str, Any] = {}
         expected_resource_files = set(EXPECTED_BASE_SIDECAR_RESOURCE_FILES)
         for key, resource in dict(manifest["platforms"]).items():
             executable = resource.get("executable")
@@ -158,6 +359,20 @@ def inspect_wheel(
             if resource.get("bundled"):
                 bundled_platforms.add(str(key))
                 expected_resource_files.add(str(executable))
+                expected_resource_files.add(TEMPORAL_CLI_PROVENANCE_RESOURCE)
+                if resource.get("license") != TEMPORAL_CLI_LICENSE_RESOURCE:
+                    raise SystemExit(
+                        f"sidecar platform {key} has wrong license resource"
+                    )
+                if resource.get("notice") != TEMPORAL_CLI_NOTICE_RESOURCE:
+                    raise SystemExit(
+                        f"sidecar platform {key} has wrong notice resource"
+                    )
+                provenance = resource.get("provenance")
+                if not isinstance(provenance, str) or not provenance:
+                    raise SystemExit(
+                        f"sidecar platform {key} is bundled without provenance"
+                    )
                 if executable_path not in names:
                     raise SystemExit(
                         f"sidecar executable missing for {key}: "
@@ -170,11 +385,30 @@ def inspect_wheel(
                         f"sidecar executable is not executable for {key}: "
                         f"{executable_path}"
                     )
+                provenance_reports[str(key)] = _validate_temporal_cli_provenance(
+                    wheel=wheel,
+                    names=names,
+                    platform_key=str(key),
+                    executable_resource=str(executable),
+                    executable_path=executable_path,
+                    provenance_resource=provenance,
+                )
             elif executable_path in names:
                 raise SystemExit(
                     f"sidecar executable is packaged but not declared bundled "
                     f"for {key}: {executable_path}"
                 )
+            elif resource.get("provenance"):
+                raise SystemExit(
+                    f"sidecar platform {key} declares provenance but is not bundled"
+                )
+        provenance_asset = (
+            f"histdatacom/sidecar/assets/{TEMPORAL_CLI_PROVENANCE_RESOURCE}"
+        )
+        if not bundled_platforms and provenance_asset in names:
+            raise SystemExit(
+                "metadata-only sidecar wheel must not package bundled provenance"
+            )
         unexpected_resource_files = sorted(
             expected_resource_files ^ set(manifest.get("resource_files", []))
         )
@@ -263,6 +497,7 @@ def inspect_wheel(
             "distribution_strategy": manifest["distribution_strategy"],
             "embedded_binary": manifest["embedded_binary"],
             "platforms": sorted(manifest_platforms),
+            "provenance": provenance_reports,
             "resource_files": list(manifest["resource_files"]),
         },
         "console_scripts": sorted(EXPECTED_CONSOLE_SCRIPTS),

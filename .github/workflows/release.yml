@@ -141,6 +141,7 @@ jobs:
             --dist-dir dist-platform \
             --platform-key "${{ matrix.platform_key }}" \
             --executable "${{ steps.temporal.outputs.executable }}" \
+            --fetch-report "release-reports/temporal-cli-${{ matrix.platform_key }}.json" \
             --report "release-reports/platform-wheel-${{ matrix.platform_key }}.json"
         shell: bash
 

@@ -13,7 +13,13 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, Sequence
 
-EXPECTED_ASSETS = ("README.md", "manifest.json", "runtime-defaults.json")
+EXPECTED_ASSETS = (
+    "README.md",
+    "manifest.json",
+    "runtime-defaults.json",
+    "third-party/temporal-cli/LICENSE",
+    "third-party/temporal-cli/NOTICE.md",
+)
 EXPECTED_CONSOLE_SCRIPTS = {
     "histdatacom": "histdatacom.histdata_com:main",
     "histdatacom-sidecar": "histdatacom.sidecar.cli:main",
