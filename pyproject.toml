@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77", "wheel"]
+requires = ["setuptools>=82.0.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -43,25 +43,26 @@ classifiers = [
     "Topic :: Terminals",
 ]
 dependencies = [
-    "beautifulsoup4>=4.12",
-    "certifi>=2024.2.2",
-    "polars>=1.0",
-    "pytz>=2024.1",
-    "PyYAML>=6.0",
-    "requests>=2.28",
-    "rich>=12.0",
+    "beautifulsoup4>=4.15.0",
+    "certifi>=2026.6.17",
+    "polars>=1.41.2",
+    "pytz>=2026.2",
+    "PyYAML>=6.0.3",
+    "requests>=2.34.2",
+    "rich>=15.0.0",
+    "Rx>=3.2",
     "temporalio>=1.10,<2",
 ]
 
 [project.optional-dependencies]
 arrow = [
-    "pyarrow>=16.0",
+    "pyarrow>=24.0.0",
 ]
 influx = [
-    "influxdb-client>=1.36",
+    "influxdb-client>=1.50.0",
 ]
 pandas = [
-    "pandas>=2.0",
+    "pandas>=2.3.3",
 ]
 jupyter = [
     "jupyter",
@@ -71,18 +72,18 @@ temporal = [
     "temporalio>=1.10,<2",
 ]
 all = [
-    "influxdb-client>=1.36",
+    "influxdb-client>=1.50.0",
     "ipywidgets",
     "jupyter",
-    "pandas>=2.0",
-    "pyarrow>=16.0",
+    "pandas>=2.3.3",
+    "pyarrow>=24.0.0",
     "temporalio>=1.10,<2",
 ]
 test = [
     "coverage==7.14.2",
-    "influxdb-client>=1.36",
-    "pandas>=2.0",
-    "pyarrow>=16.0",
+    "influxdb-client>=1.50.0",
+    "pandas>=2.3.3",
+    "pyarrow>=24.0.0",
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
     "temporalio>=1.10,<2",
@@ -102,7 +103,7 @@ lint = [
 release = [
     "build==1.5.0",
     "keyring==25.7.0",
-    "setuptools==80.10.2",
+    "setuptools==82.0.1",
     "twine==6.2.0",
     "wheel==0.47.0",
 ]
@@ -111,20 +112,20 @@ dev = [
     "black==26.5.1",
     "commitizen==4.16.3",
     "coverage==7.14.2",
-    "influxdb-client>=1.36",
+    "influxdb-client>=1.50.0",
     "ipywidgets",
     "jupyter",
     "keyring==25.7.0",
     "mypy==2.1.0",
-    "pandas>=2.0",
+    "pandas>=2.3.3",
     "pandas-stubs==3.0.3.260530",
     "pre-commit==4.6.0",
     "pyroma==5.0.1",
-    "pyarrow>=16.0",
+    "pyarrow>=24.0.0",
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
     "ruff==0.15.18",
-    "setuptools==80.10.2",
+    "setuptools==82.0.1",
     "shellcheck-py==0.11.0.1",
     "temporalio>=1.10,<2",
     "twine==6.2.0",
