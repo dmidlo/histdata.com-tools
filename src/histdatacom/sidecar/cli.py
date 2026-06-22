@@ -20,6 +20,7 @@ from histdatacom.sidecar.client import (
     inspect_job_status_sync,
     list_job_statuses_sync,
     resume_job_sync,
+    resolve_sidecar_worker_config,
     retry_job_sync,
     submit_control_job_sync,
 )
@@ -32,7 +33,6 @@ from histdatacom.sidecar.queues import (
     DEFAULT_TASK_QUEUE_PREFIX,
     DEFAULT_TEMPORAL_NAMESPACE,
     SidecarWorkerConfig,
-    build_sidecar_worker_config,
 )
 from histdatacom.sidecar.resources import SidecarResourceError
 from histdatacom.sidecar.runtime import (
@@ -166,7 +166,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     jobs = subparsers.add_parser(
         "jobs",
-        help="submit, inspect, and control sidecar jobs",
+        help=(
+            "submit, inspect, and control jobs using running sidecar routing"
+        ),
     )
     _add_common_args(jobs, include_defaults=False)
     jobs.add_argument(
@@ -440,8 +442,8 @@ def _load_run_request(path: str) -> RunRequest:
 
 def _worker_config(args: argparse.Namespace) -> SidecarWorkerConfig:
     """Create a sidecar worker config from CLI arguments."""
-    return build_sidecar_worker_config(
-        runtime_policy=_supervisor(args).runtime_policy
+    return resolve_sidecar_worker_config(
+        supervisor=_supervisor(args),
     )
 
 
@@ -492,8 +494,12 @@ def _write_maintenance_payload(payload: dict, *, as_json: bool) -> None:
 
 def _run_jobs_command(args: argparse.Namespace) -> int:
     """Run sidecar job control commands."""
-    config = _worker_config(args)
     supervisor = _supervisor(args)
+    config = (
+        None
+        if args.jobs_command == "submit" and args.start
+        else _worker_config(args)
+    )
     if args.jobs_command == "submit":
         snapshot = submit_control_job_sync(
             _load_run_request(args.request_json),
@@ -507,6 +513,7 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
     if args.jobs_command == "list":
         jobs = list_job_statuses_sync(
             config=config,
+            supervisor=supervisor,
             query=args.query,
             offline=args.offline,
             limit=args.limit,

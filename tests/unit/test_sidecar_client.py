@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -18,10 +19,15 @@ from histdatacom.runtime_contracts import (
 from histdatacom.sidecar.control import JobLifecycle
 from histdatacom.sidecar.control import SidecarJobSnapshot
 from histdatacom.sidecar import client
-from histdatacom.sidecar.queues import build_sidecar_worker_config
+from histdatacom.sidecar.queues import (
+    SidecarWorkerConfig,
+    TaskQueueLane,
+    build_sidecar_worker_config,
+)
+from histdatacom.sidecar.readiness import write_worker_readiness_payload
 from histdatacom.sidecar.resources import SidecarExecutableUnavailable
 from histdatacom.sidecar.runtime import build_sidecar_runtime_policy
-from histdatacom.sidecar.supervisor import SidecarStatus
+from histdatacom.sidecar.supervisor import SidecarStatus, SidecarSupervisor
 
 
 class _FakeTemporalClient:
@@ -295,6 +301,89 @@ def _config(tmp_path: Path):
     )
 
 
+def _write_ready_marker(state_dir: Path, lane: str, pid: int) -> None:
+    """Write a fake worker readiness marker."""
+    write_worker_readiness_payload(
+        state_dir,
+        lane,
+        {
+            "component": f"worker:{lane}",
+            "pid": pid,
+            "state": "ready",
+            "message": "ready",
+            "namespace": "histdatacom-custom",
+            "task_queue": f"histdatacom-custom.test.{lane}",
+            "target_host": "127.0.0.1:20333",
+        },
+    )
+
+
+def _running_supervisor(
+    tmp_path: Path,
+    *,
+    namespace: str = "histdatacom-custom",
+    task_queue_prefix: str = "histdatacom-custom",
+    grpc: int = 20333,
+    include_worker_fleet: bool = True,
+) -> tuple[SidecarSupervisor, SidecarWorkerConfig]:
+    """Create a real supervisor with fake healthy persisted state."""
+    policy = build_sidecar_runtime_policy(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+    )
+    config = build_sidecar_worker_config(
+        runtime_policy=policy,
+        namespace=namespace,
+        task_queue_prefix=task_queue_prefix,
+    )
+    pids = {
+        "server": 100,
+        "worker:orchestration": 200,
+        "worker:network": 300,
+        "worker:cpu-file": 400,
+        "worker:influx": 500,
+    }
+    for lane, pid in {
+        "orchestration": 200,
+        "network": 300,
+        "cpu-file": 400,
+        "influx": 500,
+    }.items():
+        _write_ready_marker(policy.paths.state_dir, lane, pid)
+    ports = {
+        "bind_ip": "127.0.0.1",
+        "grpc": grpc,
+        "ui": grpc + 1000,
+        "source": "workspace",
+        "collisions": [grpc - 1],
+    }
+    runtime_policy = policy.to_dict()
+    runtime_policy["ports"] = ports
+    state: dict[str, object] = {
+        "pids": pids,
+        "command": ["/tmp/temporal", "server", "start-dev"],
+        "ports": ports,
+        "runtime_policy": runtime_policy,
+    }
+    if include_worker_fleet:
+        state["worker_fleet"] = {
+            "namespace": config.namespace,
+            "task_queue_prefix": config.task_queues.prefix,
+            "task_queues": config.task_queues.to_dict(),
+            "lanes": [lane.value for lane in TaskQueueLane],
+            "concurrency": config.concurrency_profile.to_dict(),
+        }
+    policy.paths.pid_file.write_text(json.dumps(state), encoding="utf-8")
+    supervisor = SidecarSupervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: True,
+        frontend_ready=lambda runtime_policy: True,
+        worker_dependency_available=lambda: True,
+        sleep=lambda seconds: None,
+    )
+    return supervisor, config
+
+
 def _status(state: str) -> SidecarStatus:
     """Create a minimal sidecar status object."""
     return SidecarStatus(
@@ -454,6 +543,25 @@ def test_submit_run_request_uses_orchestration_queue(
     assert client.sidecar_job_store_path(config).parent.name == ".histdatacom"
 
 
+def test_submit_run_request_without_config_fails_on_malformed_running_state(
+    tmp_path: Path,
+) -> None:
+    """Direct submission should not silently fall back from bad live state."""
+    supervisor, _ = _running_supervisor(tmp_path, include_worker_fleet=False)
+
+    with pytest.raises(
+        client.SidecarUnavailableError,
+        match="missing worker_fleet",
+    ):
+        asyncio.run(
+            client.submit_run_request(
+                RunRequest(request_id="run-bad-direct"),
+                supervisor=supervisor,
+                client=_FakeTemporalClient(),
+            )
+        )
+
+
 def test_submit_and_observe_reuses_running_sidecar(
     tmp_path: Path,
 ) -> None:
@@ -563,6 +671,58 @@ def test_submit_and_observe_can_start_unavailable_sidecar(
     assert stored is not None
     assert stored["lifecycle"] == JobLifecycle.SUBMITTED.value
     assert supervisor.start_calls == 1
+
+
+def test_submit_and_observe_without_config_uses_running_sidecar_state(
+    tmp_path: Path,
+) -> None:
+    """Default submission should inherit persisted running sidecar routing."""
+    _FakeTemporalClient.connect_calls.clear()
+    supervisor, expected_config = _running_supervisor(tmp_path)
+
+    result = asyncio.run(
+        client.submit_run_request_and_observe(
+            RunRequest(request_id="run-state"),
+            supervisor=supervisor,
+            client_class=_FakeTemporalClient,
+            wait_for_result=False,
+        )
+    )
+
+    assert _FakeTemporalClient.connect_calls == [
+        {
+            "target_host": "127.0.0.1:20333",
+            "namespace": "histdatacom-custom",
+        }
+    ]
+    assert result.handle.task_queue == (
+        expected_config.task_queues.orchestration
+    )
+    assert result.handle.namespace == "histdatacom-custom"
+    assert result.snapshot is not None
+    assert (
+        result.snapshot.task_queue == expected_config.task_queues.orchestration
+    )
+
+
+def test_submit_and_observe_without_config_fails_on_malformed_running_state(
+    tmp_path: Path,
+) -> None:
+    """Workflow submission should not fall back from malformed live state."""
+    supervisor, _ = _running_supervisor(tmp_path, include_worker_fleet=False)
+
+    with pytest.raises(
+        client.SidecarUnavailableError,
+        match="missing worker_fleet",
+    ):
+        asyncio.run(
+            client.submit_run_request_and_observe(
+                RunRequest(request_id="run-bad-state"),
+                supervisor=supervisor,
+                client=_FakeTemporalClient(),
+                wait_for_result=False,
+            )
+        )
 
 
 def test_submit_and_observe_fails_when_sidecar_is_unavailable(

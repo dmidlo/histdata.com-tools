@@ -34,7 +34,6 @@ from histdatacom.sidecar.control import (
 )
 from histdatacom.sidecar.queues import (
     SidecarWorkerConfig,
-    build_sidecar_worker_config,
 )
 from histdatacom.sidecar.resources import SidecarResourceError
 from histdatacom.sidecar.supervisor import SidecarStatus, SidecarSupervisor
@@ -113,10 +112,14 @@ class SidecarJobResult:
 async def connect_temporal_client(
     *,
     config: SidecarWorkerConfig | None = None,
+    supervisor: SidecarSupervisor | None = None,
     client_class: Any | None = None,
 ) -> Any:
     """Connect to the workspace Temporal sidecar frontend."""
-    resolved_config = config or build_sidecar_worker_config()
+    resolved_config = resolve_sidecar_worker_config(
+        config=config,
+        supervisor=supervisor,
+    )
     temporal_client_class = client_class or _load_temporal_client_class()
     connect = getattr(temporal_client_class, "connect", None)
     if connect is None:
@@ -133,15 +136,21 @@ async def submit_run_request(
     request: RunRequest,
     *,
     config: SidecarWorkerConfig | None = None,
+    supervisor: SidecarSupervisor | None = None,
     client: Any | None = None,
     client_class: Any | None = None,
     status_store: ManifestStatusStore | None = None,
     workflow: Any = DEFAULT_RUN_WORKFLOW_NAME,
 ) -> SidecarJobHandle:
     """Submit a serialized HistData run request without activity imports."""
-    resolved_config = config or build_sidecar_worker_config()
+    resolved_config = resolve_sidecar_worker_config(
+        config=config,
+        supervisor=supervisor,
+        require_running=config is None,
+    )
     temporal_client = client or await connect_temporal_client(
         config=resolved_config,
+        supervisor=supervisor,
         client_class=client_class,
     )
     workflow_id = workflow_id_for_request(request)
@@ -184,16 +193,22 @@ async def submit_run_request_and_observe(
     workflow: Any = DEFAULT_RUN_WORKFLOW_NAME,
 ) -> SidecarJobResult:
     """Submit a run through a healthy sidecar and optionally await its result."""
-    resolved_config = config or build_sidecar_worker_config()
     resolved_supervisor = supervisor or SidecarSupervisor(
-        runtime_policy=resolved_config.runtime_policy
+        runtime_policy=config.runtime_policy if config is not None else None
     )
     sidecar_status = _ensure_sidecar_available(
         resolved_supervisor,
         start_if_needed=start_if_needed,
     )
+    resolved_config = resolve_sidecar_worker_config(
+        config=config,
+        supervisor=resolved_supervisor,
+        status=sidecar_status,
+        require_running=True,
+    )
     temporal_client = client or await connect_temporal_client(
         config=resolved_config,
+        supervisor=resolved_supervisor,
         client_class=client_class,
     )
     workflow_id = workflow_id_for_request(request)
@@ -317,7 +332,10 @@ async def inspect_job_status(
     store_fallback: bool = True,
 ) -> SidecarJobSnapshot:
     """Return a GUI-ready status snapshot for one sidecar job."""
-    resolved_config = config or build_sidecar_worker_config()
+    resolved_config = resolve_sidecar_worker_config(
+        config=config,
+        supervisor=supervisor,
+    )
     if offline:
         return _stored_job_snapshot_or_raise(
             workflow_id,
@@ -327,6 +345,7 @@ async def inspect_job_status(
     try:
         temporal_client = client or await connect_temporal_client(
             config=resolved_config,
+            supervisor=supervisor,
             client_class=client_class,
         )
         workflow_handle = _workflow_handle_for_job(
@@ -375,6 +394,7 @@ async def list_job_statuses(
     config: SidecarWorkerConfig | None = None,
     client: Any | None = None,
     client_class: Any | None = None,
+    supervisor: SidecarSupervisor | None = None,
     status_store: ManifestStatusStore | None = None,
     offline: bool = False,
     store_fallback: bool = True,
@@ -382,7 +402,10 @@ async def list_job_statuses(
     limit: int | None = None,
 ) -> SidecarJobList:
     """List known HistData job handles without reading workflow histories."""
-    resolved_config = config or build_sidecar_worker_config()
+    resolved_config = resolve_sidecar_worker_config(
+        config=config,
+        supervisor=supervisor,
+    )
     if offline:
         return list_stored_job_statuses(
             config=resolved_config,
@@ -393,6 +416,7 @@ async def list_job_statuses(
     try:
         temporal_client = client or await connect_temporal_client(
             config=resolved_config,
+            supervisor=supervisor,
             client_class=client_class,
         )
         list_workflows = getattr(temporal_client, "list_workflows", None)
@@ -499,7 +523,10 @@ async def get_job_result(
     store_fallback: bool = True,
 ) -> SidecarJobSnapshot:
     """Return a snapshot with the workflow result payload attached."""
-    resolved_config = config or build_sidecar_worker_config()
+    resolved_config = resolve_sidecar_worker_config(
+        config=config,
+        supervisor=supervisor,
+    )
     if offline:
         return _stored_job_snapshot_or_raise(
             workflow_id,
@@ -509,6 +536,7 @@ async def get_job_result(
     try:
         temporal_client = client or await connect_temporal_client(
             config=resolved_config,
+            supervisor=supervisor,
             client_class=client_class,
         )
         workflow_handle = _workflow_handle_for_job(
@@ -567,7 +595,10 @@ async def cancel_job(
     offline: bool = False,
 ) -> SidecarJobSnapshot:
     """Request cancellation and return explicit cancellation state."""
-    resolved_config = config or build_sidecar_worker_config()
+    resolved_config = resolve_sidecar_worker_config(
+        config=config,
+        supervisor=supervisor,
+    )
     if offline:
         snapshot = _stored_job_snapshot_or_raise(
             workflow_id,
@@ -585,6 +616,7 @@ async def cancel_job(
         )
     temporal_client = client or await connect_temporal_client(
         config=resolved_config,
+        supervisor=supervisor,
         client_class=client_class,
     )
     workflow_handle = _workflow_handle_for_job(
@@ -705,6 +737,26 @@ def workflow_id_for_request(request: RunRequest) -> str:
     return f"histdatacom-{request_id}"
 
 
+def resolve_sidecar_worker_config(
+    *,
+    config: SidecarWorkerConfig | None = None,
+    supervisor: SidecarSupervisor | None = None,
+    status: SidecarStatus | None = None,
+    require_running: bool = False,
+) -> SidecarWorkerConfig:
+    """Resolve client config from explicit or running sidecar state."""
+    if config is not None:
+        return config
+    resolved_supervisor = supervisor or SidecarSupervisor()
+    try:
+        return resolved_supervisor.client_worker_config(
+            status=status,
+            require_running=require_running,
+        )
+    except RuntimeError as err:
+        raise SidecarUnavailableError(str(err)) from err
+
+
 def run_request_payload(
     request: RunRequest,
     config: SidecarWorkerConfig,
@@ -725,7 +777,7 @@ def sidecar_job_store_root(
     config: SidecarWorkerConfig | None = None,
 ) -> Path:
     """Return the workspace-scoped root used for durable job snapshots."""
-    resolved_config = config or build_sidecar_worker_config()
+    resolved_config = resolve_sidecar_worker_config(config=config)
     return Path(resolved_config.runtime_policy.paths.manifests_dir)
 
 
@@ -788,9 +840,14 @@ async def _start_replacement_job(
     if action not in {"retry", "resume"}:
         raise ValueError(f"unsupported control action: {action}")
 
-    resolved_config = config or build_sidecar_worker_config()
+    resolved_config = resolve_sidecar_worker_config(
+        config=config,
+        supervisor=supervisor,
+        require_running=True,
+    )
     temporal_client = client or await connect_temporal_client(
         config=resolved_config,
+        supervisor=supervisor,
         client_class=client_class,
     )
     snapshot = await inspect_job_status(

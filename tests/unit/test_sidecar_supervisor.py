@@ -118,6 +118,72 @@ def _write_ready_marker_from_command(command: list[str], pid: int) -> None:
     _write_ready_marker(state_dir, lane, pid)
 
 
+def _running_ports(grpc: int = 19999) -> dict[str, object]:
+    """Return persisted dynamic sidecar ports for tests."""
+    return {
+        "bind_ip": "127.0.0.1",
+        "grpc": grpc,
+        "ui": grpc + 1000,
+        "source": "workspace",
+        "collisions": [grpc - 1],
+    }
+
+
+def _write_running_state(
+    policy: SidecarRuntimePolicy,
+    *,
+    ports: dict[str, object] | None = None,
+    namespace: str = "default",
+    task_queue_prefix: str = "histdatacom",
+    include_worker_fleet: bool = True,
+) -> None:
+    """Write a healthy persisted sidecar state file."""
+    paths = policy.paths
+    paths.state_dir.mkdir(parents=True, exist_ok=True)
+    pids = {
+        "server": 100,
+        "worker:orchestration": 200,
+        "worker:network": 300,
+        "worker:cpu-file": 400,
+        "worker:influx": 500,
+    }
+    for lane, pid in {
+        "orchestration": 200,
+        "network": 300,
+        "cpu-file": 400,
+        "influx": 500,
+    }.items():
+        _write_ready_marker(paths.state_dir, lane, pid)
+    running_ports = ports or _running_ports()
+    runtime_policy = policy.to_dict()
+    runtime_policy["ports"] = running_ports
+    state: dict[str, object] = {
+        "schema_version": SIDECAR_STATE_SCHEMA_VERSION,
+        "pids": pids,
+        "command": ["/tmp/temporal", "server", "start-dev"],
+        "ports": running_ports,
+        "runtime_policy": runtime_policy,
+    }
+    if include_worker_fleet:
+        config = build_sidecar_worker_config(
+            runtime_policy=policy,
+            namespace=namespace,
+            task_queue_prefix=task_queue_prefix,
+            cpu_utilization="high",
+            network_multiplier=5,
+            orchestration_workers=2,
+            influx_workers=3,
+        )
+        state["worker_fleet"] = {
+            "namespace": config.namespace,
+            "task_queue_prefix": config.task_queues.prefix,
+            "task_queues": config.task_queues.to_dict(),
+            "lanes": [lane.value for lane in TaskQueueLane],
+            "concurrency": config.concurrency_profile.to_dict(),
+        }
+    paths.pid_file.write_text(json.dumps(state), encoding="utf-8")
+
+
 def test_build_temporal_start_command_uses_runtime_defaults(
     tmp_path: Path,
 ) -> None:
@@ -497,6 +563,50 @@ def test_status_reports_stale_state_when_worker_not_ready(
     assert "workers not ready" in status.message
 
 
+def test_client_worker_config_uses_running_state_ports_and_worker_fleet(
+    tmp_path: Path,
+) -> None:
+    """Client config should use persisted live sidecar routing metadata."""
+    policy = _policy(tmp_path)
+    _write_running_state(
+        policy,
+        ports=_running_ports(19999),
+        namespace="histdatacom-custom",
+        task_queue_prefix="histdatacom-custom",
+    )
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: True,
+    )
+
+    config = supervisor.client_worker_config(require_running=True)
+
+    assert config.target_host == "127.0.0.1:19999"
+    assert config.namespace == "histdatacom-custom"
+    assert config.task_queues.prefix == "histdatacom-custom"
+    assert config.task_queues.orchestration.startswith(
+        f"histdatacom-custom.{policy.workspace_id}."
+    )
+    assert config.concurrency_profile.network_multiplier == 5
+    assert config.concurrency_profile.orchestration_workers == 2
+    assert config.concurrency_profile.influx_workers == 3
+
+
+def test_client_worker_config_fails_on_malformed_running_state(
+    tmp_path: Path,
+) -> None:
+    """Running state without worker-fleet metadata should not fall back."""
+    policy = _policy(tmp_path)
+    _write_running_state(policy, include_worker_fleet=False)
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: True,
+    )
+
+    with pytest.raises(RuntimeError, match="missing worker_fleet"):
+        supervisor.client_worker_config(require_running=True)
+
+
 def test_status_repairs_state_without_valid_pids(tmp_path: Path) -> None:
     """Malformed PID payloads should be stale and repairable."""
     paths = SidecarPaths.from_state_dir(tmp_path / "state")
@@ -656,6 +766,35 @@ def test_doctor_reports_frontend_and_worker_lane_health(
     assert doctor["workers"]["cpu-file"]["log"].endswith(
         "temporal-worker-cpu-file.log"
     )
+
+
+def test_doctor_checks_persisted_running_frontend_port(
+    tmp_path: Path,
+) -> None:
+    """Doctor should inspect the actual frontend port in running state."""
+    policy = _policy(tmp_path)
+    _write_running_state(policy, ports=_running_ports(20123))
+    checked_ports: list[int] = []
+
+    def frontend_ready(runtime_policy: SidecarRuntimePolicy) -> bool:
+        checked_ports.append(runtime_policy.ports.grpc)
+        return True
+
+    supervisor = SidecarSupervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: True,
+        process_factory=lambda command, **kwargs: _FakeProcess(1234),
+        port_available=lambda bind_ip, port: True,
+        frontend_ready=frontend_ready,
+        worker_dependency_available=lambda: True,
+        sleep=lambda seconds: None,
+    )
+
+    doctor = supervisor.doctor()
+
+    assert checked_ports == [20123]
+    assert doctor["frontend"]["target_host"] == "127.0.0.1:20123"
+    assert doctor["runtime_policy"]["ports"]["grpc"] == 20123
 
 
 def test_default_state_dir_accepts_environment_override(

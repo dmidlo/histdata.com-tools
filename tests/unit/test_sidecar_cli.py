@@ -310,6 +310,47 @@ def test_sidecar_jobs_inspect_cli_emits_control_snapshot_json(
     assert payload["lifecycle"] == JobLifecycle.RUNNING.value
 
 
+def test_sidecar_jobs_cli_resolves_config_from_running_supervisor(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Jobs commands should use the running sidecar config resolver."""
+    supervisor = _StatusOnlySupervisor("running")
+    resolved_config = _FakeConfig()
+    captured: dict[str, object] = {}
+
+    def fake_resolve_config(**kwargs: object) -> _FakeConfig:
+        captured["resolver_kwargs"] = kwargs
+        return resolved_config
+
+    def fake_inspect(
+        workflow_id: str,
+        **kwargs: object,
+    ) -> SidecarJobSnapshot:
+        captured["workflow_id"] = workflow_id
+        captured["inspect_kwargs"] = kwargs
+        return _snapshot()
+
+    monkeypatch.setattr(cli, "_supervisor", lambda args: supervisor)
+    monkeypatch.setattr(
+        cli,
+        "resolve_sidecar_worker_config",
+        fake_resolve_config,
+    )
+    monkeypatch.setattr(cli, "inspect_job_status_sync", fake_inspect)
+
+    exit_code = cli.main(["jobs", "--json", "inspect", "histdatacom-run-cli"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["workflow_id"] == "histdatacom-run-cli"
+    assert captured["resolver_kwargs"] == {"supervisor": supervisor}
+    inspect_kwargs = captured["inspect_kwargs"]
+    assert isinstance(inspect_kwargs, dict)
+    assert inspect_kwargs["config"] is resolved_config
+    assert inspect_kwargs["supervisor"] is supervisor
+
+
 def test_sidecar_jobs_offline_cli_reads_persisted_store(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -468,4 +509,54 @@ def test_sidecar_jobs_submit_cli_loads_run_request_json(
     assert exit_code == 0
     assert captured["request"].request_id == "run-cli"
     assert captured["kwargs"]["wait_for_result"] is False
+    assert payload["lifecycle"] == JobLifecycle.SUBMITTED.value
+
+
+def test_sidecar_jobs_submit_start_defers_config_until_after_start(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Submit --start should not resolve stale config before startup."""
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(RunRequest(request_id="run-cli").to_dict())
+    )
+    captured: dict[str, object] = {}
+    supervisor = _StatusOnlySupervisor("stopped")
+
+    def fail_worker_config(args: object) -> _FakeConfig:
+        raise AssertionError("config should be resolved after startup")
+
+    def fake_submit(
+        request: RunRequest,
+        **kwargs: object,
+    ) -> SidecarJobSnapshot:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _snapshot(lifecycle=JobLifecycle.SUBMITTED)
+
+    monkeypatch.setattr(cli, "_supervisor", lambda args: supervisor)
+    monkeypatch.setattr(cli, "_worker_config", fail_worker_config)
+    monkeypatch.setattr(cli, "submit_control_job_sync", fake_submit)
+
+    exit_code = cli.main(
+        [
+            "jobs",
+            "--json",
+            "submit",
+            "--request-json",
+            str(request_path),
+            "--start",
+            "--submit-only",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["config"] is None
+    assert kwargs["supervisor"] is supervisor
+    assert kwargs["start_if_needed"] is True
     assert payload["lifecycle"] == JobLifecycle.SUBMITTED.value

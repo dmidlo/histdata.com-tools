@@ -486,6 +486,14 @@ The queue name pattern is:
 histdatacom.<workspace-id>.<lane>
 ```
 
+Client commands resolve routing from the running sidecar state before submitting
+or controlling jobs. If `start` or `restart` used a non-default namespace, task
+queue prefix, or dynamically reallocated frontend port, ordinary
+`histdatacom` runs and `histdatacom-sidecar jobs ...` commands use the
+persisted runtime and worker-fleet metadata. If that running state is stale or
+missing worker-fleet metadata, job submission fails before enqueueing work; stop
+and restart the sidecar to regenerate the state file.
+
 Inspect worker configuration:
 
 ```sh

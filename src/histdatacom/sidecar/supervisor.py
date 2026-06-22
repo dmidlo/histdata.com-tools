@@ -9,7 +9,7 @@ import socket
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from importlib.util import find_spec
 from pathlib import Path
@@ -19,10 +19,12 @@ from histdatacom.sidecar.performance import (
     DEFAULT_INFLUX_WORKERS,
     DEFAULT_NETWORK_MULTIPLIER,
     DEFAULT_ORCHESTRATION_WORKERS,
+    SidecarConcurrencyProfile,
 )
 from histdatacom.sidecar.queues import (
     DEFAULT_TASK_QUEUE_PREFIX,
     DEFAULT_TEMPORAL_NAMESPACE,
+    SidecarTaskQueues,
     SidecarWorkerConfig,
     TaskQueueLane,
     build_sidecar_worker_config,
@@ -41,6 +43,7 @@ from histdatacom.sidecar.resources import (
 from histdatacom.sidecar.runtime import (
     PortAvailabilityProbe,
     SidecarPaths,
+    SidecarPorts,
     SidecarRuntimePolicy,
     build_sidecar_runtime_policy,
     default_sidecar_state_dir,  # noqa:F401
@@ -342,6 +345,23 @@ class SidecarSupervisor:
             worker_readiness=worker_readiness,
         )
 
+    def client_worker_config(
+        self,
+        *,
+        status: SidecarStatus | None = None,
+        require_running: bool = False,
+    ) -> SidecarWorkerConfig:
+        """Resolve client config from running sidecar state when available."""
+        current = status or self.status(repair=False)
+        if current.running:
+            return self._client_worker_config_from_running_state(current)
+        if require_running:
+            raise RuntimeError(
+                "Cannot resolve Temporal client configuration because the "
+                f"sidecar is {current.state}: {current.message}"
+            )
+        return self._worker_config(self.runtime_policy)
+
     def start(
         self,
         *,
@@ -448,6 +468,7 @@ class SidecarSupervisor:
     def doctor(self) -> dict[str, Any]:
         """Return supervisor diagnostics without changing sidecar state."""
         status = self.status(repair=False)
+        runtime_policy = self._runtime_policy_from_status(status)
         manifest = load_sidecar_manifest()
         platform_key = current_platform_key()
         platform_resource = manifest.platforms.get(platform_key)
@@ -466,11 +487,11 @@ class SidecarSupervisor:
             "workers": worker_status,
             "frontend": {
                 "target_host": (
-                    f"{self.runtime_policy.ports.bind_ip}:"
-                    f"{self.runtime_policy.ports.grpc}"
+                    f"{runtime_policy.ports.bind_ip}:"
+                    f"{runtime_policy.ports.grpc}"
                 ),
                 "ready": (
-                    self._frontend_ready(self.runtime_policy)
+                    self._frontend_ready(runtime_policy)
                     if status.running
                     else False
                 ),
@@ -488,7 +509,7 @@ class SidecarSupervisor:
                 ),
             },
             "runtime_defaults": _load_runtime_defaults(),
-            "runtime_policy": self.runtime_policy.to_dict(),
+            "runtime_policy": runtime_policy.to_dict(),
         }
 
     def _start_process(
@@ -691,6 +712,224 @@ class SidecarSupervisor:
             orchestration_workers=self.orchestration_workers,
             influx_workers=self.influx_workers,
         )
+
+    def _client_worker_config_from_running_state(
+        self,
+        status: SidecarStatus,
+    ) -> SidecarWorkerConfig:
+        """Build the client config represented by the persisted live state."""
+        state = self._read_running_state()
+        runtime_policy = self._runtime_policy_from_running_state(
+            state,
+            status,
+        )
+        worker_fleet = self._state_worker_fleet(state)
+        namespace = str(worker_fleet.get("namespace", "") or "").strip()
+        if not namespace:
+            raise RuntimeError(
+                "Running sidecar state is missing worker_fleet.namespace; "
+                "restart the sidecar before submitting jobs."
+            )
+        return SidecarWorkerConfig(
+            runtime_policy=runtime_policy,
+            namespace=namespace,
+            task_queues=self._state_task_queues(
+                worker_fleet,
+                runtime_policy,
+            ),
+            concurrency=self._state_concurrency_profile(worker_fleet),
+        )
+
+    def _read_running_state(self) -> dict[str, Any]:
+        """Read the running sidecar state or raise a client-facing error."""
+        try:
+            return self._read_state()
+        except (OSError, ValueError, json.JSONDecodeError) as err:
+            raise RuntimeError(
+                "Running sidecar state could not be read; stop and restart "
+                "the sidecar before submitting jobs."
+            ) from err
+
+    def _runtime_policy_from_status(
+        self,
+        status: SidecarStatus,
+    ) -> SidecarRuntimePolicy:
+        """Return a policy using the persisted status ports when valid."""
+        try:
+            return replace(
+                self.runtime_policy,
+                ports=self._state_ports_from_mapping(status.ports),
+            )
+        except RuntimeError:
+            return self.runtime_policy
+
+    def _runtime_policy_from_running_state(
+        self,
+        state: Mapping[str, Any],
+        status: SidecarStatus,
+    ) -> SidecarRuntimePolicy:
+        """Return runtime policy represented by persisted running state."""
+        runtime_policy = state.get("runtime_policy")
+        ports_payload: object = None
+        if isinstance(runtime_policy, Mapping):
+            ports_payload = runtime_policy.get("ports")
+        if not isinstance(ports_payload, Mapping):
+            ports_payload = state.get("ports")
+        if not isinstance(ports_payload, Mapping):
+            ports_payload = status.ports
+        ports = self._state_ports_from_mapping(ports_payload)
+        return replace(self.runtime_policy, ports=ports)
+
+    def _state_ports_from_mapping(
+        self,
+        payload: Mapping[str, Any],
+    ) -> SidecarPorts:
+        """Parse persisted sidecar ports from state/status metadata."""
+        bind_ip = str(
+            payload.get("bind_ip") or self.runtime_policy.ports.bind_ip
+        )
+        grpc = self._state_int(payload, "grpc", minimum=1)
+        ui = self._state_int(payload, "ui", minimum=1)
+        collisions_payload = payload.get("collisions", ())
+        collisions: tuple[int, ...] = ()
+        if isinstance(collisions_payload, list | tuple):
+            collisions = tuple(
+                int(value)
+                for value in collisions_payload
+                if isinstance(value, int | str)
+            )
+        return SidecarPorts(
+            bind_ip=bind_ip,
+            grpc=grpc,
+            ui=ui,
+            source=str(payload.get("source") or "state"),
+            collisions=collisions,
+        )
+
+    def _state_worker_fleet(
+        self,
+        state: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """Return persisted worker fleet metadata or fail clearly."""
+        worker_fleet = state.get("worker_fleet")
+        if not isinstance(worker_fleet, Mapping):
+            raise RuntimeError(
+                "Running sidecar state is missing worker_fleet metadata; "
+                "restart the sidecar before submitting jobs."
+            )
+        return worker_fleet
+
+    def _state_task_queues(
+        self,
+        worker_fleet: Mapping[str, Any],
+        runtime_policy: SidecarRuntimePolicy,
+    ) -> SidecarTaskQueues:
+        """Return exact task queues persisted for the running worker fleet."""
+        task_queues = worker_fleet.get("task_queues")
+        if not isinstance(task_queues, Mapping):
+            raise RuntimeError(
+                "Running sidecar state is missing worker_fleet.task_queues; "
+                "restart the sidecar before submitting jobs."
+            )
+        prefix = str(
+            task_queues.get("prefix")
+            or worker_fleet.get("task_queue_prefix")
+            or ""
+        ).strip()
+        values = {
+            key: str(task_queues.get(key, "") or "").strip()
+            for key in ("orchestration", "network", "cpu_file", "influx")
+        }
+        missing = [key for key, value in values.items() if not value]
+        if not prefix or missing:
+            raise RuntimeError(
+                "Running sidecar state has malformed worker task queues; "
+                f"missing={missing or ['prefix']}. Restart the sidecar before "
+                "submitting jobs."
+            )
+        return SidecarTaskQueues(
+            prefix=prefix,
+            workspace_id=str(
+                task_queues.get("workspace_id") or runtime_policy.workspace_id
+            ),
+            orchestration=values["orchestration"],
+            network=values["network"],
+            cpu_file=values["cpu_file"],
+            influx=values["influx"],
+        )
+
+    def _state_concurrency_profile(
+        self,
+        worker_fleet: Mapping[str, Any],
+    ) -> SidecarConcurrencyProfile | None:
+        """Return persisted concurrency policy when present and valid."""
+        concurrency = worker_fleet.get("concurrency")
+        if not isinstance(concurrency, Mapping):
+            return None
+        try:
+            return SidecarConcurrencyProfile(
+                cpu_utilization=str(
+                    concurrency.get("cpu_utilization")
+                    or self.cpu_utilization
+                    or "medium"
+                ),
+                base_workers=self._state_int(
+                    concurrency,
+                    "base_workers",
+                    minimum=1,
+                ),
+                orchestration_workers=self._state_int(
+                    concurrency,
+                    "orchestration_workers",
+                    minimum=1,
+                ),
+                network_workers=self._state_int(
+                    concurrency,
+                    "network_workers",
+                    minimum=1,
+                ),
+                cpu_file_workers=self._state_int(
+                    concurrency,
+                    "cpu_file_workers",
+                    minimum=1,
+                ),
+                influx_workers=self._state_int(
+                    concurrency,
+                    "influx_workers",
+                    minimum=1,
+                ),
+                network_multiplier=self._state_int(
+                    concurrency,
+                    "network_multiplier",
+                    minimum=1,
+                ),
+                source=str(concurrency.get("source") or "state"),
+            )
+        except RuntimeError as err:
+            raise RuntimeError(
+                "Running sidecar state has malformed worker concurrency "
+                "metadata; restart the sidecar before submitting jobs."
+            ) from err
+
+    def _state_int(
+        self,
+        payload: Mapping[str, Any],
+        key: str,
+        *,
+        minimum: int,
+    ) -> int:
+        """Parse an integer field from persisted sidecar state."""
+        try:
+            value = int(payload[key])
+        except (KeyError, TypeError, ValueError) as err:
+            raise RuntimeError(
+                f"Running sidecar state is missing integer field {key!r}."
+            ) from err
+        if value < minimum:
+            raise RuntimeError(
+                f"Running sidecar state field {key!r} must be >= {minimum}."
+            )
+        return value
 
     def _launch_component(
         self,
