@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+import histdatacom.sidecar.live_smoke as live_smoke
 from histdatacom.runtime_contracts import ArtifactRef, RunRequest, WorkStatus
 from histdatacom.sidecar.control import JobLifecycle, SidecarJobSnapshot
 from histdatacom.sidecar.live_smoke import (
@@ -64,7 +65,12 @@ class _FakeSupervisor:
             },
         }
 
-    def _status(self, state: str) -> SidecarStatus:
+    def _status(
+        self,
+        state: str,
+        *,
+        pids: dict[str, int] | None = None,
+    ) -> SidecarStatus:
         return SidecarStatus(
             state=state,
             message=state,
@@ -72,12 +78,47 @@ class _FakeSupervisor:
             pid_file=str(self.runtime_policy.paths.pid_file),
             lock_file=str(self.runtime_policy.paths.lock_file),
             logs={"server": str(self.runtime_policy.paths.server_log)},
-            pids={"server": 1234} if state == "running" else {},
+            pids=(
+                pids
+                if pids is not None
+                else (
+                    {"server": 1234} if state in {"running", "stopping"} else {}
+                )
+            ),
             components={
                 "server": state,
                 **{f"worker:{lane.value}": state for lane in self.worker_lanes},
             },
         )
+
+
+class _StopRaisesSupervisor(_FakeSupervisor):
+    def stop(self, *, stop_timeout: float = 0.0) -> SidecarStatus:
+        self.stopped = True
+        raise RuntimeError("stop exploded")
+
+
+class _StuckStoppingSupervisor(_FakeSupervisor):
+    def stop(self, *, stop_timeout: float = 0.0) -> SidecarStatus:
+        self.stopped = True
+        return self._status("stopping")
+
+    def status(self, *, repair: bool = False) -> SidecarStatus:
+        if self.stopped:
+            return self._status("stopping")
+        return self._status("running")
+
+
+class _StoppedWithRemainingPidsSupervisor(_FakeSupervisor):
+    def stop(self, *, stop_timeout: float = 0.0) -> SidecarStatus:
+        self.stopped = True
+        return self._status("stopped", pids={"server": 1234})
+
+
+class _MissingStopStatusSupervisor(_FakeSupervisor):
+    def stop(self, *, stop_timeout: float = 0.0) -> Any:
+        self.stopped = True
+        return None
 
 
 def _completed_snapshot(request: RunRequest) -> SidecarJobSnapshot:
@@ -179,3 +220,108 @@ def test_run_live_sidecar_smoke_failure_includes_log_diagnostics(
     assert diagnostics["snapshot"]["status"] == WorkStatus.UNKNOWN.value
     assert diagnostics["logs"]["server"]["exists"] is True
     assert "server started" in diagnostics["logs"]["server"]["text"]
+
+
+def test_run_live_sidecar_smoke_fails_when_stop_raises(
+    tmp_path: Path,
+) -> None:
+    def supervisor_factory(**kwargs: Any) -> _StopRaisesSupervisor:
+        return _StopRaisesSupervisor(**kwargs)
+
+    def submit_job(request: RunRequest, **kwargs: Any) -> SidecarJobSnapshot:
+        return _completed_snapshot(request)
+
+    with pytest.raises(
+        LiveSidecarSmokeError, match="shutdown failed"
+    ) as raised:
+        run_live_sidecar_smoke(
+            workspace=tmp_path / "workspace",
+            runtime_home=tmp_path / "runtime",
+            data_directory=tmp_path / "data",
+            supervisor_factory=supervisor_factory,
+            submit_job=submit_job,
+        )
+
+    diagnostics = raised.value.diagnostics
+    assert "stop exploded" in diagnostics["error"]
+    assert diagnostics["status"]["state"] == "running"
+    assert diagnostics["logs"]["server"]["exists"] is True
+    assert "server started" in diagnostics["logs"]["server"]["text"]
+
+
+def test_run_live_sidecar_smoke_fails_when_stop_remains_stopping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(live_smoke.time, "sleep", lambda _seconds: None)
+
+    def supervisor_factory(**kwargs: Any) -> _StuckStoppingSupervisor:
+        return _StuckStoppingSupervisor(**kwargs)
+
+    def submit_job(request: RunRequest, **kwargs: Any) -> SidecarJobSnapshot:
+        return _completed_snapshot(request)
+
+    with pytest.raises(LiveSidecarSmokeError, match="state=stopping") as raised:
+        run_live_sidecar_smoke(
+            workspace=tmp_path / "workspace",
+            runtime_home=tmp_path / "runtime",
+            data_directory=tmp_path / "data",
+            supervisor_factory=supervisor_factory,
+            submit_job=submit_job,
+        )
+
+    diagnostics = raised.value.diagnostics
+    assert diagnostics["stopped_status"]["state"] == "stopping"
+    assert diagnostics["stopped_status"]["pids"] == {"server": 1234}
+    assert diagnostics["logs"]["server"]["exists"] is True
+    assert "server started" in diagnostics["logs"]["server"]["text"]
+
+
+def test_run_live_sidecar_smoke_fails_when_stopped_status_has_pids(
+    tmp_path: Path,
+) -> None:
+    def supervisor_factory(
+        **kwargs: Any,
+    ) -> _StoppedWithRemainingPidsSupervisor:
+        return _StoppedWithRemainingPidsSupervisor(**kwargs)
+
+    def submit_job(request: RunRequest, **kwargs: Any) -> SidecarJobSnapshot:
+        return _completed_snapshot(request)
+
+    with pytest.raises(LiveSidecarSmokeError, match="remaining pids") as raised:
+        run_live_sidecar_smoke(
+            workspace=tmp_path / "workspace",
+            runtime_home=tmp_path / "runtime",
+            data_directory=tmp_path / "data",
+            supervisor_factory=supervisor_factory,
+            submit_job=submit_job,
+        )
+
+    diagnostics = raised.value.diagnostics
+    assert diagnostics["stopped_status"]["state"] == "stopped"
+    assert diagnostics["stopped_status"]["pids"] == {"server": 1234}
+
+
+def test_run_live_sidecar_smoke_fails_when_stop_returns_no_status(
+    tmp_path: Path,
+) -> None:
+    def supervisor_factory(**kwargs: Any) -> _MissingStopStatusSupervisor:
+        return _MissingStopStatusSupervisor(**kwargs)
+
+    def submit_job(request: RunRequest, **kwargs: Any) -> SidecarJobSnapshot:
+        return _completed_snapshot(request)
+
+    with pytest.raises(
+        LiveSidecarSmokeError, match="did not return a status"
+    ) as raised:
+        run_live_sidecar_smoke(
+            workspace=tmp_path / "workspace",
+            runtime_home=tmp_path / "runtime",
+            data_directory=tmp_path / "data",
+            supervisor_factory=supervisor_factory,
+            submit_job=submit_job,
+        )
+
+    diagnostics = raised.value.diagnostics
+    assert "did not return a status" in diagnostics["error"]
+    assert diagnostics["logs"]["server"]["exists"] is True

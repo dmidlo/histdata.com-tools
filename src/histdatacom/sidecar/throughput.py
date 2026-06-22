@@ -452,13 +452,10 @@ def run_live_sidecar_throughput_benchmark(
             )
         }
     finally:
-        try:
-            stopped_status = _stop_live_sidecar(
-                supervisor,
-                stop_timeout=stop_timeout,
-            )
-        except Exception:
-            stopped_status = None
+        stopped_status = _stop_live_sidecar(
+            supervisor,
+            stop_timeout=stop_timeout,
+        )
     if (
         started_status is None
         or worker_config is None

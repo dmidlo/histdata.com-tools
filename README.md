@@ -855,7 +855,9 @@ The live Temporal sidecar smoke is not collected by default pytest because it
 requires a real Temporal executable and starts local worker processes. Run it
 explicitly through `scripts/smoke_sidecar_install.py --live-sidecar-smoke`
 during bundled platform-wheel release smoke, where missing prerequisites are
-hard failures rather than skipped tests.
+hard failures rather than skipped tests. The smoke command also fails on
+shutdown leaks: stop exceptions, missing stop status, persistent `stopping`
+status, or known remaining sidecar PIDs.
 
 ---
 

@@ -3,17 +3,89 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+import histdatacom.sidecar.live_smoke as live_smoke
+from histdatacom.runtime_contracts import RunRequest, WorkStatus
+from histdatacom.sidecar.control import JobLifecycle
+from histdatacom.sidecar.live_smoke import LiveSidecarStopError
 from histdatacom.sidecar.performance import BenchmarkMeasurement
-from histdatacom.sidecar.queues import build_sidecar_worker_config
-from histdatacom.sidecar.runtime import build_sidecar_runtime_policy
+from histdatacom.sidecar.queues import (
+    TaskQueueLane,
+    build_sidecar_worker_config,
+)
+from histdatacom.sidecar.runtime import (
+    SidecarRuntimePolicy,
+    build_sidecar_runtime_policy,
+)
 from histdatacom.sidecar.supervisor import SidecarStatus
 from histdatacom.sidecar.throughput import (
     RuntimeBenchmarkResult,
+    ThroughputBenchmarkScenario,
     ThroughputBenchmarkReport,
     ThroughputComparison,
     default_throughput_benchmark_matrix,
+    run_live_sidecar_throughput_benchmark,
 )
+
+
+class _ThroughputSupervisor:
+    def __init__(
+        self,
+        *,
+        runtime_policy: SidecarRuntimePolicy,
+        worker_lanes: tuple[TaskQueueLane, ...],
+        **kwargs: object,
+    ) -> None:
+        self.runtime_policy = runtime_policy
+        self.worker_lanes = worker_lanes
+        self.kwargs = kwargs
+        self.stopped = False
+
+    def start(
+        self,
+        *,
+        executable: Path | None,
+        startup_timeout: float,
+    ) -> SidecarStatus:
+        return self._status("running")
+
+    def stop(self, *, stop_timeout: float = 0.0) -> SidecarStatus:
+        self.stopped = True
+        return self._status("stopped")
+
+    def status(self, *, repair: bool = False) -> SidecarStatus:
+        if self.stopped:
+            return self._status("stopped")
+        return self._status("running")
+
+    def _status(self, state: str) -> SidecarStatus:
+        return SidecarStatus(
+            state=state,
+            message=state,
+            state_dir=str(self.runtime_policy.paths.state_dir),
+            pid_file=str(self.runtime_policy.paths.pid_file),
+            lock_file=str(self.runtime_policy.paths.lock_file),
+            logs={},
+            pids={},
+            components={
+                "server": state,
+                **{f"worker:{lane.value}": state for lane in self.worker_lanes},
+            },
+        )
+
+
+class _ThroughputStuckStoppingSupervisor(_ThroughputSupervisor):
+    def stop(self, *, stop_timeout: float = 0.0) -> SidecarStatus:
+        self.stopped = True
+        return self._status("stopping")
+
+    def status(self, *, repair: bool = False) -> SidecarStatus:
+        if self.stopped:
+            return self._status("stopping")
+        return self._status("running")
 
 
 def test_default_throughput_matrix_covers_issue_180_operations(
@@ -109,6 +181,42 @@ def test_throughput_report_serializes_performance_envelope(
     assert payload["concurrency_profile"]["network_workers"] >= 1
 
 
+def test_live_sidecar_throughput_benchmark_records_stopped_status(
+    tmp_path: Path,
+) -> None:
+    [scenario, *_] = _single_scenario_matrix(tmp_path)
+
+    report = run_live_sidecar_throughput_benchmark(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+        data_directory=tmp_path / "data",
+        scenarios=(scenario,),
+        supervisor_factory=_ThroughputSupervisor,
+        submit_job=_completed_observed_result,
+    )
+
+    assert report.stopped_status is not None
+    assert report.stopped_status.state == "stopped"
+
+
+def test_live_sidecar_throughput_benchmark_fails_on_stopping_shutdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(live_smoke.time, "sleep", lambda _seconds: None)
+    [scenario, *_] = _single_scenario_matrix(tmp_path)
+
+    with pytest.raises(LiveSidecarStopError, match="state=stopping"):
+        run_live_sidecar_throughput_benchmark(
+            workspace=tmp_path / "workspace",
+            runtime_home=tmp_path / "runtime",
+            data_directory=tmp_path / "data",
+            scenarios=(scenario,),
+            supervisor_factory=_ThroughputStuckStoppingSupervisor,
+            submit_job=_completed_observed_result,
+        )
+
+
 def _runtime_result(
     runtime: str,
     scenario: str,
@@ -126,4 +234,39 @@ def _runtime_result(
             peak_rss_bytes=0,
         ),
         status="COMPLETED",
+    )
+
+
+def _single_scenario_matrix(
+    tmp_path: Path,
+) -> tuple[ThroughputBenchmarkScenario, ...]:
+    return (
+        ThroughputBenchmarkScenario(
+            name="validate-url",
+            request=RunRequest(
+                request_id="throughput-stop-check",
+                pairs=("eurusd",),
+                formats=("ascii",),
+                timeframes=("M1",),
+                start_yearmonth="202201",
+                end_yearmonth="202201",
+                data_directory=str(tmp_path / "data"),
+                validate_urls=True,
+            ),
+            operations=("dataset_plan", "validate_urls"),
+            work_item_count=1,
+        ),
+    )
+
+
+def _completed_observed_result(request: RunRequest, **kwargs: object) -> object:
+    return SimpleNamespace(
+        snapshot=SimpleNamespace(lifecycle=JobLifecycle.SUCCEEDED),
+        result={
+            "workflow_name": "RunRequestWorkflow",
+            "status": WorkStatus.COMPLETED.value,
+            "stage_results": [],
+            "artifacts": [],
+            "work_items": [],
+        },
     )

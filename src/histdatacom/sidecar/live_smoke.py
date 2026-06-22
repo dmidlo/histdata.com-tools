@@ -52,6 +52,19 @@ class LiveSidecarSmokeError(RuntimeError):
         self.diagnostics = dict(diagnostics)
 
 
+class LiveSidecarStopError(RuntimeError):
+    """Raised when sidecar shutdown does not reach a terminal state."""
+
+    def __init__(
+        self, message: str, status: SidecarStatus | None = None
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+_STOPPED_SIDECAR_STATES = frozenset({"stale", "stopped"})
+
+
 @dataclass(frozen=True, slots=True)
 class LiveSidecarSmokeResult:
     """Result payload for an operator-gated live sidecar smoke run."""
@@ -208,8 +221,25 @@ def run_live_sidecar_smoke(
                 supervisor,
                 stop_timeout=stop_timeout,
             )
-        except Exception:
-            pass
+            _raise_for_incomplete_sidecar_stop(stopped_status)
+        except Exception as err:
+            diagnostics = collect_live_sidecar_smoke_diagnostics(
+                supervisor=supervisor,
+                runtime_policy=supervisor.runtime_policy,
+                request=request,
+                snapshot=snapshot,
+                doctor=doctor,
+                error=err,
+            )
+            _attach_stop_status_diagnostics(
+                diagnostics,
+                status=stopped_status,
+                error=err,
+            )
+            raise LiveSidecarSmokeError(
+                f"live sidecar smoke shutdown failed: {err}",
+                diagnostics,
+            ) from err
     if started_status is None or worker_config is None or snapshot is None:
         raise LiveSidecarSmokeError(
             "live sidecar smoke did not produce a complete result",
@@ -310,15 +340,72 @@ def _stop_live_sidecar(
     status = supervisor.stop(stop_timeout=stop_timeout)
     retry_timeout = min(2.0, max(0.1, stop_timeout))
     for _attempt in range(5):
-        if status.state != "stopping":
+        if status is None:
+            raise LiveSidecarStopError(
+                _format_sidecar_stop_failure(status),
+                status,
+            )
+        if _sidecar_stop_is_complete(status):
             return status
+        if status.state != "stopping":
+            raise LiveSidecarStopError(
+                _format_sidecar_stop_failure(status),
+                status,
+            )
         time.sleep(1.0)
         status = supervisor.stop(stop_timeout=retry_timeout)
     time.sleep(2.0)
     repaired = supervisor.status(repair=True)
-    if repaired.state in {"stale", "stopped"}:
-        return supervisor.stop(stop_timeout=retry_timeout)
-    return status
+    if repaired.state in _STOPPED_SIDECAR_STATES:
+        status = supervisor.stop(stop_timeout=retry_timeout)
+        if _sidecar_stop_is_complete(status):
+            return status
+        raise LiveSidecarStopError(
+            _format_sidecar_stop_failure(status),
+            status,
+        )
+    raise LiveSidecarStopError(_format_sidecar_stop_failure(repaired), repaired)
+
+
+def _sidecar_stop_is_complete(status: SidecarStatus | None) -> bool:
+    return (
+        status is not None
+        and status.state in _STOPPED_SIDECAR_STATES
+        and not status.pids
+    )
+
+
+def _format_sidecar_stop_failure(status: SidecarStatus | None) -> str:
+    if status is None:
+        return "sidecar stop did not return a status"
+    pid_summary = ", ".join(
+        f"{component}={pid}" for component, pid in sorted(status.pids.items())
+    )
+    suffix = f"; remaining pids: {pid_summary}" if pid_summary else ""
+    return f"sidecar stop did not complete: state={status.state}{suffix}"
+
+
+def _raise_for_incomplete_sidecar_stop(
+    status: SidecarStatus | None,
+) -> SidecarStatus:
+    if status is None:
+        raise LiveSidecarStopError(_format_sidecar_stop_failure(status), status)
+    if _sidecar_stop_is_complete(status):
+        return status
+    raise LiveSidecarStopError(_format_sidecar_stop_failure(status), status)
+
+
+def _attach_stop_status_diagnostics(
+    diagnostics: dict[str, Any],
+    *,
+    status: SidecarStatus | None,
+    error: BaseException,
+) -> None:
+    stopped_status = status
+    if stopped_status is None and isinstance(error, LiveSidecarStopError):
+        stopped_status = error.status
+    if stopped_status is not None:
+        diagnostics["stopped_status"] = stopped_status.to_dict()
 
 
 def _validate_live_smoke_snapshot(snapshot: SidecarJobSnapshot) -> None:
