@@ -160,7 +160,7 @@ def test_prepare_sidecar_binary_patches_manifest_and_copies_executable(
     )
     assert (
         provenance["executable"]["sha256"]
-        == hashlib.sha256(b"#!/bin/sh\n").hexdigest()
+        == hashlib.sha256(executable.read_bytes()).hexdigest()
     )
     assert report["platform"] == "macos-arm64"
     assert report["executable"] == "bin/macos-arm64/temporal"
