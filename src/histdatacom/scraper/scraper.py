@@ -28,6 +28,7 @@ from histdatacom.activity_stages import (
     validate_url_work_item,
 )
 from histdatacom.helper_args import helper_runtime_args
+from histdatacom.legacy_boundary import warn_legacy_side_effect
 from histdatacom.observability import ProgressState
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkItem, WorkStatus
@@ -78,6 +79,7 @@ class Scraper:  # noqa:H601
         Args:
             record (Record): a record to download
         """
+        warn_legacy_side_effect("Scraper.get_zip_file")
         download_histdata_archive_to_record(
             record,
             timeout=config.REQUESTS_TIMEOUT,
@@ -143,6 +145,7 @@ class Scraper:  # noqa:H601
         args: Mapping[str, Any] | None = None,
     ) -> list[Record]:
         """Return planned records to be acted on."""
+        warn_legacy_side_effect("Scraper.plan_initial_records")
         runtime_args = self._runtime_args(args)
         progress_state = ProgressState(
             stage="dataset_plan",
@@ -202,6 +205,7 @@ class Scraper:  # noqa:H601
         args: Mapping[str, Any] | None = None,
     ) -> list[Record]:
         """Validate generated URLs and return forwarded records."""
+        warn_legacy_side_effect("Scraper.validate_urls")
         runtime_args = self._runtime_args(args)
         return [
             output
@@ -215,6 +219,7 @@ class Scraper:  # noqa:H601
         args: Mapping[str, Any] | None = None,
     ) -> list[Record]:
         """Download zip archives and return forwarded records."""
+        warn_legacy_side_effect("Scraper.download_zips")
         runtime_args = self._runtime_args(args)
         return [
             output

@@ -368,6 +368,27 @@ sidecar workflows, and sidecar activities. Legacy helper surfaces now accept
 explicit argument dictionaries rather than ambient parser state; parser globals
 are not part of runtime selection.
 
+#### Public Sidecar API Boundary
+
+New GUI and automation integrations should submit work through the sidecar-era
+public surface:
+
+- `histdatacom.Options` passed to `histdatacom.main(options)` or
+  `histdatacom(options)`
+- `histdatacom.sidecar.contracts.RunRequest`
+- `histdatacom-sidecar` lifecycle and jobs commands
+- `histdatacom.sidecar.client` job-control helpers for submit, inspect, list,
+  cancel, resume, progress, and artifact polling
+
+Do not build new validate/download/extract/cache/import automation by importing
+`Repo`, `Scraper`, `Api.validate_caches`, `Api.merge_caches`, or
+`Influx.import_data` directly. Those direct side-effect methods remain as
+compatibility helpers for existing callers and emit
+`LegacyHelperSideEffectWarning` when used. Temporal activities continue to call
+the lower-level `histdatacom.activity_stages` functions and related adapter
+objects directly; those stage helpers are the supported worker boundary, not
+the GUI or automation boundary.
+
 #### Lifecycle and Diagnostics
 
 Use the lifecycle CLI to inspect and manage the local sidecar:
@@ -498,6 +519,11 @@ options.cpu_utilization = 100
   the caller only needs job metadata, set `options.sidecar_start = False` when
   a caller requires a pre-started sidecar. `options.use_sidecar = False` is
   rejected because the foreground runtime has been removed.
+
+- New automation should not call legacy helper classes directly for
+  validate/download/extract/cache/import work. Direct side-effect helper
+  methods warn because they bypass durable sidecar status, cancellation,
+  retry/resume, and worker-lane routing.
 
 - when a behavior flag is included, `histdatacom` assumes it is being used for `CLI` automation **exclusively** and does **not** provide a return value.
 

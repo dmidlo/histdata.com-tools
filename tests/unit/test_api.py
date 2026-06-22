@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from histdatacom.histdata_ascii import CACHE_FILENAME, write_polars_cache
+from histdatacom.legacy_boundary import LegacyHelperSideEffectWarning
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
 
@@ -378,7 +379,11 @@ def test_merge_caches_converts_single_pair_timeframe_return_types(
         timeframe="M1",
         start=EXPECTED_M1_DATETIMES[1],
     )
-    result = Api(return_type=api_return_type).merge_caches([second, first])
+    with pytest.warns(
+        LegacyHelperSideEffectWarning,
+        match="Api.merge_caches",
+    ):
+        result = Api(return_type=api_return_type).merge_caches([second, first])
 
     if api_return_type == "polars":
         assert isinstance(result, pl.DataFrame)
@@ -425,7 +430,13 @@ def test_merge_caches_returns_only_observed_pair_timeframe_sets(
         timeframe="M1",
         start=EXPECTED_M1_DATETIMES[0],
     )
-    result = Api(return_type="polars").merge_caches([tick_record, m1_record])
+    with pytest.warns(
+        LegacyHelperSideEffectWarning,
+        match="Api.merge_caches",
+    ):
+        result = Api(return_type="polars").merge_caches(
+            [tick_record, m1_record]
+        )
 
     assert isinstance(result, list)
     assert [(item["timeframe"], item["pair"]) for item in result] == [
@@ -451,6 +462,10 @@ def test_merge_caches_returns_empty_list_when_no_cache_records(
         data_fxpair="eurusd",
         data_timeframe="M1",
     )
-    result = Api(return_type="polars").merge_caches([missing_cache])
+    with pytest.warns(
+        LegacyHelperSideEffectWarning,
+        match="Api.merge_caches",
+    ):
+        result = Api(return_type="polars").merge_caches([missing_cache])
 
     assert result == []

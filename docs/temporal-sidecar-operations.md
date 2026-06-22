@@ -29,6 +29,47 @@ rather than ambient parser state. New orchestration behavior should be
 expressed as `RunRequest` payloads, Temporal workflows, and Temporal
 activities.
 
+## Public API Boundary
+
+The sidecar-era public boundary for new users, scripts, services, and the
+future GUI is:
+
+- `histdatacom.Options` passed to `histdatacom.main(options)` or
+  `histdatacom(options)`
+- `histdatacom.sidecar.contracts.RunRequest`
+- the `histdatacom-sidecar` lifecycle and jobs CLI
+- `histdatacom.sidecar.client` job-control helpers for submit, inspect, list,
+  cancel, resume, progress, and artifact polling
+
+The supported Temporal worker adapter boundary is lower level:
+
+- `histdatacom.activity_stages.*`
+- `histdatacom.sidecar.activities.*`
+- `histdatacom.sidecar.workflows.*`
+- bounded adapters such as `InfluxBatchWriter` when an activity needs a live
+  sink
+
+The following public helper methods are compatibility surfaces only. They
+perform direct side effects and emit `LegacyHelperSideEffectWarning` so new GUI
+or automation code cannot silently bypass durable job status, cancellation,
+retry/resume, sidecar lifecycle, and worker-lane routing:
+
+- `Repo.get_available_repo_data`
+- `Repo.update_repo_from_github`
+- `Scraper.plan_initial_records`
+- `Scraper.validate_urls`
+- `Scraper.download_zips`
+- `Scraper.get_zip_file`
+- `Api.test_for_cache_or_create`
+- `Api.validate_caches`
+- `Api.merge_caches`
+- `Influx.import_data`
+
+`Api.merge_records` remains a synchronous materializer for explicit cache
+records, including the completed sidecar artifact path used by
+`histdatacom.main(Options)`. It should not be used as an orchestration entry
+point for validation, downloads, extraction, cache building, or imports.
+
 The base package install includes the Temporal Python SDK because sidecar job
 submission, job inspection, and workers are the default runtime surface:
 

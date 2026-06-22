@@ -6,8 +6,11 @@ import os
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from histdatacom import config
 from histdatacom.helper_args import helper_runtime_args
+from histdatacom.legacy_boundary import LegacyHelperSideEffectWarning
 from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkStatus
@@ -189,7 +192,11 @@ def test_populate_initial_records_uses_deterministic_plan(
     scraper = _scraper_without_init(args)
     scraper.urls = Urls()
 
-    records = scraper.plan_initial_records(args)
+    with pytest.warns(
+        LegacyHelperSideEffectWarning,
+        match="Scraper.plan_initial_records",
+    ):
+        records = scraper.plan_initial_records(args)
 
     assert [record.url for record in records] == [
         "http://www.histdata.com/download-free-forex-data/"
@@ -228,7 +235,11 @@ def test_plan_initial_records_resyncs_runtime_pair_filter(
     scraper = _scraper_without_init(args)
     scraper.urls = Urls()
 
-    records = scraper.plan_initial_records({**args, "pairs": {"gbpusd"}})
+    with pytest.warns(
+        LegacyHelperSideEffectWarning,
+        match="Scraper.plan_initial_records",
+    ):
+        records = scraper.plan_initial_records({**args, "pairs": {"gbpusd"}})
 
     assert scraper.filter_pairs == {"gbpusd"}
     assert [record.data_fxpair for record in records] == ["gbpusd"]

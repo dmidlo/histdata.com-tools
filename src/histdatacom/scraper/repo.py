@@ -33,6 +33,7 @@ from histdatacom.activity_stages import (
     write_repository_data_file,
 )
 from histdatacom.helper_args import helper_runtime_args
+from histdatacom.legacy_boundary import warn_legacy_side_effect
 from histdatacom.records import Record
 from histdatacom.utils import (
     get_year_from_datemonth,
@@ -129,6 +130,7 @@ class Repo:  # noqa: H601
         remote timestamp is more recent than local file timestamp, overwrite
         local data with remote data.
         """
+        warn_legacy_side_effect("Repo.update_repo_from_github")
         runtime_args = self._runtime_args(args)
         output = repository_refresh_stage(
             repo_data=self.repo_data,
@@ -163,6 +165,7 @@ class Repo:  # noqa: H601
               {'pair': {'start': 'datemonth', 'end': 'datemonth'}
               ...}
         """
+        warn_legacy_side_effect("Repo.get_available_repo_data")
         runtime_args = self._runtime_args(args)
         self._ensure_repo_data_loaded()
         filter_pairs = repository_missing_pairs(

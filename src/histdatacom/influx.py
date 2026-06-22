@@ -23,6 +23,7 @@ from histdatacom.exceptions import (
 )
 from histdatacom.histdata_ascii import format_influx_line
 from histdatacom.helper_args import helper_runtime_args
+from histdatacom.legacy_boundary import warn_legacy_side_effect
 from histdatacom.observability import ProgressState, progress_increment
 from histdatacom.runtime_contracts import WorkItem, WorkStatus
 from histdatacom.utils import check_installed_module, load_influx_yaml
@@ -64,6 +65,7 @@ class Influx:  # noqa:H601
         args: Mapping[str, Any] | None = None,
     ) -> list[Record]:
         """Upload explicit cache records through direct activity-style batches."""
+        warn_legacy_side_effect("Influx.import_data")
         runtime_args = helper_runtime_args(self.args, args)
         records_to_import = list(records)
         records_count = len(records_to_import)

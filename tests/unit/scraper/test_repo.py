@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from histdatacom.legacy_boundary import LegacyHelperSideEffectWarning
 from histdatacom.records import Record
 from histdatacom.scraper.repo import Repo
 
@@ -44,7 +45,11 @@ def test_get_available_repo_data_filters_api_result_without_queue(
     }
     repo.repo_file_exists = True
 
-    result = repo.get_available_repo_data()
+    with pytest.warns(
+        LegacyHelperSideEffectWarning,
+        match="Repo.get_available_repo_data",
+    ):
+        result = repo.get_available_repo_data()
 
     assert result == {"eurusd": {"start": "200005", "end": "202212"}}
     assert repo.filter_pairs is None
@@ -70,7 +75,11 @@ def test_update_repo_from_github_uses_explicit_refresh_stage(
     )
 
     repo = Repo(args)
-    repo.update_repo_from_github()
+    with pytest.warns(
+        LegacyHelperSideEffectWarning,
+        match="Repo.update_repo_from_github",
+    ):
+        repo.update_repo_from_github()
 
     assert repo.repo_data["eurusd"] == {
         "start": "200005",
@@ -99,7 +108,11 @@ def test_update_remote_repo_data_preserves_api_return_shape(
     repo = Repo(args)
     repo.repo_data = {"eurusd": {"start": "200005", "end": "202212"}}
     repo.repo_file_exists = True
-    result = repo.get_available_repo_data()
+    with pytest.warns(
+        LegacyHelperSideEffectWarning,
+        match="Repo.get_available_repo_data",
+    ):
+        result = repo.get_available_repo_data()
 
     assert calls == ["validate"]
     assert result == {"eurusd": {"start": "200005", "end": "202212"}}
@@ -137,10 +150,18 @@ def test_repo_reloads_data_when_runtime_repo_path_changes(
     )
 
     repo = Repo(_repo_args(first_dir, pairs={"eurusd"}))
-    first_result = repo.get_available_repo_data()
-    second_result = repo.get_available_repo_data(
-        _repo_args(second_dir, pairs={"gbpusd"})
-    )
+    with pytest.warns(
+        LegacyHelperSideEffectWarning,
+        match="Repo.get_available_repo_data",
+    ):
+        first_result = repo.get_available_repo_data()
+    with pytest.warns(
+        LegacyHelperSideEffectWarning,
+        match="Repo.get_available_repo_data",
+    ):
+        second_result = repo.get_available_repo_data(
+            _repo_args(second_dir, pairs={"gbpusd"})
+        )
 
     assert first_result == {"eurusd": {"start": "200005", "end": "202606"}}
     assert second_result == {"gbpusd": {"start": "200005", "end": "202606"}}

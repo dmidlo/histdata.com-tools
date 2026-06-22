@@ -33,6 +33,7 @@ from histdatacom.histdata_ascii import (
     write_polars_cache,
 )
 from histdatacom.helper_args import helper_runtime_args
+from histdatacom.legacy_boundary import warn_legacy_side_effect
 from histdatacom.observability import ProgressState, progress_increment
 from histdatacom.runtime_contracts import WorkItem, WorkStatus
 from histdatacom.scraper.scraper import Scraper
@@ -96,6 +97,7 @@ class Api:  # noqa:H601
             record (Record): a histdatacom.records.Record
             args (dict): args received from argparse
         """
+        warn_legacy_side_effect("Api.test_for_cache_or_create")
         if str.lower(  # noqa:BLK001
             record.data_format
         ) == "ascii" and record.data_timeframe in [
@@ -230,6 +232,7 @@ class Api:  # noqa:H601
         args: Mapping[str, Any] | None = None,
     ) -> list[Record]:
         """Validate explicit records and return cache-ready records."""
+        warn_legacy_side_effect("Api.validate_caches")
         runtime_args = helper_runtime_args(self.args, args)
         validated = [
             self._validate_cache(record, runtime_args) for record in records
@@ -248,6 +251,7 @@ class Api:  # noqa:H601
             list | PolarsDataFrame | DataFrame | Table:
                 merged data for the configured API return type
         """
+        warn_legacy_side_effect("Api.merge_caches")
         return self.merge_records(
             records_to_merge or [],
             return_type=return_type,
