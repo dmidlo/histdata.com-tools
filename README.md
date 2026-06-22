@@ -856,10 +856,15 @@ The live Temporal sidecar smoke is not collected by default pytest because it
 requires a real Temporal executable and starts local worker processes. Bundled
 platform-wheel release smoke uses
 `scripts/smoke_sidecar_install.py --hermetic-sidecar-smoke`, which submits a
-local-only dataset-planning workflow and does not contact HistData.com. Run
+local-only dataset-planning workflow with an explicit worker config and does
+not contact HistData.com. Bundled platform-wheel release smoke also runs
+`scripts/smoke_sidecar_install.py --default-routing-sidecar-smoke`, which
+starts the sidecar with non-default worker routing and submits without an
+explicit worker config so the installed package must resolve the running
+frontend, namespace, and queues from persisted sidecar state. Run
 `scripts/smoke_sidecar_install.py --live-sidecar-smoke` separately when an
 operator intentionally wants external HistData.com URL-validation coverage.
-Both commands fail on shutdown leaks: stop exceptions, missing stop status,
+These commands fail on shutdown leaks: stop exceptions, missing stop status,
 persistent `stopping` status, or known remaining sidecar PIDs.
 
 ---

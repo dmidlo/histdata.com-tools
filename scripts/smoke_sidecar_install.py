@@ -72,7 +72,9 @@ def _run_json(command: Sequence[str]) -> dict[str, Any]:
             f"stdout:\n{completed.stdout}"
         ) from err
     if not isinstance(payload, dict):
-        raise SystemExit(f"command emitted non-object JSON: {' '.join(command)}")
+        raise SystemExit(
+            f"command emitted non-object JSON: {' '.join(command)}"
+        )
     return payload
 
 
@@ -89,7 +91,9 @@ def install_wheel(
         install_target = (
             "histdatacom[temporal] @ " f"{resolved_wheel.resolve().as_uri()}"
         )
-    subprocess.check_call([sys.executable, "-m", "pip", "install", install_target])
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", install_target]
+    )
     return resolved_wheel
 
 
@@ -181,7 +185,9 @@ def check_sidecar_resources(
             )
         try:
             with sidecar_executable_path(platform_key):
-                raise SystemExit("metadata-only sidecar resource exposed an executable")
+                raise SystemExit(
+                    "metadata-only sidecar resource exposed an executable"
+                )
         except SidecarExecutableUnavailable as err:
             if "not bundled in this distribution" not in str(err):
                 raise
@@ -345,6 +351,40 @@ def check_hermetic_sidecar_smoke(
         ) from err
 
 
+def check_default_routing_sidecar_smoke(
+    *,
+    workspace: Path,
+    runtime_home: Path,
+    data_directory: Path,
+    temporal_executable: Path | None = None,
+    startup_timeout: float,
+    completion_timeout: float,
+    stop_timeout: float,
+) -> dict[str, Any]:
+    """Run local-only smoke through default client routing."""
+    from histdatacom.sidecar.live_smoke import (
+        LiveSidecarSmokeError,
+        diagnostics_json,
+        run_default_client_routing_sidecar_smoke,
+    )
+
+    try:
+        return run_default_client_routing_sidecar_smoke(
+            workspace=workspace,
+            runtime_home=runtime_home,
+            data_directory=data_directory,
+            temporal_executable=temporal_executable,
+            startup_timeout=startup_timeout,
+            completion_timeout=completion_timeout,
+            stop_timeout=stop_timeout,
+        ).to_dict()
+    except LiveSidecarSmokeError as err:
+        raise SystemExit(
+            "default-routing sidecar smoke failed with diagnostics:\n"
+            f"{diagnostics_json(err.diagnostics)}"
+        ) from err
+
+
 def main() -> None:
     """Run install-time sidecar smoke checks."""
     parser = argparse.ArgumentParser()
@@ -404,6 +444,15 @@ def main() -> None:
             "deterministic installed-wheel smoke that starts Temporal workers, "
             "submits a local-only dataset-planning job, and validates "
             "status/artifacts"
+        ),
+    )
+    parser.add_argument(
+        "--default-routing-sidecar-smoke",
+        action="store_true",
+        help=(
+            "deterministic installed-wheel smoke that starts Temporal with "
+            "non-default worker routing, submits without an explicit worker "
+            "config, and validates default client resolver routing"
         ),
     )
     parser.add_argument(
@@ -474,6 +523,7 @@ def main() -> None:
             ),
             "cli": None,
             "hermetic_sidecar": None,
+            "default_routing_sidecar": None,
             "live_sidecar": None,
         }
         if not args.skip_cli:
@@ -491,7 +541,9 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
+                "live-data"
+            )
             report["hermetic_sidecar"] = check_hermetic_sidecar_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,
@@ -501,6 +553,27 @@ def main() -> None:
                 completion_timeout=args.live_completion_timeout,
                 stop_timeout=args.live_stop_timeout,
             )
+        if args.default_routing_sidecar_smoke:
+            live_workspace = args.live_workspace or Path(temporary_dir) / (
+                "live-workspace"
+            )
+            live_runtime_home = (
+                args.live_runtime_home or Path(temporary_dir) / "live-runtime"
+            )
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
+                "live-data"
+            )
+            report["default_routing_sidecar"] = (
+                check_default_routing_sidecar_smoke(
+                    workspace=live_workspace,
+                    runtime_home=live_runtime_home,
+                    data_directory=live_data_dir,
+                    temporal_executable=args.temporal_executable,
+                    startup_timeout=args.live_startup_timeout,
+                    completion_timeout=args.live_completion_timeout,
+                    stop_timeout=args.live_stop_timeout,
+                )
+            )
         if args.live_sidecar_smoke:
             live_workspace = args.live_workspace or Path(temporary_dir) / (
                 "live-workspace"
@@ -508,7 +581,9 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
+                "live-data"
+            )
             report["live_sidecar"] = check_live_sidecar_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,

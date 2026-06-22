@@ -112,6 +112,7 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
     assert "--check-executable-version" in smoke_command
     assert "--start-sidecar" in smoke_command
     assert "--hermetic-sidecar-smoke" in smoke_command
+    assert "--default-routing-sidecar-smoke" in smoke_command
     assert "--live-sidecar-smoke" not in smoke_command
     assert "--live-workspace .sidecar-live-workspace" in smoke_command
     assert "--live-runtime-home .sidecar-live-runtime" in smoke_command

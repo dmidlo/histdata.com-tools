@@ -65,12 +65,17 @@ smoke job. The hermetic smoke uses a local-only dataset-planning request:
 extract, and import flags are all false. It still starts the packaged Temporal
 executable, starts workers, submits a workflow, waits for completion, validates
 the status snapshot and artifact references, and prints server/worker
-diagnostics if the job or sidecar shutdown fails. Stop exceptions, missing stop
-status, persistent `stopping` status, and known remaining sidecar PIDs are
-treated as smoke failures. This release gate is executed through
-`scripts/smoke_sidecar_install.py --hermetic-sidecar-smoke`, not as a default
-pytest test, so missing Temporal executables fail the explicit smoke command
-instead of appearing as skipped tests in the normal suite.
+diagnostics if the job or sidecar shutdown fails. The explicit hermetic smoke is
+executed through `scripts/smoke_sidecar_install.py --hermetic-sidecar-smoke`.
+Bundled platform wheels also run
+`scripts/smoke_sidecar_install.py --default-routing-sidecar-smoke`, which starts
+the sidecar with non-default worker-fleet routing and submits without an
+explicit worker config. That gate fails if the installed package cannot resolve
+the running frontend, namespace, and task queues from persisted sidecar state.
+Stop exceptions, missing stop status, persistent `stopping` status, and known
+remaining sidecar PIDs are treated as smoke failures. These release gates are
+not default pytest tests, so missing Temporal executables fail the explicit
+smoke command instead of appearing as skipped tests in the normal suite.
 
 The external HistData.com smoke remains available as an operator gate through
 `scripts/smoke_sidecar_install.py --live-sidecar-smoke`. That command uses a
@@ -652,7 +657,8 @@ sidecar resources, and offline `status`/`doctor` behavior for every wheel. For
 bundled platform wheels, release smoke should also require
 `doctor.platform.executable_bundled == true`, run the packaged executable
 version probe, start the sidecar without `--executable`, and run
-`--hermetic-sidecar-smoke`. Use `--live-sidecar-smoke` separately when the
+`--hermetic-sidecar-smoke` plus `--default-routing-sidecar-smoke`. Use
+`--live-sidecar-smoke` separately when the
 operator intentionally wants to include external HistData.com availability and
 URL-validation coverage.
 

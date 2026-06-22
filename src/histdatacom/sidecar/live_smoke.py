@@ -35,6 +35,11 @@ DEFAULT_LIVE_SIDECAR_SMOKE_STOP_TIMEOUT = 30.0
 DEFAULT_LOG_TAIL_LINES = 120
 DEFAULT_LOG_TAIL_BYTES = 64_000
 DEFAULT_HERMETIC_SIDECAR_SMOKE_REQUEST_ID = "hermetic-sidecar-smoke"
+DEFAULT_CLIENT_ROUTING_SIDECAR_SMOKE_REQUEST_ID = (
+    "default-client-routing-sidecar-smoke"
+)
+DEFAULT_CLIENT_ROUTING_SMOKE_NAMESPACE = "histdatacom-smoke"
+DEFAULT_CLIENT_ROUTING_SMOKE_TASK_QUEUE_PREFIX = "histdatacom-smoke"
 DEFAULT_LIVE_SIDECAR_SMOKE_LANES = (
     TaskQueueLane.ORCHESTRATION,
     TaskQueueLane.NETWORK,
@@ -76,6 +81,7 @@ class LiveSidecarSmokeResult:
     snapshot: SidecarJobSnapshot
     doctor: Mapping[str, Any]
     stopped_status: SidecarStatus | None = None
+    client_routing: str = "explicit_config"
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -91,6 +97,7 @@ class LiveSidecarSmokeResult:
                 if self.stopped_status is not None
                 else None
             ),
+            "client_routing": self.client_routing,
             "diagnostics": dict(self.diagnostics),
             "influx": live_influx_smoke_status(),
         }
@@ -155,6 +162,33 @@ def default_hermetic_sidecar_smoke_request(
     )
 
 
+def default_client_routing_sidecar_smoke_request(
+    *,
+    request_id: str = DEFAULT_CLIENT_ROUTING_SIDECAR_SMOKE_REQUEST_ID,
+    data_directory: Path | str,
+) -> RunRequest:
+    """Build a local-only request for default client-routing smoke coverage."""
+    return RunRequest(
+        request_id=request_id,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("M1",),
+        start_yearmonth="202201",
+        end_yearmonth="202201",
+        data_directory=str(Path(data_directory).expanduser()),
+        available_remote_data=False,
+        update_remote_data=False,
+        validate_urls=False,
+        download_data_archives=False,
+        extract_csvs=False,
+        import_to_influxdb=False,
+        metadata={
+            "hermetic_sidecar_smoke": True,
+            "default_client_routing_smoke": True,
+        },
+    )
+
+
 def run_hermetic_sidecar_smoke(
     *,
     workspace: Path | str,
@@ -194,6 +228,50 @@ def run_hermetic_sidecar_smoke(
         environ=environ,
         supervisor_factory=supervisor_factory,
         submit_job=submit_job,
+        default_client_routing=False,
+    )
+
+
+def run_default_client_routing_sidecar_smoke(
+    *,
+    workspace: Path | str,
+    runtime_home: Path | str,
+    data_directory: Path | str,
+    temporal_executable: Path | str | None = None,
+    startup_timeout: float = DEFAULT_LIVE_SIDECAR_SMOKE_STARTUP_TIMEOUT,
+    completion_timeout: float = DEFAULT_LIVE_SIDECAR_SMOKE_COMPLETION_TIMEOUT,
+    stop_timeout: float = DEFAULT_LIVE_SIDECAR_SMOKE_STOP_TIMEOUT,
+    request_id: str = DEFAULT_CLIENT_ROUTING_SIDECAR_SMOKE_REQUEST_ID,
+    namespace: str = DEFAULT_CLIENT_ROUTING_SMOKE_NAMESPACE,
+    task_queue_prefix: str = DEFAULT_CLIENT_ROUTING_SMOKE_TASK_QUEUE_PREFIX,
+    worker_lanes: Sequence[str | TaskQueueLane] = (
+        DEFAULT_LIVE_SIDECAR_SMOKE_LANES
+    ),
+    environ: Mapping[str, str] | None = None,
+    supervisor_factory: SupervisorFactory = SidecarSupervisor,
+    submit_job: SubmitJob | None = None,
+) -> LiveSidecarSmokeResult:
+    """Run installed-wheel smoke through the default client resolver path."""
+    request = default_client_routing_sidecar_smoke_request(
+        request_id=request_id,
+        data_directory=data_directory,
+    )
+    return _run_sidecar_smoke(
+        smoke_name="default client-routing sidecar smoke",
+        request=request,
+        workspace=workspace,
+        runtime_home=runtime_home,
+        temporal_executable=temporal_executable,
+        startup_timeout=startup_timeout,
+        completion_timeout=completion_timeout,
+        stop_timeout=stop_timeout,
+        namespace=namespace,
+        task_queue_prefix=task_queue_prefix,
+        worker_lanes=worker_lanes,
+        environ=environ,
+        supervisor_factory=supervisor_factory,
+        submit_job=submit_job,
+        default_client_routing=True,
     )
 
 
@@ -236,6 +314,7 @@ def run_live_sidecar_smoke(
         environ=environ,
         supervisor_factory=supervisor_factory,
         submit_job=submit_job,
+        default_client_routing=False,
     )
 
 
@@ -255,6 +334,7 @@ def _run_sidecar_smoke(
     environ: Mapping[str, str] | None,
     supervisor_factory: SupervisorFactory,
     submit_job: SubmitJob | None,
+    default_client_routing: bool,
 ) -> LiveSidecarSmokeResult:
     """Run a Temporal sidecar, worker fleet, and supplied job request."""
     env = environ if environ is not None else os.environ
@@ -278,6 +358,7 @@ def _run_sidecar_smoke(
     snapshot: SidecarJobSnapshot | None = None
     stopped_status: SidecarStatus | None = None
     worker_config: SidecarWorkerConfig | None = None
+    job_config: SidecarWorkerConfig | None = None
     doctor: Mapping[str, Any] | None = None
     diagnostics: Mapping[str, Any] = {}
     try:
@@ -285,20 +366,27 @@ def _run_sidecar_smoke(
             executable=executable,
             startup_timeout=startup_timeout,
         )
-        worker_config = build_sidecar_worker_config(
-            runtime_policy=supervisor.runtime_policy,
-            namespace=namespace,
-            task_queue_prefix=task_queue_prefix,
-        )
+        if default_client_routing:
+            worker_config = supervisor.client_worker_config(
+                require_running=True,
+            )
+        else:
+            worker_config = build_sidecar_worker_config(
+                runtime_policy=supervisor.runtime_policy,
+                namespace=namespace,
+                task_queue_prefix=task_queue_prefix,
+            )
+            job_config = worker_config
         snapshot = _submit_live_smoke_job(
             request,
-            config=worker_config,
+            config=job_config,
             supervisor=supervisor,
             completion_timeout=completion_timeout,
             submit_job=submit_job,
         )
         _validate_live_smoke_snapshot(snapshot)
         doctor = supervisor.doctor()
+        _validate_live_smoke_routing(snapshot, worker_config, doctor)
         diagnostics = collect_live_sidecar_smoke_diagnostics(
             supervisor=supervisor,
             runtime_policy=supervisor.runtime_policy,
@@ -355,6 +443,11 @@ def _run_sidecar_smoke(
         stopped_status=stopped_status,
         snapshot=snapshot,
         doctor=dict(doctor or {}),
+        client_routing=(
+            "default_client_routing"
+            if default_client_routing
+            else "explicit_config"
+        ),
         diagnostics=diagnostics,
     )
 
@@ -408,27 +501,25 @@ def collect_live_sidecar_smoke_diagnostics(
 def _submit_live_smoke_job(
     request: RunRequest,
     *,
-    config: SidecarWorkerConfig,
+    config: SidecarWorkerConfig | None,
     supervisor: SidecarSupervisor,
     completion_timeout: float,
     submit_job: SubmitJob | None,
 ) -> SidecarJobSnapshot:
+    kwargs: dict[str, Any] = {
+        "supervisor": supervisor,
+        "start_if_needed": False,
+        "wait_for_result": True,
+    }
+    if config is not None:
+        kwargs["config"] = config
     if submit_job is not None:
-        return submit_job(
-            request,
-            config=config,
-            supervisor=supervisor,
-            start_if_needed=False,
-            wait_for_result=True,
-        )
+        return submit_job(request, **kwargs)
     return asyncio.run(
         asyncio.wait_for(
             submit_control_job(
                 request,
-                config=config,
-                supervisor=supervisor,
-                start_if_needed=False,
-                wait_for_result=True,
+                **kwargs,
             ),
             timeout=completion_timeout,
         )
@@ -526,6 +617,46 @@ def _validate_live_smoke_snapshot(snapshot: SidecarJobSnapshot) -> None:
         raise LiveSidecarSmokeError(
             "live sidecar smoke job completed without artifact references",
             {"snapshot": snapshot.to_dict()},
+        )
+
+
+def _validate_live_smoke_routing(
+    snapshot: SidecarJobSnapshot,
+    worker_config: SidecarWorkerConfig,
+    doctor: Mapping[str, Any],
+) -> None:
+    if snapshot.namespace and snapshot.namespace != worker_config.namespace:
+        raise LiveSidecarSmokeError(
+            "live sidecar smoke job used an unexpected namespace",
+            {
+                "expected": worker_config.namespace,
+                "actual": snapshot.namespace,
+                "snapshot": snapshot.to_dict(),
+            },
+        )
+    expected_queue = worker_config.task_queues.orchestration
+    if snapshot.task_queue and snapshot.task_queue != expected_queue:
+        raise LiveSidecarSmokeError(
+            "live sidecar smoke job used an unexpected task queue",
+            {
+                "expected": expected_queue,
+                "actual": snapshot.task_queue,
+                "snapshot": snapshot.to_dict(),
+            },
+        )
+
+    frontend = doctor.get("frontend")
+    target_host = (
+        frontend.get("target_host") if isinstance(frontend, Mapping) else ""
+    )
+    if target_host and target_host != worker_config.target_host:
+        raise LiveSidecarSmokeError(
+            "live sidecar smoke doctor reported an unexpected frontend",
+            {
+                "expected": worker_config.target_host,
+                "actual": target_host,
+                "doctor": dict(doctor),
+            },
         )
 
 

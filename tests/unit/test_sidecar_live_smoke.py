@@ -11,14 +11,21 @@ import histdatacom.sidecar.live_smoke as live_smoke
 from histdatacom.runtime_contracts import ArtifactRef, RunRequest, WorkStatus
 from histdatacom.sidecar.control import JobLifecycle, SidecarJobSnapshot
 from histdatacom.sidecar.live_smoke import (
+    DEFAULT_CLIENT_ROUTING_SMOKE_NAMESPACE,
+    DEFAULT_CLIENT_ROUTING_SMOKE_TASK_QUEUE_PREFIX,
     DEFAULT_LIVE_SIDECAR_SMOKE_LANES,
     LiveSidecarSmokeError,
+    default_client_routing_sidecar_smoke_request,
     default_hermetic_sidecar_smoke_request,
     default_live_sidecar_smoke_request,
+    run_default_client_routing_sidecar_smoke,
     run_hermetic_sidecar_smoke,
     run_live_sidecar_smoke,
 )
-from histdatacom.sidecar.queues import TaskQueueLane
+from histdatacom.sidecar.queues import (
+    TaskQueueLane,
+    build_sidecar_worker_config,
+)
 from histdatacom.sidecar.runtime import SidecarRuntimePolicy
 from histdatacom.sidecar.supervisor import SidecarStatus
 
@@ -59,13 +66,25 @@ class _FakeSupervisor:
         return self._status("running")
 
     def doctor(self) -> dict[str, object]:
+        target_host = (
+            f"{self.runtime_policy.ports.bind_ip}:"
+            f"{self.runtime_policy.ports.grpc}"
+        )
         return {
             "status": self.status().to_dict(),
             "runtime_policy": self.runtime_policy.to_dict(),
+            "frontend": {"target_host": target_host, "ready": True},
             "workers": {
                 lane.value: {"state": "running"} for lane in self.worker_lanes
             },
         }
+
+    def client_worker_config(self, *, require_running: bool = False, **kwargs):
+        return build_sidecar_worker_config(
+            runtime_policy=self.runtime_policy,
+            namespace=str(self.kwargs["namespace"]),
+            task_queue_prefix=str(self.kwargs["task_queue_prefix"]),
+        )
 
     def _status(
         self,
@@ -123,11 +142,18 @@ class _MissingStopStatusSupervisor(_FakeSupervisor):
         return None
 
 
-def _completed_snapshot(request: RunRequest) -> SidecarJobSnapshot:
+def _completed_snapshot(
+    request: RunRequest,
+    *,
+    namespace: str = "",
+    task_queue: str = "",
+) -> SidecarJobSnapshot:
     return SidecarJobSnapshot(
         job_id=f"histdatacom-{request.request_id}",
         request_id=request.request_id,
         workflow_id=f"histdatacom-{request.request_id}",
+        namespace=namespace,
+        task_queue=task_queue,
         lifecycle=JobLifecycle.SUCCEEDED,
         status=WorkStatus.COMPLETED,
         artifacts=(
@@ -178,6 +204,26 @@ def test_default_hermetic_sidecar_smoke_request_is_local_only(
     assert request.timeframes == ("M1",)
 
 
+def test_default_client_routing_sidecar_smoke_request_is_local_only(
+    tmp_path: Path,
+) -> None:
+    """Default-routing release smoke should also avoid external services."""
+    request = default_client_routing_sidecar_smoke_request(
+        data_directory=tmp_path / "data"
+    )
+
+    assert request.available_remote_data is False
+    assert request.update_remote_data is False
+    assert request.validate_urls is False
+    assert request.download_data_archives is False
+    assert request.extract_csvs is False
+    assert request.import_to_influxdb is False
+    assert request.metadata == {
+        "hermetic_sidecar_smoke": True,
+        "default_client_routing_smoke": True,
+    }
+
+
 def test_run_hermetic_sidecar_smoke_uses_local_only_request_and_stops(
     tmp_path: Path,
 ) -> None:
@@ -215,6 +261,62 @@ def test_run_hermetic_sidecar_smoke_uses_local_only_request_and_stops(
     assert captured["kwargs"]["wait_for_result"] is True
     assert result.snapshot.lifecycle == JobLifecycle.SUCCEEDED
     assert result.snapshot.artifacts
+
+
+def test_run_default_client_routing_sidecar_smoke_omits_explicit_config(
+    tmp_path: Path,
+) -> None:
+    """Default-routing smoke should exercise the client resolver path."""
+    supervisors: list[_FakeSupervisor] = []
+    captured: dict[str, Any] = {}
+
+    def supervisor_factory(**kwargs: Any) -> _FakeSupervisor:
+        supervisor = _FakeSupervisor(**kwargs)
+        supervisors.append(supervisor)
+        return supervisor
+
+    def submit_job(request: RunRequest, **kwargs: Any) -> SidecarJobSnapshot:
+        supervisor = kwargs["supervisor"]
+        config = supervisor.client_worker_config(require_running=True)
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _completed_snapshot(
+            request,
+            namespace=config.namespace,
+            task_queue=config.task_queues.orchestration,
+        )
+
+    result = run_default_client_routing_sidecar_smoke(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+        data_directory=tmp_path / "data",
+        supervisor_factory=supervisor_factory,
+        submit_job=submit_job,
+    )
+
+    assert captured["request"].metadata == {
+        "hermetic_sidecar_smoke": True,
+        "default_client_routing_smoke": True,
+    }
+    assert "config" not in captured["kwargs"]
+    assert captured["kwargs"]["supervisor"] is supervisors[0]
+    assert result.client_routing == "default_client_routing"
+    assert (
+        result.worker_config.namespace == DEFAULT_CLIENT_ROUTING_SMOKE_NAMESPACE
+    )
+    assert (
+        result.worker_config.task_queues.prefix
+        == DEFAULT_CLIENT_ROUTING_SMOKE_TASK_QUEUE_PREFIX
+    )
+    assert result.snapshot.namespace == result.worker_config.namespace
+    assert (
+        result.snapshot.task_queue
+        == result.worker_config.task_queues.orchestration
+    )
+    assert (
+        result.doctor["frontend"]["target_host"]
+        == result.worker_config.target_host
+    )
 
 
 def test_run_live_sidecar_smoke_uses_external_request_and_stops(

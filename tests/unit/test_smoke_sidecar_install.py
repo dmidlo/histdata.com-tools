@@ -144,6 +144,50 @@ def test_check_hermetic_sidecar_smoke_returns_hermetic_report(
     assert captured["stop_timeout"] == 5.0
 
 
+def test_check_default_routing_sidecar_smoke_returns_report(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Install smoke should expose the default client-routing smoke."""
+    module = _module()
+    captured: dict[str, Any] = {}
+
+    class _Result:
+        def to_dict(self) -> dict[str, str]:
+            return {"client_routing": "default_client_routing"}
+
+    def fake_run_default_client_routing_sidecar_smoke(
+        **kwargs: Any,
+    ) -> _Result:
+        captured.update(kwargs)
+        return _Result()
+
+    monkeypatch.setattr(
+        live_smoke,
+        "run_default_client_routing_sidecar_smoke",
+        fake_run_default_client_routing_sidecar_smoke,
+    )
+
+    report = module.check_default_routing_sidecar_smoke(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+        data_directory=tmp_path / "data",
+        temporal_executable=tmp_path / "temporal",
+        startup_timeout=3.0,
+        completion_timeout=4.0,
+        stop_timeout=5.0,
+    )
+
+    assert report == {"client_routing": "default_client_routing"}
+    assert captured["workspace"] == tmp_path / "workspace"
+    assert captured["runtime_home"] == tmp_path / "runtime"
+    assert captured["data_directory"] == tmp_path / "data"
+    assert captured["temporal_executable"] == tmp_path / "temporal"
+    assert captured["startup_timeout"] == 3.0
+    assert captured["completion_timeout"] == 4.0
+    assert captured["stop_timeout"] == 5.0
+
+
 def test_check_package_metadata_requires_core_temporal_dependency(
     monkeypatch,
 ) -> None:

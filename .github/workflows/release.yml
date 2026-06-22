@@ -221,6 +221,7 @@ jobs:
           --check-executable-version
           --start-sidecar
           --hermetic-sidecar-smoke
+          --default-routing-sidecar-smoke
           --live-workspace .sidecar-live-workspace
           --live-runtime-home .sidecar-live-runtime
           --live-data-dir .sidecar-live-data
