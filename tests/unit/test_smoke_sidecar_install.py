@@ -244,4 +244,5 @@ def test_check_package_metadata_requires_core_temporal_dependency(
 
     report = module.check_package_metadata(expect_temporal_extra=False)
 
+    assert report["sidecar_contracts"] == ["RunRequest"]
     assert report["temporalio_version"] == "1.10.0"

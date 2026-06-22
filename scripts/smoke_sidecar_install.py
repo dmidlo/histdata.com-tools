@@ -100,6 +100,8 @@ def install_wheel(
 def check_package_metadata(*, expect_temporal_extra: bool) -> dict[str, Any]:
     """Validate installed package metadata and console entry points."""
     import histdatacom
+    from histdatacom.runtime_contracts import RunRequest as RuntimeRunRequest
+    from histdatacom.sidecar.contracts import RunRequest
 
     dist = metadata.distribution("histdatacom")
     scripts = {
@@ -130,11 +132,16 @@ def check_package_metadata(*, expect_temporal_extra: bool) -> dict[str, Any]:
     temporalio_version = metadata.version("temporalio")
     if importlib.util.find_spec("temporalio") is None:
         raise SystemExit("temporalio distribution is installed but missing")
+    if RunRequest is not RuntimeRunRequest:
+        raise SystemExit(
+            "sidecar contract RunRequest does not match runtime contract"
+        )
 
     return {
         "name": dist.metadata["Name"],
         "version": installed_version,
         "console_scripts": sorted(EXPECTED_CONSOLE_SCRIPTS),
+        "sidecar_contracts": ["RunRequest"],
         "temporalio_version": temporalio_version,
     }
 

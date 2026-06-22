@@ -104,6 +104,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "TOPOLOGY_SCHEMA_VERSION",
     ),
     "WORKFLOW_TOPOLOGY": ("histdatacom.sidecar.workflows", "WORKFLOW_TOPOLOGY"),
+    "ArtifactRef": ("histdatacom.sidecar.contracts", "ArtifactRef"),
     "ActivityExecutor": ("histdatacom.sidecar.workflows", "ActivityExecutor"),
     "ChildWorkflowExecutor": (
         "histdatacom.sidecar.workflows",
@@ -121,6 +122,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.control",
         "ControlOperationState",
     ),
+    "FailureInfo": ("histdatacom.sidecar.contracts", "FailureInfo"),
     "HistDataRunWorkflow": (
         "histdatacom.sidecar.workflows",
         "HistDataRunWorkflow",
@@ -137,6 +139,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.control",
         "JobProgressSnapshot",
     ),
+    "JSONScalar": ("histdatacom.sidecar.contracts", "JSONScalar"),
+    "JSONValue": ("histdatacom.sidecar.contracts", "JSONValue"),
     "LogMaintenanceResult": (
         "histdatacom.sidecar.maintenance",
         "LogMaintenanceResult",
@@ -205,6 +209,9 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.maintenance",
         "StatusStoreMaintenanceResult",
     ),
+    "RunRequest": ("histdatacom.sidecar.contracts", "RunRequest"),
+    "StageResult": ("histdatacom.sidecar.contracts", "StageResult"),
+    "StatusEvent": ("histdatacom.sidecar.contracts", "StatusEvent"),
     "TaskQueueLane": ("histdatacom.sidecar.queues", "TaskQueueLane"),
     "TemporalSqliteMaintenanceResult": (
         "histdatacom.sidecar.maintenance",
@@ -222,6 +229,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.resources",
         "UnsupportedSidecarPlatform",
     ),
+    "WorkItem": ("histdatacom.sidecar.contracts", "WorkItem"),
+    "WorkStatus": ("histdatacom.sidecar.contracts", "WorkStatus"),
     "WorkflowInvocation": (
         "histdatacom.sidecar.workflows",
         "WorkflowInvocation",
@@ -299,6 +308,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "default_activities",
     ),
     "default_workflows": ("histdatacom.sidecar.worker", "default_workflows"),
+    "derive_work_id": ("histdatacom.sidecar.contracts", "derive_work_id"),
     "download_archives_activity": (
         "histdatacom.sidecar.activities",
         "download_archives_activity",
@@ -373,6 +383,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.activities",
         "merge_cache_activity",
     ),
+    "new_request_id": ("histdatacom.sidecar.contracts", "new_request_id"),
     "observe_workflow_result": (
         "histdatacom.sidecar.client",
         "observe_workflow_result",
@@ -414,6 +425,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "sidecar_job_store_root": (
         "histdatacom.sidecar.client",
         "sidecar_job_store_root",
+    ),
+    "status_has_csv_artifact": (
+        "histdatacom.sidecar.contracts",
+        "status_has_csv_artifact",
     ),
     "submit_control_job": (
         "histdatacom.sidecar.client",
