@@ -104,11 +104,15 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
     assert smoke_runners["linux-arm64"] == "ubuntu-24.04-arm"
     assert smoke_runners["macos-x86_64"] == "macos-15-intel"
     assert smoke_runners["macos-arm64"] == "macos-15"
-    smoke_command = _step_run(smoke_platform, "Smoke bundled sidecar install")
+    smoke_command = _step_run(
+        smoke_platform,
+        "Smoke bundled sidecar install hermetically",
+    )
     assert "--require-bundled-current-platform" in smoke_command
     assert "--check-executable-version" in smoke_command
     assert "--start-sidecar" in smoke_command
-    assert "--live-sidecar-smoke" in smoke_command
+    assert "--hermetic-sidecar-smoke" in smoke_command
+    assert "--live-sidecar-smoke" not in smoke_command
     assert "--live-workspace .sidecar-live-workspace" in smoke_command
     assert "--live-runtime-home .sidecar-live-runtime" in smoke_command
     assert "--live-data-dir .sidecar-live-data" in smoke_command

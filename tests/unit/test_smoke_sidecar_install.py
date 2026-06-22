@@ -102,6 +102,48 @@ def test_check_live_sidecar_smoke_returns_live_report(
     assert captured["stop_timeout"] == 5.0
 
 
+def test_check_hermetic_sidecar_smoke_returns_hermetic_report(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Install smoke should expose the release-gating hermetic sidecar check."""
+    module = _module()
+    captured: dict[str, Any] = {}
+
+    class _Result:
+        def to_dict(self) -> dict[str, str]:
+            return {"status": "completed"}
+
+    def fake_run_hermetic_sidecar_smoke(**kwargs: Any) -> _Result:
+        captured.update(kwargs)
+        return _Result()
+
+    monkeypatch.setattr(
+        live_smoke,
+        "run_hermetic_sidecar_smoke",
+        fake_run_hermetic_sidecar_smoke,
+    )
+
+    report = module.check_hermetic_sidecar_smoke(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+        data_directory=tmp_path / "data",
+        temporal_executable=tmp_path / "temporal",
+        startup_timeout=3.0,
+        completion_timeout=4.0,
+        stop_timeout=5.0,
+    )
+
+    assert report == {"status": "completed"}
+    assert captured["workspace"] == tmp_path / "workspace"
+    assert captured["runtime_home"] == tmp_path / "runtime"
+    assert captured["data_directory"] == tmp_path / "data"
+    assert captured["temporal_executable"] == tmp_path / "temporal"
+    assert captured["startup_timeout"] == 3.0
+    assert captured["completion_timeout"] == 4.0
+    assert captured["stop_timeout"] == 5.0
+
+
 def test_check_package_metadata_requires_core_temporal_dependency(
     monkeypatch,
 ) -> None:

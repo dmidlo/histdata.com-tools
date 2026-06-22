@@ -853,12 +853,14 @@ leg. The first-pass gate is total-only. Per-package or domain thresholds belong
 with the broader testing work tracked in issues #9 and #68.
 
 The live Temporal sidecar smoke is not collected by default pytest because it
-requires a real Temporal executable and starts local worker processes. Run it
-explicitly through `scripts/smoke_sidecar_install.py --live-sidecar-smoke`
-during bundled platform-wheel release smoke, where missing prerequisites are
-hard failures rather than skipped tests. The smoke command also fails on
-shutdown leaks: stop exceptions, missing stop status, persistent `stopping`
-status, or known remaining sidecar PIDs.
+requires a real Temporal executable and starts local worker processes. Bundled
+platform-wheel release smoke uses
+`scripts/smoke_sidecar_install.py --hermetic-sidecar-smoke`, which submits a
+local-only dataset-planning workflow and does not contact HistData.com. Run
+`scripts/smoke_sidecar_install.py --live-sidecar-smoke` separately when an
+operator intentionally wants external HistData.com URL-validation coverage.
+Both commands fail on shutdown leaks: stop exceptions, missing stop status,
+persistent `stopping` status, or known remaining sidecar PIDs.
 
 ---
 

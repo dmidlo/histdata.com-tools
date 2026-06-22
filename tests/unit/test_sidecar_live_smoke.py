@@ -13,7 +13,9 @@ from histdatacom.sidecar.control import JobLifecycle, SidecarJobSnapshot
 from histdatacom.sidecar.live_smoke import (
     DEFAULT_LIVE_SIDECAR_SMOKE_LANES,
     LiveSidecarSmokeError,
+    default_hermetic_sidecar_smoke_request,
     default_live_sidecar_smoke_request,
+    run_hermetic_sidecar_smoke,
     run_live_sidecar_smoke,
 )
 from histdatacom.sidecar.queues import TaskQueueLane
@@ -141,6 +143,7 @@ def _completed_snapshot(request: RunRequest) -> SidecarJobSnapshot:
 def test_default_live_sidecar_smoke_request_is_minimal_non_influx(
     tmp_path: Path,
 ) -> None:
+    """The external live smoke should keep exercising HistData URL validation."""
     request = default_live_sidecar_smoke_request(
         data_directory=tmp_path / "data"
     )
@@ -155,9 +158,69 @@ def test_default_live_sidecar_smoke_request_is_minimal_non_influx(
     assert request.timeframes == ("M1",)
 
 
-def test_run_live_sidecar_smoke_uses_non_influx_lanes_and_stops(
+def test_default_hermetic_sidecar_smoke_request_is_local_only(
     tmp_path: Path,
 ) -> None:
+    """The release-gating smoke should not depend on HistData.com."""
+    request = default_hermetic_sidecar_smoke_request(
+        data_directory=tmp_path / "data"
+    )
+
+    assert request.available_remote_data is False
+    assert request.update_remote_data is False
+    assert request.validate_urls is False
+    assert request.download_data_archives is False
+    assert request.extract_csvs is False
+    assert request.import_to_influxdb is False
+    assert request.metadata == {"hermetic_sidecar_smoke": True}
+    assert request.pairs == ("eurusd",)
+    assert request.formats == ("ascii",)
+    assert request.timeframes == ("M1",)
+
+
+def test_run_hermetic_sidecar_smoke_uses_local_only_request_and_stops(
+    tmp_path: Path,
+) -> None:
+    """The hermetic smoke should start workers and submit a local request."""
+    supervisors: list[_FakeSupervisor] = []
+    captured: dict[str, Any] = {}
+
+    def supervisor_factory(**kwargs: Any) -> _FakeSupervisor:
+        supervisor = _FakeSupervisor(**kwargs)
+        supervisors.append(supervisor)
+        return supervisor
+
+    def submit_job(request: RunRequest, **kwargs: Any) -> SidecarJobSnapshot:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _completed_snapshot(request)
+
+    result = run_hermetic_sidecar_smoke(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+        data_directory=tmp_path / "data",
+        supervisor_factory=supervisor_factory,
+        submit_job=submit_job,
+    )
+
+    assert supervisors[0].worker_lanes == DEFAULT_LIVE_SIDECAR_SMOKE_LANES
+    assert TaskQueueLane.INFLUX not in supervisors[0].worker_lanes
+    assert supervisors[0].stopped is True
+    assert result.stopped_status is not None
+    assert result.stopped_status.state == "stopped"
+    assert captured["request"].available_remote_data is False
+    assert captured["request"].validate_urls is False
+    assert captured["request"].metadata == {"hermetic_sidecar_smoke": True}
+    assert captured["kwargs"]["start_if_needed"] is False
+    assert captured["kwargs"]["wait_for_result"] is True
+    assert result.snapshot.lifecycle == JobLifecycle.SUCCEEDED
+    assert result.snapshot.artifacts
+
+
+def test_run_live_sidecar_smoke_uses_external_request_and_stops(
+    tmp_path: Path,
+) -> None:
+    """The external smoke should remain available as an operator gate."""
     supervisors: list[_FakeSupervisor] = []
     captured: dict[str, Any] = {}
 
@@ -184,6 +247,7 @@ def test_run_live_sidecar_smoke_uses_non_influx_lanes_and_stops(
     assert supervisors[0].stopped is True
     assert result.stopped_status is not None
     assert result.stopped_status.state == "stopped"
+    assert captured["request"].available_remote_data is True
     assert captured["request"].validate_urls is True
     assert captured["request"].import_to_influxdb is False
     assert captured["kwargs"]["start_if_needed"] is False

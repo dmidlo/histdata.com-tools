@@ -212,7 +212,7 @@ jobs:
       - name: Upgrade installer
         run: python -m pip install --upgrade pip
 
-      - name: Smoke bundled sidecar install
+      - name: Smoke bundled sidecar install hermetically
         run: >
           python scripts/smoke_sidecar_install.py
           --wheel-dir dist-platform
@@ -220,7 +220,7 @@ jobs:
           --require-bundled-current-platform
           --check-executable-version
           --start-sidecar
-          --live-sidecar-smoke
+          --hermetic-sidecar-smoke
           --live-workspace .sidecar-live-workspace
           --live-runtime-home .sidecar-live-runtime
           --live-data-dir .sidecar-live-data

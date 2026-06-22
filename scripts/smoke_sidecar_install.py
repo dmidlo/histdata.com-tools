@@ -287,7 +287,7 @@ def check_live_sidecar_smoke(
     completion_timeout: float,
     stop_timeout: float,
 ) -> dict[str, Any]:
-    """Run a live Temporal sidecar, worker fleet, and minimal job smoke."""
+    """Run an external HistData.com sidecar smoke."""
     from histdatacom.sidecar.live_smoke import (
         LiveSidecarSmokeError,
         diagnostics_json,
@@ -307,6 +307,40 @@ def check_live_sidecar_smoke(
     except LiveSidecarSmokeError as err:
         raise SystemExit(
             "live sidecar smoke failed with diagnostics:\n"
+            f"{diagnostics_json(err.diagnostics)}"
+        ) from err
+
+
+def check_hermetic_sidecar_smoke(
+    *,
+    workspace: Path,
+    runtime_home: Path,
+    data_directory: Path,
+    temporal_executable: Path | None = None,
+    startup_timeout: float,
+    completion_timeout: float,
+    stop_timeout: float,
+) -> dict[str, Any]:
+    """Run a local-only Temporal sidecar smoke for installed wheels."""
+    from histdatacom.sidecar.live_smoke import (
+        LiveSidecarSmokeError,
+        diagnostics_json,
+        run_hermetic_sidecar_smoke,
+    )
+
+    try:
+        return run_hermetic_sidecar_smoke(
+            workspace=workspace,
+            runtime_home=runtime_home,
+            data_directory=data_directory,
+            temporal_executable=temporal_executable,
+            startup_timeout=startup_timeout,
+            completion_timeout=completion_timeout,
+            stop_timeout=stop_timeout,
+        ).to_dict()
+    except LiveSidecarSmokeError as err:
+        raise SystemExit(
+            "hermetic sidecar smoke failed with diagnostics:\n"
             f"{diagnostics_json(err.diagnostics)}"
         ) from err
 
@@ -358,27 +392,37 @@ def main() -> None:
         "--live-sidecar-smoke",
         action="store_true",
         help=(
-            "operator-gated smoke that starts Temporal workers, submits a "
-            "minimal non-Influx job, and validates status/artifacts"
+            "external HistData.com operator-gated smoke that starts Temporal "
+            "workers, submits a URL-validation job, and validates "
+            "status/artifacts"
+        ),
+    )
+    parser.add_argument(
+        "--hermetic-sidecar-smoke",
+        action="store_true",
+        help=(
+            "deterministic installed-wheel smoke that starts Temporal workers, "
+            "submits a local-only dataset-planning job, and validates "
+            "status/artifacts"
         ),
     )
     parser.add_argument(
         "--temporal-executable",
         type=Path,
         help=(
-            "Temporal executable for --live-sidecar-smoke; defaults to "
+            "Temporal executable for live sidecar smokes; defaults to "
             "HISTDATACOM_TEMPORAL_EXECUTABLE or the packaged executable"
         ),
     )
     parser.add_argument(
         "--live-workspace",
         type=Path,
-        help="workspace path used for --live-sidecar-smoke runtime scoping",
+        help="workspace path used for live sidecar smoke runtime scoping",
     )
     parser.add_argument(
         "--live-runtime-home",
         type=Path,
-        help="runtime home used for --live-sidecar-smoke state/logs/SQLite",
+        help="runtime home used for live sidecar smoke state/logs/SQLite",
     )
     parser.add_argument(
         "--live-data-dir",
@@ -429,6 +473,7 @@ def main() -> None:
                 check_executable_version=args.check_executable_version,
             ),
             "cli": None,
+            "hermetic_sidecar": None,
             "live_sidecar": None,
         }
         if not args.skip_cli:
@@ -438,6 +483,23 @@ def main() -> None:
                     args.require_bundled_current_platform
                 ),
                 start_sidecar=args.start_sidecar,
+            )
+        if args.hermetic_sidecar_smoke:
+            live_workspace = args.live_workspace or Path(temporary_dir) / (
+                "live-workspace"
+            )
+            live_runtime_home = (
+                args.live_runtime_home or Path(temporary_dir) / "live-runtime"
+            )
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
+            report["hermetic_sidecar"] = check_hermetic_sidecar_smoke(
+                workspace=live_workspace,
+                runtime_home=live_runtime_home,
+                data_directory=live_data_dir,
+                temporal_executable=args.temporal_executable,
+                startup_timeout=args.live_startup_timeout,
+                completion_timeout=args.live_completion_timeout,
+                stop_timeout=args.live_stop_timeout,
             )
         if args.live_sidecar_smoke:
             live_workspace = args.live_workspace or Path(temporary_dir) / (

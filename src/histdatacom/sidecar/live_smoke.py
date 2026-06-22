@@ -34,6 +34,7 @@ DEFAULT_LIVE_SIDECAR_SMOKE_COMPLETION_TIMEOUT = 180.0
 DEFAULT_LIVE_SIDECAR_SMOKE_STOP_TIMEOUT = 30.0
 DEFAULT_LOG_TAIL_LINES = 120
 DEFAULT_LOG_TAIL_BYTES = 64_000
+DEFAULT_HERMETIC_SIDECAR_SMOKE_REQUEST_ID = "hermetic-sidecar-smoke"
 DEFAULT_LIVE_SIDECAR_SMOKE_LANES = (
     TaskQueueLane.ORCHESTRATION,
     TaskQueueLane.NETWORK,
@@ -115,7 +116,7 @@ def default_live_sidecar_smoke_request(
     request_id: str = DEFAULT_LIVE_SIDECAR_SMOKE_REQUEST_ID,
     data_directory: Path | str,
 ) -> RunRequest:
-    """Build the minimal non-Influx live sidecar smoke request."""
+    """Build the external HistData.com non-Influx live smoke request."""
     return RunRequest(
         request_id=request_id,
         pairs=("eurusd",),
@@ -127,6 +128,72 @@ def default_live_sidecar_smoke_request(
         available_remote_data=True,
         validate_urls=True,
         metadata={"live_sidecar_smoke": True},
+    )
+
+
+def default_hermetic_sidecar_smoke_request(
+    *,
+    request_id: str = DEFAULT_HERMETIC_SIDECAR_SMOKE_REQUEST_ID,
+    data_directory: Path | str,
+) -> RunRequest:
+    """Build a local-only sidecar smoke request for installed wheels."""
+    return RunRequest(
+        request_id=request_id,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("M1",),
+        start_yearmonth="202201",
+        end_yearmonth="202201",
+        data_directory=str(Path(data_directory).expanduser()),
+        available_remote_data=False,
+        update_remote_data=False,
+        validate_urls=False,
+        download_data_archives=False,
+        extract_csvs=False,
+        import_to_influxdb=False,
+        metadata={"hermetic_sidecar_smoke": True},
+    )
+
+
+def run_hermetic_sidecar_smoke(
+    *,
+    workspace: Path | str,
+    runtime_home: Path | str,
+    data_directory: Path | str,
+    temporal_executable: Path | str | None = None,
+    startup_timeout: float = DEFAULT_LIVE_SIDECAR_SMOKE_STARTUP_TIMEOUT,
+    completion_timeout: float = DEFAULT_LIVE_SIDECAR_SMOKE_COMPLETION_TIMEOUT,
+    stop_timeout: float = DEFAULT_LIVE_SIDECAR_SMOKE_STOP_TIMEOUT,
+    request_id: str = DEFAULT_HERMETIC_SIDECAR_SMOKE_REQUEST_ID,
+    namespace: str = DEFAULT_TEMPORAL_NAMESPACE,
+    task_queue_prefix: str = DEFAULT_TASK_QUEUE_PREFIX,
+    worker_lanes: Sequence[str | TaskQueueLane] = (
+        DEFAULT_LIVE_SIDECAR_SMOKE_LANES
+    ),
+    environ: Mapping[str, str] | None = None,
+    supervisor_factory: SupervisorFactory = SidecarSupervisor,
+    submit_job: SubmitJob | None = None,
+) -> LiveSidecarSmokeResult:
+    """Run a local-only installed-wheel sidecar runtime smoke."""
+    request = default_hermetic_sidecar_smoke_request(
+        request_id=request_id,
+        data_directory=data_directory,
+    )
+    return _run_sidecar_smoke(
+        smoke_name="hermetic sidecar smoke",
+        request=request,
+        workspace=workspace,
+        runtime_home=runtime_home,
+        temporal_executable=temporal_executable,
+        startup_timeout=startup_timeout,
+        completion_timeout=completion_timeout,
+        stop_timeout=stop_timeout,
+        namespace=namespace,
+        task_queue_prefix=task_queue_prefix,
+        worker_lanes=worker_lanes,
+        environ=environ,
+        supervisor_factory=supervisor_factory,
+        submit_job=submit_job,
     )
 
 
@@ -149,15 +216,51 @@ def run_live_sidecar_smoke(
     supervisor_factory: SupervisorFactory = SidecarSupervisor,
     submit_job: SubmitJob | None = None,
 ) -> LiveSidecarSmokeResult:
-    """Run a live Temporal server, worker fleet, and minimal job smoke."""
+    """Run an external HistData.com Temporal sidecar smoke."""
+    request = default_live_sidecar_smoke_request(
+        request_id=request_id,
+        data_directory=data_directory,
+    )
+    return _run_sidecar_smoke(
+        smoke_name="external HistData.com sidecar smoke",
+        request=request,
+        workspace=workspace,
+        runtime_home=runtime_home,
+        temporal_executable=temporal_executable,
+        startup_timeout=startup_timeout,
+        completion_timeout=completion_timeout,
+        stop_timeout=stop_timeout,
+        namespace=namespace,
+        task_queue_prefix=task_queue_prefix,
+        worker_lanes=worker_lanes,
+        environ=environ,
+        supervisor_factory=supervisor_factory,
+        submit_job=submit_job,
+    )
+
+
+def _run_sidecar_smoke(
+    *,
+    smoke_name: str,
+    request: RunRequest,
+    workspace: Path | str,
+    runtime_home: Path | str,
+    temporal_executable: Path | str | None,
+    startup_timeout: float,
+    completion_timeout: float,
+    stop_timeout: float,
+    namespace: str,
+    task_queue_prefix: str,
+    worker_lanes: Sequence[str | TaskQueueLane],
+    environ: Mapping[str, str] | None,
+    supervisor_factory: SupervisorFactory,
+    submit_job: SubmitJob | None,
+) -> LiveSidecarSmokeResult:
+    """Run a Temporal sidecar, worker fleet, and supplied job request."""
     env = environ if environ is not None else os.environ
     executable = _temporal_executable_from_inputs(
         temporal_executable=temporal_executable,
         environ=env,
-    )
-    request = default_live_sidecar_smoke_request(
-        request_id=request_id,
-        data_directory=data_directory,
     )
     runtime_policy = build_sidecar_runtime_policy(
         workspace=workspace,
@@ -212,7 +315,7 @@ def run_live_sidecar_smoke(
             error=err,
         )
         raise LiveSidecarSmokeError(
-            f"live sidecar smoke failed: {err}",
+            f"{smoke_name} failed: {err}",
             diagnostics,
         ) from err
     finally:
@@ -237,12 +340,12 @@ def run_live_sidecar_smoke(
                 error=err,
             )
             raise LiveSidecarSmokeError(
-                f"live sidecar smoke shutdown failed: {err}",
+                f"{smoke_name} shutdown failed: {err}",
                 diagnostics,
             ) from err
     if started_status is None or worker_config is None or snapshot is None:
         raise LiveSidecarSmokeError(
-            "live sidecar smoke did not produce a complete result",
+            f"{smoke_name} did not produce a complete result",
             diagnostics,
         )
     return LiveSidecarSmokeResult(

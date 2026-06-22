@@ -59,15 +59,24 @@ must pass `scripts/inspect_wheel.py --require-bundled-platform`, install on its
 matching GitHub-hosted runner, run
 `histdatacom-sidecar doctor --json` with
 `platform.executable_bundled == true`, probe the executable version, start the
-sidecar without `--executable`, and run the installed-wheel live sidecar smoke
-job. The live smoke uses a minimal non-Influx request, waits for job completion,
-validates the status snapshot and artifact references, and prints server/worker
+sidecar without `--executable`, and run the installed-wheel hermetic sidecar
+smoke job. The hermetic smoke uses a local-only dataset-planning request:
+`available_remote_data`, `update_remote_data`, `validate_urls`, download,
+extract, and import flags are all false. It still starts the packaged Temporal
+executable, starts workers, submits a workflow, waits for completion, validates
+the status snapshot and artifact references, and prints server/worker
 diagnostics if the job or sidecar shutdown fails. Stop exceptions, missing stop
 status, persistent `stopping` status, and known remaining sidecar PIDs are
-treated as smoke failures. This live smoke is executed through
-`scripts/smoke_sidecar_install.py --live-sidecar-smoke`, not as a default
+treated as smoke failures. This release gate is executed through
+`scripts/smoke_sidecar_install.py --hermetic-sidecar-smoke`, not as a default
 pytest test, so missing Temporal executables fail the explicit smoke command
 instead of appearing as skipped tests in the normal suite.
+
+The external HistData.com smoke remains available as an operator gate through
+`scripts/smoke_sidecar_install.py --live-sidecar-smoke`. That command uses a
+minimal non-Influx request with URL validation enabled, so it can detect vendor
+availability, network, and website/form drift, but it should not be the default
+PyPI publish gate for otherwise-good platform wheels.
 
 Rollback behavior is intentionally conservative. If a platform executable or
 wheel is bad after publish, yank the affected platform wheel and cut a
@@ -634,7 +643,10 @@ Package release smoke should validate metadata, console entry points, packaged
 sidecar resources, and offline `status`/`doctor` behavior for every wheel. For
 bundled platform wheels, release smoke should also require
 `doctor.platform.executable_bundled == true`, run the packaged executable
-version probe, and start the sidecar without `--executable`.
+version probe, start the sidecar without `--executable`, and run
+`--hermetic-sidecar-smoke`. Use `--live-sidecar-smoke` separately when the
+operator intentionally wants to include external HistData.com availability and
+URL-validation coverage.
 
 ## GUI Integration Notes
 
