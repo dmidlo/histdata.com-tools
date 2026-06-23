@@ -14,7 +14,10 @@ from histdatacom.data_quality.discovery import normalize_quality_check_groups
 from histdatacom.data_quality.ingestion import ingestion_quality_rules
 from histdatacom.data_quality.inventory import inventory_quality_rules
 from histdatacom.data_quality.manifest import manifest_quality_run_rules
-from histdatacom.data_quality.symbols import domain_quality_rules
+from histdatacom.data_quality.symbols import (
+    domain_quality_rules,
+    domain_quality_run_rules,
+)
 from histdatacom.data_quality.time import (
     time_quality_rules,
     time_quality_run_rules,
@@ -56,4 +59,6 @@ def quality_run_rules_for_groups(
         rules.extend(time_quality_run_rules())
     if "all" in normalized or "bars" in normalized:
         rules.extend(bars_quality_run_rules())
+    if "all" in normalized or "domain" in normalized:
+        rules.extend(domain_quality_run_rules())
     return tuple(rules)

@@ -5,8 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from histdatacom.data_quality import (
+    CROSS_INSTRUMENT_METADATA_KEY,
     DOMAIN_CALENDAR_SESSION_RULE_ID,
+    DOMAIN_CROSS_INSTRUMENT_RULE_ID,
     DOMAIN_SYMBOL_METADATA_RULE_ID,
+    QualitySeverity,
     QualityStatus,
     QualityTarget,
     QualityTargetKind,
@@ -30,9 +33,14 @@ def test_domain_group_registers_symbol_metadata_rule() -> None:
         DOMAIN_SYMBOL_METADATA_RULE_ID,
         DOMAIN_CALENDAR_SESSION_RULE_ID,
     ]
-    assert quality_run_rules_for_groups(("domain",)) == ()
+    assert [
+        rule.rule_id for rule in quality_run_rules_for_groups(("domain",))
+    ] == [DOMAIN_CROSS_INSTRUMENT_RULE_ID]
     assert DOMAIN_SYMBOL_METADATA_RULE_ID in {
         rule.rule_id for rule in quality_rules_for_groups(("all",))
+    }
+    assert DOMAIN_CROSS_INSTRUMENT_RULE_ID in {
+        rule.rule_id for rule in quality_run_rules_for_groups(("all",))
     }
 
 
@@ -203,11 +211,125 @@ def test_domain_symbol_metadata_warns_for_unknown_symbols(
     assert warning.metadata["symbol_metadata"]["normalized_symbol"] == "FOOBAR"
 
 
+def test_cross_instrument_run_rule_compares_triangular_fx_sets(
+    tmp_path: Path,
+) -> None:
+    """EURUSD / GBPUSD should be compared against direct EURGBP."""
+    _write_m1_prices(
+        tmp_path,
+        "EURUSD",
+        ("1.200000", "1.210000", "1.220000"),
+    )
+    _write_m1_prices(
+        tmp_path,
+        "GBPUSD",
+        ("1.500000", "1.512500", "1.525000"),
+    )
+    _write_m1_prices(
+        tmp_path,
+        "EURGBP",
+        ("0.810000", "0.900000", "0.800000"),
+    )
+
+    report = _domain_run_report_for_paths((tmp_path,))
+
+    summary = _finding(report, "DOMAIN_CROSS_INSTRUMENT_SUMMARY")
+    warning = _finding(report, "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_WARNING")
+    error = _finding(report, "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR")
+    payload = report.metadata[CROSS_INSTRUMENT_METADATA_KEY]
+    assert report.status is QualityStatus.FAILED
+    assert summary.rule_id == DOMAIN_CROSS_INSTRUMENT_RULE_ID
+    assert payload["triangular_candidate_count"] == 1
+    assert payload["triangular_compared_timestamp_count"] == 3
+    assert payload["triangular_warning_count"] == 1
+    assert payload["triangular_error_count"] == 1
+    assert warning.severity is QualitySeverity.WARNING
+    assert error.severity is QualitySeverity.ERROR
+    assert warning.metadata["samples"][0]["relationship"] == (
+        "EURUSD / GBPUSD ~= EURGBP"
+    )
+    assert error.metadata["samples"][0]["direct_symbol"] == "EURGBP"
+
+
+def test_cross_instrument_run_rule_warns_for_stale_join_risk(
+    tmp_path: Path,
+) -> None:
+    """Sparse joins should flag forward-filled stale instrument values."""
+    _write_m1_prices(
+        tmp_path,
+        "EURUSD",
+        ("1.200000", "1.201000", "1.202000", "1.203000"),
+    )
+    _write_m1_prices(tmp_path, "GBPUSD", ("1.500000",))
+
+    report = _domain_run_report_for_paths((tmp_path,))
+
+    summary = _finding(report, "DOMAIN_CROSS_INSTRUMENT_SUMMARY")
+    sparse = _finding(
+        report,
+        "DOMAIN_CROSS_INSTRUMENT_TIMESTAMP_GRID_SPARSE",
+    )
+    stale = _finding(report, "DOMAIN_CROSS_INSTRUMENT_STALE_JOIN_RISK")
+    sample = stale.metadata["samples"][0]
+    assert report.status is QualityStatus.WARNING
+    assert summary.metadata["timestamp_grid_group_count"] == 1
+    assert sparse.metadata["samples"][0]["common_timestamp_ratio"] == 0.25
+    assert sample["stale_symbol"] == "GBPUSD"
+    assert sample["active_symbol"] == "EURUSD"
+    assert sample["affected_timestamp_count"] == 3
+
+
+def test_cross_instrument_run_rule_reports_unavailable_symbol_sets(
+    tmp_path: Path,
+) -> None:
+    """Single-instrument runs should report unavailable cross checks as info."""
+    _write_m1_prices(tmp_path, "EURUSD", ("1.200000", "1.201000"))
+
+    report = _domain_run_report_for_paths((tmp_path,))
+
+    unavailable = _finding(report, "DOMAIN_CROSS_INSTRUMENT_UNAVAILABLE")
+    reasons = {sample["reason"] for sample in unavailable.metadata["samples"]}
+    assert report.status is QualityStatus.CLEAN
+    assert "no_multi_instrument_group" in reasons
+    assert "no_triangular_symbol_sets" in reasons
+    assert "no_inverse_symbol_sets" in reasons
+
+
 def _report_for_path(path: Path):
     discovery = discover_quality_targets((path,))
     return run_quality_assessment(
         discovery.targets,
         quality_rules_for_groups(("domain",)),
+    )
+
+
+def _domain_run_report_for_paths(paths: tuple[Path, ...]):
+    discovery = discover_quality_targets(paths)
+    return run_quality_assessment(
+        discovery.targets,
+        quality_rules_for_groups(("domain",)),
+        run_rules=quality_run_rules_for_groups(("domain",)),
+        metadata={"roots": [str(path) for path in paths]},
+    )
+
+
+def _write_m1_prices(
+    directory: Path,
+    symbol: str,
+    closes: tuple[str, ...],
+) -> Path:
+    rows = tuple(
+        f"20120201 000{index}00;{close};{close};{close};{close};0"
+        for index, close in enumerate(closes)
+    )
+    return write_ascii_case(
+        directory,
+        HistDataAsciiCase(
+            name=f"m1_{symbol.lower()}",
+            timeframe=M1,
+            filename=f"DAT_ASCII_{symbol}_M1_201202.csv",
+            rows=rows,
+        ),
     )
 
 
