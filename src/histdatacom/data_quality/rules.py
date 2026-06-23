@@ -9,6 +9,7 @@ from histdatacom.data_quality.bars import (
     bars_quality_rules,
     bars_quality_run_rules,
 )
+from histdatacom.data_quality.calendar import calendar_quality_rules
 from histdatacom.data_quality.discovery import normalize_quality_check_groups
 from histdatacom.data_quality.ingestion import ingestion_quality_rules
 from histdatacom.data_quality.inventory import inventory_quality_rules
@@ -39,6 +40,7 @@ def quality_rules_for_groups(
         rules.extend(ticks_quality_rules())
     if "all" in normalized or "domain" in normalized:
         rules.extend(domain_quality_rules())
+        rules.extend(calendar_quality_rules())
     return tuple(rules)
 
 

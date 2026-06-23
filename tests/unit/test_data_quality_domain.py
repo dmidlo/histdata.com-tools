@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from histdatacom.data_quality import (
+    DOMAIN_CALENDAR_SESSION_RULE_ID,
     DOMAIN_SYMBOL_METADATA_RULE_ID,
     QualityStatus,
     QualityTarget,
@@ -27,6 +28,7 @@ def test_domain_group_registers_symbol_metadata_rule() -> None:
     """The advertised domain group should execute symbol metadata checks."""
     assert [rule.rule_id for rule in quality_rules_for_groups(("domain",))] == [
         DOMAIN_SYMBOL_METADATA_RULE_ID,
+        DOMAIN_CALENDAR_SESSION_RULE_ID,
     ]
     assert quality_run_rules_for_groups(("domain",)) == ()
     assert DOMAIN_SYMBOL_METADATA_RULE_ID in {
@@ -146,8 +148,13 @@ def test_domain_symbol_metadata_supports_enum_value_aliases(
     tmp_path: Path,
 ) -> None:
     """Pairs enum values such as EUR_USD should normalize to EURUSD."""
+    path = tmp_path / "DAT_ASCII_EUR_USD_M1_201202.csv"
+    path.write_text(
+        "20120201 000000;1.306600;1.306610;1.306590;1.306600;0\n",
+        encoding="utf-8",
+    )
     target = QualityTarget(
-        path=str((tmp_path / "DAT_ASCII_EUR_USD_M1_201202.csv").resolve()),
+        path=str(path.resolve()),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
         timeframe=M1,
