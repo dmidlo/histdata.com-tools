@@ -33,6 +33,17 @@ from typing import TYPE_CHECKING, Any, Mapping
 import histdatacom
 from histdatacom import Options
 from histdatacom.cli import ArgParser
+from histdatacom.data_quality import (
+    QualityDiscoveryError,
+    QualityExitPolicy,
+    bounded_quality_payload,
+    discover_quality_targets,
+    format_quality_console_summary,
+    normalize_quality_check_groups,
+    run_quality_assessment,
+    write_quality_report,
+)
+from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.repository_output import (
     print_repository_failure,
     print_repository_table,
@@ -49,6 +60,7 @@ from histdatacom.sidecar.cutover import (
     should_submit_to_sidecar,
 )
 from histdatacom.utils import (
+    load_influx_yaml,
     set_working_data_dir,
     normalize_api_return_type,
 )
@@ -70,6 +82,13 @@ class RuntimeContext:
     sidecar_start: bool
     sidecar_wait_result: bool
     api_return_type: str | None
+    data_quality: bool
+    quality_paths: tuple[str, ...]
+    quality_check_groups: tuple[str, ...]
+    quality_report_path: str | None
+    quality_fail_on: str
+    quality_max_errors: int
+    quality_max_warnings: int
     available_remote_data: bool
     update_remote_data: bool
     import_to_influxdb: bool
@@ -128,7 +147,67 @@ class _HistDataCom:  # noqa:R701
                 print(histdatacom.__version__)  # noqa:T201
             return histdatacom.__version__
 
+        if self.context.data_quality:
+            return self._run_data_quality()
+
         return self._run_sidecar_job()
+
+    def _run_data_quality(self) -> dict:
+        """Run a local-only data-quality assessment."""
+        try:
+            check_groups = normalize_quality_check_groups(
+                self.context.quality_check_groups
+            )
+            discovery = discover_quality_targets(self.context.quality_paths)
+            exit_policy = QualityExitPolicy.from_values(
+                fail_on=self.context.quality_fail_on,
+                max_errors=self.context.quality_max_errors,
+                max_warnings=self.context.quality_max_warnings,
+            )
+        except QualityDiscoveryError as err:
+            if self.context.from_api:
+                raise
+            print(f"error: {err}", file=sys.stderr)  # noqa:T201
+            raise SystemExit(1) from err
+        except ValueError as err:
+            if self.context.from_api:
+                raise
+            print(f"error: {err}", file=sys.stderr)  # noqa:T201
+            raise SystemExit(1) from err
+
+        report = run_quality_assessment(
+            discovery.targets,
+            (),
+            metadata={
+                "operation": "data-quality",
+                "check_groups": list(check_groups),
+            },
+        )
+        artifact = (
+            None
+            if self.context.quality_report_path is None
+            else write_quality_report(report, self.context.quality_report_path)
+        )
+        decision = exit_policy.evaluate(report.summary())
+        payload = bounded_quality_payload(
+            operation="data-quality",
+            check_groups=check_groups,
+            discovery=discovery.to_dict(),
+            report=report,
+            decision=decision,
+            artifact=artifact,
+        )
+        if not self.context.from_api:
+            print(  # noqa:T201
+                format_quality_console_summary(
+                    report,
+                    check_groups=check_groups,
+                    artifact=artifact,
+                )
+            )
+            if decision.exit_code:
+                raise SystemExit(decision.exit_code)
+        return payload
 
     def _run_sidecar_job(
         self,
@@ -226,6 +305,7 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
     args["default_download_dir"] = set_working_data_dir(args["data_directory"])
     args["api_return_type"] = normalize_api_return_type(args["api_return_type"])
     options.api_return_type = args["api_return_type"]
+    _attach_influx_config_metadata(options, args)
     try:
         should_submit_to_sidecar(args)
     except ValueError as err:
@@ -242,10 +322,77 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         sidecar_start=bool(args["sidecar_start"]),
         sidecar_wait_result=bool(args["sidecar_wait_result"]),
         api_return_type=args["api_return_type"],
+        data_quality=bool(args["data_quality"]),
+        quality_paths=tuple(
+            str(path) for path in (args.get("quality_paths") or ())
+        ),
+        quality_check_groups=tuple(
+            sorted(
+                str(group) for group in (args.get("quality_check_groups") or ())
+            )
+        ),
+        quality_report_path=(
+            None
+            if args.get("quality_report_path") is None
+            else str(args["quality_report_path"])
+        ),
+        quality_fail_on=str(args["quality_fail_on"]),
+        quality_max_errors=int(args["quality_max_errors"]),
+        quality_max_warnings=int(args["quality_max_warnings"]),
         available_remote_data=bool(args["available_remote_data"]),
         update_remote_data=bool(args["update_remote_data"]),
         import_to_influxdb=bool(args["import_to_influxdb"]),
     )
+
+
+def _attach_influx_config_metadata(
+    options: Options,
+    args: dict[str, Any],
+) -> None:
+    """Snapshot caller-local Influx config before sidecar handoff."""
+    if not bool(args.get("import_to_influxdb")):
+        return
+    metadata = dict(getattr(options, "metadata", {}) or {})
+    if isinstance(metadata.get("influx_config"), Mapping):
+        _validate_influx_metadata_config(metadata["influx_config"])
+        options.metadata = metadata
+        args["metadata"] = metadata
+        return
+    influx_yaml = load_influx_yaml()
+    influx_config = dict(influx_yaml.get("influxdb") or {})
+    missing = [
+        key
+        for key in ("org", "bucket", "url", "token")
+        if not influx_config.get(key)
+    ]
+    if missing:
+        missing_text = ", ".join(missing)
+        raise InfluxConfigurationError(
+            "influxdb.yaml is missing required influxdb keys: "
+            f"{missing_text}."
+        )
+    metadata["influx_config"] = {
+        "INFLUX_ORG": str(influx_config.get("org", "") or ""),
+        "INFLUX_BUCKET": str(influx_config.get("bucket", "") or ""),
+        "INFLUX_URL": str(influx_config.get("url", "") or ""),
+        "INFLUX_TOKEN": str(influx_config.get("token", "") or ""),
+    }
+    options.metadata = metadata
+    args["metadata"] = metadata
+
+
+def _validate_influx_metadata_config(config: Mapping[str, Any]) -> None:
+    """Validate serialized sidecar Influx connection keys."""
+    missing = [
+        key
+        for key in ("INFLUX_ORG", "INFLUX_BUCKET", "INFLUX_URL", "INFLUX_TOKEN")
+        if not config.get(key)
+    ]
+    if missing:
+        missing_text = ", ".join(missing)
+        raise InfluxConfigurationError(
+            "influx metadata is missing required keys: " f"{missing_text}."
+        )
 
 
 def _freeze_runtime_arg(value: Any) -> Any:

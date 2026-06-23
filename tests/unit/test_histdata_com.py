@@ -9,6 +9,14 @@ from types import SimpleNamespace
 import pytest
 
 import histdatacom
+from histdatacom.data_quality import (
+    QualityFinding,
+    QualityLocation,
+    QualityReport,
+    QualityRuleResult,
+    QualitySeverity,
+)
+from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.options import Options
 from histdatacom.runtime_contracts import WorkStatus
 from histdatacom.sidecar.client import (
@@ -16,6 +24,11 @@ from histdatacom.sidecar.client import (
     SidecarJobResult,
     SidecarUnavailableError,
     TemporalDependencyError,
+)
+from tests.fixtures.histdata_ascii.quality_cases import (
+    CLEAN_M1_CASE,
+    write_ascii_case,
+    write_zip_case,
 )
 
 
@@ -214,6 +227,233 @@ def test_api_options_can_submit_sidecar_job_and_return_result(
     }
 
 
+@pytest.mark.parametrize(
+    ("target_kind", "expected_count", "expected_text"),
+    (
+        ("directory", 2, "targets: 2"),
+        ("csv", 1, "csv:"),
+        ("zip", 1, "zip:"),
+        ("empty-directory", 0, "No data quality targets discovered."),
+    ),
+)
+def test_data_quality_cli_discovers_local_targets_without_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    target_kind: str,
+    expected_count: int,
+    expected_text: str,
+) -> None:
+    """Quality CLI should discover local targets without starting sidecar."""
+    import histdatacom.histdata_com as histdata_com
+
+    root = tmp_path / target_kind
+    root.mkdir()
+    csv_path = write_ascii_case(root, CLEAN_M1_CASE)
+    zip_path = write_zip_case(root, CLEAN_M1_CASE)
+    target_path = {
+        "directory": root,
+        "csv": csv_path,
+        "zip": zip_path,
+        "empty-directory": tmp_path / "empty",
+    }[target_kind]
+    if target_kind == "empty-directory":
+        target_path.mkdir()
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda *args, **kwargs: pytest.fail(
+            "quality mode should not submit to sidecar"
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(target_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert "Data quality assessment" in output
+    assert expected_text in output
+    assert f"targets: {expected_count}" in output
+
+
+def test_data_quality_cli_missing_path_exits_without_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Missing quality targets should fail locally before any sidecar call."""
+    import histdatacom.histdata_com as histdata_com
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda *args, **kwargs: pytest.fail(
+            "quality mode should not submit to sidecar"
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path / "missing"),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    assert err.value.code == 1
+    assert "quality target path does not exist" in capsys.readouterr().err
+
+
+def test_data_quality_api_returns_discovery_payload_without_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """API quality runs should return the same bounded discovery payload."""
+    import histdatacom.histdata_com as histdata_com
+
+    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    options = Options()
+    options.data_quality = True
+    options.quality_paths = (str(csv_path),)
+    options.quality_check_groups = {"inventory"}
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda *args, **kwargs: pytest.fail(
+            "quality mode should not submit to sidecar"
+        ),
+    )
+
+    result = histdata_com.main(options)
+
+    assert result["operation"] == "data-quality"
+    assert result["check_groups"] == ["inventory"]
+    assert result["discovery"]["target_count"] == 1
+    assert result["summary"]["target_count"] == 1
+    assert result["report_artifact"] is None
+    assert result["exit_decision"]["exit_code"] == 0
+
+
+def test_data_quality_cli_writes_json_report_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Quality CLI should write a full JSON report when requested."""
+    import histdatacom.histdata_com as histdata_com
+
+    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    report_path = tmp_path / "reports" / "quality.json"
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda *args, **kwargs: pytest.fail(
+            "quality mode should not submit to sidecar"
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(csv_path),
+            "--quality-report",
+            str(report_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert "Clean files" in output
+    assert "Warning files\n- none" in output
+    assert "Failed files\n- none" in output
+    assert f"report: {report_path.resolve()}" in output
+    assert '"schema_version": "histdatacom.quality-report.v1"' in (
+        report_path.read_text(encoding="utf-8")
+    )
+
+
+def test_data_quality_cli_exit_policy_fails_on_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Quality CLI should exit non-zero when findings exceed policy."""
+    import histdatacom.histdata_com as histdata_com
+
+    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+
+    def fake_assessment(targets, rules, *, metadata=None):
+        target = tuple(targets)[0]
+        finding = QualityFinding(
+            severity=QualitySeverity.ERROR,
+            code="FILE_MISSING",
+            message="expected local file is missing",
+            rule_id="file.exists",
+            target=target,
+            location=QualityLocation(path=target.path),
+        )
+        return QualityReport(
+            targets=(target,),
+            rule_results=(
+                QualityRuleResult(
+                    rule_id="file.exists",
+                    target=target,
+                    findings=(finding,),
+                ),
+            ),
+            metadata=dict(metadata or {}),
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda *args, **kwargs: pytest.fail(
+            "quality mode should not submit to sidecar"
+        ),
+    )
+    monkeypatch.setattr(histdata_com, "run_quality_assessment", fake_assessment)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(csv_path),
+            "--quality-fail-on",
+            "error",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    assert err.value.code == 1
+    output = capsys.readouterr().out
+    assert "status: failed" in output
+    assert "Failed files\n- csv:" in output
+
+
 def test_back_to_back_sidecar_api_calls_do_not_leak_global_args(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -351,6 +591,19 @@ def test_back_to_back_cli_sidecar_requests_use_fresh_parser_state(
         "submit_run_request_and_observe_sync",
         fake_submit,
     )
+    (tmp_path / "influxdb.yaml").write_text(
+        "\n".join(
+            [
+                "influxdb:",
+                "  org: org",
+                "  bucket: bucket",
+                "  url: http://127.0.0.1:8086",
+                "  token: token",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -403,8 +656,14 @@ def test_back_to_back_cli_sidecar_requests_use_fresh_parser_state(
     assert first_request.pairs == ("eurusd",)
     assert first_request.timeframes == ("M1",)
     assert first_request.data_directory == str(tmp_path / "first")
+    assert first_request.validate_urls
+    assert first_request.download_data_archives
+    assert first_request.extract_csvs
     assert first_request.import_to_influxdb
     assert first_request.delete_after_influx
+    assert first_request.metadata["influx_config"]["INFLUX_BUCKET"] == (
+        "bucket"
+    )
     assert first_kwargs == {
         "start_if_needed": False,
         "wait_for_result": False,
@@ -599,6 +858,95 @@ def test_api_sidecar_repository_request_returns_available_data(
         "start_if_needed": True,
         "wait_for_result": True,
     }
+
+
+def test_influx_cli_config_is_captured_before_sidecar_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Influx imports should use the caller cwd, not the worker cwd."""
+    import histdatacom.histdata_com as histdata_com
+
+    (tmp_path / "influxdb.yaml").write_text(
+        "\n".join(
+            [
+                "influxdb:",
+                "  org: org",
+                "  bucket: bucket",
+                "  url: http://127.0.0.1:8086",
+                "  token: token",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _job_result()
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    options = _sidecar_options()
+    options.import_to_influxdb = True
+
+    histdata_com.main(options)
+
+    request = captured["request"]
+    assert request.validate_urls is True
+    assert request.download_data_archives is True
+    assert request.extract_csvs is True
+    assert request.import_to_influxdb is True
+    assert request.metadata["influx_config"] == {
+        "INFLUX_ORG": "org",
+        "INFLUX_BUCKET": "bucket",
+        "INFLUX_URL": "http://127.0.0.1:8086",
+        "INFLUX_TOKEN": "token",
+    }
+    assert captured["kwargs"] == {
+        "start_if_needed": True,
+        "wait_for_result": True,
+    }
+
+
+def test_influx_cli_config_validation_happens_before_sidecar_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Malformed Influx config should fail in the caller process."""
+    import histdatacom.histdata_com as histdata_com
+
+    (tmp_path / "influxdb.yaml").write_text(
+        "\n".join(
+            [
+                "influxdb:",
+                "  org: org",
+                "  bucket: bucket",
+                "  url: http://127.0.0.1:8086",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    def fail_submit(*args: object, **kwargs: object) -> None:
+        raise AssertionError("malformed config should not submit to sidecar")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    options = _sidecar_options()
+    options.import_to_influxdb = True
+
+    with pytest.raises(InfluxConfigurationError, match="token"):
+        histdata_com.main(options)
 
 
 def test_api_sidecar_repository_failure_returns_available_data(

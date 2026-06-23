@@ -11,7 +11,11 @@ import pytest
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
 from histdatacom.sidecar import client as sidecar_client
 from histdatacom.sidecar import cli
-from histdatacom.sidecar.control import JobLifecycle, SidecarJobSnapshot
+from histdatacom.sidecar.control import (
+    JobLifecycle,
+    SidecarJobList,
+    SidecarJobSnapshot,
+)
 from histdatacom.sidecar.queues import build_sidecar_worker_config
 from histdatacom.sidecar.runtime import build_sidecar_runtime_policy
 
@@ -349,6 +353,80 @@ def test_sidecar_jobs_cli_resolves_config_from_running_supervisor(
     assert isinstance(inspect_kwargs, dict)
     assert inspect_kwargs["config"] is resolved_config
     assert inspect_kwargs["supervisor"] is supervisor
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ["jobs", "--json", "list"],
+        ["jobs", "list", "--json"],
+    ),
+)
+def test_sidecar_jobs_list_accepts_json_before_or_after_subcommand(
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Documented job commands should accept JSON flags naturally."""
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(
+        cli,
+        "list_job_statuses_sync",
+        lambda **kwargs: SidecarJobList(jobs=(_snapshot(),)),
+    )
+
+    exit_code = cli.main(argv)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["jobs"][0]["workflow_id"] == "histdatacom-run-cli"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ["jobs", "--json", "--offline", "inspect", "histdatacom-run-cli"],
+        ["jobs", "inspect", "histdatacom-run-cli", "--json", "--offline"],
+    ),
+)
+def test_sidecar_jobs_inspect_accepts_shared_flags_after_subcommand(
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Offline and JSON flags should work in documented user order."""
+    captured: dict[str, object] = {}
+
+    def fake_inspect(
+        workflow_id: str,
+        **kwargs: object,
+    ) -> SidecarJobSnapshot:
+        captured["workflow_id"] = workflow_id
+        captured["kwargs"] = kwargs
+        return _snapshot()
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("stopped"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(cli, "inspect_job_status_sync", fake_inspect)
+
+    exit_code = cli.main(argv)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["workflow_id"] == "histdatacom-run-cli"
+    assert captured["workflow_id"] == "histdatacom-run-cli"
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["offline"] is True
 
 
 def test_sidecar_jobs_offline_cli_reads_persisted_store(

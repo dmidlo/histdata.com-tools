@@ -174,6 +174,96 @@ def test_no_sidecar_start_cli_flag_requires_running_sidecar(
     assert options.validate_urls
 
 
+def test_data_quality_cli_mode_bypasses_legacy_prerequisites(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Offline quality mode should not auto-enable network/download stages."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-checks",
+            "inventory",
+            "ingestion",
+            "--quality-report",
+            str(tmp_path / "quality.json"),
+            "--quality-fail-on",
+            "warning",
+            "--quality-max-errors",
+            "2",
+            "--quality-max-warnings",
+            "5",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.data_quality
+    assert options.quality_paths == [str(tmp_path)]
+    assert options.quality_check_groups == ["inventory", "ingestion"]
+    assert options.quality_report_path == str(tmp_path / "quality.json")
+    assert options.quality_fail_on == "warning"
+    assert options.quality_max_errors == 2
+    assert options.quality_max_warnings == 5
+    assert not options.validate_urls
+    assert not options.download_data_archives
+    assert not options.extract_csvs
+    assert not options.import_to_influxdb
+
+
+def test_data_quality_cli_defaults_to_data_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Operators can run quality mode against the configured data directory."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--data-directory",
+            str(tmp_path),
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.data_quality
+    assert options.quality_paths == (str(tmp_path),)
+    assert not options.validate_urls
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ["histdatacom", "--quality-target", "data"],
+        ["histdatacom", "--quality-checks", "inventory"],
+        ["histdatacom", "--quality-report", "quality.json"],
+        ["histdatacom", "--quality-fail-on", "warning"],
+        ["histdatacom", "--quality-max-errors", "1"],
+        ["histdatacom", "--quality-max-warnings", "1"],
+        ["histdatacom", "--quality", "-D"],
+    ),
+)
+def test_data_quality_cli_rejects_ambiguous_quality_flags(
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Quality mode should stay separate from legacy network operations."""
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit) as err:
+        ArgParser(Options())()
+
+    assert err.value.code == 1
+
+
 def test_api_options_ignore_ambient_process_argv(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -254,6 +344,7 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
     assert first_options.data_directory == str(first_data_dir)
     assert first_options.validate_urls
     assert first_options.download_data_archives
+    assert first_options.extract_csvs
     assert first_options.import_to_influxdb
     assert first_options.delete_after_influx
     assert not first_options.sidecar_start
@@ -337,7 +428,7 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
                 "update_remote_data": False,
                 "validate_urls": True,
                 "download_data_archives": True,
-                "extract_csvs": False,
+                "extract_csvs": True,
                 "import_to_influxdb": True,
             },
         ),
