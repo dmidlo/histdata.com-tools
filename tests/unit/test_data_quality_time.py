@@ -6,6 +6,7 @@ from pathlib import Path
 
 from histdatacom.data_quality import (
     ASCII_EST_NO_DST_TIME_RULE_ID,
+    ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
     QualitySeverity,
     QualityStatus,
     discover_quality_targets,
@@ -18,7 +19,9 @@ from histdatacom.histdata_ascii import (
 )
 from tests.fixtures.histdata_ascii.quality_cases import (
     CLEAN_M1_CASE,
+    CLEAN_TICK_ROWS,
     EST_NO_DST_CALENDAR_CASES,
+    case_by_name,
     write_ascii_case,
     write_zip_case,
 )
@@ -27,7 +30,8 @@ from tests.fixtures.histdata_ascii.quality_cases import (
 def test_time_group_registers_est_no_dst_rule() -> None:
     """The advertised time group should execute concrete timestamp checks."""
     assert [rule.rule_id for rule in quality_rules_for_groups(("time",))] == [
-        ASCII_EST_NO_DST_TIME_RULE_ID
+        ASCII_EST_NO_DST_TIME_RULE_ID,
+        ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
     ]
 
 
@@ -51,6 +55,13 @@ def test_clean_ascii_file_reports_est_no_dst_conversion_summary(
         "20120201 000000"
     )
     assert summary.metadata["samples"][0]["timestamp_utc_ms"] == 1328072400000
+
+    sequence = _finding(report.findings, "ASCII_TIMESTAMP_SEQUENCE_SUMMARY")
+    assert sequence.rule_id == ASCII_TIMESTAMP_SEQUENCE_RULE_ID
+    assert sequence.metadata["non_monotonic_count"] == 0
+    assert sequence.metadata["m1_duplicate_timestamp_count"] == 0
+    assert sequence.metadata["m1_granularity_drift_count"] == 0
+    assert sequence.metadata["duplicate_policy"] == "detect-only"
 
 
 def test_dst_boundary_rows_keep_fixed_est_no_dst_offset(
@@ -186,6 +197,168 @@ def test_zip_member_timestamp_findings_include_source_member(
     )
 
 
+def test_m1_duplicate_timestamp_reports_without_deduping(
+    tmp_path: Path,
+) -> None:
+    """Duplicate M1 timestamps should be reported, not mutated."""
+    report = _report_for_path(
+        write_ascii_case(tmp_path, case_by_name("m1_duplicate_timestamp"))
+    )
+
+    finding = _finding(report.findings, "ASCII_M1_DUPLICATE_TIMESTAMP")
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_SEQUENCE_SUMMARY")
+    assert report.status is QualityStatus.WARNING
+    assert finding.severity is QualitySeverity.WARNING
+    assert finding.rule_id == ASCII_TIMESTAMP_SEQUENCE_RULE_ID
+    assert finding.location.row_number == 2
+    assert finding.location.timestamp_source == "20120201 000000"
+    assert finding.location.metadata["duplicate_of_row"] == 1
+    assert finding.location.metadata["dedupe_policy"] == "report-only"
+    assert finding.metadata["row_count"] == 1
+    assert summary.metadata["m1_duplicate_timestamp_count"] == 1
+
+
+def test_non_monotonic_timestamp_reports_previous_row_context(
+    tmp_path: Path,
+) -> None:
+    """Timestamp ordering findings should identify the preceding row."""
+    report = _report_for_path(
+        write_ascii_case(
+            tmp_path,
+            case_by_name("m1_non_monotonic_timestamp"),
+        )
+    )
+
+    finding = _finding(report.findings, "ASCII_TIMESTAMP_NON_MONOTONIC")
+    assert report.status is QualityStatus.WARNING
+    assert finding.severity is QualitySeverity.WARNING
+    assert finding.location.row_number == 2
+    assert finding.location.timestamp_source == "20120201 000000"
+    assert finding.location.metadata["previous_row_number"] == 1
+    assert finding.location.metadata["previous_timestamp_source"] == (
+        "20120201 000100"
+    )
+    assert finding.location.timestamp_utc_ms == 1328072400000
+    assert finding.location.metadata["previous_timestamp_utc_ms"] == (
+        1328072460000
+    )
+
+
+def test_m1_granularity_reports_second_and_subsecond_drift(
+    tmp_path: Path,
+) -> None:
+    """M1 rows must land exactly on minute boundaries."""
+    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_GRANULARITY.csv"
+    path.write_text(
+        "\n".join(
+            (
+                "20120201 000030;1.306600;1.306600;1.306560;1.306560;0",
+                "20120201 000100123;1.306570;1.306570;1.306470;1.306560;17",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = _report_for_path(path)
+
+    finding = _finding(report.findings, "ASCII_M1_GRANULARITY_DRIFT")
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_SEQUENCE_SUMMARY")
+    assert report.status is QualityStatus.FAILED
+    assert finding.severity is QualitySeverity.ERROR
+    assert finding.location.row_number == 1
+    assert finding.location.metadata["source_second"] == 30
+    assert finding.location.metadata["source_subsecond_digits"] == ""
+    assert finding.metadata["row_count"] == 2
+    assert (
+        finding.metadata["samples"][1]["metadata"]["source_subsecond_digits"]
+        == "123"
+    )
+    assert finding.metadata["samples"][1]["timestamp_utc_ms"] is None
+    assert summary.metadata["m1_granularity_drift_count"] == 2
+    assert summary.metadata["invalid_timestamp_count"] == 1
+
+
+def test_tick_duplicate_row_reports_exact_row_policy(
+    tmp_path: Path,
+) -> None:
+    """Tick duplicate detection should be exact-row and report-only."""
+    report = _report_for_path(
+        write_ascii_case(tmp_path, case_by_name("tick_duplicate_row"))
+    )
+
+    finding = _finding(report.findings, "ASCII_TICK_DUPLICATE_ROW")
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_SEQUENCE_SUMMARY")
+    assert report.status is QualityStatus.WARNING
+    assert finding.severity is QualitySeverity.WARNING
+    assert finding.location.row_number == 2
+    assert finding.location.timestamp_source == "20120201 000003660"
+    assert finding.location.metadata["duplicate_of_row"] == 1
+    assert finding.location.metadata["dedupe_policy"] == "report-only"
+    assert finding.location.metadata["duplicate_row_values"] == [
+        "20120201 000003660",
+        "1.306600",
+        "1.306770",
+        "0",
+    ]
+    assert summary.metadata["tick_duplicate_row_count"] == 1
+
+
+def test_tick_same_timestamp_with_different_quote_is_not_duplicate(
+    tmp_path: Path,
+) -> None:
+    """Tick duplicates are exact row matches, not timestamp-only matches."""
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_SAME_MS.csv"
+    path.write_text(
+        "\n".join(
+            (
+                CLEAN_TICK_ROWS[0],
+                "20120201 000003660,1.306610,1.306780,25",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = _report_for_path(path)
+
+    assert report.status is QualityStatus.CLEAN
+    assert _findings(report.findings, "ASCII_TICK_DUPLICATE_ROW") == ()
+
+
+def test_tick_precision_mismatch_reports_millisecond_width(
+    tmp_path: Path,
+) -> None:
+    """Tick timestamps should retain HistData's millisecond width."""
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_PRECISION.csv"
+    path.write_text(
+        "\n".join(
+            (
+                "20120201 0000039,1.306600,1.306770,0",
+                "20120201 000004973000,1.306580,1.306750,25",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = _report_for_path(path)
+
+    finding = _finding(report.findings, "ASCII_TICK_PRECISION_MISMATCH")
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_SEQUENCE_SUMMARY")
+    assert report.status is QualityStatus.FAILED
+    assert finding.severity is QualitySeverity.ERROR
+    assert finding.location.row_number == 1
+    assert finding.location.metadata["expected_fractional_digits"] == 3
+    assert finding.location.metadata["observed_fractional_digits"] == 1
+    assert finding.metadata["row_count"] == 2
+    assert (
+        finding.metadata["samples"][1]["metadata"]["observed_fractional_digits"]
+        == 6
+    )
+    assert summary.metadata["tick_precision_mismatch_count"] == 2
+
+
 def _report_for_path(path: Path):
     discovery = discover_quality_targets((path,))
     return run_quality_assessment(
@@ -198,3 +371,7 @@ def _finding(findings, code: str):
     matches = tuple(finding for finding in findings if finding.code == code)
     assert len(matches) == 1
     return matches[0]
+
+
+def _findings(findings, code: str):
+    return tuple(finding for finding in findings if finding.code == code)
