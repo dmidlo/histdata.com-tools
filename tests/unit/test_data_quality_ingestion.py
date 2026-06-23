@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from histdatacom.data_quality import (
+    ASCII_ROW_COUNT_INGESTION_RULE_ID,
     ASCII_SCHEMA_INGESTION_RULE_ID,
     ASCII_TEXT_INGESTION_RULE_ID,
     QualitySeverity,
@@ -13,10 +14,18 @@ from histdatacom.data_quality import (
     quality_rules_for_groups,
     run_quality_assessment,
 )
+from histdatacom.histdata_ascii import (
+    CACHE_FILENAME,
+    M1,
+    parse_ascii_lines,
+    to_polars_frame,
+    write_polars_cache,
+)
 from tests.fixtures.histdata_ascii.quality_cases import (
     CLEAN_M1_CASE,
     CLEAN_M1_ROWS,
     CLEAN_TICK_CASE,
+    HistDataAsciiCase,
     case_by_name,
     write_ascii_case,
     write_zip_case,
@@ -28,6 +37,7 @@ def test_ingestion_group_registers_text_rule() -> None:
     assert [
         rule.rule_id for rule in quality_rules_for_groups(("ingestion",))
     ] == [
+        ASCII_ROW_COUNT_INGESTION_RULE_ID,
         ASCII_TEXT_INGESTION_RULE_ID,
         ASCII_SCHEMA_INGESTION_RULE_ID,
     ]
@@ -40,7 +50,19 @@ def test_clean_ascii_file_passes_ingestion_text_checks(
     report = _report_for_path(write_ascii_case(tmp_path, CLEAN_M1_CASE))
 
     assert report.status is QualityStatus.CLEAN
-    assert report.findings == ()
+    assert [finding.code for finding in report.findings] == [
+        "ASCII_ROW_COUNT_SUMMARY"
+    ]
+    summary = _finding(report.findings, "ASCII_ROW_COUNT_SUMMARY")
+    assert summary.severity is QualitySeverity.INFO
+    assert summary.rule_id == ASCII_ROW_COUNT_INGESTION_RULE_ID
+    assert summary.metadata["row_count"] == 3
+    assert summary.metadata["line_count"] == 3
+    assert summary.metadata["payload_size_bytes"] > 80
+    assert summary.metadata["container_size_bytes"] > 80
+    assert summary.metadata["symbol"] == "EURUSD"
+    assert summary.metadata["timeframe"] == "M1"
+    assert summary.metadata["period"] == "201202"
 
 
 def test_clean_m1_and_tick_files_pass_strict_schema_checks(
@@ -52,8 +74,121 @@ def test_clean_m1_and_tick_files_pass_strict_schema_checks(
 
     assert m1_report.status is QualityStatus.CLEAN
     assert tick_report.status is QualityStatus.CLEAN
-    assert m1_report.findings == ()
-    assert tick_report.findings == ()
+    assert _non_info_codes(m1_report.findings) == []
+    assert _non_info_codes(tick_report.findings) == []
+    assert (
+        _finding(m1_report.findings, "ASCII_ROW_COUNT_SUMMARY").metadata[
+            "row_count"
+        ]
+        == 3
+    )
+    assert (
+        _finding(tick_report.findings, "ASCII_ROW_COUNT_SUMMARY").metadata[
+            "row_count"
+        ]
+        == 3
+    )
+
+
+def test_zip_csv_member_reports_row_count_and_member_size(
+    tmp_path: Path,
+) -> None:
+    """ZIP reports should expose row count for the CSV member payload."""
+    archive = write_zip_case(
+        tmp_path,
+        CLEAN_M1_CASE,
+        zip_filename="DAT_ASCII_EURUSD_M1_201202.zip",
+    )
+
+    report = _report_for_path(archive)
+
+    finding = _finding(report.findings, "ASCII_ROW_COUNT_SUMMARY")
+    assert report.status is QualityStatus.CLEAN
+    assert finding.metadata["row_count"] == 3
+    assert finding.metadata["source_member"] == CLEAN_M1_CASE.filename
+    assert finding.metadata["payload_size_bytes"] > 80
+    assert (
+        finding.metadata["container_size_bytes"]
+        >= finding.metadata["payload_size_bytes"]
+    )
+
+
+def test_empty_ascii_file_is_a_hard_ingestion_failure(
+    tmp_path: Path,
+) -> None:
+    """Zero-row HistData ASCII files should fail before later checks."""
+    report = _report_for_path(
+        write_ascii_case(tmp_path, case_by_name("m1_empty_file"))
+    )
+
+    finding = _finding(report.findings, "ASCII_FILE_EMPTY")
+    assert report.status is QualityStatus.FAILED
+    assert finding.severity is QualitySeverity.ERROR
+    assert finding.rule_id == ASCII_ROW_COUNT_INGESTION_RULE_ID
+    assert finding.metadata["row_count"] == 0
+    assert finding.metadata["payload_size_bytes"] == 0
+
+
+def test_tiny_ascii_file_warns_with_configured_thresholds(
+    tmp_path: Path,
+) -> None:
+    """Tiny valid files should be visible without requiring baselines."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="m1_tiny_file",
+            timeframe=M1,
+            filename="DAT_ASCII_EURUSD_M1_201202_TINY.csv",
+            rows=(CLEAN_M1_ROWS[0],),
+        ),
+    )
+
+    report = _report_for_path(path)
+
+    tiny_rows = _finding(report.findings, "ASCII_FILE_TINY")
+    tiny_size = _finding(report.findings, "ASCII_FILE_SIZE_TINY")
+    assert report.status is QualityStatus.WARNING
+    assert tiny_rows.severity is QualitySeverity.WARNING
+    assert tiny_rows.metadata["row_count"] == 1
+    assert tiny_rows.metadata["minimum_row_count"] == 2
+    assert tiny_size.metadata["payload_size_bytes"] < 60
+    assert tiny_size.metadata["minimum_size_bytes"] == 60
+
+
+def test_missing_final_line_ending_warns_as_possible_truncation(
+    tmp_path: Path,
+) -> None:
+    """A non-empty text payload lacking a final terminator is suspicious."""
+    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_TRUNCATED.csv"
+    path.write_text("\n".join(CLEAN_M1_ROWS[:2]), encoding="utf-8")
+
+    report = _report_for_path(path)
+
+    finding = _finding(report.findings, "ASCII_FILE_TRUNCATED")
+    assert report.status is QualityStatus.WARNING
+    assert finding.metadata["row_count"] == 2
+    assert finding.metadata["final_line_terminated"] is False
+
+
+def test_cache_target_reports_row_count_size_schema_and_bounds(
+    tmp_path: Path,
+) -> None:
+    """Readable Polars cache files should expose equivalent metadata."""
+    cache_path = tmp_path / CACHE_FILENAME
+    batch = parse_ascii_lines(M1, CLEAN_M1_ROWS)
+    write_polars_cache(to_polars_frame(batch), cache_path)
+
+    report = _report_for_path(cache_path)
+
+    finding = _finding(report.findings, "ASCII_ROW_COUNT_SUMMARY")
+    assert report.status is QualityStatus.CLEAN
+    assert finding.metadata["kind"] == "cache"
+    assert finding.metadata["row_count"] == 3
+    assert finding.metadata["line_count"] == 3
+    assert finding.metadata["payload_size_bytes"] == cache_path.stat().st_size
+    assert finding.metadata["schema"]["datetime"] == "Int64"
+    assert finding.metadata["start_timestamp_utc_ms"] == batch.summary.start
+    assert finding.metadata["end_timestamp_utc_ms"] == batch.summary.end
 
 
 def test_malformed_rows_are_counted_without_aborting_run(
@@ -134,10 +269,9 @@ def test_shifted_column_rows_are_reported_once(
     assert report.status is QualityStatus.FAILED
     assert finding.location.row_number == 2
     assert finding.location.column == "datetime"
+    assert finding.rule_id == ASCII_SCHEMA_INGESTION_RULE_ID
     assert finding.metadata["columns"] == ["datetime", "bid", "ask", "vol"]
-    assert [item.code for item in report.findings] == [
-        "ASCII_ROW_SCHEMA_SHIFTED"
-    ]
+    assert _non_info_codes(report.findings) == ["ASCII_ROW_SCHEMA_SHIFTED"]
 
 
 def test_bad_volume_rows_fail_schema_checks_without_rejecting_zero_volume(
@@ -266,3 +400,11 @@ def _finding(findings, code: str):
     matches = tuple(finding for finding in findings if finding.code == code)
     assert len(matches) == 1
     return matches[0]
+
+
+def _non_info_codes(findings) -> list[str]:
+    return [
+        finding.code
+        for finding in findings
+        if finding.severity is not QualitySeverity.INFO
+    ]

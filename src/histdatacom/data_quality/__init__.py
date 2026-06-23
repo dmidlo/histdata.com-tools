@@ -30,8 +30,10 @@ from histdatacom.data_quality.engine import (
     run_quality_assessment,
 )
 from histdatacom.data_quality.ingestion import (
+    ASCII_ROW_COUNT_INGESTION_RULE_ID,
     ASCII_SCHEMA_INGESTION_RULE_ID,
     ASCII_TEXT_INGESTION_RULE_ID,
+    HistDataAsciiRowCountIngestionRule,
     HistDataAsciiSchemaIngestionRule,
     HistDataAsciiTextIngestionRule,
     ingestion_quality_rules,
@@ -65,12 +67,14 @@ from histdatacom.data_quality.rules import (
 )
 
 __all__ = [
+    "ASCII_ROW_COUNT_INGESTION_RULE_ID",
     "ASCII_SCHEMA_INGESTION_RULE_ID",
     "ASCII_TEXT_INGESTION_RULE_ID",
     "COVERAGE_MANIFEST_SCHEMA_VERSION",
     "QUALITY_EXIT_TRIGGERS",
     "QUALITY_REPORT_SCHEMA_VERSION",
     "CoverageDimension",
+    "HistDataAsciiRowCountIngestionRule",
     "HistDataAsciiSchemaIngestionRule",
     "HistDataAsciiTextIngestionRule",
     "HistDataCoverageManifestRule",

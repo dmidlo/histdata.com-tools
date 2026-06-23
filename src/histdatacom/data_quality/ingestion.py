@@ -7,6 +7,7 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 import zipfile
 
 from histdatacom.data_quality.contracts import (
@@ -22,11 +23,15 @@ from histdatacom.histdata_ascii import (
     delimiter_for_timeframe,
     normalize_ascii_row,
     parse_histdata_datetime_to_utc_ms,
+    read_polars_cache,
 )
 from histdatacom.runtime_contracts import JSONValue
 
+ASCII_ROW_COUNT_INGESTION_RULE_ID = "ingestion.ascii.row_count"
 ASCII_TEXT_INGESTION_RULE_ID = "ingestion.ascii.text"
 ASCII_SCHEMA_INGESTION_RULE_ID = "ingestion.ascii.schema"
+DEFAULT_MIN_ROW_COUNT = 2
+DEFAULT_MIN_SIZE_BYTES = 60
 INT32_MAX = 2**31 - 1
 MAX_ROW_SAMPLES = 5
 
@@ -123,6 +128,162 @@ class _SchemaScan:
     bad_volumes: list[_SchemaSample] = field(default_factory=list)
     shifted_rows: list[_SchemaSample] = field(default_factory=list)
     invalid_rows: list[_SchemaSample] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class _IngestionProfile:
+    kind: str
+    row_count: int
+    payload_size_bytes: int
+    container_size_bytes: int
+    source_member: str = ""
+    line_count: int | None = None
+    empty_line_count: int | None = None
+    final_line_terminated: bool | None = None
+    schema: dict[str, str] = field(default_factory=dict)
+    start_timestamp_utc_ms: int | None = None
+    end_timestamp_utc_ms: int | None = None
+
+    def to_metadata(self, target: QualityTarget) -> dict[str, JSONValue]:
+        """Return bounded JSON-compatible profile metadata."""
+        metadata: dict[str, JSONValue] = {
+            "kind": self.kind,
+            "filename": Path(target.path).name,
+            "source_member": self.source_member,
+            "row_count": self.row_count,
+            "payload_size_bytes": self.payload_size_bytes,
+            "container_size_bytes": self.container_size_bytes,
+            "symbol": target.symbol,
+            "timeframe": target.timeframe,
+            "period": target.period,
+            "data_format": target.data_format,
+        }
+        if self.line_count is not None:
+            metadata["line_count"] = self.line_count
+        if self.empty_line_count is not None:
+            metadata["empty_line_count"] = self.empty_line_count
+        if self.final_line_terminated is not None:
+            metadata["final_line_terminated"] = self.final_line_terminated
+        if self.schema:
+            metadata["schema"] = dict(self.schema)
+        if self.start_timestamp_utc_ms is not None:
+            metadata["start_timestamp_utc_ms"] = self.start_timestamp_utc_ms
+        if self.end_timestamp_utc_ms is not None:
+            metadata["end_timestamp_utc_ms"] = self.end_timestamp_utc_ms
+        return metadata
+
+
+@dataclass(slots=True)
+class HistDataAsciiRowCountIngestionRule:
+    """Report row and size profiles for local HistData artifacts."""
+
+    min_row_count: int = DEFAULT_MIN_ROW_COUNT
+    min_size_bytes: int = DEFAULT_MIN_SIZE_BYTES
+    tiny_severity: QualitySeverity = QualitySeverity.WARNING
+    size_severity: QualitySeverity = QualitySeverity.WARNING
+    truncation_severity: QualitySeverity = QualitySeverity.WARNING
+    rule_id: str = ASCII_ROW_COUNT_INGESTION_RULE_ID
+    description: str = (
+        "Report per-file row counts and flag empty, tiny, or truncated "
+        "HistData artifacts."
+    )
+
+    def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
+        """Return row-count and size findings for one target."""
+        if not _is_ingestion_count_target(target):
+            return ()
+
+        try:
+            profile = _profile_ingestion_target(target)
+        except _SourceReadError as exc:
+            if target.kind is not QualityTargetKind.CACHE:
+                return ()
+            return (
+                _finding(
+                    target,
+                    code=exc.code,
+                    message=exc.message,
+                    severity=QualitySeverity.ERROR,
+                    rule_id=self.rule_id,
+                    metadata=exc.metadata,
+                ),
+            )
+        except UnicodeDecodeError:
+            return ()
+
+        metadata = profile.to_metadata(target)
+        findings: list[QualityFinding] = [
+            _finding(
+                target,
+                code="ASCII_ROW_COUNT_SUMMARY",
+                message="Artifact row count and byte-size profile.",
+                severity=QualitySeverity.INFO,
+                rule_id=self.rule_id,
+                metadata={
+                    **metadata,
+                    "minimum_row_count": self.min_row_count,
+                    "minimum_size_bytes": self.min_size_bytes,
+                },
+            )
+        ]
+        if profile.row_count == 0:
+            findings.append(
+                _finding(
+                    target,
+                    code="ASCII_FILE_EMPTY",
+                    message="Artifact has zero data rows.",
+                    severity=QualitySeverity.ERROR,
+                    rule_id=self.rule_id,
+                    metadata=metadata,
+                )
+            )
+            return tuple(findings)
+
+        if profile.row_count < self.min_row_count:
+            findings.append(
+                _finding(
+                    target,
+                    code="ASCII_FILE_TINY",
+                    message="Artifact row count is below the configured "
+                    "minimum.",
+                    severity=QualitySeverity.from_value(self.tiny_severity),
+                    rule_id=self.rule_id,
+                    metadata={
+                        **metadata,
+                        "minimum_row_count": self.min_row_count,
+                    },
+                )
+            )
+        if profile.payload_size_bytes < self.min_size_bytes:
+            findings.append(
+                _finding(
+                    target,
+                    code="ASCII_FILE_SIZE_TINY",
+                    message="Artifact byte size is below the configured "
+                    "minimum.",
+                    severity=QualitySeverity.from_value(self.size_severity),
+                    rule_id=self.rule_id,
+                    metadata={
+                        **metadata,
+                        "minimum_size_bytes": self.min_size_bytes,
+                    },
+                )
+            )
+        if profile.final_line_terminated is False:
+            findings.append(
+                _finding(
+                    target,
+                    code="ASCII_FILE_TRUNCATED",
+                    message="Text artifact does not end with a line "
+                    "terminator, which may indicate truncation.",
+                    severity=QualitySeverity.from_value(
+                        self.truncation_severity
+                    ),
+                    rule_id=self.rule_id,
+                    metadata=metadata,
+                )
+            )
+        return tuple(findings)
 
 
 @dataclass(slots=True)
@@ -289,9 +450,16 @@ class HistDataAsciiSchemaIngestionRule:
 
 def ingestion_quality_rules() -> tuple[QualityRule, ...]:
     """Return ingestion quality rules in deterministic execution order."""
+    row_count_rule: QualityRule = HistDataAsciiRowCountIngestionRule()
     text_rule: QualityRule = HistDataAsciiTextIngestionRule()
     schema_rule: QualityRule = HistDataAsciiSchemaIngestionRule()
-    return (text_rule, schema_rule)
+    return (row_count_rule, text_rule, schema_rule)
+
+
+def _is_ingestion_count_target(target: QualityTarget) -> bool:
+    return (
+        _is_ascii_text_target(target) or target.kind is QualityTargetKind.CACHE
+    )
 
 
 def _is_ascii_text_target(target: QualityTarget) -> bool:
@@ -299,6 +467,84 @@ def _is_ascii_text_target(target: QualityTarget) -> bool:
         QualityTargetKind.CSV,
         QualityTargetKind.ZIP,
     }
+
+
+def _profile_ingestion_target(target: QualityTarget) -> _IngestionProfile:
+    if target.kind is QualityTargetKind.CACHE:
+        return _profile_cache_target(target)
+    return _profile_ascii_text_target(target)
+
+
+def _profile_ascii_text_target(target: QualityTarget) -> _IngestionProfile:
+    payload = _read_text_payload(target)
+    text = payload.data.decode("utf-8")
+    lines = text.splitlines()
+    row_count = sum(1 for line in lines if line.strip())
+    path = Path(target.path)
+    return _IngestionProfile(
+        kind=target.kind.value,
+        row_count=row_count,
+        line_count=len(lines),
+        empty_line_count=len(lines) - row_count,
+        payload_size_bytes=len(payload.data),
+        container_size_bytes=_path_size(path),
+        source_member=payload.source_member,
+        final_line_terminated=(
+            not payload.data or payload.data.endswith((b"\n", b"\r"))
+        ),
+    )
+
+
+def _profile_cache_target(target: QualityTarget) -> _IngestionProfile:
+    path = Path(target.path)
+    try:
+        frame = read_polars_cache(path)
+    except ValueError as exc:
+        raise _SourceReadError(
+            code="ASCII_CACHE_UNREADABLE",
+            message="Polars cache file could not be read for row-count "
+            "checks.",
+            metadata={
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "payload_size_bytes": _path_size(path),
+            },
+        ) from exc
+
+    row_count = int(frame.height)
+    return _IngestionProfile(
+        kind=target.kind.value,
+        row_count=row_count,
+        line_count=row_count,
+        payload_size_bytes=_path_size(path),
+        container_size_bytes=_path_size(path),
+        schema={str(key): str(value) for key, value in frame.schema.items()},
+        start_timestamp_utc_ms=_cache_timestamp_at(frame, 0),
+        end_timestamp_utc_ms=_cache_timestamp_at(frame, row_count - 1),
+    )
+
+
+def _path_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def _cache_timestamp_at(frame: Any, row_index: int) -> int | None:
+    if row_index < 0:
+        return None
+    columns = getattr(frame, "columns", ())
+    if "datetime" not in columns:
+        return None
+    try:
+        value = frame.get_column("datetime")[row_index]
+    except (IndexError, TypeError):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _read_text_payload(target: QualityTarget) -> _TextPayload:
@@ -652,6 +898,7 @@ def _schema_finding(
         target,
         code=code,
         message=message,
+        rule_id=ASCII_SCHEMA_INGESTION_RULE_ID,
         location=QualityLocation(
             path=target.path,
             row_number=first.row_number,
@@ -751,6 +998,7 @@ def _finding(
     code: str,
     message: str,
     severity: QualitySeverity = QualitySeverity.ERROR,
+    rule_id: str = ASCII_TEXT_INGESTION_RULE_ID,
     location: QualityLocation | None = None,
     metadata: dict[str, JSONValue] | None = None,
 ) -> QualityFinding:
@@ -758,7 +1006,7 @@ def _finding(
         severity=severity,
         code=code,
         message=message,
-        rule_id=ASCII_TEXT_INGESTION_RULE_ID,
+        rule_id=rule_id,
         target=target,
         location=location or QualityLocation(path=target.path),
         metadata=dict(metadata or {}),
