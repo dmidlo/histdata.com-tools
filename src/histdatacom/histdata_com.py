@@ -35,9 +35,13 @@ from histdatacom import Options
 from histdatacom.cli import ArgParser
 from histdatacom.data_quality import (
     QualityDiscoveryError,
+    QualityExitPolicy,
+    bounded_quality_payload,
     discover_quality_targets,
+    format_quality_console_summary,
     normalize_quality_check_groups,
     run_quality_assessment,
+    write_quality_report,
 )
 from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.repository_output import (
@@ -81,6 +85,10 @@ class RuntimeContext:
     data_quality: bool
     quality_paths: tuple[str, ...]
     quality_check_groups: tuple[str, ...]
+    quality_report_path: str | None
+    quality_fail_on: str
+    quality_max_errors: int
+    quality_max_warnings: int
     available_remote_data: bool
     update_remote_data: bool
     import_to_influxdb: bool
@@ -145,13 +153,23 @@ class _HistDataCom:  # noqa:R701
         return self._run_sidecar_job()
 
     def _run_data_quality(self) -> dict:
-        """Run local-only data-quality target discovery."""
+        """Run a local-only data-quality assessment."""
         try:
             check_groups = normalize_quality_check_groups(
                 self.context.quality_check_groups
             )
             discovery = discover_quality_targets(self.context.quality_paths)
+            exit_policy = QualityExitPolicy.from_values(
+                fail_on=self.context.quality_fail_on,
+                max_errors=self.context.quality_max_errors,
+                max_warnings=self.context.quality_max_warnings,
+            )
         except QualityDiscoveryError as err:
+            if self.context.from_api:
+                raise
+            print(f"error: {err}", file=sys.stderr)  # noqa:T201
+            raise SystemExit(1) from err
+        except ValueError as err:
             if self.context.from_api:
                 raise
             print(f"error: {err}", file=sys.stderr)  # noqa:T201
@@ -165,14 +183,30 @@ class _HistDataCom:  # noqa:R701
                 "check_groups": list(check_groups),
             },
         )
-        payload = {
-            "operation": "data-quality",
-            "check_groups": list(check_groups),
-            "discovery": discovery.to_dict(),
-            "summary": report.summary().to_dict(),
-        }
+        artifact = (
+            None
+            if self.context.quality_report_path is None
+            else write_quality_report(report, self.context.quality_report_path)
+        )
+        decision = exit_policy.evaluate(report.summary())
+        payload = bounded_quality_payload(
+            operation="data-quality",
+            check_groups=check_groups,
+            discovery=discovery.to_dict(),
+            report=report,
+            decision=decision,
+            artifact=artifact,
+        )
         if not self.context.from_api:
-            _print_data_quality_discovery(payload)
+            print(  # noqa:T201
+                format_quality_console_summary(
+                    report,
+                    check_groups=check_groups,
+                    artifact=artifact,
+                )
+            )
+            if decision.exit_code:
+                raise SystemExit(decision.exit_code)
         return payload
 
     def _run_sidecar_job(
@@ -297,6 +331,14 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
                 str(group) for group in (args.get("quality_check_groups") or ())
             )
         ),
+        quality_report_path=(
+            None
+            if args.get("quality_report_path") is None
+            else str(args["quality_report_path"])
+        ),
+        quality_fail_on=str(args["quality_fail_on"]),
+        quality_max_errors=int(args["quality_max_errors"]),
+        quality_max_warnings=int(args["quality_max_warnings"]),
         available_remote_data=bool(args["available_remote_data"]),
         update_remote_data=bool(args["update_remote_data"]),
         import_to_influxdb=bool(args["import_to_influxdb"]),
@@ -364,32 +406,6 @@ def _freeze_runtime_arg(value: Any) -> Any:
             {key: _freeze_runtime_arg(item) for key, item in value.items()}
         )
     return value
-
-
-def _print_data_quality_discovery(payload: Mapping[str, Any]) -> None:
-    """Print a compact local target discovery summary."""
-    discovery = payload.get("discovery", {})
-    if not isinstance(discovery, Mapping):
-        discovery = {}
-    targets = discovery.get("targets", [])
-    if not isinstance(targets, list):
-        targets = []
-
-    print("Data quality target discovery")  # noqa:T201
-    print(  # noqa:T201
-        "checks: " + ", ".join(str(item) for item in payload["check_groups"])
-    )
-    print(f"roots: {len(discovery.get('roots', []))}")  # noqa:T201
-    print(f"targets: {len(targets)}")  # noqa:T201
-    if not targets:
-        print("No data quality targets discovered.")  # noqa:T201
-        return
-    for target in targets:
-        if not isinstance(target, Mapping):
-            continue
-        print(  # noqa:T201
-            f"- {target.get('kind', 'unknown')}: {target.get('path', '')}"
-        )
 
 
 def main(

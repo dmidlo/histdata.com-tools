@@ -190,6 +190,14 @@ def test_data_quality_cli_mode_bypasses_legacy_prerequisites(
             "--quality-checks",
             "inventory",
             "ingestion",
+            "--quality-report",
+            str(tmp_path / "quality.json"),
+            "--quality-fail-on",
+            "warning",
+            "--quality-max-errors",
+            "2",
+            "--quality-max-warnings",
+            "5",
         ],
     )
 
@@ -198,6 +206,10 @@ def test_data_quality_cli_mode_bypasses_legacy_prerequisites(
     assert options.data_quality
     assert options.quality_paths == [str(tmp_path)]
     assert options.quality_check_groups == ["inventory", "ingestion"]
+    assert options.quality_report_path == str(tmp_path / "quality.json")
+    assert options.quality_fail_on == "warning"
+    assert options.quality_max_errors == 2
+    assert options.quality_max_warnings == 5
     assert not options.validate_urls
     assert not options.download_data_archives
     assert not options.extract_csvs
@@ -232,6 +244,10 @@ def test_data_quality_cli_defaults_to_data_directory(
     (
         ["histdatacom", "--quality-target", "data"],
         ["histdatacom", "--quality-checks", "inventory"],
+        ["histdatacom", "--quality-report", "quality.json"],
+        ["histdatacom", "--quality-fail-on", "warning"],
+        ["histdatacom", "--quality-max-errors", "1"],
+        ["histdatacom", "--quality-max-warnings", "1"],
         ["histdatacom", "--quality", "-D"],
     ),
 )

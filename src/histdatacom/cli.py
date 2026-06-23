@@ -76,7 +76,7 @@ from rich import print  # pylint: disable=redefined-builtin
 
 from histdatacom import Options
 from histdatacom.concurrency import get_pool_cpu_count
-from histdatacom.data_quality import QUALITY_CHECK_GROUPS
+from histdatacom.data_quality import QUALITY_CHECK_GROUPS, QUALITY_EXIT_TRIGGERS
 from histdatacom.fx_enums import (
     Format,
     Pairs,
@@ -89,6 +89,19 @@ from histdatacom.utils import (
     get_month_from_datemonth,
     replace_date_punct,
 )
+
+
+def _non_negative_int(value: str) -> int:
+    """Return a non-negative integer for argparse thresholds."""
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} is not an integer"
+        ) from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be non-negative")
+    return parsed
 
 
 class ArgParser(argparse.ArgumentParser):  # noqa:H601
@@ -156,6 +169,18 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             if quality_groups and quality_groups != {"all"}:
                 print("--quality-checks requires --quality")  # noqa:T201
                 raise SystemExit(1)
+            if self.arg_namespace.quality_report_path:
+                print("--quality-report requires --quality")  # noqa:T201
+                raise SystemExit(1)
+            if self.arg_namespace.quality_fail_on != "error":
+                print("--quality-fail-on requires --quality")  # noqa:T201
+                raise SystemExit(1)
+            if self.arg_namespace.quality_max_errors != 0:
+                print("--quality-max-errors requires --quality")  # noqa:T201
+                raise SystemExit(1)
+            if self.arg_namespace.quality_max_warnings != 0:
+                print("--quality-max-warnings requires --quality")  # noqa:T201
+                raise SystemExit(1)
             return
 
         legacy_flags = {
@@ -205,6 +230,25 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                         *sorted(self.arg_namespace.quality_check_groups),
                     ]
                 )
+            if self.arg_namespace.quality_report_path:
+                args.extend(
+                    ["--quality-report", self.arg_namespace.quality_report_path]
+                )
+            args.extend(
+                ["--quality-fail-on", self.arg_namespace.quality_fail_on]
+            )
+            args.extend(
+                [
+                    "--quality-max-errors",
+                    str(self.arg_namespace.quality_max_errors),
+                ]
+            )
+            args.extend(
+                [
+                    "--quality-max-warnings",
+                    str(self.arg_namespace.quality_max_warnings),
+                ]
+            )
             return args
 
         self.arg_namespace.timeframes = Timeframe.convert_to_values(
@@ -940,8 +984,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             dest="data_quality",
             action="store_true",
             help=(
-                "run offline data-quality target discovery against local "
-                "datasets without contacting HistData.com"
+                "run offline data-quality assessment against local datasets "
+                "without contacting HistData.com"
             ),
         )
         quality_args.add_argument(
@@ -966,6 +1010,45 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "quality check groups to run; defaults to all. Supported: "
                 + ", ".join(QUALITY_CHECK_GROUPS)
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-report",
+            dest="quality_report_path",
+            type=str,
+            metavar="PATH",
+            help="write the full machine-readable JSON quality report to PATH",
+        )
+        quality_args.add_argument(
+            "--quality-fail-on",
+            dest="quality_fail_on",
+            type=str,
+            choices=QUALITY_EXIT_TRIGGERS,
+            metavar="SEVERITY",
+            help=(
+                "exit non-zero when configured thresholds are exceeded for "
+                "error, warning, or never. Defaults to error"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-max-errors",
+            dest="quality_max_errors",
+            type=_non_negative_int,
+            metavar="COUNT",
+            help=(
+                "maximum error findings allowed before quality mode exits "
+                "non-zero; defaults to 0"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-max-warnings",
+            dest="quality_max_warnings",
+            type=_non_negative_int,
+            metavar="COUNT",
+            help=(
+                "maximum warning findings allowed before quality mode exits "
+                "non-zero when --quality-fail-on warning is selected; "
+                "defaults to 0"
             ),
         )
 

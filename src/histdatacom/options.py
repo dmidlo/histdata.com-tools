@@ -38,6 +38,10 @@ class Options:
         self.data_quality: bool = False
         self.quality_paths: tuple[str, ...] = ()
         self.quality_check_groups: set[str] = {"all"}
+        self.quality_report_path: str | None = None
+        self.quality_fail_on: str = "error"
+        self.quality_max_errors: int = 0
+        self.quality_max_warnings: int = 0
         self.use_sidecar: bool = True
         self.sidecar_start: bool = True
         self.sidecar_wait_result: bool = True

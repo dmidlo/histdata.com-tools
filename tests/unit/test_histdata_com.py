@@ -9,6 +9,13 @@ from types import SimpleNamespace
 import pytest
 
 import histdatacom
+from histdatacom.data_quality import (
+    QualityFinding,
+    QualityLocation,
+    QualityReport,
+    QualityRuleResult,
+    QualitySeverity,
+)
 from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.options import Options
 from histdatacom.runtime_contracts import WorkStatus
@@ -274,7 +281,7 @@ def test_data_quality_cli_discovers_local_targets_without_sidecar(
     assert histdata_com.main() is None
 
     output = capsys.readouterr().out
-    assert "Data quality target discovery" in output
+    assert "Data quality assessment" in output
     assert expected_text in output
     assert f"targets: {expected_count}" in output
 
@@ -339,6 +346,112 @@ def test_data_quality_api_returns_discovery_payload_without_sidecar(
     assert result["check_groups"] == ["inventory"]
     assert result["discovery"]["target_count"] == 1
     assert result["summary"]["target_count"] == 1
+    assert result["report_artifact"] is None
+    assert result["exit_decision"]["exit_code"] == 0
+
+
+def test_data_quality_cli_writes_json_report_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Quality CLI should write a full JSON report when requested."""
+    import histdatacom.histdata_com as histdata_com
+
+    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    report_path = tmp_path / "reports" / "quality.json"
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda *args, **kwargs: pytest.fail(
+            "quality mode should not submit to sidecar"
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(csv_path),
+            "--quality-report",
+            str(report_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert "Clean files" in output
+    assert "Warning files\n- none" in output
+    assert "Failed files\n- none" in output
+    assert f"report: {report_path.resolve()}" in output
+    assert '"schema_version": "histdatacom.quality-report.v1"' in (
+        report_path.read_text(encoding="utf-8")
+    )
+
+
+def test_data_quality_cli_exit_policy_fails_on_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Quality CLI should exit non-zero when findings exceed policy."""
+    import histdatacom.histdata_com as histdata_com
+
+    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+
+    def fake_assessment(targets, rules, *, metadata=None):
+        target = tuple(targets)[0]
+        finding = QualityFinding(
+            severity=QualitySeverity.ERROR,
+            code="FILE_MISSING",
+            message="expected local file is missing",
+            rule_id="file.exists",
+            target=target,
+            location=QualityLocation(path=target.path),
+        )
+        return QualityReport(
+            targets=(target,),
+            rule_results=(
+                QualityRuleResult(
+                    rule_id="file.exists",
+                    target=target,
+                    findings=(finding,),
+                ),
+            ),
+            metadata=dict(metadata or {}),
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda *args, **kwargs: pytest.fail(
+            "quality mode should not submit to sidecar"
+        ),
+    )
+    monkeypatch.setattr(histdata_com, "run_quality_assessment", fake_assessment)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(csv_path),
+            "--quality-fail-on",
+            "error",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    assert err.value.code == 1
+    output = capsys.readouterr().out
+    assert "status: failed" in output
+    assert "Failed files\n- csv:" in output
 
 
 def test_back_to_back_sidecar_api_calls_do_not_leak_global_args(
