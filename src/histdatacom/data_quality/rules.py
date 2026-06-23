@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from histdatacom.data_quality.contracts import QualityRule
+from histdatacom.data_quality.contracts import QualityRule, QualityRunRule
 from histdatacom.data_quality.discovery import normalize_quality_check_groups
 from histdatacom.data_quality.inventory import inventory_quality_rules
+from histdatacom.data_quality.manifest import manifest_quality_run_rules
 
 
 def quality_rules_for_groups(
@@ -17,4 +18,15 @@ def quality_rules_for_groups(
     rules: list[QualityRule] = []
     if "all" in normalized or "inventory" in normalized:
         rules.extend(inventory_quality_rules())
+    return tuple(rules)
+
+
+def quality_run_rules_for_groups(
+    groups: Iterable[str] | None,
+) -> tuple[QualityRunRule, ...]:
+    """Return run-scoped quality rules for normalized check selections."""
+    normalized = normalize_quality_check_groups(groups)
+    rules: list[QualityRunRule] = []
+    if "all" in normalized or "inventory" in normalized:
+        rules.extend(manifest_quality_run_rules())
     return tuple(rules)

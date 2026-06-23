@@ -8,6 +8,7 @@ from histdatacom.data_quality.contracts import (
     QualityReport,
     QualityRule,
     QualityRuleResult,
+    QualityRunRule,
     QualityRunSummary,
     QualitySeverity,
     QualityStatus,
@@ -32,6 +33,13 @@ from histdatacom.data_quality.inventory import (
     HistDataZipInventoryRule,
     inventory_quality_rules,
 )
+from histdatacom.data_quality.manifest import (
+    COVERAGE_MANIFEST_SCHEMA_VERSION,
+    CoverageDimension,
+    HistDataCoverageManifestRule,
+    coverage_manifest_metadata,
+    manifest_quality_run_rules,
+)
 from histdatacom.data_quality.reporting import (
     QUALITY_EXIT_TRIGGERS,
     QUALITY_REPORT_SCHEMA_VERSION,
@@ -44,11 +52,17 @@ from histdatacom.data_quality.reporting import (
     quality_report_to_json,
     write_quality_report,
 )
-from histdatacom.data_quality.rules import quality_rules_for_groups
+from histdatacom.data_quality.rules import (
+    quality_rules_for_groups,
+    quality_run_rules_for_groups,
+)
 
 __all__ = [
+    "COVERAGE_MANIFEST_SCHEMA_VERSION",
     "QUALITY_EXIT_TRIGGERS",
     "QUALITY_REPORT_SCHEMA_VERSION",
+    "CoverageDimension",
+    "HistDataCoverageManifestRule",
     "HistDataZipInventoryRule",
     "QualityFinding",
     "QualityDiscoveryError",
@@ -60,6 +74,7 @@ __all__ = [
     "QualityReport",
     "QualityRule",
     "QualityRuleResult",
+    "QualityRunRule",
     "QualityRunSummary",
     "QualitySeverity",
     "QualityStatus",
@@ -68,15 +83,18 @@ __all__ = [
     "QualityTargetSummary",
     "QUALITY_CHECK_GROUPS",
     "bounded_quality_payload",
+    "coverage_manifest_metadata",
     "discover_quality_targets",
     "evaluate_quality_rule",
     "format_quality_console_summary",
     "inventory_quality_rules",
+    "manifest_quality_run_rules",
     "normalize_quality_check_groups",
     "quality_metadata_from_filename",
     "quality_report_payload",
     "quality_report_to_json",
     "quality_rules_for_groups",
+    "quality_run_rules_for_groups",
     "quality_target_from_path",
     "run_quality_assessment",
     "write_quality_report",

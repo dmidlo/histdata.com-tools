@@ -37,10 +37,12 @@ from histdatacom.data_quality import (
     QualityDiscoveryError,
     QualityExitPolicy,
     bounded_quality_payload,
+    coverage_manifest_metadata,
     discover_quality_targets,
     format_quality_console_summary,
     normalize_quality_check_groups,
     quality_rules_for_groups,
+    quality_run_rules_for_groups,
     run_quality_assessment,
     write_quality_report,
 )
@@ -179,9 +181,17 @@ class _HistDataCom:  # noqa:R701
         report = run_quality_assessment(
             discovery.targets,
             quality_rules_for_groups(check_groups),
+            run_rules=quality_run_rules_for_groups(check_groups),
             metadata={
                 "operation": "data-quality",
                 "check_groups": list(check_groups),
+                "coverage_manifest": coverage_manifest_metadata(
+                    roots=discovery.roots,
+                    request=self.context.request.to_dict(),
+                    expected_dimensions=_quality_expected_dimensions(
+                        self.context.request.metadata
+                    ),
+                ),
             },
         )
         artifact = (
@@ -394,6 +404,20 @@ def _validate_influx_metadata_config(config: Mapping[str, Any]) -> None:
         raise InfluxConfigurationError(
             "influx metadata is missing required keys: " f"{missing_text}."
         )
+
+
+def _quality_expected_dimensions(
+    metadata: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], ...] | None:
+    coverage = metadata.get("coverage_manifest")
+    if isinstance(coverage, Mapping):
+        expected = coverage.get("expected_dimensions")
+        if isinstance(expected, list):
+            return tuple(item for item in expected if isinstance(item, Mapping))
+    expected = metadata.get("quality_expected_dimensions")
+    if isinstance(expected, list):
+        return tuple(item for item in expected if isinstance(item, Mapping))
+    return None
 
 
 def _freeze_runtime_arg(value: Any) -> Any:

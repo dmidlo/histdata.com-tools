@@ -391,6 +391,70 @@ def test_data_quality_api_runs_inventory_rules_for_corrupt_zip(
     assert report["rule_results"][0]["findings"][0]["code"] == "ZIP_CORRUPT"
 
 
+def test_data_quality_api_writes_coverage_manifest_from_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """API quality runs should carry expected coverage into report output."""
+    import histdatacom.histdata_com as histdata_com
+
+    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    options = Options()
+    options.data_quality = True
+    options.quality_paths = (str(csv_path),)
+    options.quality_check_groups = {"inventory"}
+    options.quality_report_path = str(tmp_path / "quality.json")
+    options.metadata = {
+        "coverage_manifest": {
+            "expected_dimensions": [
+                {
+                    "data_format": "ascii",
+                    "timeframe": "M1",
+                    "symbol": "EURUSD",
+                    "period": "201202",
+                },
+                {
+                    "data_format": "ascii",
+                    "timeframe": "M1",
+                    "symbol": "EURUSD",
+                    "period": "201203",
+                },
+            ]
+        }
+    }
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda *args, **kwargs: pytest.fail(
+            "quality mode should not submit to sidecar"
+        ),
+    )
+
+    result = histdata_com.main(options)
+
+    assert result["summary"]["status"] == "failed"
+    report = json.loads(
+        Path(result["report_artifact"]["path"]).read_text(encoding="utf-8")
+    )
+    manifest = report["metadata"]["coverage_manifest"]
+    assert manifest["expected_source"] == "metadata"
+    assert manifest["missing"] == [
+        {
+            "data_format": "ascii",
+            "timeframe": "M1",
+            "symbol": "EURUSD",
+            "period": "201203",
+        }
+    ]
+    finding_codes = [
+        finding["code"]
+        for result in report["rule_results"]
+        for finding in result["findings"]
+    ]
+    assert "COVERAGE_PERIOD_MISSING" in finding_codes
+
+
 def test_data_quality_cli_writes_json_report_artifact(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -443,7 +507,7 @@ def test_data_quality_cli_exit_policy_fails_on_errors(
 
     csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
 
-    def fake_assessment(targets, rules, *, metadata=None):
+    def fake_assessment(targets, rules, *, run_rules=(), metadata=None):
         target = tuple(targets)[0]
         finding = QualityFinding(
             severity=QualitySeverity.ERROR,

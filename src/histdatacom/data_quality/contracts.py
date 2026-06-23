@@ -286,6 +286,21 @@ class QualityRule(Protocol):
         """Return findings for one target."""
 
 
+class QualityRunRule(Protocol):
+    """Protocol implemented by checks that need the full target set."""
+
+    rule_id: str
+    description: str
+
+    def evaluate_run(
+        self,
+        targets: Iterable[QualityTarget],
+        *,
+        metadata: Mapping[str, JSONValue] | None = None,
+    ) -> "QualityReport":
+        """Return a report fragment for a whole quality run."""
+
+
 def _severity_counts(
     findings: Iterable[QualityFinding],
 ) -> Counter[QualitySeverity]:
