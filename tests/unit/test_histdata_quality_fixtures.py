@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import zipfile
 from collections import Counter
 from io import StringIO
@@ -51,6 +52,9 @@ def test_quality_case_index_covers_clean_and_dirty_m1_and_tick_cases() -> None:
     assert {
         "malformed_row",
         "bad_timestamp",
+        "bad_numeric",
+        "shifted_column",
+        "bad_volume",
         "duplicate_timestamp",
         "non_monotonic_timestamp",
         "ohlc_violation",
@@ -62,6 +66,9 @@ def test_quality_case_index_covers_clean_and_dirty_m1_and_tick_cases() -> None:
     assert {
         "malformed_row",
         "bad_timestamp",
+        "bad_numeric",
+        "shifted_column",
+        "bad_volume",
         "duplicate_tick",
         "duplicate_timestamp",
         "non_monotonic_timestamp",
@@ -262,6 +269,12 @@ def _has_declared_anomaly(
             return _has_malformed_row(case)
         case "bad_timestamp":
             return _has_bad_timestamp(case)
+        case "bad_numeric":
+            return _has_bad_numeric(case)
+        case "shifted_column":
+            return _has_shifted_column(case)
+        case "bad_volume":
+            return _has_bad_volume(case)
         case "duplicate_timestamp":
             return _has_duplicate_timestamp(case)
         case "duplicate_tick":
@@ -299,6 +312,58 @@ def _has_bad_timestamp(case: HistDataAsciiCase) -> bool:
         except ValueError:
             return True
     return False
+
+
+def _has_bad_numeric(case: HistDataAsciiCase) -> bool:
+    expected = len(columns_for_timeframe(case.timeframe))
+    for row in _rows(case):
+        if len(row) != expected:
+            continue
+        for raw_value in row[1:-1]:
+            try:
+                parsed = float(raw_value)
+            except ValueError:
+                return True
+            if not math.isfinite(parsed):
+                return True
+    return False
+
+
+def _has_shifted_column(case: HistDataAsciiCase) -> bool:
+    expected = len(columns_for_timeframe(case.timeframe))
+    for row in _rows(case):
+        if len(row) != expected:
+            continue
+        try:
+            parse_histdata_datetime_to_utc_ms(row[0], case.timeframe)
+        except ValueError:
+            return any(
+                _is_valid_source_timestamp(value, case.timeframe)
+                for value in row[1:]
+            )
+    return False
+
+
+def _has_bad_volume(case: HistDataAsciiCase) -> bool:
+    expected = len(columns_for_timeframe(case.timeframe))
+    for row in _rows(case):
+        if len(row) != expected:
+            continue
+        raw_value = row[-1].strip()
+        if not raw_value.lstrip("+-").isdigit():
+            return True
+        parsed = int(raw_value)
+        if parsed < 0 or parsed > 2**31 - 1:
+            return True
+    return False
+
+
+def _is_valid_source_timestamp(value: str, timeframe: str) -> bool:
+    try:
+        parse_histdata_datetime_to_utc_ms(value, timeframe)
+    except ValueError:
+        return False
+    return True
 
 
 def _valid_timestamp_values(case: HistDataAsciiCase) -> list[int]:

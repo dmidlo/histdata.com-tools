@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,10 +20,14 @@ from histdatacom.data_quality.contracts import (
 from histdatacom.histdata_ascii import (
     columns_for_timeframe,
     delimiter_for_timeframe,
+    normalize_ascii_row,
+    parse_histdata_datetime_to_utc_ms,
 )
 from histdatacom.runtime_contracts import JSONValue
 
 ASCII_TEXT_INGESTION_RULE_ID = "ingestion.ascii.text"
+ASCII_SCHEMA_INGESTION_RULE_ID = "ingestion.ascii.schema"
+INT32_MAX = 2**31 - 1
 MAX_ROW_SAMPLES = 5
 
 
@@ -51,6 +56,23 @@ class _RowSample:
             "row_number": self.row_number,
             "field_count": self.field_count,
             "raw": self.raw[:200],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _SchemaSample:
+    row_number: int
+    column: str
+    raw_value: str
+    error: str
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return a bounded JSON-compatible schema sample."""
+        return {
+            "row_number": self.row_number,
+            "column": self.column,
+            "raw_value": self.raw_value[:120],
+            "error": self.error[:200],
         }
 
 
@@ -86,6 +108,21 @@ class _RowScan:
     field_count_samples: list[_RowSample] = field(default_factory=list)
     delimiter_count: int = 0
     field_count_error_count: int = 0
+
+
+@dataclass(slots=True)
+class _SchemaScan:
+    parsed_row_count: int = 0
+    bad_timestamp_count: int = 0
+    bad_numeric_count: int = 0
+    bad_volume_count: int = 0
+    shifted_row_count: int = 0
+    invalid_row_count: int = 0
+    bad_timestamps: list[_SchemaSample] = field(default_factory=list)
+    bad_numerics: list[_SchemaSample] = field(default_factory=list)
+    bad_volumes: list[_SchemaSample] = field(default_factory=list)
+    shifted_rows: list[_SchemaSample] = field(default_factory=list)
+    invalid_rows: list[_SchemaSample] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -214,10 +251,47 @@ class HistDataAsciiTextIngestionRule:
         return tuple(findings)
 
 
+@dataclass(slots=True)
+class HistDataAsciiSchemaIngestionRule:
+    """Validate strict typed HistData ASCII schema assumptions."""
+
+    rule_id: str = ASCII_SCHEMA_INGESTION_RULE_ID
+    description: str = (
+        "Validate HistData ASCII timestamps, price fields, and volume types."
+    )
+
+    def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
+        """Return strict typed schema findings for one target."""
+        if not _is_ascii_text_target(target):
+            return ()
+
+        try:
+            delimiter = delimiter_for_timeframe(target.timeframe)
+            columns = columns_for_timeframe(target.timeframe)
+            payload = _read_text_payload(target)
+            text = payload.data.decode("utf-8")
+        except (ValueError, UnicodeDecodeError, _SourceReadError):
+            return ()
+
+        scan = _scan_schema_rows(
+            text,
+            timeframe=target.timeframe,
+            delimiter=delimiter,
+            columns=columns,
+        )
+        return _schema_findings(
+            target=target,
+            scan=scan,
+            columns=columns,
+            source_member=payload.source_member,
+        )
+
+
 def ingestion_quality_rules() -> tuple[QualityRule, ...]:
     """Return ingestion quality rules in deterministic execution order."""
-    rule: QualityRule = HistDataAsciiTextIngestionRule()
-    return (rule,)
+    text_rule: QualityRule = HistDataAsciiTextIngestionRule()
+    schema_rule: QualityRule = HistDataAsciiSchemaIngestionRule()
+    return (text_rule, schema_rule)
 
 
 def _is_ascii_text_target(target: QualityTarget) -> bool:
@@ -376,8 +450,269 @@ def _scan_rows(
     return scan
 
 
+def _scan_schema_rows(
+    text: str,
+    *,
+    timeframe: str,
+    delimiter: str,
+    columns: tuple[str, ...],
+) -> _SchemaScan:
+    scan = _SchemaScan()
+    expected_count = len(columns)
+    for row_number, raw in enumerate(text.splitlines(), start=1):
+        if not raw.strip():
+            continue
+        row = _parse_row(raw, delimiter)
+        if len(row) != expected_count or tuple(row) == columns:
+            continue
+        if _row_looks_shifted(row, timeframe=timeframe):
+            scan.shifted_row_count += 1
+            _append_schema_sample(
+                scan.shifted_rows,
+                _SchemaSample(
+                    row_number=row_number,
+                    column="datetime",
+                    raw_value=row[0],
+                    error="source timestamp appears outside the datetime "
+                    "column",
+                ),
+            )
+            continue
+
+        has_schema_error = False
+        try:
+            parse_histdata_datetime_to_utc_ms(row[0], timeframe)
+        except ValueError as exc:
+            has_schema_error = True
+            scan.bad_timestamp_count += 1
+            _append_schema_sample(
+                scan.bad_timestamps,
+                _SchemaSample(
+                    row_number=row_number,
+                    column="datetime",
+                    raw_value=row[0],
+                    error=str(exc),
+                ),
+            )
+
+        for column, raw_value in zip(columns[1:-1], row[1:-1], strict=True):
+            try:
+                _parse_price_value(raw_value)
+            except ValueError as exc:
+                has_schema_error = True
+                scan.bad_numeric_count += 1
+                _append_schema_sample(
+                    scan.bad_numerics,
+                    _SchemaSample(
+                        row_number=row_number,
+                        column=column,
+                        raw_value=raw_value,
+                        error=str(exc),
+                    ),
+                )
+
+        try:
+            _parse_volume_value(row[-1])
+        except ValueError as exc:
+            has_schema_error = True
+            scan.bad_volume_count += 1
+            _append_schema_sample(
+                scan.bad_volumes,
+                _SchemaSample(
+                    row_number=row_number,
+                    column=columns[-1],
+                    raw_value=row[-1],
+                    error=str(exc),
+                ),
+            )
+
+        if has_schema_error:
+            continue
+
+        try:
+            normalize_ascii_row(timeframe, row)
+        except ValueError as exc:
+            scan.invalid_row_count += 1
+            _append_schema_sample(
+                scan.invalid_rows,
+                _SchemaSample(
+                    row_number=row_number,
+                    column="",
+                    raw_value=raw,
+                    error=str(exc),
+                ),
+            )
+            continue
+        scan.parsed_row_count += 1
+    return scan
+
+
+def _schema_findings(
+    *,
+    target: QualityTarget,
+    scan: _SchemaScan,
+    columns: tuple[str, ...],
+    source_member: str,
+) -> tuple[QualityFinding, ...]:
+    findings: list[QualityFinding] = []
+    price_columns = columns[1:-1]
+    if scan.shifted_rows:
+        findings.append(
+            _schema_finding(
+                target,
+                code="ASCII_ROW_SCHEMA_SHIFTED",
+                message="Row values appear shifted away from the HistData "
+                "timeframe schema.",
+                samples=scan.shifted_rows,
+                metadata={
+                    "columns": list(columns),
+                    "price_columns": list(price_columns),
+                    "source_member": source_member,
+                },
+                row_count=scan.shifted_row_count,
+            )
+        )
+    if scan.bad_timestamps:
+        findings.append(
+            _schema_finding(
+                target,
+                code="ASCII_TIMESTAMP_INVALID",
+                message="Timestamp values do not parse with strict HistData "
+                "source timestamp semantics.",
+                samples=scan.bad_timestamps,
+                metadata={
+                    "timeframe": target.timeframe,
+                    "source_timezone": "EST-no-DST",
+                    "source_member": source_member,
+                },
+                row_count=scan.bad_timestamp_count,
+            )
+        )
+    if scan.bad_numerics:
+        findings.append(
+            _schema_finding(
+                target,
+                code="ASCII_NUMERIC_INVALID",
+                message="Price fields must parse as finite decimal numbers.",
+                samples=scan.bad_numerics,
+                metadata={
+                    "price_columns": list(price_columns),
+                    "source_member": source_member,
+                },
+                row_count=scan.bad_numeric_count,
+            )
+        )
+    if scan.bad_volumes:
+        findings.append(
+            _schema_finding(
+                target,
+                code="ASCII_VOLUME_INVALID",
+                message="Volume fields must parse as non-negative int32 "
+                "values; zero volume is allowed for HistData FX.",
+                samples=scan.bad_volumes,
+                metadata={
+                    "volume_column": columns[-1],
+                    "min_value": 0,
+                    "max_value": INT32_MAX,
+                    "zero_volume_allowed": True,
+                    "structurally_uninformative": True,
+                    "source_member": source_member,
+                },
+                row_count=scan.bad_volume_count,
+            )
+        )
+    if scan.invalid_rows:
+        findings.append(
+            _schema_finding(
+                target,
+                code="ASCII_ROW_SCHEMA_INVALID",
+                message="Rows failed canonical HistData ASCII normalization.",
+                samples=scan.invalid_rows,
+                metadata={
+                    "columns": list(columns),
+                    "source_member": source_member,
+                },
+                row_count=scan.invalid_row_count,
+            )
+        )
+    return tuple(findings)
+
+
+def _schema_finding(
+    target: QualityTarget,
+    *,
+    code: str,
+    message: str,
+    samples: list[_SchemaSample],
+    metadata: dict[str, JSONValue],
+    row_count: int,
+) -> QualityFinding:
+    first = samples[0]
+    return _finding(
+        target,
+        code=code,
+        message=message,
+        location=QualityLocation(
+            path=target.path,
+            row_number=first.row_number,
+            column=first.column,
+            metadata={
+                "source_member": str(metadata.get("source_member") or "")
+            },
+        ),
+        metadata={
+            **metadata,
+            "row_count": row_count,
+            "samples": _schema_samples(samples),
+        },
+    )
+
+
 def _parse_row(raw: str, delimiter: str) -> list[str]:
     return next(csv.reader((raw,), delimiter=delimiter), [])
+
+
+def _row_looks_shifted(row: list[str], *, timeframe: str) -> bool:
+    try:
+        parse_histdata_datetime_to_utc_ms(row[0], timeframe)
+    except ValueError:
+        return any(
+            _is_valid_source_timestamp(value, timeframe) for value in row[1:]
+        )
+    return False
+
+
+def _is_valid_source_timestamp(value: str, timeframe: str) -> bool:
+    try:
+        parse_histdata_datetime_to_utc_ms(value, timeframe)
+    except ValueError:
+        return False
+    return True
+
+
+def _parse_price_value(value: str) -> float:
+    raw = value.strip()
+    try:
+        parsed = float(raw)
+    except ValueError as exc:
+        msg = "expected finite decimal number"
+        raise ValueError(msg) from exc
+    if not math.isfinite(parsed):
+        msg = "expected finite decimal number"
+        raise ValueError(msg)
+    return parsed
+
+
+def _parse_volume_value(value: str) -> int:
+    raw = value.strip()
+    if not raw.lstrip("+-").isdigit():
+        msg = "expected integer volume"
+        raise ValueError(msg)
+    parsed = int(raw)
+    if parsed < 0 or parsed > INT32_MAX:
+        msg = f"expected int32 volume between 0 and {INT32_MAX}"
+        raise ValueError(msg)
+    return parsed
 
 
 def _has_wrong_delimiter(raw: str, delimiter: str) -> bool:
@@ -394,7 +729,19 @@ def _append_sample(samples: list[_RowSample], sample: _RowSample) -> None:
         samples.append(sample)
 
 
+def _append_schema_sample(
+    samples: list[_SchemaSample],
+    sample: _SchemaSample,
+) -> None:
+    if len(samples) < MAX_ROW_SAMPLES:
+        samples.append(sample)
+
+
 def _samples(samples: Iterable[_RowSample]) -> list[JSONValue]:
+    return [sample.to_dict() for sample in samples]
+
+
+def _schema_samples(samples: Iterable[_SchemaSample]) -> list[JSONValue]:
     return [sample.to_dict() for sample in samples]
 
 

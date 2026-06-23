@@ -95,6 +95,36 @@ DIRTY_M1_CASES = (
         anomalies=("bad_timestamp",),
     ),
     HistDataAsciiCase(
+        name="m1_bad_numeric",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202_BAD_NUMERIC.csv",
+        rows=(
+            CLEAN_M1_ROWS[0],
+            "20120201 000100;$1.306570;1.306570;1.306470;1.306560;17",
+        ),
+        anomalies=("bad_numeric",),
+    ),
+    HistDataAsciiCase(
+        name="m1_shifted_column",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202_SHIFTED.csv",
+        rows=(
+            CLEAN_M1_ROWS[0],
+            "1.306570;20120201 000100;1.306570;1.306470;1.306560;17",
+        ),
+        anomalies=("shifted_column",),
+    ),
+    HistDataAsciiCase(
+        name="m1_bad_volume",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202_BAD_VOLUME.csv",
+        rows=(
+            CLEAN_M1_ROWS[0],
+            "20120201 000100;1.306570;1.306570;1.306470;1.306560;2147483648",
+        ),
+        anomalies=("bad_volume",),
+    ),
+    HistDataAsciiCase(
         name="m1_duplicate_timestamp",
         timeframe=M1,
         filename="DAT_ASCII_EURUSD_M1_201202_DUPLICATE.csv",
@@ -178,6 +208,36 @@ DIRTY_TICK_CASES = (
             "20120230 000003973,1.306580,1.306750,25",
         ),
         anomalies=("bad_timestamp",),
+    ),
+    HistDataAsciiCase(
+        name="tick_bad_numeric",
+        timeframe=TICK,
+        filename="DAT_ASCII_EURUSD_T_201202_BAD_NUMERIC.csv",
+        rows=(
+            CLEAN_TICK_ROWS[0],
+            "20120201 000003973,inf,1.306750,25",
+        ),
+        anomalies=("bad_numeric",),
+    ),
+    HistDataAsciiCase(
+        name="tick_shifted_column",
+        timeframe=TICK,
+        filename="DAT_ASCII_EURUSD_T_201202_SHIFTED.csv",
+        rows=(
+            CLEAN_TICK_ROWS[0],
+            "1.306580,20120201 000003973,1.306750,25",
+        ),
+        anomalies=("shifted_column",),
+    ),
+    HistDataAsciiCase(
+        name="tick_bad_volume",
+        timeframe=TICK,
+        filename="DAT_ASCII_EURUSD_T_201202_BAD_VOLUME.csv",
+        rows=(
+            CLEAN_TICK_ROWS[0],
+            "20120201 000003973,1.306580,1.306750,25.5",
+        ),
+        anomalies=("bad_volume",),
     ),
     HistDataAsciiCase(
         name="tick_duplicate_row",

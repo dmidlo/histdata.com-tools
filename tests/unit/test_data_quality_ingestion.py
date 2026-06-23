@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from histdatacom.data_quality import (
+    ASCII_SCHEMA_INGESTION_RULE_ID,
     ASCII_TEXT_INGESTION_RULE_ID,
     QualitySeverity,
     QualityStatus,
@@ -15,6 +16,7 @@ from histdatacom.data_quality import (
 from tests.fixtures.histdata_ascii.quality_cases import (
     CLEAN_M1_CASE,
     CLEAN_M1_ROWS,
+    CLEAN_TICK_CASE,
     case_by_name,
     write_ascii_case,
     write_zip_case,
@@ -25,7 +27,10 @@ def test_ingestion_group_registers_text_rule() -> None:
     """The advertised ingestion group should execute concrete checks."""
     assert [
         rule.rule_id for rule in quality_rules_for_groups(("ingestion",))
-    ] == [ASCII_TEXT_INGESTION_RULE_ID]
+    ] == [
+        ASCII_TEXT_INGESTION_RULE_ID,
+        ASCII_SCHEMA_INGESTION_RULE_ID,
+    ]
 
 
 def test_clean_ascii_file_passes_ingestion_text_checks(
@@ -36,6 +41,19 @@ def test_clean_ascii_file_passes_ingestion_text_checks(
 
     assert report.status is QualityStatus.CLEAN
     assert report.findings == ()
+
+
+def test_clean_m1_and_tick_files_pass_strict_schema_checks(
+    tmp_path: Path,
+) -> None:
+    """Both supported ASCII layouts should parse through quality mode."""
+    m1_report = _report_for_path(write_ascii_case(tmp_path, CLEAN_M1_CASE))
+    tick_report = _report_for_path(write_ascii_case(tmp_path, CLEAN_TICK_CASE))
+
+    assert m1_report.status is QualityStatus.CLEAN
+    assert tick_report.status is QualityStatus.CLEAN
+    assert m1_report.findings == ()
+    assert tick_report.findings == ()
 
 
 def test_malformed_rows_are_counted_without_aborting_run(
@@ -59,6 +77,83 @@ def test_malformed_rows_are_counted_without_aborting_run(
         }
     ]
     assert finding.location.row_number == 2
+
+
+def test_bad_timestamp_rows_fail_schema_checks(
+    tmp_path: Path,
+) -> None:
+    """Timestamps should use strict HistData source parsing."""
+    report = _report_for_path(
+        write_ascii_case(tmp_path, case_by_name("m1_bad_timestamp"))
+    )
+
+    finding = _finding(report.findings, "ASCII_TIMESTAMP_INVALID")
+    assert report.status is QualityStatus.FAILED
+    assert finding.location.row_number == 2
+    assert finding.location.column == "datetime"
+    assert finding.metadata["source_timezone"] == "EST-no-DST"
+    assert finding.metadata["samples"][0]["raw_value"] == "20120230 000000"
+
+
+def test_bad_numeric_rows_fail_schema_checks(
+    tmp_path: Path,
+) -> None:
+    """Price columns should reject strings and non-finite values."""
+    m1_report = _report_for_path(
+        write_ascii_case(tmp_path, case_by_name("m1_bad_numeric"))
+    )
+    tick_report = _report_for_path(
+        write_ascii_case(tmp_path, case_by_name("tick_bad_numeric"))
+    )
+
+    m1_finding = _finding(m1_report.findings, "ASCII_NUMERIC_INVALID")
+    tick_finding = _finding(tick_report.findings, "ASCII_NUMERIC_INVALID")
+    assert m1_finding.location.column == "open"
+    assert m1_finding.metadata["price_columns"] == [
+        "open",
+        "high",
+        "low",
+        "close",
+    ]
+    assert "ask" not in m1_finding.metadata["price_columns"]
+    assert m1_finding.metadata["samples"][0]["raw_value"] == "$1.306570"
+    assert tick_finding.location.column == "bid"
+    assert tick_finding.metadata["price_columns"] == ["bid", "ask"]
+    assert tick_finding.metadata["samples"][0]["raw_value"] == "inf"
+
+
+def test_shifted_column_rows_are_reported_once(
+    tmp_path: Path,
+) -> None:
+    """Rows with exact field counts but shifted values need clear findings."""
+    report = _report_for_path(
+        write_ascii_case(tmp_path, case_by_name("tick_shifted_column"))
+    )
+
+    finding = _finding(report.findings, "ASCII_ROW_SCHEMA_SHIFTED")
+    assert report.status is QualityStatus.FAILED
+    assert finding.location.row_number == 2
+    assert finding.location.column == "datetime"
+    assert finding.metadata["columns"] == ["datetime", "bid", "ask", "vol"]
+    assert [item.code for item in report.findings] == [
+        "ASCII_ROW_SCHEMA_SHIFTED"
+    ]
+
+
+def test_bad_volume_rows_fail_schema_checks_without_rejecting_zero_volume(
+    tmp_path: Path,
+) -> None:
+    """Volume is uninformative for FX but still has strict dtype intent."""
+    report = _report_for_path(
+        write_ascii_case(tmp_path, case_by_name("m1_bad_volume"))
+    )
+
+    finding = _finding(report.findings, "ASCII_VOLUME_INVALID")
+    assert finding.location.column == "vol"
+    assert finding.metadata["zero_volume_allowed"] is True
+    assert finding.metadata["structurally_uninformative"] is True
+    assert finding.metadata["max_value"] == 2147483647
+    assert finding.metadata["samples"][0]["raw_value"] == "2147483648"
 
 
 def test_delimiter_mismatch_is_actionable_and_still_counts_fields(
