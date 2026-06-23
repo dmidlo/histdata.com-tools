@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from histdatacom.data_quality import (
     ASCII_TICK_MICROSTRUCTURE_RULE_ID,
+    ASCII_TICK_SPREAD_REGIME_RULE_ID,
     ASCII_TICK_SPREAD_RULE_ID,
     HistDataAsciiTickMicrostructureRule,
+    HistDataAsciiTickSpreadRegimeRule,
     HistDataAsciiTickSpreadRule,
     HistDataTickMicrostructureThresholds,
+    HistDataTickSpreadRegimeThresholds,
     HistDataTickSpreadThresholds,
     QualitySeverity,
     QualityStatus,
@@ -33,6 +38,7 @@ def test_ticks_group_registers_spread_rule() -> None:
     assert [rule.rule_id for rule in quality_rules_for_groups(("ticks",))] == [
         ASCII_TICK_SPREAD_RULE_ID,
         ASCII_TICK_MICROSTRUCTURE_RULE_ID,
+        ASCII_TICK_SPREAD_REGIME_RULE_ID,
     ]
 
 
@@ -47,10 +53,12 @@ def test_clean_tick_file_reports_spread_summary(
         report.findings,
         "ASCII_TICK_MICROSTRUCTURE_SUMMARY",
     )
+    regimes = _finding(report.findings, "ASCII_TICK_SPREAD_REGIME_SUMMARY")
     assert report.status is QualityStatus.CLEAN
     assert [finding.code for finding in report.findings] == [
         "ASCII_TICK_SPREAD_SUMMARY",
         "ASCII_TICK_MICROSTRUCTURE_SUMMARY",
+        "ASCII_TICK_SPREAD_REGIME_SUMMARY",
     ]
     assert summary.rule_id == ASCII_TICK_SPREAD_RULE_ID
     assert summary.severity is QualitySeverity.INFO
@@ -70,6 +78,16 @@ def test_clean_tick_file_reports_spread_summary(
     assert microstructure.metadata["stale_quote_run_count"] == 0
     assert microstructure.metadata["burst_run_count"] == 0
     assert microstructure.metadata["one_sided_run_count"] == 0
+    assert regimes.rule_id == ASCII_TICK_SPREAD_REGIME_RULE_ID
+    assert regimes.metadata["profiled_row_count"] == 3
+    assert regimes.metadata["baseline_profile"]["source"] == (
+        "liquid_session_non_special"
+    )
+    assert regimes.metadata["symbol_spread_profiles"]["EURUSD"]["count"] == 3
+    assert regimes.metadata["source_hour_spread_profiles"]["00"]["count"] == 3
+    assert regimes.metadata["wide_spread_count"] == 0
+    assert regimes.metadata["spread_jump_count"] == 0
+    assert regimes.metadata["regime_shift_count"] == 0
 
 
 def test_m1_files_are_ignored_by_tick_spread_rule(
@@ -80,6 +98,138 @@ def test_m1_files_are_ignored_by_tick_spread_rule(
 
     assert report.status is QualityStatus.CLEAN
     assert report.findings == ()
+
+
+def test_tick_spread_regime_profiles_symbol_hour_session_and_rollover(
+    tmp_path: Path,
+) -> None:
+    """Spread regime reports should bucket by symbol, hour, and session."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="tick_spread_regime_buckets",
+            timeframe=TICK,
+            filename="DAT_ASCII_EURUSD_T_201202_REGIMES.csv",
+            rows=(
+                "20120201 000000000,1.000000,1.000100,0",
+                "20120201 030000000,1.000000,1.000200,0",
+                "20120201 080000000,1.000000,1.000300,0",
+                "20120205 170000000,1.000000,1.000400,0",
+                "20120203 165900000,1.000000,1.000500,0",
+            ),
+        ),
+    )
+    report = _report_for_path(
+        path,
+        rules=(
+            HistDataAsciiTickSpreadRegimeRule(
+                thresholds=HistDataTickSpreadRegimeThresholds(
+                    wide_spread_multiplier=99.0,
+                    jump_spread_multiplier=99.0,
+                    regime_median_multiplier=99.0,
+                )
+            ),
+        ),
+    )
+
+    summary = _finding(report.findings, "ASCII_TICK_SPREAD_REGIME_SUMMARY")
+    assert report.status is QualityStatus.CLEAN
+    assert summary.metadata["profiled_row_count"] == 5
+    assert summary.metadata["symbol_spread_profiles"]["EURUSD"]["count"] == 5
+    assert summary.metadata["source_hour_spread_profiles"]["00"][
+        "median_spread"
+    ] == pytest.approx(0.0001)
+    assert summary.metadata["source_hour_spread_profiles"]["17"]["count"] == 1
+    assert summary.metadata["session_spread_profiles"]["asia"]["count"] == 2
+    assert summary.metadata["session_spread_profiles"]["london"]["count"] == 2
+    assert summary.metadata["session_spread_profiles"]["new_york"]["count"] == 1
+    assert (
+        summary.metadata["session_spread_profiles"]["market_closed"]["count"]
+        == 2
+    )
+    special = summary.metadata["special_regime_spread_profiles"]
+    assert special["daily_rollover"]["count"] == 2
+    assert special["sunday_open"]["count"] == 1
+    assert special["friday_close"]["count"] == 1
+    assert summary.metadata["baseline_profile"]["median_spread"] == (
+        pytest.approx(0.0002)
+    )
+
+
+def test_tick_spread_regime_warns_for_outliers_and_spread_jumps(
+    tmp_path: Path,
+) -> None:
+    """Wide spreads and abrupt spread jumps should warn by default."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="tick_spread_regime_outlier",
+            timeframe=TICK,
+            filename="DAT_ASCII_EURUSD_T_201202_SPREAD_OUTLIER.csv",
+            rows=(
+                "20120201 000000000,1.000000,1.000100,0",
+                "20120201 000100000,1.000000,1.000100,0",
+                "20120201 000200000,1.000000,1.001000,0",
+                "20120201 000300000,1.000000,1.000100,0",
+            ),
+        ),
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_TICK_SPREAD_REGIME_SUMMARY")
+    wide = _finding(report.findings, "ASCII_TICK_SPREAD_REGIME_WIDE_SPREAD")
+    jump = _finding(report.findings, "ASCII_TICK_SPREAD_REGIME_JUMP")
+    assert report.status is QualityStatus.WARNING
+    assert summary.metadata["wide_spread_count"] == 1
+    assert summary.metadata["spread_jump_count"] == 2
+    assert summary.metadata["wide_spread_threshold"] == pytest.approx(0.0003)
+    assert summary.metadata["spread_jump_threshold"] == pytest.approx(0.0002)
+    assert wide.severity is QualitySeverity.WARNING
+    assert wide.location.row_number == 3
+    assert wide.location.metadata["values"]["spread"] == pytest.approx(0.001)
+    assert jump.severity is QualitySeverity.WARNING
+    assert jump.metadata["row_count"] == 2
+    assert jump.metadata["samples"][0]["previous"]["row_number"] == 2
+
+
+def test_tick_spread_regime_warns_when_special_regimes_widen(
+    tmp_path: Path,
+) -> None:
+    """Sunday open, Friday close, and rollover regimes should compare separately."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="tick_spread_regime_shift",
+            timeframe=TICK,
+            filename="DAT_ASCII_EURUSD_T_201202_REGIME_SHIFT.csv",
+            rows=(
+                "20120201 000000000,1.000000,1.000100,0",
+                "20120201 010000000,1.000000,1.000100,0",
+                "20120205 170000000,1.000000,1.000500,0",
+                "20120203 165900000,1.000000,1.000500,0",
+            ),
+        ),
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_TICK_SPREAD_REGIME_SUMMARY")
+    shift = _finding(report.findings, "ASCII_TICK_SPREAD_REGIME_SHIFT")
+    assert report.status is QualityStatus.WARNING
+    assert summary.metadata["regime_shift_count"] == 3
+    assert summary.metadata["regime_median_threshold"] == pytest.approx(0.0002)
+    special = summary.metadata["special_regime_spread_profiles"]
+    assert special["daily_rollover"]["median_spread"] == pytest.approx(0.0005)
+    assert special["sunday_open"]["median_spread"] == pytest.approx(0.0005)
+    assert special["friday_close"]["median_spread"] == pytest.approx(0.0005)
+    assert shift.severity is QualitySeverity.WARNING
+    assert shift.metadata["row_count"] == 3
+    assert {sample["profile_key"] for sample in shift.metadata["samples"]} == {
+        "daily_rollover",
+        "friday_close",
+        "sunday_open",
+    }
 
 
 def test_negative_tick_spread_is_a_hard_failure(

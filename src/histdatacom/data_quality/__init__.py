@@ -123,10 +123,13 @@ from histdatacom.data_quality.time import (
 )
 from histdatacom.data_quality.ticks import (
     ASCII_TICK_MICROSTRUCTURE_RULE_ID,
+    ASCII_TICK_SPREAD_REGIME_RULE_ID,
     ASCII_TICK_SPREAD_RULE_ID,
     HistDataAsciiTickMicrostructureRule,
+    HistDataAsciiTickSpreadRegimeRule,
     HistDataAsciiTickSpreadRule,
     HistDataTickMicrostructureThresholds,
+    HistDataTickSpreadRegimeThresholds,
     HistDataTickSpreadThresholds,
     ticks_quality_rules,
 )
@@ -144,6 +147,7 @@ __all__ = [
     "ASCII_TIMESTAMP_GAP_RULE_ID",
     "ASCII_TIMESTAMP_SEQUENCE_RULE_ID",
     "ASCII_TICK_MICROSTRUCTURE_RULE_ID",
+    "ASCII_TICK_SPREAD_REGIME_RULE_ID",
     "ASCII_TICK_SPREAD_RULE_ID",
     "ASSET_CLASS_FX",
     "ASSET_CLASS_INDEX",
@@ -171,6 +175,7 @@ __all__ = [
     "HistDataAsciiTextIngestionRule",
     "HistDataAsciiTimestampSequenceRule",
     "HistDataAsciiTickMicrostructureRule",
+    "HistDataAsciiTickSpreadRegimeRule",
     "HistDataAsciiTickSpreadRule",
     "HistDataCalendarClassification",
     "HistDataCalendarSessionRule",
@@ -185,6 +190,7 @@ __all__ = [
     "HistDataSymbolMetadataRule",
     "HistDataSymbolPrecisionRule",
     "HistDataTickMicrostructureThresholds",
+    "HistDataTickSpreadRegimeThresholds",
     "HistDataTickSpreadThresholds",
     "HistDataZipInventoryRule",
     "QualityFinding",
