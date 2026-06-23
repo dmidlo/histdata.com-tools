@@ -33,6 +33,12 @@ from typing import TYPE_CHECKING, Any, Mapping
 import histdatacom
 from histdatacom import Options
 from histdatacom.cli import ArgParser
+from histdatacom.data_quality import (
+    QualityDiscoveryError,
+    discover_quality_targets,
+    normalize_quality_check_groups,
+    run_quality_assessment,
+)
 from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.repository_output import (
     print_repository_failure,
@@ -72,6 +78,9 @@ class RuntimeContext:
     sidecar_start: bool
     sidecar_wait_result: bool
     api_return_type: str | None
+    data_quality: bool
+    quality_paths: tuple[str, ...]
+    quality_check_groups: tuple[str, ...]
     available_remote_data: bool
     update_remote_data: bool
     import_to_influxdb: bool
@@ -130,7 +139,41 @@ class _HistDataCom:  # noqa:R701
                 print(histdatacom.__version__)  # noqa:T201
             return histdatacom.__version__
 
+        if self.context.data_quality:
+            return self._run_data_quality()
+
         return self._run_sidecar_job()
+
+    def _run_data_quality(self) -> dict:
+        """Run local-only data-quality target discovery."""
+        try:
+            check_groups = normalize_quality_check_groups(
+                self.context.quality_check_groups
+            )
+            discovery = discover_quality_targets(self.context.quality_paths)
+        except QualityDiscoveryError as err:
+            if self.context.from_api:
+                raise
+            print(f"error: {err}", file=sys.stderr)  # noqa:T201
+            raise SystemExit(1) from err
+
+        report = run_quality_assessment(
+            discovery.targets,
+            (),
+            metadata={
+                "operation": "data-quality",
+                "check_groups": list(check_groups),
+            },
+        )
+        payload = {
+            "operation": "data-quality",
+            "check_groups": list(check_groups),
+            "discovery": discovery.to_dict(),
+            "summary": report.summary().to_dict(),
+        }
+        if not self.context.from_api:
+            _print_data_quality_discovery(payload)
+        return payload
 
     def _run_sidecar_job(
         self,
@@ -245,6 +288,15 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         sidecar_start=bool(args["sidecar_start"]),
         sidecar_wait_result=bool(args["sidecar_wait_result"]),
         api_return_type=args["api_return_type"],
+        data_quality=bool(args["data_quality"]),
+        quality_paths=tuple(
+            str(path) for path in (args.get("quality_paths") or ())
+        ),
+        quality_check_groups=tuple(
+            sorted(
+                str(group) for group in (args.get("quality_check_groups") or ())
+            )
+        ),
         available_remote_data=bool(args["available_remote_data"]),
         update_remote_data=bool(args["update_remote_data"]),
         import_to_influxdb=bool(args["import_to_influxdb"]),
@@ -312,6 +364,32 @@ def _freeze_runtime_arg(value: Any) -> Any:
             {key: _freeze_runtime_arg(item) for key, item in value.items()}
         )
     return value
+
+
+def _print_data_quality_discovery(payload: Mapping[str, Any]) -> None:
+    """Print a compact local target discovery summary."""
+    discovery = payload.get("discovery", {})
+    if not isinstance(discovery, Mapping):
+        discovery = {}
+    targets = discovery.get("targets", [])
+    if not isinstance(targets, list):
+        targets = []
+
+    print("Data quality target discovery")  # noqa:T201
+    print(  # noqa:T201
+        "checks: " + ", ".join(str(item) for item in payload["check_groups"])
+    )
+    print(f"roots: {len(discovery.get('roots', []))}")  # noqa:T201
+    print(f"targets: {len(targets)}")  # noqa:T201
+    if not targets:
+        print("No data quality targets discovered.")  # noqa:T201
+        return
+    for target in targets:
+        if not isinstance(target, Mapping):
+            continue
+        print(  # noqa:T201
+            f"- {target.get('kind', 'unknown')}: {target.get('path', '')}"
+        )
 
 
 def main(

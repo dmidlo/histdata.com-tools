@@ -35,6 +35,9 @@ class Options:
         self.batch_size: str = "5000"
         self.delete_after_influx: bool = False
         self.zip_persist: bool = False
+        self.data_quality: bool = False
+        self.quality_paths: tuple[str, ...] = ()
+        self.quality_check_groups: set[str] = {"all"}
         self.use_sidecar: bool = True
         self.sidecar_start: bool = True
         self.sidecar_wait_result: bool = True

@@ -18,6 +18,11 @@ from histdatacom.sidecar.client import (
     SidecarUnavailableError,
     TemporalDependencyError,
 )
+from tests.fixtures.histdata_ascii.quality_cases import (
+    CLEAN_M1_CASE,
+    write_ascii_case,
+    write_zip_case,
+)
 
 
 def test_histdata_com() -> None:
@@ -213,6 +218,127 @@ def test_api_options_can_submit_sidecar_job_and_return_result(
         "start_if_needed": True,
         "wait_for_result": True,
     }
+
+
+@pytest.mark.parametrize(
+    ("target_kind", "expected_count", "expected_text"),
+    (
+        ("directory", 2, "targets: 2"),
+        ("csv", 1, "csv:"),
+        ("zip", 1, "zip:"),
+        ("empty-directory", 0, "No data quality targets discovered."),
+    ),
+)
+def test_data_quality_cli_discovers_local_targets_without_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    target_kind: str,
+    expected_count: int,
+    expected_text: str,
+) -> None:
+    """Quality CLI should discover local targets without starting sidecar."""
+    import histdatacom.histdata_com as histdata_com
+
+    root = tmp_path / target_kind
+    root.mkdir()
+    csv_path = write_ascii_case(root, CLEAN_M1_CASE)
+    zip_path = write_zip_case(root, CLEAN_M1_CASE)
+    target_path = {
+        "directory": root,
+        "csv": csv_path,
+        "zip": zip_path,
+        "empty-directory": tmp_path / "empty",
+    }[target_kind]
+    if target_kind == "empty-directory":
+        target_path.mkdir()
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda *args, **kwargs: pytest.fail(
+            "quality mode should not submit to sidecar"
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(target_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert "Data quality target discovery" in output
+    assert expected_text in output
+    assert f"targets: {expected_count}" in output
+
+
+def test_data_quality_cli_missing_path_exits_without_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Missing quality targets should fail locally before any sidecar call."""
+    import histdatacom.histdata_com as histdata_com
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda *args, **kwargs: pytest.fail(
+            "quality mode should not submit to sidecar"
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path / "missing"),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    assert err.value.code == 1
+    assert "quality target path does not exist" in capsys.readouterr().err
+
+
+def test_data_quality_api_returns_discovery_payload_without_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """API quality runs should return the same bounded discovery payload."""
+    import histdatacom.histdata_com as histdata_com
+
+    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    options = Options()
+    options.data_quality = True
+    options.quality_paths = (str(csv_path),)
+    options.quality_check_groups = {"inventory"}
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda *args, **kwargs: pytest.fail(
+            "quality mode should not submit to sidecar"
+        ),
+    )
+
+    result = histdata_com.main(options)
+
+    assert result["operation"] == "data-quality"
+    assert result["check_groups"] == ["inventory"]
+    assert result["discovery"]["target_count"] == 1
+    assert result["summary"]["target_count"] == 1
 
 
 def test_back_to_back_sidecar_api_calls_do_not_leak_global_args(

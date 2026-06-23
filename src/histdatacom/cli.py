@@ -76,6 +76,7 @@ from rich import print  # pylint: disable=redefined-builtin
 
 from histdatacom import Options
 from histdatacom.concurrency import get_pool_cpu_count
+from histdatacom.data_quality import QUALITY_CHECK_GROUPS
 from histdatacom.fx_enums import (
     Format,
     Pairs,
@@ -145,12 +146,67 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             self.arg_namespace.formats = {"ascii"}
             self.arg_namespace.timeframes = {"T"}
 
+    def _check_quality_mode(self) -> None:
+        """Validate local-only data quality mode inputs."""
+        if not self.arg_namespace.data_quality:
+            if self.arg_namespace.quality_paths:
+                print("--quality-target requires --quality")  # noqa:T201
+                raise SystemExit(1)
+            quality_groups = set(self.arg_namespace.quality_check_groups or ())
+            if quality_groups and quality_groups != {"all"}:
+                print("--quality-checks requires --quality")  # noqa:T201
+                raise SystemExit(1)
+            return
+
+        legacy_flags = {
+            "-A/--available_remote_data": (
+                self.arg_namespace.available_remote_data
+            ),
+            "-U/--update_remote_data": self.arg_namespace.update_remote_data,
+            "-V/--validate_urls": self.arg_namespace.validate_urls,
+            "-D/--download_data_archives": (
+                self.arg_namespace.download_data_archives
+            ),
+            "-X/--extract_csvs": self.arg_namespace.extract_csvs,
+            "-I/--import_to_influxdb": self.arg_namespace.import_to_influxdb,
+        }
+        conflicts = [flag for flag, enabled in legacy_flags.items() if enabled]
+        if conflicts:
+            print(  # noqa:T201
+                "--quality is a local-only operation and cannot be combined "
+                f"with {', '.join(conflicts)}"
+            )
+            raise SystemExit(1)
+
+        if not self.arg_namespace.quality_paths:
+            self.arg_namespace.quality_paths = (
+                self.arg_namespace.data_directory,
+            )
+
     def _clean_from_api_args(self) -> list:  # noqa:CCR001
         """Build the args list from api Options.
 
         Returns:
             list: args
         """
+        if self.arg_namespace.data_quality:
+            args = [
+                *["--data-directory", self.arg_namespace.data_directory],
+                "--quality",
+            ]
+            if self.arg_namespace.quality_paths:
+                args.extend(
+                    ["--quality-target", *self.arg_namespace.quality_paths]
+                )
+            if self.arg_namespace.quality_check_groups:
+                args.extend(
+                    [
+                        "--quality-checks",
+                        *sorted(self.arg_namespace.quality_check_groups),
+                    ]
+                )
+            return args
+
         self.arg_namespace.timeframes = Timeframe.convert_to_values(
             self.arg_namespace.timeframes
         )
@@ -224,7 +280,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         """
         try:
             if self.arg_namespace.from_api and not (
-                self.arg_namespace.validate_urls
+                self.arg_namespace.data_quality
+                or self.arg_namespace.validate_urls
                 or self.arg_namespace.download_data_archives
                 or self.arg_namespace.extract_csvs
                 or self.arg_namespace.import_to_influxdb
@@ -248,6 +305,9 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
     def _check_for_supported_format_timeframe_combination(self) -> None:
         """Reject format/timeframe selections that generate no work."""
+        if self.arg_namespace.data_quality:
+            return
+
         formats = self.arg_namespace.formats or set()
         timeframes = self.arg_namespace.timeframes or set()
         has_supported_combination = any(
@@ -313,6 +373,9 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
     def _validate_prerequisites(self) -> None:
         """Set prereqs for behavior flags -V -D -X -I."""
+        if self.arg_namespace.data_quality:
+            return
+
         if (
             self.arg_namespace.available_remote_data
             or self.arg_namespace.update_remote_data
@@ -699,6 +762,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         influx_args = self.add_argument_group("Influxdb")
         system_args = self.add_argument_group("System")
         sidecar_args = self.add_argument_group("Sidecar")
+        quality_args = self.add_argument_group("Data quality")
         info_args = self.add_argument_group("Info")
 
         info_args.add_argument(
@@ -871,6 +935,39 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             action="store_false",
             help="submit the sidecar job without waiting for its result",
         )
+        quality_args.add_argument(
+            "--quality",
+            dest="data_quality",
+            action="store_true",
+            help=(
+                "run offline data-quality target discovery against local "
+                "datasets without contacting HistData.com"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-target",
+            "--quality-path",
+            dest="quality_paths",
+            nargs="+",
+            type=str,
+            metavar="PATH",
+            help=(
+                "local file or directory to assess; supports directories, "
+                "HistData ZIP archives, CSV files, and .data cache files"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-checks",
+            dest="quality_check_groups",
+            nargs="+",
+            type=str,
+            choices=QUALITY_CHECK_GROUPS,
+            metavar="GROUP",
+            help=(
+                "quality check groups to run; defaults to all. Supported: "
+                + ", ".join(QUALITY_CHECK_GROUPS)
+            ),
+        )
 
     def _sanitize_input(self) -> None:  # noqa:DAR401
         """Clean user-input before run.
@@ -891,6 +988,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             self.parse_args(namespace=self.arg_namespace)
 
         self._adjust_for_repo_data_request()
+        self._check_quality_mode()
         self._check_datetime_input()
         self._check_for_ascii_if_influx()
         self._check_for_ascii_if_api()

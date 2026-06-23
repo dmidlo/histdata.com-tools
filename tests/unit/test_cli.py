@@ -174,6 +174,80 @@ def test_no_sidecar_start_cli_flag_requires_running_sidecar(
     assert options.validate_urls
 
 
+def test_data_quality_cli_mode_bypasses_legacy_prerequisites(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Offline quality mode should not auto-enable network/download stages."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-checks",
+            "inventory",
+            "ingestion",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.data_quality
+    assert options.quality_paths == [str(tmp_path)]
+    assert options.quality_check_groups == ["inventory", "ingestion"]
+    assert not options.validate_urls
+    assert not options.download_data_archives
+    assert not options.extract_csvs
+    assert not options.import_to_influxdb
+
+
+def test_data_quality_cli_defaults_to_data_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Operators can run quality mode against the configured data directory."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--data-directory",
+            str(tmp_path),
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.data_quality
+    assert options.quality_paths == (str(tmp_path),)
+    assert not options.validate_urls
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ["histdatacom", "--quality-target", "data"],
+        ["histdatacom", "--quality-checks", "inventory"],
+        ["histdatacom", "--quality", "-D"],
+    ),
+)
+def test_data_quality_cli_rejects_ambiguous_quality_flags(
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Quality mode should stay separate from legacy network operations."""
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit) as err:
+        ArgParser(Options())()
+
+    assert err.value.code == 1
+
+
 def test_api_options_ignore_ambient_process_argv(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
