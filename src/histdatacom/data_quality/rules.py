@@ -14,6 +14,7 @@ from histdatacom.data_quality.discovery import normalize_quality_check_groups
 from histdatacom.data_quality.ingestion import ingestion_quality_rules
 from histdatacom.data_quality.inventory import inventory_quality_rules
 from histdatacom.data_quality.manifest import manifest_quality_run_rules
+from histdatacom.data_quality.modeling import modeling_quality_rules
 from histdatacom.data_quality.symbols import (
     domain_quality_rules,
     domain_quality_run_rules,
@@ -44,6 +45,8 @@ def quality_rules_for_groups(
     if "all" in normalized or "domain" in normalized:
         rules.extend(domain_quality_rules())
         rules.extend(calendar_quality_rules())
+    if "all" in normalized or "modeling" in normalized:
+        rules.extend(modeling_quality_rules())
     return tuple(rules)
 
 

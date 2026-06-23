@@ -554,7 +554,7 @@ class HistDataSymbolMetadataRule:
             return ()
 
         symbol_metadata = symbol_metadata_for(symbol)
-        metadata = {
+        metadata: dict[str, JSONValue] = {
             "symbol_metadata": symbol_metadata.to_metadata(),
             "quote_convention": _quote_convention_metadata(symbol_metadata),
             "format_assumptions": _format_assumptions_metadata(target),

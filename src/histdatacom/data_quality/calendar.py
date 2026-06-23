@@ -822,8 +822,8 @@ def _increment_counts(counter: Counter[str], values: tuple[str, ...]) -> None:
         counter[value] += 1
 
 
-def _counter_metadata(counter: Counter[str]) -> dict[str, int]:
-    return dict(sorted(counter.items()))
+def _counter_metadata(counter: Counter[str]) -> dict[str, JSONValue]:
+    return {key: count for key, count in sorted(counter.items())}
 
 
 def _append_invalid_timestamp(

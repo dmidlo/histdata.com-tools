@@ -488,13 +488,21 @@ def test_data_quality_cli_writes_json_report_artifact(
     assert histdata_com.main() is None
 
     output = capsys.readouterr().out
-    assert "Clean files" in output
-    assert "Warning files\n- none" in output
+    assert "status: warning" in output
+    assert "Clean files\n- none" in output
+    assert "Warning files" in output
     assert "Failed files\n- none" in output
     assert f"report: {report_path.resolve()}" in output
-    assert '"schema_version": "histdatacom.quality-report.v1"' in (
-        report_path.read_text(encoding="utf-8")
-    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    finding_codes = [
+        finding["code"]
+        for result in report["rule_results"]
+        for finding in result["findings"]
+    ]
+    assert report["schema_version"] == "histdatacom.quality-report.v1"
+    assert "MODELING_BID_ONLY_EXECUTION_RISK" in finding_codes
+    assert "MODELING_CURRENT_BAR_LEAKAGE_RISK" in finding_codes
+    assert "MODELING_SPREAD_COST_MISSING" in finding_codes
 
 
 def test_data_quality_cli_exit_policy_fails_on_errors(

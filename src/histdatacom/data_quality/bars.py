@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
+from typing import cast
 import zipfile
 
 from histdatacom.data_quality.contracts import (
@@ -1436,8 +1437,11 @@ def _m1_tick_comparison_sample(
     reconstructed_bar: _ReconstructedM1Bar,
     tolerance: HistDataM1TickReconstructionTolerance,
 ) -> _M1TickComparisonSample:
-    downloaded_values = downloaded_bar.values_metadata()
-    reconstructed_values = reconstructed_bar.values_metadata()
+    downloaded_values = cast(dict[str, float], downloaded_bar.values_metadata())
+    reconstructed_values = cast(
+        dict[str, float],
+        reconstructed_bar.values_metadata(),
+    )
     differences = {
         column: abs(
             float(downloaded_values[column])
