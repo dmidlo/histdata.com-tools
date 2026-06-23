@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from histdatacom.data_quality.bars import (
     ASCII_M1_BAR_INTEGRITY_RULE_ID,
+    ASCII_M1_OUTLIER_RULE_ID,
     ASCII_M1_PRECISION_RULE_ID,
     HistDataAsciiM1BarIntegrityRule,
+    HistDataAsciiM1OutlierRule,
     HistDataAsciiM1PrecisionRule,
+    HistDataM1OutlierThresholds,
     bars_quality_rules,
 )
 from histdatacom.data_quality.contracts import (
@@ -103,6 +106,7 @@ from histdatacom.data_quality.time import (
 __all__ = [
     "ASCII_EST_NO_DST_TIME_RULE_ID",
     "ASCII_M1_BAR_INTEGRITY_RULE_ID",
+    "ASCII_M1_OUTLIER_RULE_ID",
     "ASCII_M1_PRECISION_RULE_ID",
     "ASCII_ROW_COUNT_INGESTION_RULE_ID",
     "ASCII_SCHEMA_INGESTION_RULE_ID",
@@ -123,6 +127,7 @@ __all__ = [
     "TIMESTAMP_CONTINUITY_METADATA_KEY",
     "CoverageDimension",
     "HistDataAsciiM1BarIntegrityRule",
+    "HistDataAsciiM1OutlierRule",
     "HistDataAsciiM1PrecisionRule",
     "HistDataAsciiTimestampContinuityRule",
     "HistDataAsciiTimestampGapRule",
@@ -133,6 +138,7 @@ __all__ = [
     "HistDataAsciiTimestampSequenceRule",
     "HistDataCoverageManifestRule",
     "HistDataGapTolerance",
+    "HistDataM1OutlierThresholds",
     "HistDataSymbolMetadata",
     "HistDataSymbolPrecisionRule",
     "HistDataZipInventoryRule",

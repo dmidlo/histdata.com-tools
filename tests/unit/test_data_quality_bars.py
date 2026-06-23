@@ -6,12 +6,15 @@ from pathlib import Path
 
 from histdatacom.data_quality import (
     ASCII_M1_BAR_INTEGRITY_RULE_ID,
+    ASCII_M1_OUTLIER_RULE_ID,
     ASCII_M1_PRECISION_RULE_ID,
     ASSET_CLASS_FX,
     ASSET_CLASS_INDEX,
     ASSET_CLASS_METAL,
     ASSET_CLASS_OIL,
     ASSET_CLASS_UNKNOWN,
+    HistDataAsciiM1OutlierRule,
+    HistDataM1OutlierThresholds,
     QualitySeverity,
     QualityStatus,
     discover_quality_targets,
@@ -35,6 +38,7 @@ def test_bars_group_registers_m1_bar_integrity_rule() -> None:
     assert [rule.rule_id for rule in quality_rules_for_groups(("bars",))] == [
         ASCII_M1_BAR_INTEGRITY_RULE_ID,
         ASCII_M1_PRECISION_RULE_ID,
+        ASCII_M1_OUTLIER_RULE_ID,
     ]
 
 
@@ -49,6 +53,7 @@ def test_clean_m1_file_passes_bar_integrity_checks(
     assert [finding.code for finding in report.findings] == [
         "ASCII_M1_OHLC_SUMMARY",
         "ASCII_M1_PRECISION_SUMMARY",
+        "ASCII_M1_OUTLIER_SUMMARY",
     ]
     assert summary.severity is QualitySeverity.INFO
     assert summary.rule_id == ASCII_M1_BAR_INTEGRITY_RULE_ID
@@ -77,6 +82,15 @@ def test_clean_m1_file_passes_bar_integrity_checks(
     assert precision.metadata["observed_decimal_places"] == {"6": 12}
     assert precision.metadata["unexpected_precision_count"] == 0
     assert precision.metadata["regime_shift_count"] == 0
+
+    outlier = _finding(report.findings, "ASCII_M1_OUTLIER_SUMMARY")
+    assert outlier.rule_id == ASCII_M1_OUTLIER_RULE_ID
+    assert outlier.metadata["symbol_metadata"]["asset_class"] == "fx"
+    assert outlier.metadata["threshold_selection"]["source"] == "default"
+    assert outlier.metadata["range_outlier_count"] == 0
+    assert outlier.metadata["open_jump_count"] == 0
+    assert outlier.metadata["flatline_run_count"] == 0
+    assert outlier.metadata["return_outlier_count"] == 0
 
 
 def test_tick_files_are_ignored_by_m1_bar_integrity_rule(
@@ -238,6 +252,192 @@ def test_unknown_symbols_warn_without_precision_thresholds(
     assert finding.metadata["symbol_metadata"]["known"] is False
     assert finding.metadata["symbol_metadata"]["precision_rule"] is None
     assert finding.metadata["observed_decimal_places"] == {"6": 4}
+
+
+def test_m1_high_low_range_outlier_warns_with_symbol_context(
+    tmp_path: Path,
+) -> None:
+    """Implausibly large M1 high-low ranges should warn with row context."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="m1_range_outlier",
+            timeframe=M1,
+            filename="DAT_ASCII_EURUSD_M1_201202_RANGE_OUTLIER.csv",
+            rows=("20120201 000000;1.050000;1.200000;1.000000;1.050000;0",),
+        ),
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_M1_OUTLIER_SUMMARY")
+    finding = _finding(report.findings, "ASCII_M1_RANGE_OUTLIER")
+    assert report.status is QualityStatus.WARNING
+    assert summary.metadata["range_outlier_count"] == 1
+    assert finding.severity is QualitySeverity.WARNING
+    assert finding.rule_id == ASCII_M1_OUTLIER_RULE_ID
+    assert finding.location.row_number == 1
+    assert finding.location.column == "high"
+    assert finding.location.metadata["metric"] == "high_low_range_ratio"
+    assert finding.location.metadata["metric_value"] > 0.005
+    assert finding.metadata["symbol_metadata"]["normalized_symbol"] == "EURUSD"
+    assert (
+        finding.metadata["threshold_selection"]["thresholds"]["max_range_ratio"]
+        == 0.005
+    )
+
+
+def test_m1_open_close_jump_warns_with_previous_close_context(
+    tmp_path: Path,
+) -> None:
+    """Large current-open versus previous-close jumps should warn."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="m1_open_jump",
+            timeframe=M1,
+            filename="DAT_ASCII_EURUSD_M1_201202_OPEN_JUMP.csv",
+            rows=(
+                "20120201 000000;1.000000;1.000010;0.999990;1.000000;0",
+                "20120201 000100;1.050000;1.050010;1.049990;1.050000;0",
+            ),
+        ),
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_M1_OUTLIER_SUMMARY")
+    finding = _finding(report.findings, "ASCII_M1_OPEN_CLOSE_JUMP")
+    assert report.status is QualityStatus.WARNING
+    assert summary.metadata["open_jump_count"] == 1
+    assert finding.location.row_number == 2
+    assert finding.location.column == "open"
+    assert finding.location.metadata["metric"] == (
+        "previous_close_to_open_ratio"
+    )
+    assert finding.location.metadata["previous_close_price"] == 1.0
+    assert finding.metadata["samples"][0]["previous_row_number"] == 1
+
+
+def test_m1_flatline_runs_warn_with_bounded_run_sample(
+    tmp_path: Path,
+) -> None:
+    """Long runs of open == high == low == close should warn."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="m1_flatline_run",
+            timeframe=M1,
+            filename="DAT_ASCII_EURUSD_M1_201202_FLATLINE.csv",
+            rows=(
+                "20120201 000000;1.000000;1.000000;1.000000;1.000000;0",
+                "20120201 000100;1.000000;1.000000;1.000000;1.000000;0",
+                "20120201 000200;1.000000;1.000000;1.000000;1.000000;0",
+                "20120201 000300;1.000000;1.000000;1.000000;1.000000;0",
+                "20120201 000400;1.000000;1.000000;1.000000;1.000000;0",
+            ),
+        ),
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_M1_OUTLIER_SUMMARY")
+    finding = _finding(report.findings, "ASCII_M1_FLATLINE_RUN")
+    assert report.status is QualityStatus.WARNING
+    assert summary.metadata["flatline_run_count"] == 1
+    assert summary.metadata["flatline_affected_row_count"] == 5
+    assert finding.location.row_number == 1
+    assert finding.location.metadata["run_end_row_number"] == 5
+    assert finding.location.metadata["run_length"] == 5
+    assert finding.metadata["affected_row_count"] == 5
+
+
+def test_m1_return_outlier_warns_with_mad_threshold_metadata(
+    tmp_path: Path,
+) -> None:
+    """Close-to-close returns should be profiled with robust thresholds."""
+    rows = []
+    previous_close = 1.000000
+    closes = (
+        1.000010,
+        1.000020,
+        1.000030,
+        1.000040,
+        1.050000,
+        1.050010,
+        1.050020,
+        1.050030,
+        1.050040,
+    )
+    for minute, close in enumerate(closes):
+        high = max(previous_close, close) + 0.000010
+        low = min(previous_close, close) - 0.000010
+        rows.append(
+            "20120201 "
+            f"00{minute:02d}00;{previous_close:.6f};{high:.6f};"
+            f"{low:.6f};{close:.6f};0"
+        )
+        previous_close = close
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="m1_return_outlier",
+            timeframe=M1,
+            filename="DAT_ASCII_EURUSD_M1_201202_RETURN_OUTLIER.csv",
+            rows=tuple(rows),
+        ),
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_M1_OUTLIER_SUMMARY")
+    finding = _finding(report.findings, "ASCII_M1_RETURN_OUTLIER")
+    assert report.status is QualityStatus.WARNING
+    assert summary.metadata["return_sample_count"] == 8
+    assert summary.metadata["return_outlier_count"] == 1
+    assert finding.location.column == "close"
+    assert finding.location.metadata["metric"] == (
+        "absolute_log_return_deviation"
+    )
+    assert finding.metadata["return_mad"] is not None
+    assert finding.metadata["return_effective_threshold"] >= 0.005
+
+
+def test_m1_outlier_thresholds_can_be_overridden_by_asset_class(
+    tmp_path: Path,
+) -> None:
+    """Outlier thresholds should be configurable by asset class."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="m1_open_jump_with_asset_threshold_override",
+            timeframe=M1,
+            filename="DAT_ASCII_EURUSD_M1_201202_OPEN_JUMP_OK.csv",
+            rows=(
+                "20120201 000000;1.000000;1.000010;0.999990;1.000000;0",
+                "20120201 000100;1.050000;1.050010;1.049990;1.050000;0",
+            ),
+        ),
+    )
+    discovery = discover_quality_targets((path,))
+    report = run_quality_assessment(
+        discovery.targets,
+        (
+            HistDataAsciiM1OutlierRule(
+                thresholds_by_asset_class={
+                    ASSET_CLASS_FX: HistDataM1OutlierThresholds(
+                        max_open_jump_ratio=0.10,
+                    )
+                },
+            ),
+        ),
+    )
+
+    summary = _finding(report.findings, "ASCII_M1_OUTLIER_SUMMARY")
+    assert report.status is QualityStatus.CLEAN
+    assert summary.metadata["open_jump_count"] == 0
+    assert summary.metadata["threshold_selection"]["source"] == "asset_class"
+    assert summary.metadata["threshold_selection"]["key"] == ASSET_CLASS_FX
 
 
 def test_invalid_m1_ohlc_rows_fail_with_row_context(
