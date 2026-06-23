@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -186,6 +187,188 @@ def test_check_default_routing_sidecar_smoke_returns_report(
     assert captured["startup_timeout"] == 3.0
     assert captured["completion_timeout"] == 4.0
     assert captured["stop_timeout"] == 5.0
+
+
+def test_check_quality_sidecar_smoke_runs_installed_quality_cli(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Install smoke should run quality mode through installed scripts."""
+    module = _module()
+    commands: list[list[str]] = []
+    run_envs: list[dict[str, str]] = []
+
+    def fake_script_path(name: str) -> str:
+        return f"/venv/bin/{name}"
+
+    def fake_run(
+        command: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        expected_returncodes: tuple[int, ...] = (0,),
+    ) -> SimpleNamespace:
+        commands.append(command)
+        run_envs.append(dict(env or {}))
+        report_path = Path(command[command.index("--quality-report") + 1])
+        target_path = Path(command[command.index("--quality-target") + 1])
+        dirty = "BAD_NUMERIC" in target_path.name
+        payload = _quality_report_payload(status="failed" if dirty else "clean")
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(payload), encoding="utf-8")
+        returncode = 1 if dirty else 0
+        assert returncode in expected_returncodes
+        return SimpleNamespace(
+            returncode=returncode,
+            stdout="Data quality assessment\n",
+            stderr="",
+        )
+
+    def fake_run_json(
+        command: list[str],
+        *,
+        env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        commands.append(command)
+        run_envs.append(dict(env or {}))
+        if "start" in command:
+            return {"state": "running", "pids": {"server": 123}}
+        if "stop" in command:
+            return {"state": "stopped", "pids": {}}
+        if "jobs" in command and "list" in command:
+            return {
+                "jobs": [
+                    _quality_job(
+                        status="COMPLETED",
+                        target=tmp_path
+                        / "data"
+                        / "quality-smoke-fixtures"
+                        / "DAT_ASCII_EURUSD_M1_201202.csv",
+                        report=tmp_path
+                        / "data"
+                        / "quality-smoke-reports"
+                        / "quality-clean.json",
+                    ),
+                    _quality_job(
+                        status="FAILED",
+                        target=tmp_path
+                        / "data"
+                        / "quality-smoke-fixtures"
+                        / "DAT_ASCII_EURUSD_M1_201202_BAD_NUMERIC.csv",
+                        report=tmp_path
+                        / "data"
+                        / "quality-smoke-reports"
+                        / "quality-dirty.json",
+                    ),
+                ]
+            }
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(module, "_script_path", fake_script_path)
+    monkeypatch.setattr(module, "_run", fake_run)
+    monkeypatch.setattr(module, "_run_json", fake_run_json)
+
+    report = module.check_quality_sidecar_smoke(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+        data_directory=tmp_path / "data",
+        temporal_executable=tmp_path / "temporal",
+        startup_timeout=3.0,
+        stop_timeout=5.0,
+    )
+
+    assert report["start_state"] == "running"
+    assert report["stop_state"] == "stopped"
+    assert report["clean"]["returncode"] == 0
+    assert report["clean"]["status"] == "clean"
+    assert report["dirty"]["returncode"] == 1
+    assert report["dirty"]["status"] == "failed"
+    assert report["jobs"]["clean_status"] == "completed"
+    assert report["jobs"]["dirty_status"] == "failed"
+    assert any(command[0].endswith("histdatacom") for command in commands)
+    assert any(
+        command[:2] == ["/venv/bin/histdatacom-sidecar", "--workspace"]
+        and "start" in command
+        and "--executable" in command
+        for command in commands
+    )
+    assert any("--no-sidecar-start" in command for command in commands)
+    assert all(
+        env.get("HISTDATACOM_SIDECAR_WORKSPACE") == str(tmp_path / "workspace")
+        for env in run_envs
+    )
+    assert all(
+        env.get("HISTDATACOM_SIDECAR_HOME") == str(tmp_path / "runtime")
+        for env in run_envs
+    )
+
+
+def test_quality_sidecar_smoke_rejects_shutdown_leaks() -> None:
+    """Quality smoke should fail if sidecar stop leaves live PIDs."""
+    module = _module()
+
+    try:
+        module._validate_quality_sidecar_stop(
+            {"state": "stopped", "pids": {"worker": 123}}
+        )
+    except SystemExit as err:
+        assert "left running processes" in str(err)
+    else:  # pragma: no cover - defensive assertion shape
+        raise AssertionError("expected shutdown leak to fail")
+
+
+def _quality_report_payload(*, status: str) -> dict[str, Any]:
+    errors = 1 if status == "failed" else 0
+    return {
+        "schema_version": "histdatacom.quality-report.v1",
+        "targets": [{"path": "/tmp/target.csv", "kind": "csv"}],
+        "rule_results": [],
+        "target_summaries": [
+            {
+                "target": {"path": "/tmp/target.csv", "kind": "csv"},
+                "rule_count": 1,
+                "finding_count": 1,
+                "info_count": 0 if errors else 1,
+                "warning_count": 0,
+                "error_count": errors,
+                "status": status,
+                "max_severity": "error" if errors else "info",
+            }
+        ],
+        "summary": {
+            "target_count": 1,
+            "rule_count": 1,
+            "finding_count": 1,
+            "info_count": 0 if errors else 1,
+            "warning_count": 0,
+            "error_count": errors,
+            "status": status,
+            "max_severity": "error" if errors else "info",
+        },
+        "metadata": {
+            "operation": "data-quality",
+            "check_groups": ["ingestion"],
+        },
+    }
+
+
+def _quality_job(
+    *,
+    status: str,
+    target: Path,
+    report: Path,
+) -> dict[str, Any]:
+    return {
+        "workflow_id": f"histdatacom-{target.stem}",
+        "status": status,
+        "artifacts": [{"kind": "quality-report", "path": str(report)}],
+        "metadata": {
+            "run_request": {
+                "data_quality": True,
+                "quality_paths": [str(target)],
+                "quality_report_path": str(report),
+            }
+        },
+    }
 
 
 def test_check_package_metadata_requires_core_temporal_dependency(

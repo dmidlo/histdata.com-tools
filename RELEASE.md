@@ -112,7 +112,8 @@ python scripts/smoke_sidecar_install.py \
   --require-bundled-current-platform \
   --check-executable-version \
   --expect-temporal-extra \
-  --start-sidecar
+  --start-sidecar \
+  --quality-sidecar-smoke
 ```
 
 Sidecar runtime documentation must be reviewed for every release that changes
@@ -161,7 +162,9 @@ CI inspects the built wheel with `scripts/inspect_wheel.py`, writes
 `dist/sidecar-wheel-report.json`, uploads that report with the distribution
 artifacts, and then installs the built wheel on Ubuntu, macOS, and Windows.
 Those platform smoke checks verify the sidecar resource manifest and the
-offline sidecar CLI probes against the artifact that would be published.
+offline sidecar CLI probes against the artifact that would be published. They
+also run the installed `histdatacom --quality` command through the packaged
+Temporal sidecar against clean and dirty local fixtures.
 
 CI also runs `actionlint` against every workflow. The same workflow lint is
 available locally through pre-commit, so workflow syntax and common GitHub

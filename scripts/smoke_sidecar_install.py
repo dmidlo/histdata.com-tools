@@ -5,13 +5,14 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 EXPECTED_ASSETS = (
     "README.md",
@@ -25,6 +26,16 @@ EXPECTED_CONSOLE_SCRIPTS = {
     "histdatacom-sidecar": "histdatacom.sidecar.cli:main",
     "histdatacom-sidecar-worker": "histdatacom.sidecar.worker:main",
 }
+QUALITY_REPORT_SCHEMA_VERSION = "histdatacom.quality-report.v1"
+QUALITY_SMOKE_CLEAN_ROWS = (
+    "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
+    "20120201 000100;1.306570;1.306570;1.306470;1.306560;17",
+    "20120201 000200;1.306520;1.306560;1.306520;1.306560;2147483647",
+)
+QUALITY_SMOKE_DIRTY_ROWS = (
+    QUALITY_SMOKE_CLEAN_ROWS[0],
+    "20120201 000100;$1.306570;1.306570;1.306470;1.306560;17",
+)
 
 
 def _single_wheel(wheel_dir: Path) -> Path:
@@ -43,17 +54,25 @@ def _script_path(name: str) -> str:
     return script_path
 
 
-def _run(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+def _run(
+    command: Sequence[str],
+    *,
+    env: Mapping[str, str] | None = None,
+    expected_returncodes: tuple[int, ...] = (0,),
+) -> subprocess.CompletedProcess[str]:
     """Run a smoke command and fail with useful output when it breaks."""
     completed = subprocess.run(
         command,
         capture_output=True,
         check=False,
+        env=(dict(env) if env is not None else None),
         text=True,
     )
-    if completed.returncode != 0:
+    if completed.returncode not in expected_returncodes:
+        expected = ", ".join(str(code) for code in expected_returncodes)
         raise SystemExit(
-            f"command failed with exit {completed.returncode}: "
+            f"command returned exit {completed.returncode}; expected "
+            f"{expected}: "
             f"{' '.join(command)}\n"
             f"stdout:\n{completed.stdout}\n"
             f"stderr:\n{completed.stderr}"
@@ -61,9 +80,13 @@ def _run(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
     return completed
 
 
-def _run_json(command: Sequence[str]) -> dict[str, Any]:
+def _run_json(
+    command: Sequence[str],
+    *,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     """Run a command that emits JSON and return the decoded payload."""
-    completed = _run(command)
+    completed = _run(command, env=env)
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as err:
@@ -72,9 +95,7 @@ def _run_json(command: Sequence[str]) -> dict[str, Any]:
             f"stdout:\n{completed.stdout}"
         ) from err
     if not isinstance(payload, dict):
-        raise SystemExit(
-            f"command emitted non-object JSON: {' '.join(command)}"
-        )
+        raise SystemExit(f"command emitted non-object JSON: {' '.join(command)}")
     return payload
 
 
@@ -91,9 +112,7 @@ def install_wheel(
         install_target = (
             "histdatacom[temporal] @ " f"{resolved_wheel.resolve().as_uri()}"
         )
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", install_target]
-    )
+    subprocess.check_call([sys.executable, "-m", "pip", "install", install_target])
     return resolved_wheel
 
 
@@ -133,9 +152,7 @@ def check_package_metadata(*, expect_temporal_extra: bool) -> dict[str, Any]:
     if importlib.util.find_spec("temporalio") is None:
         raise SystemExit("temporalio distribution is installed but missing")
     if RunRequest is not RuntimeRunRequest:
-        raise SystemExit(
-            "sidecar contract RunRequest does not match runtime contract"
-        )
+        raise SystemExit("sidecar contract RunRequest does not match runtime contract")
 
     return {
         "name": dist.metadata["Name"],
@@ -192,9 +209,7 @@ def check_sidecar_resources(
             )
         try:
             with sidecar_executable_path(platform_key):
-                raise SystemExit(
-                    "metadata-only sidecar resource exposed an executable"
-                )
+                raise SystemExit("metadata-only sidecar resource exposed an executable")
         except SidecarExecutableUnavailable as err:
             if "not bundled in this distribution" not in str(err):
                 raise
@@ -392,6 +407,367 @@ def check_default_routing_sidecar_smoke(
         ) from err
 
 
+def check_quality_sidecar_smoke(
+    *,
+    workspace: Path,
+    runtime_home: Path,
+    data_directory: Path,
+    temporal_executable: Path | None = None,
+    startup_timeout: float,
+    stop_timeout: float,
+) -> dict[str, Any]:
+    """Run installed CLI quality checks through the packaged sidecar."""
+    smoke_env = _quality_sidecar_env(
+        workspace=workspace,
+        runtime_home=runtime_home,
+    )
+    fixtures = _write_quality_smoke_fixtures(data_directory)
+    report_dir = data_directory / "quality-smoke-reports"
+    clean_report = report_dir / "quality-clean.json"
+    dirty_report = report_dir / "quality-dirty.json"
+    start_payload: dict[str, Any] | None = None
+    stop_payload: dict[str, Any] | None = None
+    try:
+        start_payload = _start_quality_sidecar(
+            workspace=workspace,
+            runtime_home=runtime_home,
+            temporal_executable=temporal_executable,
+            startup_timeout=startup_timeout,
+            env=smoke_env,
+        )
+        clean = _run_quality_cli(
+            target=fixtures["clean"],
+            report=clean_report,
+            data_directory=data_directory,
+            env=smoke_env,
+            expected_returncodes=(0,),
+        )
+        dirty = _run_quality_cli(
+            target=fixtures["dirty"],
+            report=dirty_report,
+            data_directory=data_directory,
+            env=smoke_env,
+            expected_returncodes=(1,),
+        )
+        clean_payload = _validate_quality_report(
+            clean_report,
+            expected_status="clean",
+            min_errors=0,
+            max_errors=0,
+        )
+        dirty_payload = _validate_quality_report(
+            dirty_report,
+            expected_status="failed",
+            min_errors=1,
+            max_errors=None,
+        )
+        jobs_payload = _quality_jobs_payload(
+            workspace=workspace,
+            runtime_home=runtime_home,
+            env=smoke_env,
+        )
+        jobs = _validate_quality_sidecar_jobs(
+            jobs_payload,
+            clean_target=fixtures["clean"],
+            clean_report=clean_report,
+            dirty_target=fixtures["dirty"],
+            dirty_report=dirty_report,
+        )
+    finally:
+        stop_payload = _stop_quality_sidecar(
+            workspace=workspace,
+            runtime_home=runtime_home,
+            stop_timeout=stop_timeout,
+            env=smoke_env,
+        )
+        _validate_quality_sidecar_stop(stop_payload)
+
+    return {
+        "start_state": str((start_payload or {}).get("state", "")),
+        "stop_state": str((stop_payload or {}).get("state", "")),
+        "clean": _quality_smoke_case_result(
+            completed=clean,
+            report_path=clean_report,
+            payload=clean_payload,
+        ),
+        "dirty": _quality_smoke_case_result(
+            completed=dirty,
+            report_path=dirty_report,
+            payload=dirty_payload,
+        ),
+        "jobs": jobs,
+    }
+
+
+def _quality_sidecar_env(
+    *,
+    workspace: Path,
+    runtime_home: Path,
+) -> dict[str, str]:
+    env = dict(os.environ)
+    env["HISTDATACOM_SIDECAR_WORKSPACE"] = str(workspace)
+    env["HISTDATACOM_SIDECAR_HOME"] = str(runtime_home)
+    return env
+
+
+def _write_quality_smoke_fixtures(data_directory: Path) -> dict[str, Path]:
+    fixture_dir = data_directory / "quality-smoke-fixtures"
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    clean = fixture_dir / "DAT_ASCII_EURUSD_M1_201202.csv"
+    dirty = fixture_dir / "DAT_ASCII_EURUSD_M1_201202_BAD_NUMERIC.csv"
+    clean.write_text(
+        "\n".join(QUALITY_SMOKE_CLEAN_ROWS) + "\n",
+        encoding="ascii",
+    )
+    dirty.write_text(
+        "\n".join(QUALITY_SMOKE_DIRTY_ROWS) + "\n",
+        encoding="ascii",
+    )
+    return {"clean": clean, "dirty": dirty}
+
+
+def _start_quality_sidecar(
+    *,
+    workspace: Path,
+    runtime_home: Path,
+    temporal_executable: Path | None,
+    startup_timeout: float,
+    env: Mapping[str, str],
+) -> dict[str, Any]:
+    command = [
+        _script_path("histdatacom-sidecar"),
+        "--workspace",
+        str(workspace),
+        "--runtime-home",
+        str(runtime_home),
+        "--json",
+        "start",
+        "--startup-timeout",
+        str(startup_timeout),
+    ]
+    if temporal_executable is not None:
+        command.extend(["--executable", str(temporal_executable)])
+    payload = _run_json(command, env=env)
+    if payload.get("state") != "running":
+        raise SystemExit(f"quality sidecar did not start: {payload}")
+    return payload
+
+
+def _run_quality_cli(
+    *,
+    target: Path,
+    report: Path,
+    data_directory: Path,
+    env: Mapping[str, str],
+    expected_returncodes: tuple[int, ...],
+) -> subprocess.CompletedProcess[str]:
+    return _run(
+        [
+            _script_path("histdatacom"),
+            "--no-sidecar-start",
+            "--data-directory",
+            str(data_directory),
+            "--quality",
+            "--quality-target",
+            str(target),
+            "--quality-checks",
+            "ingestion",
+            "--quality-report",
+            str(report),
+        ],
+        env=env,
+        expected_returncodes=expected_returncodes,
+    )
+
+
+def _validate_quality_report(
+    path: Path,
+    *,
+    expected_status: str,
+    min_errors: int,
+    max_errors: int | None,
+) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as err:
+        raise SystemExit(f"quality report was not written: {path}") from err
+    except json.JSONDecodeError as err:
+        raise SystemExit(f"quality report is invalid JSON: {path}") from err
+    if not isinstance(payload, dict):
+        raise SystemExit(f"quality report is not a JSON object: {path}")
+    if payload.get("schema_version") != QUALITY_REPORT_SCHEMA_VERSION:
+        raise SystemExit(f"quality report has unexpected schema version: {path}")
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        raise SystemExit(f"quality report missing summary: {path}")
+    if summary.get("target_count") != 1:
+        raise SystemExit(f"quality report expected one target: {path} {summary}")
+    if summary.get("status") != expected_status:
+        raise SystemExit(
+            "quality report had unexpected status: "
+            f"{path} expected={expected_status} summary={summary}"
+        )
+    error_count = int(summary.get("error_count", 0) or 0)
+    if error_count < min_errors:
+        raise SystemExit(
+            f"quality report expected at least {min_errors} errors: "
+            f"{path} {summary}"
+        )
+    if max_errors is not None and error_count > max_errors:
+        raise SystemExit(
+            f"quality report expected at most {max_errors} errors: " f"{path} {summary}"
+        )
+    if not payload.get("target_summaries"):
+        raise SystemExit(f"quality report missing target summaries: {path}")
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict) or metadata.get("operation") != ("data-quality"):
+        raise SystemExit(f"quality report missing operation metadata: {path}")
+    return payload
+
+
+def _quality_jobs_payload(
+    *,
+    workspace: Path,
+    runtime_home: Path,
+    env: Mapping[str, str],
+) -> dict[str, Any]:
+    return _run_json(
+        [
+            _script_path("histdatacom-sidecar"),
+            "--workspace",
+            str(workspace),
+            "--runtime-home",
+            str(runtime_home),
+            "--json",
+            "jobs",
+            "list",
+            "--offline",
+        ],
+        env=env,
+    )
+
+
+def _validate_quality_sidecar_jobs(
+    jobs_payload: Mapping[str, Any],
+    *,
+    clean_target: Path,
+    clean_report: Path,
+    dirty_target: Path,
+    dirty_report: Path,
+) -> dict[str, Any]:
+    jobs = jobs_payload.get("jobs")
+    if not isinstance(jobs, list):
+        raise SystemExit(f"sidecar jobs payload missing jobs: {jobs_payload}")
+    clean_job = _find_quality_job(jobs, clean_target, clean_report)
+    dirty_job = _find_quality_job(jobs, dirty_target, dirty_report)
+    _validate_quality_job(clean_job, expected_status="completed")
+    _validate_quality_job(dirty_job, expected_status="failed")
+    return {
+        "count": len(jobs),
+        "clean_workflow_id": str(clean_job.get("workflow_id", "")),
+        "dirty_workflow_id": str(dirty_job.get("workflow_id", "")),
+        "clean_status": _normalized_quality_job_status(clean_job),
+        "dirty_status": _normalized_quality_job_status(dirty_job),
+    }
+
+
+def _find_quality_job(
+    jobs: Sequence[Any],
+    target: Path,
+    report: Path,
+) -> Mapping[str, Any]:
+    expected_target = str(target)
+    expected_report = str(report)
+    for job in jobs:
+        if not isinstance(job, Mapping):
+            continue
+        metadata = job.get("metadata")
+        if not isinstance(metadata, Mapping):
+            continue
+        request = metadata.get("run_request")
+        if not isinstance(request, Mapping):
+            continue
+        if request.get("data_quality") is not True:
+            continue
+        if expected_target not in tuple(request.get("quality_paths", ())):
+            continue
+        if str(request.get("quality_report_path", "")) != expected_report:
+            continue
+        return job
+    raise SystemExit(
+        "sidecar jobs did not include quality request for " f"{expected_target}"
+    )
+
+
+def _validate_quality_job(
+    job: Mapping[str, Any],
+    *,
+    expected_status: str,
+) -> None:
+    if _normalized_quality_job_status(job) != expected_status:
+        raise SystemExit(
+            "sidecar quality job had unexpected status: "
+            f"expected={expected_status} job={job}"
+        )
+    artifacts = job.get("artifacts")
+    if not isinstance(artifacts, list) or not any(
+        isinstance(artifact, Mapping) and artifact.get("kind") == "quality-report"
+        for artifact in artifacts
+    ):
+        raise SystemExit(f"sidecar quality job missing quality-report artifact: {job}")
+
+
+def _normalized_quality_job_status(job: Mapping[str, Any]) -> str:
+    return str(job.get("status", "") or "").strip().lower()
+
+
+def _stop_quality_sidecar(
+    *,
+    workspace: Path,
+    runtime_home: Path,
+    stop_timeout: float,
+    env: Mapping[str, str],
+) -> dict[str, Any]:
+    return _run_json(
+        [
+            _script_path("histdatacom-sidecar"),
+            "--workspace",
+            str(workspace),
+            "--runtime-home",
+            str(runtime_home),
+            "--json",
+            "stop",
+            "--stop-timeout",
+            str(stop_timeout),
+        ],
+        env=env,
+    )
+
+
+def _validate_quality_sidecar_stop(payload: Mapping[str, Any]) -> None:
+    if payload.get("state") != "stopped":
+        raise SystemExit(f"quality sidecar did not stop cleanly: {payload}")
+    pids = payload.get("pids")
+    if isinstance(pids, Mapping) and pids:
+        raise SystemExit(f"quality sidecar stop left running processes: {payload}")
+
+
+def _quality_smoke_case_result(
+    *,
+    completed: subprocess.CompletedProcess[str],
+    report_path: Path,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    summary = payload.get("summary")
+    return {
+        "returncode": completed.returncode,
+        "report": str(report_path),
+        "status": (
+            str(summary.get("status", "")) if isinstance(summary, Mapping) else ""
+        ),
+    }
+
+
 def main() -> None:
     """Run install-time sidecar smoke checks."""
     parser = argparse.ArgumentParser()
@@ -463,6 +839,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--quality-sidecar-smoke",
+        action="store_true",
+        help=(
+            "deterministic installed-wheel smoke that runs clean and dirty "
+            "histdatacom --quality commands through the local sidecar"
+        ),
+    )
+    parser.add_argument(
         "--temporal-executable",
         type=Path,
         help=(
@@ -531,6 +915,7 @@ def main() -> None:
             "cli": None,
             "hermetic_sidecar": None,
             "default_routing_sidecar": None,
+            "quality_sidecar": None,
             "live_sidecar": None,
         }
         if not args.skip_cli:
@@ -548,9 +933,7 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
-                "live-data"
-            )
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
             report["hermetic_sidecar"] = check_hermetic_sidecar_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,
@@ -567,19 +950,31 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
-                "live-data"
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
+            report["default_routing_sidecar"] = check_default_routing_sidecar_smoke(
+                workspace=live_workspace,
+                runtime_home=live_runtime_home,
+                data_directory=live_data_dir,
+                temporal_executable=args.temporal_executable,
+                startup_timeout=args.live_startup_timeout,
+                completion_timeout=args.live_completion_timeout,
+                stop_timeout=args.live_stop_timeout,
             )
-            report["default_routing_sidecar"] = (
-                check_default_routing_sidecar_smoke(
-                    workspace=live_workspace,
-                    runtime_home=live_runtime_home,
-                    data_directory=live_data_dir,
-                    temporal_executable=args.temporal_executable,
-                    startup_timeout=args.live_startup_timeout,
-                    completion_timeout=args.live_completion_timeout,
-                    stop_timeout=args.live_stop_timeout,
-                )
+        if args.quality_sidecar_smoke:
+            live_workspace = args.live_workspace or Path(temporary_dir) / (
+                "live-workspace"
+            )
+            live_runtime_home = (
+                args.live_runtime_home or Path(temporary_dir) / "live-runtime"
+            )
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
+            report["quality_sidecar"] = check_quality_sidecar_smoke(
+                workspace=live_workspace,
+                runtime_home=live_runtime_home,
+                data_directory=live_data_dir,
+                temporal_executable=args.temporal_executable,
+                startup_timeout=args.live_startup_timeout,
+                stop_timeout=args.live_stop_timeout,
             )
         if args.live_sidecar_smoke:
             live_workspace = args.live_workspace or Path(temporary_dir) / (
@@ -588,9 +983,7 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
-                "live-data"
-            )
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
             report["live_sidecar"] = check_live_sidecar_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,

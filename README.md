@@ -1183,6 +1183,10 @@ not contact HistData.com. Bundled platform-wheel release smoke also runs
 starts the sidecar with non-default worker routing and submits without an
 explicit worker config so the installed package must resolve the running
 frontend, namespace, and queues from persisted sidecar state. Run
+`scripts/smoke_sidecar_install.py --quality-sidecar-smoke` to exercise the
+installed `histdatacom --quality` console command against clean and dirty
+local M1 fixtures through the packaged `DataQualityWorkflow` without contacting
+HistData.com or InfluxDB. Run
 `scripts/smoke_sidecar_install.py --live-sidecar-smoke` separately when an
 operator intentionally wants external HistData.com URL-validation coverage.
 These commands fail on shutdown leaks: stop exceptions, missing stop status,
