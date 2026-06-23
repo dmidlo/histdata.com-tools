@@ -17,6 +17,7 @@ from histdatacom.data_quality.time import (
     time_quality_rules,
     time_quality_run_rules,
 )
+from histdatacom.data_quality.ticks import ticks_quality_rules
 
 
 def quality_rules_for_groups(
@@ -33,6 +34,8 @@ def quality_rules_for_groups(
         rules.extend(time_quality_rules())
     if "all" in normalized or "bars" in normalized:
         rules.extend(bars_quality_rules())
+    if "all" in normalized or "ticks" in normalized:
+        rules.extend(ticks_quality_rules())
     return tuple(rules)
 
 

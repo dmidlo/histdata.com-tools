@@ -106,6 +106,12 @@ from histdatacom.data_quality.time import (
     time_quality_run_rules,
     time_quality_rules,
 )
+from histdatacom.data_quality.ticks import (
+    ASCII_TICK_SPREAD_RULE_ID,
+    HistDataAsciiTickSpreadRule,
+    HistDataTickSpreadThresholds,
+    ticks_quality_rules,
+)
 
 __all__ = [
     "ASCII_EST_NO_DST_TIME_RULE_ID",
@@ -119,6 +125,7 @@ __all__ = [
     "ASCII_TIMESTAMP_CONTINUITY_RULE_ID",
     "ASCII_TIMESTAMP_GAP_RULE_ID",
     "ASCII_TIMESTAMP_SEQUENCE_RULE_ID",
+    "ASCII_TICK_SPREAD_RULE_ID",
     "ASSET_CLASS_FX",
     "ASSET_CLASS_INDEX",
     "ASSET_CLASS_METAL",
@@ -142,12 +149,14 @@ __all__ = [
     "HistDataAsciiSchemaIngestionRule",
     "HistDataAsciiTextIngestionRule",
     "HistDataAsciiTimestampSequenceRule",
+    "HistDataAsciiTickSpreadRule",
     "HistDataCoverageManifestRule",
     "HistDataGapTolerance",
     "HistDataM1OutlierThresholds",
     "HistDataM1TickReconstructionTolerance",
     "HistDataSymbolMetadata",
     "HistDataSymbolPrecisionRule",
+    "HistDataTickSpreadThresholds",
     "HistDataZipInventoryRule",
     "QualityFinding",
     "QualityDiscoveryError",
@@ -189,5 +198,6 @@ __all__ = [
     "symbol_metadata_for",
     "time_quality_run_rules",
     "time_quality_rules",
+    "ticks_quality_rules",
     "write_quality_report",
 ]
