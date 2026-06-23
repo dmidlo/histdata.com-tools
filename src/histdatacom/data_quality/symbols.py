@@ -20,6 +20,9 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
     QualityTargetKind,
 )
+from histdatacom.data_quality.polars_cache import (
+    read_fresh_sibling_polars_cache,
+)
 from histdatacom.fx_enums import Pairs
 from histdatacom.histdata_ascii import M1, TICK, read_ascii_file
 from histdatacom.runtime_contracts import JSONValue
@@ -882,6 +885,10 @@ def _cross_instrument_series(
     _CrossInstrumentUnavailable | None,
     int,
 ]:
+    cached = _cross_instrument_series_from_polars_cache(target)
+    if cached is not None:
+        return cached
+
     try:
         batch = read_ascii_file(Path(target.path), target.timeframe)
     except (OSError, UnicodeDecodeError, ValueError, zipfile.BadZipFile) as exc:
@@ -927,6 +934,93 @@ def _cross_instrument_series(
                 metadata={
                     "path": target.path,
                     "row_count": len(batch.rows),
+                    "invalid_price_count": invalid_price_count,
+                },
+            ),
+            invalid_price_count,
+        )
+
+    return (
+        _CrossInstrumentSeries(
+            target=target,
+            metadata=symbol_metadata_for(_target_symbol(target)),
+            timeframe=target.timeframe,
+            period=target.period,
+            price_kind=_cross_instrument_price_kind(target.timeframe),
+            points=points,
+        ),
+        None,
+        invalid_price_count,
+    )
+
+
+def _cross_instrument_series_from_polars_cache(
+    target: QualityTarget,
+) -> (
+    tuple[
+        _CrossInstrumentSeries | None,
+        _CrossInstrumentUnavailable | None,
+        int,
+    ]
+    | None
+):
+    columns = (
+        ("datetime", "close")
+        if target.timeframe == M1
+        else (
+            "datetime",
+            "bid",
+            "ask",
+        )
+    )
+    cache = read_fresh_sibling_polars_cache(
+        target,
+        required_columns=columns,
+    )
+    if cache is None:
+        return None
+
+    try:
+        frame = cache.frame.select(list(columns))
+        rows = frame.iter_rows(named=False)
+    except Exception:
+        return None
+
+    points: dict[int, _CrossInstrumentPoint] = {}
+    invalid_price_count = 0
+    row_count = 0
+    for row_number, row in enumerate(rows, start=1):
+        row_count += 1
+        try:
+            timestamp_utc_ms = int(row[0])
+            if target.timeframe == M1:
+                price = float(row[1])
+            else:
+                price = (float(row[1]) + float(row[2])) / 2.0
+        except (TypeError, ValueError):
+            invalid_price_count += 1
+            continue
+        if not math.isfinite(price) or price <= 0.0:
+            invalid_price_count += 1
+            continue
+        if timestamp_utc_ms not in points:
+            points[timestamp_utc_ms] = _CrossInstrumentPoint(
+                timestamp_utc_ms=timestamp_utc_ms,
+                price=price,
+                row_number=row_number,
+            )
+
+    if not points:
+        return (
+            None,
+            _CrossInstrumentUnavailable(
+                reason="no_valid_prices",
+                symbols=(normalize_histdata_symbol(_target_symbol(target)),),
+                timeframe=target.timeframe,
+                period=target.period,
+                metadata={
+                    "path": target.path,
+                    "row_count": row_count,
                     "invalid_price_count": invalid_price_count,
                 },
             ),

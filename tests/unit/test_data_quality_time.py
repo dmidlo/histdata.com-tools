@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import histdatacom.data_quality.time as time_quality
 from histdatacom.data_quality import (
     ASCII_EST_NO_DST_TIME_RULE_ID,
     ASCII_TIMESTAMP_CONTINUITY_RULE_ID,
@@ -151,6 +152,29 @@ def test_source_month_membership_wins_over_utc_month_boundary(
     assert boundary.metadata["samples"][0]["utc_timestamp"] == (
         "2012-03-01T04:59:00Z"
     )
+
+
+def test_annual_m1_source_membership_allows_year_periods(
+    tmp_path: Path,
+) -> None:
+    """Historical M1 annual files should validate by source year."""
+    path = tmp_path / "DAT_ASCII_EURUSD_M1_2012.csv"
+    path.write_text(
+        "20121231 235900;1.306600;1.306600;1.306560;1.306560;0\n",
+        encoding="utf-8",
+    )
+
+    report = _report_for_path(path)
+
+    boundary = _finding(report.findings, "ASCII_TIMESTAMP_UTC_MONTH_BOUNDARY")
+    assert report.status is QualityStatus.CLEAN
+    assert (
+        _findings(report.findings, "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH")
+        == ()
+    )
+    assert boundary.metadata["target_period"] == "2012"
+    assert boundary.metadata["samples"][0]["source_period"] == "2012"
+    assert boundary.metadata["samples"][0]["utc_period"] == "2013"
 
 
 def test_tick_month_boundary_preserves_millisecond_precision(
@@ -745,6 +769,45 @@ def test_cross_file_continuity_allows_expected_session_closure(
     )
     assert summary.metadata["expected_session_closure_count"] == 1
     assert summary.metadata["suspicious_gap_count"] == 0
+
+
+def test_cross_file_continuity_handles_adjacent_annual_m1_files(
+    tmp_path: Path,
+) -> None:
+    """Annual M1 files should participate in boundary continuity checks."""
+    _write_m1_file(tmp_path, "2012", ("20121231 235900",))
+    _write_m1_file(tmp_path, "2013", ("20130101 000000",))
+
+    report = _continuity_report_for_path(tmp_path)
+
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_CONTINUITY_SUMMARY")
+    assert report.status is QualityStatus.CLEAN
+    assert summary.metadata["adjacent_pair_count"] == 1
+    assert summary.metadata["clean_boundary_count"] == 1
+
+
+def test_time_rules_reuse_timestamp_scan_per_target(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The three per-target time rules should share one parsed scan."""
+    path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    time_quality.clear_timestamp_scan_caches()
+    calls = 0
+    original = time_quality._scan_timestamp_rows
+
+    def counting_scan(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(time_quality, "_scan_timestamp_rows", counting_scan)
+
+    report = _report_for_path(path)
+
+    assert report.status is QualityStatus.CLEAN
+    assert calls == 1
+    time_quality.clear_timestamp_scan_caches()
 
 
 def _report_for_path(path: Path):

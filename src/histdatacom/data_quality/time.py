@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import csv
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 import zipfile
 
 from histdatacom.data_quality.contracts import (
@@ -20,6 +20,9 @@ from histdatacom.data_quality.contracts import (
     QualitySeverity,
     QualityTarget,
     QualityTargetKind,
+)
+from histdatacom.data_quality.polars_cache import (
+    read_fresh_sibling_polars_cache,
 )
 from histdatacom.histdata_ascii import (
     EST_NO_DST_OFFSET_MS,
@@ -49,7 +52,10 @@ DEFAULT_GAP_BUCKETS_MS = (
 FX_FRIDAY_CLOSE_WEEKDAY = 4
 FX_SUNDAY_OPEN_WEEKDAY = 6
 FX_CLOSE_OPEN_MINUTE = 17 * 60
+FX_CLOSE_OPEN_TIME_OF_DAY_MS = FX_CLOSE_OPEN_MINUTE * M1_GRANULARITY_MS
 MAX_TIMESTAMP_SAMPLES = 5
+TIMESTAMP_SCAN_CACHE_MAX_ENTRIES = 4
+TIMESTAMP_BOUNDARY_CACHE_MAX_ENTRIES = 2_048
 UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
@@ -67,12 +73,41 @@ class _SourceReadError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class _TimestampScanCacheKey:
+    path: str
+    kind: str
+    timeframe: str
+    period: str
+    size_bytes: int
+    mtime_ns: int
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceDateInfo:
+    year: int
+    month: int
+    day: int
+    weekday: int
+    ordinal: int
+    year_period: str
+    month_period: str
+    month_length: int
+
+
+@dataclass(frozen=True, slots=True)
 class _TimestampSample:
     row_number: int
     timestamp_source: str
     timestamp_utc_ms: int
     source_period: str
     utc_period: str
+    source_year: int
+    source_month: int
+    source_day: int
+    source_month_length: int
+    source_weekday: int
+    source_day_ordinal: int
+    source_time_of_day_ms: int
     source_member: str = ""
     row_values: tuple[str, ...] = ()
 
@@ -96,8 +131,11 @@ class _TimestampSample:
 
 @dataclass(slots=True)
 class _TimestampScan:
+    row_count: int = 0
     parsed_row_count: int = 0
     invalid_timestamp_count: int = 0
+    field_count_error_count: int = 0
+    header_row_count: int = 0
     valid_rows: list[_TimestampSample] = field(default_factory=list)
     samples: list[_TimestampSample] = field(default_factory=list)
     period_mismatch_count: int = 0
@@ -112,6 +150,13 @@ class _TimestampScan:
     tick_precision_mismatches: list["_TimestampIssueSample"] = field(
         default_factory=list
     )
+    first_valid_row: _TimestampSample | None = None
+    last_valid_row: _TimestampSample | None = None
+    sequence_scan: "_TimestampSequenceScan | None" = None
+    gap_scans: dict[tuple[JSONValue, ...], "_TimestampGapScan"] = field(
+        default_factory=dict
+    )
+    polars_frame: Any | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,6 +431,20 @@ class _ContinuityScan:
     )
 
 
+_TIMESTAMP_SCAN_CACHE: OrderedDict[_TimestampScanCacheKey, _TimestampScan] = (
+    OrderedDict()
+)
+_TIMESTAMP_BOUNDARY_CACHE: OrderedDict[
+    _TimestampScanCacheKey, _ContinuityBoundary
+] = OrderedDict()
+
+
+def clear_timestamp_scan_caches() -> None:
+    """Clear private timestamp scan caches used within quality runs."""
+    _TIMESTAMP_SCAN_CACHE.clear()
+    _TIMESTAMP_BOUNDARY_CACHE.clear()
+
+
 @dataclass(slots=True)
 class HistDataAsciiEstNoDstTimeRule:
     """Validate HistData fixed EST-no-DST timestamp normalization."""
@@ -402,10 +461,7 @@ class HistDataAsciiEstNoDstTimeRule:
             return ()
 
         try:
-            delimiter = delimiter_for_timeframe(target.timeframe)
-            columns = columns_for_timeframe(target.timeframe)
-            payload = _read_text_payload(target)
-            text = payload.data.decode("utf-8")
+            scan = _timestamp_scan_for_target(target)
         except ValueError as exc:
             return (
                 _finding(
@@ -419,22 +475,6 @@ class HistDataAsciiEstNoDstTimeRule:
                     },
                 ),
             )
-        except UnicodeDecodeError as exc:
-            return (
-                _finding(
-                    target,
-                    code="ASCII_TIME_TEXT_ENCODING_INVALID",
-                    message="ASCII file does not decode as strict UTF-8 for "
-                    "timestamp checks.",
-                    metadata={
-                        "encoding": "utf-8",
-                        "error": str(exc),
-                        "byte_start": exc.start,
-                        "byte_end": exc.end,
-                        "source_member": payload.source_member,
-                    },
-                ),
-            )
         except _SourceReadError as exc:
             return (
                 _finding(
@@ -445,13 +485,6 @@ class HistDataAsciiEstNoDstTimeRule:
                 ),
             )
 
-        scan = _scan_timestamp_rows(
-            text,
-            target=target,
-            delimiter=delimiter,
-            columns=columns,
-            source_member=payload.source_member,
-        )
         return _timestamp_findings(target=target, scan=scan)
 
 
@@ -471,10 +504,7 @@ class HistDataAsciiTimestampSequenceRule:
             return ()
 
         try:
-            delimiter = delimiter_for_timeframe(target.timeframe)
-            columns = columns_for_timeframe(target.timeframe)
-            payload = _read_text_payload(target)
-            text = payload.data.decode("utf-8")
+            scan = _timestamp_scan_for_target(target)
         except ValueError as exc:
             return (
                 _finding(
@@ -489,23 +519,6 @@ class HistDataAsciiTimestampSequenceRule:
                     },
                 ),
             )
-        except UnicodeDecodeError as exc:
-            return (
-                _finding(
-                    target,
-                    code="ASCII_TIME_TEXT_ENCODING_INVALID",
-                    message="ASCII file does not decode as strict UTF-8 for "
-                    "timestamp sequence checks.",
-                    rule_id=self.rule_id,
-                    metadata={
-                        "encoding": "utf-8",
-                        "error": str(exc),
-                        "byte_start": exc.start,
-                        "byte_end": exc.end,
-                        "source_member": payload.source_member,
-                    },
-                ),
-            )
         except _SourceReadError as exc:
             return (
                 _finding(
@@ -517,14 +530,10 @@ class HistDataAsciiTimestampSequenceRule:
                 ),
             )
 
-        scan = _scan_timestamp_rows(
-            text,
-            target=target,
-            delimiter=delimiter,
-            columns=columns,
-            source_member=payload.source_member,
+        sequence = scan.sequence_scan or _scan_timestamp_sequence(
+            target,
+            scan.valid_rows,
         )
-        sequence = _scan_timestamp_sequence(target, scan.valid_rows)
         return _timestamp_sequence_findings(
             target=target,
             scan=scan,
@@ -552,10 +561,7 @@ class HistDataAsciiTimestampGapRule:
             return ()
 
         try:
-            delimiter = delimiter_for_timeframe(target.timeframe)
-            columns = columns_for_timeframe(target.timeframe)
-            payload = _read_text_payload(target)
-            text = payload.data.decode("utf-8")
+            timestamp_scan = _timestamp_scan_for_target(target)
         except ValueError as exc:
             return (
                 _finding(
@@ -570,23 +576,6 @@ class HistDataAsciiTimestampGapRule:
                     },
                 ),
             )
-        except UnicodeDecodeError as exc:
-            return (
-                _finding(
-                    target,
-                    code="ASCII_TIME_TEXT_ENCODING_INVALID",
-                    message="ASCII file does not decode as strict UTF-8 for "
-                    "timestamp gap checks.",
-                    rule_id=self.rule_id,
-                    metadata={
-                        "encoding": "utf-8",
-                        "error": str(exc),
-                        "byte_start": exc.start,
-                        "byte_end": exc.end,
-                        "source_member": payload.source_member,
-                    },
-                ),
-            )
         except _SourceReadError as exc:
             return (
                 _finding(
@@ -598,15 +587,9 @@ class HistDataAsciiTimestampGapRule:
                 ),
             )
 
-        timestamp_scan = _scan_timestamp_rows(
-            text,
-            target=target,
-            delimiter=delimiter,
-            columns=columns,
-            source_member=payload.source_member,
-        )
-        gap_scan = _scan_timestamp_gaps(
-            timestamp_scan.valid_rows,
+        gap_scan = _gap_scan_for_timestamp_scan(
+            target,
+            timestamp_scan,
             tolerance=self.tolerance,
         )
         return _timestamp_gap_findings(
@@ -760,6 +743,366 @@ def _source_error(
     )
 
 
+def _timestamp_scan_for_target(target: QualityTarget) -> _TimestampScan:
+    key = _timestamp_scan_cache_key(target)
+    cached = _TIMESTAMP_SCAN_CACHE.get(key)
+    if cached is not None:
+        _TIMESTAMP_SCAN_CACHE.move_to_end(key)
+        return cached
+
+    cache_scan = _timestamp_scan_from_polars_cache(target)
+    if cache_scan is not None:
+        _cache_timestamp_scan(key, cache_scan)
+        boundary = _continuity_boundary_from_scan(
+            target,
+            cache_scan,
+            source_member="",
+        )
+        if boundary is not None:
+            _cache_timestamp_boundary(key, boundary)
+        return cache_scan
+
+    delimiter = delimiter_for_timeframe(target.timeframe)
+    columns = columns_for_timeframe(target.timeframe)
+    payload = _read_text_payload(target)
+    try:
+        text = payload.data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _SourceReadError(
+            code="ASCII_TIME_TEXT_ENCODING_INVALID",
+            message=(
+                "ASCII file does not decode as strict UTF-8 for timestamp "
+                "checks."
+            ),
+            metadata={
+                "encoding": "utf-8",
+                "error": str(exc),
+                "byte_start": exc.start,
+                "byte_end": exc.end,
+                "source_member": payload.source_member,
+            },
+        ) from exc
+
+    scan = _scan_timestamp_rows(
+        text,
+        target=target,
+        delimiter=delimiter,
+        columns=columns,
+        source_member=payload.source_member,
+    )
+    _cache_timestamp_scan(key, scan)
+    boundary = _continuity_boundary_from_scan(
+        target,
+        scan,
+        source_member=payload.source_member,
+    )
+    if boundary is not None:
+        _cache_timestamp_boundary(key, boundary)
+    return scan
+
+
+def _timestamp_scan_from_polars_cache(
+    target: QualityTarget,
+) -> _TimestampScan | None:
+    if target.timeframe != "M1":
+        return None
+
+    cache = read_fresh_sibling_polars_cache(
+        target,
+        required_columns=("datetime",),
+    )
+    if cache is None:
+        return None
+
+    projected = _project_m1_timestamp_cache_frame(cache.frame, target)
+    if projected is None:
+        return None
+
+    scan = _TimestampScan(
+        row_count=projected.height,
+        parsed_row_count=projected.height,
+        polars_frame=projected,
+    )
+    if projected.is_empty():
+        return scan
+
+    scan.first_valid_row = _timestamp_sample_from_projected_row(
+        projected.row(0, named=True),
+        target=target,
+    )
+    scan.last_valid_row = _timestamp_sample_from_projected_row(
+        projected.row(projected.height - 1, named=True),
+        target=target,
+    )
+    scan.samples.extend(
+        _timestamp_sample_from_projected_row(row, target=target)
+        for row in projected.head(MAX_TIMESTAMP_SAMPLES).iter_rows(named=True)
+    )
+
+    if target.period:
+        period_mismatches = projected.filter(
+            projected["_source_period"] != target.period
+        )
+        scan.period_mismatch_count = period_mismatches.height
+        scan.period_mismatches.extend(
+            _timestamp_sample_from_projected_row(row, target=target)
+            for row in period_mismatches.head(MAX_TIMESTAMP_SAMPLES).iter_rows(
+                named=True
+            )
+        )
+        utc_boundaries = projected.filter(
+            projected["_source_period"] != projected["_utc_period"]
+        )
+        scan.utc_month_boundary_count = utc_boundaries.height
+        scan.utc_month_boundaries.extend(
+            _timestamp_sample_from_projected_row(row, target=target)
+            for row in utc_boundaries.head(MAX_TIMESTAMP_SAMPLES).iter_rows(
+                named=True
+            )
+        )
+
+    granularity_drifts = projected.filter(
+        projected["datetime"] % M1_GRANULARITY_MS != 0
+    )
+    scan.m1_granularity_drift_count = granularity_drifts.height
+    for row in granularity_drifts.head(MAX_TIMESTAMP_SAMPLES).iter_rows(
+        named=True
+    ):
+        sample = _m1_granularity_drift_sample(
+            row_number=int(row["_row_number"]),
+            timestamp_source=str(row["_source_timestamp"]),
+            timestamp_utc_ms=int(row["datetime"]),
+            source_member="",
+        )
+        if sample is not None:
+            scan.m1_granularity_drifts.append(sample)
+
+    scan.sequence_scan = _scan_timestamp_sequence_polars(
+        target,
+        projected,
+    )
+    return scan
+
+
+def _project_m1_timestamp_cache_frame(
+    frame: Any,
+    target: QualityTarget,
+) -> Any | None:
+    try:
+        import polars as pl
+
+        period_format = "%Y" if len(str(target.period or "")) == 4 else "%Y%m"
+        source_datetime = (pl.col("datetime") - EST_NO_DST_OFFSET_MS).cast(
+            pl.Datetime("ms")
+        )
+        utc_datetime = pl.col("datetime").cast(pl.Datetime("ms"))
+        return frame.select(
+            [
+                pl.col("datetime"),
+                source_datetime.dt.strftime("%Y%m%d %H%M%S").alias(
+                    "_source_timestamp"
+                ),
+                source_datetime.dt.year().alias("_source_year"),
+                source_datetime.dt.month().alias("_source_month"),
+                source_datetime.dt.day().alias("_source_day"),
+                (source_datetime.dt.weekday() - 1).alias("_source_weekday"),
+                ((pl.col("datetime") - EST_NO_DST_OFFSET_MS) // 86_400_000)
+                .cast(pl.Int64)
+                .alias("_source_day_number"),
+                ((pl.col("datetime") - EST_NO_DST_OFFSET_MS) % 86_400_000)
+                .cast(pl.Int64)
+                .alias("_source_time_of_day_ms"),
+                source_datetime.dt.strftime(period_format).alias(
+                    "_source_period"
+                ),
+                utc_datetime.dt.strftime(period_format).alias("_utc_period"),
+            ]
+        ).with_row_index("_row_number", offset=1)
+    except Exception:
+        return None
+
+
+def _timestamp_sample_from_projected_row(
+    row: Mapping[str, Any],
+    *,
+    target: QualityTarget,
+) -> _TimestampSample:
+    source_year = int(row["_source_year"])
+    source_month = int(row["_source_month"])
+    source_day = int(row["_source_day"])
+    source_weekday = int(row["_source_weekday"])
+    return _TimestampSample(
+        row_number=int(row["_row_number"]),
+        timestamp_source=str(row["_source_timestamp"]),
+        timestamp_utc_ms=int(row["datetime"]),
+        source_period=str(row["_source_period"]),
+        utc_period=str(row["_utc_period"]),
+        source_year=source_year,
+        source_month=source_month,
+        source_day=source_day,
+        source_month_length=_month_length(source_year, source_month),
+        source_weekday=source_weekday,
+        source_day_ordinal=datetime(
+            source_year,
+            source_month,
+            source_day,
+            tzinfo=timezone.utc,
+        ).toordinal(),
+        source_time_of_day_ms=int(row["_source_time_of_day_ms"]),
+        source_member="",
+    )
+
+
+def _scan_timestamp_sequence_polars(
+    target: QualityTarget,
+    frame: Any,
+) -> _TimestampSequenceScan:
+    import polars as pl
+
+    scan = _TimestampSequenceScan()
+    sequence_frame = frame.with_columns(
+        [
+            pl.col("datetime").shift(1).alias("_previous_datetime"),
+            pl.col("_row_number").shift(1).alias("_previous_row_number"),
+            pl.col("_source_timestamp")
+            .shift(1)
+            .alias("_previous_source_timestamp"),
+        ]
+    )
+    non_monotonic = sequence_frame.filter(
+        pl.col("_previous_datetime").is_not_null()
+        & (pl.col("datetime") < pl.col("_previous_datetime"))
+    )
+    scan.non_monotonic_count = non_monotonic.height
+    for row in non_monotonic.head(MAX_TIMESTAMP_SAMPLES).iter_rows(named=True):
+        previous_timestamp_utc_ms = int(row["_previous_datetime"])
+        _append_issue_sample(
+            scan.non_monotonic_rows,
+            _TimestampIssueSample(
+                row_number=int(row["_row_number"]),
+                timestamp_source=str(row["_source_timestamp"]),
+                timestamp_utc_ms=int(row["datetime"]),
+                source_member="",
+                metadata={
+                    "previous_row_number": int(row["_previous_row_number"]),
+                    "previous_timestamp_source": str(
+                        row["_previous_source_timestamp"]
+                    ),
+                    "previous_timestamp_utc_ms": previous_timestamp_utc_ms,
+                    "previous_utc_timestamp": _utc_iso_from_ms(
+                        previous_timestamp_utc_ms
+                    ),
+                },
+            ),
+        )
+
+    if target.timeframe == "M1":
+        unique_count = int(frame.select(pl.col("datetime").n_unique()).item())
+        scan.m1_duplicate_timestamp_count = max(frame.height - unique_count, 0)
+        if scan.m1_duplicate_timestamp_count:
+            duplicates = frame.with_columns(
+                pl.col("datetime")
+                .cum_count()
+                .over("datetime")
+                .alias("_duplicate_ordinal"),
+                pl.col("_row_number")
+                .first()
+                .over("datetime")
+                .alias("_duplicate_of_row"),
+            ).filter(pl.col("_duplicate_ordinal") > 1)
+            for row in duplicates.head(MAX_TIMESTAMP_SAMPLES).iter_rows(
+                named=True
+            ):
+                timestamp_utc_ms = int(row["datetime"])
+                _append_issue_sample(
+                    scan.m1_duplicate_timestamps,
+                    _TimestampIssueSample(
+                        row_number=int(row["_row_number"]),
+                        timestamp_source=str(row["_source_timestamp"]),
+                        timestamp_utc_ms=timestamp_utc_ms,
+                        source_member="",
+                        metadata={
+                            "duplicate_of_row": int(row["_duplicate_of_row"]),
+                            "duplicate_timestamp_utc_ms": timestamp_utc_ms,
+                            "duplicate_utc_timestamp": _utc_iso_from_ms(
+                                timestamp_utc_ms
+                            ),
+                            "dedupe_policy": "report-only",
+                        },
+                    ),
+                )
+    return scan
+
+
+def _timestamp_scan_cache_key(
+    target: QualityTarget,
+) -> _TimestampScanCacheKey:
+    path = Path(target.path)
+    try:
+        stat = path.stat()
+    except OSError as exc:
+        raise _source_error(
+            "ASCII_TIME_SOURCE_UNREADABLE",
+            "ASCII source could not be read for timestamp checks.",
+            exc,
+        ) from exc
+    return _TimestampScanCacheKey(
+        path=str(path.resolve()),
+        kind=target.kind.value,
+        timeframe=target.timeframe,
+        period=target.period,
+        size_bytes=stat.st_size,
+        mtime_ns=stat.st_mtime_ns,
+    )
+
+
+def _cache_timestamp_scan(
+    key: _TimestampScanCacheKey,
+    scan: _TimestampScan,
+) -> None:
+    _TIMESTAMP_SCAN_CACHE[key] = scan
+    _TIMESTAMP_SCAN_CACHE.move_to_end(key)
+    while len(_TIMESTAMP_SCAN_CACHE) > TIMESTAMP_SCAN_CACHE_MAX_ENTRIES:
+        _TIMESTAMP_SCAN_CACHE.popitem(last=False)
+
+
+def _cache_timestamp_boundary(
+    key: _TimestampScanCacheKey,
+    boundary: _ContinuityBoundary,
+) -> None:
+    _TIMESTAMP_BOUNDARY_CACHE[key] = boundary
+    _TIMESTAMP_BOUNDARY_CACHE.move_to_end(key)
+    while len(_TIMESTAMP_BOUNDARY_CACHE) > TIMESTAMP_BOUNDARY_CACHE_MAX_ENTRIES:
+        _TIMESTAMP_BOUNDARY_CACHE.popitem(last=False)
+
+
+def _cached_timestamp_boundary(
+    key: _TimestampScanCacheKey,
+) -> _ContinuityBoundary | None:
+    boundary = _TIMESTAMP_BOUNDARY_CACHE.get(key)
+    if boundary is not None:
+        _TIMESTAMP_BOUNDARY_CACHE.move_to_end(key)
+    return boundary
+
+
+def _continuity_boundary_from_scan(
+    target: QualityTarget,
+    scan: _TimestampScan,
+    *,
+    source_member: str,
+) -> _ContinuityBoundary | None:
+    if scan.first_valid_row is None or scan.last_valid_row is None:
+        return None
+    return _ContinuityBoundary(
+        target=target,
+        first=scan.first_valid_row,
+        last=scan.last_valid_row,
+        parsed_row_count=scan.parsed_row_count,
+        invalid_timestamp_count=scan.invalid_timestamp_count,
+        source_member=source_member,
+    )
+
+
 def _scan_timestamp_rows(
     text: str,
     *,
@@ -770,15 +1113,25 @@ def _scan_timestamp_rows(
 ) -> _TimestampScan:
     scan = _TimestampScan()
     expected_count = len(columns)
+    date_cache: dict[str, _SourceDateInfo] = {}
     for row_number, raw in enumerate(text.splitlines(), start=1):
         if not raw.strip():
             continue
+        scan.row_count += 1
         row = _parse_row(raw, delimiter)
-        if len(row) != expected_count or tuple(row) == columns:
+        if len(row) != expected_count:
+            scan.field_count_error_count += 1
+            continue
+        if tuple(row) == columns:
+            scan.header_row_count += 1
             continue
 
         timestamp_source = row[0].strip()
-        row_values = tuple(cell.strip() for cell in row)
+        row_values = (
+            tuple(cell.strip() for cell in row)
+            if target.timeframe == "T"
+            else ()
+        )
         timestamp_utc_ms: int | None = None
         try:
             timestamp_utc_ms = parse_histdata_datetime_to_utc_ms(
@@ -800,12 +1153,32 @@ def _scan_timestamp_rows(
         if timestamp_utc_ms is None:
             continue
 
+        source_info = _source_date_info(timestamp_source, date_cache)
+        source_time_of_day_ms = _source_time_of_day_ms(timestamp_source)
+        source_period = _source_period_for_target(
+            timestamp_source,
+            target.period,
+        )
+        utc_period = _utc_period_for_target(
+            timestamp_source,
+            timestamp_utc_ms,
+            target.period,
+            source_info=source_info,
+            source_time_of_day_ms=source_time_of_day_ms,
+        )
         sample = _TimestampSample(
             row_number=row_number,
             timestamp_source=timestamp_source,
             timestamp_utc_ms=timestamp_utc_ms,
-            source_period=_source_period(timestamp_source),
-            utc_period=_utc_period(timestamp_utc_ms),
+            source_period=source_period,
+            utc_period=utc_period,
+            source_year=source_info.year,
+            source_month=source_info.month,
+            source_day=source_info.day,
+            source_month_length=source_info.month_length,
+            source_weekday=source_info.weekday,
+            source_day_ordinal=source_info.ordinal,
+            source_time_of_day_ms=source_time_of_day_ms,
             source_member=source_member,
             row_values=row_values,
         )
@@ -1147,6 +1520,297 @@ def _scan_timestamp_gaps(
     return scan
 
 
+def _gap_scan_for_timestamp_scan(
+    target: QualityTarget,
+    timestamp_scan: _TimestampScan,
+    *,
+    tolerance: HistDataGapTolerance,
+) -> _TimestampGapScan:
+    key = _gap_tolerance_key(tolerance)
+    cached = timestamp_scan.gap_scans.get(key)
+    if cached is not None:
+        return cached
+    if target.timeframe == "M1" and timestamp_scan.polars_frame is not None:
+        gap_scan = _scan_timestamp_gaps_polars(
+            timestamp_scan.polars_frame,
+            target=target,
+            tolerance=tolerance,
+        )
+        timestamp_scan.gap_scans[key] = gap_scan
+        return gap_scan
+    return _scan_timestamp_gaps(timestamp_scan.valid_rows, tolerance=tolerance)
+
+
+def _gap_tolerance_key(
+    tolerance: HistDataGapTolerance,
+) -> tuple[JSONValue, ...]:
+    return (
+        tolerance.expected_interval_ms,
+        tolerance.suspicious_gap_ms,
+        *tolerance.bucket_thresholds_ms,
+        tolerance.session_boundary_grace_ms,
+        tolerance.dynamic_window_initial_ms,
+        tolerance.dynamic_window_max_ms,
+        tolerance.dynamic_window_growth_factor,
+        tolerance.dynamic_window_shrink_factor,
+    )
+
+
+def _scan_timestamp_gaps_polars(
+    frame: Any,
+    *,
+    target: QualityTarget,
+    tolerance: HistDataGapTolerance,
+) -> _TimestampGapScan:
+    import polars as pl
+
+    scan = _TimestampGapScan(
+        bucket_counts=_empty_gap_bucket_counts(tolerance),
+        final_dynamic_window_ms=tolerance.dynamic_window_initial_ms,
+    )
+    if frame.is_empty():
+        return scan
+
+    weekend_expr = _polars_weekend_closure_expr()
+    weekend_rows = frame.filter(weekend_expr)
+    scan.weekend_activity_count = weekend_rows.height
+    for row in weekend_rows.head(MAX_TIMESTAMP_SAMPLES).iter_rows(named=True):
+        _append_weekend_activity_sample(
+            scan.weekend_activity,
+            _WeekendActivitySample(
+                row=_timestamp_sample_from_projected_row(row, target=target),
+                session_state="weekend_closure",
+            ),
+        )
+
+    pairs = _polars_timestamp_pair_frame(frame)
+    positive_gaps = pairs.filter(
+        pl.col("_previous_datetime").is_not_null() & (pl.col("_gap_ms") > 0)
+    )
+    scan.pair_count = positive_gaps.height
+    if positive_gaps.is_empty():
+        return scan
+
+    max_gap_row = positive_gaps.sort("_gap_ms", descending=True).row(
+        0,
+        named=True,
+    )
+    scan.max_gap_ms = int(max_gap_row["_gap_ms"])
+    tracked_gaps = positive_gaps.filter(
+        pl.col("_gap_ms") > tolerance.expected_interval_ms
+    )
+    scan.tracked_gap_count = tracked_gaps.height
+    for threshold_ms in tolerance.bucket_thresholds_ms:
+        scan.bucket_counts[_gap_bucket_label(threshold_ms)] = int(
+            positive_gaps.filter(pl.col("_gap_ms") > threshold_ms).height
+        )
+
+    if tracked_gaps.is_empty():
+        scan.final_dynamic_window_ms = tolerance.dynamic_window_max_ms
+        return scan
+
+    expected_expr = _polars_expected_session_gap_expr(tolerance)
+    tracked_gaps = tracked_gaps.with_columns(
+        expected_expr.alias("_expected_session_closure")
+    )
+    scan.expected_session_closure_count = tracked_gaps.filter(
+        pl.col("_expected_session_closure")
+    ).height
+    scan.suspicious_gap_count = tracked_gaps.filter(
+        (~pl.col("_expected_session_closure"))
+        & (pl.col("_gap_ms") > tolerance.suspicious_gap_ms)
+    ).height
+
+    dynamic_window_ms = tolerance.dynamic_window_initial_ms
+    previous_tracked_row_number = 0
+    for row in tracked_gaps.iter_rows(named=True):
+        row_number = int(row["_row_number"])
+        if row_number - previous_tracked_row_number > 1:
+            dynamic_window_ms = tolerance.dynamic_window_max_ms
+        previous_tracked_row_number = row_number
+
+        gap_ms = int(row["_gap_ms"])
+        if bool(row["_expected_session_closure"]):
+            classification = "expected_session_closure"
+        elif gap_ms > tolerance.suspicious_gap_ms:
+            classification = "suspicious"
+        else:
+            classification = "tracked"
+        score_increment = _dynamic_score_increment(
+            gap_ms,
+            classification=classification,
+            dynamic_window_ms=dynamic_window_ms,
+            tolerance=tolerance,
+        )
+        sample = _timestamp_gap_sample_from_pair_row(
+            row,
+            target=target,
+            classification=classification,
+            dynamic_window_ms=dynamic_window_ms,
+            dynamic_score_increment=score_increment,
+        )
+        if gap_ms == scan.max_gap_ms and scan.max_gap is None:
+            scan.max_gap = sample
+
+        if classification == "expected_session_closure":
+            _append_gap_sample(scan.expected_session_closures, sample)
+            dynamic_window_ms = _grow_dynamic_window(
+                dynamic_window_ms,
+                tolerance,
+            )
+        elif classification == "suspicious":
+            _append_gap_sample(scan.suspicious_gaps, sample)
+            scan.dynamic_gap_score += score_increment
+            dynamic_window_ms = _shrink_dynamic_window(
+                dynamic_window_ms,
+                tolerance,
+            )
+        else:
+            dynamic_window_ms = _grow_dynamic_window(
+                dynamic_window_ms,
+                tolerance,
+            )
+        scan.final_dynamic_window_ms = dynamic_window_ms
+
+    if scan.max_gap is None:
+        scan.max_gap = _timestamp_gap_sample_from_pair_row(
+            max_gap_row,
+            target=target,
+            classification=(
+                "expected_session_closure"
+                if bool(max_gap_row.get("_expected_session_closure", False))
+                else (
+                    "suspicious"
+                    if scan.max_gap_ms > tolerance.suspicious_gap_ms
+                    else "tracked"
+                )
+            ),
+            dynamic_window_ms=scan.final_dynamic_window_ms,
+            dynamic_score_increment=0.0,
+        )
+    scan.dynamic_gap_score = round(scan.dynamic_gap_score, 4)
+    return scan
+
+
+def _polars_weekend_closure_expr() -> Any:
+    import polars as pl
+
+    return (
+        (pl.col("_source_weekday") == 5)
+        | (
+            (pl.col("_source_weekday") == FX_FRIDAY_CLOSE_WEEKDAY)
+            & (pl.col("_source_time_of_day_ms") > FX_CLOSE_OPEN_TIME_OF_DAY_MS)
+        )
+        | (
+            (pl.col("_source_weekday") == FX_SUNDAY_OPEN_WEEKDAY)
+            & (pl.col("_source_time_of_day_ms") < FX_CLOSE_OPEN_TIME_OF_DAY_MS)
+        )
+    )
+
+
+def _polars_timestamp_pair_frame(frame: Any) -> Any:
+    import polars as pl
+
+    previous_columns = {
+        "datetime": "_previous_datetime",
+        "_row_number": "_previous_row_number",
+        "_source_timestamp": "_previous_source_timestamp",
+        "_source_year": "_previous_source_year",
+        "_source_month": "_previous_source_month",
+        "_source_day": "_previous_source_day",
+        "_source_weekday": "_previous_source_weekday",
+        "_source_day_number": "_previous_source_day_number",
+        "_source_time_of_day_ms": "_previous_source_time_of_day_ms",
+        "_source_period": "_previous_source_period",
+        "_utc_period": "_previous_utc_period",
+    }
+    return frame.with_columns(
+        [
+            pl.col(column).shift(1).alias(alias)
+            for column, alias in previous_columns.items()
+        ]
+    ).with_columns(
+        (pl.col("datetime") - pl.col("_previous_datetime")).alias("_gap_ms")
+    )
+
+
+def _polars_expected_session_gap_expr(
+    tolerance: HistDataGapTolerance,
+) -> Any:
+    import polars as pl
+
+    grace_ms = tolerance.session_boundary_grace_ms
+    return (
+        (pl.col("_previous_source_weekday") == FX_FRIDAY_CLOSE_WEEKDAY)
+        & (pl.col("_source_weekday") == FX_SUNDAY_OPEN_WEEKDAY)
+        & (
+            pl.col("_source_day_number") - pl.col("_previous_source_day_number")
+            == 2
+        )
+        & (
+            pl.col("_previous_source_time_of_day_ms").is_between(
+                FX_CLOSE_OPEN_TIME_OF_DAY_MS - grace_ms,
+                FX_CLOSE_OPEN_TIME_OF_DAY_MS + grace_ms,
+            )
+        )
+        & (
+            pl.col("_source_time_of_day_ms").is_between(
+                FX_CLOSE_OPEN_TIME_OF_DAY_MS - grace_ms,
+                FX_CLOSE_OPEN_TIME_OF_DAY_MS + grace_ms,
+            )
+        )
+    )
+
+
+def _timestamp_gap_sample_from_pair_row(
+    row: Mapping[str, Any],
+    *,
+    target: QualityTarget,
+    classification: str,
+    dynamic_window_ms: int,
+    dynamic_score_increment: float,
+) -> _TimestampGapSample:
+    return _TimestampGapSample(
+        previous=_timestamp_sample_from_pair_row(row, previous=True),
+        current=_timestamp_sample_from_projected_row(row, target=target),
+        gap_ms=int(row["_gap_ms"]),
+        classification=classification,
+        dynamic_window_ms=dynamic_window_ms,
+        dynamic_score_increment=dynamic_score_increment,
+    )
+
+
+def _timestamp_sample_from_pair_row(
+    row: Mapping[str, Any],
+    *,
+    previous: bool,
+) -> _TimestampSample:
+    prefix = "_previous" if previous else ""
+    source_year = int(row[f"{prefix}_source_year"])
+    source_month = int(row[f"{prefix}_source_month"])
+    source_day = int(row[f"{prefix}_source_day"])
+    return _TimestampSample(
+        row_number=int(row[f"{prefix}_row_number"]),
+        timestamp_source=str(row[f"{prefix}_source_timestamp"]),
+        timestamp_utc_ms=int(row[f"{prefix}_datetime"]),
+        source_period=str(row[f"{prefix}_source_period"]),
+        utc_period=str(row[f"{prefix}_utc_period"]),
+        source_year=source_year,
+        source_month=source_month,
+        source_day=source_day,
+        source_month_length=_month_length(source_year, source_month),
+        source_weekday=int(row[f"{prefix}_source_weekday"]),
+        source_day_ordinal=datetime(
+            source_year,
+            source_month,
+            source_day,
+            tzinfo=timezone.utc,
+        ).toordinal(),
+        source_time_of_day_ms=int(row[f"{prefix}_source_time_of_day_ms"]),
+        source_member="",
+    )
+
+
 def _timestamp_gap_findings(
     *,
     target: QualityTarget,
@@ -1254,12 +1918,18 @@ def _scan_timestamp_continuity(
     tolerance: HistDataGapTolerance,
 ) -> _ContinuityScan:
     scan = _ContinuityScan(target_count=len(targets))
+    csv_dimensions = _csv_target_dimensions(targets)
     boundaries_by_group: dict[
         _ContinuityGroupKey, dict[str, list[_ContinuityBoundary]]
     ] = defaultdict(lambda: defaultdict(list))
 
     for target in targets:
         if not _is_ascii_text_target(target):
+            continue
+        if (
+            target.kind is QualityTargetKind.ZIP
+            and _target_dimension(target) in csv_dimensions
+        ):
             continue
         scan.candidate_target_count += 1
         key = _ContinuityGroupKey.from_target(target)
@@ -1279,7 +1949,7 @@ def _scan_timestamp_continuity(
             period: _preferred_boundary(boundaries)
             for period, boundaries in period_boundaries.items()
         }
-        periods = tuple(sorted(representatives))
+        periods = tuple(sorted(representatives, key=_period_sort_key))
         for previous_period, current_period in zip(
             periods,
             periods[1:],
@@ -1341,6 +2011,14 @@ def _timestamp_boundary_for_target(
     target: QualityTarget,
 ) -> _ContinuityBoundary | None:
     try:
+        key = _timestamp_scan_cache_key(target)
+    except _SourceReadError:
+        return None
+    cached_boundary = _cached_timestamp_boundary(key)
+    if cached_boundary is not None:
+        return cached_boundary
+
+    try:
         delimiter = delimiter_for_timeframe(target.timeframe)
         columns = columns_for_timeframe(target.timeframe)
         payload = _read_text_payload(target)
@@ -1348,22 +2026,90 @@ def _timestamp_boundary_for_target(
     except (ValueError, UnicodeDecodeError, _SourceReadError):
         return None
 
-    scan = _scan_timestamp_rows(
+    boundary = _scan_timestamp_boundary_rows(
         text,
         target=target,
         delimiter=delimiter,
         columns=columns,
         source_member=payload.source_member,
     )
-    if not scan.valid_rows:
+    if boundary is not None:
+        _cache_timestamp_boundary(key, boundary)
+    return boundary
+
+
+def _scan_timestamp_boundary_rows(
+    text: str,
+    *,
+    target: QualityTarget,
+    delimiter: str,
+    columns: tuple[str, ...],
+    source_member: str,
+) -> _ContinuityBoundary | None:
+    expected_count = len(columns)
+    first: _TimestampSample | None = None
+    last: _TimestampSample | None = None
+    parsed_row_count = 0
+    invalid_timestamp_count = 0
+    date_cache: dict[str, _SourceDateInfo] = {}
+
+    for row_number, raw in enumerate(text.splitlines(), start=1):
+        if not raw.strip():
+            continue
+        row = _parse_row(raw, delimiter)
+        if len(row) != expected_count or tuple(row) == columns:
+            continue
+
+        timestamp_source = row[0].strip()
+        try:
+            timestamp_utc_ms = parse_histdata_datetime_to_utc_ms(
+                timestamp_source,
+                target.timeframe,
+            )
+        except ValueError:
+            invalid_timestamp_count += 1
+            continue
+
+        source_info = _source_date_info(timestamp_source, date_cache)
+        source_time_of_day_ms = _source_time_of_day_ms(timestamp_source)
+        sample = _TimestampSample(
+            row_number=row_number,
+            timestamp_source=timestamp_source,
+            timestamp_utc_ms=timestamp_utc_ms,
+            source_period=_source_period_for_target(
+                timestamp_source,
+                target.period,
+            ),
+            utc_period=_utc_period_for_target(
+                timestamp_source,
+                timestamp_utc_ms,
+                target.period,
+                source_info=source_info,
+                source_time_of_day_ms=source_time_of_day_ms,
+            ),
+            source_year=source_info.year,
+            source_month=source_info.month,
+            source_day=source_info.day,
+            source_month_length=source_info.month_length,
+            source_weekday=source_info.weekday,
+            source_day_ordinal=source_info.ordinal,
+            source_time_of_day_ms=source_time_of_day_ms,
+            source_member=source_member,
+        )
+        parsed_row_count += 1
+        if first is None:
+            first = sample
+        last = sample
+
+    if first is None or last is None:
         return None
     return _ContinuityBoundary(
         target=target,
-        first=scan.valid_rows[0],
-        last=scan.valid_rows[-1],
-        parsed_row_count=scan.parsed_row_count,
-        invalid_timestamp_count=scan.invalid_timestamp_count,
-        source_member=payload.source_member,
+        first=first,
+        last=last,
+        parsed_row_count=parsed_row_count,
+        invalid_timestamp_count=invalid_timestamp_count,
+        source_member=source_member,
     )
 
 
@@ -1767,7 +2513,7 @@ def _base_metadata(
 
 
 def _parse_row(raw: str, delimiter: str) -> list[str]:
-    return next(csv.reader((raw,), delimiter=delimiter), [])
+    return raw.split(delimiter)
 
 
 def _empty_gap_bucket_counts(
@@ -1860,72 +2606,44 @@ def _is_expected_session_closure_gap(
     current: _TimestampSample,
     tolerance: HistDataGapTolerance,
 ) -> bool:
-    previous_source = _source_datetime_from_utc_ms(previous.timestamp_utc_ms)
-    current_source = _source_datetime_from_utc_ms(current.timestamp_utc_ms)
-    if current_source <= previous_source:
+    if current.timestamp_utc_ms <= previous.timestamp_utc_ms:
         return False
-
-    for friday_close in _friday_closes_between(previous_source, current_source):
-        sunday_open = friday_close + timedelta(days=2)
-        close_window_start = friday_close - timedelta(
-            milliseconds=tolerance.session_boundary_grace_ms
-        )
-        close_window_end = friday_close + timedelta(
-            milliseconds=tolerance.session_boundary_grace_ms
-        )
-        open_window_start = sunday_open - timedelta(
-            milliseconds=tolerance.session_boundary_grace_ms
-        )
-        open_window_end = sunday_open + timedelta(
-            milliseconds=tolerance.session_boundary_grace_ms
-        )
-        if (
-            close_window_start <= previous_source <= close_window_end
-            and open_window_start <= current_source <= open_window_end
-        ):
-            return True
-    return False
-
-
-def _friday_closes_between(
-    start: datetime,
-    end: datetime,
-) -> tuple[datetime, ...]:
-    closes: list[datetime] = []
-    cursor = (start - timedelta(days=7)).replace(
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0,
+    if (
+        previous.source_weekday != FX_FRIDAY_CLOSE_WEEKDAY
+        or current.source_weekday != FX_SUNDAY_OPEN_WEEKDAY
+    ):
+        return False
+    if current.source_day_ordinal - previous.source_day_ordinal != 2:
+        return False
+    grace_ms = tolerance.session_boundary_grace_ms
+    return _within_time_window(
+        previous.source_time_of_day_ms,
+        center_ms=FX_CLOSE_OPEN_TIME_OF_DAY_MS,
+        grace_ms=grace_ms,
+    ) and _within_time_window(
+        current.source_time_of_day_ms,
+        center_ms=FX_CLOSE_OPEN_TIME_OF_DAY_MS,
+        grace_ms=grace_ms,
     )
-    end_day = (end + timedelta(days=7)).replace(
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0,
-    )
-    while cursor <= end_day:
-        if cursor.weekday() == FX_FRIDAY_CLOSE_WEEKDAY:
-            closes.append(
-                cursor.replace(
-                    hour=FX_CLOSE_OPEN_MINUTE // 60,
-                    minute=FX_CLOSE_OPEN_MINUTE % 60,
-                )
-            )
-        cursor += timedelta(days=1)
-    return tuple(closes)
+
+
+def _within_time_window(
+    value_ms: int,
+    *,
+    center_ms: int,
+    grace_ms: int,
+) -> bool:
+    return center_ms - grace_ms <= value_ms <= center_ms + grace_ms
 
 
 def _is_weekend_closure_row(row: _TimestampSample) -> bool:
-    source = _source_datetime_from_utc_ms(row.timestamp_utc_ms)
-    source_minute = source.hour * 60 + source.minute
-    weekday = source.weekday()
+    weekday = row.source_weekday
     if weekday == 5:
         return True
     if weekday == FX_FRIDAY_CLOSE_WEEKDAY:
-        return source_minute > FX_CLOSE_OPEN_MINUTE
+        return row.source_time_of_day_ms > FX_CLOSE_OPEN_TIME_OF_DAY_MS
     if weekday == FX_SUNDAY_OPEN_WEEKDAY:
-        return source_minute < FX_CLOSE_OPEN_MINUTE
+        return row.source_time_of_day_ms < FX_CLOSE_OPEN_TIME_OF_DAY_MS
     return False
 
 
@@ -1977,6 +2695,8 @@ def _continuity_root(metadata: Mapping[str, JSONValue] | None) -> str:
 
 
 def _valid_period(value: str) -> bool:
+    if len(value) == 4 and value.isdigit():
+        return True
     if len(value) != 6 or not value.isdigit():
         return False
     month = int(value[4:])
@@ -1987,20 +2707,52 @@ def _missing_periods_between(
     previous_period: str,
     current_period: str,
 ) -> tuple[str, ...]:
-    previous_index = _period_index(previous_period)
-    current_index = _period_index(current_period)
-    if current_index - previous_index <= 1:
+    previous_span = _period_span(previous_period)
+    current_span = _period_span(current_period)
+    if current_span[0] - previous_span[1] <= 1:
         return ()
-    return tuple(
-        _period_from_index(index)
-        for index in range(previous_index + 1, current_index)
+    return _compact_missing_periods(
+        range(previous_span[1] + 1, current_span[0])
     )
 
 
 def _period_index(period: str) -> int:
+    if len(period) == 4:
+        year = int(period)
+        return year * 12 + 12
     year = int(period[:4])
     month = int(period[4:])
     return year * 12 + month
+
+
+def _period_sort_key(period: str) -> tuple[int, int, str]:
+    start, end = _period_span(period)
+    return (start, end, period)
+
+
+def _period_span(period: str) -> tuple[int, int]:
+    if len(period) == 4:
+        year = int(period)
+        return (year * 12 + 1, year * 12 + 12)
+    index = _period_index(period)
+    return (index, index)
+
+
+def _compact_missing_periods(indexes: range) -> tuple[str, ...]:
+    missing: list[str] = []
+    index = indexes.start
+    stop = indexes.stop
+    while index < stop:
+        year, month = divmod(index - 1, 12)
+        full_year_start = year * 12 + 1
+        full_year_end_exclusive = year * 12 + 13
+        if index == full_year_start and full_year_end_exclusive <= stop:
+            missing.append(f"{year:04d}")
+            index = full_year_end_exclusive
+            continue
+        missing.append(_period_from_index(index))
+        index += 1
+    return tuple(missing)
 
 
 def _period_from_index(index: int) -> str:
@@ -2018,6 +2770,26 @@ def _normalize_timeframe(value: str) -> str:
 
 def _normalize_symbol(value: str) -> str:
     return str(value or "").strip().upper().replace("_", "")
+
+
+def _csv_target_dimensions(
+    targets: tuple[QualityTarget, ...],
+) -> set[tuple[str, str, str, str]]:
+    return {
+        _target_dimension(target)
+        for target in targets
+        if target.kind is QualityTargetKind.CSV
+        and all(_target_dimension(target))
+    }
+
+
+def _target_dimension(target: QualityTarget) -> tuple[str, str, str, str]:
+    return (
+        _normalize_data_format(target.data_format),
+        _normalize_timeframe(target.timeframe),
+        _normalize_symbol(target.symbol),
+        str(target.period or "").strip(),
+    )
 
 
 def _metadata_int(value: JSONValue | None) -> int:
@@ -2067,6 +2839,10 @@ def _m1_granularity_drift_sample(
     timestamp_utc_ms: int | None,
     source_member: str,
 ) -> _TimestampIssueSample | None:
+    raw = timestamp_source.strip()
+    if len(raw) == 15 and raw[8:9] == " " and raw[13:15] == "00":
+        return None
+
     parts = _source_timestamp_parts(timestamp_source)
     if parts is None:
         return None
@@ -2148,6 +2924,136 @@ def _source_timestamp_parts(timestamp_source: str) -> dict[str, str] | None:
 
 def _source_period(timestamp_source: str) -> str:
     return timestamp_source.strip()[:6]
+
+
+def _source_period_for_target(timestamp_source: str, target_period: str) -> str:
+    raw = timestamp_source.strip()
+    if len(str(target_period or "")) == 4:
+        return raw[:4]
+    return raw[:6]
+
+
+def _utc_period_for_target(
+    timestamp_source: str,
+    timestamp_utc_ms: int,
+    target_period: str,
+    *,
+    source_info: _SourceDateInfo,
+    source_time_of_day_ms: int,
+) -> str:
+    is_annual = len(str(target_period or "")) == 4
+    if not _can_shift_utc_period(
+        source_info=source_info,
+        source_time_of_day_ms=source_time_of_day_ms,
+        annual=is_annual,
+    ):
+        return (
+            source_info.year_period if is_annual else source_info.month_period
+        )
+
+    timestamp = _utc_datetime_from_ms(timestamp_utc_ms)
+    if is_annual:
+        return f"{timestamp.year:04d}"
+    return f"{timestamp.year:04d}{timestamp.month:02d}"
+
+
+def _can_shift_utc_period(
+    *,
+    source_info: _SourceDateInfo,
+    source_time_of_day_ms: int,
+    annual: bool,
+) -> bool:
+    if source_time_of_day_ms < 19 * 60 * 60_000:
+        return False
+    if annual:
+        return source_info.month == 12 and source_info.day == 31
+    return source_info.day == source_info.month_length
+
+
+def _source_date_info(
+    timestamp_source: str,
+    cache: dict[str, _SourceDateInfo],
+) -> _SourceDateInfo:
+    date_key = timestamp_source.strip()[:8]
+    cached = cache.get(date_key)
+    if cached is not None:
+        return cached
+
+    year = int(date_key[:4])
+    month = int(date_key[4:6])
+    day = int(date_key[6:8])
+    timestamp = datetime(year, month, day, tzinfo=timezone.utc)
+    info = _SourceDateInfo(
+        year=year,
+        month=month,
+        day=day,
+        weekday=timestamp.weekday(),
+        ordinal=timestamp.toordinal(),
+        year_period=f"{year:04d}",
+        month_period=f"{year:04d}{month:02d}",
+        month_length=_month_length(year, month),
+    )
+    cache[date_key] = info
+    return info
+
+
+def _source_date_info_from_fields(
+    *,
+    year: int,
+    month: int,
+    day: int,
+    weekday: int,
+    cache: dict[str, _SourceDateInfo],
+) -> _SourceDateInfo:
+    date_key = f"{year:04d}{month:02d}{day:02d}"
+    cached = cache.get(date_key)
+    if cached is not None:
+        return cached
+
+    info = _SourceDateInfo(
+        year=year,
+        month=month,
+        day=day,
+        weekday=weekday,
+        ordinal=datetime(year, month, day, tzinfo=timezone.utc).toordinal(),
+        year_period=f"{year:04d}",
+        month_period=f"{year:04d}{month:02d}",
+        month_length=_month_length(year, month),
+    )
+    cache[date_key] = info
+    return info
+
+
+def _source_time_of_day_ms(timestamp_source: str) -> int:
+    raw = timestamp_source.strip()
+    return (
+        int(raw[9:11]) * 60 * 60_000
+        + int(raw[11:13]) * 60_000
+        + int(raw[13:15]) * 1_000
+        + int((raw[15:18] or "0").ljust(3, "0")[:3])
+    )
+
+
+def _source_timestamp_from_utc_ms(
+    timestamp_utc_ms: int,
+    timeframe: str,
+) -> str:
+    source = _source_datetime_from_utc_ms(timestamp_utc_ms)
+    timestamp = (
+        f"{source.year:04d}{source.month:02d}{source.day:02d} "
+        f"{source.hour:02d}{source.minute:02d}{source.second:02d}"
+    )
+    if timeframe == "T":
+        return f"{timestamp}{source.microsecond // 1_000:03d}"
+    return timestamp
+
+
+def _month_length(year: int, month: int) -> int:
+    if month == 12:
+        return 31
+    next_month = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    this_month = datetime(year, month, 1, tzinfo=timezone.utc)
+    return (next_month - this_month).days
 
 
 def _utc_period(timestamp_utc_ms: int) -> str:

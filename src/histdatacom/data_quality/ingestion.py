@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -18,10 +17,12 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
     QualityTargetKind,
 )
+from histdatacom.data_quality.polars_cache import (
+    read_fresh_sibling_polars_cache,
+)
 from histdatacom.histdata_ascii import (
     columns_for_timeframe,
     delimiter_for_timeframe,
-    normalize_ascii_row,
     parse_histdata_datetime_to_utc_ms,
     read_polars_cache,
 )
@@ -429,6 +430,14 @@ class HistDataAsciiSchemaIngestionRule:
         try:
             delimiter = delimiter_for_timeframe(target.timeframe)
             columns = columns_for_timeframe(target.timeframe)
+            cache_scan = _schema_scan_from_polars_cache(target, columns)
+            if cache_scan is not None:
+                return _schema_findings(
+                    target=target,
+                    scan=cache_scan,
+                    columns=columns,
+                    source_member="",
+                )
             payload = _read_text_payload(target)
             text = payload.data.decode("utf-8")
         except (ValueError, UnicodeDecodeError, _SourceReadError):
@@ -687,6 +696,22 @@ def _scan_rows(
     return scan
 
 
+def _schema_scan_from_polars_cache(
+    target: QualityTarget,
+    columns: tuple[str, ...],
+) -> _SchemaScan | None:
+    cache = read_fresh_sibling_polars_cache(
+        target,
+        required_columns=columns,
+    )
+    if cache is None:
+        return None
+    height = getattr(cache.frame, "height", None)
+    if not isinstance(height, int):
+        return None
+    return _SchemaScan(parsed_row_count=height)
+
+
 def _scan_schema_rows(
     text: str,
     *,
@@ -766,20 +791,6 @@ def _scan_schema_rows(
         if has_schema_error:
             continue
 
-        try:
-            normalize_ascii_row(timeframe, row)
-        except ValueError as exc:
-            scan.invalid_row_count += 1
-            _append_schema_sample(
-                scan.invalid_rows,
-                _SchemaSample(
-                    row_number=row_number,
-                    column="",
-                    raw_value=raw,
-                    error=str(exc),
-                ),
-            )
-            continue
         scan.parsed_row_count += 1
     return scan
 
@@ -907,7 +918,7 @@ def _schema_finding(
 
 
 def _parse_row(raw: str, delimiter: str) -> list[str]:
-    return next(csv.reader((raw,), delimiter=delimiter), [])
+    return raw.split(delimiter)
 
 
 def _row_looks_shifted(row: list[str], *, timeframe: str) -> bool:

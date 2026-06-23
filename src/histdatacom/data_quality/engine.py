@@ -37,11 +37,33 @@ def run_quality_assessment(
     target_tuple = tuple(targets)
     rule_tuple = tuple(rules)
     base_metadata = dict(metadata or {})
-    rule_results = tuple(
-        evaluate_quality_rule(rule, target)
-        for target in target_tuple
-        for rule in rule_tuple
-    )
+    csv_dimensions = _csv_target_dimensions(target_tuple)
+    skipped_duplicate_archive_rule_count = 0
+    rule_results_list: list[QualityRuleResult] = []
+    for target in target_tuple:
+        for rule in rule_tuple:
+            if _should_skip_duplicate_archive_rule(
+                rule,
+                target,
+                csv_dimensions,
+            ):
+                skipped_duplicate_archive_rule_count += 1
+                continue
+            rule_results_list.append(evaluate_quality_rule(rule, target))
+
+    if skipped_duplicate_archive_rule_count:
+        base_metadata["quality_engine"] = {
+            "target_count": len(target_tuple),
+            "rule_count": len(rule_tuple),
+            "target_rule_evaluation_count": len(rule_results_list),
+            "skipped_duplicate_archive_rule_evaluation_count": (
+                skipped_duplicate_archive_rule_count
+            ),
+            "duplicate_archive_scan_policy": (
+                "prefer_extracted_csv_for_non_inventory_rules"
+            ),
+        }
+    rule_results = tuple(rule_results_list)
     run_reports = tuple(
         rule.evaluate_run(target_tuple, metadata=base_metadata)
         for rule in tuple(run_rules)
@@ -76,3 +98,34 @@ def _merge_targets(
         if target not in merged:
             merged.append(target)
     return tuple(merged)
+
+
+def _csv_target_dimensions(
+    targets: tuple[QualityTarget, ...],
+) -> set[tuple[str, str, str, str]]:
+    return {
+        _target_dimension(target)
+        for target in targets
+        if target.kind.value == "csv" and all(_target_dimension(target))
+    }
+
+
+def _should_skip_duplicate_archive_rule(
+    rule: QualityRule,
+    target: QualityTarget,
+    csv_dimensions: set[tuple[str, str, str, str]],
+) -> bool:
+    if target.kind.value != "zip":
+        return False
+    if _target_dimension(target) not in csv_dimensions:
+        return False
+    return not str(rule.rule_id).startswith("inventory.")
+
+
+def _target_dimension(target: QualityTarget) -> tuple[str, str, str, str]:
+    return (
+        str(target.data_format or "").strip().lower(),
+        str(target.timeframe or "").strip().upper(),
+        str(target.symbol or "").strip().upper(),
+        str(target.period or "").strip(),
+    )

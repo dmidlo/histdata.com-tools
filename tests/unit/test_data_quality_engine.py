@@ -183,6 +183,68 @@ def test_quality_engine_runs_multiple_rules_and_aggregates_status(
     )
 
 
+def test_quality_engine_skips_duplicate_archive_semantic_scans() -> None:
+    """Matching CSV targets should own non-inventory checks for same data."""
+    archive = QualityTarget(
+        path="/tmp/DAT_ASCII_EURUSD_M1_201202.zip",
+        kind=QualityTargetKind.ZIP,
+        data_format="ascii",
+        timeframe=M1,
+        symbol="EURUSD",
+        period="201202",
+        metadata={"case": "archive"},
+    )
+    csv = QualityTarget(
+        path="/tmp/DAT_ASCII_EURUSD_M1_201202.csv",
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe=M1,
+        symbol="EURUSD",
+        period="201202",
+        metadata={"case": "csv"},
+    )
+
+    report = run_quality_assessment(
+        targets=(archive, csv),
+        rules=(
+            _StaticRule(
+                rule_id="inventory.zip.integrity",
+                description="inventory still owns archive checks",
+                severity_by_case={
+                    "archive": QualitySeverity.INFO,
+                    "csv": QualitySeverity.INFO,
+                },
+            ),
+            _StaticRule(
+                rule_id="time.ascii.gaps",
+                description="semantic scans prefer extracted CSVs",
+                severity_by_case={
+                    "archive": QualitySeverity.ERROR,
+                    "csv": QualitySeverity.INFO,
+                },
+            ),
+        ),
+    )
+
+    assert [
+        (result.rule_id, result.target.kind) for result in report.rule_results
+    ] == [
+        ("inventory.zip.integrity", QualityTargetKind.ZIP),
+        ("inventory.zip.integrity", QualityTargetKind.CSV),
+        ("time.ascii.gaps", QualityTargetKind.CSV),
+    ]
+    assert report.status is QualityStatus.CLEAN
+    assert report.metadata["quality_engine"] == {
+        "target_count": 2,
+        "rule_count": 2,
+        "target_rule_evaluation_count": 3,
+        "skipped_duplicate_archive_rule_evaluation_count": 1,
+        "duplicate_archive_scan_policy": (
+            "prefer_extracted_csv_for_non_inventory_rules"
+        ),
+    }
+
+
 def test_quality_report_round_trip_recomputes_summary_state(
     tmp_path: Path,
 ) -> None:

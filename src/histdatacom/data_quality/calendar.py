@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import csv
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 import zipfile
 
 from histdatacom.data_quality.contracts import (
@@ -16,6 +17,12 @@ from histdatacom.data_quality.contracts import (
     QualitySeverity,
     QualityTarget,
     QualityTargetKind,
+)
+from histdatacom.data_quality.time import (
+    _SourceReadError as _TimestampSourceReadError,
+    _TimestampSample,
+    _TimestampScan,
+    _timestamp_scan_for_target,
 )
 from histdatacom.histdata_ascii import (
     EST_NO_DST_OFFSET_MS,
@@ -47,6 +54,8 @@ SESSION_STATE_FRIDAY_CLOSE = "friday_close"
 FX_FRIDAY_CLOSE_WEEKDAY = 4
 FX_SUNDAY_OPEN_WEEKDAY = 6
 FX_CLOSE_OPEN_MINUTE = 17 * 60
+MILLISECONDS_PER_MINUTE = 60_000
+MILLISECONDS_PER_DAY = 24 * 60 * MILLISECONDS_PER_MINUTE
 
 
 @dataclass(frozen=True, slots=True)
@@ -415,6 +424,34 @@ class HistDataCalendarSessionRule:
             return ()
 
         try:
+            timestamp_scan = _timestamp_scan_for_target(target)
+        except (ValueError, _TimestampSourceReadError):
+            timestamp_scan = None
+        if timestamp_scan is not None and _can_use_timestamp_scan_for_calendar(
+            timestamp_scan
+        ):
+            source_member = (
+                timestamp_scan.valid_rows[0].source_member
+                if timestamp_scan.valid_rows
+                else ""
+            )
+            scan = _scan_calendar_timestamp_samples(
+                tuple(timestamp_scan.valid_rows)
+            )
+            return (
+                _summary_finding(target, scan, source_member=source_member),
+            )
+        if (
+            timestamp_scan is not None
+            and timestamp_scan.polars_frame is not None
+        ):
+            scan = _scan_calendar_projected_frame(
+                timestamp_scan.polars_frame,
+                target=target,
+            )
+            return (_summary_finding(target, scan, source_member=""),)
+
+        try:
             delimiter = delimiter_for_timeframe(target.timeframe)
             columns = columns_for_timeframe(target.timeframe)
             payload = _read_text_payload(target)
@@ -542,6 +579,308 @@ def _scan_calendar_rows(
     return scan
 
 
+def _can_use_timestamp_scan_for_calendar(scan: _TimestampScan) -> bool:
+    return (
+        scan.invalid_timestamp_count == 0
+        and scan.field_count_error_count == 0
+        and scan.header_row_count == 0
+        and scan.row_count == scan.parsed_row_count
+        and len(scan.valid_rows) == scan.parsed_row_count
+    )
+
+
+def _scan_calendar_timestamp_samples(
+    samples: tuple[_TimestampSample, ...],
+) -> _CalendarScan:
+    scan = _CalendarScan(row_count=len(samples), parsed_row_count=len(samples))
+    for sample in samples:
+        source_minute = sample.source_time_of_day_ms // MILLISECONDS_PER_MINUTE
+        utc_minute = (
+            sample.timestamp_utc_ms % MILLISECONDS_PER_DAY
+        ) // MILLISECONDS_PER_MINUTE
+        session_state = _session_state_for_source_fields(
+            weekday=sample.source_weekday,
+            minute=source_minute,
+        )
+        clock_sessions = _clock_sessions_for_minute(utc_minute)
+        active_sessions = (
+            ()
+            if session_state == SESSION_STATE_WEEKEND_CLOSURE
+            else clock_sessions
+        )
+        overlaps = _overlaps_for_sessions(active_sessions)
+        special_tags = _special_tags_for_source_fields(
+            source_month=sample.source_month,
+            source_day=sample.source_day,
+            source_month_length=sample.source_month_length,
+            source_minute=source_minute,
+            utc_minute=utc_minute,
+            session_state=session_state,
+        )
+        holiday_tags = _holiday_tags_for_source_fields(
+            source_month=sample.source_month,
+            source_day=sample.source_day,
+        )
+        calendar_tags = tuple(
+            dict.fromkeys(
+                (
+                    *active_sessions,
+                    *overlaps,
+                    session_state,
+                    *special_tags,
+                    *holiday_tags,
+                )
+            )
+        )
+        _record_calendar_values(
+            scan,
+            row_number=sample.row_number,
+            source_member=sample.source_member,
+            timestamp_sample=sample,
+            session_state=session_state,
+            clock_sessions=clock_sessions,
+            active_sessions=active_sessions,
+            overlaps=overlaps,
+            special_tags=special_tags,
+            holiday_tags=holiday_tags,
+            calendar_tags=calendar_tags,
+        )
+    return scan
+
+
+def _scan_calendar_projected_frame(
+    frame: Any,
+    *,
+    target: QualityTarget,
+) -> _CalendarScan:
+    import polars as pl
+
+    scan = _CalendarScan(row_count=frame.height, parsed_row_count=frame.height)
+    if frame.is_empty():
+        return scan
+
+    source_minute = pl.col("_source_time_of_day_ms") // MILLISECONDS_PER_MINUTE
+    utc_minute = (pl.col("datetime") % MILLISECONDS_PER_DAY) // (
+        MILLISECONDS_PER_MINUTE
+    )
+    asia = utc_minute.is_between(0, 9 * 60 - 1)
+    london = utc_minute.is_between(7 * 60, 16 * 60 - 1)
+    new_york = utc_minute.is_between(12 * 60, 21 * 60 - 1)
+    friday_close = (
+        pl.col("_source_weekday") == FX_FRIDAY_CLOSE_WEEKDAY
+    ) & source_minute.is_between(16 * 60, 17 * 60 - 1)
+    sunday_open = (
+        pl.col("_source_weekday") == FX_SUNDAY_OPEN_WEEKDAY
+    ) & source_minute.is_between(17 * 60, 18 * 60 - 1)
+    weekend = (
+        (pl.col("_source_weekday") == 5)
+        | (
+            (pl.col("_source_weekday") == FX_FRIDAY_CLOSE_WEEKDAY)
+            & (source_minute >= FX_CLOSE_OPEN_MINUTE)
+        )
+        | (
+            (pl.col("_source_weekday") == FX_SUNDAY_OPEN_WEEKDAY)
+            & (source_minute < FX_CLOSE_OPEN_MINUTE)
+        )
+    )
+    market_open = ~(weekend | friday_close | sunday_open)
+    non_weekend = ~weekend
+    any_session = asia | london | new_york
+    month_length = _polars_month_length_expr()
+    month_end = pl.col("_source_day") == month_length
+    quarter_end = pl.col("_source_month").is_in([3, 6, 9, 12]) & month_end
+    year_end = (pl.col("_source_month") == 12) & (pl.col("_source_day") == 31)
+    london_fix = utc_minute.is_between(15 * 60 + 55, 16 * 60 + 4)
+    daily_rollover = source_minute.is_between(16 * 60 + 55, 17 * 60 + 4)
+
+    session_counts = {
+        SESSION_STATE_MARKET_OPEN: _polars_count(frame, market_open),
+        SESSION_STATE_WEEKEND_CLOSURE: _polars_count(frame, weekend),
+        SESSION_STATE_SUNDAY_OPEN: _polars_count(frame, sunday_open),
+        SESSION_STATE_FRIDAY_CLOSE: _polars_count(frame, friday_close),
+    }
+    scan.session_state_counts.update(
+        {key: count for key, count in session_counts.items() if count}
+    )
+    scan.clock_session_counts.update(
+        {
+            key: count
+            for key, count in {
+                SESSION_ASIA: _polars_count(frame, asia),
+                SESSION_LONDON: _polars_count(frame, london),
+                SESSION_NEW_YORK: _polars_count(frame, new_york),
+            }.items()
+            if count
+        },
+    )
+    scan.active_session_counts.update(
+        {
+            key: count
+            for key, count in {
+                SESSION_MARKET_CLOSED: session_counts[
+                    SESSION_STATE_WEEKEND_CLOSURE
+                ],
+                SESSION_ASIA: _polars_count(frame, non_weekend & asia),
+                SESSION_LONDON: _polars_count(frame, non_weekend & london),
+                SESSION_NEW_YORK: _polars_count(frame, non_weekend & new_york),
+                SESSION_NO_ACTIVE_WINDOW: _polars_count(
+                    frame,
+                    non_weekend & ~any_session,
+                ),
+            }.items()
+            if count
+        },
+    )
+    scan.overlap_counts.update(
+        {
+            key: count
+            for key, count in {
+                "asia_london_overlap": _polars_count(
+                    frame,
+                    non_weekend & asia & london,
+                ),
+                "london_new_york_overlap": _polars_count(
+                    frame,
+                    non_weekend & london & new_york,
+                ),
+                "multi_session_overlap": _polars_count(
+                    frame,
+                    non_weekend
+                    & (
+                        (
+                            asia.cast(pl.Int8)
+                            + london.cast(pl.Int8)
+                            + new_york.cast(pl.Int8)
+                        )
+                        > 1
+                    ),
+                ),
+            }.items()
+            if count
+        },
+    )
+    special_counts = {
+        SESSION_STATE_WEEKEND_CLOSURE: session_counts[
+            SESSION_STATE_WEEKEND_CLOSURE
+        ],
+        SESSION_STATE_SUNDAY_OPEN: session_counts[SESSION_STATE_SUNDAY_OPEN],
+        SESSION_STATE_FRIDAY_CLOSE: session_counts[SESSION_STATE_FRIDAY_CLOSE],
+        DAILY_ROLLOVER_WINDOW.name: _polars_count(frame, daily_rollover),
+        LONDON_FIX_WINDOW.name: _polars_count(frame, london_fix),
+        "month_end_fix_window": _polars_count(frame, london_fix & month_end),
+        "quarter_end_fix_window": _polars_count(
+            frame,
+            london_fix & quarter_end,
+        ),
+        "year_end_fix_window": _polars_count(frame, london_fix & year_end),
+        "month_end": _polars_count(frame, month_end),
+        "quarter_end": _polars_count(frame, quarter_end),
+        "year_end": _polars_count(frame, year_end),
+    }
+    scan.special_tag_counts.update(
+        {key: count for key, count in special_counts.items() if count}
+    )
+    holiday_counts = {
+        f"major_holiday:{holiday.name}": _polars_count(
+            frame,
+            (pl.col("_source_month") == holiday.month)
+            & (pl.col("_source_day") == holiday.day),
+        )
+        for holiday in STATIC_MAJOR_HOLIDAYS
+    }
+    scan.holiday_tag_counts.update(
+        {key: count for key, count in holiday_counts.items() if count}
+    )
+    for counter in (
+        scan.active_session_counts,
+        scan.overlap_counts,
+        scan.session_state_counts,
+        Counter(
+            {
+                key: count
+                for key, count in special_counts.items()
+                if key
+                not in {
+                    SESSION_STATE_WEEKEND_CLOSURE,
+                    SESSION_STATE_SUNDAY_OPEN,
+                    SESSION_STATE_FRIDAY_CLOSE,
+                }
+                and count
+            }
+        ),
+        scan.holiday_tag_counts,
+    ):
+        scan.calendar_tag_counts.update(counter)
+
+    for row in frame.head(MAX_CALENDAR_SAMPLES).iter_rows(named=True):
+        sample = _projected_calendar_timestamp_sample(row, target=target)
+        scan.samples.append(
+            _CalendarSample(
+                row_number=sample.row_number,
+                classification=classify_histdata_timestamp(
+                    sample.timestamp_utc_ms,
+                    source_timestamp=sample.timestamp_source,
+                ),
+                source_member="",
+            )
+        )
+    return scan
+
+
+def _projected_calendar_timestamp_sample(
+    row: Mapping[str, Any],
+    *,
+    target: QualityTarget,
+) -> _TimestampSample:
+    source_year = int(row["_source_year"])
+    source_month = int(row["_source_month"])
+    source_day = int(row["_source_day"])
+    return _TimestampSample(
+        row_number=int(row["_row_number"]),
+        timestamp_source=str(row["_source_timestamp"]),
+        timestamp_utc_ms=int(row["datetime"]),
+        source_period=str(row["_source_period"]),
+        utc_period=str(row["_utc_period"]),
+        source_year=source_year,
+        source_month=source_month,
+        source_day=source_day,
+        source_month_length=_month_length(source_year, source_month),
+        source_weekday=int(row["_source_weekday"]),
+        source_day_ordinal=datetime(
+            source_year,
+            source_month,
+            source_day,
+            tzinfo=timezone.utc,
+        ).toordinal(),
+        source_time_of_day_ms=int(row["_source_time_of_day_ms"]),
+        source_member="",
+    )
+
+
+def _polars_count(frame: Any, expression: Any) -> int:
+    try:
+        return int(frame.select(expression.sum()).item() or 0)
+    except Exception:
+        return 0
+
+
+def _polars_month_length_expr() -> Any:
+    import polars as pl
+
+    year = pl.col("_source_year")
+    month = pl.col("_source_month")
+    leap_year = ((year % 4 == 0) & (year % 100 != 0)) | (year % 400 == 0)
+    return (
+        pl.when(month.is_in([1, 3, 5, 7, 8, 10, 12]))
+        .then(pl.lit(31))
+        .when((month == 2) & leap_year)
+        .then(pl.lit(29))
+        .when(month == 2)
+        .then(pl.lit(28))
+        .otherwise(pl.lit(30))
+    )
+
+
 def _record_classification(
     scan: _CalendarScan,
     classification: HistDataCalendarClassification,
@@ -569,6 +908,51 @@ def _record_classification(
             _CalendarSample(
                 row_number=row_number,
                 classification=classification,
+                source_member=source_member,
+            )
+        )
+
+
+def _record_calendar_values(
+    scan: _CalendarScan,
+    *,
+    row_number: int,
+    source_member: str,
+    timestamp_sample: _TimestampSample | None,
+    session_state: str,
+    clock_sessions: tuple[str, ...],
+    active_sessions: tuple[str, ...],
+    overlaps: tuple[str, ...],
+    special_tags: tuple[str, ...],
+    holiday_tags: tuple[str, ...],
+    calendar_tags: tuple[str, ...],
+) -> None:
+    scan.session_state_counts[session_state] += 1
+    _increment_counts(scan.clock_session_counts, clock_sessions)
+    _increment_counts(
+        scan.active_session_counts,
+        active_sessions
+        or (
+            (SESSION_MARKET_CLOSED,)
+            if session_state == SESSION_STATE_WEEKEND_CLOSURE
+            else (SESSION_NO_ACTIVE_WINDOW,)
+        ),
+    )
+    _increment_counts(scan.overlap_counts, overlaps)
+    _increment_counts(scan.special_tag_counts, special_tags)
+    _increment_counts(scan.holiday_tag_counts, holiday_tags)
+    _increment_counts(scan.calendar_tag_counts, calendar_tags)
+    if (
+        timestamp_sample is not None
+        and len(scan.samples) < MAX_CALENDAR_SAMPLES
+    ):
+        scan.samples.append(
+            _CalendarSample(
+                row_number=row_number,
+                classification=classify_histdata_timestamp(
+                    timestamp_sample.timestamp_utc_ms,
+                    source_timestamp=timestamp_sample.timestamp_source,
+                ),
                 source_member=source_member,
             )
         )
@@ -612,6 +996,10 @@ def _summary_finding(
 def _session_state_for_source(source: datetime) -> str:
     weekday = source.weekday()
     minute = _minute_of_day(source)
+    return _session_state_for_source_fields(weekday=weekday, minute=minute)
+
+
+def _session_state_for_source_fields(*, weekday: int, minute: int) -> str:
     if weekday == 5:
         return SESSION_STATE_WEEKEND_CLOSURE
     if weekday == FX_FRIDAY_CLOSE_WEEKDAY:
@@ -628,22 +1016,28 @@ def _session_state_for_source(source: datetime) -> str:
 
 
 def _clock_sessions_for_utc(utc: datetime) -> tuple[str, ...]:
-    minute = _minute_of_day(utc)
-    return tuple(
-        window.name for window in SESSION_WINDOWS if window.contains(minute)
-    )
+    return _clock_sessions_for_minute(_minute_of_day(utc))
+
+
+def _clock_sessions_for_minute(minute: int) -> tuple[str, ...]:
+    sessions: list[str] = []
+    if 0 <= minute < 9 * 60:
+        sessions.append(SESSION_ASIA)
+    if 7 * 60 <= minute < 16 * 60:
+        sessions.append(SESSION_LONDON)
+    if 12 * 60 <= minute < 21 * 60:
+        sessions.append(SESSION_NEW_YORK)
+    return tuple(sessions)
 
 
 def _overlaps_for_sessions(sessions: tuple[str, ...]) -> tuple[str, ...]:
-    session_set = set(sessions)
-    overlaps: list[str] = []
-    if {SESSION_ASIA, SESSION_LONDON}.issubset(session_set):
-        overlaps.append("asia_london_overlap")
-    if {SESSION_LONDON, SESSION_NEW_YORK}.issubset(session_set):
-        overlaps.append("london_new_york_overlap")
-    if len(session_set) > 1:
-        overlaps.append("multi_session_overlap")
-    return tuple(overlaps)
+    if len(sessions) < 2:
+        return ()
+    if sessions == (SESSION_ASIA, SESSION_LONDON):
+        return ("asia_london_overlap", "multi_session_overlap")
+    if sessions == (SESSION_LONDON, SESSION_NEW_YORK):
+        return ("london_new_york_overlap", "multi_session_overlap")
+    return ("multi_session_overlap",)
 
 
 def _special_tags(
@@ -651,9 +1045,30 @@ def _special_tags(
     utc: datetime,
     session_state: str,
 ) -> tuple[str, ...]:
+    source_month_end = _is_month_end(source)
+    return _special_tags_for_source_fields(
+        source_month=source.month,
+        source_day=source.day,
+        source_month_length=source.day if source_month_end else source.day + 1,
+        source_minute=_minute_of_day(source),
+        utc_minute=_minute_of_day(utc),
+        session_state=session_state,
+    )
+
+
+def _special_tags_for_source_fields(
+    *,
+    source_month: int,
+    source_day: int,
+    source_month_length: int,
+    source_minute: int,
+    utc_minute: int,
+    session_state: str,
+) -> tuple[str, ...]:
     tags: list[str] = []
-    source_minute = _minute_of_day(source)
-    utc_minute = _minute_of_day(utc)
+    source_month_end = source_day == source_month_length
+    source_quarter_end = source_month in {3, 6, 9, 12} and source_month_end
+    source_year_end = source_month == 12 and source_day == 31
     if session_state in {
         SESSION_STATE_WEEKEND_CLOSURE,
         SESSION_STATE_SUNDAY_OPEN,
@@ -664,34 +1079,49 @@ def _special_tags(
         tags.append(DAILY_ROLLOVER_WINDOW.name)
     if LONDON_FIX_WINDOW.contains(utc_minute):
         tags.append(LONDON_FIX_WINDOW.name)
-        if _is_month_end(source):
+        if source_month_end:
             tags.append("month_end_fix_window")
-        if _is_quarter_end(source):
+        if source_quarter_end:
             tags.append("quarter_end_fix_window")
-        if _is_year_end(source):
+        if source_year_end:
             tags.append("year_end_fix_window")
-    if _is_month_end(source):
+    if source_month_end:
         tags.append("month_end")
-    if _is_quarter_end(source):
+    if source_quarter_end:
         tags.append("quarter_end")
-    if _is_year_end(source):
+    if source_year_end:
         tags.append("year_end")
     return tuple(dict.fromkeys(tags))
 
 
 def _holiday_tags(source: datetime) -> tuple[str, ...]:
+    return _holiday_tags_for_source_fields(
+        source_month=source.month,
+        source_day=source.day,
+    )
+
+
+def _holiday_tags_for_source_fields(
+    *,
+    source_month: int,
+    source_day: int,
+) -> tuple[str, ...]:
     return tuple(
         f"major_holiday:{holiday.name}"
         for holiday in STATIC_MAJOR_HOLIDAYS
-        if holiday.matches(source)
+        if holiday.month == source_month and holiday.day == source_day
     )
 
 
 def _is_month_end(source: datetime) -> bool:
-    next_month_year = source.year + (1 if source.month == 12 else 0)
-    next_month = 1 if source.month == 12 else source.month + 1
+    return source.day == _month_length(source.year, source.month)
+
+
+def _month_length(year: int, month: int) -> int:
+    next_month_year = year + (1 if month == 12 else 0)
+    next_month = 1 if month == 12 else month + 1
     first_next_month = datetime(next_month_year, next_month, 1)
-    return source.day == (first_next_month - timedelta(days=1)).day
+    return (first_next_month - timedelta(days=1)).day
 
 
 def _is_quarter_end(source: datetime) -> bool:
@@ -814,7 +1244,7 @@ def _finding(
 
 
 def _parse_row(raw: str, delimiter: str) -> list[str]:
-    return next(csv.reader((raw,), delimiter=delimiter), [])
+    return raw.split(delimiter)
 
 
 def _increment_counts(counter: Counter[str], values: tuple[str, ...]) -> None:

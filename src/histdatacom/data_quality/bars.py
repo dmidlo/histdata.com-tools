@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import csv
 import math
+from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
-from typing import cast
+from typing import Any, cast
 import zipfile
 
 from histdatacom.data_quality.contracts import (
@@ -23,6 +23,9 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
     QualityTargetKind,
 )
+from histdatacom.data_quality.polars_cache import (
+    read_fresh_sibling_polars_cache,
+)
 from histdatacom.data_quality.symbols import (
     ASSET_CLASS_UNKNOWN,
     HistDataSymbolMetadata,
@@ -31,6 +34,7 @@ from histdatacom.data_quality.symbols import (
     symbol_metadata_for,
 )
 from histdatacom.histdata_ascii import (
+    EST_NO_DST_OFFSET_MS,
     M1,
     TICK,
     columns_for_timeframe,
@@ -48,6 +52,7 @@ SOURCE_TIMEZONE = "EST-no-DST"
 SOURCE_UTC_OFFSET = "-05:00"
 CANONICAL_TIMEZONE = "UTC"
 MAX_BAR_SAMPLES = 5
+M1_BAR_SAMPLE_CACHE_MAX_ENTRIES = 4
 M1_MINUTE_MS = 60_000
 M1_PRICE_COLUMNS = ("open", "high", "low", "close")
 MAD_SCALE_FACTOR = 1.4826
@@ -142,6 +147,16 @@ class _SourceReadError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class _M1BarScanCacheKey:
+    path: str
+    kind: str
+    timeframe: str
+    period: str
+    size_bytes: int
+    mtime_ns: int
+
+
+@dataclass(frozen=True, slots=True)
 class _M1BarSample:
     row_number: int
     timestamp_source: str
@@ -198,6 +213,16 @@ class _M1BarScan:
     non_positive_price_count: int = 0
     invalid_ohlc_rows: list[_M1BarSample] = field(default_factory=list)
     non_positive_price_rows: list[_M1BarSample] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class _M1BarSampleRows:
+    samples: tuple[_M1BarSample, ...]
+    source_member: str
+
+    @property
+    def parsed_row_count(self) -> int:
+        return len(self.samples)
 
 
 @dataclass(frozen=True, slots=True)
@@ -542,6 +567,11 @@ class _M1OutlierScan:
     return_outliers: list[_M1OutlierSample] = field(default_factory=list)
 
 
+_M1_BAR_SAMPLE_CACHE: OrderedDict[_M1BarScanCacheKey, _M1BarSampleRows] = (
+    OrderedDict()
+)
+
+
 @dataclass(slots=True)
 class HistDataAsciiM1BarIntegrityRule:
     """Validate M1 OHLC ordering and strictly positive bid prices."""
@@ -558,9 +588,7 @@ class HistDataAsciiM1BarIntegrityRule:
             return ()
 
         try:
-            delimiter = delimiter_for_timeframe(target.timeframe)
-            payload = _read_text_payload(target)
-            text = payload.data.decode("utf-8")
+            sample_rows = _m1_bar_sample_rows_for_target(target)
         except ValueError as exc:
             return (
                 _finding(
@@ -574,22 +602,6 @@ class HistDataAsciiM1BarIntegrityRule:
                     },
                 ),
             )
-        except UnicodeDecodeError as exc:
-            return (
-                _finding(
-                    target,
-                    code="ASCII_M1_BARS_TEXT_ENCODING_INVALID",
-                    message="ASCII file does not decode as strict UTF-8 for "
-                    "M1 bar checks.",
-                    metadata={
-                        "encoding": "utf-8",
-                        "error": str(exc),
-                        "byte_start": exc.start,
-                        "byte_end": exc.end,
-                        "source_member": payload.source_member,
-                    },
-                ),
-            )
         except _SourceReadError as exc:
             return (
                 _finding(
@@ -600,16 +612,11 @@ class HistDataAsciiM1BarIntegrityRule:
                 ),
             )
 
-        scan = _scan_m1_bar_rows(
-            text,
-            target=target,
-            delimiter=delimiter,
-            source_member=payload.source_member,
-        )
+        scan = _scan_m1_bar_samples(sample_rows.samples)
         return _bar_findings(
             target=target,
             scan=scan,
-            source_member=payload.source_member,
+            source_member=sample_rows.source_member,
             rule_id=self.rule_id,
         )
 
@@ -629,6 +636,21 @@ class HistDataAsciiM1PrecisionRule:
         """Return M1 precision findings for one target."""
         if not _is_m1_ascii_text_target(target):
             return ()
+
+        symbol_metadata = symbol_metadata_for(target.symbol)
+        polars_scan = _scan_m1_precision_polars_csv(
+            target,
+            symbol_metadata=symbol_metadata,
+        )
+        if polars_scan is not None:
+            return _precision_findings(
+                target=target,
+                scan=polars_scan,
+                source_member="",
+                symbol_metadata=symbol_metadata,
+                severity=self.warning_severity,
+                rule_id=self.rule_id,
+            )
 
         try:
             delimiter = delimiter_for_timeframe(target.timeframe)
@@ -678,7 +700,6 @@ class HistDataAsciiM1PrecisionRule:
                 ),
             )
 
-        symbol_metadata = symbol_metadata_for(target.symbol)
         scan = _scan_m1_precision_rows(
             text,
             target=target,
@@ -722,9 +743,7 @@ class HistDataAsciiM1OutlierRule:
             return ()
 
         try:
-            delimiter = delimiter_for_timeframe(target.timeframe)
-            payload = _read_text_payload(target)
-            text = payload.data.decode("utf-8")
+            sample_rows = _m1_bar_sample_rows_for_target(target)
         except ValueError as exc:
             return (
                 _finding(
@@ -739,23 +758,6 @@ class HistDataAsciiM1OutlierRule:
                     },
                 ),
             )
-        except UnicodeDecodeError as exc:
-            return (
-                _finding(
-                    target,
-                    code="ASCII_M1_OUTLIER_TEXT_ENCODING_INVALID",
-                    message="ASCII file does not decode as strict UTF-8 for "
-                    "M1 outlier checks.",
-                    rule_id=self.rule_id,
-                    metadata={
-                        "encoding": "utf-8",
-                        "error": str(exc),
-                        "byte_start": exc.start,
-                        "byte_end": exc.end,
-                        "source_member": payload.source_member,
-                    },
-                ),
-            )
         except _SourceReadError as exc:
             return (
                 _finding(
@@ -766,7 +768,6 @@ class HistDataAsciiM1OutlierRule:
                     metadata=exc.metadata,
                 ),
             )
-
         symbol_metadata = symbol_metadata_for(target.symbol)
         threshold_selection = _outlier_threshold_selection(
             symbol_metadata,
@@ -774,17 +775,14 @@ class HistDataAsciiM1OutlierRule:
             thresholds_by_symbol=self.thresholds_by_symbol,
             thresholds_by_asset_class=self.thresholds_by_asset_class,
         )
-        scan = _scan_m1_outlier_rows(
-            text,
-            target=target,
-            delimiter=delimiter,
-            source_member=payload.source_member,
+        scan = _scan_m1_outlier_samples(
+            sample_rows.samples,
             thresholds=threshold_selection.thresholds,
         )
         return _outlier_findings(
             target=target,
             scan=scan,
-            source_member=payload.source_member,
+            source_member=sample_rows.source_member,
             symbol_metadata=symbol_metadata,
             threshold_selection=threshold_selection,
             severity=self.warning_severity,
@@ -945,6 +943,160 @@ def _source_error(
     )
 
 
+def _m1_bar_sample_rows_for_target(target: QualityTarget) -> _M1BarSampleRows:
+    key = _m1_bar_sample_cache_key(target)
+    cached = _M1_BAR_SAMPLE_CACHE.get(key)
+    if cached is not None:
+        _M1_BAR_SAMPLE_CACHE.move_to_end(key)
+        return cached
+
+    cached_sample_rows = _m1_bar_sample_rows_from_polars_cache(target)
+    if cached_sample_rows is not None:
+        _M1_BAR_SAMPLE_CACHE[key] = cached_sample_rows
+        _M1_BAR_SAMPLE_CACHE.move_to_end(key)
+        while len(_M1_BAR_SAMPLE_CACHE) > M1_BAR_SAMPLE_CACHE_MAX_ENTRIES:
+            _M1_BAR_SAMPLE_CACHE.popitem(last=False)
+        return cached_sample_rows
+
+    delimiter = delimiter_for_timeframe(target.timeframe)
+    payload = _read_text_payload(target)
+    try:
+        text = payload.data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _SourceReadError(
+            code="ASCII_M1_BARS_TEXT_ENCODING_INVALID",
+            message="ASCII file does not decode as strict UTF-8 for M1 bar checks.",
+            metadata={
+                "encoding": "utf-8",
+                "error": str(exc),
+                "byte_start": exc.start,
+                "byte_end": exc.end,
+                "source_member": payload.source_member,
+            },
+        ) from exc
+
+    sample_rows = _scan_m1_bar_sample_rows(
+        text,
+        target=target,
+        delimiter=delimiter,
+        source_member=payload.source_member,
+    )
+    _M1_BAR_SAMPLE_CACHE[key] = sample_rows
+    _M1_BAR_SAMPLE_CACHE.move_to_end(key)
+    while len(_M1_BAR_SAMPLE_CACHE) > M1_BAR_SAMPLE_CACHE_MAX_ENTRIES:
+        _M1_BAR_SAMPLE_CACHE.popitem(last=False)
+    return sample_rows
+
+
+def _m1_bar_sample_rows_from_polars_cache(
+    target: QualityTarget,
+) -> _M1BarSampleRows | None:
+    cache = read_fresh_sibling_polars_cache(
+        target,
+        required_columns=("datetime", "open", "high", "low", "close"),
+    )
+    if cache is None:
+        return None
+
+    try:
+        import polars as pl
+
+        source_datetime = (pl.col("datetime") - EST_NO_DST_OFFSET_MS).cast(
+            pl.Datetime("ms")
+        )
+        rows = cache.frame.select(
+            [
+                pl.col("datetime"),
+                source_datetime.dt.strftime("%Y%m%d %H%M%S").alias(
+                    "_source_timestamp"
+                ),
+                pl.col("open"),
+                pl.col("high"),
+                pl.col("low"),
+                pl.col("close"),
+            ]
+        ).iter_rows(named=False)
+    except Exception:
+        return None
+
+    samples: list[_M1BarSample] = []
+    for row_number, row in enumerate(rows, start=1):
+        try:
+            timestamp_utc_ms = int(row[0])
+            timestamp_source = str(row[1])
+            open_price = float(row[2])
+            high_price = float(row[3])
+            low_price = float(row[4])
+            close_price = float(row[5])
+        except (TypeError, ValueError):
+            continue
+
+        sample = _m1_bar_sample_from_values(
+            row_number=row_number,
+            timestamp_source=timestamp_source,
+            timestamp_utc_ms=timestamp_utc_ms,
+            open_price=open_price,
+            high_price=high_price,
+            low_price=low_price,
+            close_price=close_price,
+            source_member="",
+        )
+        if sample is not None:
+            samples.append(sample)
+    return _M1BarSampleRows(samples=tuple(samples), source_member="")
+
+
+def _m1_bar_sample_cache_key(target: QualityTarget) -> _M1BarScanCacheKey:
+    path = Path(target.path)
+    try:
+        stat = path.stat()
+    except OSError as exc:
+        raise _source_error(
+            "ASCII_M1_BARS_SOURCE_UNREADABLE",
+            "ASCII source could not be read for M1 bar checks.",
+            exc,
+        ) from exc
+    return _M1BarScanCacheKey(
+        path=str(path.resolve()),
+        kind=target.kind.value,
+        timeframe=target.timeframe,
+        period=target.period,
+        size_bytes=stat.st_size,
+        mtime_ns=stat.st_mtime_ns,
+    )
+
+
+def _scan_m1_bar_sample_rows(
+    text: str,
+    *,
+    target: QualityTarget,
+    delimiter: str,
+    source_member: str,
+) -> _M1BarSampleRows:
+    samples: list[_M1BarSample] = []
+    columns = columns_for_timeframe(M1)
+    expected_count = len(columns)
+    for row_number, raw in enumerate(text.splitlines(), start=1):
+        if not raw.strip():
+            continue
+        row = _parse_row(raw, delimiter)
+        if len(row) != expected_count or tuple(row) == columns:
+            continue
+
+        sample = _m1_bar_sample(
+            row,
+            row_number=row_number,
+            timeframe=target.timeframe,
+            source_member=source_member,
+        )
+        if sample is not None:
+            samples.append(sample)
+    return _M1BarSampleRows(
+        samples=tuple(samples),
+        source_member=source_member,
+    )
+
+
 def _scan_m1_bar_rows(
     text: str,
     *,
@@ -981,6 +1133,180 @@ def _scan_m1_bar_rows(
     return scan
 
 
+def _scan_m1_bar_samples(
+    samples: tuple[_M1BarSample, ...],
+) -> _M1BarScan:
+    scan = _M1BarScan(parsed_row_count=len(samples))
+    for sample in samples:
+        if sample.violations:
+            scan.invalid_ohlc_count += 1
+            _append_bar_sample(scan.invalid_ohlc_rows, sample)
+        if sample.non_positive_columns:
+            scan.non_positive_price_count += 1
+            _append_bar_sample(scan.non_positive_price_rows, sample)
+    return scan
+
+
+def _scan_m1_precision_polars_csv(
+    target: QualityTarget,
+    *,
+    symbol_metadata: HistDataSymbolMetadata,
+) -> _M1PrecisionScan | None:
+    if target.kind is not QualityTargetKind.CSV:
+        return None
+
+    try:
+        import polars as pl
+
+        columns = columns_for_timeframe(M1)
+        frame = pl.read_csv(
+            Path(target.path),
+            has_header=False,
+            separator=delimiter_for_timeframe(M1),
+            new_columns=list(columns),
+            schema_overrides={column: pl.Utf8 for column in columns},
+        )
+        precision_frame = frame.select(
+            [
+                _polars_decimal_places_expr(column).alias(column)
+                for column in M1_PRICE_COLUMNS
+            ]
+        )
+    except Exception:
+        return None
+
+    scan = _M1PrecisionScan()
+    expected_rule = symbol_metadata.precision_rule
+    try:
+        valid_rows = precision_frame.select(
+            pl.all_horizontal(
+                [pl.col(column).is_not_null() for column in M1_PRICE_COLUMNS]
+            ).sum()
+        ).item()
+    except Exception:
+        return None
+    scan.parsed_row_count = int(valid_rows or 0)
+
+    for column in M1_PRICE_COLUMNS:
+        try:
+            value_counts = tuple(
+                precision_frame.get_column(column)
+                .value_counts()
+                .iter_rows(named=True)
+            )
+        except Exception:
+            return None
+        for row in value_counts:
+            decimal_places = row.get(column)
+            count = row.get("count")
+            if decimal_places is None or count is None:
+                continue
+            decimal_places_int = int(decimal_places)
+            count_int = int(count)
+            _increment_count(scan.observed_decimal_counts, decimal_places_int)
+            scan.observed_decimal_counts[decimal_places_int] += count_int - 1
+            column_counts = scan.observed_column_decimal_counts.setdefault(
+                column,
+                {},
+            )
+            column_counts[decimal_places_int] = (
+                column_counts.get(decimal_places_int, 0) + count_int
+            )
+            if expected_rule is None:
+                continue
+
+            sample = _polars_precision_sample(
+                frame,
+                precision_frame,
+                column=column,
+                decimal_places=decimal_places_int,
+                target=target,
+                expected_rule=expected_rule,
+            )
+            if sample is None:
+                continue
+            scan.regime_samples.setdefault(column, {}).setdefault(
+                decimal_places_int,
+                sample,
+            )
+            if decimal_places_int not in expected_rule.expected_decimal_places:
+                scan.unexpected_precision_count += count_int
+                _append_precision_sample(scan.unexpected_precision, sample)
+
+    if expected_rule is not None:
+        scan.regime_shifts.extend(
+            _precision_regime_shifts(
+                scan.observed_column_decimal_counts,
+                scan.regime_samples,
+                expected_rule,
+            )
+        )
+        scan.regime_shift_count = len(scan.regime_shifts)
+    return scan
+
+
+def _polars_decimal_places_expr(column: str) -> Any:
+    import polars as pl
+
+    stripped = pl.col(column).str.strip_chars()
+    whole_number = stripped.str.contains(r"^[+-]?\d+$")
+    decimal_number = stripped.str.contains(r"^[+-]?\d+\.\d+$")
+    fractional = (
+        stripped.str.split_exact(".", 1).struct.field("field_1").str.len_chars()
+    )
+    return (
+        pl.when(whole_number)
+        .then(pl.lit(0))
+        .when(decimal_number)
+        .then(fractional)
+        .otherwise(None)
+    )
+
+
+def _polars_precision_sample(
+    frame: Any,
+    precision_frame: Any,
+    *,
+    column: str,
+    decimal_places: int,
+    target: QualityTarget,
+    expected_rule: HistDataSymbolPrecisionRule,
+) -> _M1PrecisionSample | None:
+    try:
+        import polars as pl
+
+        row = (
+            frame.select(["datetime", column])
+            .with_columns(precision_frame.get_column(column).alias("_decimals"))
+            .with_row_index("_row_number", offset=1)
+            .filter(pl.col("_decimals") == decimal_places)
+            .select(["_row_number", "datetime", column])
+            .head(1)
+            .row(0, named=True)
+        )
+    except Exception:
+        return None
+
+    timestamp_source = str(row["datetime"]).strip()
+    try:
+        timestamp_utc_ms = parse_histdata_datetime_to_utc_ms(
+            timestamp_source,
+            target.timeframe,
+        )
+    except ValueError:
+        return None
+    return _M1PrecisionSample(
+        row_number=int(row["_row_number"]),
+        column=column,
+        raw_value=str(row[column]).strip(),
+        decimal_places=decimal_places,
+        timestamp_source=timestamp_source,
+        timestamp_utc_ms=timestamp_utc_ms,
+        expected_rule=expected_rule,
+        source_member="",
+    )
+
+
 def _scan_m1_precision_rows(
     text: str,
     *,
@@ -1001,14 +1327,7 @@ def _scan_m1_precision_rows(
             continue
 
         timestamp_source = row[0].strip()
-        try:
-            timestamp_utc_ms = parse_histdata_datetime_to_utc_ms(
-                timestamp_source,
-                target.timeframe,
-            )
-        except ValueError:
-            continue
-
+        timestamp_utc_ms: int | None = None
         parsed_price_count = 0
         for column, raw_value in zip(
             M1_PRICE_COLUMNS,
@@ -1016,13 +1335,6 @@ def _scan_m1_precision_rows(
             strict=True,
         ):
             value = raw_value.strip()
-            try:
-                parsed_price = float(value)
-            except ValueError:
-                continue
-            if not math.isfinite(parsed_price):
-                continue
-
             decimal_places = _decimal_places(value)
             if decimal_places is None:
                 continue
@@ -1035,6 +1347,22 @@ def _scan_m1_precision_rows(
             )
 
             if expected_rule is not None:
+                needs_sample = (
+                    decimal_places not in scan.regime_samples.get(column, {})
+                    or decimal_places
+                    not in expected_rule.expected_decimal_places
+                )
+                if needs_sample and timestamp_utc_ms is None:
+                    try:
+                        timestamp_utc_ms = parse_histdata_datetime_to_utc_ms(
+                            timestamp_source,
+                            target.timeframe,
+                        )
+                    except ValueError:
+                        timestamp_utc_ms = None
+                if timestamp_utc_ms is None:
+                    continue
+
                 sample = _M1PrecisionSample(
                     row_number=row_number,
                     column=column,
@@ -1100,6 +1428,86 @@ def _scan_m1_outlier_rows(
             timeframe=target.timeframe,
             source_member=source_member,
         )
+        bar = _parsed_bar_from_sample(sample)
+        if bar is None:
+            continue
+
+        bars.append(bar)
+        scan.parsed_row_count += 1
+
+        range_ratio = bar.range_ratio
+        scan.max_range_ratio = max(scan.max_range_ratio, range_ratio)
+        if range_ratio > thresholds.max_range_ratio:
+            scan.range_outlier_count += 1
+            _append_outlier_sample(
+                scan.range_outliers,
+                _range_outlier_sample(bar, thresholds.max_range_ratio),
+            )
+
+        if previous_bar is not None:
+            open_jump_ratio = _ratio(
+                abs(bar.open_price - previous_bar.close_price),
+                previous_bar.close_price,
+            )
+            scan.max_open_jump_ratio = max(
+                scan.max_open_jump_ratio,
+                open_jump_ratio,
+            )
+            if open_jump_ratio > thresholds.max_open_jump_ratio:
+                scan.open_jump_count += 1
+                _append_outlier_sample(
+                    scan.open_jumps,
+                    _open_jump_sample(
+                        bar,
+                        previous_bar,
+                        open_jump_ratio,
+                        thresholds.max_open_jump_ratio,
+                    ),
+                )
+
+        if _is_flatline_bar(bar):
+            if flatline_start is None:
+                flatline_start = bar
+            flatline_end = bar
+            flatline_length += 1
+        else:
+            _finalize_flatline_run(
+                scan,
+                flatline_start,
+                flatline_end,
+                flatline_length,
+                thresholds,
+            )
+            flatline_start = None
+            flatline_end = None
+            flatline_length = 0
+
+        previous_bar = bar
+
+    _finalize_flatline_run(
+        scan,
+        flatline_start,
+        flatline_end,
+        flatline_length,
+        thresholds,
+    )
+    _scan_return_outliers(scan, bars, thresholds)
+    return scan
+
+
+def _scan_m1_outlier_samples(
+    samples: tuple[_M1BarSample, ...],
+    *,
+    thresholds: HistDataM1OutlierThresholds,
+) -> _M1OutlierScan:
+    scan = _M1OutlierScan()
+    bars: list[_M1ParsedBar] = []
+    previous_bar: _M1ParsedBar | None = None
+    flatline_start: _M1ParsedBar | None = None
+    flatline_end: _M1ParsedBar | None = None
+    flatline_length = 0
+
+    for sample in samples:
         bar = _parsed_bar_from_sample(sample)
         if bar is None:
             continue
@@ -1545,8 +1953,35 @@ def _m1_bar_sample(
     except (ValueError, IndexError):
         return None
 
-    prices = (open_price, high_price, low_price, close_price)
-    if not all(math.isfinite(price) for price in prices):
+    return _m1_bar_sample_from_values(
+        row_number=row_number,
+        timestamp_source=values[0],
+        timestamp_utc_ms=timestamp_utc_ms,
+        open_price=open_price,
+        high_price=high_price,
+        low_price=low_price,
+        close_price=close_price,
+        source_member=source_member,
+    )
+
+
+def _m1_bar_sample_from_values(
+    *,
+    row_number: int,
+    timestamp_source: str,
+    timestamp_utc_ms: int,
+    open_price: float,
+    high_price: float,
+    low_price: float,
+    close_price: float,
+    source_member: str,
+) -> _M1BarSample | None:
+    if not (
+        math.isfinite(open_price)
+        and math.isfinite(high_price)
+        and math.isfinite(low_price)
+        and math.isfinite(close_price)
+    ):
         return None
 
     violations: list[str] = []
@@ -1557,26 +1992,26 @@ def _m1_bar_sample(
     if high_price < low_price:
         violations.append("high_below_low")
 
-    non_positive_columns = tuple(
-        column
-        for column, price in zip(
-            M1_PRICE_COLUMNS,
-            prices,
-            strict=True,
-        )
-        if price <= 0.0
-    )
+    non_positive_columns: list[str] = []
+    if open_price <= 0.0:
+        non_positive_columns.append("open")
+    if high_price <= 0.0:
+        non_positive_columns.append("high")
+    if low_price <= 0.0:
+        non_positive_columns.append("low")
+    if close_price <= 0.0:
+        non_positive_columns.append("close")
 
     return _M1BarSample(
         row_number=row_number,
-        timestamp_source=values[0],
+        timestamp_source=timestamp_source,
         timestamp_utc_ms=timestamp_utc_ms,
         open_price=open_price,
         high_price=high_price,
         low_price=low_price,
         close_price=close_price,
         violations=tuple(violations),
-        non_positive_columns=non_positive_columns,
+        non_positive_columns=tuple(non_positive_columns),
         source_member=source_member,
     )
 
@@ -2590,7 +3025,7 @@ def _finding(
 
 
 def _parse_row(raw: str, delimiter: str) -> list[str]:
-    return next(csv.reader((raw,), delimiter=delimiter), [])
+    return raw.split(delimiter)
 
 
 def _append_bar_sample(
@@ -2785,4 +3220,16 @@ def _utc_iso_from_ms(timestamp_utc_ms: int) -> str:
         .replace(microsecond=milliseconds * 1000)
         .isoformat()
         .replace("+00:00", "Z")
+    )
+
+
+def _source_timestamp_from_utc_ms(timestamp_utc_ms: int) -> str:
+    source_utc_ms = timestamp_utc_ms - EST_NO_DST_OFFSET_MS
+    seconds, milliseconds = divmod(source_utc_ms, 1000)
+    source = datetime.fromtimestamp(seconds, tz=timezone.utc).replace(
+        microsecond=milliseconds * 1000
+    )
+    return (
+        f"{source.year:04d}{source.month:02d}{source.day:02d} "
+        f"{source.hour:02d}{source.minute:02d}{source.second:02d}"
     )
