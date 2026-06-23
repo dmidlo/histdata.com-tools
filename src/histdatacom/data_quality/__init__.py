@@ -65,8 +65,14 @@ from histdatacom.data_quality.rules import (
     quality_rules_for_groups,
     quality_run_rules_for_groups,
 )
+from histdatacom.data_quality.time import (
+    ASCII_EST_NO_DST_TIME_RULE_ID,
+    HistDataAsciiEstNoDstTimeRule,
+    time_quality_rules,
+)
 
 __all__ = [
+    "ASCII_EST_NO_DST_TIME_RULE_ID",
     "ASCII_ROW_COUNT_INGESTION_RULE_ID",
     "ASCII_SCHEMA_INGESTION_RULE_ID",
     "ASCII_TEXT_INGESTION_RULE_ID",
@@ -74,6 +80,7 @@ __all__ = [
     "QUALITY_EXIT_TRIGGERS",
     "QUALITY_REPORT_SCHEMA_VERSION",
     "CoverageDimension",
+    "HistDataAsciiEstNoDstTimeRule",
     "HistDataAsciiRowCountIngestionRule",
     "HistDataAsciiSchemaIngestionRule",
     "HistDataAsciiTextIngestionRule",
@@ -113,5 +120,6 @@ __all__ = [
     "quality_run_rules_for_groups",
     "quality_target_from_path",
     "run_quality_assessment",
+    "time_quality_rules",
     "write_quality_report",
 ]

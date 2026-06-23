@@ -9,6 +9,7 @@ from histdatacom.data_quality.discovery import normalize_quality_check_groups
 from histdatacom.data_quality.ingestion import ingestion_quality_rules
 from histdatacom.data_quality.inventory import inventory_quality_rules
 from histdatacom.data_quality.manifest import manifest_quality_run_rules
+from histdatacom.data_quality.time import time_quality_rules
 
 
 def quality_rules_for_groups(
@@ -21,6 +22,8 @@ def quality_rules_for_groups(
         rules.extend(inventory_quality_rules())
     if "all" in normalized or "ingestion" in normalized:
         rules.extend(ingestion_quality_rules())
+    if "all" in normalized or "time" in normalized:
+        rules.extend(time_quality_rules())
     return tuple(rules)
 
 
