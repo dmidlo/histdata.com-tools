@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from histdatacom.data_quality.contracts import QualityRule, QualityRunRule
-from histdatacom.data_quality.bars import bars_quality_rules
+from histdatacom.data_quality.bars import (
+    bars_quality_rules,
+    bars_quality_run_rules,
+)
 from histdatacom.data_quality.discovery import normalize_quality_check_groups
 from histdatacom.data_quality.ingestion import ingestion_quality_rules
 from histdatacom.data_quality.inventory import inventory_quality_rules
@@ -43,4 +46,6 @@ def quality_run_rules_for_groups(
         rules.extend(manifest_quality_run_rules())
     if "all" in normalized or "time" in normalized:
         rules.extend(time_quality_run_rules())
+    if "all" in normalized or "bars" in normalized:
+        rules.extend(bars_quality_run_rules())
     return tuple(rules)

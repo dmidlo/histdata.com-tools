@@ -8,21 +8,25 @@ from histdatacom.data_quality import (
     ASCII_M1_BAR_INTEGRITY_RULE_ID,
     ASCII_M1_OUTLIER_RULE_ID,
     ASCII_M1_PRECISION_RULE_ID,
+    ASCII_M1_TICK_RECONSTRUCTION_RULE_ID,
     ASSET_CLASS_FX,
     ASSET_CLASS_INDEX,
     ASSET_CLASS_METAL,
     ASSET_CLASS_OIL,
     ASSET_CLASS_UNKNOWN,
     HistDataAsciiM1OutlierRule,
+    HistDataAsciiM1TickReconstructionRule,
     HistDataM1OutlierThresholds,
+    HistDataM1TickReconstructionTolerance,
     QualitySeverity,
     QualityStatus,
     discover_quality_targets,
     quality_rules_for_groups,
+    quality_run_rules_for_groups,
     run_quality_assessment,
     symbol_metadata_for,
 )
-from histdatacom.histdata_ascii import M1
+from histdatacom.histdata_ascii import M1, TICK
 from tests.fixtures.histdata_ascii.quality_cases import (
     CLEAN_M1_CASE,
     CLEAN_TICK_CASE,
@@ -40,6 +44,9 @@ def test_bars_group_registers_m1_bar_integrity_rule() -> None:
         ASCII_M1_PRECISION_RULE_ID,
         ASCII_M1_OUTLIER_RULE_ID,
     ]
+    assert [
+        rule.rule_id for rule in quality_run_rules_for_groups(("bars",))
+    ] == [ASCII_M1_TICK_RECONSTRUCTION_RULE_ID]
 
 
 def test_clean_m1_file_passes_bar_integrity_checks(
@@ -101,6 +108,163 @@ def test_tick_files_are_ignored_by_m1_bar_integrity_rule(
 
     assert report.status is QualityStatus.CLEAN
     assert report.findings == ()
+
+
+def test_m1_tick_reconstruction_exact_match_is_reported(
+    tmp_path: Path,
+) -> None:
+    """Matching tick bid aggregates should be distinguished explicitly."""
+    m1_path, tick_path = _write_reconstruction_pair(
+        tmp_path,
+        suffix="EXACT",
+        m1_rows=("20120201 000000;1.000000;1.000500;0.999900;1.000200;0",),
+        tick_rows=(
+            "20120201 000000000,1.000000,1.000100,0",
+            "20120201 000010000,1.000500,1.000600,0",
+            "20120201 000020000,0.999900,1.000000,0",
+            "20120201 000059000,1.000200,1.000300,0",
+        ),
+    )
+
+    report = _run_report_for_paths(m1_path, tick_path)
+
+    summary = _finding(
+        report.findings,
+        "ASCII_M1_TICK_RECONSTRUCTION_SUMMARY",
+    )
+    exact = _finding(
+        report.findings,
+        "ASCII_M1_TICK_RECONSTRUCTION_EXACT_MATCH",
+    )
+    assert report.status is QualityStatus.CLEAN
+    assert summary.rule_id == ASCII_M1_TICK_RECONSTRUCTION_RULE_ID
+    assert summary.metadata["candidate_pair_count"] == 1
+    assert summary.metadata["compared_bar_count"] == 1
+    assert summary.metadata["exact_match_count"] == 1
+    assert summary.metadata["tolerance_match_count"] == 0
+    assert summary.metadata["mismatch_count"] == 0
+    assert summary.metadata["aggregation"]["open"] == (
+        "first tick bid in minute"
+    )
+    assert exact.severity is QualitySeverity.INFO
+    assert exact.location.timestamp_utc_ms == 1328072400000
+    assert exact.location.metadata["classification"] == "exact_match"
+    assert exact.metadata["samples"][0]["reconstructed_values"] == {
+        "open": 1.0,
+        "high": 1.0005,
+        "low": 0.9999,
+        "close": 1.0002,
+    }
+
+
+def test_m1_tick_reconstruction_tolerance_match_is_reported(
+    tmp_path: Path,
+) -> None:
+    """Small configured deviations should be classified separately."""
+    m1_path, tick_path = _write_reconstruction_pair(
+        tmp_path,
+        suffix="TOLERANCE",
+        m1_rows=("20120201 000000;1.000001;1.000500;0.999900;1.000200;0",),
+        tick_rows=(
+            "20120201 000000000,1.000000,1.000100,0",
+            "20120201 000010000,1.000500,1.000600,0",
+            "20120201 000020000,0.999900,1.000000,0",
+            "20120201 000059000,1.000200,1.000300,0",
+        ),
+    )
+    run_rule = HistDataAsciiM1TickReconstructionRule(
+        tolerance=HistDataM1TickReconstructionTolerance(
+            price_tolerance=0.000002,
+        )
+    )
+
+    report = _run_report_for_paths(m1_path, tick_path, run_rules=(run_rule,))
+
+    summary = _finding(
+        report.findings,
+        "ASCII_M1_TICK_RECONSTRUCTION_SUMMARY",
+    )
+    tolerance = _finding(
+        report.findings,
+        "ASCII_M1_TICK_RECONSTRUCTION_TOLERANCE_MATCH",
+    )
+    assert report.status is QualityStatus.CLEAN
+    assert summary.metadata["exact_match_count"] == 0
+    assert summary.metadata["tolerance_match_count"] == 1
+    assert summary.metadata["mismatch_count"] == 0
+    assert tolerance.location.metadata["classification"] == "tolerance_match"
+    max_difference = tolerance.location.metadata["max_abs_difference"]
+    assert 0.0 < max_difference <= 0.000002
+    assert tolerance.metadata["tolerance"]["price_tolerance"] == 0.000002
+
+
+def test_m1_tick_reconstruction_mismatch_warns(
+    tmp_path: Path,
+) -> None:
+    """Downloaded bars outside tolerance should warn with row context."""
+    m1_path, tick_path = _write_reconstruction_pair(
+        tmp_path,
+        suffix="MISMATCH",
+        m1_rows=("20120201 000000;1.000000;1.000500;0.999900;1.000300;0",),
+        tick_rows=(
+            "20120201 000000000,1.000000,1.000100,0",
+            "20120201 000010000,1.000500,1.000600,0",
+            "20120201 000020000,0.999900,1.000000,0",
+            "20120201 000059000,1.000200,1.000300,0",
+        ),
+    )
+
+    report = _run_report_for_paths(m1_path, tick_path)
+
+    summary = _finding(
+        report.findings,
+        "ASCII_M1_TICK_RECONSTRUCTION_SUMMARY",
+    )
+    mismatch = _finding(
+        report.findings,
+        "ASCII_M1_TICK_RECONSTRUCTION_MISMATCH",
+    )
+    assert report.status is QualityStatus.WARNING
+    assert summary.metadata["mismatch_count"] == 1
+    assert mismatch.severity is QualitySeverity.WARNING
+    assert mismatch.location.column == "close"
+    assert mismatch.location.metadata["classification"] == "mismatch"
+    close_difference = mismatch.metadata["samples"][0]["differences"]["close"]
+    assert 0.00009 < close_difference < 0.00011
+
+
+def test_m1_tick_reconstruction_unavailable_without_matching_tick(
+    tmp_path: Path,
+) -> None:
+    """M1 targets without same-period tick input should be reported cleanly."""
+    m1_path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="m1_reconstruction_unavailable",
+            timeframe=M1,
+            filename="DAT_ASCII_EURUSD_M1_201202_UNAVAILABLE.csv",
+            rows=("20120201 000000;1.000000;1.000500;0.999900;1.000200;0",),
+        ),
+    )
+
+    report = _run_report_for_paths(m1_path)
+
+    summary = _finding(
+        report.findings,
+        "ASCII_M1_TICK_RECONSTRUCTION_SUMMARY",
+    )
+    unavailable = _finding(
+        report.findings,
+        "ASCII_M1_TICK_RECONSTRUCTION_UNAVAILABLE",
+    )
+    assert report.status is QualityStatus.CLEAN
+    assert summary.metadata["candidate_pair_count"] == 0
+    assert summary.metadata["unavailable_count"] == 1
+    assert unavailable.severity is QualitySeverity.INFO
+    assert unavailable.location.metadata["reason"] == (
+        "matching_tick_target_unavailable"
+    )
+    assert unavailable.metadata["samples"][0]["tick_path"] == ""
 
 
 def test_symbol_metadata_identifies_fx_precision_classes() -> None:
@@ -543,6 +707,50 @@ def test_zip_csv_member_is_scanned_for_m1_bar_findings(
     )
     assert finding.location.metadata["source_member"] == (
         "DAT_ASCII_EURUSD_M1_201202_BAD_OHLC.csv"
+    )
+
+
+def _write_reconstruction_pair(
+    tmp_path: Path,
+    *,
+    suffix: str,
+    m1_rows: tuple[str, ...],
+    tick_rows: tuple[str, ...],
+) -> tuple[Path, Path]:
+    m1_path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name=f"m1_reconstruction_{suffix.lower()}",
+            timeframe=M1,
+            filename=f"DAT_ASCII_EURUSD_M1_201202_{suffix}.csv",
+            rows=m1_rows,
+        ),
+    )
+    tick_path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name=f"tick_reconstruction_{suffix.lower()}",
+            timeframe=TICK,
+            filename=f"DAT_ASCII_EURUSD_T_201202_{suffix}.csv",
+            rows=tick_rows,
+        ),
+    )
+    return (m1_path, tick_path)
+
+
+def _run_report_for_paths(
+    *paths: Path,
+    run_rules=None,
+):
+    discovery = discover_quality_targets(paths)
+    return run_quality_assessment(
+        discovery.targets,
+        (),
+        run_rules=(
+            quality_run_rules_for_groups(("bars",))
+            if run_rules is None
+            else run_rules
+        ),
     )
 
 

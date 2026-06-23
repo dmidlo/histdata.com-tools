@@ -14,7 +14,10 @@ import zipfile
 from histdatacom.data_quality.contracts import (
     QualityFinding,
     QualityLocation,
+    QualityReport,
     QualityRule,
+    QualityRuleResult,
+    QualityRunRule,
     QualitySeverity,
     QualityTarget,
     QualityTargetKind,
@@ -28,6 +31,7 @@ from histdatacom.data_quality.symbols import (
 )
 from histdatacom.histdata_ascii import (
     M1,
+    TICK,
     columns_for_timeframe,
     delimiter_for_timeframe,
     parse_histdata_datetime_to_utc_ms,
@@ -37,10 +41,13 @@ from histdatacom.runtime_contracts import JSONValue
 ASCII_M1_BAR_INTEGRITY_RULE_ID = "bars.ascii.m1_ohlc"
 ASCII_M1_PRECISION_RULE_ID = "bars.ascii.m1_precision"
 ASCII_M1_OUTLIER_RULE_ID = "bars.ascii.m1_outliers"
+ASCII_M1_TICK_RECONSTRUCTION_RULE_ID = "bars.ascii.m1_tick_reconstruction"
+M1_TICK_RECONSTRUCTION_METADATA_KEY = "m1_tick_reconstruction"
 SOURCE_TIMEZONE = "EST-no-DST"
 SOURCE_UTC_OFFSET = "-05:00"
 CANONICAL_TIMEZONE = "UTC"
 MAX_BAR_SAMPLES = 5
+M1_MINUTE_MS = 60_000
 M1_PRICE_COLUMNS = ("open", "high", "low", "close")
 MAD_SCALE_FACTOR = 1.4826
 
@@ -90,6 +97,34 @@ class HistDataM1OutlierThresholds:
 
 
 DEFAULT_M1_OUTLIER_THRESHOLDS = HistDataM1OutlierThresholds()
+
+
+@dataclass(frozen=True, slots=True)
+class HistDataM1TickReconstructionTolerance:
+    """Tolerance for comparing downloaded M1 bars to tick-bid aggregates."""
+
+    price_tolerance: float = 0.0
+
+    def __post_init__(self) -> None:
+        """Validate tolerance values at construction time."""
+        if not math.isfinite(self.price_tolerance):
+            msg = "price_tolerance must be finite"
+            raise ValueError(msg)
+        if self.price_tolerance < 0.0:
+            msg = "price_tolerance must be non-negative"
+            raise ValueError(msg)
+
+    def to_metadata(self) -> dict[str, JSONValue]:
+        """Return JSON-compatible tolerance metadata."""
+        return {
+            "price_tolerance": self.price_tolerance,
+            "price_columns": list(M1_PRICE_COLUMNS),
+        }
+
+
+DEFAULT_M1_TICK_RECONSTRUCTION_TOLERANCE = (
+    HistDataM1TickReconstructionTolerance()
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +301,157 @@ class _M1ParsedBar:
             "low": self.low_price,
             "close": self.close_price,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class _TickBidSample:
+    row_number: int
+    timestamp_source: str
+    timestamp_utc_ms: int
+    bid_price: float
+    source_member: str = ""
+
+    @property
+    def utc_timestamp(self) -> str:
+        """Return canonical UTC timestamp text for the sampled tick."""
+        return _utc_iso_from_ms(self.timestamp_utc_ms)
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return bounded JSON-compatible tick context."""
+        return {
+            "row_number": self.row_number,
+            "timestamp_source": self.timestamp_source,
+            "timestamp_utc_ms": self.timestamp_utc_ms,
+            "utc_timestamp": self.utc_timestamp,
+            "bid": self.bid_price,
+            "source_member": self.source_member,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _ReconstructedM1Bar:
+    timestamp_utc_ms: int
+    open_price: float
+    high_price: float
+    low_price: float
+    close_price: float
+    tick_count: int
+    first_tick: _TickBidSample
+    high_tick: _TickBidSample
+    low_tick: _TickBidSample
+    last_tick: _TickBidSample
+
+    @property
+    def utc_timestamp(self) -> str:
+        """Return canonical UTC timestamp text for the reconstructed bar."""
+        return _utc_iso_from_ms(self.timestamp_utc_ms)
+
+    def values_metadata(self) -> dict[str, JSONValue]:
+        """Return reconstructed OHLC values."""
+        return {
+            "open": self.open_price,
+            "high": self.high_price,
+            "low": self.low_price,
+            "close": self.close_price,
+        }
+
+    def tick_context_metadata(self) -> dict[str, JSONValue]:
+        """Return the tick rows that produced each reconstructed value."""
+        return {
+            "first_tick": self.first_tick.to_dict(),
+            "high_tick": self.high_tick.to_dict(),
+            "low_tick": self.low_tick.to_dict(),
+            "last_tick": self.last_tick.to_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _M1TickComparisonSample:
+    classification: str
+    m1_target: QualityTarget
+    tick_target: QualityTarget
+    downloaded_bar: _M1ParsedBar
+    reconstructed_bar: _ReconstructedM1Bar
+    differences: dict[str, float]
+    max_abs_difference: float
+    tolerance: HistDataM1TickReconstructionTolerance
+
+    @property
+    def timestamp_utc_ms(self) -> int:
+        """Return the compared minute timestamp."""
+        return self.downloaded_bar.timestamp_utc_ms
+
+    @property
+    def utc_timestamp(self) -> str:
+        """Return canonical UTC timestamp text for the comparison."""
+        return _utc_iso_from_ms(self.timestamp_utc_ms)
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return bounded JSON-compatible comparison context."""
+        return {
+            "classification": self.classification,
+            "symbol": self.m1_target.symbol,
+            "period": self.m1_target.period,
+            "timestamp_source": self.downloaded_bar.timestamp_source,
+            "timestamp_utc_ms": self.timestamp_utc_ms,
+            "utc_timestamp": self.utc_timestamp,
+            "m1_path": self.m1_target.path,
+            "tick_path": self.tick_target.path,
+            "m1_row_number": self.downloaded_bar.row_number,
+            "tick_count": self.reconstructed_bar.tick_count,
+            "downloaded_values": self.downloaded_bar.values_metadata(),
+            "reconstructed_values": (self.reconstructed_bar.values_metadata()),
+            "differences": dict(self.differences),
+            "max_abs_difference": self.max_abs_difference,
+            "tolerance": self.tolerance.to_metadata(),
+            "m1_source_member": self.downloaded_bar.source_member,
+            "tick_source_member": (
+                self.reconstructed_bar.first_tick.source_member
+            ),
+            "tick_context": (self.reconstructed_bar.tick_context_metadata()),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _M1TickUnavailableComparison:
+    reason: str
+    m1_target: QualityTarget
+    tick_target: QualityTarget | None = None
+    metadata: dict[str, JSONValue] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return bounded JSON-compatible unavailable-comparison context."""
+        return {
+            "reason": self.reason,
+            "symbol": self.m1_target.symbol,
+            "period": self.m1_target.period,
+            "m1_path": self.m1_target.path,
+            "tick_path": (
+                "" if self.tick_target is None else self.tick_target.path
+            ),
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(slots=True)
+class _M1TickReconstructionScan:
+    target_count: int = 0
+    m1_target_count: int = 0
+    tick_target_count: int = 0
+    candidate_pair_count: int = 0
+    compared_bar_count: int = 0
+    exact_match_count: int = 0
+    tolerance_match_count: int = 0
+    mismatch_count: int = 0
+    unavailable_count: int = 0
+    exact_matches: list[_M1TickComparisonSample] = field(default_factory=list)
+    tolerance_matches: list[_M1TickComparisonSample] = field(
+        default_factory=list
+    )
+    mismatches: list[_M1TickComparisonSample] = field(default_factory=list)
+    unavailable: list[_M1TickUnavailableComparison] = field(
+        default_factory=list
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -605,6 +791,67 @@ class HistDataAsciiM1OutlierRule:
         )
 
 
+@dataclass(slots=True)
+class HistDataAsciiM1TickReconstructionRule:
+    """Compare downloaded M1 bid bars with reconstructed tick-bid bars."""
+
+    tolerance: HistDataM1TickReconstructionTolerance = (
+        DEFAULT_M1_TICK_RECONSTRUCTION_TOLERANCE
+    )
+    warning_severity: QualitySeverity = QualitySeverity.WARNING
+    rule_id: str = ASCII_M1_TICK_RECONSTRUCTION_RULE_ID
+    description: str = (
+        "Reconstruct M1 open/high/low/close from matching tick bid data and "
+        "compare the result against downloaded HistData M1 bid bars."
+    )
+
+    def evaluate_run(
+        self,
+        targets: Iterable[QualityTarget],
+        *,
+        metadata: Mapping[str, JSONValue] | None = None,
+    ) -> QualityReport:
+        """Return cross-format M1/tick reconstruction findings."""
+        target_tuple = tuple(targets)
+        scan = _scan_m1_tick_reconstruction(
+            target_tuple,
+            tolerance=self.tolerance,
+        )
+        payload = _m1_tick_reconstruction_payload(
+            scan,
+            tolerance=self.tolerance,
+        )
+        if not _has_m1_tick_reconstruction_surface(scan):
+            return QualityReport(
+                metadata={M1_TICK_RECONSTRUCTION_METADATA_KEY: payload},
+            )
+
+        reconstruction_target = _m1_tick_reconstruction_target(
+            target_tuple,
+            metadata=metadata,
+            payload=payload,
+        )
+        findings = _m1_tick_reconstruction_findings(
+            reconstruction_target,
+            scan=scan,
+            tolerance=self.tolerance,
+            severity=self.warning_severity,
+            rule_id=self.rule_id,
+        )
+        return QualityReport(
+            # Keep report target counts tied to user-discovered files. The
+            # synthetic target still anchors this run-level rule result.
+            rule_results=(
+                QualityRuleResult(
+                    rule_id=self.rule_id,
+                    target=reconstruction_target,
+                    findings=findings,
+                ),
+            ),
+            metadata={M1_TICK_RECONSTRUCTION_METADATA_KEY: payload},
+        )
+
+
 def bars_quality_rules() -> tuple[QualityRule, ...]:
     """Return M1 bar quality rules in deterministic execution order."""
     m1_rule: QualityRule = HistDataAsciiM1BarIntegrityRule()
@@ -613,10 +860,26 @@ def bars_quality_rules() -> tuple[QualityRule, ...]:
     return (m1_rule, precision_rule, outlier_rule)
 
 
+def bars_quality_run_rules() -> tuple[QualityRunRule, ...]:
+    """Return run-scoped M1 bar quality rules."""
+    reconstruction_rule: QualityRunRule = (
+        HistDataAsciiM1TickReconstructionRule()
+    )
+    return (reconstruction_rule,)
+
+
 def _is_m1_ascii_text_target(target: QualityTarget) -> bool:
     return (
         target.data_format == "ascii"
         and target.timeframe == M1
+        and target.kind in {QualityTargetKind.CSV, QualityTargetKind.ZIP}
+    )
+
+
+def _is_tick_ascii_text_target(target: QualityTarget) -> bool:
+    return (
+        target.data_format == "ascii"
+        and target.timeframe == TICK
         and target.kind in {QualityTargetKind.CSV, QualityTargetKind.ZIP}
     )
 
@@ -901,6 +1164,361 @@ def _scan_m1_outlier_rows(
     )
     _scan_return_outliers(scan, bars, thresholds)
     return scan
+
+
+def _scan_m1_tick_reconstruction(
+    targets: tuple[QualityTarget, ...],
+    *,
+    tolerance: HistDataM1TickReconstructionTolerance,
+) -> _M1TickReconstructionScan:
+    scan = _M1TickReconstructionScan(target_count=len(targets))
+    m1_targets = tuple(
+        target for target in targets if _is_m1_ascii_text_target(target)
+    )
+    tick_targets = tuple(
+        target for target in targets if _is_tick_ascii_text_target(target)
+    )
+    scan.m1_target_count = len(m1_targets)
+    scan.tick_target_count = len(tick_targets)
+
+    tick_targets_by_key: dict[tuple[str, str], list[QualityTarget]] = {}
+    for target in tick_targets:
+        key = _target_symbol_period_key(target)
+        if key is not None:
+            tick_targets_by_key.setdefault(key, []).append(target)
+
+    m1_cache: dict[str, dict[int, _M1ParsedBar] | _SourceReadError] = {}
+    tick_cache: dict[
+        str,
+        dict[int, _ReconstructedM1Bar] | _SourceReadError,
+    ] = {}
+
+    for m1_target in m1_targets:
+        key = _target_symbol_period_key(m1_target)
+        matching_tick_targets = (
+            () if key is None else tuple(tick_targets_by_key.get(key, ()))
+        )
+        if not matching_tick_targets:
+            _record_reconstruction_unavailable(
+                scan,
+                m1_target=m1_target,
+                reason="matching_tick_target_unavailable",
+            )
+            continue
+
+        for tick_target in matching_tick_targets:
+            scan.candidate_pair_count += 1
+            m1_bars = _cached_m1_bars(m1_cache, m1_target)
+            if isinstance(m1_bars, _SourceReadError):
+                _record_reconstruction_unavailable(
+                    scan,
+                    m1_target=m1_target,
+                    tick_target=tick_target,
+                    reason="m1_source_unavailable",
+                    metadata=_source_read_error_metadata(m1_bars),
+                )
+                continue
+
+            reconstructed_bars = _cached_reconstructed_tick_bars(
+                tick_cache,
+                tick_target,
+            )
+            if isinstance(reconstructed_bars, _SourceReadError):
+                _record_reconstruction_unavailable(
+                    scan,
+                    m1_target=m1_target,
+                    tick_target=tick_target,
+                    reason="tick_source_unavailable",
+                    metadata=_source_read_error_metadata(reconstructed_bars),
+                )
+                continue
+
+            common_timestamps = sorted(
+                set(m1_bars).intersection(reconstructed_bars)
+            )
+            if not common_timestamps:
+                _record_reconstruction_unavailable(
+                    scan,
+                    m1_target=m1_target,
+                    tick_target=tick_target,
+                    reason="no_overlapping_m1_minutes",
+                    metadata={
+                        "m1_parsed_bar_count": len(m1_bars),
+                        "reconstructed_bar_count": len(reconstructed_bars),
+                    },
+                )
+                continue
+
+            for timestamp_utc_ms in common_timestamps:
+                sample = _m1_tick_comparison_sample(
+                    m1_target=m1_target,
+                    tick_target=tick_target,
+                    downloaded_bar=m1_bars[timestamp_utc_ms],
+                    reconstructed_bar=reconstructed_bars[timestamp_utc_ms],
+                    tolerance=tolerance,
+                )
+                _record_reconstruction_comparison(scan, sample)
+
+    return scan
+
+
+def _cached_m1_bars(
+    cache: dict[str, dict[int, _M1ParsedBar] | _SourceReadError],
+    target: QualityTarget,
+) -> dict[int, _M1ParsedBar] | _SourceReadError:
+    if target.path not in cache:
+        try:
+            cache[target.path] = _m1_bars_by_timestamp(target)
+        except _SourceReadError as exc:
+            cache[target.path] = exc
+    return cache[target.path]
+
+
+def _cached_reconstructed_tick_bars(
+    cache: dict[str, dict[int, _ReconstructedM1Bar] | _SourceReadError],
+    target: QualityTarget,
+) -> dict[int, _ReconstructedM1Bar] | _SourceReadError:
+    if target.path not in cache:
+        try:
+            cache[target.path] = _reconstructed_tick_bars_by_timestamp(target)
+        except _SourceReadError as exc:
+            cache[target.path] = exc
+    return cache[target.path]
+
+
+def _m1_bars_by_timestamp(target: QualityTarget) -> dict[int, _M1ParsedBar]:
+    try:
+        delimiter = delimiter_for_timeframe(M1)
+        payload = _read_text_payload(target)
+        text = _decode_reconstruction_payload(payload)
+    except ValueError as exc:
+        raise _SourceReadError(
+            code="ASCII_M1_TICK_RECONSTRUCTION_M1_METADATA_UNSUPPORTED",
+            message="M1 target metadata is unsupported for tick "
+            "reconstruction comparison.",
+            metadata={"timeframe": target.timeframe, "error": str(exc)},
+        ) from exc
+
+    bars: dict[int, _M1ParsedBar] = {}
+    columns = columns_for_timeframe(M1)
+    expected_count = len(columns)
+    for row_number, raw in enumerate(text.splitlines(), start=1):
+        if not raw.strip():
+            continue
+        row = _parse_row(raw, delimiter)
+        if len(row) != expected_count or tuple(row) == columns:
+            continue
+        sample = _m1_bar_sample(
+            row,
+            row_number=row_number,
+            timeframe=M1,
+            source_member=payload.source_member,
+        )
+        bar = _parsed_bar_from_sample(sample)
+        if bar is None:
+            continue
+        bars.setdefault(bar.timestamp_utc_ms, bar)
+    return bars
+
+
+def _reconstructed_tick_bars_by_timestamp(
+    target: QualityTarget,
+) -> dict[int, _ReconstructedM1Bar]:
+    try:
+        delimiter = delimiter_for_timeframe(TICK)
+        payload = _read_text_payload(target)
+        text = _decode_reconstruction_payload(payload)
+    except ValueError as exc:
+        raise _SourceReadError(
+            code="ASCII_M1_TICK_RECONSTRUCTION_TICK_METADATA_UNSUPPORTED",
+            message="Tick target metadata is unsupported for M1 "
+            "reconstruction comparison.",
+            metadata={"timeframe": target.timeframe, "error": str(exc)},
+        ) from exc
+
+    columns = columns_for_timeframe(TICK)
+    expected_count = len(columns)
+    ticks: list[_TickBidSample] = []
+    for row_number, raw in enumerate(text.splitlines(), start=1):
+        if not raw.strip():
+            continue
+        row = _parse_row(raw, delimiter)
+        if len(row) != expected_count or tuple(row) == columns:
+            continue
+        sample = _tick_bid_sample(
+            row,
+            row_number=row_number,
+            source_member=payload.source_member,
+        )
+        if sample is not None:
+            ticks.append(sample)
+    return _reconstruct_m1_bars_from_tick_bids(ticks)
+
+
+def _decode_reconstruction_payload(payload: _TextPayload) -> str:
+    try:
+        return payload.data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _SourceReadError(
+            code="ASCII_M1_TICK_RECONSTRUCTION_TEXT_ENCODING_INVALID",
+            message="ASCII source does not decode as strict UTF-8 for "
+            "M1/tick reconstruction comparison.",
+            metadata={
+                "encoding": "utf-8",
+                "error": str(exc),
+                "byte_start": exc.start,
+                "byte_end": exc.end,
+                "source_member": payload.source_member,
+            },
+        ) from exc
+
+
+def _tick_bid_sample(
+    row: list[str],
+    *,
+    row_number: int,
+    source_member: str,
+) -> _TickBidSample | None:
+    values = tuple(cell.strip() for cell in row)
+    try:
+        timestamp_utc_ms = parse_histdata_datetime_to_utc_ms(values[0], TICK)
+        bid_price = float(values[1])
+    except (ValueError, IndexError):
+        return None
+    if not math.isfinite(bid_price) or bid_price <= 0.0:
+        return None
+    return _TickBidSample(
+        row_number=row_number,
+        timestamp_source=values[0],
+        timestamp_utc_ms=timestamp_utc_ms,
+        bid_price=bid_price,
+        source_member=source_member,
+    )
+
+
+def _reconstruct_m1_bars_from_tick_bids(
+    ticks: Iterable[_TickBidSample],
+) -> dict[int, _ReconstructedM1Bar]:
+    ticks_by_minute: dict[int, list[_TickBidSample]] = {}
+    for tick in sorted(
+        ticks,
+        key=lambda sample: (sample.timestamp_utc_ms, sample.row_number),
+    ):
+        minute_utc_ms = (tick.timestamp_utc_ms // M1_MINUTE_MS) * M1_MINUTE_MS
+        ticks_by_minute.setdefault(minute_utc_ms, []).append(tick)
+
+    bars: dict[int, _ReconstructedM1Bar] = {}
+    for minute_utc_ms, minute_ticks in ticks_by_minute.items():
+        first_tick = minute_ticks[0]
+        last_tick = minute_ticks[-1]
+        high_tick = max(minute_ticks, key=lambda sample: sample.bid_price)
+        low_tick = min(minute_ticks, key=lambda sample: sample.bid_price)
+        bars[minute_utc_ms] = _ReconstructedM1Bar(
+            timestamp_utc_ms=minute_utc_ms,
+            open_price=first_tick.bid_price,
+            high_price=high_tick.bid_price,
+            low_price=low_tick.bid_price,
+            close_price=last_tick.bid_price,
+            tick_count=len(minute_ticks),
+            first_tick=first_tick,
+            high_tick=high_tick,
+            low_tick=low_tick,
+            last_tick=last_tick,
+        )
+    return bars
+
+
+def _m1_tick_comparison_sample(
+    *,
+    m1_target: QualityTarget,
+    tick_target: QualityTarget,
+    downloaded_bar: _M1ParsedBar,
+    reconstructed_bar: _ReconstructedM1Bar,
+    tolerance: HistDataM1TickReconstructionTolerance,
+) -> _M1TickComparisonSample:
+    downloaded_values = downloaded_bar.values_metadata()
+    reconstructed_values = reconstructed_bar.values_metadata()
+    differences = {
+        column: abs(
+            float(downloaded_values[column])
+            - float(reconstructed_values[column])
+        )
+        for column in M1_PRICE_COLUMNS
+    }
+    max_abs_difference = max(differences.values())
+    if max_abs_difference == 0.0:
+        classification = "exact_match"
+    elif max_abs_difference <= tolerance.price_tolerance:
+        classification = "tolerance_match"
+    else:
+        classification = "mismatch"
+    return _M1TickComparisonSample(
+        classification=classification,
+        m1_target=m1_target,
+        tick_target=tick_target,
+        downloaded_bar=downloaded_bar,
+        reconstructed_bar=reconstructed_bar,
+        differences=differences,
+        max_abs_difference=max_abs_difference,
+        tolerance=tolerance,
+    )
+
+
+def _record_reconstruction_comparison(
+    scan: _M1TickReconstructionScan,
+    sample: _M1TickComparisonSample,
+) -> None:
+    scan.compared_bar_count += 1
+    if sample.classification == "exact_match":
+        scan.exact_match_count += 1
+        _append_comparison_sample(scan.exact_matches, sample)
+    elif sample.classification == "tolerance_match":
+        scan.tolerance_match_count += 1
+        _append_comparison_sample(scan.tolerance_matches, sample)
+    else:
+        scan.mismatch_count += 1
+        _append_comparison_sample(scan.mismatches, sample)
+
+
+def _record_reconstruction_unavailable(
+    scan: _M1TickReconstructionScan,
+    *,
+    m1_target: QualityTarget,
+    reason: str,
+    tick_target: QualityTarget | None = None,
+    metadata: dict[str, JSONValue] | None = None,
+) -> None:
+    scan.unavailable_count += 1
+    if len(scan.unavailable) >= MAX_BAR_SAMPLES:
+        return
+    scan.unavailable.append(
+        _M1TickUnavailableComparison(
+            reason=reason,
+            m1_target=m1_target,
+            tick_target=tick_target,
+            metadata=dict(metadata or {}),
+        )
+    )
+
+
+def _target_symbol_period_key(
+    target: QualityTarget,
+) -> tuple[str, str] | None:
+    symbol = target.symbol.strip().upper()
+    period = target.period.strip()
+    if not symbol or not period:
+        return None
+    return (symbol, period)
+
+
+def _source_read_error_metadata(
+    error: _SourceReadError,
+) -> dict[str, JSONValue]:
+    return {
+        "source_error_code": error.code,
+        "source_error_message": error.message,
+        "source_error_metadata": dict(error.metadata),
+    }
 
 
 def _m1_bar_sample(
@@ -1446,6 +2064,270 @@ def _outlier_findings(
     return tuple(findings)
 
 
+def _m1_tick_reconstruction_findings(
+    target: QualityTarget,
+    *,
+    scan: _M1TickReconstructionScan,
+    tolerance: HistDataM1TickReconstructionTolerance,
+    severity: QualitySeverity,
+    rule_id: str,
+) -> tuple[QualityFinding, ...]:
+    payload = _m1_tick_reconstruction_payload(scan, tolerance=tolerance)
+    findings: list[QualityFinding] = [
+        _finding(
+            target,
+            code="ASCII_M1_TICK_RECONSTRUCTION_SUMMARY",
+            message="M1 tick-bid reconstruction comparison profile.",
+            severity=QualitySeverity.INFO,
+            rule_id=rule_id,
+            metadata=payload,
+        )
+    ]
+    if scan.exact_matches:
+        findings.append(
+            _m1_tick_comparison_finding(
+                target,
+                code="ASCII_M1_TICK_RECONSTRUCTION_EXACT_MATCH",
+                message="Downloaded M1 bid bars exactly match tick-bid "
+                "reconstruction.",
+                severity=QualitySeverity.INFO,
+                samples=scan.exact_matches,
+                row_count=scan.exact_match_count,
+                tolerance=tolerance,
+                rule_id=rule_id,
+            )
+        )
+    if scan.tolerance_matches:
+        findings.append(
+            _m1_tick_comparison_finding(
+                target,
+                code="ASCII_M1_TICK_RECONSTRUCTION_TOLERANCE_MATCH",
+                message="Downloaded M1 bid bars match tick-bid "
+                "reconstruction within configured tolerance.",
+                severity=QualitySeverity.INFO,
+                samples=scan.tolerance_matches,
+                row_count=scan.tolerance_match_count,
+                tolerance=tolerance,
+                rule_id=rule_id,
+            )
+        )
+    if scan.mismatches:
+        findings.append(
+            _m1_tick_comparison_finding(
+                target,
+                code="ASCII_M1_TICK_RECONSTRUCTION_MISMATCH",
+                message="Downloaded M1 bid bars differ from tick-bid "
+                "reconstruction beyond configured tolerance.",
+                severity=severity,
+                samples=scan.mismatches,
+                row_count=scan.mismatch_count,
+                tolerance=tolerance,
+                rule_id=rule_id,
+            )
+        )
+    if scan.unavailable:
+        findings.append(
+            _m1_tick_unavailable_finding(
+                target,
+                samples=scan.unavailable,
+                row_count=scan.unavailable_count,
+                tolerance=tolerance,
+                rule_id=rule_id,
+            )
+        )
+    return tuple(findings)
+
+
+def _m1_tick_comparison_finding(
+    target: QualityTarget,
+    *,
+    code: str,
+    message: str,
+    severity: QualitySeverity,
+    samples: list[_M1TickComparisonSample],
+    row_count: int,
+    tolerance: HistDataM1TickReconstructionTolerance,
+    rule_id: str,
+) -> QualityFinding:
+    first = samples[0]
+    column = _comparison_primary_column(first)
+    return _finding(
+        target,
+        code=code,
+        message=message,
+        severity=severity,
+        rule_id=rule_id,
+        location=QualityLocation(
+            path=first.m1_target.path,
+            row_number=first.downloaded_bar.row_number,
+            timestamp_source=first.downloaded_bar.timestamp_source,
+            timestamp_utc_ms=first.timestamp_utc_ms,
+            column=column,
+            metadata={
+                "source_timezone": SOURCE_TIMEZONE,
+                "source_utc_offset": SOURCE_UTC_OFFSET,
+                "utc_timestamp": first.utc_timestamp,
+                "symbol": first.m1_target.symbol,
+                "period": first.m1_target.period,
+                "classification": first.classification,
+                "difference": first.differences[column],
+                "max_abs_difference": first.max_abs_difference,
+                "tolerance": tolerance.to_metadata(),
+                "m1_path": first.m1_target.path,
+                "tick_path": first.tick_target.path,
+                "m1_source_member": first.downloaded_bar.source_member,
+                "tick_source_member": (
+                    first.reconstructed_bar.first_tick.source_member
+                ),
+            },
+        ),
+        metadata={
+            **_m1_tick_reconstruction_base_metadata(tolerance),
+            "row_count": row_count,
+            "samples": _comparison_samples(samples),
+        },
+    )
+
+
+def _m1_tick_unavailable_finding(
+    target: QualityTarget,
+    *,
+    samples: list[_M1TickUnavailableComparison],
+    row_count: int,
+    tolerance: HistDataM1TickReconstructionTolerance,
+    rule_id: str,
+) -> QualityFinding:
+    first = samples[0]
+    return _finding(
+        target,
+        code="ASCII_M1_TICK_RECONSTRUCTION_UNAVAILABLE",
+        message="M1/tick reconstruction comparison is unavailable for one "
+        "or more M1 targets.",
+        severity=QualitySeverity.INFO,
+        rule_id=rule_id,
+        location=QualityLocation(
+            path=first.m1_target.path,
+            metadata={
+                "reason": first.reason,
+                "symbol": first.m1_target.symbol,
+                "period": first.m1_target.period,
+                "m1_path": first.m1_target.path,
+                "tick_path": (
+                    "" if first.tick_target is None else first.tick_target.path
+                ),
+                **dict(first.metadata),
+            },
+        ),
+        metadata={
+            **_m1_tick_reconstruction_base_metadata(tolerance),
+            "row_count": row_count,
+            "samples": _unavailable_samples(samples),
+        },
+    )
+
+
+def _m1_tick_reconstruction_payload(
+    scan: _M1TickReconstructionScan,
+    *,
+    tolerance: HistDataM1TickReconstructionTolerance,
+) -> dict[str, JSONValue]:
+    return {
+        **_m1_tick_reconstruction_base_metadata(tolerance),
+        "target_count": scan.target_count,
+        "m1_target_count": scan.m1_target_count,
+        "tick_target_count": scan.tick_target_count,
+        "candidate_pair_count": scan.candidate_pair_count,
+        "compared_bar_count": scan.compared_bar_count,
+        "exact_match_count": scan.exact_match_count,
+        "tolerance_match_count": scan.tolerance_match_count,
+        "mismatch_count": scan.mismatch_count,
+        "unavailable_count": scan.unavailable_count,
+        "exact_match_samples": _comparison_samples(scan.exact_matches),
+        "tolerance_match_samples": _comparison_samples(scan.tolerance_matches),
+        "mismatch_samples": _comparison_samples(scan.mismatches),
+        "unavailable_samples": _unavailable_samples(scan.unavailable),
+    }
+
+
+def _m1_tick_reconstruction_base_metadata(
+    tolerance: HistDataM1TickReconstructionTolerance,
+) -> dict[str, JSONValue]:
+    return {
+        "source_timezone": SOURCE_TIMEZONE,
+        "source_utc_offset": SOURCE_UTC_OFFSET,
+        "canonical_timezone": CANONICAL_TIMEZONE,
+        "source_timeframe": M1,
+        "tick_timeframe": TICK,
+        "quote_side": "bid",
+        "price_columns": list(M1_PRICE_COLUMNS),
+        "tolerance": tolerance.to_metadata(),
+        "aggregation": {
+            "minute_bucket": "UTC minute after EST-no-DST normalization",
+            "open": "first tick bid in minute",
+            "high": "maximum tick bid in minute",
+            "low": "minimum tick bid in minute",
+            "close": "last tick bid in minute",
+            "ordering": "ascending tick timestamp, then source row number",
+        },
+    }
+
+
+def _has_m1_tick_reconstruction_surface(
+    scan: _M1TickReconstructionScan,
+) -> bool:
+    return scan.m1_target_count > 0
+
+
+def _m1_tick_reconstruction_target(
+    targets: tuple[QualityTarget, ...],
+    *,
+    metadata: Mapping[str, JSONValue] | None,
+    payload: Mapping[str, JSONValue],
+) -> QualityTarget:
+    root = _quality_run_root(metadata)
+    if not root and targets:
+        root = str(Path(targets[0].path).parent)
+    return QualityTarget(
+        path=root or "m1-tick-reconstruction",
+        kind=QualityTargetKind.DIRECTORY,
+        data_format="ascii",
+        timeframe=M1,
+        metadata={
+            "manifest": "m1-tick-reconstruction",
+            "rule_id": ASCII_M1_TICK_RECONSTRUCTION_RULE_ID,
+            "target_count": _json_int(payload.get("target_count")),
+            "m1_target_count": _json_int(payload.get("m1_target_count")),
+            "tick_target_count": _json_int(payload.get("tick_target_count")),
+            "candidate_pair_count": _json_int(
+                payload.get("candidate_pair_count")
+            ),
+            "compared_bar_count": _json_int(payload.get("compared_bar_count")),
+            "mismatch_count": _json_int(payload.get("mismatch_count")),
+            "unavailable_count": _json_int(payload.get("unavailable_count")),
+        },
+    )
+
+
+def _quality_run_root(metadata: Mapping[str, JSONValue] | None) -> str:
+    metadata_map = dict(metadata or {})
+    roots = metadata_map.get("roots")
+    if isinstance(roots, list) and roots:
+        return str(roots[0])
+    coverage = metadata_map.get("coverage_manifest")
+    if isinstance(coverage, Mapping):
+        nested_roots = coverage.get("roots")
+        if isinstance(nested_roots, list) and nested_roots:
+            return str(nested_roots[0])
+    return ""
+
+
+def _comparison_primary_column(sample: _M1TickComparisonSample) -> str:
+    return max(
+        M1_PRICE_COLUMNS,
+        key=lambda column: sample.differences[column],
+    )
+
+
 def _precision_metadata_finding(
     target: QualityTarget,
     *,
@@ -1731,6 +2613,14 @@ def _append_outlier_sample(
         samples.append(sample)
 
 
+def _append_comparison_sample(
+    samples: list[_M1TickComparisonSample],
+    sample: _M1TickComparisonSample,
+) -> None:
+    if len(samples) < MAX_BAR_SAMPLES:
+        samples.append(sample)
+
+
 def _bar_samples(samples: Iterable[_M1BarSample]) -> list[JSONValue]:
     return [sample.to_dict() for sample in samples]
 
@@ -1743,6 +2633,18 @@ def _precision_samples(
 
 def _outlier_samples(
     samples: Iterable[_M1OutlierSample],
+) -> list[JSONValue]:
+    return [sample.to_dict() for sample in samples]
+
+
+def _comparison_samples(
+    samples: Iterable[_M1TickComparisonSample],
+) -> list[JSONValue]:
+    return [sample.to_dict() for sample in samples]
+
+
+def _unavailable_samples(
+    samples: Iterable[_M1TickUnavailableComparison],
 ) -> list[JSONValue]:
     return [sample.to_dict() for sample in samples]
 
@@ -1859,6 +2761,17 @@ def _column_decimal_count_metadata(
         column: _decimal_count_metadata(column_counts)
         for column, column_counts in sorted(counts.items())
     }
+
+
+def _json_int(value: JSONValue | None) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int | float | str):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+    return 0
 
 
 def _utc_iso_from_ms(timestamp_utc_ms: int) -> str:
