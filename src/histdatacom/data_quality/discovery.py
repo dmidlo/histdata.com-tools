@@ -163,6 +163,11 @@ def quality_target_from_path(path: str | Path) -> QualityTarget | None:
     )
 
 
+def quality_metadata_from_filename(path: str | Path) -> dict[str, JSONValue]:
+    """Return normalized HistData metadata parsed from a local filename."""
+    return _metadata_from_filename(Path(path))
+
+
 def _normalize_roots(paths: Iterable[str | Path]) -> tuple[Path, ...]:
     roots = tuple(Path(path).expanduser() for path in paths)
     if not roots:

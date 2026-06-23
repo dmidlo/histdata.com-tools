@@ -321,7 +321,9 @@ def write_zip_case(
     extra_members: Iterable[tuple[str, str | bytes]] = (),
 ) -> Path:
     """Write a ZIP archive for one fixture case."""
-    target = directory / (zip_filename or f"{case.filename}.zip")
+    target = directory / (
+        zip_filename or Path(case.filename).with_suffix(".zip").name
+    )
     target.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(target, "w") as archive:
         if not case.missing:

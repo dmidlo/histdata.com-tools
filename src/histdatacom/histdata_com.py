@@ -40,6 +40,7 @@ from histdatacom.data_quality import (
     discover_quality_targets,
     format_quality_console_summary,
     normalize_quality_check_groups,
+    quality_rules_for_groups,
     run_quality_assessment,
     write_quality_report,
 )
@@ -50,7 +51,7 @@ from histdatacom.repository_output import (
 )
 from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.records import Record
-from histdatacom.runtime_contracts import RunRequest, WorkStatus
+from histdatacom.runtime_contracts import JSONValue, RunRequest, WorkStatus
 from histdatacom.sidecar.client import (
     SidecarUnavailableError,
     submit_run_request_and_observe_sync,
@@ -152,7 +153,7 @@ class _HistDataCom:  # noqa:R701
 
         return self._run_sidecar_job()
 
-    def _run_data_quality(self) -> dict:
+    def _run_data_quality(self) -> dict[str, JSONValue]:
         """Run a local-only data-quality assessment."""
         try:
             check_groups = normalize_quality_check_groups(
@@ -177,7 +178,7 @@ class _HistDataCom:  # noqa:R701
 
         report = run_quality_assessment(
             discovery.targets,
-            (),
+            quality_rules_for_groups(check_groups),
             metadata={
                 "operation": "data-quality",
                 "check_groups": list(check_groups),
@@ -189,7 +190,7 @@ class _HistDataCom:  # noqa:R701
             else write_quality_report(report, self.context.quality_report_path)
         )
         decision = exit_policy.evaluate(report.summary())
-        payload = bounded_quality_payload(
+        payload: dict[str, JSONValue] = bounded_quality_payload(
             operation="data-quality",
             check_groups=check_groups,
             discovery=discovery.to_dict(),

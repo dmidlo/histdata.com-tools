@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +29,7 @@ from histdatacom.sidecar.client import (
 from tests.fixtures.histdata_ascii.quality_cases import (
     CLEAN_M1_CASE,
     write_ascii_case,
+    write_corrupt_zip,
     write_zip_case,
 )
 
@@ -348,6 +350,45 @@ def test_data_quality_api_returns_discovery_payload_without_sidecar(
     assert result["summary"]["target_count"] == 1
     assert result["report_artifact"] is None
     assert result["exit_decision"]["exit_code"] == 0
+
+
+def test_data_quality_api_runs_inventory_rules_for_corrupt_zip(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """API quality runs should execute concrete inventory checks locally."""
+    import histdatacom.histdata_com as histdata_com
+
+    archive = write_corrupt_zip(
+        tmp_path,
+        filename="DAT_ASCII_EURUSD_M1_201202.zip",
+    )
+    options = Options()
+    options.data_quality = True
+    options.quality_paths = (str(archive),)
+    options.quality_check_groups = {"inventory"}
+    options.quality_report_path = str(tmp_path / "quality.json")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda *args, **kwargs: pytest.fail(
+            "quality mode should not submit to sidecar"
+        ),
+    )
+
+    result = histdata_com.main(options)
+
+    assert result["summary"]["status"] == "failed"
+    assert result["summary"]["error_count"] == 1
+    assert result["target_summaries"][0]["status"] == "failed"
+    assert result["target_summaries"][0]["target"]["kind"] == "zip"
+    assert result["target_summaries"][0]["target"]["symbol"] == "EURUSD"
+    report = json.loads(
+        Path(result["report_artifact"]["path"]).read_text(encoding="utf-8")
+    )
+    assert report["rule_results"][0]["rule_id"] == "inventory.zip.integrity"
+    assert report["rule_results"][0]["findings"][0]["code"] == "ZIP_CORRUPT"
 
 
 def test_data_quality_cli_writes_json_report_artifact(
