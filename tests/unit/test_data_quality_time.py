@@ -6,7 +6,10 @@ from pathlib import Path
 
 from histdatacom.data_quality import (
     ASCII_EST_NO_DST_TIME_RULE_ID,
+    ASCII_TIMESTAMP_GAP_RULE_ID,
     ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
+    HistDataAsciiTimestampGapRule,
+    HistDataGapTolerance,
     QualitySeverity,
     QualityStatus,
     discover_quality_targets,
@@ -32,6 +35,7 @@ def test_time_group_registers_est_no_dst_rule() -> None:
     assert [rule.rule_id for rule in quality_rules_for_groups(("time",))] == [
         ASCII_EST_NO_DST_TIME_RULE_ID,
         ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
+        ASCII_TIMESTAMP_GAP_RULE_ID,
     ]
 
 
@@ -63,6 +67,19 @@ def test_clean_ascii_file_reports_est_no_dst_conversion_summary(
     assert sequence.metadata["m1_granularity_drift_count"] == 0
     assert sequence.metadata["duplicate_policy"] == "detect-only"
 
+    gaps = _finding(report.findings, "ASCII_TIMESTAMP_GAP_SUMMARY")
+    assert gaps.rule_id == ASCII_TIMESTAMP_GAP_RULE_ID
+    assert gaps.metadata["tracked_gap_count"] == 0
+    assert gaps.metadata["max_gap_ms"] == 60_000
+    assert gaps.metadata["gap_bucket_counts"] == {
+        "gt_1m": 0,
+        "gt_5m": 0,
+        "gt_30m": 0,
+        "gt_1h": 0,
+        "gt_1d": 0,
+    }
+    assert gaps.metadata["dynamic_window_policy"] == "inverted-tcp-backoff"
+
 
 def test_dst_boundary_rows_keep_fixed_est_no_dst_offset(
     tmp_path: Path,
@@ -90,7 +107,7 @@ def test_dst_boundary_rows_keep_fixed_est_no_dst_offset(
             "ASCII_TIMESTAMP_EST_NO_DST_SUMMARY",
         )
         sample = summary.metadata["samples"][0]
-        assert report.status is QualityStatus.CLEAN
+        assert report.summary().error_count == 0
         assert sample["timestamp_source"] == case.raw
         assert sample["timestamp_utc_ms"] == case.expected_utc_ms
 
@@ -357,6 +374,231 @@ def test_tick_precision_mismatch_reports_millisecond_width(
         == 6
     )
     assert summary.metadata["tick_precision_mismatch_count"] == 2
+
+
+def test_suspicious_weekday_gap_reports_distribution_and_dynamic_score(
+    tmp_path: Path,
+) -> None:
+    """Weekday gaps outside tolerance should warn with bucket context."""
+    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_WEEKDAY_GAP.csv"
+    path.write_text(
+        "\n".join(
+            (
+                "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
+                "20120201 000200;1.306570;1.306570;1.306470;1.306560;17",
+                "20120201 001000;1.306520;1.306560;1.306520;1.306560;2",
+                "20120201 001100;1.306520;1.306560;1.306520;1.306560;3",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_GAP_SUMMARY")
+    gap = _finding(report.findings, "ASCII_TIMESTAMP_SUSPICIOUS_GAP")
+    assert report.status is QualityStatus.WARNING
+    assert gap.severity is QualitySeverity.WARNING
+    assert gap.location.row_number == 3
+    assert gap.location.metadata["gap_ms"] == 480_000
+    assert gap.location.metadata["previous_row_number"] == 2
+    assert gap.location.metadata["classification"] == "suspicious"
+    assert summary.metadata["tracked_gap_count"] == 2
+    assert summary.metadata["suspicious_gap_count"] == 1
+    assert summary.metadata["max_gap_ms"] == 480_000
+    assert summary.metadata["gap_bucket_counts"] == {
+        "gt_1m": 2,
+        "gt_5m": 1,
+        "gt_30m": 0,
+        "gt_1h": 0,
+        "gt_1d": 0,
+    }
+    assert summary.metadata["dynamic_gap_score"] > 0
+
+
+def test_weekend_closure_gap_is_reported_as_expected_session_gap(
+    tmp_path: Path,
+) -> None:
+    """Friday close to Sunday open should be classified as normal closure."""
+    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_WEEKEND_CLOSE.csv"
+    path.write_text(
+        "\n".join(
+            (
+                "20120203 165900;1.306600;1.306600;1.306560;1.306560;0",
+                "20120205 170100;1.306570;1.306570;1.306470;1.306560;17",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_GAP_SUMMARY")
+    closure = _finding(
+        report.findings,
+        "ASCII_TIMESTAMP_EXPECTED_SESSION_CLOSURE_GAP",
+    )
+    assert report.status is QualityStatus.CLEAN
+    assert closure.severity is QualitySeverity.INFO
+    assert closure.location.row_number == 2
+    assert closure.location.metadata["classification"] == (
+        "expected_session_closure"
+    )
+    assert summary.metadata["expected_session_closure_count"] == 1
+    assert summary.metadata["suspicious_gap_count"] == 0
+    assert summary.metadata["weekend_activity_count"] == 0
+    assert summary.metadata["gap_bucket_counts"]["gt_1d"] == 1
+
+
+def test_weekend_closure_classification_requires_boundary_windows(
+    tmp_path: Path,
+) -> None:
+    """Large gaps spanning Friday close are not automatically normal closure."""
+    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_BROAD_WEEKEND_GAP.csv"
+    path.write_text(
+        "\n".join(
+            (
+                "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
+                "20120205 170100;1.306570;1.306570;1.306470;1.306560;17",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_GAP_SUMMARY")
+    suspicious = _finding(report.findings, "ASCII_TIMESTAMP_SUSPICIOUS_GAP")
+    assert report.status is QualityStatus.WARNING
+    assert suspicious.location.metadata["classification"] == "suspicious"
+    assert summary.metadata["expected_session_closure_count"] == 0
+    assert summary.metadata["suspicious_gap_count"] == 1
+    assert (
+        _findings(
+            report.findings,
+            "ASCII_TIMESTAMP_EXPECTED_SESSION_CLOSURE_GAP",
+        )
+        == ()
+    )
+
+
+def test_unexpected_weekend_activity_warns_without_hard_failure(
+    tmp_path: Path,
+) -> None:
+    """Weekend records should be warnings by default."""
+    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_WEEKEND_ACTIVITY.csv"
+    path.write_text(
+        "20120204 120000;1.306600;1.306600;1.306560;1.306560;0\n",
+        encoding="utf-8",
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_GAP_SUMMARY")
+    activity = _finding(report.findings, "ASCII_TIMESTAMP_WEEKEND_ACTIVITY")
+    assert report.status is QualityStatus.WARNING
+    assert activity.severity is QualitySeverity.WARNING
+    assert activity.location.row_number == 1
+    assert activity.location.timestamp_source == "20120204 120000"
+    assert activity.location.metadata["session_state"] == "weekend_closure"
+    assert summary.metadata["weekend_activity_count"] == 1
+
+
+def test_gap_tolerance_windows_are_adjustable(
+    tmp_path: Path,
+) -> None:
+    """Operators can widen suspicious-gap tolerance without changing parser."""
+    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_ADJUSTABLE_GAP.csv"
+    path.write_text(
+        "\n".join(
+            (
+                "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
+                "20120201 000800;1.306570;1.306570;1.306470;1.306560;17",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    discovery = discover_quality_targets((path,))
+
+    default_report = run_quality_assessment(
+        discovery.targets,
+        (HistDataAsciiTimestampGapRule(),),
+    )
+    widened_report = run_quality_assessment(
+        discovery.targets,
+        (
+            HistDataAsciiTimestampGapRule(
+                tolerance=HistDataGapTolerance(
+                    suspicious_gap_ms=10 * 60_000,
+                )
+            ),
+        ),
+    )
+
+    assert _finding(
+        default_report.findings,
+        "ASCII_TIMESTAMP_SUSPICIOUS_GAP",
+    )
+    widened_summary = _finding(
+        widened_report.findings,
+        "ASCII_TIMESTAMP_GAP_SUMMARY",
+    )
+    assert widened_report.status is QualityStatus.CLEAN
+    assert widened_summary.metadata["tracked_gap_count"] == 1
+    assert widened_summary.metadata["suspicious_gap_count"] == 0
+    assert (
+        _findings(
+            widened_report.findings,
+            "ASCII_TIMESTAMP_SUSPICIOUS_GAP",
+        )
+        == ()
+    )
+
+
+def test_dynamic_gap_score_uses_inverted_backoff_windowing(
+    tmp_path: Path,
+) -> None:
+    """Clustered suspicious gaps should score higher as tolerance narrows."""
+    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_DYNAMIC_GAP.csv"
+    path.write_text(
+        "\n".join(
+            (
+                "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
+                "20120201 000100;1.306570;1.306570;1.306470;1.306560;17",
+                "20120201 000200;1.306520;1.306560;1.306520;1.306560;2",
+                "20120201 000500;1.306520;1.306560;1.306520;1.306560;3",
+                "20120201 000800;1.306520;1.306560;1.306520;1.306560;4",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    discovery = discover_quality_targets((path,))
+    tolerance = HistDataGapTolerance(
+        suspicious_gap_ms=60_000,
+        dynamic_window_initial_ms=60_000,
+        dynamic_window_max_ms=4 * 60_000,
+    )
+
+    report = run_quality_assessment(
+        discovery.targets,
+        (HistDataAsciiTimestampGapRule(tolerance=tolerance),),
+    )
+
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_GAP_SUMMARY")
+    gap = _finding(report.findings, "ASCII_TIMESTAMP_SUSPICIOUS_GAP")
+    samples = gap.metadata["samples"]
+    assert summary.metadata["dynamic_window_policy"] == "inverted-tcp-backoff"
+    assert summary.metadata["suspicious_gap_count"] == 2
+    assert summary.metadata["dynamic_gap_score"] == 9.0
+    assert samples[0]["dynamic_window_ms"] == 240_000
+    assert samples[0]["dynamic_score_increment"] == 3.0
+    assert samples[1]["dynamic_window_ms"] == 120_000
+    assert samples[1]["dynamic_score_increment"] == 6.0
 
 
 def _report_for_path(path: Path):

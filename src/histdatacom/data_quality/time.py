@@ -26,11 +26,22 @@ from histdatacom.runtime_contracts import JSONValue
 
 ASCII_EST_NO_DST_TIME_RULE_ID = "time.ascii.est_no_dst"
 ASCII_TIMESTAMP_SEQUENCE_RULE_ID = "time.ascii.sequence"
+ASCII_TIMESTAMP_GAP_RULE_ID = "time.ascii.gaps"
 SOURCE_TIMEZONE = "EST-no-DST"
 SOURCE_UTC_OFFSET = "-05:00"
 CANONICAL_TIMEZONE = "UTC"
 M1_GRANULARITY_MS = 60_000
 EXPECTED_TICK_MILLISECOND_DIGITS = 3
+DEFAULT_GAP_BUCKETS_MS = (
+    60_000,
+    5 * 60_000,
+    30 * 60_000,
+    60 * 60_000,
+    24 * 60 * 60_000,
+)
+FX_FRIDAY_CLOSE_WEEKDAY = 4
+FX_SUNDAY_OPEN_WEEKDAY = 6
+FX_CLOSE_OPEN_MINUTE = 17 * 60
 MAX_TIMESTAMP_SAMPLES = 5
 UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
@@ -137,6 +148,127 @@ class _TimestampSequenceScan:
     tick_duplicate_rows: list[_TimestampIssueSample] = field(
         default_factory=list
     )
+
+
+@dataclass(frozen=True, slots=True)
+class HistDataGapTolerance:
+    """Configurable gap and session tolerance windows for HistData checks."""
+
+    expected_interval_ms: int = M1_GRANULARITY_MS
+    suspicious_gap_ms: int = 5 * M1_GRANULARITY_MS
+    bucket_thresholds_ms: tuple[int, ...] = DEFAULT_GAP_BUCKETS_MS
+    session_boundary_grace_ms: int = 60 * M1_GRANULARITY_MS
+    dynamic_window_initial_ms: int = 5 * M1_GRANULARITY_MS
+    dynamic_window_max_ms: int = 60 * M1_GRANULARITY_MS
+    dynamic_window_growth_factor: float = 2.0
+    dynamic_window_shrink_factor: float = 0.5
+
+    def to_metadata(self) -> dict[str, JSONValue]:
+        """Return JSON-compatible tolerance configuration metadata."""
+        return {
+            "expected_interval_ms": self.expected_interval_ms,
+            "suspicious_gap_ms": self.suspicious_gap_ms,
+            "bucket_thresholds_ms": list(self.bucket_thresholds_ms),
+            "session_boundary_grace_ms": self.session_boundary_grace_ms,
+            "dynamic_window_initial_ms": self.dynamic_window_initial_ms,
+            "dynamic_window_max_ms": self.dynamic_window_max_ms,
+            "dynamic_window_growth_factor": self.dynamic_window_growth_factor,
+            "dynamic_window_shrink_factor": self.dynamic_window_shrink_factor,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _TimestampGapSample:
+    previous: _TimestampSample
+    current: _TimestampSample
+    gap_ms: int
+    classification: str
+    dynamic_window_ms: int
+    dynamic_score_increment: float
+
+    @property
+    def row_number(self) -> int:
+        """Return the current row number for location context."""
+        return self.current.row_number
+
+    @property
+    def timestamp_source(self) -> str:
+        """Return the current source timestamp text."""
+        return self.current.timestamp_source
+
+    @property
+    def timestamp_utc_ms(self) -> int:
+        """Return the current canonical UTC timestamp."""
+        return self.current.timestamp_utc_ms
+
+    @property
+    def source_member(self) -> str:
+        """Return source ZIP member context, when available."""
+        return self.current.source_member
+
+    @property
+    def utc_timestamp(self) -> str:
+        """Return canonical UTC timestamp text for the current row."""
+        return self.current.utc_timestamp
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return a bounded JSON-compatible gap sample."""
+        return {
+            "previous_row_number": self.previous.row_number,
+            "previous_timestamp_source": self.previous.timestamp_source,
+            "previous_timestamp_utc_ms": self.previous.timestamp_utc_ms,
+            "previous_utc_timestamp": self.previous.utc_timestamp,
+            "row_number": self.current.row_number,
+            "timestamp_source": self.current.timestamp_source,
+            "timestamp_utc_ms": self.current.timestamp_utc_ms,
+            "utc_timestamp": self.current.utc_timestamp,
+            "gap_ms": self.gap_ms,
+            "classification": self.classification,
+            "dynamic_window_ms": self.dynamic_window_ms,
+            "dynamic_score_increment": self.dynamic_score_increment,
+            "source_member": self.source_member,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _WeekendActivitySample:
+    row: _TimestampSample
+    session_state: str
+
+    @property
+    def utc_timestamp(self) -> str:
+        """Return canonical UTC timestamp text for the row."""
+        return self.row.utc_timestamp
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return a bounded JSON-compatible weekend activity sample."""
+        return {
+            "row_number": self.row.row_number,
+            "timestamp_source": self.row.timestamp_source,
+            "timestamp_utc_ms": self.row.timestamp_utc_ms,
+            "utc_timestamp": self.row.utc_timestamp,
+            "session_state": self.session_state,
+            "source_member": self.row.source_member,
+        }
+
+
+@dataclass(slots=True)
+class _TimestampGapScan:
+    pair_count: int = 0
+    tracked_gap_count: int = 0
+    max_gap_ms: int = 0
+    max_gap: _TimestampGapSample | None = None
+    bucket_counts: dict[str, int] = field(default_factory=dict)
+    expected_session_closure_count: int = 0
+    expected_session_closures: list[_TimestampGapSample] = field(
+        default_factory=list
+    )
+    suspicious_gap_count: int = 0
+    suspicious_gaps: list[_TimestampGapSample] = field(default_factory=list)
+    weekend_activity_count: int = 0
+    weekend_activity: list[_WeekendActivitySample] = field(default_factory=list)
+    dynamic_gap_score: float = 0.0
+    final_dynamic_window_ms: int = 0
 
 
 @dataclass(slots=True)
@@ -285,11 +417,99 @@ class HistDataAsciiTimestampSequenceRule:
         )
 
 
+@dataclass(slots=True)
+class HistDataAsciiTimestampGapRule:
+    """Profile timestamp gaps, market closures, and weekend activity."""
+
+    tolerance: HistDataGapTolerance = field(
+        default_factory=HistDataGapTolerance
+    )
+    warning_severity: QualitySeverity = QualitySeverity.WARNING
+    rule_id: str = ASCII_TIMESTAMP_GAP_RULE_ID
+    description: str = (
+        "Compute gap buckets, expected FX closure gaps, unexpected weekend "
+        "activity, and dynamic tolerance scores over normalized timestamps."
+    )
+
+    def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
+        """Return gap and session findings for one target."""
+        if not _is_ascii_text_target(target):
+            return ()
+
+        try:
+            delimiter = delimiter_for_timeframe(target.timeframe)
+            columns = columns_for_timeframe(target.timeframe)
+            payload = _read_text_payload(target)
+            text = payload.data.decode("utf-8")
+        except ValueError as exc:
+            return (
+                _finding(
+                    target,
+                    code="ASCII_TIME_METADATA_UNSUPPORTED",
+                    message="Target metadata does not describe a supported "
+                    "HistData ASCII timeframe.",
+                    rule_id=self.rule_id,
+                    metadata={
+                        "timeframe": target.timeframe,
+                        "error": str(exc),
+                    },
+                ),
+            )
+        except UnicodeDecodeError as exc:
+            return (
+                _finding(
+                    target,
+                    code="ASCII_TIME_TEXT_ENCODING_INVALID",
+                    message="ASCII file does not decode as strict UTF-8 for "
+                    "timestamp gap checks.",
+                    rule_id=self.rule_id,
+                    metadata={
+                        "encoding": "utf-8",
+                        "error": str(exc),
+                        "byte_start": exc.start,
+                        "byte_end": exc.end,
+                        "source_member": payload.source_member,
+                    },
+                ),
+            )
+        except _SourceReadError as exc:
+            return (
+                _finding(
+                    target,
+                    code=exc.code,
+                    message=exc.message,
+                    rule_id=self.rule_id,
+                    metadata=exc.metadata,
+                ),
+            )
+
+        timestamp_scan = _scan_timestamp_rows(
+            text,
+            target=target,
+            delimiter=delimiter,
+            columns=columns,
+            source_member=payload.source_member,
+        )
+        gap_scan = _scan_timestamp_gaps(
+            timestamp_scan.valid_rows,
+            tolerance=self.tolerance,
+        )
+        return _timestamp_gap_findings(
+            target=target,
+            timestamp_scan=timestamp_scan,
+            gap_scan=gap_scan,
+            tolerance=self.tolerance,
+            severity=self.warning_severity,
+            rule_id=self.rule_id,
+        )
+
+
 def time_quality_rules() -> tuple[QualityRule, ...]:
     """Return timestamp quality rules in deterministic execution order."""
     est_no_dst_rule: QualityRule = HistDataAsciiEstNoDstTimeRule()
     sequence_rule: QualityRule = HistDataAsciiTimestampSequenceRule()
-    return (est_no_dst_rule, sequence_rule)
+    gap_rule: QualityRule = HistDataAsciiTimestampGapRule()
+    return (est_no_dst_rule, sequence_rule, gap_rule)
 
 
 def _is_ascii_text_target(target: QualityTarget) -> bool:
@@ -660,6 +880,193 @@ def _timestamp_sequence_findings(
     return tuple(findings)
 
 
+def _scan_timestamp_gaps(
+    rows: list[_TimestampSample],
+    *,
+    tolerance: HistDataGapTolerance,
+) -> _TimestampGapScan:
+    scan = _TimestampGapScan(
+        bucket_counts=_empty_gap_bucket_counts(tolerance),
+        final_dynamic_window_ms=tolerance.dynamic_window_initial_ms,
+    )
+    dynamic_window_ms = tolerance.dynamic_window_initial_ms
+
+    for row in rows:
+        if _is_weekend_closure_row(row):
+            scan.weekend_activity_count += 1
+            _append_weekend_activity_sample(
+                scan.weekend_activity,
+                _WeekendActivitySample(
+                    row=row,
+                    session_state="weekend_closure",
+                ),
+            )
+
+    for previous, current in zip(rows, rows[1:], strict=False):
+        gap_ms = current.timestamp_utc_ms - previous.timestamp_utc_ms
+        if gap_ms <= 0:
+            continue
+
+        scan.pair_count += 1
+        if gap_ms > scan.max_gap_ms:
+            scan.max_gap_ms = gap_ms
+
+        if gap_ms <= tolerance.expected_interval_ms:
+            dynamic_window_ms = _grow_dynamic_window(
+                dynamic_window_ms,
+                tolerance,
+            )
+            scan.final_dynamic_window_ms = dynamic_window_ms
+            continue
+
+        scan.tracked_gap_count += 1
+        _increment_gap_buckets(scan.bucket_counts, gap_ms, tolerance)
+        classification = _classify_gap(previous, current, gap_ms, tolerance)
+        score_increment = _dynamic_score_increment(
+            gap_ms,
+            classification=classification,
+            dynamic_window_ms=dynamic_window_ms,
+            tolerance=tolerance,
+        )
+        sample = _TimestampGapSample(
+            previous=previous,
+            current=current,
+            gap_ms=gap_ms,
+            classification=classification,
+            dynamic_window_ms=dynamic_window_ms,
+            dynamic_score_increment=score_increment,
+        )
+        if gap_ms == scan.max_gap_ms:
+            scan.max_gap = sample
+
+        if classification == "expected_session_closure":
+            scan.expected_session_closure_count += 1
+            _append_gap_sample(scan.expected_session_closures, sample)
+            dynamic_window_ms = _grow_dynamic_window(
+                dynamic_window_ms,
+                tolerance,
+            )
+        elif classification == "suspicious":
+            scan.suspicious_gap_count += 1
+            _append_gap_sample(scan.suspicious_gaps, sample)
+            scan.dynamic_gap_score += score_increment
+            dynamic_window_ms = _shrink_dynamic_window(
+                dynamic_window_ms,
+                tolerance,
+            )
+        else:
+            dynamic_window_ms = _grow_dynamic_window(
+                dynamic_window_ms,
+                tolerance,
+            )
+
+        scan.final_dynamic_window_ms = dynamic_window_ms
+
+    scan.dynamic_gap_score = round(scan.dynamic_gap_score, 4)
+    return scan
+
+
+def _timestamp_gap_findings(
+    *,
+    target: QualityTarget,
+    timestamp_scan: _TimestampScan,
+    gap_scan: _TimestampGapScan,
+    tolerance: HistDataGapTolerance,
+    severity: QualitySeverity,
+    rule_id: str,
+) -> tuple[QualityFinding, ...]:
+    source_member = (
+        timestamp_scan.samples[0].source_member
+        if timestamp_scan.samples
+        else ""
+    )
+    findings: list[QualityFinding] = [
+        _finding(
+            target,
+            code="ASCII_TIMESTAMP_GAP_SUMMARY",
+            message="ASCII timestamp gap distribution and market-session "
+            "profile.",
+            severity=QualitySeverity.INFO,
+            rule_id=rule_id,
+            metadata={
+                **_base_metadata(target, source_member=source_member),
+                "parsed_row_count": timestamp_scan.parsed_row_count,
+                "invalid_timestamp_count": (
+                    timestamp_scan.invalid_timestamp_count
+                ),
+                "pair_count": gap_scan.pair_count,
+                "tracked_gap_count": gap_scan.tracked_gap_count,
+                "max_gap_ms": gap_scan.max_gap_ms,
+                "gap_bucket_counts": dict(gap_scan.bucket_counts),
+                "expected_session_closure_count": (
+                    gap_scan.expected_session_closure_count
+                ),
+                "suspicious_gap_count": gap_scan.suspicious_gap_count,
+                "weekend_activity_count": gap_scan.weekend_activity_count,
+                "dynamic_gap_score": gap_scan.dynamic_gap_score,
+                "final_dynamic_window_ms": gap_scan.final_dynamic_window_ms,
+                "dynamic_window_policy": "inverted-tcp-backoff",
+                "tolerance": tolerance.to_metadata(),
+                "max_gap": (
+                    {}
+                    if gap_scan.max_gap is None
+                    else gap_scan.max_gap.to_dict()
+                ),
+                "samples": _gap_samples(
+                    [
+                        *gap_scan.suspicious_gaps,
+                        *gap_scan.expected_session_closures,
+                    ][:MAX_TIMESTAMP_SAMPLES]
+                ),
+            },
+        )
+    ]
+
+    if gap_scan.expected_session_closures:
+        findings.append(
+            _gap_sample_finding(
+                target,
+                code="ASCII_TIMESTAMP_EXPECTED_SESSION_CLOSURE_GAP",
+                message="Timestamp gap matches the configured FX weekend "
+                "closure tolerance window.",
+                severity=QualitySeverity.INFO,
+                rule_id=rule_id,
+                samples=gap_scan.expected_session_closures,
+                row_count=gap_scan.expected_session_closure_count,
+            )
+        )
+
+    if gap_scan.suspicious_gaps:
+        findings.append(
+            _gap_sample_finding(
+                target,
+                code="ASCII_TIMESTAMP_SUSPICIOUS_GAP",
+                message="Timestamp gap exceeds the suspicious-gap tolerance "
+                "and does not match an expected session closure.",
+                severity=severity,
+                rule_id=rule_id,
+                samples=gap_scan.suspicious_gaps,
+                row_count=gap_scan.suspicious_gap_count,
+            )
+        )
+
+    if gap_scan.weekend_activity:
+        findings.append(
+            _weekend_activity_finding(
+                target,
+                code="ASCII_TIMESTAMP_WEEKEND_ACTIVITY",
+                message="Timestamp falls inside the configured FX weekend "
+                "closure window.",
+                severity=severity,
+                rule_id=rule_id,
+                samples=gap_scan.weekend_activity,
+                row_count=gap_scan.weekend_activity_count,
+            )
+        )
+
+    return tuple(findings)
+
+
 def _sample_finding(
     target: QualityTarget,
     *,
@@ -738,6 +1145,91 @@ def _issue_sample_finding(
     )
 
 
+def _gap_sample_finding(
+    target: QualityTarget,
+    *,
+    code: str,
+    message: str,
+    severity: QualitySeverity,
+    rule_id: str,
+    samples: list[_TimestampGapSample],
+    row_count: int,
+) -> QualityFinding:
+    first = samples[0]
+    return _finding(
+        target,
+        code=code,
+        message=message,
+        severity=severity,
+        rule_id=rule_id,
+        location=QualityLocation(
+            path=target.path,
+            row_number=first.row_number,
+            timestamp_source=first.timestamp_source,
+            timestamp_utc_ms=first.timestamp_utc_ms,
+            column="datetime",
+            metadata={
+                "source_timezone": SOURCE_TIMEZONE,
+                "source_utc_offset": SOURCE_UTC_OFFSET,
+                "utc_timestamp": first.utc_timestamp,
+                "source_member": first.source_member,
+                "gap_ms": first.gap_ms,
+                "classification": first.classification,
+                "previous_row_number": first.previous.row_number,
+                "previous_timestamp_source": first.previous.timestamp_source,
+                "previous_timestamp_utc_ms": first.previous.timestamp_utc_ms,
+                "previous_utc_timestamp": first.previous.utc_timestamp,
+                "dynamic_window_ms": first.dynamic_window_ms,
+                "dynamic_score_increment": first.dynamic_score_increment,
+            },
+        ),
+        metadata={
+            **_base_metadata(target, source_member=first.source_member),
+            "row_count": row_count,
+            "samples": _gap_samples(samples),
+        },
+    )
+
+
+def _weekend_activity_finding(
+    target: QualityTarget,
+    *,
+    code: str,
+    message: str,
+    severity: QualitySeverity,
+    rule_id: str,
+    samples: list[_WeekendActivitySample],
+    row_count: int,
+) -> QualityFinding:
+    first = samples[0]
+    return _finding(
+        target,
+        code=code,
+        message=message,
+        severity=severity,
+        rule_id=rule_id,
+        location=QualityLocation(
+            path=target.path,
+            row_number=first.row.row_number,
+            timestamp_source=first.row.timestamp_source,
+            timestamp_utc_ms=first.row.timestamp_utc_ms,
+            column="datetime",
+            metadata={
+                "source_timezone": SOURCE_TIMEZONE,
+                "source_utc_offset": SOURCE_UTC_OFFSET,
+                "utc_timestamp": first.utc_timestamp,
+                "source_member": first.row.source_member,
+                "session_state": first.session_state,
+            },
+        ),
+        metadata={
+            **_base_metadata(target, source_member=first.row.source_member),
+            "row_count": row_count,
+            "samples": _weekend_activity_samples(samples),
+        },
+    )
+
+
 def _base_metadata(
     target: QualityTarget,
     *,
@@ -757,6 +1249,165 @@ def _base_metadata(
 
 def _parse_row(raw: str, delimiter: str) -> list[str]:
     return next(csv.reader((raw,), delimiter=delimiter), [])
+
+
+def _empty_gap_bucket_counts(
+    tolerance: HistDataGapTolerance,
+) -> dict[str, int]:
+    return {
+        _gap_bucket_label(threshold_ms): 0
+        for threshold_ms in tolerance.bucket_thresholds_ms
+    }
+
+
+def _increment_gap_buckets(
+    bucket_counts: dict[str, int],
+    gap_ms: int,
+    tolerance: HistDataGapTolerance,
+) -> None:
+    for threshold_ms in tolerance.bucket_thresholds_ms:
+        if gap_ms > threshold_ms:
+            bucket_counts[_gap_bucket_label(threshold_ms)] += 1
+
+
+def _gap_bucket_label(threshold_ms: int) -> str:
+    match threshold_ms:
+        case 60_000:
+            return "gt_1m"
+        case 300_000:
+            return "gt_5m"
+        case 1_800_000:
+            return "gt_30m"
+        case 3_600_000:
+            return "gt_1h"
+        case 86_400_000:
+            return "gt_1d"
+        case _:
+            return f"gt_{threshold_ms}ms"
+
+
+def _classify_gap(
+    previous: _TimestampSample,
+    current: _TimestampSample,
+    gap_ms: int,
+    tolerance: HistDataGapTolerance,
+) -> str:
+    if _is_expected_session_closure_gap(previous, current, tolerance):
+        return "expected_session_closure"
+    if gap_ms > tolerance.suspicious_gap_ms:
+        return "suspicious"
+    return "tracked"
+
+
+def _dynamic_score_increment(
+    gap_ms: int,
+    *,
+    classification: str,
+    dynamic_window_ms: int,
+    tolerance: HistDataGapTolerance,
+) -> float:
+    if classification != "suspicious":
+        return 0.0
+
+    base = gap_ms / max(tolerance.suspicious_gap_ms, 1)
+    window_multiplier = tolerance.dynamic_window_max_ms / max(
+        dynamic_window_ms,
+        1,
+    )
+    return round(base * max(window_multiplier, 1.0), 4)
+
+
+def _grow_dynamic_window(
+    current_window_ms: int,
+    tolerance: HistDataGapTolerance,
+) -> int:
+    grown = int(current_window_ms * tolerance.dynamic_window_growth_factor)
+    return min(
+        max(grown, tolerance.dynamic_window_initial_ms),
+        tolerance.dynamic_window_max_ms,
+    )
+
+
+def _shrink_dynamic_window(
+    current_window_ms: int,
+    tolerance: HistDataGapTolerance,
+) -> int:
+    shrunk = int(current_window_ms * tolerance.dynamic_window_shrink_factor)
+    return max(shrunk, tolerance.dynamic_window_initial_ms)
+
+
+def _is_expected_session_closure_gap(
+    previous: _TimestampSample,
+    current: _TimestampSample,
+    tolerance: HistDataGapTolerance,
+) -> bool:
+    previous_source = _source_datetime_from_utc_ms(previous.timestamp_utc_ms)
+    current_source = _source_datetime_from_utc_ms(current.timestamp_utc_ms)
+    if current_source <= previous_source:
+        return False
+
+    for friday_close in _friday_closes_between(previous_source, current_source):
+        sunday_open = friday_close + timedelta(days=2)
+        close_window_start = friday_close - timedelta(
+            milliseconds=tolerance.session_boundary_grace_ms
+        )
+        close_window_end = friday_close + timedelta(
+            milliseconds=tolerance.session_boundary_grace_ms
+        )
+        open_window_start = sunday_open - timedelta(
+            milliseconds=tolerance.session_boundary_grace_ms
+        )
+        open_window_end = sunday_open + timedelta(
+            milliseconds=tolerance.session_boundary_grace_ms
+        )
+        if (
+            close_window_start <= previous_source <= close_window_end
+            and open_window_start <= current_source <= open_window_end
+        ):
+            return True
+    return False
+
+
+def _friday_closes_between(
+    start: datetime,
+    end: datetime,
+) -> tuple[datetime, ...]:
+    closes: list[datetime] = []
+    cursor = (start - timedelta(days=7)).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    end_day = (end + timedelta(days=7)).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    while cursor <= end_day:
+        if cursor.weekday() == FX_FRIDAY_CLOSE_WEEKDAY:
+            closes.append(
+                cursor.replace(
+                    hour=FX_CLOSE_OPEN_MINUTE // 60,
+                    minute=FX_CLOSE_OPEN_MINUTE % 60,
+                )
+            )
+        cursor += timedelta(days=1)
+    return tuple(closes)
+
+
+def _is_weekend_closure_row(row: _TimestampSample) -> bool:
+    source = _source_datetime_from_utc_ms(row.timestamp_utc_ms)
+    source_minute = source.hour * 60 + source.minute
+    weekday = source.weekday()
+    if weekday == 5:
+        return True
+    if weekday == FX_FRIDAY_CLOSE_WEEKDAY:
+        return source_minute > FX_CLOSE_OPEN_MINUTE
+    if weekday == FX_SUNDAY_OPEN_WEEKDAY:
+        return source_minute < FX_CLOSE_OPEN_MINUTE
+    return False
 
 
 def _record_raw_timestamp_shape(
@@ -902,6 +1553,12 @@ def _utc_datetime_from_ms(timestamp_utc_ms: int) -> datetime:
     )
 
 
+def _source_datetime_from_utc_ms(timestamp_utc_ms: int) -> datetime:
+    return _utc_datetime_from_ms(timestamp_utc_ms) - timedelta(
+        milliseconds=EST_NO_DST_OFFSET_MS
+    )
+
+
 def _append_sample(
     samples: list[_TimestampSample],
     sample: _TimestampSample,
@@ -918,11 +1575,37 @@ def _append_issue_sample(
         samples.append(sample)
 
 
+def _append_gap_sample(
+    samples: list[_TimestampGapSample],
+    sample: _TimestampGapSample,
+) -> None:
+    if len(samples) < MAX_TIMESTAMP_SAMPLES:
+        samples.append(sample)
+
+
+def _append_weekend_activity_sample(
+    samples: list[_WeekendActivitySample],
+    sample: _WeekendActivitySample,
+) -> None:
+    if len(samples) < MAX_TIMESTAMP_SAMPLES:
+        samples.append(sample)
+
+
 def _samples(samples: list[_TimestampSample]) -> list[JSONValue]:
     return [sample.to_dict() for sample in samples]
 
 
 def _issue_samples(samples: list[_TimestampIssueSample]) -> list[JSONValue]:
+    return [sample.to_dict() for sample in samples]
+
+
+def _gap_samples(samples: list[_TimestampGapSample]) -> list[JSONValue]:
+    return [sample.to_dict() for sample in samples]
+
+
+def _weekend_activity_samples(
+    samples: list[_WeekendActivitySample],
+) -> list[JSONValue]:
     return [sample.to_dict() for sample in samples]
 
 

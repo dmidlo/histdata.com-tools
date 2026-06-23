@@ -67,9 +67,12 @@ from histdatacom.data_quality.rules import (
 )
 from histdatacom.data_quality.time import (
     ASCII_EST_NO_DST_TIME_RULE_ID,
+    ASCII_TIMESTAMP_GAP_RULE_ID,
     ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
+    HistDataAsciiTimestampGapRule,
     HistDataAsciiEstNoDstTimeRule,
     HistDataAsciiTimestampSequenceRule,
+    HistDataGapTolerance,
     time_quality_rules,
 )
 
@@ -78,17 +81,20 @@ __all__ = [
     "ASCII_ROW_COUNT_INGESTION_RULE_ID",
     "ASCII_SCHEMA_INGESTION_RULE_ID",
     "ASCII_TEXT_INGESTION_RULE_ID",
+    "ASCII_TIMESTAMP_GAP_RULE_ID",
     "ASCII_TIMESTAMP_SEQUENCE_RULE_ID",
     "COVERAGE_MANIFEST_SCHEMA_VERSION",
     "QUALITY_EXIT_TRIGGERS",
     "QUALITY_REPORT_SCHEMA_VERSION",
     "CoverageDimension",
+    "HistDataAsciiTimestampGapRule",
     "HistDataAsciiEstNoDstTimeRule",
     "HistDataAsciiRowCountIngestionRule",
     "HistDataAsciiSchemaIngestionRule",
     "HistDataAsciiTextIngestionRule",
     "HistDataAsciiTimestampSequenceRule",
     "HistDataCoverageManifestRule",
+    "HistDataGapTolerance",
     "HistDataZipInventoryRule",
     "QualityFinding",
     "QualityDiscoveryError",
