@@ -189,6 +189,7 @@ def test_run_temporal_worker_accepts_fake_temporal_classes(
     } == {
         "repository_refresh_activity",
         "dataset_plan_activity",
+        "data_quality_activity",
         "validate_urls_activity",
         "download_archives_activity",
         "extract_csv_activity",
@@ -203,6 +204,7 @@ def test_default_workflows_include_topology_classes() -> None:
     assert [workflow.__name__ for workflow in worker.default_workflows()] == [
         "HistDataRunWorkflow",
         "RepositoryRefreshWorkflow",
+        "DataQualityWorkflow",
         "DatasetPlanWorkflow",
         "SymbolTimeframeWorkflow",
         "ValidateUrlsWorkflow",
@@ -234,6 +236,7 @@ def test_default_activities_include_repository_refresh() -> None:
     assert [activity.__name__ for activity in worker.default_activities()] == [
         "repository_refresh_activity",
         "dataset_plan_activity",
+        "data_quality_activity",
         "validate_urls_activity",
         "download_archives_activity",
         "extract_csv_activity",

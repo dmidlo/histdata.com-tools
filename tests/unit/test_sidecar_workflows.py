@@ -663,6 +663,7 @@ def test_workflow_topology_documents_expected_hierarchy() -> None:
     assert set(workflows.workflow_names()) == {
         "HistDataRunWorkflow",
         "RepositoryRefreshWorkflow",
+        "DataQualityWorkflow",
         "DatasetPlanWorkflow",
         "SymbolTimeframeWorkflow",
         "ValidateUrlsWorkflow",
@@ -674,6 +675,7 @@ def test_workflow_topology_documents_expected_hierarchy() -> None:
     }
     assert specs["HistDataRunWorkflow"]["children"] == [
         "RepositoryRefreshWorkflow",
+        "DataQualityWorkflow",
         "DatasetPlanWorkflow",
         "SymbolTimeframeWorkflow",
     ]
@@ -702,6 +704,10 @@ def test_workflow_topology_documents_expected_hierarchy() -> None:
         == RetryPolicyName.NONE.value
     )
     assert (
+        activity_policies["data_quality"]["retry_policy"]["name"]
+        == RetryPolicyName.NONE.value
+    )
+    assert (
         activity_policies["download_archives"]["heartbeat_timeout_seconds"]
         == 60
     )
@@ -715,7 +721,12 @@ def test_activity_execution_policy_rejects_unknown_activity() -> None:
 
 def test_config_or_local_only_activity_policies_do_not_retry() -> None:
     """Config/local validation stages should not receive Temporal retries."""
-    for activity_name in ("dataset_plan", "extract_csv", "build_cache"):
+    for activity_name in (
+        "dataset_plan",
+        "data_quality",
+        "extract_csv",
+        "build_cache",
+    ):
         policy = workflows.activity_execution_policy(activity_name)
         assert policy.retry_policy.name is RetryPolicyName.NONE
         assert policy.retry_policy.maximum_attempts == 1
@@ -785,6 +796,25 @@ def test_repository_only_request_only_plans_repository_refresh() -> None:
     assert [item.workflow_name for item in invocations] == [
         "RepositoryRefreshWorkflow"
     ]
+
+
+def test_data_quality_request_only_plans_quality_workflow() -> None:
+    """A quality request should stay offline and skip dataset fan-out."""
+    request = _request(
+        data_quality=True,
+        quality_paths=("/tmp/histdata",),
+        quality_check_groups=("inventory",),
+        available_remote_data=True,
+        update_remote_data=True,
+    )
+
+    invocations = workflows.build_run_child_invocations(request)
+
+    assert [item.workflow_name for item in invocations] == [
+        "DataQualityWorkflow"
+    ]
+    assert invocations[0].task_queue_lane.value == "cpu-file"
+    assert invocations[0].payload["request"]["data_quality"] is True
 
 
 def test_parent_workflow_preserves_repository_available_data_metrics() -> None:
@@ -1496,6 +1526,37 @@ def test_dataset_plan_workflow_uses_activity_executor() -> None:
     ]
     assert summary["status"] == WorkStatus.COMPLETED.value
     assert workflow.status()["planned_children"] == ["dataset_plan"]
+
+
+def test_data_quality_workflow_uses_activity_executor() -> None:
+    """Quality assessment should run through the activity executor seam."""
+    activity_executor = _RecordingActivityExecutor()
+    workflow = workflows.DataQualityWorkflow(
+        activity_executor=activity_executor
+    )
+    request = _request(
+        data_quality=True,
+        quality_paths=("/tmp/histdata",),
+        quality_check_groups=("inventory",),
+    )
+    invocation = workflows.build_run_child_invocations(request)[0]
+
+    summary = asyncio.run(workflow.run(invocation.payload))
+
+    assert activity_executor.calls == [
+        {
+            "activity_name": "data_quality",
+            "payload": {
+                **invocation.payload,
+                "activity": "data_quality",
+                "stage": "data_quality",
+                "task_queue": "queue-cpu-file",
+            },
+            "task_queue": "queue-cpu-file",
+        }
+    ]
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert workflow.status()["planned_children"] == ["data_quality"]
 
 
 def test_download_archives_workflow_uses_activity_executor() -> None:

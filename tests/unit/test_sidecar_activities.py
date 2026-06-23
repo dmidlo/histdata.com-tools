@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from importlib import import_module
 import io
+import json
 import shutil
 import zipfile
 from pathlib import Path
@@ -26,10 +27,18 @@ from histdatacom.manifest_store import (
     ManifestStatusStore,
     STATUS_STORE_REF_KEY,
 )
+from histdatacom.data_quality import (
+    QualityFinding,
+    QualityLocation,
+    QualityReport,
+    QualityRuleResult,
+    QualitySeverity,
+)
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
 from histdatacom.sidecar.control import SidecarJobSnapshot
 from histdatacom.sidecar.activities import (
     build_cache_activity,
+    data_quality_activity,
     dataset_plan_activity,
     default_activities,
     download_archives_activity,
@@ -38,6 +47,11 @@ from histdatacom.sidecar.activities import (
     merge_cache_activity,
     repository_refresh_activity,
     validate_urls_activity,
+)
+from tests.fixtures.histdata_ascii.quality_cases import (
+    CLEAN_M1_CASE,
+    write_ascii_case,
+    write_corrupt_zip,
 )
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
@@ -972,11 +986,211 @@ def test_import_to_influx_activity_honors_delete_after_influx(
     assert not cache_path.exists()
 
 
+def test_data_quality_activity_writes_report_and_bounded_metrics(
+    tmp_path: Path,
+) -> None:
+    """Quality activity should persist detailed findings outside history."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    report_path = tmp_path / "reports" / "quality.json"
+    request = RunRequest(
+        request_id="run-quality",
+        data_directory=str(tmp_path),
+        data_quality=True,
+        quality_paths=(str(csv_path),),
+        quality_check_groups=("inventory",),
+        quality_report_path=str(report_path),
+    )
+
+    payload = data_quality_activity(
+        {"request": request.to_dict(), "workflow_id": "quality-workflow"}
+    )
+
+    result = payload["result"]
+    quality = result["metrics"]["quality"]
+    artifact = result["artifacts"][0]
+    assert result["status"] == WorkStatus.COMPLETED.value
+    assert result["failure"] is None
+    assert payload["quality"] == quality
+    assert artifact["kind"] == "quality-report"
+    assert Path(artifact["path"]) == report_path.resolve()
+    assert report_path.exists()
+    assert quality["summary"]["target_count"] == 1
+    assert quality["summary"]["finding_count"] >= 0
+    assert quality["report_artifact"]["path"] == str(report_path.resolve())
+    assert quality["target_summaries"][0]["target"]["kind"] == "csv"
+    assert "targets" not in quality
+    assert "rule_results" not in quality
+
+    detailed_report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert detailed_report["schema_version"] == (
+        "histdatacom.quality-report.v1"
+    )
+    assert detailed_report["target_summaries"][0]["target"]["kind"] == "csv"
+
+
+def test_data_quality_activity_runs_inventory_rules_for_corrupt_zip(
+    tmp_path: Path,
+) -> None:
+    """Quality activity should execute concrete rules, not an empty registry."""
+    archive = write_corrupt_zip(
+        tmp_path,
+        filename="DAT_ASCII_EURUSD_M1_201202.zip",
+    )
+    report_path = tmp_path / "reports" / "quality-corrupt-zip.json"
+    request = RunRequest(
+        request_id="run-quality-corrupt-zip",
+        data_directory=str(tmp_path),
+        data_quality=True,
+        quality_paths=(str(archive),),
+        quality_check_groups=("inventory",),
+        quality_report_path=str(report_path),
+    )
+
+    payload = data_quality_activity({"request": request.to_dict()})
+
+    result = payload["result"]
+    quality = result["metrics"]["quality"]
+    assert result["status"] == WorkStatus.FAILED.value
+    assert quality["summary"]["error_count"] == 1
+    assert quality["target_summaries"][0]["target"]["kind"] == "zip"
+    assert quality["target_summaries"][0]["status"] == "failed"
+
+    detailed_report = json.loads(report_path.read_text(encoding="utf-8"))
+    finding_codes = [
+        finding["code"]
+        for rule_result in detailed_report["rule_results"]
+        for finding in rule_result["findings"]
+    ]
+    assert "ZIP_CORRUPT" in finding_codes
+
+
+def test_data_quality_activity_preserves_coverage_manifest_metadata(
+    tmp_path: Path,
+) -> None:
+    """Quality activity should pass expected coverage metadata to run rules."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    report_path = tmp_path / "reports" / "quality-coverage.json"
+    request = RunRequest(
+        request_id="run-quality-coverage",
+        data_directory=str(tmp_path),
+        data_quality=True,
+        quality_paths=(str(csv_path),),
+        quality_check_groups=("inventory",),
+        quality_report_path=str(report_path),
+        metadata={
+            "coverage_manifest": {
+                "expected_dimensions": [
+                    {
+                        "data_format": "ascii",
+                        "timeframe": "M1",
+                        "symbol": "EURUSD",
+                        "period": "201202",
+                    },
+                    {
+                        "data_format": "ascii",
+                        "timeframe": "M1",
+                        "symbol": "EURUSD",
+                        "period": "201203",
+                    },
+                ]
+            }
+        },
+    )
+
+    payload = data_quality_activity({"request": request.to_dict()})
+
+    result = payload["result"]
+    quality = result["metrics"]["quality"]
+    assert result["status"] == WorkStatus.FAILED.value
+    assert quality["summary"]["error_count"] == 1
+
+    detailed_report = json.loads(report_path.read_text(encoding="utf-8"))
+    manifest = detailed_report["metadata"]["coverage_manifest"]
+    assert manifest["expected_source"] == "metadata"
+    assert manifest["missing"] == [
+        {
+            "data_format": "ascii",
+            "timeframe": "M1",
+            "symbol": "EURUSD",
+            "period": "201203",
+        }
+    ]
+    finding_codes = [
+        finding["code"]
+        for rule_result in detailed_report["rule_results"]
+        for finding in rule_result["findings"]
+    ]
+    assert "COVERAGE_PERIOD_MISSING" in finding_codes
+
+
+def test_data_quality_activity_returns_failed_stage_for_policy_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Quality failures should be non-retryable stage failures."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    report_path = tmp_path / "reports" / "quality-failed.json"
+    request = RunRequest(
+        request_id="run-quality-failed",
+        data_directory=str(tmp_path),
+        data_quality=True,
+        quality_paths=(str(csv_path),),
+        quality_check_groups=("inventory",),
+        quality_report_path=str(report_path),
+        quality_fail_on="error",
+    )
+
+    def fake_assessment(  # noqa: ARG001
+        targets,
+        rules,
+        *,
+        run_rules=(),
+        metadata=None,
+    ):
+        target = tuple(targets)[0]
+        finding = QualityFinding(
+            severity=QualitySeverity.ERROR,
+            code="FILE_MISSING",
+            message="expected local file is missing",
+            rule_id="file.exists",
+            target=target,
+            location=QualityLocation(path=target.path),
+        )
+        return QualityReport(
+            targets=(target,),
+            rule_results=(
+                QualityRuleResult(
+                    rule_id="file.exists",
+                    target=target,
+                    findings=(finding,),
+                ),
+            ),
+            metadata=dict(metadata or {}),
+        )
+
+    monkeypatch.setattr(
+        "histdatacom.sidecar.activities.run_quality_assessment",
+        fake_assessment,
+    )
+
+    payload = data_quality_activity({"request": request.to_dict()})
+
+    result = payload["result"]
+    quality = result["metrics"]["quality"]
+    assert result["status"] == WorkStatus.FAILED.value
+    assert result["failure"]["code"] == "DATA_QUALITY_FAILED"
+    assert result["failure"]["retryable"] is False
+    assert quality["summary"]["error_count"] == 1
+    assert quality["exit_decision"]["exit_code"] == 1
+    assert report_path.exists()
+
+
 def test_default_activities_register_operation_activities() -> None:
     """The worker default activity set should include migrated activities."""
     assert default_activities() == (
         repository_refresh_activity,
         dataset_plan_activity,
+        data_quality_activity,
         validate_urls_activity,
         download_archives_activity,
         extract_csv_activity,

@@ -28,24 +28,11 @@ import os
 import sys
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping, TypeGuard
 
 import histdatacom
 from histdatacom import Options
 from histdatacom.cli import ArgParser
-from histdatacom.data_quality import (
-    QualityDiscoveryError,
-    QualityExitPolicy,
-    bounded_quality_payload,
-    coverage_manifest_metadata,
-    discover_quality_targets,
-    format_quality_console_summary,
-    normalize_quality_check_groups,
-    quality_rules_for_groups,
-    quality_run_rules_for_groups,
-    run_quality_assessment,
-    write_quality_report,
-)
 from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.repository_output import (
     print_repository_failure,
@@ -53,7 +40,7 @@ from histdatacom.repository_output import (
 )
 from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.records import Record
-from histdatacom.runtime_contracts import JSONValue, RunRequest, WorkStatus
+from histdatacom.runtime_contracts import RunRequest, WorkStatus
 from histdatacom.sidecar.client import (
     SidecarUnavailableError,
     submit_run_request_and_observe_sync,
@@ -150,75 +137,7 @@ class _HistDataCom:  # noqa:R701
                 print(histdatacom.__version__)  # noqa:T201
             return histdatacom.__version__
 
-        if self.context.data_quality:
-            return self._run_data_quality()
-
         return self._run_sidecar_job()
-
-    def _run_data_quality(self) -> dict[str, JSONValue]:
-        """Run a local-only data-quality assessment."""
-        try:
-            check_groups = normalize_quality_check_groups(
-                self.context.quality_check_groups
-            )
-            discovery = discover_quality_targets(self.context.quality_paths)
-            exit_policy = QualityExitPolicy.from_values(
-                fail_on=self.context.quality_fail_on,
-                max_errors=self.context.quality_max_errors,
-                max_warnings=self.context.quality_max_warnings,
-            )
-        except QualityDiscoveryError as err:
-            if self.context.from_api:
-                raise
-            print(f"error: {err}", file=sys.stderr)  # noqa:T201
-            raise SystemExit(1) from err
-        except ValueError as err:
-            if self.context.from_api:
-                raise
-            print(f"error: {err}", file=sys.stderr)  # noqa:T201
-            raise SystemExit(1) from err
-
-        report = run_quality_assessment(
-            discovery.targets,
-            quality_rules_for_groups(check_groups),
-            run_rules=quality_run_rules_for_groups(check_groups),
-            metadata={
-                "operation": "data-quality",
-                "check_groups": list(check_groups),
-                "coverage_manifest": coverage_manifest_metadata(
-                    roots=discovery.roots,
-                    request=self.context.request.to_dict(),
-                    expected_dimensions=_quality_expected_dimensions(
-                        self.context.request.metadata
-                    ),
-                ),
-            },
-        )
-        artifact = (
-            None
-            if self.context.quality_report_path is None
-            else write_quality_report(report, self.context.quality_report_path)
-        )
-        decision = exit_policy.evaluate(report.summary())
-        payload: dict[str, JSONValue] = bounded_quality_payload(
-            operation="data-quality",
-            check_groups=check_groups,
-            discovery=discovery.to_dict(),
-            report=report,
-            decision=decision,
-            artifact=artifact,
-        )
-        if not self.context.from_api:
-            print(  # noqa:T201
-                format_quality_console_summary(
-                    report,
-                    check_groups=check_groups,
-                    artifact=artifact,
-                )
-            )
-            if decision.exit_code:
-                raise SystemExit(decision.exit_code)
-        return payload
 
     def _run_sidecar_job(
         self,
@@ -237,6 +156,22 @@ class _HistDataCom:  # noqa:R701
             raise SystemExit(1) from err
 
         payload = result.to_dict()
+        if self.context.data_quality and self.context.sidecar_wait_result:
+            quality_payload = _quality_payload_from_sidecar_payload(payload)
+            if quality_payload is not None:
+                if self.context.from_api:
+                    return quality_payload
+                print(  # noqa:T201
+                    _format_sidecar_quality_console_summary(quality_payload)
+                )
+                quality_exit_code = _quality_sidecar_exit_code(quality_payload)
+                if quality_exit_code:
+                    raise SystemExit(quality_exit_code)
+                if _sidecar_payload_failed(payload):
+                    _print_sidecar_payload_failure(payload)
+                    raise SystemExit(1)
+                return payload
+
         if self._should_materialize_sidecar_repository_return():
             if _sidecar_repository_payload_failed(payload):
                 if self.context.from_api:
@@ -406,20 +341,6 @@ def _validate_influx_metadata_config(config: Mapping[str, Any]) -> None:
         )
 
 
-def _quality_expected_dimensions(
-    metadata: Mapping[str, Any],
-) -> tuple[Mapping[str, Any], ...] | None:
-    coverage = metadata.get("coverage_manifest")
-    if isinstance(coverage, Mapping):
-        expected = coverage.get("expected_dimensions")
-        if isinstance(expected, list):
-            return tuple(item for item in expected if isinstance(item, Mapping))
-    expected = metadata.get("quality_expected_dimensions")
-    if isinstance(expected, list):
-        return tuple(item for item in expected if isinstance(item, Mapping))
-    return None
-
-
 def _freeze_runtime_arg(value: Any) -> Any:
     """Return an immutable equivalent for container-like runtime args."""
     if isinstance(value, set):
@@ -578,6 +499,159 @@ def _repository_failure_code_from_sidecar_payload(
         if code:
             return str(code)
     return ""
+
+
+def _quality_payload_from_sidecar_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Return the bounded quality payload from a sidecar result."""
+    for item in _iter_mapping_payloads(payload):
+        quality = item.get("quality")
+        if _is_data_quality_payload(quality):
+            return dict(quality)
+        metrics = item.get("metrics")
+        if isinstance(metrics, Mapping):
+            quality = metrics.get("quality")
+            if _is_data_quality_payload(quality):
+                return dict(quality)
+    return None
+
+
+def _is_data_quality_payload(value: object) -> TypeGuard[Mapping[str, Any]]:
+    return isinstance(value, Mapping) and value.get("operation") == (
+        "data-quality"
+    )
+
+
+def _format_sidecar_quality_console_summary(
+    quality_payload: Mapping[str, Any],
+) -> str:
+    """Return a compact CLI summary from sidecar quality metadata."""
+    summary = _mapping_from_payload(quality_payload.get("summary"))
+    check_groups = quality_payload.get("check_groups")
+    checks = (
+        ", ".join(str(group) for group in check_groups)
+        if isinstance(check_groups, list) and check_groups
+        else "all"
+    )
+    lines = [
+        "Data quality assessment",
+        f"checks: {checks}",
+    ]
+    if "error" in quality_payload:
+        lines.extend(
+            (
+                "status: failed",
+                f"error: {quality_payload['error']}",
+            )
+        )
+        return "\n".join(lines)
+
+    lines.extend(
+        (
+            f"status: {summary.get('status', 'unknown')}",
+            _format_quality_target_counts(quality_payload, summary),
+            (
+                "findings: "
+                f"{summary.get('finding_count', 0)} "
+                f"info: {summary.get('info_count', 0)} "
+                f"warning: {summary.get('warning_count', 0)} "
+                f"error: {summary.get('error_count', 0)}"
+            ),
+        )
+    )
+    artifact = _mapping_from_payload(quality_payload.get("report_artifact"))
+    if artifact.get("path"):
+        lines.append(f"report: {artifact['path']}")
+    decision = _mapping_from_payload(quality_payload.get("exit_decision"))
+    if decision.get("reason"):
+        lines.append(f"decision: {decision['reason']}")
+    if int(summary.get("target_count", 0) or 0) == 0:
+        lines.append("No data quality targets discovered.")
+    lines.extend(_format_quality_target_sections(quality_payload))
+    return "\n".join(lines)
+
+
+def _quality_sidecar_exit_code(quality_payload: Mapping[str, Any]) -> int:
+    decision = _mapping_from_payload(quality_payload.get("exit_decision"))
+    try:
+        return int(decision.get("exit_code", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _mapping_from_payload(value: object) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _format_quality_target_counts(
+    quality_payload: Mapping[str, Any],
+    summary: Mapping[str, Any],
+) -> str:
+    target_summaries = _quality_target_summaries(quality_payload)
+    if not target_summaries:
+        return "targets: " f"{summary.get('target_count', 0)}"
+    return (
+        "targets: "
+        f"{summary.get('target_count', 0)} "
+        f"clean: {_quality_target_count(target_summaries, 'clean')} "
+        f"warning: {_quality_target_count(target_summaries, 'warning')} "
+        f"failed: {_quality_target_count(target_summaries, 'failed')}"
+    )
+
+
+def _format_quality_target_sections(
+    quality_payload: Mapping[str, Any],
+) -> list[str]:
+    target_summaries = _quality_target_summaries(quality_payload)
+    if not target_summaries:
+        return []
+    lines: list[str] = []
+    for status, title in (
+        ("clean", "Clean files"),
+        ("warning", "Warning files"),
+        ("failed", "Failed files"),
+    ):
+        lines.extend(("", title))
+        target_lines = [
+            _format_quality_target_summary(item)
+            for item in target_summaries
+            if str(item.get("status", "") or "") == status
+        ]
+        lines.extend(target_lines or ["- none"])
+    return lines
+
+
+def _quality_target_summaries(
+    quality_payload: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    raw_summaries = quality_payload.get("target_summaries")
+    if not isinstance(raw_summaries, list):
+        return []
+    return [dict(item) for item in raw_summaries if isinstance(item, Mapping)]
+
+
+def _quality_target_count(
+    target_summaries: list[dict[str, Any]],
+    status: str,
+) -> int:
+    return sum(
+        1
+        for item in target_summaries
+        if str(item.get("status", "") or "") == status
+    )
+
+
+def _format_quality_target_summary(summary: Mapping[str, Any]) -> str:
+    target = _mapping_from_payload(summary.get("target"))
+    return (
+        f"- {target.get('kind', 'unknown')}: {target.get('path', '')} "
+        f"(findings={summary.get('finding_count', 0)}, "
+        f"warnings={summary.get('warning_count', 0)}, "
+        f"errors={summary.get('error_count', 0)})"
+    )
 
 
 def _record_from_cache_artifact(

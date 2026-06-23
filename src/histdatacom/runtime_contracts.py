@@ -416,6 +416,13 @@ class RunRequest:
     import_to_influxdb: bool = False
     delete_after_influx: bool = False
     zip_persist: bool = False
+    data_quality: bool = False
+    quality_paths: tuple[str, ...] = ()
+    quality_check_groups: tuple[str, ...] = ()
+    quality_report_path: str = ""
+    quality_fail_on: str = "error"
+    quality_max_errors: int = 0
+    quality_max_warnings: int = 0
     metadata: dict[str, JSONValue] = field(default_factory=dict)
 
     @classmethod
@@ -458,6 +465,31 @@ class RunRequest:
                 getattr(options, "delete_after_influx", False)
             ),
             zip_persist=bool(getattr(options, "zip_persist", False)),
+            data_quality=bool(getattr(options, "data_quality", False)),
+            quality_paths=tuple(
+                str(path)
+                for path in (getattr(options, "quality_paths", ()) or ())
+            ),
+            quality_check_groups=tuple(
+                sorted(
+                    str(group)
+                    for group in (
+                        getattr(options, "quality_check_groups", ()) or ()
+                    )
+                )
+            ),
+            quality_report_path=str(
+                getattr(options, "quality_report_path", "") or ""
+            ),
+            quality_fail_on=str(
+                getattr(options, "quality_fail_on", "error") or "error"
+            ),
+            quality_max_errors=int(
+                getattr(options, "quality_max_errors", 0) or 0
+            ),
+            quality_max_warnings=int(
+                getattr(options, "quality_max_warnings", 0) or 0
+            ),
             metadata=metadata,
         )
 
@@ -482,6 +514,13 @@ class RunRequest:
             "import_to_influxdb": self.import_to_influxdb,
             "delete_after_influx": self.delete_after_influx,
             "zip_persist": self.zip_persist,
+            "data_quality": self.data_quality,
+            "quality_paths": list(self.quality_paths),
+            "quality_check_groups": list(self.quality_check_groups),
+            "quality_report_path": self.quality_report_path,
+            "quality_fail_on": self.quality_fail_on,
+            "quality_max_errors": self.quality_max_errors,
+            "quality_max_warnings": self.quality_max_warnings,
             "metadata": dict(self.metadata),
         }
 
@@ -513,5 +552,18 @@ class RunRequest:
             import_to_influxdb=bool(data.get("import_to_influxdb", False)),
             delete_after_influx=bool(data.get("delete_after_influx", False)),
             zip_persist=bool(data.get("zip_persist", False)),
+            data_quality=bool(data.get("data_quality", False)),
+            quality_paths=tuple(
+                str(item) for item in data.get("quality_paths", [])
+            ),
+            quality_check_groups=tuple(
+                str(item) for item in data.get("quality_check_groups", [])
+            ),
+            quality_report_path=str(data.get("quality_report_path", "") or ""),
+            quality_fail_on=str(
+                data.get("quality_fail_on", "error") or "error"
+            ),
+            quality_max_errors=int(data.get("quality_max_errors", 0) or 0),
+            quality_max_warnings=int(data.get("quality_max_warnings", 0) or 0),
             metadata=dict(data.get("metadata") or {}),
         )

@@ -160,7 +160,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             self.arg_namespace.timeframes = {"T"}
 
     def _check_quality_mode(self) -> None:
-        """Validate local-only data quality mode inputs."""
+        """Validate offline data quality mode inputs."""
         if not self.arg_namespace.data_quality:
             if self.arg_namespace.quality_paths:
                 print("--quality-target requires --quality")  # noqa:T201
@@ -198,7 +198,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         conflicts = [flag for flag, enabled in legacy_flags.items() if enabled]
         if conflicts:
             print(  # noqa:T201
-                "--quality is a local-only operation and cannot be combined "
+                "--quality is an offline operation and cannot be combined "
                 f"with {', '.join(conflicts)}"
             )
             raise SystemExit(1)

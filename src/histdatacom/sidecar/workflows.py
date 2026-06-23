@@ -400,6 +400,7 @@ class TemporalActivityExecutor:
 
 RUN_CHILDREN = (
     "RepositoryRefreshWorkflow",
+    "DataQualityWorkflow",
     "DatasetPlanWorkflow",
     "SymbolTimeframeWorkflow",
 )
@@ -422,6 +423,11 @@ WORKFLOW_TOPOLOGY = (
         name="RepositoryRefreshWorkflow",
         lane=TaskQueueLane.NETWORK,
         operation_family="repository metadata refresh",
+    ),
+    WorkflowSpec(
+        name="DataQualityWorkflow",
+        lane=TaskQueueLane.CPU_FILE,
+        operation_family="data quality assessment",
     ),
     WorkflowSpec(
         name="DatasetPlanWorkflow",
@@ -468,6 +474,7 @@ WORKFLOW_TOPOLOGY = (
 WORKFLOW_SPECS_BY_NAME = {spec.name: spec for spec in WORKFLOW_TOPOLOGY}
 OPERATION_ACTIVITIES = {
     "RepositoryRefreshWorkflow": "repository_refresh",
+    "DataQualityWorkflow": "data_quality",
     "DatasetPlanWorkflow": "dataset_plan",
     "ValidateUrlsWorkflow": "validate_urls",
     "DownloadArchivesWorkflow": "download_archives",
@@ -486,6 +493,12 @@ ACTIVITY_EXECUTION_POLICIES = {
     "dataset_plan": ActivityExecutionPolicy(
         activity_name="dataset_plan",
         start_to_close_timeout_seconds=300,
+        heartbeat_timeout_seconds=30,
+        retry_policy=NO_RETRY_POLICY,
+    ),
+    "data_quality": ActivityExecutionPolicy(
+        activity_name="data_quality",
+        start_to_close_timeout_seconds=1800,
         heartbeat_timeout_seconds=30,
         retry_policy=NO_RETRY_POLICY,
     ),
@@ -606,6 +619,9 @@ def build_run_child_invocations(
 ) -> tuple[WorkflowInvocation, ...]:
     """Plan top-level child workflow calls for a user-visible job."""
     invocations: list[WorkflowInvocation] = []
+    if request.data_quality:
+        return (_invocation(request, "DataQualityWorkflow"),)
+
     if request.available_remote_data or request.update_remote_data:
         invocations.append(_invocation(request, "RepositoryRefreshWorkflow"))
 
@@ -960,6 +976,25 @@ class DatasetPlanWorkflow(_ActivityWorkflowBase):
 
 
 @workflow_defn
+class DataQualityWorkflow(_ActivityWorkflowBase):
+    """Child workflow for offline data-quality assessment."""
+
+    workflow_name = "DataQualityWorkflow"
+
+    @workflow_run
+    async def run(self, payload: dict[str, Any]) -> dict:
+        """Run data quality as a real activity."""
+        return await execute_activity_workflow(
+            self.workflow_name,
+            payload,
+            activity_executor=self._activity_executor_or_default(),
+            progress=self._progress,
+        )
+
+    status = workflow_query(_ActivityWorkflowBase.status)
+
+
+@workflow_defn
 class ValidateUrlsWorkflow(_ActivityWorkflowBase):
     """Child workflow for URL validation."""
 
@@ -1076,6 +1111,7 @@ class ImportWorkflow(_ActivityWorkflowBase):
 DEFAULT_WORKFLOWS = (
     HistDataRunWorkflow,
     RepositoryRefreshWorkflow,
+    DataQualityWorkflow,
     DatasetPlanWorkflow,
     SymbolTimeframeWorkflow,
     ValidateUrlsWorkflow,

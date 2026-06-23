@@ -374,9 +374,11 @@ curl "https://raw.githubusercontent.com/dmidlo/histdata.com-tools/main/influxdb.
 ### Data Quality Assessments
 
 `histdatacom --quality` runs offline checks against datasets that are already on
-disk. It does not contact HistData.com and does not submit a Temporal sidecar
-job. Use it after downloading or extracting data, before trusting local ZIP,
-CSV, or cache artifacts for import, modeling, or backtesting.
+disk. It does not contact HistData.com or InfluxDB; it submits a local Temporal
+sidecar `DataQualityWorkflow` that runs CPU/file activities and writes detailed
+JSON reports as disk artifacts. Use it after downloading or extracting data,
+before trusting local ZIP, CSV, or cache artifacts for import, modeling, or
+backtesting.
 
 ```sh
 histdatacom --quality --quality-target data/ --quality-report reports/quality.json

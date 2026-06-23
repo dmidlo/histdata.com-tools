@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,13 +9,6 @@ from types import SimpleNamespace
 import pytest
 
 import histdatacom
-from histdatacom.data_quality import (
-    QualityFinding,
-    QualityLocation,
-    QualityReport,
-    QualityRuleResult,
-    QualitySeverity,
-)
 from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.options import Options
 from histdatacom.runtime_contracts import WorkStatus
@@ -109,6 +101,119 @@ def _sidecar_repository_result(
             "status": status,
             "stage_results": [stage_result],
             "artifacts": [],
+        },
+    )
+
+
+def _sidecar_quality_result(
+    *,
+    status: str = WorkStatus.COMPLETED.value,
+    target_count: int = 1,
+    finding_count: int = 0,
+    warning_count: int = 0,
+    error_count: int = 0,
+    exit_code: int = 0,
+    report_path: str = "/tmp/quality.json",
+    error: str = "",
+) -> SidecarJobResult:
+    """Return a sidecar result containing bounded quality metadata."""
+    quality_status = (
+        "failed" if error_count else "warning" if warning_count else "clean"
+    )
+    max_severity = (
+        "error" if error_count else "warning" if warning_count else "info"
+    )
+    quality = {
+        "operation": "data-quality",
+        "check_groups": ["inventory"],
+        "summary": {
+            "target_count": target_count,
+            "rule_count": 0,
+            "finding_count": finding_count,
+            "info_count": 0,
+            "warning_count": warning_count,
+            "error_count": error_count,
+            "status": quality_status,
+            "max_severity": max_severity,
+        },
+        "target_summaries": [
+            {
+                "target": {
+                    "path": "/tmp/DAT_ASCII_EURUSD_M1_201202.csv",
+                    "kind": "csv",
+                    "data_format": "ascii",
+                    "timeframe": "M1",
+                    "symbol": "EURUSD",
+                    "period": "201202",
+                    "metadata": {},
+                },
+                "rule_count": 1,
+                "finding_count": finding_count,
+                "info_count": 0,
+                "warning_count": warning_count,
+                "error_count": error_count,
+                "status": quality_status,
+                "max_severity": max_severity,
+            }
+            for _ in range(target_count)
+        ],
+        "report_schema_version": "histdatacom.quality-report.v1",
+        "report_artifact": {
+            "kind": "quality-report",
+            "path": report_path,
+            "size_bytes": 128,
+            "sha256": "quality-sha",
+            "metadata": {
+                "target_count": target_count,
+                "finding_count": finding_count,
+                "warning_count": warning_count,
+                "error_count": error_count,
+            },
+        },
+        "exit_decision": {
+            "exit_code": exit_code,
+            "reason": (
+                "quality error threshold exceeded"
+                if exit_code
+                else "quality report is within configured exit policy"
+            ),
+            "policy": {
+                "fail_on": "error",
+                "max_errors": 0,
+                "max_warnings": 0,
+            },
+        },
+    }
+    if error:
+        quality = {
+            "operation": "data-quality",
+            "report_schema_version": "histdatacom.quality-report.v1",
+            "error": error,
+        }
+    stage_result = {
+        "stage": "data_quality",
+        "status": status,
+        "metrics": {"quality": quality},
+        "artifacts": (
+            [quality["report_artifact"]] if "report_artifact" in quality else []
+        ),
+        "failure": None,
+    }
+    if status == WorkStatus.FAILED.value:
+        stage_result["failure"] = {
+            "code": "DATA_QUALITY_FAILED",
+            "message": error or "quality error threshold exceeded",
+            "retryable": False,
+            "detail": {},
+        }
+    return SidecarJobResult(
+        handle=_job_result().handle,
+        status="completed",
+        result={
+            "workflow_name": "HistDataRunWorkflow",
+            "status": status,
+            "stage_results": [stage_result],
+            "artifacts": stage_result["artifacts"],
         },
     )
 
@@ -230,23 +335,22 @@ def test_api_options_can_submit_sidecar_job_and_return_result(
 
 
 @pytest.mark.parametrize(
-    ("target_kind", "expected_count", "expected_text"),
+    ("target_kind", "expected_count"),
     (
-        ("directory", 2, "targets: 2"),
-        ("csv", 1, "csv:"),
-        ("zip", 1, "zip:"),
-        ("empty-directory", 0, "No data quality targets discovered."),
+        ("directory", 2),
+        ("csv", 1),
+        ("zip", 1),
+        ("empty-directory", 0),
     ),
 )
-def test_data_quality_cli_discovers_local_targets_without_sidecar(
+def test_data_quality_cli_submits_quality_request_to_sidecar(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     target_kind: str,
     expected_count: int,
-    expected_text: str,
 ) -> None:
-    """Quality CLI should discover local targets without starting sidecar."""
+    """Quality CLI should submit an offline quality request to sidecar."""
     import histdatacom.histdata_com as histdata_com
 
     root = tmp_path / target_kind
@@ -262,12 +366,17 @@ def test_data_quality_cli_discovers_local_targets_without_sidecar(
     if target_kind == "empty-directory":
         target_path.mkdir()
 
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _sidecar_quality_result(target_count=expected_count)
+
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
-        lambda *args, **kwargs: pytest.fail(
-            "quality mode should not submit to sidecar"
-        ),
+        fake_submit,
     )
     monkeypatch.setattr(
         sys,
@@ -283,25 +392,44 @@ def test_data_quality_cli_discovers_local_targets_without_sidecar(
     assert histdata_com.main() is None
 
     output = capsys.readouterr().out
+    request = captured["request"]
+    assert request.data_quality
+    assert request.quality_paths == (str(target_path),)
+    assert request.validate_urls is False
+    assert request.download_data_archives is False
+    assert request.extract_csvs is False
+    assert request.import_to_influxdb is False
+    assert captured["kwargs"] == {
+        "start_if_needed": True,
+        "wait_for_result": True,
+    }
     assert "Data quality assessment" in output
-    assert expected_text in output
     assert f"targets: {expected_count}" in output
 
 
-def test_data_quality_cli_missing_path_exits_without_sidecar(
+def test_data_quality_cli_missing_path_reports_sidecar_failure(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    """Missing quality targets should fail locally before any sidecar call."""
+    """Missing quality targets should surface sidecar activity failure."""
     import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _sidecar_quality_result(
+            status=WorkStatus.FAILED.value,
+            target_count=0,
+            error="quality target path does not exist",
+        )
 
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
-        lambda *args, **kwargs: pytest.fail(
-            "quality mode should not submit to sidecar"
-        ),
+        fake_submit,
     )
     monkeypatch.setattr(
         sys,
@@ -318,14 +446,17 @@ def test_data_quality_cli_missing_path_exits_without_sidecar(
         histdata_com.main()
 
     assert err.value.code == 1
-    assert "quality target path does not exist" in capsys.readouterr().err
+    assert captured["request"].data_quality
+    output = capsys.readouterr()
+    assert "quality target path does not exist" in output.out
+    assert "sidecar job failed" in output.err
 
 
-def test_data_quality_api_returns_discovery_payload_without_sidecar(
+def test_data_quality_api_returns_sidecar_quality_payload(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """API quality runs should return the same bounded discovery payload."""
+    """API quality runs should return the bounded sidecar quality payload."""
     import histdatacom.histdata_com as histdata_com
 
     csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
@@ -334,21 +465,29 @@ def test_data_quality_api_returns_discovery_payload_without_sidecar(
     options.quality_paths = (str(csv_path),)
     options.quality_check_groups = {"inventory"}
 
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _sidecar_quality_result(
+            target_count=1,
+            report_path=str(tmp_path / "quality.json"),
+        )
+
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
-        lambda *args, **kwargs: pytest.fail(
-            "quality mode should not submit to sidecar"
-        ),
+        fake_submit,
     )
 
     result = histdata_com.main(options)
 
+    assert captured["request"].data_quality
     assert result["operation"] == "data-quality"
     assert result["check_groups"] == ["inventory"]
-    assert result["discovery"]["target_count"] == 1
     assert result["summary"]["target_count"] == 1
-    assert result["report_artifact"] is None
+    assert result["report_artifact"]["kind"] == "quality-report"
     assert result["exit_decision"]["exit_code"] == 0
 
 
@@ -356,7 +495,7 @@ def test_data_quality_api_runs_inventory_rules_for_corrupt_zip(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """API quality runs should execute concrete inventory checks locally."""
+    """API quality runs should submit inventory checks to the sidecar."""
     import histdatacom.histdata_com as histdata_com
 
     archive = write_corrupt_zip(
@@ -369,26 +508,37 @@ def test_data_quality_api_runs_inventory_rules_for_corrupt_zip(
     options.quality_check_groups = {"inventory"}
     options.quality_report_path = str(tmp_path / "quality.json")
 
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _sidecar_quality_result(
+            status=WorkStatus.FAILED.value,
+            target_count=1,
+            finding_count=1,
+            error_count=1,
+            exit_code=1,
+            report_path=options.quality_report_path,
+        )
+
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
-        lambda *args, **kwargs: pytest.fail(
-            "quality mode should not submit to sidecar"
-        ),
+        fake_submit,
     )
 
     result = histdata_com.main(options)
 
+    request = captured["request"]
+    assert request.data_quality
+    assert request.quality_paths == (str(archive),)
+    assert request.quality_check_groups == ("inventory",)
+    assert request.quality_report_path == options.quality_report_path
     assert result["summary"]["status"] == "failed"
     assert result["summary"]["error_count"] == 1
     assert result["target_summaries"][0]["status"] == "failed"
-    assert result["target_summaries"][0]["target"]["kind"] == "zip"
-    assert result["target_summaries"][0]["target"]["symbol"] == "EURUSD"
-    report = json.loads(
-        Path(result["report_artifact"]["path"]).read_text(encoding="utf-8")
-    )
-    assert report["rule_results"][0]["rule_id"] == "inventory.zip.integrity"
-    assert report["rule_results"][0]["findings"][0]["code"] == "ZIP_CORRUPT"
+    assert result["report_artifact"]["path"] == options.quality_report_path
 
 
 def test_data_quality_api_writes_coverage_manifest_from_metadata(
@@ -423,36 +573,38 @@ def test_data_quality_api_writes_coverage_manifest_from_metadata(
         }
     }
 
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _sidecar_quality_result(
+            status=WorkStatus.FAILED.value,
+            target_count=1,
+            finding_count=1,
+            error_count=1,
+            exit_code=1,
+            report_path=options.quality_report_path,
+        )
+
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
-        lambda *args, **kwargs: pytest.fail(
-            "quality mode should not submit to sidecar"
-        ),
+        fake_submit,
     )
 
     result = histdata_com.main(options)
 
-    assert result["summary"]["status"] == "failed"
-    report = json.loads(
-        Path(result["report_artifact"]["path"]).read_text(encoding="utf-8")
+    request = captured["request"]
+    assert request.data_quality
+    assert request.quality_paths == (str(csv_path),)
+    assert request.quality_check_groups == ("inventory",)
+    assert (
+        request.metadata["coverage_manifest"]
+        == options.metadata["coverage_manifest"]
     )
-    manifest = report["metadata"]["coverage_manifest"]
-    assert manifest["expected_source"] == "metadata"
-    assert manifest["missing"] == [
-        {
-            "data_format": "ascii",
-            "timeframe": "M1",
-            "symbol": "EURUSD",
-            "period": "201203",
-        }
-    ]
-    finding_codes = [
-        finding["code"]
-        for result in report["rule_results"]
-        for finding in result["findings"]
-    ]
-    assert "COVERAGE_PERIOD_MISSING" in finding_codes
+    assert result["summary"]["status"] == "failed"
+    assert result["report_artifact"]["path"] == options.quality_report_path
 
 
 def test_data_quality_cli_writes_json_report_artifact(
@@ -465,12 +617,18 @@ def test_data_quality_cli_writes_json_report_artifact(
 
     csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
     report_path = tmp_path / "reports" / "quality.json"
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _sidecar_quality_result(report_path=str(report_path.resolve()))
+
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
-        lambda *args, **kwargs: pytest.fail(
-            "quality mode should not submit to sidecar"
-        ),
+        fake_submit,
     )
     monkeypatch.setattr(
         sys,
@@ -488,21 +646,11 @@ def test_data_quality_cli_writes_json_report_artifact(
     assert histdata_com.main() is None
 
     output = capsys.readouterr().out
-    assert "status: warning" in output
-    assert "Clean files\n- none" in output
-    assert "Warning files" in output
+    assert captured["request"].quality_report_path == str(report_path)
+    assert "Clean files" in output
+    assert "Warning files\n- none" in output
     assert "Failed files\n- none" in output
     assert f"report: {report_path.resolve()}" in output
-    report = json.loads(report_path.read_text(encoding="utf-8"))
-    finding_codes = [
-        finding["code"]
-        for result in report["rule_results"]
-        for finding in result["findings"]
-    ]
-    assert report["schema_version"] == "histdatacom.quality-report.v1"
-    assert "MODELING_BID_ONLY_EXECUTION_RISK" in finding_codes
-    assert "MODELING_CURRENT_BAR_LEAKAGE_RISK" in finding_codes
-    assert "MODELING_SPREAD_COST_MISSING" in finding_codes
 
 
 def test_data_quality_cli_exit_policy_fails_on_errors(
@@ -515,36 +663,24 @@ def test_data_quality_cli_exit_policy_fails_on_errors(
 
     csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
 
-    def fake_assessment(targets, rules, *, run_rules=(), metadata=None):
-        target = tuple(targets)[0]
-        finding = QualityFinding(
-            severity=QualitySeverity.ERROR,
-            code="FILE_MISSING",
-            message="expected local file is missing",
-            rule_id="file.exists",
-            target=target,
-            location=QualityLocation(path=target.path),
-        )
-        return QualityReport(
-            targets=(target,),
-            rule_results=(
-                QualityRuleResult(
-                    rule_id="file.exists",
-                    target=target,
-                    findings=(finding,),
-                ),
-            ),
-            metadata=dict(metadata or {}),
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _sidecar_quality_result(
+            status=WorkStatus.FAILED.value,
+            target_count=1,
+            finding_count=1,
+            error_count=1,
+            exit_code=1,
         )
 
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
-        lambda *args, **kwargs: pytest.fail(
-            "quality mode should not submit to sidecar"
-        ),
+        fake_submit,
     )
-    monkeypatch.setattr(histdata_com, "run_quality_assessment", fake_assessment)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -562,9 +698,11 @@ def test_data_quality_cli_exit_policy_fails_on_errors(
         histdata_com.main()
 
     assert err.value.code == 1
+    assert captured["request"].quality_fail_on == "error"
     output = capsys.readouterr().out
     assert "status: failed" in output
-    assert "Failed files\n- csv:" in output
+    assert "findings: 1 info: 0 warning: 0 error: 1" in output
+    assert "decision: quality error threshold exceeded" in output
 
 
 def test_back_to_back_sidecar_api_calls_do_not_leak_global_args(

@@ -4,9 +4,8 @@ Issue: #169
 
 This runbook documents the local Temporal sidecar model used by
 `histdatacom`. It is written for users, operators, contributors, and the
-future GUI surface. Data-quality assessments are available as a local-only
-operation for already-downloaded datasets; normal download, extraction, cache,
-API, and import jobs continue to use the Temporal sidecar runtime by default.
+future GUI surface. Data-quality operations run as offline CPU/file activities
+and persist detailed reports as disk artifacts.
 
 ## Current Packaging Status
 
@@ -706,9 +705,12 @@ InfluxDB unavailable:
 Data-quality checks:
 
 - `histdatacom --quality` runs offline against local files and directories and
-  does not submit a Temporal workflow. It is the operator path for assessing
-  ZIP archives, extracted CSV files, and `.data` cache files that already exist
-  on disk.
+  submits a `DataQualityWorkflow` to the CPU/file lane. It is the operator path
+  for assessing ZIP archives, extracted CSV files, and `.data` cache files that
+  already exist on disk; the workflow does not contact HistData.com or InfluxDB.
+- The activity writes the detailed `quality-report` JSON artifact on disk and
+  keeps workflow history limited to counters, policy decisions, progress,
+  failures, and artifact references.
 - Quality mode supports focused groups with `--quality-checks`: `inventory`,
   `ingestion`, `time`, `bars`, `ticks`, `domain`, and `modeling`. The default
   is `all`.

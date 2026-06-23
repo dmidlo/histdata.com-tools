@@ -127,6 +127,13 @@ def test_run_request_round_trips_options_payload() -> None:
     options.validate_urls = True
     options.download_data_archives = True
     options.extract_csvs = True
+    options.data_quality = True
+    options.quality_paths = ("data/DAT_ASCII_EURUSD_M1_202001.csv",)
+    options.quality_check_groups = {"inventory", "time"}
+    options.quality_report_path = "reports/quality.json"
+    options.quality_fail_on = "warning"
+    options.quality_max_errors = 2
+    options.quality_max_warnings = 5
 
     request = RunRequest.from_options(options, request_id="run-test")
     restored = RunRequest.from_dict(json.loads(json.dumps(request.to_dict())))
@@ -140,6 +147,13 @@ def test_run_request_round_trips_options_payload() -> None:
     assert restored.validate_urls
     assert restored.download_data_archives
     assert restored.extract_csvs
+    assert restored.data_quality
+    assert restored.quality_paths == ("data/DAT_ASCII_EURUSD_M1_202001.csv",)
+    assert restored.quality_check_groups == ("inventory", "time")
+    assert restored.quality_report_path == "reports/quality.json"
+    assert restored.quality_fail_on == "warning"
+    assert restored.quality_max_errors == 2
+    assert restored.quality_max_warnings == 5
 
 
 def test_stage_result_round_trips_artifacts_events_and_failure() -> None:

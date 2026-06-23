@@ -24,6 +24,19 @@ from histdatacom.cancellation import (
     operation_resume_metadata,
     partial_artifact_candidates,
 )
+from histdatacom.data_quality import (
+    QUALITY_REPORT_SCHEMA_VERSION,
+    QualityDiscoveryError,
+    QualityExitPolicy,
+    bounded_quality_payload,
+    coverage_manifest_metadata,
+    discover_quality_targets,
+    normalize_quality_check_groups,
+    quality_rules_for_groups,
+    quality_run_rules_for_groups,
+    run_quality_assessment,
+    write_quality_report,
+)
 from histdatacom.exceptions import (
     CancellationOperationError,
     influx_failure_info,
@@ -239,6 +252,120 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
         output_payload.pop("work_items", None)
     _raise_for_retryable_activity_result(output.result)
     return output_payload
+
+
+@activity_defn(name="data_quality")
+def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
+    """Run offline quality assessment and persist details as an artifact."""
+    request = RunRequest.from_dict(_mapping(payload.get("request", {})))
+    if _activity_cancelled():
+        result = _observe_and_persist_stage_result(
+            _cancelled_stage_result(
+                "data_quality",
+                work_id=request.request_id,
+            ),
+            total=0,
+            completed=0,
+            unit="targets",
+            increment=0,
+            payload=payload,
+            request=request,
+        )
+        return {"result": result.to_dict()}
+
+    try:
+        check_groups = normalize_quality_check_groups(
+            request.quality_check_groups
+        )
+        discovery = discover_quality_targets(request.quality_paths)
+        exit_policy = QualityExitPolicy.from_values(
+            fail_on=request.quality_fail_on,
+            max_errors=request.quality_max_errors,
+            max_warnings=request.quality_max_warnings,
+        )
+        report = run_quality_assessment(
+            discovery.targets,
+            quality_rules_for_groups(check_groups),
+            run_rules=quality_run_rules_for_groups(check_groups),
+            metadata={
+                "operation": "data-quality",
+                "check_groups": list(check_groups),
+                "request_id": request.request_id,
+                "coverage_manifest": coverage_manifest_metadata(
+                    roots=discovery.roots,
+                    request=request.to_dict(),
+                    expected_dimensions=_quality_expected_dimensions(
+                        request.metadata
+                    ),
+                ),
+            },
+        )
+        artifact = write_quality_report(report, _quality_report_path(request))
+        decision = exit_policy.evaluate(report.summary())
+        quality_payload = bounded_quality_payload(
+            operation="data-quality",
+            check_groups=check_groups,
+            discovery=discovery.to_dict(),
+            report=report,
+            decision=decision,
+            artifact=artifact,
+        )
+        result = StageResult(
+            work_id=request.request_id,
+            stage="data_quality",
+            status=(
+                WorkStatus.FAILED
+                if int(decision.exit_code)
+                else WorkStatus.COMPLETED
+            ),
+            artifacts=(artifact,),
+            failure=(
+                FailureInfo(
+                    code="DATA_QUALITY_FAILED",
+                    message=decision.reason,
+                    retryable=False,
+                )
+                if int(decision.exit_code)
+                else None
+            ),
+            metrics={
+                "quality": quality_payload,
+                "quality_report_path": artifact.path,
+                "quality_report_sha256": artifact.sha256,
+            },
+        )
+        total_targets = report.summary().target_count
+        completed_targets = total_targets
+    except (QualityDiscoveryError, ValueError, OSError) as err:
+        quality_payload = {
+            "operation": "data-quality",
+            "report_schema_version": QUALITY_REPORT_SCHEMA_VERSION,
+            "error": str(err),
+        }
+        result = StageResult(
+            work_id=request.request_id,
+            stage="data_quality",
+            status=WorkStatus.FAILED,
+            failure=FailureInfo(
+                code="DATA_QUALITY_ERROR",
+                message=str(err),
+                retryable=False,
+            ),
+            metrics={"quality": quality_payload},
+        )
+        total_targets = 0
+        completed_targets = 0
+
+    result = _observe_and_persist_stage_result(
+        result,
+        total=total_targets,
+        completed=completed_targets,
+        unit="targets",
+        payload=payload,
+        request=request,
+    )
+    _raise_for_retryable_activity_result(result)
+    return {"result": result.to_dict(), "quality": quality_payload}
 
 
 @activity_defn(name="validate_urls")
@@ -538,6 +665,7 @@ def default_activities() -> tuple[Callable[..., Any], ...]:
     return (
         repository_refresh_activity,
         dataset_plan_activity,
+        data_quality_activity,
         validate_urls_activity,
         download_archives_activity,
         extract_csv_activity,
@@ -550,6 +678,28 @@ def default_activities() -> tuple[Callable[..., Any], ...]:
 def _repo_local_path(request: RunRequest) -> Path:
     data_dir = Path(set_working_data_dir(request.data_directory))
     return data_dir / ".repo"
+
+
+def _quality_report_path(request: RunRequest) -> Path:
+    if request.quality_report_path:
+        return Path(request.quality_report_path)
+    data_dir = Path(set_working_data_dir(request.data_directory))
+    request_id = request.request_id.strip() or "request"
+    return data_dir / ".quality" / "reports" / f"{request_id}.json"
+
+
+def _quality_expected_dimensions(
+    metadata: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], ...] | None:
+    coverage = metadata.get("coverage_manifest")
+    if isinstance(coverage, Mapping):
+        expected = coverage.get("expected_dimensions")
+        if isinstance(expected, list):
+            return tuple(item for item in expected if isinstance(item, Mapping))
+    expected = metadata.get("quality_expected_dimensions")
+    if isinstance(expected, list):
+        return tuple(item for item in expected if isinstance(item, Mapping))
+    return None
 
 
 def _influx_args(request: RunRequest) -> dict[str, Any]:
@@ -1023,7 +1173,8 @@ def _influx_failure_output(
 
 
 def _influx_failure_info(err: Exception | SystemExit) -> FailureInfo:
-    return influx_failure_info(err)
+    failure: FailureInfo = influx_failure_info(err)
+    return failure
 
 
 def _mapping(value: Any) -> dict[str, Any]:
