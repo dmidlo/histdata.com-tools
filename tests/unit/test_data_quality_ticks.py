@@ -5,8 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from histdatacom.data_quality import (
+    ASCII_TICK_MICROSTRUCTURE_RULE_ID,
     ASCII_TICK_SPREAD_RULE_ID,
+    HistDataAsciiTickMicrostructureRule,
     HistDataAsciiTickSpreadRule,
+    HistDataTickMicrostructureThresholds,
     HistDataTickSpreadThresholds,
     QualitySeverity,
     QualityStatus,
@@ -29,6 +32,7 @@ def test_ticks_group_registers_spread_rule() -> None:
     """The advertised ticks group should execute spread checks."""
     assert [rule.rule_id for rule in quality_rules_for_groups(("ticks",))] == [
         ASCII_TICK_SPREAD_RULE_ID,
+        ASCII_TICK_MICROSTRUCTURE_RULE_ID,
     ]
 
 
@@ -39,9 +43,14 @@ def test_clean_tick_file_reports_spread_summary(
     report = _report_for_path(write_ascii_case(tmp_path, CLEAN_TICK_CASE))
 
     summary = _finding(report.findings, "ASCII_TICK_SPREAD_SUMMARY")
+    microstructure = _finding(
+        report.findings,
+        "ASCII_TICK_MICROSTRUCTURE_SUMMARY",
+    )
     assert report.status is QualityStatus.CLEAN
     assert [finding.code for finding in report.findings] == [
         "ASCII_TICK_SPREAD_SUMMARY",
+        "ASCII_TICK_MICROSTRUCTURE_SUMMARY",
     ]
     assert summary.rule_id == ASCII_TICK_SPREAD_RULE_ID
     assert summary.severity is QualitySeverity.INFO
@@ -56,6 +65,11 @@ def test_clean_tick_file_reports_spread_summary(
     assert summary.metadata["price_columns"] == ["bid", "ask"]
     assert summary.metadata["min_spread"] > 0.0
     assert summary.metadata["max_spread"] > 0.0
+    assert microstructure.rule_id == ASCII_TICK_MICROSTRUCTURE_RULE_ID
+    assert microstructure.metadata["duplicate_row_count"] == 0
+    assert microstructure.metadata["stale_quote_run_count"] == 0
+    assert microstructure.metadata["burst_run_count"] == 0
+    assert microstructure.metadata["one_sided_run_count"] == 0
 
 
 def test_m1_files_are_ignored_by_tick_spread_rule(
@@ -155,6 +169,170 @@ def test_zero_spread_run_threshold_is_configurable(
     assert report.status is QualityStatus.CLEAN
     assert summary.metadata["zero_spread_count"] == 2
     assert summary.metadata["zero_spread_run_count"] == 0
+
+
+def test_tick_microstructure_summarizes_duplicate_rows_without_warning(
+    tmp_path: Path,
+) -> None:
+    """Exact duplicate tick findings stay owned by the timestamp rule."""
+    report = _report_for_path(
+        write_ascii_case(tmp_path, case_by_name("tick_duplicate_row")),
+        rules=(HistDataAsciiTickMicrostructureRule(),),
+    )
+
+    summary = _finding(report.findings, "ASCII_TICK_MICROSTRUCTURE_SUMMARY")
+    assert report.status is QualityStatus.CLEAN
+    assert summary.metadata["duplicate_row_count"] == 1
+    assert summary.metadata["duplicate_detection"] == {
+        "summary_only": True,
+        "owner_rule_id": "time.ascii.timestamp_sequence",
+        "owner_finding_code": "ASCII_TICK_DUPLICATE_ROW",
+    }
+    duplicate = summary.metadata["duplicate_samples"][0]
+    assert duplicate["row_number"] == 2
+    assert duplicate["metadata"]["duplicate_of_row"] == 1
+    assert duplicate["metadata"]["dedupe_policy"] == "summary-only"
+
+
+def test_tick_microstructure_detects_stale_quote_runs(
+    tmp_path: Path,
+) -> None:
+    """Repeated bid/ask quotes inside the active gap window should warn."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="tick_stale_quote_run",
+            timeframe=TICK,
+            filename="DAT_ASCII_EURUSD_T_201202_STALE.csv",
+            rows=(
+                "20120201 000003660,1.306600,1.306770,0",
+                "20120201 000004660,1.306600,1.306770,25",
+                "20120201 000005660,1.306600,1.306770,25",
+                "20120201 000006660,1.306610,1.306780,25",
+            ),
+        ),
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_TICK_MICROSTRUCTURE_SUMMARY")
+    finding = _finding(report.findings, "ASCII_TICK_STALE_QUOTE_RUN")
+    assert report.status is QualityStatus.WARNING
+    assert summary.metadata["stale_quote_repeat_count"] == 2
+    assert summary.metadata["stale_quote_run_count"] == 1
+    assert summary.metadata["stale_quote_run_row_count"] == 3
+    assert finding.location.row_number == 1
+    assert finding.location.timestamp_source == "20120201 000003660"
+    assert finding.location.metadata["run_length"] == 3
+    assert finding.metadata["samples"][0]["run_end_row_number"] == 3
+
+
+def test_tick_microstructure_detects_tick_bursts(
+    tmp_path: Path,
+) -> None:
+    """Dense timestamp clusters should warn as possible batched ticks."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="tick_burst",
+            timeframe=TICK,
+            filename="DAT_ASCII_EURUSD_T_201202_BURST.csv",
+            rows=(
+                "20120201 000003660,1.306600,1.306770,0",
+                "20120201 000003700,1.306610,1.306780,25",
+                "20120201 000003750,1.306620,1.306790,25",
+                "20120201 000014990,1.306630,1.306800,25",
+            ),
+        ),
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_TICK_MICROSTRUCTURE_SUMMARY")
+    finding = _finding(report.findings, "ASCII_TICK_BURST_RUN")
+    assert report.status is QualityStatus.WARNING
+    assert summary.metadata["burst_interval_count"] == 2
+    assert summary.metadata["burst_run_count"] == 1
+    assert summary.metadata["burst_tick_count"] == 3
+    assert finding.location.row_number == 1
+    assert finding.location.column == "datetime"
+    assert finding.location.metadata["run_length"] == 3
+    assert finding.metadata["samples"][0]["metadata"]["duration_ms"] == 90
+
+
+def test_tick_microstructure_detects_one_sided_quote_runs(
+    tmp_path: Path,
+) -> None:
+    """Bid-only or ask-only quote movement should be profiled."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="tick_one_sided_bid",
+            timeframe=TICK,
+            filename="DAT_ASCII_EURUSD_T_201202_ONE_SIDED.csv",
+            rows=(
+                "20120201 000003660,1.306600,1.306770,0",
+                "20120201 000004660,1.306610,1.306770,25",
+                "20120201 000005660,1.306620,1.306770,25",
+                "20120201 000006660,1.306630,1.306790,25",
+            ),
+        ),
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_TICK_MICROSTRUCTURE_SUMMARY")
+    finding = _finding(report.findings, "ASCII_TICK_ONE_SIDED_QUOTE_RUN")
+    assert report.status is QualityStatus.WARNING
+    assert summary.metadata["one_sided_movement_count"] == 2
+    assert summary.metadata["one_sided_run_count"] == 1
+    assert summary.metadata["bid_only_movement_count"] == 2
+    assert summary.metadata["ask_only_movement_count"] == 0
+    assert finding.location.row_number == 2
+    assert finding.location.metadata["direction"] == "bid_only"
+    assert finding.location.metadata["previous_row_number"] == 1
+    assert finding.metadata["samples"][0]["run_end_row_number"] == 3
+
+
+def test_tick_microstructure_thresholds_are_symbol_session_configurable(
+    tmp_path: Path,
+) -> None:
+    """Symbol/session profiles should override default warning thresholds."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="tick_one_sided_below_session_threshold",
+            timeframe=TICK,
+            filename="DAT_ASCII_EURUSD_T_201202_ONE_SIDED_OK.csv",
+            rows=(
+                "20120201 000003660,1.306600,1.306770,0",
+                "20120201 000004660,1.306610,1.306770,25",
+                "20120201 000005660,1.306620,1.306770,25",
+            ),
+        ),
+    )
+    report = _report_for_path(
+        path,
+        rules=(
+            HistDataAsciiTickMicrostructureRule(
+                session_name="rollover",
+                thresholds_by_symbol_session={
+                    "EURUSD:rollover": HistDataTickMicrostructureThresholds(
+                        one_sided_run_length=3,
+                    )
+                },
+            ),
+        ),
+    )
+
+    summary = _finding(report.findings, "ASCII_TICK_MICROSTRUCTURE_SUMMARY")
+    assert report.status is QualityStatus.CLEAN
+    assert summary.metadata["one_sided_movement_count"] == 2
+    assert summary.metadata["one_sided_run_count"] == 0
+    assert summary.metadata["threshold_profile"]["source"] == "symbol-session"
+    assert summary.metadata["threshold_profile"]["profile_key"] == (
+        "EURUSD:rollover"
+    )
 
 
 def test_missing_tick_bid_or_ask_field_is_schema_error(
