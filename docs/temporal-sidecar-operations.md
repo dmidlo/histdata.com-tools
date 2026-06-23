@@ -4,8 +4,9 @@ Issue: #169
 
 This runbook documents the local Temporal sidecar model used by
 `histdatacom`. It is written for users, operators, contributors, and the
-future GUI surface. Data-quality operations are intentionally deferred until
-the runtime foundation is stable.
+future GUI surface. Data-quality assessments are available as a local-only
+operation for already-downloaded datasets; normal download, extraction, cache,
+API, and import jobs continue to use the Temporal sidecar runtime by default.
 
 ## Current Packaging Status
 
@@ -704,9 +705,104 @@ InfluxDB unavailable:
 
 Data-quality checks:
 
-- The runtime records status, artifacts, and failures. It does not yet run the
-  future data-quality assessment operations. Those checks remain deferred to
-  the data-quality issue block.
+- `histdatacom --quality` runs offline against local files and directories and
+  does not submit a Temporal workflow. It is the operator path for assessing
+  ZIP archives, extracted CSV files, and `.data` cache files that already exist
+  on disk.
+- Quality mode supports focused groups with `--quality-checks`: `inventory`,
+  `ingestion`, `time`, `bars`, `ticks`, `domain`, and `modeling`. The default
+  is `all`.
+- Use `--quality-report PATH` to write the full JSON report. The report schema
+  is `histdatacom.quality-report.v1`; console output remains a bounded human
+  summary with clean, warning, and failed file sections.
+- Warnings are advisory by default. Errors make a target failed and make the
+  process exit nonzero under the default `--quality-fail-on error` policy.
+  CI jobs that want warnings to fail should pass
+  `--quality-fail-on warning --quality-max-warnings 0`; report-only jobs can
+  pass `--quality-fail-on never`.
+- The checks encode HistData-specific assumptions: ASCII M1 files are bid OHLC
+  bars, ASCII tick files include bid and ask, and source timestamps are fixed
+  EST with no daylight-saving adjustment before UTC normalization.
+
+Example clean focused ingestion run:
+
+```sh
+histdatacom --quality \
+  --quality-target data/DAT_ASCII_EURUSD_M1_201202.csv \
+  --quality-checks ingestion \
+  --quality-report reports/quality-clean.json
+```
+
+```txt
+Data quality assessment
+checks: ingestion
+status: clean
+targets: 1 clean: 1 warning: 0 failed: 0
+findings: 1 info: 1 warning: 0 error: 0
+
+Clean files
+- csv: /path/to/data/DAT_ASCII_EURUSD_M1_201202.csv (findings=1, warnings=0, errors=0)
+
+Warning files
+- none
+
+Failed files
+- none
+```
+
+Example failing ingestion run:
+
+```sh
+histdatacom --quality \
+  --quality-target data/bad/ \
+  --quality-checks ingestion \
+  --quality-report reports/quality-failing.json
+```
+
+```txt
+Data quality assessment
+checks: ingestion
+status: failed
+targets: 1 clean: 0 warning: 0 failed: 1
+findings: 2 info: 1 warning: 0 error: 1
+
+Clean files
+- none
+
+Warning files
+- none
+
+Failed files
+- csv: /path/to/data/bad/DAT_ASCII_EURUSD_M1_201202_BAD.csv (findings=2, warnings=0, errors=1)
+```
+
+Representative JSON report fields:
+
+```json
+{
+  "schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "status": "failed",
+    "target_count": 1,
+    "warning_count": 0,
+    "error_count": 1
+  },
+  "rule_results": [
+    {
+      "rule_id": "ingestion.ascii.schema",
+      "findings": [
+        {
+          "code": "ASCII_ROW_FIELD_COUNT_INVALID",
+          "severity": "error",
+          "location": {
+            "row_number": 2
+          }
+        }
+      ]
+    }
+  ]
+}
+```
 
 ## Contributor Testing Strategy
 

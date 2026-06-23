@@ -26,6 +26,10 @@ Works on MacOS, Linux & Windows Systems.
   - [Import to InfluxDB](#import-to-influxdb)
     - [Docker-backed InfluxDB Smoke](#docker-backed-influxdb-smoke)
     - [influxdb.yaml](#influxdbyaml)
+  - [Data Quality Assessments](#data-quality-assessments)
+    - [Quality Targets and Check Groups](#quality-targets-and-check-groups)
+    - [Clean and Failing Examples](#clean-and-failing-examples)
+    - [Warning, Error, and Exit Policy](#warning-error-and-exit-policy)
   - [Temporal Sidecar Compatibility](#temporal-sidecar-compatibility)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Lifecycle and Diagnostics](#lifecycle-and-diagnostics)
@@ -77,58 +81,98 @@ histdatacom -h
 ```
 
 ```txt
-histdatacom -h
 usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION]
-                   [--data-directory DATA_DIRECTORY] [--sidecar] [--sidecar-start] [--no-sidecar-start] [--sidecar-submit-only]
+                   [--data-directory DATA_DIRECTORY] [--sidecar] [--sidecar-start] [--no-sidecar-start] [--sidecar-submit-only] [--quality] [--quality-target PATH [PATH ...]] [--quality-checks GROUP [GROUP ...]]
+                   [--quality-report PATH] [--quality-fail-on SEVERITY] [--quality-max-errors COUNT] [--quality-max-warnings COUNT]
 
 options:
   -h, --help            show this help message and exit
 
 Mode:
-  -V, --validate_urls   Check generated list of URLs as valid download locations
+  -V, --validate_urls   Check generated list of URLs as valid download
+                        locations
   -D, --download_data_archives
-                        download specified pairs/formats/timeframe and create data files
-  -X, --extract_csvs    histdata.com delivers zip files. Use the -X flag to extract them.
+                        download specified pairs/formats/timeframe and create
+                        data files
+  -X, --extract_csvs    histdata.com delivers zip files. Use the -X flag to
+                        extract them.
 
 Config:
-  -p PAIR [PAIR ...], --pairs PAIR [PAIR ...]
-                        space separated currency pairs. e.g. -p eurusd usdjpy ...
-  -f FORMAT [FORMAT ...], --formats FORMAT [FORMAT ...]
-                        space separated formats. -f metatrader ascii ninjatrader metastock
-  -t TIMEFRAME [TIMEFRAME ...], --timeframes TIMEFRAME [TIMEFRAME ...]
-                        space separated Timeframes. -t tick-data-quotes 1-minute-bar-quotes
-  -s START_YEARMONTH, --start_yearmonth START_YEARMONTH
-                        set a start year and month for data. e.g. -s 2000-04 or -s 2015-00
-  -e END_YEARMONTH, --end_yearmonth END_YEARMONTH
-                        set a start year and month for data. e.g. -e 2020-00 or -e 2022-04
+  -p, --pairs PAIR [PAIR ...]
+                        space separated currency pairs. e.g. -p eurusd usdjpy
+                        ...
+  -f, --formats FORMAT [FORMAT ...]
+                        space separated formats. -f metatrader ascii
+                        ninjatrader metastock
+  -t, --timeframes TIMEFRAME [TIMEFRAME ...]
+                        space separated Timeframes. -t tick-data-quotes
+                        1-minute-bar-quotes
+  -s, --start_yearmonth START_YEARMONTH
+                        set a start year and month for data. e.g. -s 2000-04
+                        or -s 2015-00
+  -e, --end_yearmonth END_YEARMONTH
+                        set a start year and month for data. e.g. -e 2020-00
+                        or -e 2022-04
 
 Influxdb:
   -I, --import_to_influxdb
-                        import data to influxdb instance. Use influxdb.yaml to configure.
+                        import data to influxdb instance. Use influxdb.yaml to
+                        configure.
   -d, --delete_after_influx
                         delete data files after upload to influxdb
-  -b BATCH_SIZE, --batch_size BATCH_SIZE
-                        (integer) influxdb write_api batch size. defaults to 5000
+  -b, --batch_size BATCH_SIZE
+                        (integer) influxdb write_api batch size. defaults to
+                        5000
 
 System:
-  -c CPU_UTILIZATION, --cpu_utilization CPU_UTILIZATION
-                        "low", "medium", "high". High uses all available CPUs OR integer percent 1-200
+  -c, --cpu_utilization CPU_UTILIZATION
+                        "low", "medium", "high". High uses all available CPUs
+                        OR integer percent 1-200
   --data-directory DATA_DIRECTORY
                         Directory Used to save data. default is "./data/"
 
 Sidecar:
-  --sidecar             submit this run to the local Temporal sidecar (default runtime)
-  --sidecar-start       start the sidecar server and worker fleet only when no healthy sidecar is running
-  --no-sidecar-start    submit to the sidecar only when a healthy sidecar is already running
+  --sidecar             submit this run to the local Temporal sidecar (default
+                        runtime)
+  --sidecar-start       start the sidecar server and worker fleet only when no
+                        healthy sidecar is running
+  --no-sidecar-start    submit to the sidecar only when a healthy sidecar is
+                        already running
   --sidecar-submit-only
                         submit the sidecar job without waiting for its result
+
+Data quality:
+  --quality             run offline data-quality assessment against local
+                        datasets without contacting HistData.com
+  --quality-target, --quality-path PATH [PATH ...]
+                        local file or directory to assess; supports
+                        directories, HistData ZIP archives, CSV files, and
+                        .data cache files
+  --quality-checks GROUP [GROUP ...]
+                        quality check groups to run; defaults to all.
+                        Supported: all, inventory, ingestion, time, bars,
+                        ticks, domain, modeling
+  --quality-report PATH
+                        write the full machine-readable JSON quality report to
+                        PATH
+  --quality-fail-on SEVERITY
+                        exit non-zero when configured thresholds are exceeded
+                        for error, warning, or never. Defaults to error
+  --quality-max-errors COUNT
+                        maximum error findings allowed before quality mode
+                        exits non-zero; defaults to 0
+  --quality-max-warnings COUNT
+                        maximum warning findings allowed before quality mode
+                        exits non-zero when --quality-fail-on warning is
+                        selected; defaults to 0
 
 Info:
   -A, --available_remote_data
                         list data retrievable from histdata.com
   -U, --update_remote_data
                         update list of data retrievable from histdata.com
-  --by BY               With -A, -U, to sort --by [pair_asc, pair_dsc, start_asc, start_dsc]
+  --by BY               With -A, -U, to sort --by [pair_asc, pair_dsc,
+                        start_asc, start_dsc]
   --version             return current version of histdatacom.
 ```
 
@@ -324,6 +368,204 @@ influxdb:
 ```shell
 curl "https://raw.githubusercontent.com/dmidlo/histdata.com-tools/main/influxdb.sample.yaml" --output influxdb.yaml
 ```
+
+---
+
+### Data Quality Assessments
+
+`histdatacom --quality` runs offline checks against datasets that are already on
+disk. It does not contact HistData.com and does not submit a Temporal sidecar
+job. Use it after downloading or extracting data, before trusting local ZIP,
+CSV, or cache artifacts for import, modeling, or backtesting.
+
+```sh
+histdatacom --quality --quality-target data/ --quality-report reports/quality.json
+```
+
+The command prints a human summary and can also write a full JSON report. If no
+`--quality-target` is passed, quality mode uses the configured data directory.
+Targets can be plain HistData CSV files, HistData ZIP archives, directories
+containing those files, or the canonical `.data` cache file.
+
+#### Quality Targets and Check Groups
+
+Quality groups are composable. `all` is the default and cannot be combined with
+specific groups in the same command.
+
+```sh
+histdatacom --quality --quality-target data/ --quality-checks inventory ingestion
+histdatacom --quality --quality-target data/DAT_ASCII_EURUSD_M1_201202.csv --quality-checks time bars
+histdatacom --quality --quality-target data/DAT_ASCII_EURUSD_T_201202.zip --quality-checks ticks domain
+```
+
+Supported groups:
+
+| Group | Scope |
+| --- | --- |
+| `inventory` | ZIP integrity, filename metadata, expected coverage manifest |
+| `ingestion` | text readability, line endings, delimiter/header checks, schema and typed parsing, row-count anomalies |
+| `time` | EST-no-DST to UTC normalization, month boundaries, ordering, duplicates, granularity, gaps, cross-file continuity |
+| `bars` | M1 bid OHLC integrity, positive prices, precision, outliers, tick-to-M1 reconstruction |
+| `ticks` | tick bid/ask ordering, spread, duplicate/stale/burst/one-sided quote behavior, spread regimes |
+| `domain` | symbol metadata, quote conventions, calendar/session tags, cross-instrument consistency |
+| `modeling` | advisory modeling-readiness checks for bid-only bars, leakage risk, spread-cost assumptions, target horizon feasibility |
+
+HistData-specific assumptions are reported directly in findings:
+
+- ASCII M1 rows are bid-based OHLCV bars.
+- ASCII tick rows include bid and ask values.
+- HistData timestamps are interpreted as fixed EST with no daylight-saving
+  adjustment and normalized to UTC.
+- M1 `volume` is not treated as automatically meaningful or required for
+  market-quality decisions.
+
+#### Clean and Failing Examples
+
+A focused ingestion run against a clean M1 CSV reports a clean file and writes a
+machine-readable report:
+
+```sh
+histdatacom --quality \
+  --quality-target data/DAT_ASCII_EURUSD_M1_201202.csv \
+  --quality-checks ingestion \
+  --quality-report reports/quality-clean.json
+```
+
+```txt
+Data quality assessment
+checks: ingestion
+status: clean
+targets: 1 clean: 1 warning: 0 failed: 0
+findings: 1 info: 1 warning: 0 error: 0
+report: /path/to/reports/quality-clean.json
+
+Clean files
+- csv: /path/to/data/DAT_ASCII_EURUSD_M1_201202.csv (findings=1, warnings=0, errors=0)
+
+Warning files
+- none
+
+Failed files
+- none
+```
+
+The JSON report includes deterministic top-level summary fields:
+
+```json
+{
+  "schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 0,
+    "finding_count": 1,
+    "info_count": 1,
+    "max_severity": "info",
+    "rule_count": 3,
+    "status": "clean",
+    "target_count": 1,
+    "warning_count": 0
+  }
+}
+```
+
+A malformed M1 CSV fails ingestion and exits nonzero by default because
+`--quality-fail-on error` with `--quality-max-errors 0` is the default policy:
+
+```sh
+histdatacom --quality \
+  --quality-target data/bad/ \
+  --quality-checks ingestion \
+  --quality-report reports/quality-failing.json
+```
+
+```txt
+Data quality assessment
+checks: ingestion
+status: failed
+targets: 1 clean: 0 warning: 0 failed: 1
+findings: 2 info: 1 warning: 0 error: 1
+report: /path/to/reports/quality-failing.json
+
+Clean files
+- none
+
+Warning files
+- none
+
+Failed files
+- csv: /path/to/data/bad/DAT_ASCII_EURUSD_M1_201202_BAD.csv (findings=2, warnings=0, errors=1)
+```
+
+The detailed report carries row and field context for automation and manual
+investigation:
+
+```json
+{
+  "schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 1,
+    "finding_count": 2,
+    "max_severity": "error",
+    "status": "failed",
+    "target_count": 1,
+    "warning_count": 0
+  },
+  "rule_results": [
+    {
+      "rule_id": "ingestion.ascii.schema",
+      "findings": [
+        {
+          "code": "ASCII_ROW_FIELD_COUNT_INVALID",
+          "severity": "error",
+          "location": {
+            "row_number": 2
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### Warning, Error, and Exit Policy
+
+Quality findings use three severities:
+
+- `info`: informational summaries and profiles.
+- `warning`: suspicious data, domain assumptions, or modeling-readiness risks
+  that should be reviewed but do not block ingestion by default.
+- `error`: hard defects such as corrupt ZIP archives, unreadable files, schema
+  violations, parse failures, invalid OHLC relationships, or negative spreads.
+
+Target status rolls up from findings: any error makes a target `failed`; warnings
+without errors make it `warning`; otherwise it is `clean`.
+
+The default process exit policy fails on any error:
+
+```sh
+histdatacom --quality --quality-target data/
+```
+
+To make warnings fail CI, opt in explicitly:
+
+```sh
+histdatacom --quality \
+  --quality-target data/ \
+  --quality-fail-on warning \
+  --quality-max-warnings 0
+```
+
+To generate advisory reports without failing a job, disable quality exits:
+
+```sh
+histdatacom --quality \
+  --quality-target data/ \
+  --quality-fail-on never \
+  --quality-report reports/quality.json
+```
+
+For CI/offline use, run against checked-in fixtures or downloaded artifacts in a
+workspace cache. The command needs only local filesystem access; network access,
+HistData.com availability, Temporal, and InfluxDB are not required.
 
 ---
 
