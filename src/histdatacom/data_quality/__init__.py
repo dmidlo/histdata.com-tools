@@ -29,6 +29,11 @@ from histdatacom.data_quality.engine import (
     evaluate_quality_rule,
     run_quality_assessment,
 )
+from histdatacom.data_quality.ingestion import (
+    ASCII_TEXT_INGESTION_RULE_ID,
+    HistDataAsciiTextIngestionRule,
+    ingestion_quality_rules,
+)
 from histdatacom.data_quality.inventory import (
     HistDataZipInventoryRule,
     inventory_quality_rules,
@@ -58,10 +63,12 @@ from histdatacom.data_quality.rules import (
 )
 
 __all__ = [
+    "ASCII_TEXT_INGESTION_RULE_ID",
     "COVERAGE_MANIFEST_SCHEMA_VERSION",
     "QUALITY_EXIT_TRIGGERS",
     "QUALITY_REPORT_SCHEMA_VERSION",
     "CoverageDimension",
+    "HistDataAsciiTextIngestionRule",
     "HistDataCoverageManifestRule",
     "HistDataZipInventoryRule",
     "QualityFinding",
@@ -87,6 +94,7 @@ __all__ = [
     "discover_quality_targets",
     "evaluate_quality_rule",
     "format_quality_console_summary",
+    "ingestion_quality_rules",
     "inventory_quality_rules",
     "manifest_quality_run_rules",
     "normalize_quality_check_groups",

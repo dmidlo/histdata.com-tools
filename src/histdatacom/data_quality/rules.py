@@ -6,6 +6,7 @@ from collections.abc import Iterable
 
 from histdatacom.data_quality.contracts import QualityRule, QualityRunRule
 from histdatacom.data_quality.discovery import normalize_quality_check_groups
+from histdatacom.data_quality.ingestion import ingestion_quality_rules
 from histdatacom.data_quality.inventory import inventory_quality_rules
 from histdatacom.data_quality.manifest import manifest_quality_run_rules
 
@@ -18,6 +19,8 @@ def quality_rules_for_groups(
     rules: list[QualityRule] = []
     if "all" in normalized or "inventory" in normalized:
         rules.extend(inventory_quality_rules())
+    if "all" in normalized or "ingestion" in normalized:
+        rules.extend(ingestion_quality_rules())
     return tuple(rules)
 
 
