@@ -42,6 +42,11 @@ from histdatacom.data_quality.contracts import (
     QualityTargetKind,
     QualityTargetSummary,
 )
+from histdatacom.data_quality.campaign import (
+    CAMPAIGN_REPORT_SCHEMA_VERSION,
+    DEEP_QUALITY_DIMENSIONS,
+    build_full_dataset_campaign_report,
+)
 from histdatacom.data_quality.discovery import (
     QUALITY_CHECK_GROUPS,
     QualityDiscoveryError,
@@ -166,6 +171,7 @@ __all__ = [
     "ASSET_CLASS_OIL",
     "ASSET_CLASS_UNKNOWN",
     "COVERAGE_MANIFEST_SCHEMA_VERSION",
+    "CAMPAIGN_REPORT_SCHEMA_VERSION",
     "CROSS_INSTRUMENT_METADATA_KEY",
     "DOMAIN_CROSS_INSTRUMENT_RULE_ID",
     "DOMAIN_SYMBOL_METADATA_RULE_ID",
@@ -177,6 +183,7 @@ __all__ = [
     "QUALITY_EXIT_TRIGGERS",
     "QUALITY_REPORT_SCHEMA_VERSION",
     "TIMESTAMP_CONTINUITY_METADATA_KEY",
+    "DEEP_QUALITY_DIMENSIONS",
     "CoverageDimension",
     "HistDataAsciiM1BarIntegrityRule",
     "HistDataAsciiM1OutlierRule",
@@ -232,6 +239,7 @@ __all__ = [
     "bars_quality_rules",
     "bars_quality_run_rules",
     "bounded_quality_payload",
+    "build_full_dataset_campaign_report",
     "calendar_policy_metadata",
     "calendar_quality_rules",
     "classify_histdata_source_timestamp",

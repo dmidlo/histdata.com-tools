@@ -1,0 +1,836 @@
+{
+  "command_lines": [
+    "df -h . data",
+    "venv/bin/python -m histdatacom -U -p audcad audchf audjpy audnzd audusd auxaud bcousd cadchf cadjpy chfjpy --repo-quality-columns --data-directory data",
+    "venv/bin/python - <<PY ... repository_refresh_stage(update_remote_data=True, pairs=batch_1) ... PY",
+    "venv/bin/python -m pytest -q tests/unit/test_data_quality_campaign.py"
+  ],
+  "current_yearmonth": "202606",
+  "data_directory": "data",
+  "deferred_scope": [
+    {
+      "issue": 225,
+      "reason": "Deep parser-level quality is currently limited to ASCII M1 and ASCII tick artifacts.",
+      "scope": "non-ascii and inventory-only format coverage"
+    },
+    {
+      "issue": 223,
+      "reason": "Cache quality rules are tracked separately.",
+      "scope": "canonical cache deep validation"
+    },
+    {
+      "issue": 229,
+      "reason": "Lineage checks are tracked separately.",
+      "scope": "sidecar provenance validation"
+    }
+  ],
+  "dimensions": [
+    {
+      "deep_quality_supported": true,
+      "format": "ascii",
+      "status": "deep-supported",
+      "timeframe": "M1"
+    },
+    {
+      "deep_quality_supported": true,
+      "format": "ascii",
+      "status": "deep-supported",
+      "timeframe": "T"
+    },
+    {
+      "deep_quality_supported": false,
+      "format": "excel",
+      "status": "deferred",
+      "timeframe": "M1"
+    },
+    {
+      "deep_quality_supported": false,
+      "format": "metastock",
+      "status": "deferred",
+      "timeframe": "M1"
+    },
+    {
+      "deep_quality_supported": false,
+      "format": "metatrader",
+      "status": "deferred",
+      "timeframe": "M1"
+    },
+    {
+      "deep_quality_supported": false,
+      "format": "ninjatrader",
+      "status": "deferred",
+      "timeframe": "M1"
+    },
+    {
+      "deep_quality_supported": false,
+      "format": "ninjatrader",
+      "status": "deferred",
+      "timeframe": "T_ASK"
+    },
+    {
+      "deep_quality_supported": false,
+      "format": "ninjatrader",
+      "status": "deferred",
+      "timeframe": "T_BID"
+    },
+    {
+      "deep_quality_supported": false,
+      "format": "ninjatrader",
+      "status": "deferred",
+      "timeframe": "T_LAST"
+    }
+  ],
+  "disk_preflight": {
+    "available_bytes": 31095013376,
+    "available_gib": 28.959,
+    "minimum_free_bytes": 107374182400,
+    "minimum_free_gib": 100.0,
+    "status": "blocked",
+    "total_bytes": 994662584320,
+    "used_bytes": 963567570944
+  },
+  "issue_number": 233,
+  "missing_symbols": [],
+  "observations": [
+    {
+      "kind": "repo-refresh",
+      "local_written": true,
+      "remote_checked": true,
+      "remote_refreshed": false,
+      "repo_url": "https://raw.githubusercontent.com/dmidlo/histdata.com-tools/main/data/.repo",
+      "status": "completed",
+      "summary": "Hosted GitHub .repo index was reachable and batch availability rows matched local data/.repo."
+    },
+    {
+      "follow_up_issue": 240,
+      "kind": "cli-attempt",
+      "status": "blocked",
+      "summary": "Source checkout CLI could not start the default sidecar because the sdist fallback manifest has no bundled macos-arm64 Temporal executable."
+    },
+    {
+      "follow_up_issue": 240,
+      "kind": "disk-preflight",
+      "status": "blocked",
+      "summary": "Full batch was not downloaded on this workstation: available disk is below the explicit 100 GiB operator floor and the intended surface contains 10843 archive work items including tick archives."
+    },
+    {
+      "kind": "quality-boundary",
+      "status": "deferred",
+      "summary": "Deep quality support is currently ASCII M1/T only; non-ASCII format boundaries remain tracked by #225."
+    }
+  ],
+  "repo": {
+    "hash": "b31dde1cd82deadbfc656c6685ae768e",
+    "hash_utc": "1782228722.095186",
+    "pair_count": 66,
+    "url": "https://raw.githubusercontent.com/dmidlo/histdata.com-tools/main/data/.repo"
+  },
+  "schema_version": "histdatacom.data-quality-campaign.v1",
+  "status": "blocked",
+  "symbols": [
+    {
+      "deep_quality_work_item_count": 251,
+      "deferred_work_item_count": 778,
+      "dimensions": [
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 226,
+          "timeframe": "T"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "excel",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metastock",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metatrader",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 226,
+          "timeframe": "T_ASK"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 226,
+          "timeframe": "T_BID"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 226,
+          "timeframe": "T_LAST"
+        }
+      ],
+      "repo_end": "202606",
+      "repo_start": "200709",
+      "repo_status": "found",
+      "symbol": "audcad",
+      "work_item_count": 1029
+    },
+    {
+      "deep_quality_work_item_count": 244,
+      "deferred_work_item_count": 756,
+      "dimensions": [
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 24,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 220,
+          "timeframe": "T"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "excel",
+          "period_count": 24,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metastock",
+          "period_count": 24,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metatrader",
+          "period_count": 24,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 24,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 220,
+          "timeframe": "T_ASK"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 220,
+          "timeframe": "T_BID"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 220,
+          "timeframe": "T_LAST"
+        }
+      ],
+      "repo_end": "202606",
+      "repo_start": "200803",
+      "repo_status": "found",
+      "symbol": "audchf",
+      "work_item_count": 1000
+    },
+    {
+      "deep_quality_work_item_count": 317,
+      "deferred_work_item_count": 981,
+      "dimensions": [
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 30,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 287,
+          "timeframe": "T"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "excel",
+          "period_count": 30,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metastock",
+          "period_count": 30,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metatrader",
+          "period_count": 30,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 30,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 287,
+          "timeframe": "T_ASK"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 287,
+          "timeframe": "T_BID"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 287,
+          "timeframe": "T_LAST"
+        }
+      ],
+      "repo_end": "202606",
+      "repo_start": "200208",
+      "repo_status": "found",
+      "symbol": "audjpy",
+      "work_item_count": 1298
+    },
+    {
+      "deep_quality_work_item_count": 251,
+      "deferred_work_item_count": 778,
+      "dimensions": [
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 226,
+          "timeframe": "T"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "excel",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metastock",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metatrader",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 226,
+          "timeframe": "T_ASK"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 226,
+          "timeframe": "T_BID"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 226,
+          "timeframe": "T_LAST"
+        }
+      ],
+      "repo_end": "202606",
+      "repo_start": "200709",
+      "repo_status": "found",
+      "symbol": "audnzd",
+      "work_item_count": 1029
+    },
+    {
+      "deep_quality_work_item_count": 345,
+      "deferred_work_item_count": 1067,
+      "dimensions": [
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 32,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 313,
+          "timeframe": "T"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "excel",
+          "period_count": 32,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metastock",
+          "period_count": 32,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metatrader",
+          "period_count": 32,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 32,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 313,
+          "timeframe": "T_ASK"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 313,
+          "timeframe": "T_BID"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 313,
+          "timeframe": "T_LAST"
+        }
+      ],
+      "repo_end": "202606",
+      "repo_start": "200006",
+      "repo_status": "found",
+      "symbol": "audusd",
+      "work_item_count": 1412
+    },
+    {
+      "deep_quality_work_item_count": 210,
+      "deferred_work_item_count": 652,
+      "dimensions": [
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 22,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 188,
+          "timeframe": "T"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "excel",
+          "period_count": 22,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metastock",
+          "period_count": 22,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metatrader",
+          "period_count": 22,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 22,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 188,
+          "timeframe": "T_ASK"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 188,
+          "timeframe": "T_BID"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 188,
+          "timeframe": "T_LAST"
+        }
+      ],
+      "repo_end": "202606",
+      "repo_start": "201011",
+      "repo_status": "found",
+      "symbol": "auxaud",
+      "work_item_count": 862
+    },
+    {
+      "deep_quality_work_item_count": 210,
+      "deferred_work_item_count": 652,
+      "dimensions": [
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 22,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 188,
+          "timeframe": "T"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "excel",
+          "period_count": 22,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metastock",
+          "period_count": 22,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metatrader",
+          "period_count": 22,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 22,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 188,
+          "timeframe": "T_ASK"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 188,
+          "timeframe": "T_BID"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 188,
+          "timeframe": "T_LAST"
+        }
+      ],
+      "repo_end": "202606",
+      "repo_start": "201011",
+      "repo_status": "found",
+      "symbol": "bcousd",
+      "work_item_count": 862
+    },
+    {
+      "deep_quality_work_item_count": 244,
+      "deferred_work_item_count": 756,
+      "dimensions": [
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 24,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 220,
+          "timeframe": "T"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "excel",
+          "period_count": 24,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metastock",
+          "period_count": 24,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metatrader",
+          "period_count": 24,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 24,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 220,
+          "timeframe": "T_ASK"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 220,
+          "timeframe": "T_BID"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 220,
+          "timeframe": "T_LAST"
+        }
+      ],
+      "repo_end": "202606",
+      "repo_start": "200803",
+      "repo_status": "found",
+      "symbol": "cadchf",
+      "work_item_count": 1000
+    },
+    {
+      "deep_quality_work_item_count": 257,
+      "deferred_work_item_count": 796,
+      "dimensions": [
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 232,
+          "timeframe": "T"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "excel",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metastock",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metatrader",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 25,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 232,
+          "timeframe": "T_ASK"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 232,
+          "timeframe": "T_BID"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 232,
+          "timeframe": "T_LAST"
+        }
+      ],
+      "repo_end": "202606",
+      "repo_start": "200703",
+      "repo_status": "found",
+      "symbol": "cadjpy",
+      "work_item_count": 1053
+    },
+    {
+      "deep_quality_work_item_count": 317,
+      "deferred_work_item_count": 981,
+      "dimensions": [
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 30,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": true,
+          "format": "ascii",
+          "period_count": 287,
+          "timeframe": "T"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "excel",
+          "period_count": 30,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metastock",
+          "period_count": 30,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "metatrader",
+          "period_count": 30,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 30,
+          "timeframe": "M1"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 287,
+          "timeframe": "T_ASK"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 287,
+          "timeframe": "T_BID"
+        },
+        {
+          "deep_quality_supported": false,
+          "format": "ninjatrader",
+          "period_count": 287,
+          "timeframe": "T_LAST"
+        }
+      ],
+      "repo_end": "202606",
+      "repo_start": "200208",
+      "repo_status": "found",
+      "symbol": "chfjpy",
+      "work_item_count": 1298
+    }
+  ],
+  "totals": {
+    "deep_quality_work_item_count": 2646,
+    "deferred_work_item_count": 8197,
+    "repo_symbol_count": 10,
+    "symbol_count": 10,
+    "work_item_count": 10843,
+    "work_items_by_dimension": [
+      {
+        "format": "ascii",
+        "timeframe": "M1",
+        "work_item_count": 259
+      },
+      {
+        "format": "ascii",
+        "timeframe": "T",
+        "work_item_count": 2387
+      },
+      {
+        "format": "excel",
+        "timeframe": "M1",
+        "work_item_count": 259
+      },
+      {
+        "format": "metastock",
+        "timeframe": "M1",
+        "work_item_count": 259
+      },
+      {
+        "format": "metatrader",
+        "timeframe": "M1",
+        "work_item_count": 259
+      },
+      {
+        "format": "ninjatrader",
+        "timeframe": "M1",
+        "work_item_count": 259
+      },
+      {
+        "format": "ninjatrader",
+        "timeframe": "T_ASK",
+        "work_item_count": 2387
+      },
+      {
+        "format": "ninjatrader",
+        "timeframe": "T_BID",
+        "work_item_count": 2387
+      },
+      {
+        "format": "ninjatrader",
+        "timeframe": "T_LAST",
+        "work_item_count": 2387
+      }
+    ]
+  }
+}
