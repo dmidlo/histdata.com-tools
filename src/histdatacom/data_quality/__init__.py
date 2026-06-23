@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from histdatacom.data_quality.bars import (
+    ASCII_M1_BAR_INTEGRITY_RULE_ID,
+    HistDataAsciiM1BarIntegrityRule,
+    bars_quality_rules,
+)
 from histdatacom.data_quality.contracts import (
     QualityFinding,
     QualityLocation,
@@ -82,6 +87,7 @@ from histdatacom.data_quality.time import (
 
 __all__ = [
     "ASCII_EST_NO_DST_TIME_RULE_ID",
+    "ASCII_M1_BAR_INTEGRITY_RULE_ID",
     "ASCII_ROW_COUNT_INGESTION_RULE_ID",
     "ASCII_SCHEMA_INGESTION_RULE_ID",
     "ASCII_TEXT_INGESTION_RULE_ID",
@@ -93,6 +99,7 @@ __all__ = [
     "QUALITY_REPORT_SCHEMA_VERSION",
     "TIMESTAMP_CONTINUITY_METADATA_KEY",
     "CoverageDimension",
+    "HistDataAsciiM1BarIntegrityRule",
     "HistDataAsciiTimestampContinuityRule",
     "HistDataAsciiTimestampGapRule",
     "HistDataAsciiEstNoDstTimeRule",
@@ -121,6 +128,7 @@ __all__ = [
     "QualityTargetKind",
     "QualityTargetSummary",
     "QUALITY_CHECK_GROUPS",
+    "bars_quality_rules",
     "bounded_quality_payload",
     "coverage_manifest_metadata",
     "discover_quality_targets",
