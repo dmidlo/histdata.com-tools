@@ -67,12 +67,16 @@ from histdatacom.data_quality.rules import (
 )
 from histdatacom.data_quality.time import (
     ASCII_EST_NO_DST_TIME_RULE_ID,
+    ASCII_TIMESTAMP_CONTINUITY_RULE_ID,
     ASCII_TIMESTAMP_GAP_RULE_ID,
     ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
+    TIMESTAMP_CONTINUITY_METADATA_KEY,
+    HistDataAsciiTimestampContinuityRule,
     HistDataAsciiTimestampGapRule,
     HistDataAsciiEstNoDstTimeRule,
     HistDataAsciiTimestampSequenceRule,
     HistDataGapTolerance,
+    time_quality_run_rules,
     time_quality_rules,
 )
 
@@ -81,12 +85,15 @@ __all__ = [
     "ASCII_ROW_COUNT_INGESTION_RULE_ID",
     "ASCII_SCHEMA_INGESTION_RULE_ID",
     "ASCII_TEXT_INGESTION_RULE_ID",
+    "ASCII_TIMESTAMP_CONTINUITY_RULE_ID",
     "ASCII_TIMESTAMP_GAP_RULE_ID",
     "ASCII_TIMESTAMP_SEQUENCE_RULE_ID",
     "COVERAGE_MANIFEST_SCHEMA_VERSION",
     "QUALITY_EXIT_TRIGGERS",
     "QUALITY_REPORT_SCHEMA_VERSION",
+    "TIMESTAMP_CONTINUITY_METADATA_KEY",
     "CoverageDimension",
+    "HistDataAsciiTimestampContinuityRule",
     "HistDataAsciiTimestampGapRule",
     "HistDataAsciiEstNoDstTimeRule",
     "HistDataAsciiRowCountIngestionRule",
@@ -130,6 +137,7 @@ __all__ = [
     "quality_run_rules_for_groups",
     "quality_target_from_path",
     "run_quality_assessment",
+    "time_quality_run_rules",
     "time_quality_rules",
     "write_quality_report",
 ]

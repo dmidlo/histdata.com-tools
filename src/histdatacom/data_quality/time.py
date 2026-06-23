@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,7 +13,10 @@ import zipfile
 from histdatacom.data_quality.contracts import (
     QualityFinding,
     QualityLocation,
+    QualityReport,
     QualityRule,
+    QualityRuleResult,
+    QualityRunRule,
     QualitySeverity,
     QualityTarget,
     QualityTargetKind,
@@ -27,6 +32,8 @@ from histdatacom.runtime_contracts import JSONValue
 ASCII_EST_NO_DST_TIME_RULE_ID = "time.ascii.est_no_dst"
 ASCII_TIMESTAMP_SEQUENCE_RULE_ID = "time.ascii.sequence"
 ASCII_TIMESTAMP_GAP_RULE_ID = "time.ascii.gaps"
+ASCII_TIMESTAMP_CONTINUITY_RULE_ID = "time.ascii.continuity"
+TIMESTAMP_CONTINUITY_METADATA_KEY = "timestamp_continuity"
 SOURCE_TIMEZONE = "EST-no-DST"
 SOURCE_UTC_OFFSET = "-05:00"
 CANONICAL_TIMEZONE = "UTC"
@@ -271,6 +278,114 @@ class _TimestampGapScan:
     final_dynamic_window_ms: int = 0
 
 
+@dataclass(frozen=True, order=True, slots=True)
+class _ContinuityGroupKey:
+    data_format: str
+    timeframe: str
+    symbol: str
+
+    @classmethod
+    def from_target(cls, target: QualityTarget) -> "_ContinuityGroupKey | None":
+        if not (target.data_format and target.timeframe and target.symbol):
+            return None
+        return cls(
+            data_format=_normalize_data_format(target.data_format),
+            timeframe=_normalize_timeframe(target.timeframe),
+            symbol=_normalize_symbol(target.symbol),
+        )
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {
+            "data_format": self.data_format,
+            "timeframe": self.timeframe,
+            "symbol": self.symbol,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _ContinuityBoundary:
+    target: QualityTarget
+    first: _TimestampSample
+    last: _TimestampSample
+    parsed_row_count: int
+    invalid_timestamp_count: int
+    source_member: str
+
+    @property
+    def period(self) -> str:
+        return str(self.target.period)
+
+    @property
+    def path(self) -> str:
+        return str(self.target.path)
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {
+            "path": self.target.path,
+            "kind": self.target.kind.value,
+            "period": self.target.period,
+            "source_member": self.source_member,
+            "parsed_row_count": self.parsed_row_count,
+            "invalid_timestamp_count": self.invalid_timestamp_count,
+            "first": self.first.to_dict(),
+            "last": self.last.to_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _ContinuityComparison:
+    key: _ContinuityGroupKey
+    previous: _ContinuityBoundary
+    current: _ContinuityBoundary
+    gap_ms: int
+    classification: str
+    missing_periods: tuple[str, ...] = ()
+
+    @property
+    def previous_path(self) -> str:
+        return self.previous.path
+
+    @property
+    def current_path(self) -> str:
+        return self.current.path
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {
+            "group": self.key.to_dict(),
+            "classification": self.classification,
+            "gap_ms": self.gap_ms,
+            "missing_periods": list(self.missing_periods),
+            "previous": self.previous.to_dict(),
+            "current": self.current.to_dict(),
+        }
+
+
+@dataclass(slots=True)
+class _ContinuityScan:
+    target_count: int = 0
+    candidate_target_count: int = 0
+    comparable_target_count: int = 0
+    skipped_target_count: int = 0
+    group_count: int = 0
+    adjacent_pair_count: int = 0
+    clean_boundary_count: int = 0
+    missing_period_count: int = 0
+    period_gap_count: int = 0
+    duplicate_overlap_count: int = 0
+    reversed_order_count: int = 0
+    suspicious_gap_count: int = 0
+    expected_session_closure_count: int = 0
+    missing_periods: list[_ContinuityComparison] = field(default_factory=list)
+    duplicate_overlaps: list[_ContinuityComparison] = field(
+        default_factory=list
+    )
+    reversed_order: list[_ContinuityComparison] = field(default_factory=list)
+    suspicious_gaps: list[_ContinuityComparison] = field(default_factory=list)
+    expected_session_closures: list[_ContinuityComparison] = field(
+        default_factory=list
+    )
+
+
 @dataclass(slots=True)
 class HistDataAsciiEstNoDstTimeRule:
     """Validate HistData fixed EST-no-DST timestamp normalization."""
@@ -504,12 +619,78 @@ class HistDataAsciiTimestampGapRule:
         )
 
 
+@dataclass(slots=True)
+class HistDataAsciiTimestampContinuityRule:
+    """Validate cross-file timestamp continuity for adjacent monthly files."""
+
+    tolerance: HistDataGapTolerance = field(
+        default_factory=HistDataGapTolerance
+    )
+    warning_severity: QualitySeverity = QualitySeverity.WARNING
+    rule_id: str = ASCII_TIMESTAMP_CONTINUITY_RULE_ID
+    description: str = (
+        "Compare adjacent monthly HistData ASCII file boundary timestamps by "
+        "symbol, format, and timeframe."
+    )
+
+    def evaluate_run(
+        self,
+        targets: Iterable[QualityTarget],
+        *,
+        metadata: Mapping[str, JSONValue] | None = None,
+    ) -> QualityReport:
+        """Return cross-file continuity findings for the full target set."""
+        target_tuple = tuple(targets)
+        scan = _scan_timestamp_continuity(
+            target_tuple,
+            tolerance=self.tolerance,
+        )
+        payload = _timestamp_continuity_payload(
+            scan,
+            tolerance=self.tolerance,
+        )
+        if not _has_continuity_surface(scan):
+            return QualityReport(
+                metadata={TIMESTAMP_CONTINUITY_METADATA_KEY: payload},
+            )
+
+        continuity_target = _continuity_target(
+            target_tuple,
+            metadata=metadata,
+            payload=payload,
+        )
+        findings = _timestamp_continuity_findings(
+            continuity_target,
+            scan=scan,
+            tolerance=self.tolerance,
+            severity=self.warning_severity,
+            rule_id=self.rule_id,
+        )
+        return QualityReport(
+            targets=(continuity_target,),
+            rule_results=(
+                QualityRuleResult(
+                    rule_id=self.rule_id,
+                    target=continuity_target,
+                    findings=findings,
+                ),
+            ),
+            metadata={TIMESTAMP_CONTINUITY_METADATA_KEY: payload},
+        )
+
+
 def time_quality_rules() -> tuple[QualityRule, ...]:
     """Return timestamp quality rules in deterministic execution order."""
     est_no_dst_rule: QualityRule = HistDataAsciiEstNoDstTimeRule()
     sequence_rule: QualityRule = HistDataAsciiTimestampSequenceRule()
     gap_rule: QualityRule = HistDataAsciiTimestampGapRule()
     return (est_no_dst_rule, sequence_rule, gap_rule)
+
+
+def time_quality_run_rules() -> tuple[QualityRunRule, ...]:
+    """Return run-scoped timestamp quality rules."""
+    continuity_rule: QualityRunRule = HistDataAsciiTimestampContinuityRule()
+    return (continuity_rule,)
 
 
 def _is_ascii_text_target(target: QualityTarget) -> bool:
@@ -1067,6 +1248,297 @@ def _timestamp_gap_findings(
     return tuple(findings)
 
 
+def _scan_timestamp_continuity(
+    targets: tuple[QualityTarget, ...],
+    *,
+    tolerance: HistDataGapTolerance,
+) -> _ContinuityScan:
+    scan = _ContinuityScan(target_count=len(targets))
+    boundaries_by_group: dict[
+        _ContinuityGroupKey, dict[str, list[_ContinuityBoundary]]
+    ] = defaultdict(lambda: defaultdict(list))
+
+    for target in targets:
+        if not _is_ascii_text_target(target):
+            continue
+        scan.candidate_target_count += 1
+        key = _ContinuityGroupKey.from_target(target)
+        if key is None or not _valid_period(target.period):
+            scan.skipped_target_count += 1
+            continue
+        boundary = _timestamp_boundary_for_target(target)
+        if boundary is None:
+            scan.skipped_target_count += 1
+            continue
+        scan.comparable_target_count += 1
+        boundaries_by_group[key][target.period].append(boundary)
+
+    scan.group_count = len(boundaries_by_group)
+    for key, period_boundaries in sorted(boundaries_by_group.items()):
+        representatives = {
+            period: _preferred_boundary(boundaries)
+            for period, boundaries in period_boundaries.items()
+        }
+        periods = tuple(sorted(representatives))
+        for previous_period, current_period in zip(
+            periods,
+            periods[1:],
+            strict=False,
+        ):
+            previous = representatives[previous_period]
+            current = representatives[current_period]
+            missing_periods = _missing_periods_between(
+                previous_period,
+                current_period,
+            )
+            gap_ms = (
+                current.first.timestamp_utc_ms - previous.last.timestamp_utc_ms
+            )
+            if missing_periods:
+                comparison = _ContinuityComparison(
+                    key=key,
+                    previous=previous,
+                    current=current,
+                    gap_ms=gap_ms,
+                    classification="missing_period",
+                    missing_periods=missing_periods,
+                )
+                scan.period_gap_count += 1
+                scan.missing_period_count += len(missing_periods)
+                _append_continuity_sample(scan.missing_periods, comparison)
+                continue
+
+            scan.adjacent_pair_count += 1
+            comparison = _classify_continuity_pair(
+                key=key,
+                previous=previous,
+                current=current,
+                gap_ms=gap_ms,
+                tolerance=tolerance,
+            )
+            if comparison.classification == "clean":
+                scan.clean_boundary_count += 1
+            elif comparison.classification == "expected_session_closure":
+                scan.expected_session_closure_count += 1
+                _append_continuity_sample(
+                    scan.expected_session_closures,
+                    comparison,
+                )
+            elif comparison.classification == "duplicate_overlap":
+                scan.duplicate_overlap_count += 1
+                _append_continuity_sample(scan.duplicate_overlaps, comparison)
+            elif comparison.classification == "reversed_order":
+                scan.reversed_order_count += 1
+                _append_continuity_sample(scan.reversed_order, comparison)
+            elif comparison.classification == "suspicious_gap":
+                scan.suspicious_gap_count += 1
+                _append_continuity_sample(scan.suspicious_gaps, comparison)
+
+    return scan
+
+
+def _timestamp_boundary_for_target(
+    target: QualityTarget,
+) -> _ContinuityBoundary | None:
+    try:
+        delimiter = delimiter_for_timeframe(target.timeframe)
+        columns = columns_for_timeframe(target.timeframe)
+        payload = _read_text_payload(target)
+        text = payload.data.decode("utf-8")
+    except (ValueError, UnicodeDecodeError, _SourceReadError):
+        return None
+
+    scan = _scan_timestamp_rows(
+        text,
+        target=target,
+        delimiter=delimiter,
+        columns=columns,
+        source_member=payload.source_member,
+    )
+    if not scan.valid_rows:
+        return None
+    return _ContinuityBoundary(
+        target=target,
+        first=scan.valid_rows[0],
+        last=scan.valid_rows[-1],
+        parsed_row_count=scan.parsed_row_count,
+        invalid_timestamp_count=scan.invalid_timestamp_count,
+        source_member=payload.source_member,
+    )
+
+
+def _preferred_boundary(
+    boundaries: list[_ContinuityBoundary],
+) -> _ContinuityBoundary:
+    return sorted(boundaries, key=_boundary_sort_key)[0]
+
+
+def _boundary_sort_key(
+    boundary: _ContinuityBoundary,
+) -> tuple[int, str]:
+    kind_rank = {
+        QualityTargetKind.CSV: 0,
+        QualityTargetKind.ZIP: 1,
+    }.get(boundary.target.kind, 2)
+    return (kind_rank, boundary.target.path)
+
+
+def _classify_continuity_pair(
+    *,
+    key: _ContinuityGroupKey,
+    previous: _ContinuityBoundary,
+    current: _ContinuityBoundary,
+    gap_ms: int,
+    tolerance: HistDataGapTolerance,
+) -> _ContinuityComparison:
+    classification = "clean"
+    if gap_ms < 0:
+        classification = "reversed_order"
+    elif gap_ms == 0:
+        classification = "duplicate_overlap"
+    elif _is_expected_session_closure_gap(
+        previous.last,
+        current.first,
+        tolerance,
+    ):
+        classification = "expected_session_closure"
+    elif gap_ms > tolerance.suspicious_gap_ms:
+        classification = "suspicious_gap"
+
+    return _ContinuityComparison(
+        key=key,
+        previous=previous,
+        current=current,
+        gap_ms=gap_ms,
+        classification=classification,
+    )
+
+
+def _timestamp_continuity_payload(
+    scan: _ContinuityScan,
+    *,
+    tolerance: HistDataGapTolerance,
+) -> dict[str, JSONValue]:
+    samples = [
+        *scan.missing_periods,
+        *scan.duplicate_overlaps,
+        *scan.reversed_order,
+        *scan.suspicious_gaps,
+        *scan.expected_session_closures,
+    ][:MAX_TIMESTAMP_SAMPLES]
+    return {
+        "target_count": scan.target_count,
+        "candidate_target_count": scan.candidate_target_count,
+        "comparable_target_count": scan.comparable_target_count,
+        "skipped_target_count": scan.skipped_target_count,
+        "group_count": scan.group_count,
+        "adjacent_pair_count": scan.adjacent_pair_count,
+        "clean_boundary_count": scan.clean_boundary_count,
+        "missing_period_count": scan.missing_period_count,
+        "period_gap_count": scan.period_gap_count,
+        "duplicate_overlap_count": scan.duplicate_overlap_count,
+        "reversed_order_count": scan.reversed_order_count,
+        "suspicious_gap_count": scan.suspicious_gap_count,
+        "expected_session_closure_count": scan.expected_session_closure_count,
+        "tolerance": tolerance.to_metadata(),
+        "samples": _continuity_samples(samples),
+    }
+
+
+def _has_continuity_surface(scan: _ContinuityScan) -> bool:
+    return bool(scan.adjacent_pair_count or scan.period_gap_count)
+
+
+def _timestamp_continuity_findings(
+    target: QualityTarget,
+    *,
+    scan: _ContinuityScan,
+    tolerance: HistDataGapTolerance,
+    severity: QualitySeverity,
+    rule_id: str,
+) -> tuple[QualityFinding, ...]:
+    findings: list[QualityFinding] = [
+        _finding(
+            target,
+            code="ASCII_TIMESTAMP_CONTINUITY_SUMMARY",
+            message="ASCII monthly file boundary timestamp continuity profile.",
+            severity=QualitySeverity.INFO,
+            rule_id=rule_id,
+            metadata={
+                **_base_metadata(target),
+                **_timestamp_continuity_payload(scan, tolerance=tolerance),
+            },
+        )
+    ]
+
+    if scan.missing_periods:
+        findings.append(
+            _continuity_sample_finding(
+                target,
+                code="ASCII_TIMESTAMP_CONTINUITY_PERIOD_MISSING",
+                message="Observed monthly files skip one or more intermediate "
+                "periods for the same symbol, format, and timeframe.",
+                severity=severity,
+                rule_id=rule_id,
+                samples=scan.missing_periods,
+                row_count=scan.period_gap_count,
+            )
+        )
+    if scan.duplicate_overlaps:
+        findings.append(
+            _continuity_sample_finding(
+                target,
+                code="ASCII_TIMESTAMP_CONTINUITY_DUPLICATE_OVERLAP",
+                message="Adjacent monthly files share the same boundary "
+                "timestamp.",
+                severity=severity,
+                rule_id=rule_id,
+                samples=scan.duplicate_overlaps,
+                row_count=scan.duplicate_overlap_count,
+            )
+        )
+    if scan.reversed_order:
+        findings.append(
+            _continuity_sample_finding(
+                target,
+                code="ASCII_TIMESTAMP_CONTINUITY_REVERSED_ORDER",
+                message="The next monthly file starts before the previous "
+                "monthly file ends.",
+                severity=severity,
+                rule_id=rule_id,
+                samples=scan.reversed_order,
+                row_count=scan.reversed_order_count,
+            )
+        )
+    if scan.suspicious_gaps:
+        findings.append(
+            _continuity_sample_finding(
+                target,
+                code="ASCII_TIMESTAMP_CONTINUITY_SUSPICIOUS_GAP",
+                message="Adjacent monthly files have a suspicious boundary "
+                "gap that is not an expected market closure.",
+                severity=severity,
+                rule_id=rule_id,
+                samples=scan.suspicious_gaps,
+                row_count=scan.suspicious_gap_count,
+            )
+        )
+    if scan.expected_session_closures:
+        findings.append(
+            _continuity_sample_finding(
+                target,
+                code="ASCII_TIMESTAMP_CONTINUITY_EXPECTED_SESSION_CLOSURE",
+                message="Adjacent monthly file boundary gap matches the "
+                "configured FX weekend closure tolerance window.",
+                severity=QualitySeverity.INFO,
+                rule_id=rule_id,
+                samples=scan.expected_session_closures,
+                row_count=scan.expected_session_closure_count,
+            )
+        )
+    return tuple(findings)
+
+
 def _sample_finding(
     target: QualityTarget,
     *,
@@ -1226,6 +1698,53 @@ def _weekend_activity_finding(
             **_base_metadata(target, source_member=first.row.source_member),
             "row_count": row_count,
             "samples": _weekend_activity_samples(samples),
+        },
+    )
+
+
+def _continuity_sample_finding(
+    target: QualityTarget,
+    *,
+    code: str,
+    message: str,
+    severity: QualitySeverity,
+    rule_id: str,
+    samples: list[_ContinuityComparison],
+    row_count: int,
+) -> QualityFinding:
+    first = samples[0]
+    current = first.current.first
+    return _finding(
+        target,
+        code=code,
+        message=message,
+        severity=severity,
+        rule_id=rule_id,
+        location=QualityLocation(
+            path=first.current_path,
+            row_number=current.row_number,
+            timestamp_source=current.timestamp_source,
+            timestamp_utc_ms=current.timestamp_utc_ms,
+            column="datetime",
+            metadata={
+                "source_timezone": SOURCE_TIMEZONE,
+                "source_utc_offset": SOURCE_UTC_OFFSET,
+                "utc_timestamp": current.utc_timestamp,
+                "previous_path": first.previous_path,
+                "current_path": first.current_path,
+                "previous_period": first.previous.period,
+                "current_period": first.current.period,
+                "gap_ms": first.gap_ms,
+                "classification": first.classification,
+                "missing_periods": list(first.missing_periods),
+                "previous_last": first.previous.last.to_dict(),
+                "current_first": current.to_dict(),
+            },
+        ),
+        metadata={
+            **_base_metadata(target),
+            "row_count": row_count,
+            "samples": _continuity_samples(samples),
         },
     )
 
@@ -1410,6 +1929,106 @@ def _is_weekend_closure_row(row: _TimestampSample) -> bool:
     return False
 
 
+def _continuity_target(
+    targets: tuple[QualityTarget, ...],
+    *,
+    metadata: Mapping[str, JSONValue] | None,
+    payload: Mapping[str, JSONValue],
+) -> QualityTarget:
+    root = _continuity_root(metadata)
+    if not root and targets:
+        root = str(Path(targets[0].path).parent)
+    return QualityTarget(
+        path=root or "timestamp-continuity",
+        kind=QualityTargetKind.DIRECTORY,
+        metadata={
+            "manifest": "timestamp-continuity",
+            "rule_id": ASCII_TIMESTAMP_CONTINUITY_RULE_ID,
+            "target_count": _metadata_int(payload.get("target_count")),
+            "candidate_target_count": _metadata_int(
+                payload.get("candidate_target_count")
+            ),
+            "comparable_target_count": _metadata_int(
+                payload.get("comparable_target_count")
+            ),
+            "adjacent_pair_count": _metadata_int(
+                payload.get("adjacent_pair_count")
+            ),
+            "missing_period_count": _metadata_int(
+                payload.get("missing_period_count")
+            ),
+            "suspicious_gap_count": _metadata_int(
+                payload.get("suspicious_gap_count")
+            ),
+        },
+    )
+
+
+def _continuity_root(metadata: Mapping[str, JSONValue] | None) -> str:
+    metadata_map = dict(metadata or {})
+    roots = metadata_map.get("roots")
+    if not isinstance(roots, list):
+        coverage_manifest = metadata_map.get("coverage_manifest")
+        if isinstance(coverage_manifest, Mapping):
+            roots = coverage_manifest.get("roots")
+    if isinstance(roots, list) and roots:
+        return str(roots[0])
+    return ""
+
+
+def _valid_period(value: str) -> bool:
+    if len(value) != 6 or not value.isdigit():
+        return False
+    month = int(value[4:])
+    return 1 <= month <= 12
+
+
+def _missing_periods_between(
+    previous_period: str,
+    current_period: str,
+) -> tuple[str, ...]:
+    previous_index = _period_index(previous_period)
+    current_index = _period_index(current_period)
+    if current_index - previous_index <= 1:
+        return ()
+    return tuple(
+        _period_from_index(index)
+        for index in range(previous_index + 1, current_index)
+    )
+
+
+def _period_index(period: str) -> int:
+    year = int(period[:4])
+    month = int(period[4:])
+    return year * 12 + month
+
+
+def _period_from_index(index: int) -> str:
+    year, month = divmod(index - 1, 12)
+    return f"{year:04d}{month + 1:02d}"
+
+
+def _normalize_data_format(value: str) -> str:
+    return str(value or "").strip().lower()
+
+
+def _normalize_timeframe(value: str) -> str:
+    return str(value or "").strip().upper()
+
+
+def _normalize_symbol(value: str) -> str:
+    return str(value or "").strip().upper().replace("_", "")
+
+
+def _metadata_int(value: JSONValue | None) -> int:
+    if isinstance(value, bool | list | dict) or value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _record_raw_timestamp_shape(
     scan: _TimestampScan,
     *,
@@ -1591,6 +2210,14 @@ def _append_weekend_activity_sample(
         samples.append(sample)
 
 
+def _append_continuity_sample(
+    samples: list[_ContinuityComparison],
+    sample: _ContinuityComparison,
+) -> None:
+    if len(samples) < MAX_TIMESTAMP_SAMPLES:
+        samples.append(sample)
+
+
 def _samples(samples: list[_TimestampSample]) -> list[JSONValue]:
     return [sample.to_dict() for sample in samples]
 
@@ -1605,6 +2232,12 @@ def _gap_samples(samples: list[_TimestampGapSample]) -> list[JSONValue]:
 
 def _weekend_activity_samples(
     samples: list[_WeekendActivitySample],
+) -> list[JSONValue]:
+    return [sample.to_dict() for sample in samples]
+
+
+def _continuity_samples(
+    samples: list[_ContinuityComparison],
 ) -> list[JSONValue]:
     return [sample.to_dict() for sample in samples]
 

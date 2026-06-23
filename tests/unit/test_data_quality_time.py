@@ -6,13 +6,16 @@ from pathlib import Path
 
 from histdatacom.data_quality import (
     ASCII_EST_NO_DST_TIME_RULE_ID,
+    ASCII_TIMESTAMP_CONTINUITY_RULE_ID,
     ASCII_TIMESTAMP_GAP_RULE_ID,
     ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
+    HistDataAsciiTimestampContinuityRule,
     HistDataAsciiTimestampGapRule,
     HistDataGapTolerance,
     QualitySeverity,
     QualityStatus,
     discover_quality_targets,
+    quality_run_rules_for_groups,
     quality_rules_for_groups,
     run_quality_assessment,
 )
@@ -37,6 +40,13 @@ def test_time_group_registers_est_no_dst_rule() -> None:
         ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
         ASCII_TIMESTAMP_GAP_RULE_ID,
     ]
+
+
+def test_time_group_registers_continuity_run_rule() -> None:
+    """Cross-file timestamp checks should run for the advertised time group."""
+    assert [
+        rule.rule_id for rule in quality_run_rules_for_groups(("time",))
+    ] == [ASCII_TIMESTAMP_CONTINUITY_RULE_ID]
 
 
 def test_clean_ascii_file_reports_est_no_dst_conversion_summary(
@@ -601,12 +611,174 @@ def test_dynamic_gap_score_uses_inverted_backoff_windowing(
     assert samples[1]["dynamic_score_increment"] == 6.0
 
 
+def test_cross_file_continuity_clean_adjacent_months(
+    tmp_path: Path,
+) -> None:
+    """Adjacent monthly files should compare clean boundary timestamps."""
+    _write_m1_file(tmp_path, "201202", ("20120229 235900",))
+    _write_m1_file(tmp_path, "201203", ("20120301 000000",))
+
+    report = _continuity_report_for_path(tmp_path)
+
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_CONTINUITY_SUMMARY")
+    assert report.status is QualityStatus.CLEAN
+    assert summary.rule_id == ASCII_TIMESTAMP_CONTINUITY_RULE_ID
+    assert summary.metadata["adjacent_pair_count"] == 1
+    assert summary.metadata["clean_boundary_count"] == 1
+    assert summary.metadata["missing_period_count"] == 0
+    assert summary.metadata["suspicious_gap_count"] == 0
+
+
+def test_cross_file_continuity_reports_missing_next_month(
+    tmp_path: Path,
+) -> None:
+    """Observed month gaps should name the skipped period and both files."""
+    previous = _write_m1_file(tmp_path, "201202", ("20120229 235900",))
+    current = _write_m1_file(tmp_path, "201204", ("20120401 000000",))
+
+    report = _continuity_report_for_path(tmp_path)
+
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_CONTINUITY_SUMMARY")
+    missing = _finding(
+        report.findings,
+        "ASCII_TIMESTAMP_CONTINUITY_PERIOD_MISSING",
+    )
+    sample = missing.metadata["samples"][0]
+    assert report.status is QualityStatus.WARNING
+    assert missing.severity is QualitySeverity.WARNING
+    assert missing.location.path == str(current.resolve())
+    assert missing.location.metadata["previous_path"] == str(previous.resolve())
+    assert missing.location.metadata["current_path"] == str(current.resolve())
+    assert missing.location.metadata["missing_periods"] == ["201203"]
+    assert sample["missing_periods"] == ["201203"]
+    assert summary.metadata["missing_period_count"] == 1
+    assert summary.metadata["period_gap_count"] == 1
+    assert summary.metadata["adjacent_pair_count"] == 0
+
+
+def test_cross_file_continuity_reports_duplicate_overlap(
+    tmp_path: Path,
+) -> None:
+    """Repeated boundary timestamps should be reported across files."""
+    previous = _write_m1_file(tmp_path, "201202", ("20120301 000000",))
+    current = _write_m1_file(tmp_path, "201203", ("20120301 000000",))
+
+    report = _continuity_report_for_path(tmp_path)
+
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_CONTINUITY_SUMMARY")
+    overlap = _finding(
+        report.findings,
+        "ASCII_TIMESTAMP_CONTINUITY_DUPLICATE_OVERLAP",
+    )
+    assert report.status is QualityStatus.WARNING
+    assert overlap.location.metadata["classification"] == "duplicate_overlap"
+    assert overlap.location.metadata["gap_ms"] == 0
+    assert overlap.metadata["samples"][0]["previous"]["path"] == (
+        str(previous.resolve())
+    )
+    assert overlap.metadata["samples"][0]["current"]["path"] == (
+        str(current.resolve())
+    )
+    assert summary.metadata["duplicate_overlap_count"] == 1
+
+
+def test_cross_file_continuity_reports_reversed_file_ordering(
+    tmp_path: Path,
+) -> None:
+    """A next file that starts before the previous file ends should warn."""
+    _write_m1_file(tmp_path, "201202", ("20120301 001000",))
+    _write_m1_file(tmp_path, "201203", ("20120301 000000",))
+
+    report = _continuity_report_for_path(tmp_path)
+
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_CONTINUITY_SUMMARY")
+    reversed_order = _finding(
+        report.findings,
+        "ASCII_TIMESTAMP_CONTINUITY_REVERSED_ORDER",
+    )
+    assert report.status is QualityStatus.WARNING
+    assert reversed_order.location.metadata["classification"] == (
+        "reversed_order"
+    )
+    assert reversed_order.location.metadata["gap_ms"] == -600_000
+    assert summary.metadata["reversed_order_count"] == 1
+
+
+def test_cross_file_continuity_reports_suspicious_boundary_gap(
+    tmp_path: Path,
+) -> None:
+    """Adjacent files with large non-session boundary gaps should warn."""
+    _write_m1_file(tmp_path, "201202", ("20120229 235000",))
+    _write_m1_file(tmp_path, "201203", ("20120301 001000",))
+
+    report = _continuity_report_for_path(tmp_path)
+
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_CONTINUITY_SUMMARY")
+    gap = _finding(
+        report.findings,
+        "ASCII_TIMESTAMP_CONTINUITY_SUSPICIOUS_GAP",
+    )
+    assert report.status is QualityStatus.WARNING
+    assert gap.location.metadata["classification"] == "suspicious_gap"
+    assert gap.location.metadata["gap_ms"] == 20 * 60_000
+    assert summary.metadata["suspicious_gap_count"] == 1
+
+
+def test_cross_file_continuity_allows_expected_session_closure(
+    tmp_path: Path,
+) -> None:
+    """Month boundaries crossing FX weekend closure should remain clean."""
+    _write_m1_file(tmp_path, "201203", ("20120330 165900",))
+    _write_m1_file(tmp_path, "201204", ("20120401 170100",))
+
+    report = _continuity_report_for_path(tmp_path)
+
+    summary = _finding(report.findings, "ASCII_TIMESTAMP_CONTINUITY_SUMMARY")
+    closure = _finding(
+        report.findings,
+        "ASCII_TIMESTAMP_CONTINUITY_EXPECTED_SESSION_CLOSURE",
+    )
+    assert report.status is QualityStatus.CLEAN
+    assert closure.severity is QualitySeverity.INFO
+    assert closure.location.metadata["classification"] == (
+        "expected_session_closure"
+    )
+    assert summary.metadata["expected_session_closure_count"] == 1
+    assert summary.metadata["suspicious_gap_count"] == 0
+
+
 def _report_for_path(path: Path):
     discovery = discover_quality_targets((path,))
     return run_quality_assessment(
         discovery.targets,
         quality_rules_for_groups(("time",)),
     )
+
+
+def _continuity_report_for_path(path: Path):
+    discovery = discover_quality_targets((path,))
+    return run_quality_assessment(
+        discovery.targets,
+        (),
+        run_rules=(HistDataAsciiTimestampContinuityRule(),),
+    )
+
+
+def _write_m1_file(
+    directory: Path,
+    period: str,
+    timestamps: tuple[str, ...],
+) -> Path:
+    path = directory / f"DAT_ASCII_EURUSD_M1_{period}.csv"
+    path.write_text(
+        "\n".join(_m1_row(timestamp) for timestamp in timestamps) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _m1_row(timestamp: str) -> str:
+    return f"{timestamp};1.306600;1.306600;1.306560;1.306560;0"
 
 
 def _finding(findings, code: str):
