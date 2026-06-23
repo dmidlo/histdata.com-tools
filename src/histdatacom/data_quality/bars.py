@@ -18,6 +18,12 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
     QualityTargetKind,
 )
+from histdatacom.data_quality.symbols import (
+    ASSET_CLASS_UNKNOWN,
+    HistDataSymbolMetadata,
+    HistDataSymbolPrecisionRule,
+    symbol_metadata_for,
+)
 from histdatacom.histdata_ascii import (
     M1,
     columns_for_timeframe,
@@ -27,10 +33,12 @@ from histdatacom.histdata_ascii import (
 from histdatacom.runtime_contracts import JSONValue
 
 ASCII_M1_BAR_INTEGRITY_RULE_ID = "bars.ascii.m1_ohlc"
+ASCII_M1_PRECISION_RULE_ID = "bars.ascii.m1_precision"
 SOURCE_TIMEZONE = "EST-no-DST"
 SOURCE_UTC_OFFSET = "-05:00"
 CANONICAL_TIMEZONE = "UTC"
 MAX_BAR_SAMPLES = 5
+M1_PRICE_COLUMNS = ("open", "high", "low", "close")
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +113,73 @@ class _M1BarScan:
     non_positive_price_rows: list[_M1BarSample] = field(default_factory=list)
 
 
+@dataclass(frozen=True, slots=True)
+class _M1PrecisionSample:
+    row_number: int
+    column: str
+    raw_value: str
+    decimal_places: int
+    timestamp_source: str
+    timestamp_utc_ms: int
+    expected_rule: HistDataSymbolPrecisionRule
+    source_member: str = ""
+
+    @property
+    def utc_timestamp(self) -> str:
+        """Return canonical UTC timestamp text for the sampled row."""
+        return _utc_iso_from_ms(self.timestamp_utc_ms)
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return a bounded JSON-compatible precision sample."""
+        return {
+            "row_number": self.row_number,
+            "column": self.column,
+            "raw_value": self.raw_value,
+            "decimal_places": self.decimal_places,
+            "timestamp_source": self.timestamp_source,
+            "timestamp_utc_ms": self.timestamp_utc_ms,
+            "utc_timestamp": self.utc_timestamp,
+            "expected_rule": self.expected_rule.to_metadata(),
+            "source_member": self.source_member,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _M1PrecisionRegimeShift:
+    column: str
+    observed_decimal_places: tuple[int, ...]
+    counts: dict[int, int]
+    first_sample: _M1PrecisionSample
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return a bounded JSON-compatible regime-shift sample."""
+        return {
+            "column": self.column,
+            "observed_decimal_places": list(self.observed_decimal_places),
+            "counts": {
+                str(decimal_places): count
+                for decimal_places, count in sorted(self.counts.items())
+            },
+            "first_sample": self.first_sample.to_dict(),
+        }
+
+
+@dataclass(slots=True)
+class _M1PrecisionScan:
+    parsed_row_count: int = 0
+    observed_decimal_counts: dict[int, int] = field(default_factory=dict)
+    observed_column_decimal_counts: dict[str, dict[int, int]] = field(
+        default_factory=dict
+    )
+    regime_samples: dict[str, dict[int, _M1PrecisionSample]] = field(
+        default_factory=dict
+    )
+    unexpected_precision_count: int = 0
+    unexpected_precision: list[_M1PrecisionSample] = field(default_factory=list)
+    regime_shift_count: int = 0
+    regime_shifts: list[_M1PrecisionRegimeShift] = field(default_factory=list)
+
+
 @dataclass(slots=True)
 class HistDataAsciiM1BarIntegrityRule:
     """Validate M1 OHLC ordering and strictly positive bid prices."""
@@ -177,10 +252,93 @@ class HistDataAsciiM1BarIntegrityRule:
         )
 
 
+@dataclass(slots=True)
+class HistDataAsciiM1PrecisionRule:
+    """Validate M1 price precision against symbol-aware expectations."""
+
+    warning_severity: QualitySeverity = QualitySeverity.WARNING
+    rule_id: str = ASCII_M1_PRECISION_RULE_ID
+    description: str = (
+        "Validate HistData M1 bid OHLC decimal precision against "
+        "instrument-aware pip and tick-size expectations."
+    )
+
+    def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
+        """Return M1 precision findings for one target."""
+        if not _is_m1_ascii_text_target(target):
+            return ()
+
+        try:
+            delimiter = delimiter_for_timeframe(target.timeframe)
+            payload = _read_text_payload(target)
+            text = payload.data.decode("utf-8")
+        except ValueError as exc:
+            return (
+                _finding(
+                    target,
+                    code="ASCII_M1_PRECISION_METADATA_UNSUPPORTED",
+                    message="Target metadata does not describe a supported "
+                    "HistData M1 ASCII timeframe.",
+                    rule_id=self.rule_id,
+                    metadata={
+                        "timeframe": target.timeframe,
+                        "error": str(exc),
+                    },
+                ),
+            )
+        except UnicodeDecodeError as exc:
+            return (
+                _finding(
+                    target,
+                    code="ASCII_M1_PRECISION_TEXT_ENCODING_INVALID",
+                    message="ASCII file does not decode as strict UTF-8 for "
+                    "M1 precision checks.",
+                    rule_id=self.rule_id,
+                    metadata={
+                        "encoding": "utf-8",
+                        "error": str(exc),
+                        "byte_start": exc.start,
+                        "byte_end": exc.end,
+                        "source_member": payload.source_member,
+                    },
+                ),
+            )
+        except _SourceReadError as exc:
+            return (
+                _finding(
+                    target,
+                    code=exc.code.replace("BARS", "PRECISION"),
+                    message=exc.message.replace(
+                        "bar checks", "precision checks"
+                    ),
+                    rule_id=self.rule_id,
+                    metadata=exc.metadata,
+                ),
+            )
+
+        symbol_metadata = symbol_metadata_for(target.symbol)
+        scan = _scan_m1_precision_rows(
+            text,
+            target=target,
+            delimiter=delimiter,
+            source_member=payload.source_member,
+            symbol_metadata=symbol_metadata,
+        )
+        return _precision_findings(
+            target=target,
+            scan=scan,
+            source_member=payload.source_member,
+            symbol_metadata=symbol_metadata,
+            severity=self.warning_severity,
+            rule_id=self.rule_id,
+        )
+
+
 def bars_quality_rules() -> tuple[QualityRule, ...]:
     """Return M1 bar quality rules in deterministic execution order."""
     m1_rule: QualityRule = HistDataAsciiM1BarIntegrityRule()
-    return (m1_rule,)
+    precision_rule: QualityRule = HistDataAsciiM1PrecisionRule()
+    return (m1_rule, precision_rule)
 
 
 def _is_m1_ascii_text_target(target: QualityTarget) -> bool:
@@ -287,6 +445,95 @@ def _scan_m1_bar_rows(
     return scan
 
 
+def _scan_m1_precision_rows(
+    text: str,
+    *,
+    target: QualityTarget,
+    delimiter: str,
+    source_member: str,
+    symbol_metadata: HistDataSymbolMetadata,
+) -> _M1PrecisionScan:
+    scan = _M1PrecisionScan()
+    columns = columns_for_timeframe(M1)
+    expected_count = len(columns)
+    expected_rule = symbol_metadata.precision_rule
+    for row_number, raw in enumerate(text.splitlines(), start=1):
+        if not raw.strip():
+            continue
+        row = _parse_row(raw, delimiter)
+        if len(row) != expected_count or tuple(row) == columns:
+            continue
+
+        timestamp_source = row[0].strip()
+        try:
+            timestamp_utc_ms = parse_histdata_datetime_to_utc_ms(
+                timestamp_source,
+                target.timeframe,
+            )
+        except ValueError:
+            continue
+
+        parsed_price_count = 0
+        for column, raw_value in zip(
+            M1_PRICE_COLUMNS,
+            row[1:5],
+            strict=True,
+        ):
+            value = raw_value.strip()
+            try:
+                parsed_price = float(value)
+            except ValueError:
+                continue
+            if not math.isfinite(parsed_price):
+                continue
+
+            decimal_places = _decimal_places(value)
+            if decimal_places is None:
+                continue
+
+            parsed_price_count += 1
+            _increment_count(scan.observed_decimal_counts, decimal_places)
+            _increment_count(
+                scan.observed_column_decimal_counts.setdefault(column, {}),
+                decimal_places,
+            )
+
+            if expected_rule is not None:
+                sample = _M1PrecisionSample(
+                    row_number=row_number,
+                    column=column,
+                    raw_value=value,
+                    decimal_places=decimal_places,
+                    timestamp_source=timestamp_source,
+                    timestamp_utc_ms=timestamp_utc_ms,
+                    expected_rule=expected_rule,
+                    source_member=source_member,
+                )
+                scan.regime_samples.setdefault(column, {}).setdefault(
+                    decimal_places,
+                    sample,
+                )
+                if decimal_places not in expected_rule.expected_decimal_places:
+                    scan.unexpected_precision_count += 1
+                    _append_precision_sample(
+                        scan.unexpected_precision,
+                        sample,
+                    )
+        if parsed_price_count == len(M1_PRICE_COLUMNS):
+            scan.parsed_row_count += 1
+
+    if expected_rule is not None:
+        scan.regime_shifts.extend(
+            _precision_regime_shifts(
+                scan.observed_column_decimal_counts,
+                scan.regime_samples,
+                expected_rule,
+            )
+        )
+        scan.regime_shift_count = len(scan.regime_shifts)
+    return scan
+
+
 def _m1_bar_sample(
     row: list[str],
     *,
@@ -322,7 +569,7 @@ def _m1_bar_sample(
     non_positive_columns = tuple(
         column
         for column, price in zip(
-            ("open", "high", "low", "close"),
+            M1_PRICE_COLUMNS,
             prices,
             strict=True,
         )
@@ -396,6 +643,222 @@ def _bar_findings(
     return tuple(findings)
 
 
+def _precision_findings(
+    *,
+    target: QualityTarget,
+    scan: _M1PrecisionScan,
+    source_member: str,
+    symbol_metadata: HistDataSymbolMetadata,
+    severity: QualitySeverity,
+    rule_id: str,
+) -> tuple[QualityFinding, ...]:
+    findings: list[QualityFinding] = [
+        _finding(
+            target,
+            code="ASCII_M1_PRECISION_SUMMARY",
+            message="M1 price precision and tick-size profile.",
+            severity=QualitySeverity.INFO,
+            rule_id=rule_id,
+            metadata={
+                **_base_metadata(target, source_member=source_member),
+                "symbol_metadata": symbol_metadata.to_metadata(),
+                "parsed_row_count": scan.parsed_row_count,
+                "observed_decimal_places": _decimal_count_metadata(
+                    scan.observed_decimal_counts
+                ),
+                "observed_column_decimal_places": (
+                    _column_decimal_count_metadata(
+                        scan.observed_column_decimal_counts
+                    )
+                ),
+                "unexpected_precision_count": (scan.unexpected_precision_count),
+                "regime_shift_count": scan.regime_shift_count,
+                "precision_rule_available": (
+                    symbol_metadata.precision_rule is not None
+                ),
+            },
+        )
+    ]
+    if symbol_metadata.asset_class == ASSET_CLASS_UNKNOWN:
+        findings.append(
+            _precision_metadata_finding(
+                target,
+                code="ASCII_M1_SYMBOL_METADATA_UNKNOWN",
+                message="Symbol metadata is unknown, so M1 precision "
+                "expectations cannot be selected.",
+                severity=severity,
+                source_member=source_member,
+                symbol_metadata=symbol_metadata,
+                scan=scan,
+                rule_id=rule_id,
+            )
+        )
+    elif symbol_metadata.precision_rule is None:
+        findings.append(
+            _precision_metadata_finding(
+                target,
+                code="ASCII_M1_PRECISION_RULE_UNAVAILABLE",
+                message="Symbol metadata is known, but no M1 precision "
+                "threshold is configured for this asset class yet.",
+                severity=severity,
+                source_member=source_member,
+                symbol_metadata=symbol_metadata,
+                scan=scan,
+                rule_id=rule_id,
+            )
+        )
+    if scan.unexpected_precision:
+        findings.append(
+            _precision_sample_finding(
+                target,
+                code="ASCII_M1_PRECISION_UNEXPECTED",
+                message="M1 OHLC decimal precision does not match the "
+                "symbol-aware pip and tick-size expectation.",
+                severity=severity,
+                samples=scan.unexpected_precision,
+                row_count=scan.unexpected_precision_count,
+                symbol_metadata=symbol_metadata,
+                rule_id=rule_id,
+            )
+        )
+    if scan.regime_shifts:
+        findings.append(
+            _precision_regime_finding(
+                target,
+                code="ASCII_M1_PRECISION_REGIME_SHIFT",
+                message="M1 OHLC decimal precision changes across rows for "
+                "one or more price columns.",
+                severity=severity,
+                shifts=scan.regime_shifts,
+                row_count=scan.regime_shift_count,
+                symbol_metadata=symbol_metadata,
+                rule_id=rule_id,
+            )
+        )
+    return tuple(findings)
+
+
+def _precision_metadata_finding(
+    target: QualityTarget,
+    *,
+    code: str,
+    message: str,
+    severity: QualitySeverity,
+    source_member: str,
+    symbol_metadata: HistDataSymbolMetadata,
+    scan: _M1PrecisionScan,
+    rule_id: str,
+) -> QualityFinding:
+    return _finding(
+        target,
+        code=code,
+        message=message,
+        severity=severity,
+        rule_id=rule_id,
+        metadata={
+            **_base_metadata(target, source_member=source_member),
+            "symbol_metadata": symbol_metadata.to_metadata(),
+            "parsed_row_count": scan.parsed_row_count,
+            "observed_decimal_places": _decimal_count_metadata(
+                scan.observed_decimal_counts
+            ),
+            "observed_column_decimal_places": _column_decimal_count_metadata(
+                scan.observed_column_decimal_counts
+            ),
+        },
+    )
+
+
+def _precision_sample_finding(
+    target: QualityTarget,
+    *,
+    code: str,
+    message: str,
+    severity: QualitySeverity,
+    samples: list[_M1PrecisionSample],
+    row_count: int,
+    symbol_metadata: HistDataSymbolMetadata,
+    rule_id: str,
+) -> QualityFinding:
+    first = samples[0]
+    return _finding(
+        target,
+        code=code,
+        message=message,
+        severity=severity,
+        rule_id=rule_id,
+        location=QualityLocation(
+            path=target.path,
+            row_number=first.row_number,
+            timestamp_source=first.timestamp_source,
+            timestamp_utc_ms=first.timestamp_utc_ms,
+            column=first.column,
+            metadata={
+                "source_timezone": SOURCE_TIMEZONE,
+                "source_utc_offset": SOURCE_UTC_OFFSET,
+                "utc_timestamp": first.utc_timestamp,
+                "source_member": first.source_member,
+                "raw_value": first.raw_value,
+                "decimal_places": first.decimal_places,
+                "expected_rule": first.expected_rule.to_metadata(),
+                "symbol_metadata": symbol_metadata.to_metadata(),
+            },
+        ),
+        metadata={
+            **_base_metadata(target, source_member=first.source_member),
+            "symbol_metadata": symbol_metadata.to_metadata(),
+            "expected_rule": first.expected_rule.to_metadata(),
+            "row_count": row_count,
+            "samples": _precision_samples(samples),
+        },
+    )
+
+
+def _precision_regime_finding(
+    target: QualityTarget,
+    *,
+    code: str,
+    message: str,
+    severity: QualitySeverity,
+    shifts: list[_M1PrecisionRegimeShift],
+    row_count: int,
+    symbol_metadata: HistDataSymbolMetadata,
+    rule_id: str,
+) -> QualityFinding:
+    first = shifts[0].first_sample
+    return _finding(
+        target,
+        code=code,
+        message=message,
+        severity=severity,
+        rule_id=rule_id,
+        location=QualityLocation(
+            path=target.path,
+            row_number=first.row_number,
+            timestamp_source=first.timestamp_source,
+            timestamp_utc_ms=first.timestamp_utc_ms,
+            column=first.column,
+            metadata={
+                "source_timezone": SOURCE_TIMEZONE,
+                "source_utc_offset": SOURCE_UTC_OFFSET,
+                "utc_timestamp": first.utc_timestamp,
+                "source_member": first.source_member,
+                "observed_decimal_places": list(
+                    shifts[0].observed_decimal_places
+                ),
+                "expected_rule": first.expected_rule.to_metadata(),
+                "symbol_metadata": symbol_metadata.to_metadata(),
+            },
+        ),
+        metadata={
+            **_base_metadata(target, source_member=first.source_member),
+            "symbol_metadata": symbol_metadata.to_metadata(),
+            "row_count": row_count,
+            "samples": _regime_shift_samples(shifts),
+        },
+    )
+
+
 def _bar_sample_finding(
     target: QualityTarget,
     *,
@@ -455,7 +918,7 @@ def _base_metadata(
         "source_timezone": SOURCE_TIMEZONE,
         "source_utc_offset": SOURCE_UTC_OFFSET,
         "canonical_timezone": CANONICAL_TIMEZONE,
-        "price_columns": ["open", "high", "low", "close"],
+        "price_columns": list(M1_PRICE_COLUMNS),
         "quote_side": "bid",
     }
 
@@ -493,8 +956,96 @@ def _append_bar_sample(
         samples.append(sample)
 
 
+def _append_precision_sample(
+    samples: list[_M1PrecisionSample],
+    sample: _M1PrecisionSample,
+) -> None:
+    if len(samples) < MAX_BAR_SAMPLES:
+        samples.append(sample)
+
+
 def _bar_samples(samples: Iterable[_M1BarSample]) -> list[JSONValue]:
     return [sample.to_dict() for sample in samples]
+
+
+def _precision_samples(
+    samples: Iterable[_M1PrecisionSample],
+) -> list[JSONValue]:
+    return [sample.to_dict() for sample in samples]
+
+
+def _regime_shift_samples(
+    samples: Iterable[_M1PrecisionRegimeShift],
+) -> list[JSONValue]:
+    return [sample.to_dict() for sample in samples]
+
+
+def _precision_regime_shifts(
+    observed_column_decimal_counts: dict[str, dict[int, int]],
+    regime_samples: dict[str, dict[int, _M1PrecisionSample]],
+    expected_rule: HistDataSymbolPrecisionRule,
+) -> list[_M1PrecisionRegimeShift]:
+    shifts: list[_M1PrecisionRegimeShift] = []
+    for column, counts in observed_column_decimal_counts.items():
+        observed = tuple(sorted(counts))
+        if len(observed) <= 1:
+            continue
+        representative_decimal_places = next(
+            (
+                decimal_places
+                for decimal_places in observed
+                if decimal_places not in expected_rule.expected_decimal_places
+            ),
+            observed[0],
+        )
+        sample = regime_samples[column][representative_decimal_places]
+        shifts.append(
+            _M1PrecisionRegimeShift(
+                column=column,
+                observed_decimal_places=observed,
+                counts=dict(counts),
+                first_sample=sample,
+            )
+        )
+        if len(shifts) >= MAX_BAR_SAMPLES:
+            break
+    return shifts
+
+
+def _decimal_places(value: str) -> int | None:
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if "e" in normalized.lower():
+        return None
+    whole, dot, fractional = normalized.partition(".")
+    if not dot:
+        return 0
+    if not whole.lstrip("+-").isdigit():
+        return None
+    if not fractional.isdigit():
+        return None
+    return len(fractional)
+
+
+def _increment_count(counts: dict[int, int], key: int) -> None:
+    counts[key] = counts.get(key, 0) + 1
+
+
+def _decimal_count_metadata(counts: dict[int, int]) -> dict[str, JSONValue]:
+    return {
+        str(decimal_places): count
+        for decimal_places, count in sorted(counts.items())
+    }
+
+
+def _column_decimal_count_metadata(
+    counts: dict[str, dict[int, int]],
+) -> dict[str, JSONValue]:
+    return {
+        column: _decimal_count_metadata(column_counts)
+        for column, column_counts in sorted(counts.items())
+    }
 
 
 def _utc_iso_from_ms(timestamp_utc_ms: int) -> str:
