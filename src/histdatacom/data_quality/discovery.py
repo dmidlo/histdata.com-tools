@@ -28,7 +28,12 @@ QUALITY_CHECK_GROUPS = (
 
 _ASCII_FILENAME_RE = re.compile(
     r"^DAT_ASCII_(?P<symbol>[A-Z0-9]+)_(?P<timeframe>M1|T)_"
-    r"(?P<period>\d{6})(?:_[A-Z0-9_]+)?(?:\.csv)?$",
+    r"(?P<period>\d{4}(?:\d{2})?)(?:_[A-Z0-9_]+)?(?:\.csv)?$",
+    re.IGNORECASE,
+)
+_HISTDATA_ARCHIVE_FILENAME_RE = re.compile(
+    r"^HISTDATA_COM_ASCII_(?P<symbol>[A-Z0-9]+)_"
+    r"(?P<timeframe>M1|T)(?P<period>\d{4}(?:\d{2})?)$",
     re.IGNORECASE,
 )
 
@@ -189,11 +194,16 @@ def _target_kind(path: Path) -> QualityTargetKind | None:
 
 
 def _metadata_from_filename(path: Path) -> dict[str, JSONValue]:
+    if path.name == CACHE_FILENAME:
+        return _metadata_from_cache_path(path)
+
     filename = path.name
     if path.suffix.lower() == ".zip":
         filename = path.with_suffix("").name
 
     match = _ASCII_FILENAME_RE.match(filename)
+    if match is None:
+        match = _HISTDATA_ARCHIVE_FILENAME_RE.match(filename)
     if match is None:
         return {}
 
@@ -207,6 +217,48 @@ def _metadata_from_filename(path: Path) -> dict[str, JSONValue]:
         "timeframe": timeframe,
         "period": match.group("period"),
     }
+
+
+def _metadata_from_cache_path(path: Path) -> dict[str, JSONValue]:
+    parts = path.parts
+    for index, part in enumerate(parts):
+        if part.upper() != "ASCII":
+            continue
+        try:
+            timeframe = parts[index + 1].upper()
+            symbol = parts[index + 2].upper()
+        except IndexError:
+            return {}
+        if timeframe not in {M1, TICK}:
+            return {}
+
+        period_parts = parts[index + 3 : -1]
+        period = _period_from_path_parts(period_parts)
+        if period:
+            return {
+                "data_format": "ascii",
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "period": period,
+            }
+    return {}
+
+
+def _period_from_path_parts(parts: tuple[str, ...]) -> str:
+    if not parts:
+        return ""
+    year = parts[0]
+    if len(year) != 4 or not year.isdigit():
+        return ""
+    if len(parts) == 1:
+        return year
+    month = parts[1]
+    if not month.isdigit():
+        return ""
+    month_value = int(month)
+    if not 1 <= month_value <= 12:
+        return ""
+    return f"{year}{month_value:02d}"
 
 
 _TARGET_KINDS = (

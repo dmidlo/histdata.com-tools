@@ -73,17 +73,24 @@ def test_quality_discovery_recursively_finds_zip_csv_and_cache_targets(
 
 
 @pytest.mark.parametrize(
-    ("filename", "kind"),
+    ("filename", "kind", "expected_period"),
     (
-        ("DAT_ASCII_EURUSD_M1_201202.csv", QualityTargetKind.CSV),
-        ("DAT_ASCII_EURUSD_M1_201202.zip", QualityTargetKind.ZIP),
-        (CACHE_FILENAME, QualityTargetKind.CACHE),
+        ("DAT_ASCII_EURUSD_M1_201202.csv", QualityTargetKind.CSV, "201202"),
+        ("DAT_ASCII_EURUSD_M1_2012.csv", QualityTargetKind.CSV, "2012"),
+        ("DAT_ASCII_EURUSD_M1_201202.zip", QualityTargetKind.ZIP, "201202"),
+        (
+            "HISTDATA_COM_ASCII_EURUSD_M1201202.zip",
+            QualityTargetKind.ZIP,
+            "201202",
+        ),
+        (CACHE_FILENAME, QualityTargetKind.CACHE, ""),
     ),
 )
 def test_quality_target_from_path_classifies_supported_files(
     tmp_path: Path,
     filename: str,
     kind: QualityTargetKind,
+    expected_period: str,
 ) -> None:
     """Supported files should map to QualityTarget objects."""
     path = tmp_path / filename
@@ -94,6 +101,37 @@ def test_quality_target_from_path_classifies_supported_files(
     assert target is not None
     assert target.kind == kind
     assert target.path == str(path.resolve())
+    assert target.period == expected_period
+
+
+@pytest.mark.parametrize(
+    ("path_parts", "expected_period"),
+    (
+        (("data", "ASCII", "M1", "eurusd", "2012", CACHE_FILENAME), "2012"),
+        (
+            ("data", "ASCII", "M1", "eurusd", "2026", "2", CACHE_FILENAME),
+            "202602",
+        ),
+    ),
+)
+def test_cache_targets_derive_metadata_from_dataset_directory_layout(
+    tmp_path: Path,
+    path_parts: tuple[str, ...],
+    expected_period: str,
+) -> None:
+    """Polars cache files use a fixed name, so metadata comes from the path."""
+    path = tmp_path.joinpath(*path_parts)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"")
+
+    target = quality_target_from_path(path)
+
+    assert target is not None
+    assert target.kind is QualityTargetKind.CACHE
+    assert target.data_format == "ascii"
+    assert target.symbol == "EURUSD"
+    assert target.timeframe == M1
+    assert target.period == expected_period
 
 
 def test_quality_discovery_rejects_missing_and_unsupported_paths(

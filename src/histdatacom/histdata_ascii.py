@@ -84,19 +84,54 @@ def parse_histdata_datetime_to_utc_ms(value: str, timeframe: str) -> int:
     value = value.strip()
     match timeframe:
         case "M1":
-            parsed = datetime.strptime(value, "%Y%m%d %H%M%S")
+            parsed = _parse_m1_datetime(value)
         case "T":
-            parsed = datetime.strptime(value, "%Y%m%d %H%M%S%f")
+            parsed = _parse_tick_datetime(value)
         case _:
             raise ValueError(f"unsupported ASCII timeframe: {timeframe}")
 
-    delta = parsed.replace(tzinfo=timezone.utc) - UNIX_EPOCH
+    delta = parsed - UNIX_EPOCH
     epoch_ms = (
         delta.days * 86_400_000
         + delta.seconds * 1_000
         + delta.microseconds // 1_000
     )
     return epoch_ms + EST_NO_DST_OFFSET_MS
+
+
+def _parse_m1_datetime(value: str) -> datetime:
+    if len(value) != 15 or value[8] != " ":
+        raise ValueError(f"time data {value!r} does not match M1 format")
+    compact = value[:8] + value[9:]
+    if not compact.isdigit():
+        raise ValueError(f"time data {value!r} does not match M1 format")
+    return datetime(
+        int(value[:4]),
+        int(value[4:6]),
+        int(value[6:8]),
+        int(value[9:11]),
+        int(value[11:13]),
+        int(value[13:15]),
+        tzinfo=timezone.utc,
+    )
+
+
+def _parse_tick_datetime(value: str) -> datetime:
+    if len(value) != 18 or value[8] != " ":
+        raise ValueError(f"time data {value!r} does not match T format")
+    compact = value[:8] + value[9:]
+    if not compact.isdigit():
+        raise ValueError(f"time data {value!r} does not match T format")
+    return datetime(
+        int(value[:4]),
+        int(value[4:6]),
+        int(value[6:8]),
+        int(value[9:11]),
+        int(value[11:13]),
+        int(value[13:15]),
+        int(value[15:18]) * 1_000,
+        tzinfo=timezone.utc,
+    )
 
 
 def normalize_ascii_row(
@@ -269,13 +304,31 @@ def _read_csv_to_polars(source: Any, timeframe: str) -> Any:
     """Read a HistData ASCII CSV source into a raw Polars dataframe."""
     import polars as pl
 
-    return pl.read_csv(
+    columns = list(columns_for_timeframe(timeframe))
+    frame = pl.read_csv(
         source,
         has_header=False,
         separator=delimiter_for_timeframe(timeframe),
-        new_columns=list(columns_for_timeframe(timeframe)),
-        schema_overrides=raw_polars_schema_for_timeframe(timeframe),
+        new_columns=columns,
+        schema_overrides={column: pl.Utf8 for column in columns},
     )
+    return frame.with_columns(
+        [_raw_polars_cast_expr(column) for column in columns]
+    )
+
+
+def _raw_polars_cast_expr(column: str) -> Any:
+    """Return a trimmed raw-ingest expression for one Polars column."""
+    import polars as pl
+
+    stripped = pl.col(column).str.strip_chars()
+    match column:
+        case "datetime":
+            return stripped.alias(column)
+        case "vol":
+            return stripped.cast(pl.Int32).alias(column)
+        case _:
+            return stripped.cast(pl.Float64).alias(column)
 
 
 def _single_csv_member_from_zip(path: Path) -> bytes:

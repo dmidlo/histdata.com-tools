@@ -1073,7 +1073,7 @@ def test_data_quality_activity_refreshes_repo_quality_metadata(
     assert quality["formats"] == ["ascii"]
     assert quality["timeframes"] == ["M1"]
     assert quality["periods"] == ["201202"]
-    assert quality["report_artifact"]["path"] == str(report_path.resolve())
+    assert quality["report_artifact"]["path"] == "reports/repo-quality.json"
 
 
 def test_data_quality_activity_runs_inventory_rules_for_corrupt_zip(

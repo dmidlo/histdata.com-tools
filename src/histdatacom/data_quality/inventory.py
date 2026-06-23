@@ -17,8 +17,11 @@ from histdatacom.data_quality.contracts import (
 from histdatacom.data_quality.discovery import quality_metadata_from_filename
 from histdatacom.runtime_contracts import JSONValue
 
-ASCII_ZIP_FILENAME_PATTERN = "DAT_ASCII_<SYMBOL>_<TIMEFRAME>_<YYYYMM>.zip"
-ASCII_CSV_MEMBER_PATTERN = "DAT_ASCII_<SYMBOL>_<TIMEFRAME>_<YYYYMM>.csv"
+ASCII_ZIP_FILENAME_PATTERN = (
+    "DAT_ASCII_<SYMBOL>_<TIMEFRAME>_<YYYY[MM]>.zip or "
+    "HISTDATA_COM_ASCII_<SYMBOL>_<TIMEFRAME><YYYY[MM]>.zip"
+)
+ASCII_CSV_MEMBER_PATTERN = "DAT_ASCII_<SYMBOL>_<TIMEFRAME>_<YYYY[MM]>.csv"
 ZIP_INVENTORY_RULE_ID = "inventory.zip.integrity"
 
 
@@ -38,9 +41,9 @@ class HistDataZipInventoryRule:
 
         findings: list[QualityFinding] = []
         path = Path(target.path)
-        expected_filename = _expected_zip_filename(target)
+        expected_filenames = _expected_zip_filenames(target)
         expected_member = _expected_zip_member(target)
-        if expected_filename is None:
+        if not expected_filenames:
             findings.append(
                 _finding(
                     target,
@@ -55,7 +58,7 @@ class HistDataZipInventoryRule:
                     },
                 )
             )
-        elif path.name != expected_filename:
+        elif path.name not in expected_filenames:
             findings.append(
                 _finding(
                     target,
@@ -66,7 +69,8 @@ class HistDataZipInventoryRule:
                     ),
                     metadata={
                         "expected_pattern": ASCII_ZIP_FILENAME_PATTERN,
-                        "expected_filename": expected_filename,
+                        "expected_filename": expected_filenames[0],
+                        "accepted_filenames": list(expected_filenames),
                         "observed_filename": path.name,
                     },
                 )
@@ -181,8 +185,11 @@ def _member_findings(
         )
         return tuple(findings)
 
+    expected_sidecar = str(Path(expected_member).with_suffix(".txt"))
     extra_members = tuple(
-        member for member in members if member != expected_member
+        member
+        for member in members
+        if member not in {expected_member, expected_sidecar}
     )
     if extra_members:
         findings.append(
@@ -219,15 +226,18 @@ def _expected_zip_member(target: QualityTarget) -> str | None:
     return f"DAT_ASCII_{target.symbol}_{target.timeframe}_{target.period}.csv"
 
 
-def _expected_zip_filename(target: QualityTarget) -> str | None:
+def _expected_zip_filenames(target: QualityTarget) -> tuple[str, ...]:
     if (
         target.data_format != "ascii"
         or not target.symbol
         or not target.timeframe
         or not target.period
     ):
-        return None
-    return f"DAT_ASCII_{target.symbol}_{target.timeframe}_{target.period}.zip"
+        return ()
+    return (
+        f"DAT_ASCII_{target.symbol}_{target.timeframe}_{target.period}.zip",
+        f"HISTDATA_COM_ASCII_{target.symbol}_{target.timeframe}{target.period}.zip",
+    )
 
 
 def _member_metadata(member: str) -> dict[str, JSONValue]:

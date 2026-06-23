@@ -205,6 +205,59 @@ def test_polars_ingest_reads_csv_fixtures_with_stable_raw_schema(
 
 
 @pytest.mark.parametrize(
+    ("timeframe", "content", "expected_records"),
+    (
+        (
+            "M1",
+            "20040307 170500;85.37     ;85.37     ;85.36     ;85.36     ;0   \n",
+            (
+                {
+                    "datetime": "20040307 170500",
+                    "open": 85.37,
+                    "high": 85.37,
+                    "low": 85.36,
+                    "close": 85.36,
+                    "vol": 0,
+                },
+            ),
+        ),
+        (
+            "T",
+            "20120201 000003660 ,1.3066    ,1.30677   ,0   \n",
+            (
+                {
+                    "datetime": "20120201 000003660",
+                    "bid": 1.3066,
+                    "ask": 1.30677,
+                    "vol": 0,
+                },
+            ),
+        ),
+    ),
+)
+def test_polars_ingest_trims_legacy_fixed_width_padding(
+    tmp_path: Path,
+    timeframe: str,
+    content: str,
+    expected_records: tuple[dict[str, object], ...],
+) -> None:
+    """Older HistData archives may pad numeric ASCII fields with spaces."""
+    import polars as pl
+
+    path = tmp_path / "padded.csv"
+    path.write_text(content, encoding="utf-8")
+
+    frame = read_ascii_file_to_polars(path, timeframe)
+
+    assert frame.to_dicts() == list(expected_records)
+    assert frame.schema["datetime"] == pl.String
+    assert frame.schema["vol"] == pl.Int32
+    assert all(
+        frame.schema[column] == pl.Float64 for column in frame.columns[1:-1]
+    )
+
+
+@pytest.mark.parametrize(
     ("timeframe", "filename", "expected_records"),
     (
         (

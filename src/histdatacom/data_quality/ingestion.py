@@ -608,21 +608,12 @@ def _source_error(
 
 
 def _scan_line_endings(data: bytes) -> _LineEndingScan:
-    counts = {"lf": 0, "crlf": 0, "cr": 0}
-    index = 0
-    while index < len(data):
-        value = data[index]
-        if value == 13:
-            if index + 1 < len(data) and data[index + 1] == 10:
-                counts["crlf"] += 1
-                index += 2
-            else:
-                counts["cr"] += 1
-                index += 1
-            continue
-        if value == 10:
-            counts["lf"] += 1
-        index += 1
+    crlf_count = data.count(b"\r\n")
+    counts = {
+        "lf": data.count(b"\n") - crlf_count,
+        "crlf": crlf_count,
+        "cr": data.count(b"\r") - crlf_count,
+    }
     return _LineEndingScan(counts=counts)
 
 
@@ -920,13 +911,11 @@ def _parse_row(raw: str, delimiter: str) -> list[str]:
 
 
 def _row_looks_shifted(row: list[str], *, timeframe: str) -> bool:
-    try:
-        parse_histdata_datetime_to_utc_ms(row[0], timeframe)
-    except ValueError:
-        return any(
-            _is_valid_source_timestamp(value, timeframe) for value in row[1:]
-        )
-    return False
+    if _source_timestamp_shape_matches(row[0], timeframe):
+        return False
+    return any(
+        _source_timestamp_shape_matches(value, timeframe) for value in row[1:]
+    )
 
 
 def _is_valid_source_timestamp(value: str, timeframe: str) -> bool:
@@ -935,6 +924,25 @@ def _is_valid_source_timestamp(value: str, timeframe: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _source_timestamp_shape_matches(value: str, timeframe: str) -> bool:
+    raw = value.strip()
+    match timeframe:
+        case "M1":
+            return (
+                len(raw) == 15
+                and raw[8] == " "
+                and (raw[:8] + raw[9:]).isdigit()
+            )
+        case "T":
+            return (
+                len(raw) == 18
+                and raw[8] == " "
+                and (raw[:8] + raw[9:]).isdigit()
+            )
+        case _:
+            return False
 
 
 def _parse_price_value(value: str) -> float:

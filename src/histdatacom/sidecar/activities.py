@@ -724,10 +724,37 @@ def _refresh_repo_quality_metadata(
     repo_data = read_repository_data_file(repo_path)
     updated = repository_data_with_quality_payload(
         repo_data,
-        quality_payload,
+        _portable_repo_quality_payload(quality_payload, repo_path=repo_path),
         request_id=request.request_id,
     )
     return write_repository_data_file(updated, repo_path)
+
+
+def _portable_repo_quality_payload(
+    quality_payload: Mapping[str, Any],
+    *,
+    repo_path: Path,
+) -> dict[str, Any]:
+    payload = dict(quality_payload)
+    artifact = quality_payload.get("report_artifact")
+    if isinstance(artifact, Mapping):
+        portable_artifact = dict(artifact)
+        portable_artifact["path"] = _portable_repo_artifact_path(
+            str(artifact.get("path", "") or ""),
+            repo_path=repo_path,
+        )
+        payload["report_artifact"] = portable_artifact
+    return payload
+
+
+def _portable_repo_artifact_path(value: str, *, repo_path: Path) -> str:
+    path = Path(value)
+    if not value or not path.is_absolute():
+        return value
+    try:
+        return str(path.resolve().relative_to(repo_path.parent.resolve()))
+    except ValueError:
+        return value
 
 
 def _quality_expected_dimensions(
