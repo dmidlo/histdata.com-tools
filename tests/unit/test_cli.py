@@ -239,6 +239,53 @@ def test_data_quality_cli_defaults_to_data_directory(
     assert not options.validate_urls
 
 
+def test_repo_quality_cli_refresh_defaults_to_data_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Repo-quality refresh should be explicit and local-only."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--repo-quality",
+            "--quality-checks",
+            "inventory",
+            "--data-directory",
+            str(tmp_path),
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert not options.data_quality
+    assert options.repo_quality_refresh
+    assert options.quality_paths == (str(tmp_path),)
+    assert options.quality_check_groups == ["inventory"]
+    assert not options.available_remote_data
+    assert not options.update_remote_data
+    assert not options.validate_urls
+
+
+def test_repo_quality_columns_are_display_only_for_repo_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stored quality columns should not imply a quality refresh."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "-A", "--repo-quality-columns"],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.available_remote_data
+    assert options.repo_quality_columns
+    assert not options.repo_quality_refresh
+    assert not options.data_quality
+
+
 @pytest.mark.parametrize(
     "argv",
     (
@@ -249,6 +296,8 @@ def test_data_quality_cli_defaults_to_data_directory(
         ["histdatacom", "--quality-max-errors", "1"],
         ["histdatacom", "--quality-max-warnings", "1"],
         ["histdatacom", "--quality", "-D"],
+        ["histdatacom", "--repo-quality", "-A"],
+        ["histdatacom", "--repo-quality-columns"],
     ),
 )
 def test_data_quality_cli_rejects_ambiguous_quality_flags(
@@ -285,6 +334,23 @@ def test_api_options_ignore_ambient_process_argv(
 
     assert parsed.version is True
     assert parsed.from_api is True
+
+
+def test_api_repo_quality_refresh_accepts_default_format_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Repo quality API requests should not validate legacy fetch formats."""
+    monkeypatch.setattr(sys, "argv", ["histdatacom"])
+    options = Options()
+    options.from_api = True
+    options.repo_quality_refresh = True
+    options.data_directory = str(tmp_path)
+
+    parsed = ArgParser(options)()
+
+    assert parsed.repo_quality_refresh is True
+    assert parsed.quality_paths == (str(tmp_path),)
 
 
 def test_argparser_bare_construction_uses_fresh_option_namespace(

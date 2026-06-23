@@ -423,6 +423,8 @@ class RunRequest:
     quality_fail_on: str = "error"
     quality_max_errors: int = 0
     quality_max_warnings: int = 0
+    repo_quality_refresh: bool = False
+    repo_quality_columns: bool = False
     metadata: dict[str, JSONValue] = field(default_factory=dict)
 
     @classmethod
@@ -490,6 +492,12 @@ class RunRequest:
             quality_max_warnings=int(
                 getattr(options, "quality_max_warnings", 0) or 0
             ),
+            repo_quality_refresh=bool(
+                getattr(options, "repo_quality_refresh", False)
+            ),
+            repo_quality_columns=bool(
+                getattr(options, "repo_quality_columns", False)
+            ),
             metadata=metadata,
         )
 
@@ -521,6 +529,8 @@ class RunRequest:
             "quality_fail_on": self.quality_fail_on,
             "quality_max_errors": self.quality_max_errors,
             "quality_max_warnings": self.quality_max_warnings,
+            "repo_quality_refresh": self.repo_quality_refresh,
+            "repo_quality_columns": self.repo_quality_columns,
             "metadata": dict(self.metadata),
         }
 
@@ -565,5 +575,7 @@ class RunRequest:
             ),
             quality_max_errors=int(data.get("quality_max_errors", 0) or 0),
             quality_max_warnings=int(data.get("quality_max_warnings", 0) or 0),
+            repo_quality_refresh=bool(data.get("repo_quality_refresh", False)),
+            repo_quality_columns=bool(data.get("repo_quality_columns", False)),
             metadata=dict(data.get("metadata") or {}),
         )

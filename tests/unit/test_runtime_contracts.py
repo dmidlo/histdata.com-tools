@@ -134,6 +134,8 @@ def test_run_request_round_trips_options_payload() -> None:
     options.quality_fail_on = "warning"
     options.quality_max_errors = 2
     options.quality_max_warnings = 5
+    options.repo_quality_refresh = True
+    options.repo_quality_columns = True
 
     request = RunRequest.from_options(options, request_id="run-test")
     restored = RunRequest.from_dict(json.loads(json.dumps(request.to_dict())))
@@ -154,6 +156,8 @@ def test_run_request_round_trips_options_payload() -> None:
     assert restored.quality_fail_on == "warning"
     assert restored.quality_max_errors == 2
     assert restored.quality_max_warnings == 5
+    assert restored.repo_quality_refresh
+    assert restored.repo_quality_columns
 
 
 def test_stage_result_round_trips_artifacts_events_and_failure() -> None:

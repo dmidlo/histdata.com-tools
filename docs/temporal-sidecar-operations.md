@@ -714,6 +714,13 @@ Data-quality checks:
 - Quality mode supports focused groups with `--quality-checks`: `inventory`,
   `ingestion`, `time`, `bars`, `ticks`, `domain`, and `modeling`. The default
   is `all`.
+- `histdatacom --repo-quality` runs the same offline quality workflow and then
+  writes bounded per-instrument summary metadata back to the local `.repo`
+  helper file. It stores status, counts, checked groups, format/timeframe/period
+  coverage, and artifact references only; detailed findings remain in the JSON
+  quality report. Ordinary `-A` and `-U` repository commands do not run quality
+  checks. Use `histdatacom -A --repo-quality-columns` to display previously
+  stored quality summaries in repository table output.
 - Use `--quality-report PATH` to write the full JSON report. The report schema
   is `histdatacom.quality-report.v1`; console output remains a bounded human
   summary with clean, warning, and failed file sections.

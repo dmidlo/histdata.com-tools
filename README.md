@@ -389,6 +389,23 @@ The command prints a human summary and can also write a full JSON report. If no
 Targets can be plain HistData CSV files, HistData ZIP archives, directories
 containing those files, or the canonical `.data` cache file.
 
+Use `--repo-quality` when the same quality run should also update the local
+repo helper file with bounded per-instrument quality summaries:
+
+```sh
+histdatacom --repo-quality --quality-target data/ --quality-report reports/quality.json
+```
+
+The `.repo` quality metadata stores summary counts, status, checked groups,
+formats/timeframes/periods, and report artifact references. Detailed findings
+stay in the JSON quality report on disk. Ordinary `-A` and `-U` repository
+list/update commands do not run quality checks. To display stored quality
+columns in repository output, use:
+
+```sh
+histdatacom -A --repo-quality-columns
+```
+
 #### Quality Targets and Check Groups
 
 Quality groups are composable. `all` is the default and cannot be combined with

@@ -25,6 +25,15 @@ DEFAULT_HELPER_ARGS: dict[str, Any] = {
     "batch_size": "5000",
     "delete_after_influx": False,
     "zip_persist": False,
+    "data_quality": False,
+    "quality_paths": (),
+    "quality_check_groups": {"all"},
+    "quality_report_path": "",
+    "quality_fail_on": "error",
+    "quality_max_errors": 0,
+    "quality_max_warnings": 0,
+    "repo_quality_refresh": False,
+    "repo_quality_columns": False,
 }
 
 

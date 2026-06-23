@@ -817,6 +817,25 @@ def test_data_quality_request_only_plans_quality_workflow() -> None:
     assert invocations[0].payload["request"]["data_quality"] is True
 
 
+def test_repo_quality_request_only_plans_quality_workflow() -> None:
+    """Repo-quality refresh should stay offline and skip repo refresh."""
+    request = _request(
+        repo_quality_refresh=True,
+        quality_paths=("/tmp/histdata",),
+        quality_check_groups=("inventory",),
+        available_remote_data=True,
+        update_remote_data=True,
+    )
+
+    invocations = workflows.build_run_child_invocations(request)
+
+    assert [item.workflow_name for item in invocations] == [
+        "DataQualityWorkflow"
+    ]
+    assert invocations[0].task_queue_lane.value == "cpu-file"
+    assert invocations[0].payload["request"]["repo_quality_refresh"] is True
+
+
 def test_parent_workflow_preserves_repository_available_data_metrics() -> None:
     """Parent results should retain bounded repo data for API parity."""
     request = _request(

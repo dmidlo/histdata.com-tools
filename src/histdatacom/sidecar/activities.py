@@ -15,8 +15,10 @@ from histdatacom.activity_stages import (
     extract_csv_work_item,
     import_to_influx_work_item,
     merge_cache_work_items,
+    read_repository_data_file,
     repository_refresh_stage,
     validate_url_work_item,
+    write_repository_data_file,
 )
 from histdatacom.cancellation import (
     cancellation_metadata,
@@ -54,6 +56,9 @@ from histdatacom.manifest_store import (
     ManifestStatusStore,
 )
 from histdatacom.observability import attach_progress_metadata
+from histdatacom.repository_quality import (
+    repository_data_with_quality_payload,
+)
 from histdatacom.runtime_contracts import (
     ArtifactRef,
     FailureInfo,
@@ -310,6 +315,23 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
             decision=decision,
             artifact=artifact,
         )
+        repo_artifact = _refresh_repo_quality_metadata(
+            request,
+            quality_payload,
+        )
+        if repo_artifact is not None:
+            quality_payload["repo_quality"] = {
+                "refreshed": True,
+                "repo_artifact": repo_artifact.to_dict(),
+            }
+        artifacts = (
+            (artifact,)
+            if repo_artifact is None
+            else (
+                artifact,
+                repo_artifact,
+            )
+        )
         result = StageResult(
             work_id=request.request_id,
             stage="data_quality",
@@ -318,7 +340,7 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
                 if int(decision.exit_code)
                 else WorkStatus.COMPLETED
             ),
-            artifacts=(artifact,),
+            artifacts=artifacts,
             failure=(
                 FailureInfo(
                     code="DATA_QUALITY_FAILED",
@@ -332,6 +354,10 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
                 "quality": quality_payload,
                 "quality_report_path": artifact.path,
                 "quality_report_sha256": artifact.sha256,
+                "repo_quality_refreshed": repo_artifact is not None,
+                "repo_quality_path": (
+                    "" if repo_artifact is None else repo_artifact.path
+                ),
             },
         )
         total_targets = report.summary().target_count
@@ -686,6 +712,22 @@ def _quality_report_path(request: RunRequest) -> Path:
     data_dir = Path(set_working_data_dir(request.data_directory))
     request_id = request.request_id.strip() or "request"
     return data_dir / ".quality" / "reports" / f"{request_id}.json"
+
+
+def _refresh_repo_quality_metadata(
+    request: RunRequest,
+    quality_payload: Mapping[str, Any],
+) -> ArtifactRef | None:
+    if not request.repo_quality_refresh:
+        return None
+    repo_path = _repo_local_path(request)
+    repo_data = read_repository_data_file(repo_path)
+    updated = repository_data_with_quality_payload(
+        repo_data,
+        quality_payload,
+        request_id=request.request_id,
+    )
+    return write_repository_data_file(updated, repo_path)
 
 
 def _quality_expected_dimensions(

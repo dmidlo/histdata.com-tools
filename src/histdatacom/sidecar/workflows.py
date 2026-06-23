@@ -619,7 +619,7 @@ def build_run_child_invocations(
 ) -> tuple[WorkflowInvocation, ...]:
     """Plan top-level child workflow calls for a user-visible job."""
     invocations: list[WorkflowInvocation] = []
-    if request.data_quality:
+    if request.data_quality or request.repo_quality_refresh:
         return (_invocation(request, "DataQualityWorkflow"),)
 
     if request.available_remote_data or request.update_remote_data:

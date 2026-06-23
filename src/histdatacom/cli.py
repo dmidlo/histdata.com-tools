@@ -161,25 +161,49 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
     def _check_quality_mode(self) -> None:
         """Validate offline data quality mode inputs."""
-        if not self.arg_namespace.data_quality:
+        quality_requested = bool(
+            self.arg_namespace.data_quality
+            or self.arg_namespace.repo_quality_refresh
+        )
+        if (
+            self.arg_namespace.repo_quality_columns
+            and not self.arg_namespace.available_remote_data
+            and not self.arg_namespace.update_remote_data
+        ):
+            print("--repo-quality-columns requires -A or -U")  # noqa:T201
+            raise SystemExit(1)
+
+        if not quality_requested:
             if self.arg_namespace.quality_paths:
-                print("--quality-target requires --quality")  # noqa:T201
+                print(  # noqa:T201
+                    "--quality-target requires --quality or --repo-quality"
+                )
                 raise SystemExit(1)
             quality_groups = set(self.arg_namespace.quality_check_groups or ())
             if quality_groups and quality_groups != {"all"}:
-                print("--quality-checks requires --quality")  # noqa:T201
+                print(  # noqa:T201
+                    "--quality-checks requires --quality or --repo-quality"
+                )
                 raise SystemExit(1)
             if self.arg_namespace.quality_report_path:
-                print("--quality-report requires --quality")  # noqa:T201
+                print(  # noqa:T201
+                    "--quality-report requires --quality or --repo-quality"
+                )
                 raise SystemExit(1)
             if self.arg_namespace.quality_fail_on != "error":
-                print("--quality-fail-on requires --quality")  # noqa:T201
+                print(  # noqa:T201
+                    "--quality-fail-on requires --quality or --repo-quality"
+                )
                 raise SystemExit(1)
             if self.arg_namespace.quality_max_errors != 0:
-                print("--quality-max-errors requires --quality")  # noqa:T201
+                print(  # noqa:T201
+                    "--quality-max-errors requires --quality or --repo-quality"
+                )
                 raise SystemExit(1)
             if self.arg_namespace.quality_max_warnings != 0:
-                print("--quality-max-warnings requires --quality")  # noqa:T201
+                print(  # noqa:T201
+                    "--quality-max-warnings requires --quality or --repo-quality"
+                )
                 raise SystemExit(1)
             return
 
@@ -198,7 +222,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         conflicts = [flag for flag, enabled in legacy_flags.items() if enabled]
         if conflicts:
             print(  # noqa:T201
-                "--quality is an offline operation and cannot be combined "
+                "quality refresh is an offline operation and cannot be combined "
                 f"with {', '.join(conflicts)}"
             )
             raise SystemExit(1)
@@ -214,11 +238,17 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         Returns:
             list: args
         """
-        if self.arg_namespace.data_quality:
+        if (
+            self.arg_namespace.data_quality
+            or self.arg_namespace.repo_quality_refresh
+        ):
             args = [
                 *["--data-directory", self.arg_namespace.data_directory],
-                "--quality",
             ]
+            if self.arg_namespace.data_quality:
+                args.append("--quality")
+            if self.arg_namespace.repo_quality_refresh:
+                args.append("--repo-quality")
             if self.arg_namespace.quality_paths:
                 args.extend(
                     ["--quality-target", *self.arg_namespace.quality_paths]
@@ -272,6 +302,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args.append("-A")
         if self.arg_namespace.update_remote_data:
             args.append("-U")
+        if self.arg_namespace.repo_quality_columns:
+            args.append("--repo-quality-columns")
         if self.arg_namespace.validate_urls:
             args.append("-V")
         if self.arg_namespace.download_data_archives:
@@ -325,6 +357,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         try:
             if self.arg_namespace.from_api and not (
                 self.arg_namespace.data_quality
+                or self.arg_namespace.repo_quality_refresh
                 or self.arg_namespace.validate_urls
                 or self.arg_namespace.download_data_archives
                 or self.arg_namespace.extract_csvs
@@ -349,7 +382,10 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
     def _check_for_supported_format_timeframe_combination(self) -> None:
         """Reject format/timeframe selections that generate no work."""
-        if self.arg_namespace.data_quality:
+        if (
+            self.arg_namespace.data_quality
+            or self.arg_namespace.repo_quality_refresh
+        ):
             return
 
         formats = self.arg_namespace.formats or set()
@@ -417,7 +453,10 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
     def _validate_prerequisites(self) -> None:
         """Set prereqs for behavior flags -V -D -X -I."""
-        if self.arg_namespace.data_quality:
+        if (
+            self.arg_namespace.data_quality
+            or self.arg_namespace.repo_quality_refresh
+        ):
             return
 
         if (
@@ -986,6 +1025,24 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "run offline data-quality assessment against local datasets "
                 "without contacting HistData.com"
+            ),
+        )
+        quality_args.add_argument(
+            "--repo-quality",
+            dest="repo_quality_refresh",
+            action="store_true",
+            help=(
+                "run offline data-quality assessment and write bounded "
+                "quality summary metadata back to the local .repo file"
+            ),
+        )
+        info_args.add_argument(
+            "--repo-quality-columns",
+            dest="repo_quality_columns",
+            action="store_true",
+            help=(
+                "include stored data-quality status columns in -A/-U "
+                "repository table output"
             ),
         )
         quality_args.add_argument(

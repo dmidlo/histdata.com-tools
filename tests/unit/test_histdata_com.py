@@ -70,12 +70,20 @@ def _sidecar_repository_result(
     *,
     status: str = "completed",
     failure_code: str = "",
+    include_quality: bool = False,
 ) -> SidecarJobResult:
     """Return a completed sidecar result with repository metrics."""
     available_data = {
         "gbpusd": {"start": "200005", "end": "202212"},
         "eurusd": {"start": "200005", "end": "202212"},
     }
+    if include_quality:
+        available_data["eurusd"]["quality"] = {
+            "status": "clean",
+            "target_count": 2,
+            "finding_count": 0,
+            "report_artifact": {"path": "/tmp/quality.json"},
+        }
     stage_result = {
         "stage": "RepositoryRefreshWorkflow",
         "status": status,
@@ -1253,6 +1261,45 @@ def test_cli_sidecar_repository_request_prints_legacy_table(
     assert "from HistData.com" in output
     assert "eurusd" in output
     assert '"status"' not in output
+
+
+def test_cli_sidecar_repository_request_can_print_quality_columns(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Repository table quality columns should be opt-in."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fake_submit(*args: object, **kwargs: object) -> SidecarJobResult:
+        return _sidecar_repository_result(include_quality=True)
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--sidecar",
+            "-A",
+            "-p",
+            "eurusd",
+            "--repo-quality-columns",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    assert err.value.code == 0
+    output = capsys.readouterr().out
+    assert "Quality" in output
+    assert "Q Targets" in output
+    assert "clean" in output
+    assert "2" in output
 
 
 @pytest.mark.parametrize(

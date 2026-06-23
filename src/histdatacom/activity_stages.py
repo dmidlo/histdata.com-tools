@@ -46,6 +46,7 @@ from histdatacom.histdata_ascii import (
     write_polars_cache,
 )
 from histdatacom.records import Record
+from histdatacom.repository_quality import REPOSITORY_QUALITY_KEY
 from histdatacom.runtime_contracts import (
     ArtifactRef,
     FailureInfo,
@@ -1979,8 +1980,33 @@ def merge_remote_repository_data(
     local_time = _json_float(local_repo_data.get("hash_utc"))
     remote_time = _json_float(remote_repo_data.get("hash_utc"))
     if local_hash != remote_hash and local_time < remote_time:
-        return dict(remote_repo_data)
+        return _repository_data_preserving_quality(
+            remote_repo_data,
+            local_repo_data,
+        )
     return dict(local_repo_data)
+
+
+def _repository_data_preserving_quality(
+    primary_repo_data: Mapping[str, Any],
+    quality_source_repo_data: Mapping[str, Any],
+) -> dict[str, Any]:
+    updated = {
+        key: dict(value) if isinstance(value, Mapping) else value
+        for key, value in dict(primary_repo_data).items()
+    }
+    for pair, local_entry in repository_pair_data(
+        quality_source_repo_data
+    ).items():
+        quality = local_entry.get(REPOSITORY_QUALITY_KEY)
+        if not isinstance(quality, Mapping):
+            continue
+        primary_entry = updated.get(pair)
+        if isinstance(primary_entry, Mapping):
+            next_entry = dict(primary_entry)
+            next_entry[REPOSITORY_QUALITY_KEY] = dict(quality)
+            updated[pair] = next_entry
+    return updated
 
 
 def repository_data_with_record(
@@ -2002,10 +2028,10 @@ def repository_data_with_record(
 
     start = str(current.get("start", datemonth))
     end = str(current.get("end", datemonth))
-    updated[pair] = {
-        "start": datemonth if int(datemonth) < int(start) else start,
-        "end": datemonth if int(datemonth) > int(end) else end,
-    }
+    next_entry = dict(current)
+    next_entry["start"] = datemonth if int(datemonth) < int(start) else start
+    next_entry["end"] = datemonth if int(datemonth) > int(end) else end
+    updated[pair] = next_entry
     return updated
 
 

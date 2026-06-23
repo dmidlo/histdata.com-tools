@@ -79,6 +79,8 @@ class RuntimeContext:
     quality_fail_on: str
     quality_max_errors: int
     quality_max_warnings: int
+    repo_quality_refresh: bool
+    repo_quality_columns: bool
     available_remote_data: bool
     update_remote_data: bool
     import_to_influxdb: bool
@@ -156,7 +158,9 @@ class _HistDataCom:  # noqa:R701
             raise SystemExit(1) from err
 
         payload = result.to_dict()
-        if self.context.data_quality and self.context.sidecar_wait_result:
+        if (
+            self.context.data_quality or self.context.repo_quality_refresh
+        ) and self.context.sidecar_wait_result:
             quality_payload = _quality_payload_from_sidecar_payload(payload)
             if quality_payload is not None:
                 if self.context.from_api:
@@ -190,7 +194,10 @@ class _HistDataCom:  # noqa:R701
             if available_data is not None:
                 if self.context.from_api:
                     return available_data
-                print_repository_table(available_data)
+                print_repository_table(
+                    available_data,
+                    include_quality=self.context.repo_quality_columns,
+                )
                 raise SystemExit(0)
 
         if self.context.sidecar_wait_result and _sidecar_payload_failed(
@@ -285,6 +292,8 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         quality_fail_on=str(args["quality_fail_on"]),
         quality_max_errors=int(args["quality_max_errors"]),
         quality_max_warnings=int(args["quality_max_warnings"]),
+        repo_quality_refresh=bool(args["repo_quality_refresh"]),
+        repo_quality_columns=bool(args["repo_quality_columns"]),
         available_remote_data=bool(args["available_remote_data"]),
         update_remote_data=bool(args["update_remote_data"]),
         import_to_influxdb=bool(args["import_to_influxdb"]),
@@ -563,6 +572,10 @@ def _format_sidecar_quality_console_summary(
     artifact = _mapping_from_payload(quality_payload.get("report_artifact"))
     if artifact.get("path"):
         lines.append(f"report: {artifact['path']}")
+    repo_quality = _mapping_from_payload(quality_payload.get("repo_quality"))
+    repo_artifact = _mapping_from_payload(repo_quality.get("repo_artifact"))
+    if repo_quality.get("refreshed") and repo_artifact.get("path"):
+        lines.append(f"repo quality: {repo_artifact['path']}")
     decision = _mapping_from_payload(quality_payload.get("exit_decision"))
     if decision.get("reason"):
         lines.append(f"decision: {decision['reason']}")

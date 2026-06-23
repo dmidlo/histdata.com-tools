@@ -1205,9 +1205,50 @@ def test_repository_refresh_stage_accepts_one_shot_pair_iterable(
     assert output.result.metrics["filter_pairs"] == []
 
 
+def test_repository_refresh_preserves_quality_when_remote_updates(
+    tmp_path: Path,
+) -> None:
+    """Remote availability refresh should carry local quality metadata."""
+    local_repo = {
+        "eurusd": {
+            "start": "200005",
+            "end": "202212",
+            "quality": {"status": "clean", "target_count": 2},
+        },
+        "hash": "local",
+        "hash_utc": 1.0,
+    }
+    remote_repo = {
+        "eurusd": {"start": "200005", "end": "202606"},
+        "hash": "remote",
+        "hash_utc": 2.0,
+    }
+
+    output = repository_refresh_stage(
+        repo_data=local_repo,
+        repo_file_exists=True,
+        repo_local_path=tmp_path / ".repo",
+        pairs=("eurusd",),
+        available_remote_data=True,
+        fetch_remote_repository=lambda url: remote_repo,
+    )
+
+    assert output.available_data["eurusd"] == {
+        "start": "200005",
+        "end": "202606",
+        "quality": {"status": "clean", "target_count": 2},
+    }
+
+
 def test_repository_data_with_record_updates_ranges_without_globals() -> None:
     """Repository range updates should work from explicit inputs."""
-    existing = {"eurusd": {"start": "202201", "end": "202201"}}
+    existing = {
+        "eurusd": {
+            "start": "202201",
+            "end": "202201",
+            "quality": {"status": "warning", "target_count": 1},
+        }
+    }
     record = Record(
         data_fxpair="EURUSD",
         data_datemonth="202212",
@@ -1215,5 +1256,11 @@ def test_repository_data_with_record_updates_ranges_without_globals() -> None:
 
     updated = repository_data_with_record(existing, record)
 
-    assert updated == {"eurusd": {"start": "202201", "end": "202212"}}
-    assert existing == {"eurusd": {"start": "202201", "end": "202201"}}
+    assert updated == {
+        "eurusd": {
+            "start": "202201",
+            "end": "202212",
+            "quality": {"status": "warning", "target_count": 1},
+        }
+    }
+    assert existing["eurusd"]["end"] == "202201"

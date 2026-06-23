@@ -1028,6 +1028,54 @@ def test_data_quality_activity_writes_report_and_bounded_metrics(
     assert detailed_report["target_summaries"][0]["target"]["kind"] == "csv"
 
 
+def test_data_quality_activity_refreshes_repo_quality_metadata(
+    tmp_path: Path,
+) -> None:
+    """Repo-quality refresh should persist bounded pair summaries in .repo."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    repo_path = tmp_path / ".repo"
+    repo_path.write_text(
+        json.dumps({"eurusd": {"start": "200005", "end": "202606"}}),
+        encoding="utf-8",
+    )
+    report_path = tmp_path / "reports" / "repo-quality.json"
+    request = RunRequest(
+        request_id="run-repo-quality",
+        data_directory=str(tmp_path),
+        repo_quality_refresh=True,
+        quality_paths=(str(csv_path),),
+        quality_check_groups=("ingestion",),
+        quality_report_path=str(report_path),
+    )
+
+    payload = data_quality_activity({"request": request.to_dict()})
+
+    result = payload["result"]
+    repo_payload = json.loads(repo_path.read_text(encoding="utf-8"))
+    quality = repo_payload["eurusd"]["quality"]
+    bounded_quality = payload["quality"]
+    assert result["status"] == WorkStatus.COMPLETED.value
+    assert result["metrics"]["repo_quality_refreshed"] is True
+    assert result["metrics"]["repo_quality_path"] == str(repo_path)
+    assert bounded_quality["repo_quality"]["refreshed"] is True
+    assert bounded_quality["repo_quality"]["repo_artifact"]["path"] == str(
+        repo_path
+    )
+    assert {artifact["kind"] for artifact in result["artifacts"]} == {
+        "quality-report",
+        "repository",
+    }
+    assert quality["operation"] == "repo-quality-refresh"
+    assert quality["request_id"] == "run-repo-quality"
+    assert quality["status"] == "clean"
+    assert quality["target_count"] == 1
+    assert quality["finding_count"] == 1
+    assert quality["formats"] == ["ascii"]
+    assert quality["timeframes"] == ["M1"]
+    assert quality["periods"] == ["201202"]
+    assert quality["report_artifact"]["path"] == str(report_path.resolve())
+
+
 def test_data_quality_activity_runs_inventory_rules_for_corrupt_zip(
     tmp_path: Path,
 ) -> None:

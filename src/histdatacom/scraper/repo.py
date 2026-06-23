@@ -35,6 +35,7 @@ from histdatacom.activity_stages import (
 from histdatacom.helper_args import helper_runtime_args
 from histdatacom.legacy_boundary import warn_legacy_side_effect
 from histdatacom.records import Record
+from histdatacom.repository_quality import repository_quality_columns
 from histdatacom.utils import (
     get_year_from_datemonth,
     get_month_from_datemonth,
@@ -304,6 +305,10 @@ class Repo:  # noqa: H601
         table.add_column("Pair -p")
         table.add_column("Start -s")
         table.add_column("End -e")
+        if runtime_args.get("repo_quality_columns"):
+            table.add_column("Quality")
+            table.add_column("Q Targets")
+            table.add_column("Q Findings")
 
         for row in self._sort_repo_dict_by(  # pylint: disable=not-an-iterable
             self.repo_data.copy(),
@@ -316,11 +321,21 @@ class Repo:  # noqa: H601
             end = self.repo_data[row]["end"]
             end_year = get_year_from_datemonth(end)
             end_month = get_month_from_datemonth(end)
-            table.add_row(
+            cells = [
                 row.lower(),
                 f"{start_year}-{start_month}",
                 f"{end_year}-{end_month}",
-            )
+            ]
+            if runtime_args.get("repo_quality_columns"):
+                quality = repository_quality_columns(self.repo_data[row])
+                cells.extend(
+                    [
+                        quality["status"],
+                        quality["targets"],
+                        quality["findings"],
+                    ]
+                )
+            table.add_row(*cells)
         print(table)  # noqa: T201
 
     def _runtime_args(
