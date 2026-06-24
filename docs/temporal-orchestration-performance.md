@@ -2,9 +2,9 @@
 
 Issues: #166, #180, #181, #187
 
-See `docs/temporal-orchestration-operations.md` for lifecycle commands, runtime
-paths, troubleshooting, and worker startup guidance. This page is limited to
-the performance baseline and lane sizing policy.
+See `docs/temporal-orchestration-runtime-runbook.md` for lifecycle commands,
+runtime paths, troubleshooting, and worker startup guidance. This page is
+limited to the performance baseline and lane sizing policy.
 
 ## Retired Runtime Baseline
 

@@ -37,7 +37,7 @@ Works on MacOS, Linux & Windows Systems.
     - [Public Orchestration API Boundary](#public-orchestration-api-boundary)
     - [Maintainer Runtime Diagnostics](#maintainer-runtime-diagnostics)
     - [Job Telemetry and Automation](#job-telemetry-and-automation)
-    - [Runtime Troubleshooting and Contributor Docs](#runtime-troubleshooting-and-contributor-docs)
+    - [Runtime User and Maintainer Docs](#runtime-user-and-maintainer-docs)
   - [API - Other Scripts, Modules, & Jupyter Support](#api-other-scripts-modules-jupyter-support)
     - [CLI Automation](#cli-automation)
     - [Jupyter and External Scripts](#jupyter-and-external-scripts)
@@ -898,11 +898,14 @@ job metadata instead of a materialized API return object. Set
 `options.orchestration_start = False` when a caller requires a pre-started
 runtime. `options.use_orchestration = False` is not supported.
 
-#### Runtime Troubleshooting and Contributor Docs
+#### Runtime User and Maintainer Docs
 
-See [Temporal Orchestration Operations](docs/temporal-orchestration-operations.md) for the
-runtime path layout, port policy, lifecycle commands, job controls,
-cancellation/resume behavior, and troubleshooting guidance. See
+See [Temporal Orchestration User Guide](docs/temporal-orchestration-operations.md)
+for submit, observe, cancel, retry, resume, artifacts, and user troubleshooting
+workflows. See
+[Temporal Orchestration Runtime Runbook](docs/temporal-orchestration-runtime-runbook.md)
+for maintainer lifecycle commands, runtime path layout, port policy, worker
+lanes, SQLite persistence, maintenance, and low-level diagnostics. See
 [Temporal Workflow Topology](docs/temporal-workflow-topology.md) for workflow,
 activity, task queue, and testing boundaries. See
 [Temporal Orchestration Performance Baseline](docs/temporal-orchestration-performance.md)

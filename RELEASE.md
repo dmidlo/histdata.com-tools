@@ -198,9 +198,11 @@ runtime CLI flags, runtime paths, worker queues, package resources, or bundled
 executable behavior:
 
 - `README.md` for the user-facing orchestration runtime summary.
-- `docs/temporal-orchestration-operations.md` for lifecycle commands, state layout,
-  logs, SQLite persistence, troubleshooting, cancellation/resume behavior, and
-  GUI-oriented job control.
+- `docs/temporal-orchestration-operations.md` for submit, observe, cancel,
+  retry, resume, artifact, and user troubleshooting workflows.
+- `docs/temporal-orchestration-runtime-runbook.md` for lifecycle commands, state
+  layout, logs, SQLite persistence, worker lanes, release-smoke expectations,
+  and low-level runtime troubleshooting.
 - `docs/temporal-workflow-topology.md` for workflow, activity, task queue, and
   testing boundaries.
 - `docs/temporal-orchestration-performance.md` for lane sizing and benchmark policy.
