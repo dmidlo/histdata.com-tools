@@ -18,6 +18,13 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
     QualityTargetKind,
 )
+from histdatacom.data_quality.calendar_profiles import (
+    HistDataCalendarDateTag,
+    HistDataCalendarProfile,
+    HistDataCalendarWindowTag,
+    default_calendar_profile,
+)
+from histdatacom.data_quality.symbols import symbol_metadata_for
 from histdatacom.data_quality.time import (
     _SourceReadError as _TimestampSourceReadError,
     _TimestampSample,
@@ -152,6 +159,7 @@ class HistDataCalendarClassification:
     overlaps: tuple[str, ...]
     special_tags: tuple[str, ...]
     holiday_tags: tuple[str, ...]
+    event_tags: tuple[str, ...]
     calendar_tags: tuple[str, ...]
 
     @property
@@ -181,6 +189,7 @@ class HistDataCalendarClassification:
             "overlaps": list(self.overlaps),
             "special_tags": list(self.special_tags),
             "holiday_tags": list(self.holiday_tags),
+            "event_tags": list(self.event_tags),
             "calendar_tags": list(self.calendar_tags),
         }
 
@@ -241,6 +250,7 @@ class _CalendarScan:
     overlap_counts: Counter[str] = field(default_factory=Counter)
     special_tag_counts: Counter[str] = field(default_factory=Counter)
     holiday_tag_counts: Counter[str] = field(default_factory=Counter)
+    event_tag_counts: Counter[str] = field(default_factory=Counter)
     calendar_tag_counts: Counter[str] = field(default_factory=Counter)
     samples: list[_CalendarSample] = field(default_factory=list)
     invalid_timestamps: list[_InvalidTimestampSample] = field(
@@ -318,6 +328,8 @@ def classify_histdata_timestamp(
     timestamp_utc_ms: int,
     *,
     source_timestamp: str = "",
+    calendar_profile: HistDataCalendarProfile | None = None,
+    asset_class: str = "",
 ) -> HistDataCalendarClassification:
     """Classify one canonical UTC millisecond timestamp.
 
@@ -328,6 +340,7 @@ def classify_histdata_timestamp(
     """
     utc = _utc_datetime_from_ms(timestamp_utc_ms)
     source = _source_datetime_from_utc_ms(timestamp_utc_ms)
+    profile = calendar_profile or default_calendar_profile()
     session_state = _session_state_for_source(source)
     clock_sessions = _clock_sessions_for_utc(utc)
     active_sessions = (
@@ -335,7 +348,16 @@ def classify_histdata_timestamp(
     )
     overlaps = _overlaps_for_sessions(active_sessions)
     special_tags = _special_tags(source, utc, session_state)
-    holiday_tags = _holiday_tags(source)
+    holiday_tags = _holiday_tags(
+        source,
+        calendar_profile=profile,
+        asset_class=asset_class,
+    )
+    event_tags = _event_tags(
+        source,
+        calendar_profile=profile,
+        asset_class=asset_class,
+    )
     calendar_tags = tuple(
         dict.fromkeys(
             (
@@ -344,6 +366,7 @@ def classify_histdata_timestamp(
                 session_state,
                 *special_tags,
                 *holiday_tags,
+                *event_tags,
             )
         )
     )
@@ -358,6 +381,7 @@ def classify_histdata_timestamp(
         overlaps=overlaps,
         special_tags=special_tags,
         holiday_tags=holiday_tags,
+        event_tags=event_tags,
         calendar_tags=calendar_tags,
     )
 
@@ -365,17 +389,26 @@ def classify_histdata_timestamp(
 def classify_histdata_source_timestamp(
     value: str,
     timeframe: str,
+    *,
+    calendar_profile: HistDataCalendarProfile | None = None,
+    asset_class: str = "",
 ) -> HistDataCalendarClassification:
     """Parse and classify a raw HistData source timestamp."""
     timestamp_utc_ms = parse_histdata_datetime_to_utc_ms(value, timeframe)
     return classify_histdata_timestamp(
         timestamp_utc_ms,
         source_timestamp=value.strip(),
+        calendar_profile=calendar_profile,
+        asset_class=asset_class,
     )
 
 
-def calendar_policy_metadata() -> dict[str, JSONValue]:
+def calendar_policy_metadata(
+    calendar_profile: HistDataCalendarProfile | None = None,
+) -> dict[str, JSONValue]:
     """Return the tagging policy embedded in quality-report summaries."""
+    profile = calendar_profile or default_calendar_profile()
+    profile_metadata = profile.to_metadata()
     return {
         "source_timezone": SOURCE_TIMEZONE,
         "source_utc_offset": SOURCE_UTC_OFFSET,
@@ -392,15 +425,16 @@ def calendar_policy_metadata() -> dict[str, JSONValue]:
             FRIDAY_CLOSE_WINDOW.to_metadata(),
             LONDON_FIX_WINDOW.to_metadata(),
         ],
-        "holiday_calendar_source": "static_month_day_major_holidays",
-        "holiday_calendar_complete": False,
-        "holiday_calendar_limitations": (
-            "No network-backed or exchange-specific holiday calendar is "
-            "bundled; static holiday tags are advisory."
-        ),
+        "calendar_profile": profile_metadata,
+        "holiday_calendar_source": profile.source,
+        "holiday_calendar_complete": profile.complete,
+        "holiday_calendar_static_advisory": profile.static_advisory,
+        "holiday_calendar_limitations": "; ".join(profile.limitations),
         "static_major_holidays": [
             holiday.to_metadata() for holiday in STATIC_MAJOR_HOLIDAYS
         ],
+        "profile_date_tags": profile_metadata["date_tags"],
+        "profile_window_tags": profile_metadata["window_tags"],
         "month_end_policy": "source_calendar_date",
         "fix_window_policy": "advisory_utc_london_4pm_window",
     }
@@ -410,8 +444,12 @@ def calendar_policy_metadata() -> dict[str, JSONValue]:
 class HistDataCalendarSessionRule:
     """Emit session, rollover, fix, and calendar-regime tags."""
 
+    calendar_profile: HistDataCalendarProfile = field(
+        default_factory=default_calendar_profile
+    )
     timestamp_severity: QualitySeverity = QualitySeverity.WARNING
     source_severity: QualitySeverity = QualitySeverity.WARNING
+    profile_missing_severity: QualitySeverity = QualitySeverity.INFO
     rule_id: str = DOMAIN_CALENDAR_SESSION_RULE_ID
     description: str = (
         "Tag HistData rows with FX/CFD sessions, open/close, rollover, "
@@ -423,6 +461,7 @@ class HistDataCalendarSessionRule:
         if not _is_ascii_text_target(target):
             return ()
 
+        asset_class = _target_asset_class(target)
         try:
             timestamp_scan = _timestamp_scan_for_target(target)
         except (ValueError, _TimestampSourceReadError):
@@ -436,10 +475,14 @@ class HistDataCalendarSessionRule:
                 else ""
             )
             scan = _scan_calendar_timestamp_samples(
-                tuple(timestamp_scan.valid_rows)
+                tuple(timestamp_scan.valid_rows),
+                calendar_profile=self.calendar_profile,
+                asset_class=asset_class,
             )
-            return (
-                _summary_finding(target, scan, source_member=source_member),
+            return self._findings_for_scan(
+                target,
+                scan,
+                source_member=source_member,
             )
         if (
             timestamp_scan is not None
@@ -448,8 +491,10 @@ class HistDataCalendarSessionRule:
             scan = _scan_calendar_projected_frame(
                 timestamp_scan.polars_frame,
                 target=target,
+                calendar_profile=self.calendar_profile,
+                asset_class=asset_class,
             )
-            return (_summary_finding(target, scan, source_member=""),)
+            return self._findings_for_scan(target, scan, source_member="")
 
         try:
             delimiter = delimiter_for_timeframe(target.timeframe)
@@ -495,9 +540,17 @@ class HistDataCalendarSessionRule:
             delimiter=delimiter,
             timestamp_index=columns.index("datetime"),
             source_member=payload.source_member,
+            calendar_profile=self.calendar_profile,
+            asset_class=asset_class,
         )
         findings = [
-            _summary_finding(target, scan, source_member=payload.source_member)
+            *_scan_findings(
+                target,
+                scan,
+                source_member=payload.source_member,
+                calendar_profile=self.calendar_profile,
+                profile_missing_severity=self.profile_missing_severity,
+            )
         ]
         if scan.invalid_timestamp_count:
             findings.append(
@@ -525,10 +578,32 @@ class HistDataCalendarSessionRule:
             )
         return tuple(findings)
 
+    def _findings_for_scan(
+        self,
+        target: QualityTarget,
+        scan: _CalendarScan,
+        *,
+        source_member: str,
+    ) -> tuple[QualityFinding, ...]:
+        return _scan_findings(
+            target,
+            scan,
+            source_member=source_member,
+            calendar_profile=self.calendar_profile,
+            profile_missing_severity=self.profile_missing_severity,
+        )
 
-def calendar_quality_rules() -> tuple[QualityRule, ...]:
+
+def calendar_quality_rules(
+    calendar_profile: HistDataCalendarProfile | None = None,
+    *,
+    profile_missing_severity: QualitySeverity = QualitySeverity.INFO,
+) -> tuple[QualityRule, ...]:
     """Return calendar/session quality rules."""
-    rule: QualityRule = HistDataCalendarSessionRule()
+    rule: QualityRule = HistDataCalendarSessionRule(
+        calendar_profile=calendar_profile or default_calendar_profile(),
+        profile_missing_severity=profile_missing_severity,
+    )
     return (rule,)
 
 
@@ -539,6 +614,8 @@ def _scan_calendar_rows(
     delimiter: str,
     timestamp_index: int,
     source_member: str,
+    calendar_profile: HistDataCalendarProfile,
+    asset_class: str,
 ) -> _CalendarScan:
     scan = _CalendarScan()
     for row_number, raw in enumerate(lines, start=1):
@@ -555,6 +632,8 @@ def _scan_calendar_rows(
             classification = classify_histdata_source_timestamp(
                 timestamp_source,
                 target.timeframe,
+                calendar_profile=calendar_profile,
+                asset_class=asset_class,
             )
         except ValueError as exc:
             scan.invalid_timestamp_count += 1
@@ -580,7 +659,7 @@ def _scan_calendar_rows(
 
 
 def _can_use_timestamp_scan_for_calendar(scan: _TimestampScan) -> bool:
-    return (
+    return bool(
         scan.invalid_timestamp_count == 0
         and scan.field_count_error_count == 0
         and scan.header_row_count == 0
@@ -591,6 +670,9 @@ def _can_use_timestamp_scan_for_calendar(scan: _TimestampScan) -> bool:
 
 def _scan_calendar_timestamp_samples(
     samples: tuple[_TimestampSample, ...],
+    *,
+    calendar_profile: HistDataCalendarProfile,
+    asset_class: str,
 ) -> _CalendarScan:
     scan = _CalendarScan(row_count=len(samples), parsed_row_count=len(samples))
     for sample in samples:
@@ -618,8 +700,19 @@ def _scan_calendar_timestamp_samples(
             session_state=session_state,
         )
         holiday_tags = _holiday_tags_for_source_fields(
+            source_year=sample.source_year,
             source_month=sample.source_month,
             source_day=sample.source_day,
+            calendar_profile=calendar_profile,
+            asset_class=asset_class,
+        )
+        event_tags = _event_tags_for_source_fields(
+            source_month=sample.source_month,
+            source_day=sample.source_day,
+            source_day_number=sample.source_day_ordinal
+            - UNIX_EPOCH.toordinal(),
+            calendar_profile=calendar_profile,
+            asset_class=asset_class,
         )
         calendar_tags = tuple(
             dict.fromkeys(
@@ -629,6 +722,7 @@ def _scan_calendar_timestamp_samples(
                     session_state,
                     *special_tags,
                     *holiday_tags,
+                    *event_tags,
                 )
             )
         )
@@ -643,7 +737,10 @@ def _scan_calendar_timestamp_samples(
             overlaps=overlaps,
             special_tags=special_tags,
             holiday_tags=holiday_tags,
+            event_tags=event_tags,
             calendar_tags=calendar_tags,
+            calendar_profile=calendar_profile,
+            asset_class=asset_class,
         )
     return scan
 
@@ -652,6 +749,8 @@ def _scan_calendar_projected_frame(
     frame: Any,
     *,
     target: QualityTarget,
+    calendar_profile: HistDataCalendarProfile,
+    asset_class: str,
 ) -> _CalendarScan:
     import polars as pl
 
@@ -780,16 +879,21 @@ def _scan_calendar_projected_frame(
     scan.special_tag_counts.update(
         {key: count for key, count in special_counts.items() if count}
     )
-    holiday_counts = {
-        f"major_holiday:{holiday.name}": _polars_count(
-            frame,
-            (pl.col("_source_month") == holiday.month)
-            & (pl.col("_source_day") == holiday.day),
-        )
-        for holiday in STATIC_MAJOR_HOLIDAYS
-    }
+    holiday_counts = _polars_date_tag_counts(
+        frame,
+        calendar_profile=calendar_profile,
+        asset_class=asset_class,
+    )
     scan.holiday_tag_counts.update(
         {key: count for key, count in holiday_counts.items() if count}
+    )
+    event_counts = _polars_window_tag_counts(
+        frame,
+        calendar_profile=calendar_profile,
+        asset_class=asset_class,
+    )
+    scan.event_tag_counts.update(
+        {key: count for key, count in event_counts.items() if count}
     )
     for counter in (
         scan.active_session_counts,
@@ -809,6 +913,7 @@ def _scan_calendar_projected_frame(
             }
         ),
         scan.holiday_tag_counts,
+        scan.event_tag_counts,
     ):
         scan.calendar_tag_counts.update(counter)
 
@@ -820,6 +925,8 @@ def _scan_calendar_projected_frame(
                 classification=classify_histdata_timestamp(
                     sample.timestamp_utc_ms,
                     source_timestamp=sample.timestamp_source,
+                    calendar_profile=calendar_profile,
+                    asset_class=asset_class,
                 ),
                 source_member="",
             )
@@ -864,6 +971,94 @@ def _polars_count(frame: Any, expression: Any) -> int:
         return 0
 
 
+def _polars_date_tag_counts(
+    frame: Any,
+    *,
+    calendar_profile: HistDataCalendarProfile,
+    asset_class: str,
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    years = _polars_source_year_range(frame)
+    for tag in calendar_profile.applicable_date_tags(asset_class=asset_class):
+        counts[tag.tag] = _polars_count(
+            frame,
+            _polars_date_tag_expression(tag, years=years),
+        )
+    return counts
+
+
+def _polars_window_tag_counts(
+    frame: Any,
+    *,
+    calendar_profile: HistDataCalendarProfile,
+    asset_class: str,
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for tag in calendar_profile.applicable_window_tags(asset_class=asset_class):
+        counts[tag.tag] = _polars_count(
+            frame,
+            _polars_window_tag_expression(tag),
+        )
+    return counts
+
+
+def _polars_date_tag_expression(
+    tag: HistDataCalendarDateTag,
+    *,
+    years: range,
+) -> Any:
+    import polars as pl
+
+    if tag.rule:
+        expression = pl.lit(False)
+        for year in years:
+            match = tag.movable_date_for_year(year)
+            expression = expression | (
+                (pl.col("_source_year") == year)
+                & (pl.col("_source_month") == match.month)
+                & (pl.col("_source_day") == match.day)
+            )
+        return expression
+    return (pl.col("_source_month") == tag.month) & (
+        pl.col("_source_day") == tag.day
+    )
+
+
+def _polars_window_tag_expression(tag: HistDataCalendarWindowTag) -> Any:
+    import polars as pl
+
+    if tag.uses_absolute_dates:
+        return pl.col("_source_day_number").is_between(
+            tag.start_day_number,
+            tag.end_day_number,
+        )
+    value = pl.col("_source_month") * 100 + pl.col("_source_day")
+    start = tag.start_month * 100 + tag.start_day
+    end = tag.end_month * 100 + tag.end_day
+    if start <= end:
+        return value.is_between(start, end)
+    return (value >= start) | (value <= end)
+
+
+def _polars_source_year_range(frame: Any) -> range:
+    import polars as pl
+
+    try:
+        row = frame.select(
+            [
+                pl.col("_source_year").min(),
+                pl.col("_source_year").max(),
+            ]
+        ).row(0)
+    except Exception:
+        return range(0)
+    start = int(row[0] or 0)
+    end = int(row[1] or 0)
+    if not start or not end or end < start:
+        return range(0)
+    return range(start, end + 1)
+
+
 def _polars_month_length_expr() -> Any:
     import polars as pl
 
@@ -902,6 +1097,7 @@ def _record_classification(
     _increment_counts(scan.overlap_counts, classification.overlaps)
     _increment_counts(scan.special_tag_counts, classification.special_tags)
     _increment_counts(scan.holiday_tag_counts, classification.holiday_tags)
+    _increment_counts(scan.event_tag_counts, classification.event_tags)
     _increment_counts(scan.calendar_tag_counts, classification.calendar_tags)
     if len(scan.samples) < MAX_CALENDAR_SAMPLES:
         scan.samples.append(
@@ -925,7 +1121,10 @@ def _record_calendar_values(
     overlaps: tuple[str, ...],
     special_tags: tuple[str, ...],
     holiday_tags: tuple[str, ...],
+    event_tags: tuple[str, ...],
     calendar_tags: tuple[str, ...],
+    calendar_profile: HistDataCalendarProfile,
+    asset_class: str,
 ) -> None:
     scan.session_state_counts[session_state] += 1
     _increment_counts(scan.clock_session_counts, clock_sessions)
@@ -941,6 +1140,7 @@ def _record_calendar_values(
     _increment_counts(scan.overlap_counts, overlaps)
     _increment_counts(scan.special_tag_counts, special_tags)
     _increment_counts(scan.holiday_tag_counts, holiday_tags)
+    _increment_counts(scan.event_tag_counts, event_tags)
     _increment_counts(scan.calendar_tag_counts, calendar_tags)
     if (
         timestamp_sample is not None
@@ -952,6 +1152,8 @@ def _record_calendar_values(
                 classification=classify_histdata_timestamp(
                     timestamp_sample.timestamp_utc_ms,
                     source_timestamp=timestamp_sample.timestamp_source,
+                    calendar_profile=calendar_profile,
+                    asset_class=asset_class,
                 ),
                 source_member=source_member,
             )
@@ -963,6 +1165,7 @@ def _summary_finding(
     scan: _CalendarScan,
     *,
     source_member: str,
+    calendar_profile: HistDataCalendarProfile,
 ) -> QualityFinding:
     return _finding(
         target,
@@ -986,11 +1189,51 @@ def _summary_finding(
             "overlap_counts": _counter_metadata(scan.overlap_counts),
             "special_tag_counts": _counter_metadata(scan.special_tag_counts),
             "holiday_tag_counts": _counter_metadata(scan.holiday_tag_counts),
+            "event_tag_counts": _counter_metadata(scan.event_tag_counts),
             "calendar_tag_counts": _counter_metadata(scan.calendar_tag_counts),
             "samples": [sample.to_dict() for sample in scan.samples],
-            "calendar_policy": calendar_policy_metadata(),
+            "calendar_policy": calendar_policy_metadata(calendar_profile),
         },
     )
+
+
+def _scan_findings(
+    target: QualityTarget,
+    scan: _CalendarScan,
+    *,
+    source_member: str,
+    calendar_profile: HistDataCalendarProfile,
+    profile_missing_severity: QualitySeverity,
+) -> tuple[QualityFinding, ...]:
+    findings = [
+        _summary_finding(
+            target,
+            scan,
+            source_member=source_member,
+            calendar_profile=calendar_profile,
+        )
+    ]
+    if not calendar_profile.complete:
+        findings.append(
+            _finding(
+                target,
+                code="DOMAIN_CALENDAR_PROFILE_INCOMPLETE",
+                message=(
+                    "Calendar profile is incomplete or advisory; optional "
+                    "holiday, exchange-closure, and event data may be absent."
+                ),
+                severity=profile_missing_severity,
+                metadata={
+                    **_base_metadata(target, source_member),
+                    "calendar_profile": calendar_profile.to_metadata(),
+                    "calendar_policy": calendar_policy_metadata(
+                        calendar_profile
+                    ),
+                    "missing_optional_calendar_data": True,
+                },
+            )
+        )
+    return tuple(findings)
 
 
 def _session_state_for_source(source: datetime) -> str:
@@ -1094,22 +1337,63 @@ def _special_tags_for_source_fields(
     return tuple(dict.fromkeys(tags))
 
 
-def _holiday_tags(source: datetime) -> tuple[str, ...]:
-    return _holiday_tags_for_source_fields(
-        source_month=source.month,
-        source_day=source.day,
-    )
+def _holiday_tags(
+    source: datetime,
+    *,
+    calendar_profile: HistDataCalendarProfile,
+    asset_class: str,
+) -> tuple[str, ...]:
+    return calendar_profile.holiday_tags_for(source, asset_class=asset_class)
+
+
+def _event_tags(
+    source: datetime,
+    *,
+    calendar_profile: HistDataCalendarProfile,
+    asset_class: str,
+) -> tuple[str, ...]:
+    return calendar_profile.event_tags_for(source, asset_class=asset_class)
 
 
 def _holiday_tags_for_source_fields(
     *,
+    source_year: int,
     source_month: int,
     source_day: int,
+    calendar_profile: HistDataCalendarProfile,
+    asset_class: str,
 ) -> tuple[str, ...]:
-    return tuple(
-        f"major_holiday:{holiday.name}"
-        for holiday in STATIC_MAJOR_HOLIDAYS
-        if holiday.month == source_month and holiday.day == source_day
+    return calendar_profile.holiday_tags_for_fields(
+        source_year=source_year,
+        source_month=source_month,
+        source_day=source_day,
+        asset_class=asset_class,
+    )
+
+
+def _event_tags_for_source_fields(
+    *,
+    source_month: int,
+    source_day: int,
+    source_day_number: int | None,
+    calendar_profile: HistDataCalendarProfile,
+    asset_class: str,
+) -> tuple[str, ...]:
+    return calendar_profile.event_tags_for_fields(
+        source_month=source_month,
+        source_day=source_day,
+        source_day_number=source_day_number,
+        asset_class=asset_class,
+    )
+
+
+def _legacy_static_holiday_tags(source: datetime) -> tuple[str, ...]:
+    return _holiday_tags_for_source_fields(
+        source_year=source.year,
+        source_month=source.month,
+        source_day=source.day,
+        calendar_profile=default_calendar_profile(),
+        asset_class="",
     )
 
 
@@ -1197,6 +1481,10 @@ def _is_ascii_text_target(target: QualityTarget) -> bool:
             QualityTargetKind.CACHE,
         }
     )
+
+
+def _target_asset_class(target: QualityTarget) -> str:
+    return str(symbol_metadata_for(target.symbol).asset_class)
 
 
 def _base_metadata(

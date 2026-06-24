@@ -6,9 +6,11 @@ from pathlib import Path
 
 from histdatacom.data_quality import (
     DOMAIN_CALENDAR_SESSION_RULE_ID,
+    QUALITY_PROFILE_SCHEMA_VERSION,
     QualitySeverity,
     QualityStatus,
     calendar_policy_metadata,
+    calendar_profile_from_mapping,
     classify_histdata_source_timestamp,
     discover_quality_targets,
     quality_rules_for_groups,
@@ -51,6 +53,8 @@ def test_calendar_policy_documents_optional_static_holiday_scope() -> None:
     assert policy["holiday_calendar_complete"] is False
     assert "exchange-specific" in str(policy["holiday_calendar_limitations"])
     assert policy["month_end_policy"] == "source_calendar_date"
+    assert policy["calendar_profile"]["static_advisory"] is True
+    assert policy["calendar_profile"]["complete"] is False
 
 
 def test_domain_calendar_rule_reports_session_and_overlap_counts(
@@ -75,8 +79,11 @@ def test_domain_calendar_rule_reports_session_and_overlap_counts(
     report = _report_for_path(path)
 
     summary = _finding(report, "DOMAIN_CALENDAR_SESSION_SUMMARY")
+    profile_notice = _finding(report, "DOMAIN_CALENDAR_PROFILE_INCOMPLETE")
     assert report.status is QualityStatus.CLEAN
     assert summary.rule_id == DOMAIN_CALENDAR_SESSION_RULE_ID
+    assert profile_notice.severity is QualitySeverity.INFO
+    assert profile_notice.metadata["missing_optional_calendar_data"] is True
     assert summary.metadata["parsed_row_count"] == 4
     assert summary.metadata["invalid_timestamp_count"] == 0
     assert summary.metadata["session_state_counts"] == {"market_open": 4}
@@ -146,6 +153,83 @@ def test_domain_calendar_rule_reports_open_close_rollover_and_fix_tags(
     assert summary.metadata["calendar_policy"]["holiday_calendar_complete"] is (
         False
     )
+    assert _finding(report, "DOMAIN_CALENDAR_PROFILE_INCOMPLETE").severity is (
+        QualitySeverity.INFO
+    )
+
+
+def test_domain_calendar_rule_uses_configured_complete_profile(
+    tmp_path: Path,
+) -> None:
+    """Configured profiles should add movable holidays and event windows."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="m1_configured_calendar_profile",
+            timeframe=M1,
+            filename="DAT_ASCII_EURUSD_M1_202203_PROFILED.csv",
+            rows=(
+                "20220415 120000;1.306600;1.306610;1.306590;1.306600;0",
+                "20221227 120000;1.306600;1.306610;1.306590;1.306600;0",
+                "20200316 120000;1.306600;1.306610;1.306590;1.306600;0",
+            ),
+        ),
+    )
+
+    report = _report_for_path(path, profile=_complete_calendar_profile())
+
+    summary = _finding(report, "DOMAIN_CALENDAR_SESSION_SUMMARY")
+    policy = summary.metadata["calendar_policy"]
+    assert report.status is QualityStatus.CLEAN
+    assert not any(
+        finding.code == "DOMAIN_CALENDAR_PROFILE_INCOMPLETE"
+        for finding in report.findings
+    )
+    assert policy["holiday_calendar_source"] == "operator-config"
+    assert policy["holiday_calendar_complete"] is True
+    assert policy["calendar_profile"]["version"] == "2026.06"
+    assert summary.metadata["holiday_tag_counts"] == {
+        "market_holiday:good_friday": 1
+    }
+    assert summary.metadata["event_tag_counts"] == {
+        "crisis:covid_shock": 1,
+        "thin_liquidity:christmas_new_year": 1,
+    }
+    assert (
+        "market_holiday:good_friday"
+        in summary.metadata["samples"][0]["calendar_tags"]
+    )
+    assert (
+        "thin_liquidity:christmas_new_year"
+        in summary.metadata["samples"][1]["event_tags"]
+    )
+    assert (
+        "crisis:covid_shock" in summary.metadata["samples"][2]["calendar_tags"]
+    )
+
+
+def test_calendar_classifier_accepts_asset_scoped_profile() -> None:
+    """Profile tags can be scoped to supported asset classes."""
+    profile_config = _complete_calendar_profile()["rules"][
+        "domain.calendar_sessions"
+    ]["calendar_profile"]
+    profile = calendar_profile_from_mapping(profile_config)
+
+    fx = classify_histdata_source_timestamp(
+        "20220415 120000",
+        M1,
+        calendar_profile=profile,
+        asset_class="fx",
+    )
+    metal = classify_histdata_source_timestamp(
+        "20220415 120000",
+        M1,
+        calendar_profile=profile,
+        asset_class="metal",
+    )
+
+    assert "market_holiday:good_friday" in fx.holiday_tags
+    assert metal.holiday_tags == ()
 
 
 def test_domain_calendar_rule_warns_on_unparseable_timestamps(
@@ -194,12 +278,58 @@ def test_domain_calendar_rule_retains_zip_source_member(
     )
 
 
-def _report_for_path(path: Path):
+def _report_for_path(path: Path, *, profile: dict | None = None):
     discovery = discover_quality_targets((path,))
     return run_quality_assessment(
         discovery.targets,
-        quality_rules_for_groups(("domain",)),
+        quality_rules_for_groups(("domain",), profile=profile),
     )
+
+
+def _complete_calendar_profile() -> dict:
+    return {
+        "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+        "name": "complete-calendar",
+        "rules": {
+            "domain.calendar_sessions": {
+                "calendar_profile": {
+                    "name": "operator-complete-calendar",
+                    "source": "operator-config",
+                    "version": "2026.06",
+                    "complete": True,
+                    "date_tags": [
+                        {
+                            "name": "good_friday",
+                            "tag": "market_holiday:good_friday",
+                            "rule": "good_friday",
+                            "asset_classes": ["fx"],
+                            "description": "Movable Good Friday market holiday.",
+                        }
+                    ],
+                    "window_tags": [
+                        {
+                            "name": "christmas_new_year_thin_liquidity",
+                            "tag": "thin_liquidity:christmas_new_year",
+                            "category": "thin_liquidity",
+                            "start_month": 12,
+                            "start_day": 24,
+                            "end_month": 1,
+                            "end_day": 2,
+                            "description": "Christmas/New Year thin liquidity.",
+                        },
+                        {
+                            "name": "covid_shock",
+                            "tag": "crisis:covid_shock",
+                            "category": "crisis",
+                            "start_date": "2020-03-01",
+                            "end_date": "2020-03-31",
+                            "description": "Configured crisis-period tag.",
+                        },
+                    ],
+                }
+            }
+        },
+    }
 
 
 def _finding(report, code: str):

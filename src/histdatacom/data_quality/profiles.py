@@ -17,6 +17,11 @@ from histdatacom.data_quality.bars import (
     HistDataM1OutlierThresholds,
     HistDataM1TickReconstructionTolerance,
 )
+from histdatacom.data_quality.calendar import DOMAIN_CALENDAR_SESSION_RULE_ID
+from histdatacom.data_quality.calendar_profiles import (
+    HistDataCalendarProfile,
+    calendar_profile_from_mapping,
+)
 from histdatacom.data_quality.contracts import QualitySeverity
 from histdatacom.data_quality.ingestion import (
     ASCII_ROW_COUNT_INGESTION_RULE_ID,
@@ -69,6 +74,7 @@ CONFIGURABLE_QUALITY_RULE_IDS = frozenset(
         ASCII_TICK_MICROSTRUCTURE_RULE_ID,
         ASCII_TICK_SPREAD_REGIME_RULE_ID,
         DOMAIN_CROSS_INSTRUMENT_RULE_ID,
+        DOMAIN_CALENDAR_SESSION_RULE_ID,
         MODELING_READINESS_RULE_ID,
     }
 )
@@ -514,6 +520,26 @@ class QualityProfile:
             path=f"{DOMAIN_CROSS_INSTRUMENT_RULE_ID}.tolerance",
         )
 
+    def calendar_profile(self) -> HistDataCalendarProfile:
+        """Return configured calendar/session profile."""
+        config = self.rule_config(DOMAIN_CALENDAR_SESSION_RULE_ID)
+        _reject_unknown_keys(
+            config,
+            {"calendar_profile", "profile_missing_severity"},
+            DOMAIN_CALENDAR_SESSION_RULE_ID,
+        )
+        try:
+            return calendar_profile_from_mapping(
+                _mapping_field(
+                    config,
+                    "calendar_profile",
+                    path=DOMAIN_CALENDAR_SESSION_RULE_ID,
+                )
+            )
+        except ValueError as exc:
+            msg = f"{DOMAIN_CALENDAR_SESSION_RULE_ID}: {exc}"
+            raise QualityProfileError(msg) from exc
+
     def modeling_profile_assumptions(self) -> dict[str, JSONValue]:
         """Return configured modeling-readiness assumptions."""
         config = self.rule_config(MODELING_READINESS_RULE_ID)
@@ -654,6 +680,7 @@ def validate_quality_profile(profile: QualityProfile) -> None:
     profile.tick_spread_regime_thresholds()
     profile.tick_spread_regime_thresholds_by_asset_class()
     profile.cross_instrument_tolerance()
+    profile.calendar_profile()
     profile.modeling_profile_assumptions()
     _validate_configured_severities(profile)
 
@@ -684,6 +711,7 @@ def _validate_configured_severities(profile: QualityProfile) -> None:
             "warning_severity",
             "error_severity",
         ),
+        DOMAIN_CALENDAR_SESSION_RULE_ID: ("profile_missing_severity",),
         MODELING_READINESS_RULE_ID: ("warning_severity",),
     }
     for rule_id, keys in severity_fields.items():

@@ -76,7 +76,7 @@ def quality_rules_for_groups(
         rules.extend(_ticks_quality_rules(quality_profile))
     if "all" in normalized or "domain" in normalized:
         rules.extend(domain_quality_rules())
-        rules.extend(calendar_quality_rules())
+        rules.extend(_calendar_quality_rules(quality_profile))
     if "all" in normalized or "modeling" in normalized:
         rules.extend(_modeling_quality_rules(quality_profile))
     return tuple(rules)
@@ -157,6 +157,17 @@ def _time_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
                 "warning_severity",
                 QualitySeverity.WARNING,
             ),
+        ),
+    )
+
+
+def _calendar_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
+    return calendar_quality_rules(
+        profile.calendar_profile(),
+        profile_missing_severity=profile.severity(
+            "domain.calendar_sessions",
+            "profile_missing_severity",
+            QualitySeverity.INFO,
         ),
     )
 
