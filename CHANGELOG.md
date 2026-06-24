@@ -1,5 +1,7 @@
 ## Unreleased
 
+## 0.79.0 (2026-06-24)
+
 ### Changed
 
 - **temporal-sidecar**: make the Temporal sidecar the default CLI/API runtime.
