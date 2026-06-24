@@ -50,6 +50,7 @@ from histdatacom.sidecar.contracts import RunRequest as SidecarRunRequest
 from histdatacom.sidecar.resources import (
     current_platform_key,
     load_sidecar_manifest,
+    load_temporal_runtime_index,
     sidecar_asset,
     sidecar_executable_path,
     sidecar_platform_resource,
@@ -99,6 +100,7 @@ expected_assets = (
     "README.md",
     "manifest.json",
     "runtime-defaults.json",
+    "temporal-runtime-index.json",
     "third-party/temporal-cli/LICENSE",
     "third-party/temporal-cli/NOTICE.md",
 )
@@ -107,8 +109,12 @@ for asset in expected_assets:
         raise SystemExit(f"sidecar asset is not packaged: {asset}")
 
 manifest = load_sidecar_manifest()
+runtime_index = load_temporal_runtime_index(manifest)
 platform_key = current_platform_key()
 resource = sidecar_platform_resource(platform_key, manifest)
+artifact = runtime_index.platforms.get(platform_key)
+if artifact is None:
+    raise SystemExit(f"runtime index does not support current platform: {platform_key}")
 executable = ""
 if require_bundled:
     if not resource.bundled:
@@ -135,6 +141,9 @@ print(json.dumps({
         "distribution_strategy": manifest.distribution_strategy,
         "embedded_binary": manifest.embedded_binary,
         "platform_bundled": resource.bundled,
+        "runtime_index_version": runtime_index.version,
+        "runtime_archive": artifact.archive_name,
+        "runtime_archive_sha256": artifact.archive_sha256,
         "executable": executable,
     },
 }, sort_keys=True))
@@ -355,9 +364,7 @@ def _cli_parity_probe(
 
     sidecar_help = _run([str(sidecar), "--help"], timeout=timeout).stdout
     missing_commands = [
-        command
-        for command in EXPECTED_SIDECAR_COMMANDS
-        if command not in sidecar_help
+        command for command in EXPECTED_SIDECAR_COMMANDS if command not in sidecar_help
     ]
     if missing_commands:
         raise SystemExit(
@@ -413,9 +420,11 @@ def _smoke_sidecar_install_probe(
         command.append("--quality-sidecar-smoke")
     if args.live_sidecar_smoke:
         command.append("--live-sidecar-smoke")
+    env = _venv_environment(venv_dir)
+    env["HISTDATACOM_TEMPORAL_CACHE_DIR"] = str(root / "temporal-runtime-cache")
     return _run_json(
         command,
-        env=_venv_environment(venv_dir),
+        env=env,
         timeout=args.timeout,
     )
 

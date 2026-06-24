@@ -85,15 +85,15 @@ metadata, resource manifests, third-party notices, and CLI entry points.
 The accepted V1.0 packaging design keeps normal PyPI/TestPyPI artifacts
 metadata-only and provisions the pinned Temporal executable through a verified
 runtime cache on first use. The design is documented in
-`docs/temporal-binary-provisioning.md`; #250 implements the resolver and #251
+`docs/temporal-binary-provisioning.md`; #250 implemented the resolver and #251
 hardens release preflight around that resolver.
 
-Until the resolver lands, metadata-only artifacts and unsupported platforms
-should pass an explicit Temporal executable path to
-`histdatacom-sidecar start --executable`. Bundled executable wheels remain an
-offline/private distribution path, not the normal PyPI release path. The Python
-SDK and the server executable are separate distribution concerns: base installs
-provide the SDK, while the runtime resolver owns executable availability.
+Metadata-only artifacts resolve the Temporal executable from an explicit path,
+an offline/private bundle, a verified per-user cache entry, or a pinned first-run
+download. Bundled executable wheels remain an offline/private distribution path,
+not the normal PyPI release path. The Python SDK and the server executable are
+separate distribution concerns: base installs provide the SDK, while the runtime
+resolver owns executable availability.
 
 Release automation should build the metadata-only sdist/fallback wheel for
 normal PyPI/TestPyPI publication, enforce the upload-size gate, and smoke a clean
@@ -141,8 +141,9 @@ Default-runtime failure policy:
 - `--foreground` is rejected by the CLI.
 - `Options.use_sidecar = False` is rejected by API runtime resolution.
 - Metadata-only wheels and unsupported platforms fail sidecar starts with a
-  `SidecarUnavailableError`/nonzero CLI exit unless an operator supplies
-  `histdatacom-sidecar start --executable /path/to/temporal`.
+  `SidecarUnavailableError`/nonzero CLI exit when no explicit executable,
+  verified bundle, verified cache entry, or allowed first-run download is
+  available.
 - The runtime never silently falls back from sidecar execution.
 
 ## Runtime Model
@@ -245,14 +246,13 @@ Check status:
 histdatacom-sidecar status --json
 ```
 
-Start with a packaged executable on an offline/private bundled wheel:
+Start through the runtime resolver:
 
 ```sh
 histdatacom-sidecar start
 ```
 
-Start with an explicit Temporal executable on metadata-only artifacts until the
-runtime resolver provisions a verified cache entry:
+Start with an explicit Temporal executable override:
 
 ```sh
 histdatacom-sidecar start --executable /path/to/temporal
@@ -643,9 +643,9 @@ Temporal executable unavailable:
 
 - Symptom: `doctor` reports `executable_bundled: false`, or start cannot find a
   packaged or cached executable.
-- Fix: after #250, pre-seed the verified runtime cache or allow first-run
-  provisioning. Until then, pass `--executable /path/to/temporal` or install an
-  offline/private bundled artifact for development and operator tests.
+- Fix: pre-seed the verified runtime cache, allow first-run provisioning, pass
+  `--executable /path/to/temporal`, or install an offline/private bundled
+  artifact for development and operator tests.
 
 Sidecar unavailable:
 
@@ -740,8 +740,8 @@ Data-quality checks:
   `find <slice-target> -name .data -type f -delete`; more aggressive low-disk
   runs may remove the entire slice working directory after `.repo` and reports
   have been written. Source checkouts whose doctor output reports
-  `platform.executable_bundled=false` need an explicit Temporal executable until
-  the verified runtime cache resolver is available.
+  `platform.executable_bundled=false` need an explicit Temporal executable, a
+  verified cache entry, or network access for first-run provisioning.
 - Use `--quality-report PATH` to write the full JSON report. The report schema
   is `histdatacom.quality-report.v1`; console output remains a bounded human
   summary with clean, warning, and failed file sections.
@@ -896,8 +896,8 @@ Live smoke tests belong behind explicit operator setup because they require a
 Temporal executable, and live import coverage requires a real Influx target or
 the Docker-backed `scripts/smoke_influx_docker.py` helper.
 Package release smoke should validate metadata, console entry points, runtime
-resources, and offline `status`/`doctor` behavior for every wheel. After #250,
-normal metadata-only release smoke should exercise the verified resolver with an
+resources, and offline `status`/`doctor` behavior for every wheel. Normal
+metadata-only release smoke should exercise the verified resolver with an
 isolated cache. For bundled offline/private wheels, release smoke should also
 require `doctor.platform.executable_bundled == true`, run the packaged
 executable version probe, start the runtime without `--executable`, and run

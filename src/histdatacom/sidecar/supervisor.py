@@ -37,9 +37,12 @@ from histdatacom.sidecar.readiness import (
 )
 from histdatacom.sidecar.resources import (
     current_platform_key,
+    default_temporal_runtime_cache_dir,
+    inspect_temporal_runtime_cache,
     load_sidecar_manifest,
+    load_temporal_runtime_index,
     read_sidecar_asset_text,
-    sidecar_executable_path,
+    temporal_runtime_executable_path,
 )
 from histdatacom.sidecar.runtime import (
     PortAvailabilityProbe,
@@ -531,18 +534,20 @@ class SidecarSupervisor:
         self._acquire_lock()
         try:
             if executable is None:
-                with sidecar_executable_path() as packaged_executable:
+                with temporal_runtime_executable_path() as resolution:
                     return self._start_process(
-                        packaged_executable,
+                        resolution.executable,
                         extra_args,
                         startup_timeout,
                         runtime_policy,
+                        runtime_resolution=resolution.to_dict(),
                     )
             return self._start_process(
                 Path(executable).expanduser(),
                 extra_args,
                 startup_timeout,
                 runtime_policy,
+                runtime_resolution={"source": "explicit"},
             )
         finally:
             self._release_lock()
@@ -610,11 +615,23 @@ class SidecarSupervisor:
         status = self.status(repair=False)
         runtime_policy = self._runtime_policy_from_status(status)
         manifest = load_sidecar_manifest()
+        runtime_index = load_temporal_runtime_index(manifest)
         platform_key = current_platform_key()
         platform_resource = manifest.platforms.get(platform_key)
+        platform_artifact = runtime_index.platforms.get(platform_key)
         executable_bundled = (
             bool(platform_resource.bundled) if platform_resource else False
         )
+        cache_entries = inspect_temporal_runtime_cache()
+        current_cache_entries = tuple(
+            entry
+            for entry in cache_entries
+            if platform_artifact is not None
+            and entry.version == runtime_index.version
+            and entry.platform_key == platform_key
+            and entry.archive_sha256 == platform_artifact.archive_sha256
+        )
+        cache_available = any(entry.valid for entry in current_cache_entries)
         worker_status = self._worker_status(
             status.pids,
             status.components,
@@ -642,11 +659,30 @@ class SidecarSupervisor:
                 "executable_bundled": executable_bundled,
                 "message": (
                     "No packaged Temporal executable is available in this "
-                    "artifact. Use a verified runtime cache when available, "
-                    "install an offline/private bundled wheel, or pass "
-                    "--executable."
+                    "artifact. The runtime resolver will use a verified cache "
+                    "entry, provision the pinned executable on first use, use "
+                    "an offline/private bundled wheel, or honor --executable."
                     if not executable_bundled
                     else "Packaged Temporal executable is available."
+                ),
+            },
+            "runtime_provisioning": {
+                "index_version": runtime_index.version,
+                "cache_dir": str(default_temporal_runtime_cache_dir()),
+                "cache_available": cache_available,
+                "cache_entries": [
+                    entry.to_dict() for entry in current_cache_entries
+                ],
+                "artifact": (
+                    {
+                        "archive_name": platform_artifact.archive_name,
+                        "archive_url": platform_artifact.archive_url,
+                        "archive_sha256": platform_artifact.archive_sha256,
+                        "archive_size_bytes": platform_artifact.archive_size_bytes,
+                        "executable_name": platform_artifact.executable_name,
+                    }
+                    if platform_artifact is not None
+                    else None
                 ),
             },
             "runtime_defaults": _load_runtime_defaults(),
@@ -665,6 +701,8 @@ class SidecarSupervisor:
         extra_args: Sequence[str],
         startup_timeout: float,
         runtime_policy: SidecarRuntimePolicy,
+        *,
+        runtime_resolution: Mapping[str, Any] | None = None,
     ) -> SidecarStatus:
         """Start the Temporal server and worker lane fleet."""
         if self.worker_lanes and not self._worker_dependency_available():
@@ -740,6 +778,7 @@ class SidecarSupervisor:
                 "pids": pids,
                 "ports": runtime_policy.ports.to_dict(),
                 "runtime_policy": runtime_policy.to_dict(),
+                "runtime_resolution": dict(runtime_resolution or {}),
                 "worker_fleet": self._worker_fleet_metadata(base_worker_config),
                 "worker_readiness": worker_readiness,
                 "logs": logs,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 import json
 import subprocess
 from pathlib import Path
@@ -27,6 +29,7 @@ from histdatacom.sidecar.runtime import (
     SidecarRuntimePolicy,
     build_sidecar_runtime_policy,
 )
+from histdatacom.sidecar.resources import TemporalRuntimeResolution
 
 
 class _FakeProcess:
@@ -72,18 +75,57 @@ def _policy(tmp_path: Path) -> SidecarRuntimePolicy:
     )
 
 
+def _missing_process(_pid: int) -> bool:
+    return False
+
+
+def _noop_process(_pid: int) -> None:
+    return None
+
+
+def _default_process_factory(
+    command: list[str],
+    **kwargs: object,
+) -> _FakeProcess:
+    return _FakeProcess(1234)
+
+
+def _default_command_runner(
+    command: list[str],
+    **kwargs: object,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+
+def _port_available(_bind_ip: str, _port: int) -> bool:
+    return True
+
+
+def _frontend_ready(_runtime_policy: SidecarRuntimePolicy) -> bool:
+    return True
+
+
+def _worker_dependency_available() -> bool:
+    return True
+
+
+def _sleep(_seconds: float) -> None:
+    return None
+
+
 def _supervisor(
     *,
     runtime_policy: SidecarRuntimePolicy | None = None,
     paths: SidecarPaths | None = None,
-    process_exists=lambda pid: False,
-    process_terminate=lambda pid: None,
-    process_kill=lambda pid: None,
-    process_factory=lambda command, **kwargs: _FakeProcess(1234),
-    command_runner=lambda command, **kwargs: subprocess.CompletedProcess(
-        command, 0, stdout="", stderr=""
-    ),
-    worker_lanes=tuple(TaskQueueLane),
+    process_exists: Callable[[int], bool] = _missing_process,
+    process_terminate: Callable[[int], None] = _noop_process,
+    process_kill: Callable[[int], None] = _noop_process,
+    process_factory: Callable[..., _FakeProcess] = _default_process_factory,
+    command_runner: Callable[
+        ...,
+        subprocess.CompletedProcess[str],
+    ] = _default_command_runner,
+    worker_lanes: tuple[TaskQueueLane, ...] = tuple(TaskQueueLane),
     namespace: str = "default",
     task_queue_prefix: str = "histdatacom",
 ) -> SidecarSupervisor:
@@ -96,10 +138,10 @@ def _supervisor(
         process_kill=process_kill,
         process_factory=process_factory,
         command_runner=command_runner,
-        port_available=lambda bind_ip, port: True,
-        frontend_ready=lambda runtime_policy: True,
-        worker_dependency_available=lambda: True,
-        sleep=lambda seconds: None,
+        port_available=_port_available,
+        frontend_ready=_frontend_ready,
+        worker_dependency_available=_worker_dependency_available,
+        sleep=_sleep,
         worker_lanes=worker_lanes,
         namespace=namespace,
         task_queue_prefix=task_queue_prefix,
@@ -368,6 +410,59 @@ def test_start_writes_state_and_is_idempotent_for_running_sidecar(
     assert state["runtime_policy"]["paths"]["sqlite_db"] == str(paths.sqlite_db)
     assert paths.runtime_manifest.exists()
     assert not paths.lock_file.exists()
+
+
+def test_start_without_explicit_executable_uses_runtime_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Default startup should resolve the Temporal binary through provisioning."""
+    executable = _executable(tmp_path)
+    policy = _policy(tmp_path)
+    calls: list[list[str]] = []
+    live_pids: set[int] = set()
+    next_pid = iter(range(2200, 2202))
+
+    @contextmanager
+    def fake_resolver() -> Iterator[TemporalRuntimeResolution]:
+        yield TemporalRuntimeResolution(
+            executable=executable,
+            source="cache",
+            platform_key="linux-x86_64",
+            version="1.7.2",
+            archive_sha256="abc",
+            cache_entry=tmp_path / "cache-entry",
+            provenance_path=tmp_path / "cache-entry" / "provenance.json",
+        )
+
+    def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
+        pid = next(next_pid)
+        live_pids.add(pid)
+        calls.append(command)
+        _write_ready_marker_from_command(command, pid)
+        return _FakeProcess(pid)
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "temporal_runtime_executable_path",
+        fake_resolver,
+    )
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: pid in live_pids,
+        process_factory=process_factory,
+        worker_lanes=(TaskQueueLane.NETWORK,),
+    )
+
+    status = supervisor.start()
+    state = json.loads(policy.paths.pid_file.read_text(encoding="utf-8"))
+
+    assert status.state == "running"
+    assert calls[0][0] == str(executable)
+    assert state["runtime_resolution"]["source"] == "cache"
+    assert state["runtime_resolution"]["cache_entry"] == str(
+        tmp_path / "cache-entry"
+    )
 
 
 def test_start_creates_non_default_namespace_before_workers(
@@ -1015,7 +1110,7 @@ def test_doctor_checks_persisted_running_frontend_port(
 
 
 def test_default_state_dir_accepts_environment_override(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """Environment override should support tests and GUI launchers."""

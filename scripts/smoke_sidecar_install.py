@@ -173,18 +173,23 @@ def check_sidecar_resources(
     from histdatacom.sidecar import (
         SidecarExecutableUnavailable,
         current_platform_key,
+        inspect_temporal_runtime_cache,
         load_sidecar_manifest,
+        load_temporal_runtime_index,
         sidecar_asset,
         sidecar_executable_path,
+        temporal_runtime_executable_path,
     )
 
     manifest = load_sidecar_manifest()
+    runtime_index = load_temporal_runtime_index(manifest)
     for asset in EXPECTED_ASSETS:
         if not sidecar_asset(asset).is_file():
             raise SystemExit(f"sidecar asset is not a file: {asset}")
 
     platform_key = current_platform_key()
     platform_resource = manifest.platforms.get(platform_key)
+    platform_artifact = runtime_index.platforms.get(platform_key)
     if platform_resource is None:
         supported = ", ".join(sorted(manifest.platforms))
         raise SystemExit(
@@ -192,6 +197,7 @@ def check_sidecar_resources(
             f"manifest. Supported platforms: {supported}"
         )
     executable_version = ""
+    resolver_source = ""
     if platform_resource.bundled:
         with sidecar_executable_path(platform_key) as executable_path:
             if not executable_path.is_file():
@@ -203,6 +209,7 @@ def check_sidecar_resources(
                 executable_version = (
                     completed.stdout.strip() or completed.stderr.strip()
                 )
+                resolver_source = "packaged"
     else:
         if require_bundled_current_platform:
             raise SystemExit(
@@ -214,13 +221,36 @@ def check_sidecar_resources(
         except SidecarExecutableUnavailable as err:
             if "not bundled in this distribution" not in str(err):
                 raise
+        if check_executable_version:
+            with temporal_runtime_executable_path() as resolution:
+                completed = _run([str(resolution.executable), "--version"])
+                executable_version = (
+                    completed.stdout.strip() or completed.stderr.strip()
+                )
+                resolver_source = resolution.source
 
     return {
         "sidecar": manifest.sidecar,
         "distribution_strategy": manifest.distribution_strategy,
+        "runtime_index_version": runtime_index.version,
         "embedded_binary": manifest.embedded_binary,
         "platform": platform_key,
         "platform_bundled": platform_resource.bundled,
+        "platform_artifact": (
+            {
+                "archive_name": platform_artifact.archive_name,
+                "archive_sha256": platform_artifact.archive_sha256,
+                "archive_size_bytes": platform_artifact.archive_size_bytes,
+            }
+            if platform_artifact is not None
+            else None
+        ),
+        "runtime_cache_entries": [
+            entry.to_dict()
+            for entry in inspect_temporal_runtime_cache()
+            if entry.platform_key == platform_key
+        ],
+        "resolver_source": resolver_source,
         "executable_version": executable_version,
     }
 
@@ -324,15 +354,17 @@ def check_live_sidecar_smoke(
     )
 
     try:
-        return run_live_sidecar_smoke(
-            workspace=workspace,
-            runtime_home=runtime_home,
-            data_directory=data_directory,
-            temporal_executable=temporal_executable,
-            startup_timeout=startup_timeout,
-            completion_timeout=completion_timeout,
-            stop_timeout=stop_timeout,
-        ).to_dict()
+        return dict(
+            run_live_sidecar_smoke(
+                workspace=workspace,
+                runtime_home=runtime_home,
+                data_directory=data_directory,
+                temporal_executable=temporal_executable,
+                startup_timeout=startup_timeout,
+                completion_timeout=completion_timeout,
+                stop_timeout=stop_timeout,
+            ).to_dict()
+        )
     except LiveSidecarSmokeError as err:
         raise SystemExit(
             "live sidecar smoke failed with diagnostics:\n"
@@ -358,15 +390,17 @@ def check_hermetic_sidecar_smoke(
     )
 
     try:
-        return run_hermetic_sidecar_smoke(
-            workspace=workspace,
-            runtime_home=runtime_home,
-            data_directory=data_directory,
-            temporal_executable=temporal_executable,
-            startup_timeout=startup_timeout,
-            completion_timeout=completion_timeout,
-            stop_timeout=stop_timeout,
-        ).to_dict()
+        return dict(
+            run_hermetic_sidecar_smoke(
+                workspace=workspace,
+                runtime_home=runtime_home,
+                data_directory=data_directory,
+                temporal_executable=temporal_executable,
+                startup_timeout=startup_timeout,
+                completion_timeout=completion_timeout,
+                stop_timeout=stop_timeout,
+            ).to_dict()
+        )
     except LiveSidecarSmokeError as err:
         raise SystemExit(
             "hermetic sidecar smoke failed with diagnostics:\n"
@@ -392,15 +426,17 @@ def check_default_routing_sidecar_smoke(
     )
 
     try:
-        return run_default_client_routing_sidecar_smoke(
-            workspace=workspace,
-            runtime_home=runtime_home,
-            data_directory=data_directory,
-            temporal_executable=temporal_executable,
-            startup_timeout=startup_timeout,
-            completion_timeout=completion_timeout,
-            stop_timeout=stop_timeout,
-        ).to_dict()
+        return dict(
+            run_default_client_routing_sidecar_smoke(
+                workspace=workspace,
+                runtime_home=runtime_home,
+                data_directory=data_directory,
+                temporal_executable=temporal_executable,
+                startup_timeout=startup_timeout,
+                completion_timeout=completion_timeout,
+                stop_timeout=stop_timeout,
+            ).to_dict()
+        )
     except LiveSidecarSmokeError as err:
         raise SystemExit(
             "default-routing sidecar smoke failed with diagnostics:\n"

@@ -225,6 +225,34 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.client",
         "TemporalDependencyError",
     ),
+    "TemporalRuntimeArtifact": (
+        "histdatacom.sidecar.resources",
+        "TemporalRuntimeArtifact",
+    ),
+    "TemporalRuntimeCacheEntry": (
+        "histdatacom.sidecar.resources",
+        "TemporalRuntimeCacheEntry",
+    ),
+    "TemporalRuntimeChecksumError": (
+        "histdatacom.sidecar.resources",
+        "TemporalRuntimeChecksumError",
+    ),
+    "TemporalRuntimeIndex": (
+        "histdatacom.sidecar.resources",
+        "TemporalRuntimeIndex",
+    ),
+    "TemporalRuntimeOfflineError": (
+        "histdatacom.sidecar.resources",
+        "TemporalRuntimeOfflineError",
+    ),
+    "TemporalRuntimeProvisioningError": (
+        "histdatacom.sidecar.resources",
+        "TemporalRuntimeProvisioningError",
+    ),
+    "TemporalRuntimeResolution": (
+        "histdatacom.sidecar.resources",
+        "TemporalRuntimeResolution",
+    ),
     "UnsupportedSidecarPlatform": (
         "histdatacom.sidecar.resources",
         "UnsupportedSidecarPlatform",
@@ -303,6 +331,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.sidecar.runtime",
         "default_sidecar_workspace",
     ),
+    "default_temporal_runtime_cache_dir": (
+        "histdatacom.sidecar.resources",
+        "default_temporal_runtime_cache_dir",
+    ),
     "default_worker_activities": (
         "histdatacom.sidecar.worker",
         "default_activities",
@@ -370,6 +402,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "load_sidecar_manifest": (
         "histdatacom.sidecar.resources",
         "load_sidecar_manifest",
+    ),
+    "load_temporal_runtime_index": (
+        "histdatacom.sidecar.resources",
+        "load_temporal_runtime_index",
     ),
     "max_work_items_per_batch": (
         "histdatacom.sidecar.workflows",
@@ -449,6 +485,30 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "submit_run_request_and_observe_sync": (
         "histdatacom.sidecar.client",
         "submit_run_request_and_observe_sync",
+    ),
+    "inspect_temporal_runtime_cache": (
+        "histdatacom.sidecar.resources",
+        "inspect_temporal_runtime_cache",
+    ),
+    "prune_temporal_runtime_cache": (
+        "histdatacom.sidecar.resources",
+        "prune_temporal_runtime_cache",
+    ),
+    "resolve_temporal_runtime_executable": (
+        "histdatacom.sidecar.resources",
+        "resolve_temporal_runtime_executable",
+    ),
+    "temporal_runtime_artifact": (
+        "histdatacom.sidecar.resources",
+        "temporal_runtime_artifact",
+    ),
+    "temporal_runtime_cache_entry_dir": (
+        "histdatacom.sidecar.resources",
+        "temporal_runtime_cache_entry_dir",
+    ),
+    "temporal_runtime_executable_path": (
+        "histdatacom.sidecar.resources",
+        "temporal_runtime_executable_path",
     ),
     "validate_urls_activity": (
         "histdatacom.sidecar.activities",

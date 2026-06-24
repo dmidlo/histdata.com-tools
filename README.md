@@ -415,9 +415,9 @@ histdatacom -A --repo-quality-columns
 
 Full HistData.com quality campaigns should run in bounded
 symbol/format/timeframe slices from an environment with a verified Temporal
-executable: a future provisioned cache, an offline/private bundled artifact, or
-a source checkout started with an explicit executable. Do not run the full
-repository surface as one accumulating local scrape.
+executable: an explicit override, an offline/private bundled artifact, a
+verified runtime cache entry, or a resolver-provisioned first-run download. Do
+not run the full repository surface as one accumulating local scrape.
 
 For each slice, run download/extract first, then run `--repo-quality` so `.repo`
 keeps bounded findings and the detailed JSON report path. Normal campaign
@@ -766,13 +766,15 @@ entry points, runtime defaults, and third-party notices. The accepted V1.0
 packaging design keeps normal PyPI and TestPyPI artifacts metadata-only and
 provisions the pinned Temporal executable through a verified runtime cache on
 first use. See [Temporal Binary Provisioning](docs/temporal-binary-provisioning.md)
-for the production design and the #250/#251 implementation split.
+for the production design. Release preflight hardening for that non-bundled path
+is tracked by #251.
 
-Until that resolver lands, metadata-only artifacts still require an explicit
-Temporal executable through the lifecycle command. Bundled executable wheels
-remain an offline/private distribution path, not the normal PyPI release path.
-The executable and the Python Temporal SDK are separate concerns: base installs
-provide the SDK, while the runtime resolver owns executable availability.
+Metadata-only artifacts resolve the Temporal executable from an explicit
+operator override, an offline/private bundle, a verified per-user cache entry, or
+a pinned first-run download. Bundled executable wheels remain an offline/private
+distribution path, not the normal PyPI release path. The executable and the
+Python Temporal SDK are separate concerns: base installs provide the SDK, while
+the runtime resolver owns executable availability.
 
 Default sidecar submissions are built from resolved runtime context and
 `RunRequest` payloads. New orchestration work should use `RunRequest`,
@@ -788,11 +790,13 @@ artifacts by version, platform, URL, checksum, size, and provenance metadata.
 Normal PyPI artifacts stay below upload limits because they ship the index and
 not the binary.
 
-The future resolver should prefer explicit operator overrides, then verified
+The runtime resolver prefers explicit operator overrides, then verified
 private/offline bundles, then a verified per-user cache, and finally a first-run
-download when network provisioning is allowed. Offline environments should fail
-with instructions to pre-seed the cache, install an offline/private bundle, or
-pass an explicit executable.
+download when network provisioning is allowed. `HISTDATACOM_TEMPORAL_EXECUTABLE`
+sets a process-wide explicit executable, `HISTDATACOM_TEMPORAL_CACHE_DIR` sets an
+alternate cache root, and `HISTDATACOM_TEMPORAL_OFFLINE=1` disables first-run
+network provisioning. Offline environments fail with instructions to pre-seed
+the cache, install an offline/private bundle, or pass an explicit executable.
 
 #### Public Sidecar API Boundary
 

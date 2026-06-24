@@ -13,6 +13,8 @@ from types import ModuleType
 
 import pytest
 
+from histdatacom.sidecar.resources import load_temporal_runtime_index
+
 
 def _load_script() -> ModuleType:
     """Load the Temporal CLI fetch helper as a test module."""
@@ -59,6 +61,26 @@ def test_temporal_cli_asset_rejects_unpinned_version() -> None:
 
     with pytest.raises(SystemExit, match="checksum table is pinned"):
         module.temporal_cli_asset("linux-x86_64", version="9.9.9")
+
+
+def test_temporal_cli_asset_table_matches_runtime_index() -> None:
+    """The fetch helper and packaged resolver index should not drift apart."""
+    module = _load_script()
+    index = load_temporal_runtime_index()
+
+    assert index.version == module.DEFAULT_TEMPORAL_CLI_VERSION
+    assert set(index.platforms) == set(module.TEMPORAL_CLI_ASSETS)
+    for platform_key, artifact in index.platforms.items():
+        asset = module.TEMPORAL_CLI_ASSETS[platform_key]
+        assert artifact.archive_name == asset.asset_name(index.version)
+        assert artifact.archive_url == asset.url(index.version)
+        assert artifact.archive_sha256 == asset.sha256
+        assert artifact.executable_name == asset.executable_name
+        expected_format = (
+            "zip" if artifact.archive_name.endswith(".zip") else "tar.gz"
+        )
+        assert artifact.archive_format == expected_format
+        assert artifact.archive_size_bytes > 0
 
 
 def test_extract_executable_from_tar_archive(tmp_path: Path) -> None:

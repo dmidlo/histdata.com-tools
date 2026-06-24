@@ -1,7 +1,7 @@
 # Temporal Binary Provisioning Design
 
-Status: accepted for the V1.0 polish block. Implementation is tracked by
-#250, and release verification is tracked by #251.
+Status: accepted for the V1.0 polish block. Runtime resolver and cache behavior
+were implemented in #250, and release verification is tracked by #251.
 
 ## Problem
 
@@ -35,10 +35,10 @@ Bundled executable wheels remain an explicit offline/private distribution path
 only. They should not be uploaded to the normal PyPI project unless the project
 has a confirmed larger file limit and the release operator deliberately opts in.
 
-The default runtime resolver added in #250 should provision the Temporal binary
-from a packaged artifact index on first use, verify the archive checksum before
-use, extract the executable into a per-user cache, and reuse only cache entries
-that match the pinned version, platform, and checksum.
+The default runtime resolver provisions the Temporal binary from a packaged
+artifact index on first use, verifies the archive checksum before use, extracts
+the executable into a per-user cache, and reuses only cache entries that match
+the pinned version, platform, and checksum.
 
 ## Artifact Index
 
@@ -87,9 +87,8 @@ index entries define positive sizes for supported platforms so release tooling
 can report expected download and cache impact.
 
 The current index mirrors the existing checksum table in
-`scripts/fetch_temporal_cli.py`. After #250, the script and the packaged index
-should share one source of truth or have a test that proves they describe the
-same version, platforms, URLs, executable names, checksums, and archive sizes.
+`scripts/fetch_temporal_cli.py`. A regression test proves they describe the same
+version, platforms, URLs, executable names, checksums, and archive shapes.
 
 ## Resolver Order
 
@@ -101,8 +100,7 @@ Resolution order:
 
 1. explicit executable supplied by CLI/API, kept for development, CI, and
    operator overrides.
-2. explicit executable from a future environment override, for example
-   `HISTDATACOM_TEMPORAL_EXECUTABLE`.
+2. explicit executable from `HISTDATACOM_TEMPORAL_EXECUTABLE`.
 3. bundled executable from an offline/private wheel, when the manifest declares
    it and the bundled provenance matches the pinned index.
 4. verified cache entry matching the packaged artifact index.
@@ -188,7 +186,8 @@ of these operator actions:
 - install a private/offline wheel that includes the verified executable.
 - pass an explicit executable path.
 
-The future CLI should expose cache inspection and pre-seeding, for example:
+CLI cache inspection and pre-seeding commands should expose the resolver
+primitives, for example:
 
 ```text
 histdatacom runtime doctor --json
@@ -198,7 +197,7 @@ histdatacom runtime cache prune --keep-current
 ```
 
 The command names can be finalized in #246. The resolver and cache primitives
-belong in #250.
+are available through the package runtime surface.
 
 ## Security and Integrity
 
@@ -241,7 +240,7 @@ named and documented as offline/private artifacts, not the default PyPI path.
 
 ## Impact on Follow-Up Issues
 
-#250 should implement:
+#250 implemented:
 
 - artifact index loader and validation
 - cache directory policy
@@ -261,5 +260,5 @@ named and documented as offline/private artifacts, not the default PyPI path.
 - TestPyPI parity checks for the non-bundled install path
 - documentation for keyring, cache, and network prerequisites
 
-This design keeps #249 intentionally scoped to architecture and metadata. The
-runtime behavior belongs in #250, and release hardening belongs in #251.
+This design kept #249 intentionally scoped to architecture and metadata. Runtime
+behavior landed in #250, and release hardening belongs in #251.

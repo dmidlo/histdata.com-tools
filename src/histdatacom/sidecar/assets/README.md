@@ -8,10 +8,10 @@ runtime defaults, third-party notice material, and the packaged Temporal
 artifact index. They do not embed the Temporal executable.
 
 The accepted V1.0 design is metadata-only wheel distribution plus verified
-first-run runtime provisioning. The resolver implemented after this design
-should read the packaged artifact index, download only pinned Temporal CLI
-release artifacts, verify archive SHA-256 checksums before extraction, and cache
-the executable outside the installed package.
+first-run runtime provisioning. The resolver reads the packaged artifact index,
+downloads only pinned Temporal CLI release artifacts, verifies archive SHA-256
+checksums before extraction, and caches the executable outside the installed
+package.
 
 Bundled executable wheels remain an explicit offline/private artifact path.
 Those wheels stage an explicit Temporal executable with
@@ -21,5 +21,6 @@ Those wheels stage an explicit Temporal executable with
 wheel tag.
 
 Metadata-only artifacts and unsupported platforms must fail executable lookup
-with a clear message until the runtime resolver can provision a verified cache
-entry. They must not silently fall back to an unmanaged system binary.
+with a clear message when no explicit executable, verified bundle, verified cache
+entry, or allowed first-run download is available. They must not silently fall
+back to an unmanaged system binary.
