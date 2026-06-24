@@ -391,10 +391,10 @@ def main(
                                 ...
                             ]
     """
-    if not options and len(sys.argv) > 1 and sys.argv[1] == "sidecar":
-        from histdatacom.orchestration.cli import main as orchestration_main
+    if not options and len(sys.argv) > 1 and sys.argv[1] == "jobs":
+        from histdatacom.orchestration.cli import jobs_main
 
-        return orchestration_main(sys.argv[2:])
+        return jobs_main(sys.argv[2:])
 
     if not options:
         options = Options()

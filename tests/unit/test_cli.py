@@ -87,18 +87,17 @@ def test_invalid_cli_inputs_exit_nonzero(
     assert err.value.code == 1
 
 
-def test_sidecar_cli_flags_preserve_default_runtime_controls(
+def test_orchestration_cli_flags_preserve_default_runtime_controls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Sidecar flags should preserve normal CLI validation."""
+    """Orchestration flags should preserve normal CLI validation."""
     monkeypatch.setattr(
         sys,
         "argv",
         [
             "histdatacom",
-            "--sidecar",
-            "--sidecar-start",
-            "--sidecar-submit-only",
+            "--orchestration-start",
+            "--submit-only",
             "-V",
             "-p",
             "eurusd",
@@ -117,6 +116,47 @@ def test_sidecar_cli_flags_preserve_default_runtime_controls(
     assert options.sidecar_start
     assert not options.sidecar_wait_result
     assert options.validate_urls
+
+
+def test_sidecar_cli_flags_are_no_longer_public(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The top-level CLI should not accept old sidecar flag spelling."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--sidecar-submit-only",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        ArgParser(Options())()
+
+    assert err.value.code == 2
+
+
+def test_help_advertises_orchestration_jobs_not_sidecar() -> None:
+    """Main help should point users at orchestration job telemetry."""
+    parser = ArgParser(Options())
+    parser._set_args()
+    help_text = parser.format_help()
+
+    assert "Orchestration:" in help_text
+    assert "histdatacom jobs --help" in help_text
+    assert "--submit-only" in help_text
+    assert "--sidecar-submit-only" not in help_text
+    assert "Sidecar:" not in help_text
 
 
 def test_foreground_cli_flag_is_no_longer_accepted(
@@ -147,16 +187,16 @@ def test_foreground_cli_flag_is_no_longer_accepted(
     assert err.value.code == 2
 
 
-def test_no_sidecar_start_cli_flag_requires_running_sidecar(
+def test_no_orchestration_start_cli_flag_requires_running_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Operators should be able to disable default sidecar autostart."""
+    """Operators should be able to disable default runtime autostart."""
     monkeypatch.setattr(
         sys,
         "argv",
         [
             "histdatacom",
-            "--no-sidecar-start",
+            "--no-orchestration-start",
             "-V",
             "-p",
             "eurusd",
@@ -174,6 +214,20 @@ def test_no_sidecar_start_cli_flag_requires_running_sidecar(
     assert options.use_sidecar
     assert not options.sidecar_start
     assert options.validate_urls
+
+
+def test_options_expose_orchestration_named_runtime_controls() -> None:
+    """Options should expose public orchestration runtime controls."""
+    options = Options()
+
+    options.orchestration_start = False
+    options.orchestration_wait_result = False
+
+    assert options.use_orchestration
+    assert not options.orchestration_start
+    assert not options.orchestration_wait_result
+    assert not options.sidecar_start
+    assert not options.sidecar_wait_result
 
 
 def test_data_quality_cli_mode_bypasses_legacy_prerequisites(
@@ -431,8 +485,8 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
         "argv",
         [
             "histdatacom",
-            "--no-sidecar-start",
-            "--sidecar-submit-only",
+            "--no-orchestration-start",
+            "--submit-only",
             "-I",
             "-d",
             "-p",
@@ -577,7 +631,6 @@ def test_legacy_behavior_flags_keep_sidecar_request_shape(
         "argv",
         [
             "histdatacom",
-            "--sidecar",
             flag,
             "-p",
             "eurusd",

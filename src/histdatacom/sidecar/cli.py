@@ -71,12 +71,12 @@ def _add_common_args(
     parser.add_argument(
         "--workspace",
         default=workspace_default,
-        help="workspace path used to scope sidecar runtime state",
+        help="workspace path used to scope orchestration runtime state",
     )
     parser.add_argument(
         "--runtime-home",
         default=runtime_home_default,
-        help="base directory for per-workspace sidecar runtime state",
+        help="base directory for per-workspace orchestration runtime state",
     )
     parser.add_argument(
         "--state-dir",
@@ -166,17 +166,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     jobs = subparsers.add_parser(
         "jobs",
-        help=(
-            "submit, inspect, and control jobs using running sidecar routing"
-        ),
+        help="submit, inspect, and control jobs using orchestration routing",
     )
     _add_common_args(jobs, include_defaults=False)
-    jobs.add_argument(
+    _add_jobs_args(jobs)
+    return parser
+
+
+def build_jobs_parser() -> argparse.ArgumentParser:
+    """Build the first-class orchestration jobs argument parser."""
+    parser = argparse.ArgumentParser(prog="histdatacom jobs")
+    _add_common_args(parser, include_defaults=True)
+    _add_jobs_args(parser)
+    return parser
+
+
+def _add_jobs_args(parser: argparse.ArgumentParser) -> None:
+    """Add orchestration job command arguments to a parser."""
+    parser.add_argument(
         "--offline",
         action="store_true",
         help="read persisted local job snapshots without querying Temporal",
     )
-    job_subparsers = jobs.add_subparsers(
+    job_subparsers = parser.add_subparsers(
         dest="jobs_command",
         required=True,
     )
@@ -204,7 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_jobs = job_subparsers.add_parser(
         "list",
-        help="list known HistData sidecar jobs",
+        help="list known HistData orchestration jobs",
     )
     list_jobs.add_argument(
         "--query",
@@ -220,7 +232,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_job_command_common_args(list_jobs, include_offline=True)
 
     for command, help_text in (
-        ("inspect", "inspect one sidecar job"),
+        ("inspect", "inspect one orchestration job"),
         ("progress", "show one job's progress view"),
         ("logs", "show one job's event/log view"),
         ("artifacts", "show one job's artifact view"),
@@ -247,7 +259,6 @@ def build_parser() -> argparse.ArgumentParser:
                     "instead of reusing them"
                 ),
             )
-    return parser
 
 
 def _supervisor(args: argparse.Namespace) -> SidecarSupervisor:
@@ -688,6 +699,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "jobs":
             return _run_jobs_command(args)
         parser.error(f"unsupported sidecar command: {args.command}")
+    except (
+        RuntimeError,
+        SidecarResourceError,
+        PortAllocationError,
+        OSError,
+    ) as err:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "state": "error",
+                        "message": str(err),
+                        "state_dir": str(args.state_dir or ""),
+                        "workspace": str(args.workspace),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )  # noqa:T201
+        else:
+            print(f"error: {err}", file=sys.stderr)  # noqa:T201
+        return 1
+
+
+def jobs_main(argv: Sequence[str] | None = None) -> int:
+    """Run first-class orchestration job telemetry commands."""
+    parser = build_jobs_parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    try:
+        return _run_jobs_command(args)
     except (
         RuntimeError,
         SidecarResourceError,

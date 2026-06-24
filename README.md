@@ -1,8 +1,9 @@
 # histdata.com-tools
 
 A command-line utility and Python ETL package that downloads currency exchange
-rates from Histdata.com. The Temporal sidecar is the default runtime; InfluxDB,
-Jupyter, and alternate dataframe return formats are available through extras.
+rates from Histdata.com. The local Temporal orchestration runtime is the
+default execution engine; InfluxDB, Jupyter, and alternate dataframe return
+formats are available through extras.
 Works on MacOS, Linux & Windows Systems.
 **Requires Python3.10+**
 
@@ -30,12 +31,13 @@ Works on MacOS, Linux & Windows Systems.
     - [Quality Targets and Check Groups](#quality-targets-and-check-groups)
     - [Clean and Failing Examples](#clean-and-failing-examples)
     - [Warning, Error, and Exit Policy](#warning-error-and-exit-policy)
-  - [Temporal Sidecar Compatibility](#temporal-sidecar-compatibility)
+  - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
-    - [Lifecycle and Diagnostics](#lifecycle-and-diagnostics)
-    - [Sidecar Jobs and Automation](#sidecar-jobs-and-automation)
-    - [Sidecar Troubleshooting and Contributor Docs](#sidecar-troubleshooting-and-contributor-docs)
+    - [Public Orchestration API Boundary](#public-orchestration-api-boundary)
+    - [Maintainer Runtime Diagnostics](#maintainer-runtime-diagnostics)
+    - [Job Telemetry and Automation](#job-telemetry-and-automation)
+    - [Runtime Troubleshooting and Contributor Docs](#runtime-troubleshooting-and-contributor-docs)
   - [API - Other Scripts, Modules, & Jupyter Support](#api-other-scripts-modules-jupyter-support)
     - [CLI Automation](#cli-automation)
     - [Jupyter and External Scripts](#jupyter-and-external-scripts)
@@ -83,7 +85,7 @@ histdatacom -h
 
 ```txt
 usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION]
-                   [--data-directory DATA_DIRECTORY] [--sidecar] [--sidecar-start] [--no-sidecar-start] [--sidecar-submit-only] [--quality] [--quality-target PATH [PATH ...]] [--quality-checks GROUP [GROUP ...]]
+                   [--data-directory DATA_DIRECTORY] [--orchestration-start] [--no-orchestration-start] [--submit-only] [--quality] [--repo-quality] [--repo-quality-columns] [--quality-target PATH [PATH ...]] [--quality-checks GROUP [GROUP ...]]
                    [--quality-report PATH] [--quality-profile PATH] [--quality-fail-on SEVERITY] [--quality-max-errors COUNT] [--quality-max-warnings COUNT]
 
 options:
@@ -132,19 +134,21 @@ System:
   --data-directory DATA_DIRECTORY
                         Directory Used to save data. default is "./data/"
 
-Sidecar:
-  --sidecar             submit this run to the local Temporal sidecar (default
-                        runtime)
-  --sidecar-start       start the sidecar server and worker fleet only when no
-                        healthy sidecar is running
-  --no-sidecar-start    submit to the sidecar only when a healthy sidecar is
+Orchestration:
+  --orchestration-start
+                        start the local orchestration runtime only when no
+                        healthy runtime is running
+  --no-orchestration-start
+                        submit only when a healthy orchestration runtime is
                         already running
-  --sidecar-submit-only
-                        submit the sidecar job without waiting for its result
+  --submit-only         submit the orchestration job without waiting for its
+                        result
 
 Data quality:
   --quality             run offline data-quality assessment against local
                         datasets without contacting HistData.com
+  --repo-quality        run offline data-quality assessment and write bounded
+                        quality summary metadata back to the local .repo file
   --quality-target, --quality-path PATH [PATH ...]
                         local file or directory to assess; supports
                         directories, HistData ZIP archives, CSV files, XLSX
@@ -178,6 +182,14 @@ Info:
   --by BY               With -A, -U, to sort --by [pair_asc, pair_dsc,
                         start_asc, start_dsc]
   --version             return current version of histdatacom.
+  --repo-quality-columns
+                        include stored data-quality status columns in -A/-U
+                        repository table output
+
+Commands:
+  jobs        Inspect and control orchestrated work
+
+Run `histdatacom jobs --help` for job telemetry commands.
 ```
 
 ---
@@ -379,7 +391,7 @@ curl "https://raw.githubusercontent.com/dmidlo/histdata.com-tools/main/influxdb.
 
 `histdatacom --quality` runs offline checks against datasets that are already on
 disk. It does not contact HistData.com or InfluxDB; it submits a local Temporal
-sidecar `DataQualityWorkflow` that runs CPU/file activities and writes detailed
+orchestration `DataQualityWorkflow` that runs CPU/file activities and writes detailed
 JSON reports as disk artifacts. Use it after downloading or extracting data,
 before trusting local ZIP, CSV, or cache artifacts for import, modeling, or
 backtesting.
@@ -458,13 +470,13 @@ Supported groups:
 | `ticks` | tick bid/ask ordering, spread, duplicate/stale/burst/one-sided quote behavior, spread regimes |
 | `domain` | symbol metadata, quote conventions, calendar/session tags, cross-instrument consistency |
 | `modeling` | advisory modeling-readiness checks for bid-only bars, leakage risk, spread-cost assumptions, target horizon feasibility |
-| `provenance` | optional sidecar manifest/status lineage checks for artifact paths, sizes, checksums, cache metadata, stale caches, and orphan files |
+| `provenance` | optional orchestration manifest/status lineage checks for artifact paths, sizes, checksums, cache metadata, stale caches, and orphan files |
 
-`provenance` checks are only applied when a local sidecar
+`provenance` checks are only applied when a local orchestration
 `.histdatacom/manifest-status.sqlite3` store is available. Explicit
 `--quality-checks provenance` runs without a store return a clean info finding
 that records the missing store; ordinary file-only quality runs are not failed by
-the absence of sidecar provenance data.
+the absence of orchestration provenance data.
 
 #### Quality Profiles
 
@@ -720,43 +732,40 @@ HistData.com availability, Temporal, and InfluxDB are not required.
 
 ---
 
-### Temporal Sidecar Compatibility
+### Orchestration Runtime
 
-The production default is now the local Temporal sidecar for CLI and API runs.
-Default requests submit a `RunRequest` to the sidecar and start the bundled
-local sidecar when no healthy sidecar is running. The `--sidecar` flag remains
-accepted as an explicit compatibility alias for automation that already passed
-it during the migration.
+The production default is the local Temporal orchestration runtime for CLI and
+API runs. Default requests submit a `RunRequest` to the runtime and start the
+local service and worker fleet when no healthy runtime is running.
 
 The foreground rollback runtime has been removed after its release-window
 deprecation period. `--foreground` is no longer a valid CLI flag, and API code
-that sets `options.use_sidecar = False` raises a clear `ValueError`. If the
+that sets `options.use_orchestration = False` raises a clear `ValueError`. If the
 runtime cannot be started or contacted, CLI calls exit nonzero with a clear
-error and API calls raise `OrchestrationUnavailableError`; the runtime never silently
-falls back to a local non-sidecar execution path.
+error and API calls raise `OrchestrationUnavailableError`; the runtime never
+silently falls back to a local foreground execution path.
 
 #### Runtime Model and Install Surface
 
-The base install includes the Temporal Python SDK because the sidecar is the
+The base install includes the Temporal Python SDK because orchestration is the
 default runtime:
 
 ```sh
 pip install histdatacom
 ```
 
-`histdatacom[temporal]` remains accepted as a backwards-compatible extra name
-for automation that installed the sidecar dependency surface during migration,
-but it does not change the default runtime contract: base installs include the
-Temporal SDK needed by sidecar clients and workers.
+`histdatacom[temporal]` is available for environments that want to make the
+runtime dependency explicit, but it does not change the default runtime
+contract: base installs include the Temporal SDK needed by clients and workers.
 
-The sidecar stores Temporal process state, SQLite history, logs, and runtime
+The runtime stores Temporal process state, SQLite history, logs, and runtime
 manifests under a per-user, per-workspace runtime directory. Downloaded ZIP
 files, extracted CSV/XLSX files, cache IPC files, and merged API artifacts stay
 under the existing HistData data-directory policy.
 
-Record status metadata is manifest-only for new writes. Normal CLI/API and
-sidecar paths update `.histdatacom/manifest-status.sqlite3` under the relevant
-data or sidecar status root and no longer create new hidden `.meta` files beside
+Record status metadata is manifest-only for new writes. Normal CLI/API paths
+update `.histdatacom/manifest-status.sqlite3` under the relevant data or
+runtime status root and no longer create new hidden `.meta` files beside
 records. Existing `.meta` files remain readable as migration inputs; successful
 imports write the manifest row and remove the legacy file, while missing or
 corrupt legacy files are reported without blocking manifest-backed operation.
@@ -807,7 +816,7 @@ orchestration surface:
 - `histdatacom.Options` passed to `histdatacom.main(options)` or
   `histdatacom(options)`
 - `histdatacom.orchestration.contracts.RunRequest`
-- `histdatacom-sidecar` lifecycle and jobs commands
+- `histdatacom jobs ...` for job telemetry and control
 - `histdatacom.orchestration.client` job-control helpers for submit, inspect,
   list, cancel, resume, progress, and artifact polling
 - `histdatacom.orchestration.telemetry` helpers for job status, progress, logs,
@@ -822,9 +831,10 @@ the lower-level `histdatacom.activity_stages` functions and related adapter
 objects directly; those stage helpers are the supported worker boundary, not
 the GUI or automation boundary.
 
-#### Lifecycle and Diagnostics
+#### Maintainer Runtime Diagnostics
 
-Use the lifecycle CLI to inspect and manage the local sidecar:
+The normal user path does not require process lifecycle commands. Maintainers
+can inspect and manage the local runtime through the lower-level lifecycle CLI:
 
 ```sh
 histdatacom-sidecar doctor --json
@@ -837,14 +847,13 @@ histdatacom-sidecar stop
 `status` and `doctor` report component health for the server and each worker
 lane: `orchestration`, `network`, `cpu-file`, and `influx`.
 
-`histdatacom sidecar ...` is also routed through the top-level command. Use
-`--workspace` or `HISTDATACOM_SIDECAR_WORKSPACE` for cron, service managers,
-GUI launchers, and other contexts where the current working directory may not
-be stable.
+Use `--workspace` or `HISTDATACOM_SIDECAR_WORKSPACE` for cron, service
+managers, GUI launchers, and other contexts where the current working directory
+may not be stable.
 
-#### Sidecar Jobs and Automation
+#### Job Telemetry and Automation
 
-Submit a job through the default sidecar runtime:
+Submit a job through the default orchestration runtime:
 
 ```sh
 histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
@@ -853,43 +862,43 @@ histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 Submit without waiting for completion:
 
 ```sh
-histdatacom --sidecar-submit-only -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+histdatacom --submit-only -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
 The JSON control surface supports job inspection and future GUI polling:
 
 ```sh
-histdatacom-sidecar jobs list --json
-histdatacom-sidecar jobs progress histdatacom-<request-id> --json
-histdatacom-sidecar jobs artifacts histdatacom-<request-id> --json
-histdatacom-sidecar jobs cancel histdatacom-<request-id> --reason "operator stop"
+histdatacom jobs list --json
+histdatacom jobs progress histdatacom-<request-id> --json
+histdatacom jobs artifacts histdatacom-<request-id> --json
+histdatacom jobs cancel histdatacom-<request-id> --reason "operator stop"
 ```
 
-- `histdatacom --version` stays local and does not require the sidecar.
-- `-A`, `-U`, `-V`, `-D`, `-X`, and `-I` keep their existing option semantics before a sidecar request is submitted.
+- `histdatacom --version` stays local and does not require orchestration.
+- `-A`, `-U`, `-V`, `-D`, `-X`, and `-I` keep their existing option semantics before an orchestration request is submitted.
 - `--foreground` has been removed and is rejected by the CLI.
-- `--sidecar-start` starts the server and worker lane fleet only when no healthy sidecar is running.
-- `--no-sidecar-start` requires an already-running healthy sidecar and fails
+- `--orchestration-start` starts the server and worker lane fleet only when no healthy runtime is running.
+- `--no-orchestration-start` requires an already-running healthy runtime and fails
   clearly instead of starting one.
-- `--sidecar-submit-only` submits a job and returns job metadata instead of waiting for cache artifacts or workflow results.
-- Waited sidecar `-A` / `-U` repository requests keep the historical output contract: API calls return the available-data dictionary, and CLI calls render the repository table.
-- API calls with `options.api_return_type` return the requested `polars`, `pandas`, or `arrow` object after a completed sidecar job by materializing cache artifacts on disk.
+- `--submit-only` submits a job and returns job metadata instead of waiting for cache artifacts or workflow results.
+- Waited orchestration `-A` / `-U` repository requests keep the output contract: API calls return the available-data dictionary, and CLI calls render the repository table.
+- API calls with `options.api_return_type` return the requested `polars`, `pandas`, or `arrow` object after a completed orchestration job by materializing cache artifacts on disk.
 - If orchestration is unavailable, CLI calls exit nonzero with a clear error and API calls raise `OrchestrationUnavailableError`.
 
 Orchestration-backed API calls use the same public `Options` object and runtime
 defaults:
 
 ```python
-options.sidecar_wait_result = True
+options.orchestration_wait_result = True
 options.api_return_type = "polars"
 ```
 
-Set `options.sidecar_wait_result = False` to submit a job and receive sidecar
+Set `options.orchestration_wait_result = False` to submit a job and receive
 job metadata instead of a materialized API return object. Set
-`options.sidecar_start = False` when a caller requires a pre-started sidecar.
-`options.use_sidecar = False` is no longer supported.
+`options.orchestration_start = False` when a caller requires a pre-started
+runtime. `options.use_orchestration = False` is not supported.
 
-#### Sidecar Troubleshooting and Contributor Docs
+#### Runtime Troubleshooting and Contributor Docs
 
 See [Temporal Sidecar Operations](docs/temporal-sidecar-operations.md) for the
 runtime path layout, port policy, lifecycle commands, job controls,
@@ -947,15 +956,16 @@ options.end_yearmonth = "now"
 options.cpu_utilization = 100
 ```
 
-- Automation requests submit through the sidecar by default and start a missing
-  bundled sidecar when needed. Set `options.sidecar_wait_result = False` when
-  the caller only needs job metadata, set `options.sidecar_start = False` when
-  a caller requires a pre-started sidecar. `options.use_sidecar = False` is
+- Automation requests submit through orchestration by default and start a
+  missing runtime when needed. Set
+  `options.orchestration_wait_result = False` when the caller only needs job
+  metadata, set `options.orchestration_start = False` when a caller requires a
+  pre-started runtime. `options.use_orchestration = False` is
   rejected because the foreground runtime has been removed.
 
 - New automation should not call legacy helper classes directly for
   validate/download/extract/cache/import work. Direct side-effect helper
-  methods warn because they bypass durable sidecar status, cancellation,
+  methods warn because they bypass durable orchestration status, cancellation,
   retry/resume, and worker-lane routing.
 
 - when a behavior flag is included, `histdatacom` assumes it is being used for `CLI` automation **exclusively** and does **not** provide a return value.
@@ -1234,9 +1244,9 @@ pip install "histdatacom[jupyter]"
 pip install "histdatacom[all]"
 ```
 
-`histdatacom[temporal]` remains a compatibility alias for migration-era install
-scripts, but the Temporal Python SDK is part of the base package dependency
-set because sidecar execution is the default runtime.
+`histdatacom[temporal]` remains available for explicit runtime installs, but
+the Temporal Python SDK is part of the base package dependency set because
+orchestration is the default runtime.
 
 to install latest development version
 

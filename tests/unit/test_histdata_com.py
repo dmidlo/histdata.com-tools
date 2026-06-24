@@ -868,8 +868,8 @@ def test_back_to_back_cli_sidecar_requests_use_fresh_parser_state(
         "argv",
         [
             "histdatacom",
-            "--no-sidecar-start",
-            "--sidecar-submit-only",
+            "--no-orchestration-start",
+            "--submit-only",
             "-I",
             "-d",
             "-p",
@@ -1249,7 +1249,7 @@ def test_cli_sidecar_repository_request_prints_legacy_table(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["histdatacom", "--sidecar", "-A", "-p", "eurusd"],
+        ["histdatacom", "-A", "-p", "eurusd"],
     )
 
     with pytest.raises(SystemExit) as err:
@@ -1283,7 +1283,6 @@ def test_cli_sidecar_repository_request_can_print_quality_columns(
         "argv",
         [
             "histdatacom",
-            "--sidecar",
             "-A",
             "-p",
             "eurusd",
@@ -1331,7 +1330,6 @@ def test_cli_waited_sidecar_terminal_failure_exits_nonzero(
         "argv",
         [
             "histdatacom",
-            "--sidecar",
             "-V",
             "-p",
             "eurusd",
@@ -1376,7 +1374,7 @@ def test_cli_sidecar_repository_failure_exits_nonzero(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["histdatacom", "--sidecar", "-A", "-p", "eurusd"],
+        ["histdatacom", "-A", "-p", "eurusd"],
     )
 
     with pytest.raises(SystemExit) as err:
@@ -1495,7 +1493,6 @@ def test_cli_sidecar_unavailable_exits_nonzero(
         "argv",
         [
             "histdatacom",
-            "--sidecar",
             "-V",
             "-p",
             "eurusd",
@@ -1614,7 +1611,7 @@ def test_cli_sidecar_version_exits_without_job_submission(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["histdatacom", "--sidecar", "--version"],
+        ["histdatacom", "--version"],
     )
 
     assert histdata_com.main() is None

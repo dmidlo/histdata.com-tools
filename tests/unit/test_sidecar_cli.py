@@ -267,26 +267,48 @@ def test_sidecar_maintenance_cli_emits_json(
     assert payload["downloaded_artifacts_removed"] is False
 
 
-def test_histdatacom_main_dispatches_sidecar_command(
+def test_histdatacom_main_dispatches_jobs_command(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """The top-level histdatacom command should route sidecar subcommands."""
+    """The top-level histdatacom command should route job telemetry."""
     import histdatacom.histdata_com as histdata_com
+    import histdatacom.orchestration.cli as orchestration_cli
+
+    captured: dict[str, tuple[str, ...]] = {}
+
+    def fake_jobs_main(argv: list[str]) -> int:
+        captured["argv"] = tuple(argv)
+        return 0
+
+    monkeypatch.setattr(orchestration_cli, "jobs_main", fake_jobs_main)
 
     monkeypatch.setattr(
         sys,
         "argv",
         [
             "histdatacom",
-            "sidecar",
-            "--state-dir",
-            str(tmp_path),
-            "status",
+            "jobs",
+            "list",
+            "--json",
         ],
     )
 
     assert histdata_com.main() == 0
+    assert captured["argv"] == ("list", "--json")
+
+
+def test_histdatacom_main_does_not_route_sidecar_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The top-level user CLI should not expose sidecar lifecycle commands."""
+    import histdatacom.histdata_com as histdata_com
+
+    monkeypatch.setattr(sys, "argv", ["histdatacom", "sidecar", "status"])
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    assert err.value.code == 2
 
 
 def test_sidecar_jobs_inspect_cli_emits_control_snapshot_json(

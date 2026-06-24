@@ -123,7 +123,16 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 allocated when omitted.
         """
         # init _HistDataCom.ArgParser to extend argparse.ArgumentParser
-        argparse.ArgumentParser.__init__(self, prog="histdatacom")
+        argparse.ArgumentParser.__init__(
+            self,
+            prog="histdatacom",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog=(
+                "Commands:\n"
+                "  jobs        Inspect and control orchestrated work\n\n"
+                "Run `histdatacom jobs --help` for job telemetry commands."
+            ),
+        )
         # bring in the defaults arg DTO from outer class, use the
         # __dict__ representation of it to set argparse argument defaults.
 
@@ -356,12 +365,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args.append("-I")
         if self.arg_namespace.delete_after_influx:
             args.append("-d")
-        if self.arg_namespace.use_sidecar:
-            args.append("--sidecar")
         if self.arg_namespace.sidecar_start:
-            args.append("--sidecar-start")
+            args.append("--orchestration-start")
+        else:
+            args.append("--no-orchestration-start")
         if not self.arg_namespace.sidecar_wait_result:
-            args.append("--sidecar-submit-only")
+            args.append("--submit-only")
         return args
 
     def _check_for_ascii_if_influx(self) -> None:
@@ -886,7 +895,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         config_args = self.add_argument_group("Config")
         influx_args = self.add_argument_group("Influxdb")
         system_args = self.add_argument_group("System")
-        sidecar_args = self.add_argument_group("Sidecar")
+        orchestration_args = self.add_argument_group("Orchestration")
         quality_args = self.add_argument_group("Data quality")
         info_args = self.add_argument_group("Info")
 
@@ -1027,38 +1036,29 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             type=str,
             help='Directory Used to save data. default is "./data/"',
         )
-        sidecar_args.add_argument(
-            "--sidecar",
-            dest="use_sidecar",
-            action="store_true",
-            help=(
-                "submit this run to the local Temporal sidecar "
-                "(default runtime)"
-            ),
-        )
-        sidecar_args.add_argument(
-            "--sidecar-start",
+        orchestration_args.add_argument(
+            "--orchestration-start",
             dest="sidecar_start",
             action="store_true",
             help=(
-                "start the sidecar server and worker fleet only when no "
-                "healthy sidecar is running"
+                "start the local orchestration runtime only when no healthy "
+                "runtime is running"
             ),
         )
-        sidecar_args.add_argument(
-            "--no-sidecar-start",
+        orchestration_args.add_argument(
+            "--no-orchestration-start",
             dest="sidecar_start",
             action="store_false",
             help=(
-                "submit to the sidecar only when a healthy sidecar is already "
+                "submit only when a healthy orchestration runtime is already "
                 "running"
             ),
         )
-        sidecar_args.add_argument(
-            "--sidecar-submit-only",
+        orchestration_args.add_argument(
+            "--submit-only",
             dest="sidecar_wait_result",
             action="store_false",
-            help="submit the sidecar job without waiting for its result",
+            help="submit the orchestration job without waiting for its result",
         )
         quality_args.add_argument(
             "--quality",
