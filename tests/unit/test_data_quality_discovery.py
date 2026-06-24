@@ -83,6 +83,23 @@ def test_quality_discovery_recursively_finds_zip_csv_and_cache_targets(
             QualityTargetKind.ZIP,
             "201202",
         ),
+        ("DAT_MT_EURUSD_M1_201202.csv", QualityTargetKind.CSV, "201202"),
+        (
+            "DAT_NT_AUDCAD_T_LAST_201212.csv",
+            QualityTargetKind.CSV,
+            "201212",
+        ),
+        ("DAT_MS_EURUSD_M1_201202.csv", QualityTargetKind.CSV, "201202"),
+        (
+            "DAT_XLSX_EURUSD_M1_2022.xlsx",
+            QualityTargetKind.SPREADSHEET,
+            "2022",
+        ),
+        (
+            "HISTDATA_COM_MT_EURUSD_M1201202.zip",
+            QualityTargetKind.ZIP,
+            "201202",
+        ),
         (CACHE_FILENAME, QualityTargetKind.CACHE, ""),
     ),
 )
@@ -102,6 +119,40 @@ def test_quality_target_from_path_classifies_supported_files(
     assert target.kind == kind
     assert target.path == str(path.resolve())
     assert target.period == expected_period
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_format", "expected_code", "expected_timeframe"),
+    (
+        ("DAT_MT_EURUSD_M1_201202.csv", "metatrader", "MT", "M1"),
+        ("DAT_NT_AUDCAD_T_LAST_201212.csv", "ninjatrader", "NT", "T_LAST"),
+        ("DAT_NT_AUDCAD_T_BID_201212.csv", "ninjatrader", "NT", "T_BID"),
+        ("DAT_NT_AUDCAD_T_ASK_201212.csv", "ninjatrader", "NT", "T_ASK"),
+        ("DAT_MS_EURUSD_M1_201202.csv", "metastock", "MS", "M1"),
+        ("DAT_XLSX_EURUSD_M1_2022.xlsx", "excel", "XLSX", "M1"),
+    ),
+)
+def test_non_ascii_targets_expose_inventory_only_support_metadata(
+    tmp_path: Path,
+    filename: str,
+    expected_format: str,
+    expected_code: str,
+    expected_timeframe: str,
+) -> None:
+    """Non-ASCII HistData artifacts should not look deeply supported."""
+    path = tmp_path / filename
+    path.write_bytes(b"fixture")
+
+    target = quality_target_from_path(path)
+
+    assert target is not None
+    assert target.data_format == expected_format
+    assert target.timeframe == expected_timeframe
+    assert target.metadata["format_code"] == expected_code
+    support = target.metadata["quality_support"]
+    assert support["status"] == "inventory-only"
+    assert support["inventory_supported"] is True
+    assert support["parser_supported"] is False
 
 
 @pytest.mark.parametrize(

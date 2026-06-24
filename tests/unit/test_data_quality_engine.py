@@ -303,6 +303,7 @@ def test_quality_enums_normalize_aliases_and_reject_bad_values() -> None:
     assert QualityStatus.from_value("failure") == QualityStatus.FAILED
     assert QualityTargetKind.from_value("zip-file") == QualityTargetKind.ZIP
     assert QualityTargetKind.from_value("parquet") == QualityTargetKind.CACHE
+    assert QualityTargetKind.from_value("xlsx") == QualityTargetKind.SPREADSHEET
     assert QualityTargetKind.from_value("not-a-kind") == (
         QualityTargetKind.UNKNOWN
     )

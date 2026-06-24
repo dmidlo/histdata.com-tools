@@ -1054,7 +1054,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             metavar="PATH",
             help=(
                 "local file or directory to assess; supports directories, "
-                "HistData ZIP archives, CSV files, and .data cache files"
+                "HistData ZIP archives, CSV files, XLSX payloads, and .data "
+                "cache files"
             ),
         )
         quality_args.add_argument(

@@ -11,12 +11,12 @@ from histdatacom.activity_stages import (
     iter_dataset_periods,
     valid_dataset_dimensions,
 )
+from histdatacom.data_quality.format_support import DEEP_QUALITY_DIMENSIONS
 from histdatacom.fx_enums import Format, Timeframe
 from histdatacom.runtime_contracts import JSONValue
 from histdatacom.utils import get_current_datemonth_gmt_minus5
 
 CAMPAIGN_REPORT_SCHEMA_VERSION = "histdatacom.data-quality-campaign.v1"
-DEEP_QUALITY_DIMENSIONS = (("ascii", "M1"), ("ascii", "T"))
 DEFAULT_FOLLOW_UP_ISSUES = {
     "cache_deep_validation": 223,
     "installed_quality_smoke": 224,

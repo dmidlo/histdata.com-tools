@@ -706,8 +706,9 @@ Data-quality checks:
 
 - `histdatacom --quality` runs offline against local files and directories and
   submits a `DataQualityWorkflow` to the CPU/file lane. It is the operator path
-  for assessing ZIP archives, extracted CSV files, and `.data` cache files that
-  already exist on disk; the workflow does not contact HistData.com or InfluxDB.
+  for assessing ZIP archives, extracted CSV files, extracted Excel `.xlsx`
+  payloads, and `.data` cache files that already exist on disk; the workflow
+  does not contact HistData.com or InfluxDB.
 - The activity writes the detailed `quality-report` JSON artifact on disk and
   keeps workflow history limited to counters, policy decisions, progress,
   failures, and artifact references.
@@ -732,6 +733,14 @@ Data-quality checks:
 - The checks encode HistData-specific assumptions: ASCII M1 files are bid OHLC
   bars, ASCII tick files include bid and ask, and source timestamps are fixed
   EST with no daylight-saving adjustment before UTC normalization.
+- Format coverage is explicit per target through `quality_support` metadata.
+  ASCII `M1` and `T` artifacts receive parser-level checks. MetaTrader `M1`,
+  NinjaTrader `M1`/`T_LAST`/`T_BID`/`T_ASK`, MetaStock `M1`, and Excel `M1`
+  artifacts are inventory-only today: ZIP integrity and expected filename/member
+  checks are supported, but parser-level content checks emit
+  `HISTDATA_FORMAT_INVENTORY_ONLY` warnings instead of reporting the target as
+  deeply clean. Recognized formats used with unsupported timeframes emit
+  `HISTDATA_FORMAT_UNSUPPORTED`.
 
 Example clean focused ingestion run:
 

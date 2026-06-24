@@ -146,8 +146,8 @@ Data quality:
                         datasets without contacting HistData.com
   --quality-target, --quality-path PATH [PATH ...]
                         local file or directory to assess; supports
-                        directories, HistData ZIP archives, CSV files, and
-                        .data cache files
+                        directories, HistData ZIP archives, CSV files, XLSX
+                        payloads, and .data cache files
   --quality-checks GROUP [GROUP ...]
                         quality check groups to run; defaults to all.
                         Supported: all, inventory, ingestion, time, bars,
@@ -386,8 +386,9 @@ histdatacom --quality --quality-target data/ --quality-report reports/quality.js
 
 The command prints a human summary and can also write a full JSON report. If no
 `--quality-target` is passed, quality mode uses the configured data directory.
-Targets can be plain HistData CSV files, HistData ZIP archives, directories
-containing those files, or the canonical `.data` cache file.
+Targets can be plain HistData CSV files, extracted Excel `.xlsx` payloads,
+HistData ZIP archives, directories containing those files, or the canonical
+`.data` cache file.
 
 Use `--repo-quality` when the same quality run should also update the local
 repo helper file with bounded per-instrument quality summaries:
@@ -428,6 +429,22 @@ Supported groups:
 | `ticks` | tick bid/ask ordering, spread, duplicate/stale/burst/one-sided quote behavior, spread regimes |
 | `domain` | symbol metadata, quote conventions, calendar/session tags, cross-instrument consistency |
 | `modeling` | advisory modeling-readiness checks for bid-only bars, leakage risk, spread-cost assumptions, target horizon feasibility |
+
+Format support is explicit in every discovered target's `quality_support`
+metadata. The current quality boundary is:
+
+| Format | Timeframes | Quality support |
+| --- | --- | --- |
+| `ascii` | `M1`, `T` | Deep parser-level checks for ZIP, CSV, and canonical `.data` cache artifacts |
+| `metatrader` | `M1` | Inventory-only: filename, ZIP integrity, and expected member checks |
+| `ninjatrader` | `M1`, `T_LAST`, `T_BID`, `T_ASK` | Inventory-only: filename, ZIP integrity, and expected member checks |
+| `metastock` | `M1` | Inventory-only: filename, ZIP integrity, and expected member checks |
+| `excel` | `M1` | Inventory-only for ZIPs and extracted `.xlsx` workbook payloads |
+
+Inventory-only targets emit a warning with code
+`HISTDATA_FORMAT_INVENTORY_ONLY`; they are intentionally not reported as deeply
+clean. Recognized formats used with unsupported timeframes emit
+`HISTDATA_FORMAT_UNSUPPORTED`.
 
 HistData-specific assumptions are reported directly in findings:
 

@@ -12,6 +12,12 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
     QualityTargetKind,
 )
+from histdatacom.data_quality.format_support import (
+    data_format_from_code,
+    known_histdata_format_codes,
+    known_histdata_timeframes,
+    quality_support_for_target,
+)
 from histdatacom.histdata_ascii import CACHE_FILENAME, M1, TICK
 from histdatacom.runtime_contracts import JSONValue
 
@@ -26,14 +32,21 @@ QUALITY_CHECK_GROUPS = (
     "modeling",
 )
 
-_ASCII_FILENAME_RE = re.compile(
-    r"^DAT_ASCII_(?P<symbol>[A-Z0-9]+)_(?P<timeframe>M1|T)_"
-    r"(?P<period>\d{4}(?:\d{2})?)(?:_[A-Z0-9_]+)?(?:\.csv)?$",
+_FORMAT_CODE_PATTERN = "|".join(known_histdata_format_codes())
+_TIMEFRAME_PATTERN = "|".join(
+    sorted(known_histdata_timeframes(), key=len, reverse=True)
+)
+_HISTDATA_DATA_FILENAME_RE = re.compile(
+    rf"^DAT_(?P<format>{_FORMAT_CODE_PATTERN})_"
+    rf"(?P<symbol>[A-Z0-9]+)_(?P<timeframe>{_TIMEFRAME_PATTERN})_"
+    r"(?P<period>\d{4}(?:\d{2})?)(?:_[A-Z0-9_]+)?"
+    r"(?:\.(?:csv|xlsx))?$",
     re.IGNORECASE,
 )
 _HISTDATA_ARCHIVE_FILENAME_RE = re.compile(
-    r"^HISTDATA_COM_ASCII_(?P<symbol>[A-Z0-9]+)_"
-    r"(?P<timeframe>M1|T)(?P<period>\d{4}(?:\d{2})?)$",
+    rf"^HISTDATA_COM_(?P<format>{_FORMAT_CODE_PATTERN})_"
+    rf"(?P<symbol>[A-Z0-9]+)_(?P<timeframe>{_TIMEFRAME_PATTERN})"
+    r"(?P<period>\d{4}(?:\d{2})?)$",
     re.IGNORECASE,
 )
 
@@ -157,6 +170,11 @@ def quality_target_from_path(path: str | Path) -> QualityTarget | None:
 
     metadata = _metadata_from_filename(source)
     metadata["filename"] = source.name
+    metadata["quality_support"] = quality_support_for_target(
+        data_format=str(metadata.get("data_format", "") or ""),
+        timeframe=str(metadata.get("timeframe", "") or ""),
+        kind=kind.value,
+    ).to_metadata()
     return QualityTarget(
         path=str(source.resolve()),
         kind=kind,
@@ -190,6 +208,8 @@ def _target_kind(path: Path) -> QualityTargetKind | None:
         return QualityTargetKind.ZIP
     if suffix == ".csv":
         return QualityTargetKind.CSV
+    if suffix == ".xlsx":
+        return QualityTargetKind.SPREADSHEET
     return None
 
 
@@ -201,18 +221,20 @@ def _metadata_from_filename(path: Path) -> dict[str, JSONValue]:
     if path.suffix.lower() == ".zip":
         filename = path.with_suffix("").name
 
-    match = _ASCII_FILENAME_RE.match(filename)
+    match = _HISTDATA_DATA_FILENAME_RE.match(filename)
     if match is None:
         match = _HISTDATA_ARCHIVE_FILENAME_RE.match(filename)
     if match is None:
         return {}
 
-    timeframe = match.group("timeframe").upper()
-    if timeframe not in {M1, TICK}:
+    data_format = data_format_from_code(match.group("format"))
+    if not data_format:
         return {}
+    timeframe = match.group("timeframe").upper()
 
     return {
-        "data_format": "ascii",
+        "data_format": data_format,
+        "format_code": match.group("format").upper(),
         "symbol": match.group("symbol").upper(),
         "timeframe": timeframe,
         "period": match.group("period"),
@@ -235,12 +257,19 @@ def _metadata_from_cache_path(path: Path) -> dict[str, JSONValue]:
         period_parts = parts[index + 3 : -1]
         period = _period_from_path_parts(period_parts)
         if period:
-            return {
+            metadata: dict[str, JSONValue] = {
                 "data_format": "ascii",
+                "format_code": "ASCII",
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "period": period,
             }
+            metadata["quality_support"] = quality_support_for_target(
+                data_format="ascii",
+                timeframe=timeframe,
+                kind=QualityTargetKind.CACHE.value,
+            ).to_metadata()
+            return metadata
     return {}
 
 
@@ -264,5 +293,6 @@ def _period_from_path_parts(parts: tuple[str, ...]) -> str:
 _TARGET_KINDS = (
     QualityTargetKind.ZIP,
     QualityTargetKind.CSV,
+    QualityTargetKind.SPREADSHEET,
     QualityTargetKind.CACHE,
 )

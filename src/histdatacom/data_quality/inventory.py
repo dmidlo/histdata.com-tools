@@ -15,14 +15,80 @@ from histdatacom.data_quality.contracts import (
     QualityTargetKind,
 )
 from histdatacom.data_quality.discovery import quality_metadata_from_filename
+from histdatacom.data_quality.format_support import (
+    HISTDATA_FORMAT_SUPPORT_RULE_ID,
+    format_code_for_data_format,
+    payload_extension_for_format,
+    quality_support_for_target,
+)
 from histdatacom.runtime_contracts import JSONValue
 
-ASCII_ZIP_FILENAME_PATTERN = (
-    "DAT_ASCII_<SYMBOL>_<TIMEFRAME>_<YYYY[MM]>.zip or "
-    "HISTDATA_COM_ASCII_<SYMBOL>_<TIMEFRAME><YYYY[MM]>.zip"
+HISTDATA_ZIP_FILENAME_PATTERN = (
+    "DAT_<FORMAT>_<SYMBOL>_<TIMEFRAME>_<YYYY[MM]>.zip or "
+    "HISTDATA_COM_<FORMAT>_<SYMBOL>_<TIMEFRAME><YYYY[MM]>.zip"
 )
-ASCII_CSV_MEMBER_PATTERN = "DAT_ASCII_<SYMBOL>_<TIMEFRAME>_<YYYY[MM]>.csv"
+HISTDATA_MEMBER_PATTERN = (
+    "DAT_<FORMAT>_<SYMBOL>_<TIMEFRAME>_<YYYY[MM]>.<csv|xlsx>"
+)
 ZIP_INVENTORY_RULE_ID = "inventory.zip.integrity"
+
+
+@dataclass(slots=True)
+class HistDataFormatSupportRule:
+    """Report the parser-support boundary for each discovered target."""
+
+    rule_id: str = HISTDATA_FORMAT_SUPPORT_RULE_ID
+    description: str = (
+        "Report deep-parser, inventory-only, or unsupported format coverage."
+    )
+
+    def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
+        """Return format-support boundary findings for one target."""
+        support = quality_support_for_target(
+            data_format=target.data_format,
+            timeframe=target.timeframe,
+            kind=target.kind.value,
+        )
+        if support.status == "inventory-only":
+            return (
+                _finding(
+                    target,
+                    code="HISTDATA_FORMAT_INVENTORY_ONLY",
+                    message=(
+                        "HistData format is recognized, but parser-level "
+                        "quality checks are not implemented for this "
+                        "format/timeframe."
+                    ),
+                    rule_id=self.rule_id,
+                    severity=QualitySeverity.WARNING,
+                    metadata={
+                        "quality_support": support.to_metadata(),
+                        "boundary": "inventory-only",
+                    },
+                ),
+            )
+
+        if support.status != "unsupported":
+            return ()
+
+        if target.kind is QualityTargetKind.ZIP and not target.data_format:
+            return ()
+
+        return (
+            _finding(
+                target,
+                code="HISTDATA_FORMAT_UNSUPPORTED",
+                message=(
+                    "HistData target format metadata is unsupported for "
+                    "data-quality checks."
+                ),
+                rule_id=self.rule_id,
+                metadata={
+                    "quality_support": support.to_metadata(),
+                    "boundary": "unsupported",
+                },
+            ),
+        )
 
 
 @dataclass(slots=True)
@@ -48,12 +114,10 @@ class HistDataZipInventoryRule:
                 _finding(
                     target,
                     code="HISTDATA_ZIP_FILENAME_INVALID",
-                    message=(
-                        "ZIP filename does not match expected HistData ASCII "
-                        "pattern."
-                    ),
+                    message="ZIP filename does not match expected HistData pattern.",
+                    rule_id=self.rule_id,
                     metadata={
-                        "expected_pattern": ASCII_ZIP_FILENAME_PATTERN,
+                        "expected_pattern": HISTDATA_ZIP_FILENAME_PATTERN,
                         "observed_filename": path.name,
                     },
                 )
@@ -63,12 +127,10 @@ class HistDataZipInventoryRule:
                 _finding(
                     target,
                     code="HISTDATA_ZIP_FILENAME_INVALID",
-                    message=(
-                        "ZIP filename does not match expected HistData ASCII "
-                        "metadata."
-                    ),
+                    message="ZIP filename does not match expected HistData metadata.",
+                    rule_id=self.rule_id,
                     metadata={
-                        "expected_pattern": ASCII_ZIP_FILENAME_PATTERN,
+                        "expected_pattern": HISTDATA_ZIP_FILENAME_PATTERN,
                         "expected_filename": expected_filenames[0],
                         "accepted_filenames": list(expected_filenames),
                         "observed_filename": path.name,
@@ -87,6 +149,7 @@ class HistDataZipInventoryRule:
                             message=(
                                 "ZIP archive failed CRC/decompression check."
                             ),
+                            rule_id=self.rule_id,
                             metadata={"bad_member": bad_member},
                         )
                     )
@@ -98,6 +161,7 @@ class HistDataZipInventoryRule:
                     target,
                     code="ZIP_CORRUPT",
                     message="ZIP archive could not be opened.",
+                    rule_id=self.rule_id,
                     metadata={
                         "error_type": type(exc).__name__,
                         "error": str(exc),
@@ -111,6 +175,7 @@ class HistDataZipInventoryRule:
                     target,
                     code="ZIP_UNREADABLE",
                     message="ZIP archive could not be read.",
+                    rule_id=self.rule_id,
                     metadata={
                         "error_type": type(exc).__name__,
                         "error": str(exc),
@@ -125,8 +190,9 @@ class HistDataZipInventoryRule:
 
 def inventory_quality_rules() -> tuple[QualityRule, ...]:
     """Return inventory quality rules in deterministic execution order."""
-    rule: QualityRule = HistDataZipInventoryRule()
-    return (rule,)
+    support_rule: QualityRule = HistDataFormatSupportRule()
+    zip_rule: QualityRule = HistDataZipInventoryRule()
+    return (support_rule, zip_rule)
 
 
 def _member_findings(
@@ -145,10 +211,11 @@ def _member_findings(
                         code="HISTDATA_ZIP_MEMBER_FILENAME_INVALID",
                         message=(
                             "ZIP member filename does not match expected "
-                            "HistData ASCII pattern."
+                            "HistData pattern."
                         ),
+                        rule_id=ZIP_INVENTORY_RULE_ID,
                         metadata={
-                            "expected_pattern": ASCII_CSV_MEMBER_PATTERN,
+                            "expected_pattern": HISTDATA_MEMBER_PATTERN,
                             "observed_member": member,
                         },
                     )
@@ -160,7 +227,8 @@ def _member_findings(
             _finding(
                 target,
                 code="ZIP_MEMBER_MISSING",
-                message="ZIP archive does not contain the expected CSV member.",
+                message="ZIP archive does not contain the expected data member.",
+                rule_id=ZIP_INVENTORY_RULE_ID,
                 metadata={
                     "expected_member": expected_member,
                     "observed_members": [],
@@ -173,7 +241,8 @@ def _member_findings(
             _finding(
                 target,
                 code="ZIP_MEMBER_UNEXPECTED",
-                message="ZIP archive does not contain the expected CSV member.",
+                message="ZIP archive does not contain the expected data member.",
+                rule_id=ZIP_INVENTORY_RULE_ID,
                 metadata={
                     "expected_member": expected_member,
                     "observed_members": list(members),
@@ -197,6 +266,7 @@ def _member_findings(
                 target,
                 code="ZIP_EXTRA_MEMBER",
                 message="ZIP archive contains unexpected extra members.",
+                rule_id=ZIP_INVENTORY_RULE_ID,
                 severity=QualitySeverity.WARNING,
                 metadata={
                     "expected_member": expected_member,
@@ -217,26 +287,36 @@ def _archive_file_members(archive: zipfile.ZipFile) -> tuple[str, ...]:
 
 def _expected_zip_member(target: QualityTarget) -> str | None:
     if (
-        target.data_format != "ascii"
+        not target.data_format
         or not target.symbol
         or not target.timeframe
         or not target.period
     ):
         return None
-    return f"DAT_ASCII_{target.symbol}_{target.timeframe}_{target.period}.csv"
+    format_code = format_code_for_data_format(target.data_format)
+    if not format_code:
+        return None
+    extension = payload_extension_for_format(target.data_format)
+    return (
+        f"DAT_{format_code}_{target.symbol}_{target.timeframe}_"
+        f"{target.period}.{extension}"
+    )
 
 
 def _expected_zip_filenames(target: QualityTarget) -> tuple[str, ...]:
     if (
-        target.data_format != "ascii"
+        not target.data_format
         or not target.symbol
         or not target.timeframe
         or not target.period
     ):
         return ()
+    format_code = format_code_for_data_format(target.data_format)
+    if not format_code:
+        return ()
     return (
-        f"DAT_ASCII_{target.symbol}_{target.timeframe}_{target.period}.zip",
-        f"HISTDATA_COM_ASCII_{target.symbol}_{target.timeframe}{target.period}.zip",
+        f"DAT_{format_code}_{target.symbol}_{target.timeframe}_{target.period}.zip",
+        f"HISTDATA_COM_{format_code}_{target.symbol}_{target.timeframe}{target.period}.zip",
     )
 
 
@@ -256,6 +336,7 @@ def _finding(
     *,
     code: str,
     message: str,
+    rule_id: str = ZIP_INVENTORY_RULE_ID,
     severity: QualitySeverity = QualitySeverity.ERROR,
     metadata: dict[str, JSONValue] | None = None,
 ) -> QualityFinding:
@@ -263,7 +344,7 @@ def _finding(
         severity=severity,
         code=code,
         message=message,
-        rule_id=ZIP_INVENTORY_RULE_ID,
+        rule_id=rule_id,
         target=target,
         location=QualityLocation(path=target.path),
         metadata=dict(metadata or {}),

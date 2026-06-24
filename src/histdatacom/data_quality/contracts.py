@@ -125,6 +125,7 @@ class QualityTargetKind(str, Enum):
     DIRECTORY = "directory"
     ZIP = "zip"
     CSV = "csv"
+    SPREADSHEET = "spreadsheet"
     CACHE = "cache"
 
     @classmethod
@@ -146,6 +147,11 @@ class QualityTargetKind(str, Enum):
             "zipfile": cls.ZIP,
             "zip-file": cls.ZIP,
             "csv-file": cls.CSV,
+            "xlsx": cls.SPREADSHEET,
+            "workbook": cls.SPREADSHEET,
+            "spreadsheet-file": cls.SPREADSHEET,
+            "excel": cls.SPREADSHEET,
+            "excel-file": cls.SPREADSHEET,
             "file": cls.CSV,
             "polars-cache": cls.CACHE,
             "cache-file": cls.CACHE,
