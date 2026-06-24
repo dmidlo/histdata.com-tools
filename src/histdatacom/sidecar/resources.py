@@ -56,7 +56,7 @@ class TemporalRuntimeOfflineError(TemporalRuntimeProvisioningError):
 
 @dataclass(frozen=True, slots=True)
 class SidecarPlatformResource:
-    """Manifest entry for a platform-specific Temporal sidecar payload."""
+    """Manifest entry for a platform-specific Temporal runtime payload."""
 
     key: str
     bundled: bool
@@ -82,10 +82,10 @@ class SidecarPlatformResource:
 
 @dataclass(frozen=True, slots=True)
 class SidecarManifest:
-    """Packaged Temporal sidecar distribution manifest."""
+    """Packaged Temporal runtime distribution manifest."""
 
     schema_version: int
-    sidecar: str
+    runtime: str
     distribution_strategy: str
     embedded_binary: bool
     resource_files: tuple[str, ...]
@@ -102,7 +102,7 @@ class SidecarManifest:
         }
         return cls(
             schema_version=int(data.get("schema_version", 0)),
-            sidecar=str(data.get("sidecar", "")),
+            runtime=str(data.get("runtime", data.get("sidecar", ""))),
             distribution_strategy=str(data.get("distribution_strategy", "")),
             embedded_binary=bool(data.get("embedded_binary", False)),
             resource_files=tuple(

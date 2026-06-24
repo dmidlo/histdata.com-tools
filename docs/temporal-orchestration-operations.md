@@ -1,15 +1,15 @@
-# Temporal Sidecar Operations
+# Temporal Orchestration Operations
 
 Issue: #169
 
-This runbook documents the local Temporal sidecar model used by
+This runbook documents the local Temporal runtime model used by
 `histdatacom`. It is written for users, operators, contributors, and the
 future GUI surface. Data-quality operations run as offline CPU/file activities
 and persist detailed reports as disk artifacts.
 
 ## Current Packaging Status
 
-The local Temporal sidecar is now the production default for ordinary CLI and
+The local Temporal runtime is now the production default for ordinary CLI and
 API runs:
 
 ```sh
@@ -19,11 +19,11 @@ histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 Default requests submit a `RunRequest` through Temporal orchestration and start
 the local runtime when no healthy runtime is running.
 
-Default sidecar submissions are built from resolved runtime context and
+Default submissions are built from resolved runtime context and
 `RunRequest` payloads. The foreground rollback runtime has been removed after
 its release-window deprecation period: `--foreground` is no longer accepted,
 and API code that sets `Options.use_orchestration = False` receives a clear
-`ValueError`. Removed sidecar-named option attributes raise `AttributeError`
+`ValueError`. Removed migration-era option attributes raise `AttributeError`
 instead of becoming stale state. Legacy helper surfaces accept explicit
 argument dictionaries rather than ambient parser state. New orchestration
 behavior should be expressed as `RunRequest` payloads, Temporal workflows, and
@@ -31,28 +31,26 @@ Temporal activities.
 
 ## Public API Boundary
 
-The sidecar-era public boundary for new users, scripts, services, and the
-future GUI is:
+The V1 public boundary for new users, scripts, services, and the future GUI is:
 
 - `histdatacom.Options` passed to `histdatacom.main(options)` or
   `histdatacom(options)`
-- `histdatacom.sidecar.contracts.RunRequest`
-- the `histdatacom-sidecar` lifecycle and jobs CLI
-- `histdatacom.sidecar.client` job-control helpers for submit, inspect, list,
+- `histdatacom.orchestration.contracts.RunRequest`
+- `histdatacom jobs ...` for job telemetry and control
+- `histdatacom runtime ...` for maintainer runtime diagnostics
+- `histdatacom.orchestration.client` job-control helpers for submit, inspect, list,
   cancel, resume, progress, and artifact polling
 
 The supported Temporal worker adapter boundary is lower level:
 
 - `histdatacom.activity_stages.*`
-- `histdatacom.sidecar.activities.*`
-- `histdatacom.sidecar.workflows.*`
 - bounded adapters such as `InfluxBatchWriter` when an activity needs a live
   sink
 
 The following public helper methods are compatibility surfaces only. They
 perform direct side effects and emit `LegacyHelperSideEffectWarning` so new GUI
 or automation code cannot silently bypass durable job status, cancellation,
-retry/resume, sidecar lifecycle, and worker-lane routing:
+retry/resume, runtime lifecycle, and worker-lane routing:
 
 - `Repo.get_available_repo_data`
 - `Repo.update_repo_from_github`
@@ -66,20 +64,19 @@ retry/resume, sidecar lifecycle, and worker-lane routing:
 - `Influx.import_data`
 
 `Api.merge_records` remains a synchronous materializer for explicit cache
-records, including the completed sidecar artifact path used by
+records, including the completed runtime artifact path used by
 `histdatacom.main(Options)`. It should not be used as an orchestration entry
 point for validation, downloads, extraction, cache building, or imports.
 
-The base package install includes the Temporal Python SDK because sidecar job
-submission, job inspection, and workers are the default runtime surface:
+The base package install includes the Temporal Python SDK because job
+submission, job inspection, and workers are part of the default runtime:
 
 ```sh
 pip install histdatacom
 ```
 
-`histdatacom[temporal]` remains accepted as a backwards-compatible extra for
-automation written during migration, and `histdatacom[all]` still includes the
-same SDK dependency. Source distributions and universal wheels include runtime
+`histdatacom[all]` includes the same SDK dependency with the broader optional
+tooling surface. Source distributions and universal wheels include runtime
 metadata, resource manifests, third-party notices, and CLI entry points.
 
 The accepted V1.0 packaging design keeps normal PyPI/TestPyPI artifacts
@@ -102,7 +99,7 @@ still build offline/private artifacts with pinned Temporal CLI `1.7.2` release
 artifacts, SHA-256 verification, `temporal-cli-provenance.json`, and Temporal CLI
 notice/license resources, but those wheels require an explicit operator decision.
 Bundled wheels must pass `scripts/inspect_wheel.py --require-bundled-platform`,
-install on a matching runner, run `histdatacom-sidecar doctor --json` with
+install on a matching runner, run `histdatacom runtime doctor --json` with
 `platform.executable_bundled == true`, probe the executable version, start the
 runtime without `--executable`, and run the installed-wheel hermetic smoke job.
 The hermetic smoke uses a local-only dataset-planning request:
@@ -110,20 +107,20 @@ The hermetic smoke uses a local-only dataset-planning request:
 extract, and import flags are all false. It still starts the packaged Temporal
 executable, starts workers, submits a workflow, waits for completion, validates
 the status snapshot and artifact references, and prints server/worker
-diagnostics if the job or sidecar shutdown fails. The explicit hermetic smoke is
-executed through `scripts/smoke_sidecar_install.py --hermetic-sidecar-smoke`.
+diagnostics if the job or runtime shutdown fails. The explicit hermetic smoke is
+executed through `scripts/smoke_runtime_install.py --hermetic-runtime-smoke`.
 Bundled platform wheels also run
-`scripts/smoke_sidecar_install.py --default-routing-sidecar-smoke`, which starts
-the sidecar with non-default worker-fleet routing and submits without an
+`scripts/smoke_runtime_install.py --default-routing-runtime-smoke`, which starts
+the runtime with non-default worker-fleet routing and submits without an
 explicit worker config. That gate fails if the installed package cannot resolve
-the running frontend, namespace, and task queues from persisted sidecar state.
+the running frontend, namespace, and task queues from persisted runtime state.
 Stop exceptions, missing stop status, persistent `stopping` status, and known
-remaining sidecar PIDs are treated as smoke failures. These release gates are
+remaining runtime PIDs are treated as smoke failures. These release gates are
 not default pytest tests, so missing Temporal executables fail the explicit
 smoke command instead of appearing as skipped tests in the normal suite.
 
 The external HistData.com smoke remains available as an operator gate through
-`scripts/smoke_sidecar_install.py --live-sidecar-smoke`. That command uses a
+`scripts/smoke_runtime_install.py --live-runtime-smoke`. That command uses a
 minimal non-Influx request with URL validation enabled, so it can detect vendor
 availability, network, and website/form drift, but it should not be the default
 PyPI publish gate for otherwise-good platform wheels.
@@ -140,24 +137,24 @@ Default-runtime failure policy:
   when no healthy runtime is running.
 - `--foreground` is rejected by the CLI.
 - `Options.use_orchestration = False` is rejected by API runtime resolution.
-- Sidecar-named option attributes such as `Options.use_sidecar`,
+- Removed migration-era option attributes such as `Options.use_sidecar`,
   `Options.sidecar_start`, and `Options.sidecar_wait_result` are removed and
   raise `AttributeError` if assigned.
-- Metadata-only wheels and unsupported platforms fail sidecar starts with a
-  `SidecarUnavailableError`/nonzero CLI exit when no explicit executable,
+- Metadata-only wheels and unsupported platforms fail runtime starts with a
+  `OrchestrationUnavailableError`/nonzero CLI exit when no explicit executable,
   verified bundle, verified cache entry, or allowed first-run download is
   available.
-- The runtime never silently falls back from sidecar execution.
+- The runtime never silently falls back to non-orchestrated execution.
 
 ## Runtime Model
 
-The sidecar runs a local Temporal developer server with SQLite persistence plus
+The runtime runs a local Temporal developer server with SQLite persistence plus
 one worker process for each configured task-queue lane. The runtime is scoped
 by workspace so concurrent projects do not share process state, logs, task
 queues, or SQLite history unless they intentionally use the same workspace
 path.
 
-The sidecar stores only orchestration state:
+The runtime stores only orchestration state:
 
 - process state
 - transient supervisor locks
@@ -167,11 +164,11 @@ The sidecar stores only orchestration state:
 
 Downloaded ZIP files, extracted CSV/XLSX files, cache IPC files, and merged
 API-return artifacts stay under the existing HistData data-directory policy.
-They are not moved into the sidecar runtime home.
+They are not moved into the orchestration runtime home.
 
-Record status metadata is manifest-only for new writes. Sidecar and API paths
+Record status metadata is manifest-only for new writes. Runtime and API paths
 update `.histdatacom/manifest-status.sqlite3` under the
-resolved data or sidecar status root and no longer create new hidden `.meta`
+resolved data or runtime status root and no longer create new hidden `.meta`
 files beside individual records. Existing `.meta` files are migration inputs:
 successful restore/import operations write the manifest row and remove the
 legacy file, while missing or corrupt legacy files are reported and otherwise
@@ -181,13 +178,13 @@ ignored.
 
 The default runtime home is per user and platform-specific:
 
-- macOS: `~/Library/Application Support/histdatacom/sidecar`
-- Linux: `$XDG_STATE_HOME/histdatacom/sidecar`, or
-  `~/.local/state/histdatacom/sidecar`
-- Windows: `%LOCALAPPDATA%\histdatacom\sidecar`, or
-  `~/AppData/Local/histdatacom/sidecar`
+- macOS: `~/Library/Application Support/histdatacom/runtime`
+- Linux: `$XDG_STATE_HOME/histdatacom/runtime`, or
+  `~/.local/state/histdatacom/runtime`
+- Windows: `%LOCALAPPDATA%\histdatacom\runtime`, or
+  `~/AppData/Local/histdatacom/runtime`
 
-Override the base directory with `HISTDATACOM_SIDECAR_HOME` or
+Override the base directory with `HISTDATACOM_RUNTIME_HOME` or
 `--runtime-home`.
 
 Each workspace gets a deterministic directory:
@@ -198,25 +195,25 @@ Each workspace gets a deterministic directory:
 
 The workspace defaults to the launch directory. Automation, GUI launchers, and
 service managers should pass `--workspace` or set
-`HISTDATACOM_SIDECAR_WORKSPACE` so the sidecar is not accidentally scoped to a
+`HISTDATACOM_RUNTIME_WORKSPACE` so the runtime is not accidentally scoped to a
 different current working directory.
 
 Workspace runtime contents:
 
 | Path | Purpose |
 | --- | --- |
-| `state/sidecar.pid.json` | Persisted component PIDs, commands, ports, worker fleet config, and log paths |
-| `state/sidecar.lock` | Transient supervisor lock while start/stop mutates state |
+| `state/runtime.pid.json` | Persisted component PIDs, commands, ports, worker fleet config, and log paths |
+| `state/runtime.lock` | Transient supervisor lock while start/stop mutates state |
 | `logs/temporal-server.log` | Temporal server stdout/stderr |
 | `logs/temporal-worker-<lane>.log` | Worker lane stdout/stderr |
 | `sqlite/temporal.db` | Temporal developer-server SQLite persistence |
 | `manifests/runtime-policy.json` | Resolved runtime path, port, and workspace policy |
-| `manifests/.histdatacom/manifest-status.sqlite3` | Durable sidecar job snapshots, status events, and artifact references |
+| `manifests/.histdatacom/manifest-status.sqlite3` | Durable runtime job snapshots, status events, and artifact references |
 
 ## Ports
 
-The sidecar binds to `127.0.0.1` by default. Override with
-`HISTDATACOM_SIDECAR_IP` only when a local operator intentionally needs a
+The runtime binds to `127.0.0.1` by default. Override with
+`HISTDATACOM_RUNTIME_IP` only when a local operator intentionally needs a
 different bind address.
 
 The default gRPC port is selected deterministically from the workspace hash in
@@ -226,46 +223,45 @@ deterministic window and records collisions in the runtime policy.
 
 Explicit port overrides:
 
-- `HISTDATACOM_SIDECAR_PORT`
-- `HISTDATACOM_SIDECAR_UI_PORT`
+- `HISTDATACOM_RUNTIME_PORT`
+- `HISTDATACOM_RUNTIME_UI_PORT`
 
 Explicit port collisions fail with a clear error instead of silently selecting
 a different port.
 
 ## Lifecycle Commands
 
-Both spellings are supported where installed: the stable console script is
-`histdatacom-sidecar`, and the top-level command routes `histdatacom sidecar`.
+The maintainer lifecycle surface is exposed through `histdatacom runtime`.
 
 Check diagnostics:
 
 ```sh
-histdatacom-sidecar doctor --json
+histdatacom runtime doctor --json
 ```
 
 Check status:
 
 ```sh
-histdatacom-sidecar status --json
+histdatacom runtime status --json
 ```
 
 Start through the runtime resolver:
 
 ```sh
-histdatacom-sidecar start
+histdatacom runtime start
 ```
 
 Start with an explicit Temporal executable override:
 
 ```sh
-histdatacom-sidecar start --executable /path/to/temporal
+histdatacom runtime start --executable /path/to/temporal
 ```
 
 Stop or restart:
 
 ```sh
-histdatacom-sidecar stop
-histdatacom-sidecar restart --executable /path/to/temporal
+histdatacom runtime stop
+histdatacom runtime restart --executable /path/to/temporal
 ```
 
 Lifecycle `start` and `restart` start the Temporal server, wait until the
@@ -273,7 +269,7 @@ frontend port accepts connections, and then launch the worker lane fleet.
 Worker lane settings can be passed to start/restart:
 
 ```sh
-histdatacom-sidecar start \
+histdatacom runtime start \
   --executable /path/to/temporal \
   --namespace default \
   --task-queue-prefix histdatacom \
@@ -290,23 +286,23 @@ Scope every lifecycle command to a stable workspace when running from cron,
 launchd, systemd, scheduled tasks, or a future GUI shell:
 
 ```sh
-histdatacom-sidecar --workspace /path/to/project status --json
+histdatacom runtime --workspace /path/to/project status --json
 ```
 
 ## Maintenance And Retention
 
-Long-running PyPI installs and future GUI bundles should run sidecar maintenance
+Long-running PyPI installs and future GUI bundles should run runtime maintenance
 periodically for the same workspace they use to start jobs:
 
 ```sh
-histdatacom-sidecar --workspace /path/to/project maintenance --json
+histdatacom runtime --workspace /path/to/project maintenance --json
 ```
 
 `cleanup` is accepted as an alias for `maintenance`. The JSON payload is stable
 for GUI use and reports log actions, status-store row counts, Temporal SQLite
 size, warnings, and the data-directory policy. The safe default refuses to
-mutate logs or SQLite-backed status rows while the sidecar is running; stop the
-sidecar first, or pass `--allow-running` only when an operator intentionally
+mutate logs or SQLite-backed status rows while the runtime is running; stop the
+runtime first, or pass `--allow-running` only when an operator intentionally
 accepts active file-handle risk.
 
 Default retention policy:
@@ -325,7 +321,7 @@ Default retention policy:
 Each limit can be overridden on the maintenance command:
 
 ```sh
-histdatacom-sidecar maintenance \
+histdatacom runtime maintenance \
   --max-log-bytes 10485760 \
   --max-rotated-logs 5 \
   --max-job-snapshots 500 \
@@ -336,60 +332,54 @@ histdatacom-sidecar maintenance \
   --json
 ```
 
-Maintenance is workspace-scoped and only mutates sidecar runtime state:
+Maintenance is workspace-scoped and only mutates orchestration runtime state:
 
 - log files under `logs/`
-- durable sidecar manifest/status rows under
+- durable runtime manifest/status rows under
   `manifests/.histdatacom/manifest-status.sqlite3`
 
 It does not remove downloaded HistData ZIP files, extracted CSV/XLSX files,
 cache IPC files, merged API-return artifacts, or files referenced by artifact
 rows. Temporal SQLite history is measured and preserved by default. If it grows
 past the warning threshold, preserve `logs/` and `sqlite/temporal.db` for
-diagnosis, stop the sidecar, and reset the workspace runtime directory only as
+diagnosis, stop the runtime, and reset the workspace runtime directory only as
 an explicit recovery action.
 
 ### Persistence Schema Handling
 
-The sidecar manifest/status SQLite store tracks its schema with
+The runtime manifest/status SQLite store tracks its schema with
 `PRAGMA user_version`. Opening an unversioned v1 store marks it as the current
 schema in place; opening a store with a newer unsupported schema fails clearly
 without pruning rows. `maintenance --json` reports `status_store.schema_state`,
 `status_store.schema_version`, and `status_store.expected_schema_version`.
 
-The sidecar PID/state JSON also carries a schema version. Missing v1-era
-`schema_version` values are treated as legacy state for compatibility, while
-newer unsupported versions make `status --json` report stale state and
-`doctor --json` report `persistence.sidecar_state.schema_state` as
+The runtime PID/state JSON also carries a schema version. Missing
+`schema_version` values are treated as invalid state, while newer unsupported
+versions make `status --json` report stale state and `doctor --json` report
+`persistence.runtime_state.schema_state` as
 `"unsupported"`. Operators should upgrade HistData.com Tools before reusing a
-newer state file, or stop the sidecar and move the affected workspace runtime
+newer state file, or stop the runtime and move the affected workspace runtime
 directory aside after preserving logs and SQLite files for diagnosis.
 
-## Sidecar Job Submission
+## Runtime Job Submission
 
-Submit through the default sidecar runtime and start it if no healthy server is
+Submit through the default orchestration runtime and start it if no healthy server is
 already running:
 
 ```sh
 histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
-Pass `--sidecar` when existing automation still includes the old explicit flag:
+Require an already-running runtime instead of autostarting one:
 
 ```sh
-histdatacom --sidecar --sidecar-start -p eurusd -f ascii -t 1-minute-bar-quotes -s now
-```
-
-Require an already-running sidecar instead of autostarting one:
-
-```sh
-histdatacom --no-sidecar-start -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+histdatacom --no-orchestration-start -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
 Submit without waiting for the workflow result:
 
 ```sh
-histdatacom --sidecar --sidecar-start --sidecar-submit-only -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+histdatacom --submit-only -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
 Orchestrated API calls use the same public options and runtime defaults:
@@ -418,44 +408,44 @@ return the requested `polars`, `pandas`, or `arrow` object by materializing
 completed cache artifacts on disk. When `orchestration_wait_result` is `False`,
 the call returns the orchestration job payload instead.
 
-Waited sidecar repository requests preserve the historical output surface. API
+Waited runtime repository requests preserve the historical output surface. API
 calls using `available_remote_data` or `update_remote_data` return
 the available-data dictionary, while CLI calls using `-A` or `-U` render the
 repository table and use the same repository failure exit behavior. Submit-only
-repository requests still return sidecar job metadata.
+repository requests still return runtime job metadata.
 
 ## Job Control Commands
 
-The sidecar control surface is intentionally JSON-friendly for CLI automation
+The runtime control surface is intentionally JSON-friendly for CLI automation
 and future GUI polling.
 
 Submit a serialized `RunRequest`:
 
 ```sh
-histdatacom-sidecar jobs submit --start --submit-only --request-json request.json --json
+histdatacom jobs submit --start --submit-only --request-json request.json --json
 ```
 
 Inspect and control jobs:
 
 ```sh
-histdatacom-sidecar jobs list --json
-histdatacom-sidecar jobs inspect histdatacom-<request-id> --json
-histdatacom-sidecar jobs progress histdatacom-<request-id> --json
-histdatacom-sidecar jobs logs histdatacom-<request-id> --json
-histdatacom-sidecar jobs artifacts histdatacom-<request-id> --json
-histdatacom-sidecar jobs result histdatacom-<request-id> --json
-histdatacom-sidecar jobs cancel histdatacom-<request-id> --reason "operator stop"
-histdatacom-sidecar jobs retry histdatacom-<request-id> --reason "transient failure"
-histdatacom-sidecar jobs resume histdatacom-<request-id> --reason "continue run"
+histdatacom jobs list --json
+histdatacom jobs inspect histdatacom-<request-id> --json
+histdatacom jobs progress histdatacom-<request-id> --json
+histdatacom jobs logs histdatacom-<request-id> --json
+histdatacom jobs artifacts histdatacom-<request-id> --json
+histdatacom jobs result histdatacom-<request-id> --json
+histdatacom jobs cancel histdatacom-<request-id> --reason "operator stop"
+histdatacom jobs retry histdatacom-<request-id> --reason "transient failure"
+histdatacom jobs resume histdatacom-<request-id> --reason "continue run"
 ```
 
 The workflow ID format is `histdatacom-<request_id>`.
 
-Job snapshots are persisted under the workspace-scoped sidecar runtime
+Job snapshots are persisted under the workspace-scoped orchestration runtime
 manifests directory, not in HistData download/cache directories:
 
 ```txt
-<sidecar-runtime>/<workspace-slug>/manifests/.histdatacom/manifest-status.sqlite3
+<runtime-home>/<workspace-slug>/manifests/.histdatacom/manifest-status.sqlite3
 ```
 
 Submit, inspect, progress, logs, artifacts, result, cancel, retry, and resume
@@ -465,12 +455,12 @@ control state, and workflow result metadata; rows, dataframe contents, archive
 bytes, and cache data remain on disk outside workflow history and outside the
 job snapshot payload.
 
-Run submissions also pass a compact `sidecar_status_store` reference through
+Run submissions also pass a compact `runtime_status_store` reference through
 request metadata. Activities use that reference to persist work-item state,
 stage results, progress events, log entries, and artifact references after each
 work item or bounded aggregate activity. This means `jobs progress`, `jobs
 logs`, `jobs artifacts`, and `jobs result --offline` can still show the latest
-observed state after a client crash or sidecar shutdown, even when no later
+observed state after a client crash or runtime shutdown, even when no later
 client-side inspect call ran. The write volume is proportional to work items and
 activity progress events: one work-item upsert, one stage-result insert, and one
 bounded job-snapshot merge per observed item or aggregate stage. Do not store
@@ -481,12 +471,12 @@ Use offline mode to inspect recent persisted jobs without connecting to
 Temporal:
 
 ```sh
-histdatacom-sidecar jobs --offline list --json
-histdatacom-sidecar jobs --offline inspect histdatacom-<request-id> --json
-histdatacom-sidecar jobs --offline progress histdatacom-<request-id> --json
-histdatacom-sidecar jobs --offline logs histdatacom-<request-id> --json
-histdatacom-sidecar jobs --offline artifacts histdatacom-<request-id> --json
-histdatacom-sidecar jobs --offline result histdatacom-<request-id> --json
+histdatacom jobs --offline list --json
+histdatacom jobs --offline inspect histdatacom-<request-id> --json
+histdatacom jobs --offline progress histdatacom-<request-id> --json
+histdatacom jobs --offline logs histdatacom-<request-id> --json
+histdatacom jobs --offline artifacts histdatacom-<request-id> --json
+histdatacom jobs --offline result histdatacom-<request-id> --json
 ```
 
 When Temporal is unavailable, read-only job commands fall back to this local
@@ -555,28 +545,28 @@ The queue name pattern is:
 histdatacom.<workspace-id>.<lane>
 ```
 
-Client commands resolve routing from the running sidecar state before submitting
+Client commands resolve routing from the running runtime state before submitting
 or controlling jobs. If `start` or `restart` used a non-default namespace, task
 queue prefix, or dynamically reallocated frontend port, ordinary
-`histdatacom` runs and `histdatacom-sidecar jobs ...` commands use the
+`histdatacom` runs and `histdatacom jobs ...` commands use the
 persisted runtime and worker-fleet metadata. If that running state is stale or
 missing worker-fleet metadata, job submission fails before enqueueing work; stop
-and restart the sidecar to regenerate the state file.
+and restart the runtime to regenerate the state file.
 
 Inspect worker configuration:
 
 ```sh
-histdatacom-sidecar-worker config --lane network --json
+python -m histdatacom.orchestration.worker config --lane network --json
 ```
 
 The lifecycle supervisor normally starts every worker lane. Run an individual
 worker lane manually only for debugging or targeted recovery:
 
 ```sh
-histdatacom-sidecar-worker run --lane orchestration
-histdatacom-sidecar-worker run --lane network
-histdatacom-sidecar-worker run --lane cpu-file
-histdatacom-sidecar-worker run --lane influx
+python -m histdatacom.orchestration.worker run --lane orchestration
+python -m histdatacom.orchestration.worker run --lane network
+python -m histdatacom.orchestration.worker run --lane cpu-file
+python -m histdatacom.orchestration.worker run --lane influx
 ```
 
 Concurrency is derived from the existing `--cpu-utilization` policy:
@@ -613,7 +603,7 @@ partition IDs, status events, and artifact references. Rows, dataframes, ZIP
 bytes, and CSV contents stay on disk.
 
 See `docs/temporal-workflow-topology.md` for the contributor-facing topology
-contract and `docs/temporal-sidecar-performance.md` for lane sizing and
+contract and `docs/temporal-orchestration-performance.md` for lane sizing and
 benchmark policy.
 
 ## Cancellation And Resume
@@ -650,42 +640,42 @@ Temporal executable unavailable:
   `--executable /path/to/temporal`, or install an offline/private bundled
   artifact for development and operator tests.
 
-Sidecar unavailable:
+Runtime unavailable:
 
-- Symptom: CLI exits nonzero or API raises `SidecarUnavailableError`.
-- Fix: run `histdatacom-sidecar status --json` and `histdatacom-sidecar doctor
-  --json`, start the sidecar manually with an explicit executable when using a
+- Symptom: CLI exits nonzero or API raises `OrchestrationUnavailableError`.
+- Fix: run `histdatacom runtime status --json` and `histdatacom runtime doctor
+  --json`, start the runtime manually with an explicit executable when using a
   metadata-only artifact, and inspect server/worker logs from the doctor output.
 
 Port collisions:
 
 - Symptom: start fails with a port allocation error.
-- Fix: inspect `histdatacom-sidecar doctor --json`, set
-  `HISTDATACOM_SIDECAR_PORT` and optionally
-  `HISTDATACOM_SIDECAR_UI_PORT`, or choose a different workspace.
+- Fix: inspect `histdatacom runtime doctor --json`, set
+  `HISTDATACOM_RUNTIME_PORT` and optionally
+  `HISTDATACOM_RUNTIME_UI_PORT`, or choose a different workspace.
 
 Stale PID state:
 
 - Symptom: status is `stale`, or the PID file references dead processes.
-- Fix: `histdatacom-sidecar stop` removes stale PID and lock state. If a lock
+- Fix: `histdatacom runtime stop` removes stale PID and lock state. If a lock
   is held by a live process, do not delete it manually; stop the owner first.
 
 Corrupted SQLite or runtime state:
 
 - Symptom: the server repeatedly fails to start for the same workspace after a
   crash or interrupted disk write.
-- Fix: stop the sidecar, preserve `logs/` and `sqlite/temporal.db` for
+- Fix: stop the runtime, preserve `logs/` and `sqlite/temporal.db` for
   diagnosis, then move aside or delete the workspace runtime directory. HistData
   ZIP, CSV, and cache artifacts are outside this runtime directory.
 
 Unsupported persistence schema:
 
-- Symptom: `status --json` reports stale state with an unsupported sidecar
+- Symptom: `status --json` reports stale state with an unsupported runtime
   schema version, `doctor --json` reports
-  `persistence.sidecar_state.schema_state: "unsupported"`, or
+  `persistence.runtime_state.schema_state: "unsupported"`, or
   `maintenance --json` reports `status_store.schema_state: "unsupported"`.
 - Fix: upgrade HistData.com Tools to a version that supports the newer schema.
-  If the state came from a failed downgrade, stop the sidecar and move the
+  If the state came from a failed downgrade, stop the runtime and move the
   workspace runtime directory aside only after preserving `logs/`,
   `sqlite/temporal.db`, and `manifests/.histdatacom/manifest-status.sqlite3`
   for diagnosis.
@@ -693,8 +683,8 @@ Unsupported persistence schema:
 Worker crashes:
 
 - Symptom: jobs remain queued or lane progress stops.
-- Fix: inspect `histdatacom-sidecar doctor --json` and the affected
-  `logs/temporal-worker-<lane>.log`, then run `histdatacom-sidecar restart`
+- Fix: inspect `histdatacom runtime doctor --json` and the affected
+  `logs/temporal-worker-<lane>.log`, then run `histdatacom runtime restart`
   with the same workspace and runtime home.
 
 InfluxDB unavailable:
@@ -702,7 +692,7 @@ InfluxDB unavailable:
 - Symptom: import activities fail or retry because no live Influx target is
   configured.
 - Fix: install `histdatacom[influx]`, provide `influxdb.yaml`, or skip
-  `-I/--import_to_influxdb`. The sidecar does not provide an InfluxDB service.
+  `-I/--import_to_influxdb`. The runtime does not provide an InfluxDB service.
   Local contract tests replace only the final writer and do not prove live
   credentials, bucket permissions, network latency, or server-side write
   rejection behavior. When Docker is available, run
@@ -904,16 +894,16 @@ metadata-only release smoke should exercise the verified resolver with an
 isolated cache. For bundled offline/private wheels, release smoke should also
 require `doctor.platform.executable_bundled == true`, run the packaged
 executable version probe, start the runtime without `--executable`, and run
-`--hermetic-sidecar-smoke` plus `--default-routing-sidecar-smoke`. Use
-`--live-sidecar-smoke` separately when the
+`--hermetic-runtime-smoke` plus `--default-routing-runtime-smoke`. Use
+`--live-runtime-smoke` separately when the
 operator intentionally wants to include external HistData.com availability and
 URL-validation coverage.
 
 ## GUI Integration Notes
 
-The future GUI should treat the sidecar as a local workspace service:
+The future GUI should treat the orchestration runtime as a local workspace service:
 
-- choose and persist a workspace path before starting the sidecar
+- choose and persist a workspace path before starting the runtime
 - use JSON lifecycle commands for status and diagnostics
 - submit requests through the same `RunRequest` contract as the CLI/API
 - poll `jobs progress`, `jobs logs`, and `jobs artifacts`

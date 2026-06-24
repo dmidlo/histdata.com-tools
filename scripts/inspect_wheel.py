@@ -1,4 +1,4 @@
-"""Inspect built histdatacom wheels for package metadata and sidecar assets."""
+"""Inspect built histdatacom wheels for package metadata and runtime assets."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZipFile
 
-EXPECTED_BASE_SIDECAR_ASSETS = {
+EXPECTED_BASE_RUNTIME_ASSETS = {
     "histdatacom/sidecar/assets/README.md",
     "histdatacom/sidecar/assets/manifest.json",
     "histdatacom/sidecar/assets/runtime-defaults.json",
@@ -19,7 +19,7 @@ EXPECTED_BASE_SIDECAR_ASSETS = {
     "histdatacom/sidecar/assets/third-party/temporal-cli/LICENSE",
     "histdatacom/sidecar/assets/third-party/temporal-cli/NOTICE.md",
 }
-EXPECTED_BASE_SIDECAR_RESOURCE_FILES = {
+EXPECTED_BASE_RUNTIME_RESOURCE_FILES = {
     "README.md",
     "manifest.json",
     "runtime-defaults.json",
@@ -30,7 +30,7 @@ EXPECTED_BASE_SIDECAR_RESOURCE_FILES = {
 TEMPORAL_CLI_PROVENANCE_RESOURCE = "temporal-cli-provenance.json"
 TEMPORAL_CLI_LICENSE_RESOURCE = "third-party/temporal-cli/LICENSE"
 TEMPORAL_CLI_NOTICE_RESOURCE = "third-party/temporal-cli/NOTICE.md"
-EXPECTED_SIDECAR_PLATFORMS = {
+EXPECTED_RUNTIME_PLATFORMS = {
     "linux-arm64",
     "linux-x86_64",
     "macos-arm64",
@@ -39,8 +39,6 @@ EXPECTED_SIDECAR_PLATFORMS = {
 }
 EXPECTED_CONSOLE_SCRIPTS = {
     "histdatacom = histdatacom.histdata_com:main",
-    "histdatacom-sidecar = histdatacom.orchestration.cli:main",
-    "histdatacom-sidecar-worker = histdatacom.orchestration.worker:main",
 }
 EXPECTED_METADATA_CLASSIFIERS = {
     "Operating System :: MacOS",
@@ -54,7 +52,7 @@ def _current_platform_key(
     system: str | None = None,
     machine: str | None = None,
 ) -> str:
-    """Return the sidecar manifest platform key for this machine."""
+    """Return the runtime manifest platform key for this machine."""
     normalized_system = (system or platform.system()).strip().lower()
     normalized_machine = (machine or platform.machine()).strip().lower()
     system_aliases = {
@@ -155,12 +153,12 @@ def _validate_third_party_notice_manifest(manifest: dict[str, Any]) -> None:
     notices = _manifest_mapping(
         manifest,
         "third_party_notices",
-        context="sidecar manifest",
+        context="runtime manifest",
     )
     temporal_cli = _manifest_mapping(
         notices,
         "temporal_cli",
-        context="sidecar manifest third_party_notices",
+        context="runtime manifest third_party_notices",
     )
     if temporal_cli.get("license") != "MIT":
         raise SystemExit("Temporal CLI third-party notice must declare MIT")
@@ -189,13 +187,13 @@ def _validate_temporal_cli_provenance(
     """Validate packaged provenance for one bundled platform executable."""
     if provenance_resource != TEMPORAL_CLI_PROVENANCE_RESOURCE:
         raise SystemExit(
-            f"sidecar platform {platform_key} has unexpected provenance "
+            f"runtime platform {platform_key} has unexpected provenance "
             f"resource: {provenance_resource}"
         )
     provenance_path = f"histdatacom/sidecar/assets/{provenance_resource}"
     if provenance_path not in names:
         raise SystemExit(
-            f"sidecar provenance missing for {platform_key}: {provenance_path}"
+            f"runtime provenance missing for {platform_key}: {provenance_path}"
         )
     for required_resource in (
         TEMPORAL_CLI_LICENSE_RESOURCE,
@@ -204,12 +202,12 @@ def _validate_temporal_cli_provenance(
         required_path = f"histdatacom/sidecar/assets/{required_resource}"
         if required_path not in names:
             raise SystemExit(
-                f"sidecar third-party notice resource missing: {required_path}"
+                f"runtime third-party notice resource missing: {required_path}"
             )
 
     loaded = json.loads(wheel.read(provenance_path).decode("utf-8"))
     if not isinstance(loaded, dict):
-        raise SystemExit(f"sidecar provenance must be an object: {provenance_path}")
+        raise SystemExit(f"runtime provenance must be an object: {provenance_path}")
     provenance: dict[str, Any] = loaded
     if provenance.get("schema_version") != 1:
         raise SystemExit("Temporal CLI provenance schema_version must be 1")
@@ -306,7 +304,7 @@ def inspect_wheel(
     require_bundled_platforms: set[str] | None = None,
     require_current_platform_bundled: bool = False,
 ) -> dict[str, Any]:
-    """Validate wheel metadata, entry points, and sidecar resource payloads."""
+    """Validate wheel metadata, entry points, and runtime resource payloads."""
     required_bundled_platforms = set(require_bundled_platforms or set())
     if require_current_platform_bundled:
         required_bundled_platforms.add(_current_platform_key())
@@ -324,9 +322,9 @@ def inspect_wheel(
             for name in names
             if name.endswith(".dist-info/entry_points.txt")
         )
-        missing = sorted(EXPECTED_BASE_SIDECAR_ASSETS - names)
+        missing = sorted(EXPECTED_BASE_RUNTIME_ASSETS - names)
         if missing:
-            raise SystemExit(f"wheel missing sidecar assets: {missing}")
+            raise SystemExit(f"wheel missing runtime assets: {missing}")
 
         wheel_metadata = Parser().parsestr(
             wheel.read(metadata_path).decode("utf-8")
@@ -343,20 +341,20 @@ def inspect_wheel(
         _validate_third_party_notice_manifest(manifest)
         manifest_platforms = set(dict(manifest["platforms"]))
         missing_platforms = sorted(
-            EXPECTED_SIDECAR_PLATFORMS - manifest_platforms
+            EXPECTED_RUNTIME_PLATFORMS - manifest_platforms
         )
         if missing_platforms:
             raise SystemExit(
-                "sidecar manifest is missing platform declarations: "
+                "runtime manifest is missing platform declarations: "
                 f"{missing_platforms}"
             )
         bundled_platforms: set[str] = set()
         provenance_reports: dict[str, Any] = {}
-        expected_resource_files = set(EXPECTED_BASE_SIDECAR_RESOURCE_FILES)
+        expected_resource_files = set(EXPECTED_BASE_RUNTIME_RESOURCE_FILES)
         for key, resource in dict(manifest["platforms"]).items():
             executable = resource.get("executable")
             if not executable:
-                raise SystemExit(f"sidecar platform {key} has no executable")
+                raise SystemExit(f"runtime platform {key} has no executable")
             executable_path = f"histdatacom/sidecar/assets/{executable}"
             if resource.get("bundled"):
                 bundled_platforms.add(str(key))
@@ -364,27 +362,27 @@ def inspect_wheel(
                 expected_resource_files.add(TEMPORAL_CLI_PROVENANCE_RESOURCE)
                 if resource.get("license") != TEMPORAL_CLI_LICENSE_RESOURCE:
                     raise SystemExit(
-                        f"sidecar platform {key} has wrong license resource"
+                        f"runtime platform {key} has wrong license resource"
                     )
                 if resource.get("notice") != TEMPORAL_CLI_NOTICE_RESOURCE:
                     raise SystemExit(
-                        f"sidecar platform {key} has wrong notice resource"
+                        f"runtime platform {key} has wrong notice resource"
                     )
                 provenance = resource.get("provenance")
                 if not isinstance(provenance, str) or not provenance:
                     raise SystemExit(
-                        f"sidecar platform {key} is bundled without provenance"
+                        f"runtime platform {key} is bundled without provenance"
                     )
                 if executable_path not in names:
                     raise SystemExit(
-                        f"sidecar executable missing for {key}: "
+                        f"runtime executable missing for {key}: "
                         f"{executable_path}"
                     )
                 info = wheel.getinfo(executable_path)
                 mode = (info.external_attr >> 16) & 0o777
                 if mode and mode & 0o111 == 0:
                     raise SystemExit(
-                        f"sidecar executable is not executable for {key}: "
+                        f"runtime executable is not executable for {key}: "
                         f"{executable_path}"
                     )
                 provenance_reports[str(key)] = _validate_temporal_cli_provenance(
@@ -397,26 +395,26 @@ def inspect_wheel(
                 )
             elif executable_path in names:
                 raise SystemExit(
-                    f"sidecar executable is packaged but not declared bundled "
+                    f"runtime executable is packaged but not declared bundled "
                     f"for {key}: {executable_path}"
                 )
             elif resource.get("provenance"):
                 raise SystemExit(
-                    f"sidecar platform {key} declares provenance but is not bundled"
+                    f"runtime platform {key} declares provenance but is not bundled"
                 )
         provenance_asset = (
             f"histdatacom/sidecar/assets/{TEMPORAL_CLI_PROVENANCE_RESOURCE}"
         )
         if not bundled_platforms and provenance_asset in names:
             raise SystemExit(
-                "metadata-only sidecar wheel must not package bundled provenance"
+                "metadata-only runtime wheel must not package bundled provenance"
             )
         unexpected_resource_files = sorted(
             expected_resource_files ^ set(manifest.get("resource_files", []))
         )
         if unexpected_resource_files:
             raise SystemExit(
-                "sidecar manifest resource_files drifted from packaged "
+                "runtime manifest resource_files drifted from packaged "
                 f"assets: {unexpected_resource_files}"
             )
 
@@ -464,28 +462,28 @@ def inspect_wheel(
         extra="all",
     ):
         raise SystemExit("temporalio dependency missing from all extra")
-    if manifest["sidecar"] != "temporal":
-        raise SystemExit("sidecar manifest does not describe Temporal")
+    if manifest["runtime"] != "temporal":
+        raise SystemExit("runtime manifest does not describe Temporal")
     if manifest["distribution_strategy"] != (
         "metadata-wheel-with-verified-runtime-provisioning"
     ):
-        raise SystemExit("unexpected sidecar distribution strategy")
+        raise SystemExit("unexpected runtime distribution strategy")
     embedded_binary = bool(manifest["embedded_binary"])
     if embedded_binary != bool(bundled_platforms):
         raise SystemExit(
-            "sidecar manifest embedded_binary does not match bundled "
+            "runtime manifest embedded_binary does not match bundled "
             f"platforms: {sorted(bundled_platforms)}"
         )
     missing_required = sorted(required_bundled_platforms - bundled_platforms)
     if missing_required:
         raise SystemExit(
-            "wheel is missing required bundled sidecar platforms: "
+            "wheel is missing required bundled runtime platforms: "
             f"{missing_required}"
         )
     wheel_tags = list(wheel_file_metadata.get_all("Tag", []))
     if embedded_binary and all(tag.endswith("-any") for tag in wheel_tags):
         raise SystemExit(
-            "bundled sidecar executable wheels must use platform wheel tags"
+            "bundled runtime executable wheels must use platform wheel tags"
         )
     return {
         "wheel": wheel_path.name,
@@ -493,8 +491,8 @@ def inspect_wheel(
         "name": wheel_metadata["Name"],
         "requires_python": wheel_metadata["Requires-Python"],
         "provides_extra": sorted(provides_extra),
-        "sidecar": {
-            "assets": sorted(EXPECTED_BASE_SIDECAR_ASSETS),
+        "runtime": {
+            "assets": sorted(EXPECTED_BASE_RUNTIME_ASSETS),
             "bundled_platforms": sorted(bundled_platforms),
             "distribution_strategy": manifest["distribution_strategy"],
             "embedded_binary": manifest["embedded_binary"],

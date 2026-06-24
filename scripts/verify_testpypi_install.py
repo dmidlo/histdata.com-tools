@@ -18,10 +18,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TESTPYPI_INDEX = "https://test.pypi.org/simple/"
 DEFAULT_DEPENDENCY_INDEX = "https://pypi.org/simple/"
 EXPECTED_HELP_TOKENS = (
-    "--sidecar",
-    "--sidecar-start",
-    "--no-sidecar-start",
-    "--sidecar-submit-only",
+    "--orchestration-start",
+    "--no-orchestration-start",
+    "--submit-only",
     "--quality",
     "--repo-quality",
     "--repo-quality-columns",
@@ -33,7 +32,7 @@ EXPECTED_HELP_TOKENS = (
     "--quality-max-errors",
     "--quality-max-warnings",
 )
-EXPECTED_SIDECAR_COMMANDS = (
+EXPECTED_RUNTIME_COMMANDS = (
     "status",
     "doctor",
     "start",
@@ -77,8 +76,6 @@ entry_points = {
 }
 expected_scripts = {
     "histdatacom": "histdatacom.histdata_com:main",
-    "histdatacom-sidecar": "histdatacom.orchestration.cli:main",
-    "histdatacom-sidecar-worker": "histdatacom.orchestration.worker:main",
 }
 for name, target in expected_scripts.items():
     if entry_points.get(name) != target:
@@ -106,7 +103,7 @@ expected_assets = (
 )
 for asset in expected_assets:
     if not runtime_asset(asset).is_file():
-        raise SystemExit(f"sidecar asset is not packaged: {asset}")
+        raise SystemExit(f"runtime asset is not packaged: {asset}")
 
 manifest = load_runtime_manifest()
 runtime_index = load_temporal_runtime_index(manifest)
@@ -142,7 +139,7 @@ print(json.dumps({
     "version": installed_version,
     "requires_dist": sorted(requires_dist),
     "console_scripts": sorted(expected_scripts),
-    "sidecar": {
+    "runtime": {
         "platform": platform_key,
         "distribution_strategy": manifest.distribution_strategy,
         "embedded_binary": manifest.embedded_binary,
@@ -249,8 +246,8 @@ def _release_verification_environment(
     for key in (
         "HISTDATACOM_TEMPORAL_EXECUTABLE",
         "HISTDATACOM_TEMPORAL_OFFLINE",
-        "HISTDATACOM_SIDECAR_HOME",
-        "HISTDATACOM_SIDECAR_WORKSPACE",
+        "HISTDATACOM_RUNTIME_HOME",
+        "HISTDATACOM_RUNTIME_WORKSPACE",
     ):
         env.pop(key, None)
     env["HISTDATACOM_TEMPORAL_CACHE_DIR"] = str(
@@ -367,8 +364,7 @@ def _cli_parity_probe(
 ) -> dict[str, Any]:
     """Validate current installed CLI surface and entry-point behavior."""
     histdatacom = _script_path(venv_dir, "histdatacom")
-    sidecar = _script_path(venv_dir, "histdatacom-sidecar")
-    worker = _script_path(venv_dir, "histdatacom-sidecar-worker")
+    venv_python = _venv_python(venv_dir)
 
     version_output = _run([str(histdatacom), "--version"], timeout=timeout)
     actual_version = version_output.stdout.strip()
@@ -388,43 +384,48 @@ def _cli_parity_probe(
             + ", ".join(missing_tokens)
         )
 
-    sidecar_help = _run([str(sidecar), "--help"], timeout=timeout).stdout
+    runtime_help = _run(
+        [str(histdatacom), "runtime", "--help"], timeout=timeout
+    ).stdout
     missing_commands = [
-        command for command in EXPECTED_SIDECAR_COMMANDS if command not in sidecar_help
+        command for command in EXPECTED_RUNTIME_COMMANDS if command not in runtime_help
     ]
     if missing_commands:
         raise SystemExit(
-            "installed sidecar CLI help is missing commands: "
+            "installed runtime CLI help is missing commands: "
             + ", ".join(missing_commands)
         )
-    _run([str(worker), "--help"], timeout=timeout)
+    _run(
+        [str(venv_python), "-m", "histdatacom.orchestration.worker", "--help"],
+        timeout=timeout,
+    )
 
     return {
         "version": actual_version,
         "required_help_tokens": sorted(EXPECTED_HELP_TOKENS),
-        "sidecar_commands": sorted(EXPECTED_SIDECAR_COMMANDS),
+        "runtime_commands": sorted(EXPECTED_RUNTIME_COMMANDS),
     }
 
 
-def _smoke_sidecar_install_probe(
+def _smoke_runtime_install_probe(
     *,
     venv_python: Path,
     venv_dir: Path,
     root: Path,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
-    """Run the installed-package sidecar smoke suite from the fresh venv."""
+    """Run the installed-package runtime smoke suite from the fresh venv."""
     command = [
         str(venv_python),
-        str(PROJECT_ROOT / "scripts" / "smoke_sidecar_install.py"),
+        str(PROJECT_ROOT / "scripts" / "smoke_runtime_install.py"),
         "--state-dir",
-        str(root / "sidecar-state"),
+        str(root / "runtime-state"),
         "--live-workspace",
-        str(root / "sidecar-workspace"),
+        str(root / "runtime-workspace"),
         "--live-runtime-home",
-        str(root / "sidecar-runtime"),
+        str(root / "runtime-home"),
         "--live-data-dir",
-        str(root / "sidecar-data"),
+        str(root / "runtime-data"),
         "--live-startup-timeout",
         str(args.live_startup_timeout),
         "--live-completion-timeout",
@@ -438,16 +439,16 @@ def _smoke_sidecar_install_probe(
         command.append("--require-external-runtime-provisioning")
     if args.check_executable_version:
         command.append("--check-executable-version")
-    if args.start_sidecar:
-        command.append("--start-sidecar")
-    if args.hermetic_sidecar_smoke:
-        command.append("--hermetic-sidecar-smoke")
-    if args.default_routing_sidecar_smoke:
-        command.append("--default-routing-sidecar-smoke")
-    if args.quality_sidecar_smoke:
-        command.append("--quality-sidecar-smoke")
-    if args.live_sidecar_smoke:
-        command.append("--live-sidecar-smoke")
+    if args.start_runtime:
+        command.append("--start-runtime")
+    if args.hermetic_runtime_smoke:
+        command.append("--hermetic-runtime-smoke")
+    if args.default_routing_runtime_smoke:
+        command.append("--default-routing-runtime-smoke")
+    if args.quality_runtime_smoke:
+        command.append("--quality-runtime-smoke")
+    if args.live_runtime_smoke:
+        command.append("--live-runtime-smoke")
     if args.temporal_executable:
         command.extend(["--temporal-executable", str(args.temporal_executable)])
     env = _release_verification_environment(venv_dir=venv_dir, root=root)
@@ -467,9 +468,9 @@ def _download_smoke_probe(
     """Run a small live download/extract smoke through installed CLI defaults."""
     data_dir = root / "download-smoke-data"
     env = _release_verification_environment(venv_dir=venv_dir, root=root)
-    env["HISTDATACOM_SIDECAR_HOME"] = str(root / "download-smoke-sidecar-runtime")
-    env["HISTDATACOM_SIDECAR_WORKSPACE"] = str(
-        root / "download-smoke-sidecar-workspace"
+    env["HISTDATACOM_RUNTIME_HOME"] = str(root / "download-smoke-runtime")
+    env["HISTDATACOM_RUNTIME_WORKSPACE"] = str(
+        root / "download-smoke-runtime-workspace"
     )
     command = [
         str(_script_path(venv_dir, "histdatacom")),
@@ -492,15 +493,25 @@ def _download_smoke_probe(
     except BaseException:
         try:
             _run_json(
-                [str(_script_path(venv_dir, "histdatacom-sidecar")), "--json", "stop"],
+                [
+                    str(_script_path(venv_dir, "histdatacom")),
+                    "runtime",
+                    "--json",
+                    "stop",
+                ],
                 env=env,
                 timeout=90.0,
             )
         except SystemExit:
             pass
         raise
-    sidecar_stop = _run_json(
-        [str(_script_path(venv_dir, "histdatacom-sidecar")), "--json", "stop"],
+    runtime_stop = _run_json(
+        [
+            str(_script_path(venv_dir, "histdatacom")),
+            "runtime",
+            "--json",
+            "stop",
+        ],
         env=env,
         timeout=90.0,
     )
@@ -511,7 +522,7 @@ def _download_smoke_probe(
         "returncode": completed.returncode,
         "data_directory": str(data_dir),
         "files": files,
-        "sidecar_stop": sidecar_stop,
+        "runtime_stop": runtime_stop,
     }
 
 
@@ -574,7 +585,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
                 version=version,
                 timeout=args.timeout,
             ),
-            "installed_smoke": _smoke_sidecar_install_probe(
+            "installed_smoke": _smoke_runtime_install_probe(
                 venv_python=venv_python,
                 venv_dir=venv_dir,
                 root=root,
@@ -660,13 +671,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--live-completion-timeout",
         type=float,
         default=180.0,
-        help="seconds to wait for the live sidecar smoke job to complete",
+        help="seconds to wait for the live runtime smoke job to complete",
     )
     parser.add_argument(
         "--live-stop-timeout",
         type=float,
         default=90.0,
-        help="seconds to wait for live sidecar processes to stop",
+        help="seconds to wait for live runtime processes to stop",
     )
     parser.add_argument(
         "--require-bundled-current-platform",
@@ -695,29 +706,29 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--start-sidecar",
+        "--start-runtime",
         action="store_true",
-        help="start and stop the installed sidecar through its CLI",
+        help="start and stop the installed runtime through its CLI",
     )
     parser.add_argument(
-        "--hermetic-sidecar-smoke",
+        "--hermetic-runtime-smoke",
         action="store_true",
-        help="run deterministic installed sidecar workflow smoke",
+        help="run deterministic installed runtime workflow smoke",
     )
     parser.add_argument(
-        "--default-routing-sidecar-smoke",
+        "--default-routing-runtime-smoke",
         action="store_true",
-        help="run deterministic default client-routing sidecar smoke",
+        help="run deterministic default client-routing runtime smoke",
     )
     parser.add_argument(
-        "--quality-sidecar-smoke",
+        "--quality-runtime-smoke",
         action="store_true",
-        help="run clean and dirty quality checks through the installed sidecar",
+        help="run clean and dirty quality checks through the installed runtime",
     )
     parser.add_argument(
-        "--live-sidecar-smoke",
+        "--live-runtime-smoke",
         action="store_true",
-        help="run operator-gated live HistData sidecar smoke",
+        help="run operator-gated live HistData runtime smoke",
     )
     parser.add_argument(
         "--download-smoke",

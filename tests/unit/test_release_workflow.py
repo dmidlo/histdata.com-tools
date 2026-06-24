@@ -67,7 +67,7 @@ def _step_run(job: dict[str, object], step_name: str) -> str:
 
 
 def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
-    """Release CI should build and smoke every bundled sidecar platform."""
+    """Release CI should build and smoke every bundled runtime platform."""
     workflow = _release_workflow()
     fetch_script = _load_fetch_script()
     jobs = workflow["jobs"]
@@ -113,17 +113,17 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
     assert smoke_runners["macos-arm64"] == "macos-15"
     smoke_command = _step_run(
         smoke_platform,
-        "Smoke bundled sidecar install hermetically",
+        "Smoke bundled runtime install hermetically",
     )
     assert "--require-bundled-current-platform" in smoke_command
     assert "--check-executable-version" in smoke_command
-    assert "--start-sidecar" in smoke_command
-    assert "--hermetic-sidecar-smoke" in smoke_command
-    assert "--default-routing-sidecar-smoke" in smoke_command
-    assert "--live-sidecar-smoke" not in smoke_command
-    assert "--live-workspace .sidecar-live-workspace" in smoke_command
-    assert "--live-runtime-home .sidecar-live-runtime" in smoke_command
-    assert "--live-data-dir .sidecar-live-data" in smoke_command
+    assert "--start-runtime" in smoke_command
+    assert "--hermetic-runtime-smoke" in smoke_command
+    assert "--default-routing-runtime-smoke" in smoke_command
+    assert "--live-runtime-smoke" not in smoke_command
+    assert "--live-workspace .runtime-live-workspace" in smoke_command
+    assert "--live-runtime-home .runtime-live-home" in smoke_command
+    assert "--live-data-dir .runtime-live-data" in smoke_command
     assert "--live-startup-timeout 45" in smoke_command
     assert "--live-completion-timeout 240" in smoke_command
     assert "--live-stop-timeout 45" in smoke_command
@@ -150,7 +150,7 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
 
 
 def test_package_metadata_advertises_platform_wheel_support() -> None:
-    """PyPI metadata should match the sidecar platform wheel support matrix."""
+    """PyPI metadata should match the runtime platform wheel support matrix."""
     project = _pyproject_config()["project"]
     assert isinstance(project, dict)
     classifiers = set(project["classifiers"])

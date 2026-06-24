@@ -57,8 +57,8 @@ jobs:
           python -m pip install -e ".[all]"
           python -m pip install "pip-audit==2.10.1"
 
-      - name: Verify sidecar dependency audit surface
-        run: python scripts/smoke_sidecar_install.py --expect-temporal-extra --skip-cli
+      - name: Verify runtime dependency audit surface
+        run: python scripts/smoke_runtime_install.py --expect-temporal-extra --skip-cli
 
       - name: Run pip-audit
         run: python -m pip_audit --local --strict --format=json --output=pip-audit.json --progress-spinner=off

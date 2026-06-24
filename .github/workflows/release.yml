@@ -57,21 +57,21 @@ jobs:
       - name: Check package artifacts
         run: python -m twine check dist/*.whl dist/*.tar.gz
 
-      - name: Inspect fallback wheel sidecar resources
+      - name: Inspect fallback wheel runtime resources
         run: |
           mkdir -p release-reports
           python scripts/inspect_wheel.py \
-            --report release-reports/sidecar-wheel-report.json
+            --report release-reports/runtime-wheel-report.json
         shell: bash
 
-      - name: Smoke fallback wheel sidecar install
+      - name: Smoke fallback wheel runtime install
         run: |
           python -m venv .wheel-smoke
           . .wheel-smoke/bin/activate
           python -m pip install --upgrade pip
-          python scripts/smoke_sidecar_install.py \
+          python scripts/smoke_runtime_install.py \
             --wheel-dir dist \
-            --state-dir .sidecar-smoke
+            --state-dir .runtime-smoke
         shell: bash
 
       - name: Upload metadata distributions
@@ -137,7 +137,7 @@ jobs:
 
       - name: Build bundled platform wheel
         run: |
-          python scripts/sidecar_platform_wheel.py \
+          python scripts/runtime_platform_wheel.py \
             --dist-dir dist-platform \
             --platform-key "${{ matrix.platform_key }}" \
             --executable "${{ steps.temporal.outputs.executable }}" \
@@ -152,7 +152,7 @@ jobs:
           python scripts/inspect_wheel.py \
             --wheel "${wheel}" \
             --require-bundled-platform "${{ matrix.platform_key }}" \
-            --report "release-reports/sidecar-wheel-${{ matrix.platform_key }}.json"
+            --report "release-reports/runtime-wheel-${{ matrix.platform_key }}.json"
         shell: bash
 
       - name: Generate bundled wheel provenance attestation
@@ -212,19 +212,19 @@ jobs:
       - name: Upgrade installer
         run: python -m pip install --upgrade pip
 
-      - name: Smoke bundled sidecar install hermetically
+      - name: Smoke bundled runtime install hermetically
         run: >
-          python scripts/smoke_sidecar_install.py
+          python scripts/smoke_runtime_install.py
           --wheel-dir dist-platform
-          --state-dir .sidecar-smoke
+          --state-dir .runtime-smoke
           --require-bundled-current-platform
           --check-executable-version
-          --start-sidecar
-          --hermetic-sidecar-smoke
-          --default-routing-sidecar-smoke
-          --live-workspace .sidecar-live-workspace
-          --live-runtime-home .sidecar-live-runtime
-          --live-data-dir .sidecar-live-data
+          --start-runtime
+          --hermetic-runtime-smoke
+          --default-routing-runtime-smoke
+          --live-workspace .runtime-live-workspace
+          --live-runtime-home .runtime-live-home
+          --live-data-dir .runtime-live-data
           --live-startup-timeout 45
           --live-completion-timeout 240
           --live-stop-timeout 45

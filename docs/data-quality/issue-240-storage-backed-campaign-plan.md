@@ -8,7 +8,7 @@ Issue #240 is the operational bridge between the completed data-quality rule
 work and the remaining full-dataset campaign batches. The remaining batch
 issues should not be run as one unbounded local scrape. They should run as
 bounded symbol/format/timeframe slices from an installed platform wheel or from
-a source checkout whose sidecar has an explicit Temporal executable.
+a source checkout whose runtime has an explicit Temporal executable.
 
 The `.repo` helper is part of the campaign contract. Every completed slice must
 run `histdatacom --repo-quality` so `.repo` keeps bounded quality findings and
@@ -17,8 +17,8 @@ explicit disk-pressure tactic for these full-dataset campaign batches.
 
 ## Local Audit
 
-- Current source checkout sidecar mode: metadata-only fallback for
-  `macos-arm64`; `histdatacom-sidecar doctor --json` reports
+- Current source checkout runtime mode: metadata-only fallback for
+  `macos-arm64`; `histdatacom runtime doctor --json` reports
   `platform.executable_bundled=false`.
 - Current local data root: `data`.
 - Current local `.repo`: present and already carries bounded quality metadata
@@ -37,7 +37,7 @@ Use one of these environments:
 python -m venv .campaign-venv
 . .campaign-venv/bin/activate
 pip install histdatacom
-histdatacom-sidecar doctor --json
+histdatacom runtime doctor --json
 ```
 
 The doctor payload must show `platform.executable_bundled=true`.
@@ -45,8 +45,8 @@ The doctor payload must show `platform.executable_bundled=true`.
 2. Source checkout with explicit Temporal executable:
 
 ```sh
-venv/bin/histdatacom-sidecar start --executable /path/to/temporal
-venv/bin/histdatacom-sidecar doctor --json
+venv/bin/histdatacom runtime start --executable /path/to/temporal
+venv/bin/histdatacom runtime doctor --json
 ```
 
 This is acceptable for development, but it must not be confused with a packaged

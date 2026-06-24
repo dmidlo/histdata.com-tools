@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Run the issue-180 live Temporal sidecar throughput benchmark."""
+"""Run the issue-180 live Temporal runtime throughput benchmark."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Sequence
 from histdatacom.sidecar.throughput import (
     DEFAULT_THROUGHPUT_FANOUT_END_PERIOD,
     DEFAULT_THROUGHPUT_PERIOD,
-    LIVE_SIDECAR_THROUGHPUT_ENV,
+    LIVE_RUNTIME_THROUGHPUT_ENV,
     default_throughput_benchmark_matrix,
     run_live_sidecar_throughput_benchmark,
     write_throughput_report,
@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the throughput benchmark parser."""
     parser = argparse.ArgumentParser(
         description=(
-            "Run the live Temporal sidecar runtime on the issue-180/181 "
+            "Run the live Temporal runtime on the issue-180/181 "
             "non-Influx benchmark matrix."
         )
     )
@@ -76,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force",
         action="store_true",
-        help=(f"Run without requiring {LIVE_SIDECAR_THROUGHPUT_ENV}=1."),
+        help=(f"Run without requiring {LIVE_RUNTIME_THROUGHPUT_ENV}=1."),
     )
     return parser
 
@@ -87,9 +87,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if (
         not args.force
-        and os.environ.get(LIVE_SIDECAR_THROUGHPUT_ENV, "").strip() != "1"
+        and os.environ.get(LIVE_RUNTIME_THROUGHPUT_ENV, "").strip() != "1"
     ):
-        parser.error(f"{LIVE_SIDECAR_THROUGHPUT_ENV}=1 is required.")
+        parser.error(f"{LIVE_RUNTIME_THROUGHPUT_ENV}=1 is required.")
 
     scenarios = default_throughput_benchmark_matrix(
         data_directory=args.data_directory,

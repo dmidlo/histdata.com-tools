@@ -27,7 +27,7 @@ def test_sidecar_manifest_loads_packaged_strategy() -> None:
     manifest = load_sidecar_manifest()
 
     assert manifest.schema_version == 1
-    assert manifest.sidecar == "temporal"
+    assert manifest.runtime == "temporal"
     assert manifest.distribution_strategy == (
         "metadata-wheel-with-verified-runtime-provisioning"
     )
@@ -55,7 +55,7 @@ def test_sidecar_assets_are_readable_from_importlib_resources() -> None:
     notice_text = read_sidecar_asset_text("third-party/temporal-cli/NOTICE.md")
 
     assert sidecar_asset("README.md").is_file()
-    assert json.loads(manifest_text)["sidecar"] == "temporal"
+    assert json.loads(manifest_text)["runtime"] == "temporal"
     assert json.loads(defaults_text)["persistence"]["driver"] == "sqlite"
     runtime_index = json.loads(runtime_index_text)
     assert runtime_index["component"] == "temporal-cli"
@@ -103,7 +103,7 @@ def test_bundled_platform_executable_resolves_from_resources(
     manifest = SidecarManifest.from_dict(
         {
             "schema_version": 1,
-            "sidecar": "temporal",
+            "runtime": "temporal",
             "distribution_strategy": (
                 "metadata-wheel-with-verified-runtime-provisioning"
             ),

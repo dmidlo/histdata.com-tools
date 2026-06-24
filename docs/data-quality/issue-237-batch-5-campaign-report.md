@@ -18,7 +18,7 @@ treated as ingestion failures.
 ## Runtime
 
 - Data root: `data`
-- Sidecar mode: source checkout with explicit Temporal executable
+- Runtime mode: source checkout with explicit Temporal executable
 - Temporal executable: `/opt/local/bin/temporal`
 - Source checkout doctor note: `platform.executable_bundled=false` is expected
   outside an installed platform wheel.
@@ -73,11 +73,11 @@ venv/bin/histdatacom -A \
 
 ## Command Evidence
 
-The sidecar was started explicitly because this source checkout does not bundle
+The runtime was started explicitly because this source checkout does not bundle
 the platform executable:
 
 ```sh
-venv/bin/histdatacom-sidecar start --executable /opt/local/bin/temporal
+venv/bin/histdatacom runtime start --executable /opt/local/bin/temporal
 ```
 
 Availability metadata was refreshed before running quality:

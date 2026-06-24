@@ -1,4 +1,4 @@
-"""Build platform wheels with a bundled Temporal sidecar executable."""
+"""Build platform wheels with a bundled Temporal runtime executable."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def _current_platform_key(
     system: str | None = None,
     machine: str | None = None,
 ) -> str:
-    """Return the sidecar manifest platform key for this machine."""
+    """Return the runtime manifest platform key for this machine."""
     normalized_system = (system or platform.system()).strip().lower()
     normalized_machine = (machine or platform.machine()).strip().lower()
     system_aliases = {
@@ -72,19 +72,19 @@ def _current_platform_key(
 
 
 def _manifest_path(source_root: Path) -> Path:
-    """Return the sidecar manifest path inside a source tree."""
+    """Return the runtime manifest path inside a source tree."""
     return source_root / ASSET_ROOT / MANIFEST_FILENAME
 
 
 def _load_manifest(source_root: Path) -> dict[str, Any]:
-    """Load a sidecar manifest from a source tree."""
+    """Load a runtime manifest from a source tree."""
     manifest_path = _manifest_path(source_root)
     try:
         loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
     except FileNotFoundError as err:
-        raise SystemExit(f"sidecar manifest not found: {manifest_path}") from err
+        raise SystemExit(f"runtime manifest not found: {manifest_path}") from err
     if not isinstance(loaded, dict):
-        raise SystemExit(f"sidecar manifest must contain an object: {manifest_path}")
+        raise SystemExit(f"runtime manifest must contain an object: {manifest_path}")
     return loaded
 
 
@@ -100,7 +100,7 @@ def _load_fetch_report(report_path: Path) -> dict[str, Any]:
 
 
 def _write_manifest(source_root: Path, manifest: dict[str, Any]) -> None:
-    """Write a normalized sidecar manifest into a source tree."""
+    """Write a normalized runtime manifest into a source tree."""
     _manifest_path(source_root).write_text(
         json.dumps(manifest, indent=2, sort_keys=False) + "\n",
         encoding="utf-8",
@@ -111,12 +111,12 @@ def _resource_path(relative_path: str) -> PurePosixPath:
     """Validate and return a manifest resource path."""
     resource_path = PurePosixPath(relative_path)
     if resource_path.is_absolute() or ".." in resource_path.parts:
-        raise SystemExit(f"sidecar resource path must be relative: {relative_path}")
+        raise SystemExit(f"runtime resource path must be relative: {relative_path}")
     return resource_path
 
 
 def _asset_path(source_root: Path, relative_path: str) -> Path:
-    """Return a filesystem path for a POSIX-style sidecar asset path."""
+    """Return a filesystem path for a POSIX-style runtime asset path."""
     resource_path = _resource_path(relative_path)
     return source_root / ASSET_ROOT / Path(*resource_path.parts)
 
@@ -137,7 +137,7 @@ def _platform_resource(
     """Return a mutable platform resource entry from a manifest."""
     platforms = manifest.get("platforms")
     if not isinstance(platforms, dict):
-        raise SystemExit("sidecar manifest must define a platforms object")
+        raise SystemExit("runtime manifest must define a platforms object")
     resource = platforms.get(platform_key)
     if not isinstance(resource, dict):
         supported = ", ".join(sorted(str(key) for key in platforms))
@@ -149,7 +149,7 @@ def _platform_resource(
 
 
 def _is_windows_platform(platform_key: str) -> bool:
-    """Return whether a sidecar platform key targets Windows."""
+    """Return whether a runtime platform key targets Windows."""
     return platform_key.startswith("windows-")
 
 
@@ -232,10 +232,10 @@ def _validate_fetch_report(
 
 
 def _ensure_asset_file(source_root: Path, relative_path: str) -> None:
-    """Fail if a required sidecar asset file is missing from the source tree."""
+    """Fail if a required runtime asset file is missing from the source tree."""
     asset_path = _asset_path(source_root, relative_path)
     if not asset_path.is_file():
-        raise SystemExit(f"sidecar asset is required for bundled wheels: {relative_path}")
+        raise SystemExit(f"runtime asset is required for bundled wheels: {relative_path}")
 
 
 def _merge_resource_files(
@@ -289,7 +289,7 @@ def _write_temporal_cli_provenance(
             "size_bytes": stat_result.st_size,
             "version_probe": version_probe,
         },
-        "builder": "scripts/sidecar_platform_wheel.py",
+        "builder": "scripts/runtime_platform_wheel.py",
     }
     provenance_path = _asset_path(source_root, PROVENANCE_FILENAME)
     provenance_path.write_text(
@@ -299,7 +299,7 @@ def _write_temporal_cli_provenance(
     return provenance
 
 
-def prepare_sidecar_binary(
+def prepare_runtime_binary(
     *,
     source_root: Path,
     platform_key: str,
@@ -353,7 +353,7 @@ def prepare_sidecar_binary(
     resource["license"] = TEMPORAL_CLI_LICENSE_RESOURCE
     resource["notice"] = TEMPORAL_CLI_NOTICE_RESOURCE
     resource["notes"] = (
-        "Bundled by scripts/sidecar_platform_wheel.py for a platform wheel."
+        "Bundled by scripts/runtime_platform_wheel.py for a platform wheel."
     )
     manifest["resource_files"] = _merge_resource_files(
         manifest.get("resource_files", []),
@@ -485,7 +485,7 @@ def build_platform_wheel(
 ) -> dict[str, Any]:
     """Build a platform wheel from an explicit Temporal executable artifact."""
     staged_source = _copy_source_tree(source_root.resolve(), work_root)
-    prepare_report = prepare_sidecar_binary(
+    prepare_report = prepare_runtime_binary(
         source_root=staged_source,
         platform_key=platform_key,
         executable=executable,
@@ -522,16 +522,16 @@ def build_platform_wheel(
         "platform": platform_key,
         "platform_tag": resolved_platform_tag,
         "staged_source": str(staged_source),
-        "sidecar": prepare_report,
+        "runtime": prepare_report,
     }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Build a platform-specific sidecar wheel."""
+    """Build a platform-specific runtime wheel."""
     parser = argparse.ArgumentParser(
         description=(
             "Build a histdatacom platform wheel with a bundled Temporal "
-            "sidecar executable. The source tree is copied to a temporary "
+            "runtime executable. The source tree is copied to a temporary "
             "staging directory before package data and manifest changes are "
             "applied."
         )
@@ -550,13 +550,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--dist-dir",
         type=Path,
-        default=Path("dist-sidecar"),
+        default=Path("dist-runtime"),
         help="directory where the retagged platform wheel is copied",
     )
     parser.add_argument(
         "--platform-key",
         default=_current_platform_key(),
-        help="sidecar manifest platform key to bundle",
+        help="runtime manifest platform key to bundle",
     )
     parser.add_argument(
         "--platform-tag",
@@ -593,7 +593,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     fetch_report = _load_fetch_report(args.fetch_report)
 
     if args.work_dir is None:
-        with tempfile.TemporaryDirectory(prefix="histdatacom-sidecar-wheel-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="histdatacom-runtime-wheel-") as tmp:
             report = build_platform_wheel(
                 source_root=args.source_root,
                 work_root=Path(tmp),

@@ -1,4 +1,4 @@
-"""Runtime path and port policy for the local Temporal sidecar."""
+"""Runtime path and port policy for the local Temporal runtime."""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-SIDECAR_RUNTIME_HOME_ENV = "HISTDATACOM_SIDECAR_HOME"
-SIDECAR_WORKSPACE_ENV = "HISTDATACOM_SIDECAR_WORKSPACE"
-SIDECAR_IP_ENV = "HISTDATACOM_SIDECAR_IP"
-SIDECAR_PORT_ENV = "HISTDATACOM_SIDECAR_PORT"
-SIDECAR_UI_PORT_ENV = "HISTDATACOM_SIDECAR_UI_PORT"
+RUNTIME_HOME_ENV = "HISTDATACOM_RUNTIME_HOME"
+WORKSPACE_ENV = "HISTDATACOM_RUNTIME_WORKSPACE"
+BIND_IP_ENV = "HISTDATACOM_RUNTIME_IP"
+TEMPORAL_PORT_ENV = "HISTDATACOM_RUNTIME_PORT"
+TEMPORAL_UI_PORT_ENV = "HISTDATACOM_RUNTIME_UI_PORT"
 
 DEFAULT_BIND_IP = "127.0.0.1"
 DEFAULT_TEMPORAL_PORT_BASE = 17233
@@ -28,12 +28,12 @@ PortAvailabilityProbe = Callable[[str, int], bool]
 
 
 class PortAllocationError(RuntimeError):
-    """Raised when sidecar port allocation cannot find usable ports."""
+    """Raised when runtime port allocation cannot find usable ports."""
 
 
 @dataclass(frozen=True, slots=True)
 class SidecarPaths:
-    """Filesystem paths used by the sidecar runtime and supervisor."""
+    """Filesystem paths used by the runtime and supervisor."""
 
     runtime_dir: Path
     state_dir: Path
@@ -49,7 +49,7 @@ class SidecarPaths:
 
     @classmethod
     def from_runtime_dir(cls, runtime_dir: Path | str) -> "SidecarPaths":
-        """Create sidecar paths under a workspace runtime directory."""
+        """Create runtime paths under a workspace runtime directory."""
         root = Path(runtime_dir).expanduser()
         state_dir = root / "state"
         logs_dir = root / "logs"
@@ -61,8 +61,8 @@ class SidecarPaths:
             logs_dir=logs_dir,
             sqlite_dir=sqlite_dir,
             manifests_dir=manifests_dir,
-            pid_file=state_dir / "sidecar.pid.json",
-            lock_file=state_dir / "sidecar.lock",
+            pid_file=state_dir / "runtime.pid.json",
+            lock_file=state_dir / "runtime.lock",
             server_log=logs_dir / "temporal-server.log",
             worker_log=logs_dir / "temporal-worker.log",
             sqlite_db=sqlite_dir / "temporal.db",
@@ -71,7 +71,7 @@ class SidecarPaths:
 
     @classmethod
     def from_state_dir(cls, state_dir: Path | str) -> "SidecarPaths":
-        """Create sidecar paths from an explicit state directory override."""
+        """Create runtime paths from an explicit state directory override."""
         state_root = Path(state_dir).expanduser()
         runtime_dir = (
             state_root.parent if state_root.name == "state" else state_root
@@ -85,8 +85,8 @@ class SidecarPaths:
             logs_dir=logs_dir,
             sqlite_dir=sqlite_dir,
             manifests_dir=manifests_dir,
-            pid_file=state_root / "sidecar.pid.json",
-            lock_file=state_root / "sidecar.lock",
+            pid_file=state_root / "runtime.pid.json",
+            lock_file=state_root / "runtime.lock",
             server_log=logs_dir / "temporal-server.log",
             worker_log=logs_dir / "temporal-worker.log",
             sqlite_db=sqlite_dir / "temporal.db",
@@ -94,7 +94,7 @@ class SidecarPaths:
         )
 
     def ensure_directories(self) -> None:
-        """Create sidecar runtime directories."""
+        """Create runtime directories."""
         for directory in (
             self.runtime_dir,
             self.state_dir,
@@ -210,7 +210,7 @@ class SidecarRuntimePolicy:
             "paths": self.paths.to_dict(),
             "ports": self.ports.to_dict(),
             "data_directory_policy": (
-                "Sidecar state, logs, manifests, and SQLite files are kept "
+                "Runtime state, logs, manifests, and SQLite files are kept "
                 "outside HistData download/cache directories."
             ),
         }
@@ -222,9 +222,9 @@ def default_sidecar_runtime_home(
     platform_name: str | None = None,
     home: Path | str | None = None,
 ) -> Path:
-    """Return the per-user sidecar runtime home for this platform."""
+    """Return the per-user runtime home for this platform."""
     env = environ if environ is not None else os.environ
-    override = env.get(SIDECAR_RUNTIME_HOME_ENV)
+    override = env.get(RUNTIME_HOME_ENV)
     if override:
         return Path(override).expanduser()
 
@@ -236,34 +236,34 @@ def default_sidecar_runtime_home(
             / "Library"
             / "Application Support"
             / "histdatacom"
-            / "sidecar"
+            / "runtime"
         )
     if system == "Windows":
         local_app_data = env.get("LOCALAPPDATA")
         if local_app_data:
-            return Path(local_app_data).expanduser() / "histdatacom" / "sidecar"
-        return user_home / "AppData" / "Local" / "histdatacom" / "sidecar"
+            return Path(local_app_data).expanduser() / "histdatacom" / "runtime"
+        return user_home / "AppData" / "Local" / "histdatacom" / "runtime"
 
     xdg_state_home = env.get("XDG_STATE_HOME")
     if xdg_state_home:
-        return Path(xdg_state_home).expanduser() / "histdatacom" / "sidecar"
-    return user_home / ".local" / "state" / "histdatacom" / "sidecar"
+        return Path(xdg_state_home).expanduser() / "histdatacom" / "runtime"
+    return user_home / ".local" / "state" / "histdatacom" / "runtime"
 
 
 def default_sidecar_workspace(
     *,
     environ: Mapping[str, str] | None = None,
 ) -> Path:
-    """Return the default workspace used to scope sidecar runtime state."""
+    """Return the default workspace used to scope runtime state."""
     env = environ if environ is not None else os.environ
-    override = env.get(SIDECAR_WORKSPACE_ENV)
+    override = env.get(WORKSPACE_ENV)
     if override:
         return Path(override).expanduser().resolve(strict=False)
     return Path.cwd().resolve(strict=False)
 
 
 def default_sidecar_state_dir() -> Path:
-    """Return the default workspace-scoped sidecar state directory."""
+    """Return the default workspace-scoped runtime state directory."""
     return build_sidecar_runtime_policy().paths.state_dir
 
 
@@ -278,7 +278,7 @@ def build_sidecar_runtime_policy(
     check_ports: bool = False,
     port_available: PortAvailabilityProbe | None = None,
 ) -> SidecarRuntimePolicy:
-    """Build a testable sidecar runtime policy for a workspace."""
+    """Build a testable runtime policy for a workspace."""
     env = environ if environ is not None else os.environ
     workspace_path = _resolve_workspace_path(workspace, env)
     workspace_id = _workspace_id(workspace_path, platform_name)
@@ -303,7 +303,7 @@ def build_sidecar_runtime_policy(
 
     ports = _allocate_ports(
         workspace_id=workspace_id,
-        bind_ip=env.get(SIDECAR_IP_ENV, DEFAULT_BIND_IP),
+        bind_ip=env.get(BIND_IP_ENV, DEFAULT_BIND_IP),
         environ=env,
         port_available=selected_port_probe,
     )
@@ -368,15 +368,15 @@ def _allocate_ports(
     if existing and existing.source == "environment":
         return _validate_environment_ports(existing, port_available)
 
-    env_grpc = environ.get(SIDECAR_PORT_ENV)
+    env_grpc = environ.get(TEMPORAL_PORT_ENV)
     if env_grpc:
         ports = SidecarPorts(
             bind_ip=bind_ip,
-            grpc=_parse_port(env_grpc, SIDECAR_PORT_ENV),
+            grpc=_parse_port(env_grpc, TEMPORAL_PORT_ENV),
             ui=_parse_port(
-                environ.get(SIDECAR_UI_PORT_ENV, ""),
-                SIDECAR_UI_PORT_ENV,
-                default=_parse_port(env_grpc, SIDECAR_PORT_ENV)
+                environ.get(TEMPORAL_UI_PORT_ENV, ""),
+                TEMPORAL_UI_PORT_ENV,
+                default=_parse_port(env_grpc, TEMPORAL_PORT_ENV)
                 + DEFAULT_TEMPORAL_UI_PORT_OFFSET,
             ),
             source="environment",
@@ -408,7 +408,7 @@ def _allocate_ports(
         collisions.extend(blocked)
 
     raise PortAllocationError(
-        "No free Temporal sidecar port pair was found for workspace "
+        "No free Temporal runtime port pair was found for workspace "
         f"{workspace_id} after {DEFAULT_PORT_SCAN_LIMIT} deterministic "
         f"attempts from {DEFAULT_TEMPORAL_PORT_BASE + first_offset}. "
         f"Colliding ports: {tuple(collisions)}."
@@ -426,9 +426,9 @@ def _validate_environment_ports(
     ]
     if blocked:
         raise PortAllocationError(
-            "Configured Temporal sidecar port is unavailable. "
-            f"{SIDECAR_PORT_ENV}={ports.grpc}, "
-            f"{SIDECAR_UI_PORT_ENV}={ports.ui}, "
+            "Configured Temporal runtime port is unavailable. "
+            f"{TEMPORAL_PORT_ENV}={ports.grpc}, "
+            f"{TEMPORAL_UI_PORT_ENV}={ports.ui}, "
             f"blocked={tuple(blocked)}."
         )
     return ports

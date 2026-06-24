@@ -129,7 +129,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog=(
                 "Commands:\n"
-                "  jobs        Inspect and control orchestrated work\n\n"
+                "  jobs        Inspect and control orchestrated work\n"
+                "  runtime     Inspect and manage the orchestration runtime\n\n"
                 "Run `histdatacom jobs --help` for job telemetry commands."
             ),
         )

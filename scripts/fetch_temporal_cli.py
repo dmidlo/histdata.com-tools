@@ -277,7 +277,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--platform-key",
         required=True,
         choices=sorted(TEMPORAL_CLI_ASSETS),
-        help="sidecar manifest platform key to fetch",
+        help="runtime manifest platform key to fetch",
     )
     parser.add_argument(
         "--version",

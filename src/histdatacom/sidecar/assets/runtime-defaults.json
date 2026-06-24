@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "sidecar": "temporal",
+  "runtime": "temporal",
   "persistence": {
     "driver": "sqlite",
     "filename": "temporal.db"
@@ -13,11 +13,11 @@
     ]
   },
   "runtime_policy": {
-    "workspace_env": "HISTDATACOM_SIDECAR_WORKSPACE",
-    "runtime_home_env": "HISTDATACOM_SIDECAR_HOME",
-    "bind_ip_env": "HISTDATACOM_SIDECAR_IP",
-    "port_env": "HISTDATACOM_SIDECAR_PORT",
-    "ui_port_env": "HISTDATACOM_SIDECAR_UI_PORT",
+    "workspace_env": "HISTDATACOM_RUNTIME_WORKSPACE",
+    "runtime_home_env": "HISTDATACOM_RUNTIME_HOME",
+    "bind_ip_env": "HISTDATACOM_RUNTIME_IP",
+    "port_env": "HISTDATACOM_RUNTIME_PORT",
+    "ui_port_env": "HISTDATACOM_RUNTIME_UI_PORT",
     "default_bind_ip": "127.0.0.1",
     "default_grpc_port_base": 17233,
     "default_ui_port_offset": 1000,

@@ -208,4 +208,4 @@ def test_storage_backed_campaign_plan_marks_source_checkout_boundary() -> None:
         plan["execution_environment"]["source_checkout_sdist_fallback_expected"]
         is True
     )
-    assert plan["preflight_commands"][0] == "histdatacom-sidecar doctor --json"
+    assert plan["preflight_commands"][0] == "histdatacom runtime doctor --json"

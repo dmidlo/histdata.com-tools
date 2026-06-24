@@ -1,4 +1,4 @@
-"""Queue-free stage functions for the Temporal sidecar migration."""
+"""Queue-free stage functions for the Temporal orchestration runtime."""
 
 from __future__ import annotations
 

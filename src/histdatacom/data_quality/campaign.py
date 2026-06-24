@@ -196,12 +196,13 @@ def build_storage_backed_campaign_plan(
             ),
             "source_checkout_sdist_fallback_action": (
                 "Install a bundled platform wheel or pass "
-                "histdatacom-sidecar start --executable /path/to/temporal."
+                "histdatacom runtime start --executable /path/to/temporal."
             ),
         },
         "preflight_commands": [
             _shell_command(
-                "histdatacom-sidecar",
+                "histdatacom",
+                "runtime",
                 "doctor",
                 "--json",
             ),

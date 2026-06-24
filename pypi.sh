@@ -37,7 +37,7 @@ inspect_wheel_metadata()
     for wheel in "${wheels[@]}"; do
         python scripts/inspect_wheel.py \
             --wheel "${wheel}" \
-            --report "dist/$(basename "${wheel%.whl}")-sidecar-wheel-report.json"
+            --report "dist/$(basename "${wheel%.whl}")-runtime-wheel-report.json"
     done
 }
 
@@ -62,14 +62,14 @@ smoke_wheel_install()
             # shellcheck source=/dev/null
             source "${smoke_dir}/venv/bin/activate"
             python -m pip install --upgrade pip
-            python "${project_root}/scripts/smoke_sidecar_install.py" \
+            python "${project_root}/scripts/smoke_runtime_install.py" \
                 --wheel "${project_root}/${wheel}" \
-                --state-dir "${smoke_dir}/sidecar-state"
+                --state-dir "${smoke_dir}/runtime-state"
         )
     done
 }
 
-current_sidecar_platform()
+current_runtime_platform()
 {
     python - <<'PY'
 from histdatacom.sidecar.resources import current_platform_key
@@ -78,16 +78,16 @@ print(current_platform_key())
 PY
 }
 
-sidecar_platform_wheel()
+runtime_platform_wheel()
 {
-    local executable="${HISTDATACOM_SIDECAR_EXECUTABLE:-}"
+    local executable="${HISTDATACOM_RUNTIME_EXECUTABLE:-}"
     local fetch_report="${HISTDATACOM_FETCH_REPORT:-}"
-    local platform_key="${HISTDATACOM_SIDECAR_PLATFORM:-}"
-    local report="dist/sidecar-platform-wheel-build-report.json"
+    local platform_key="${HISTDATACOM_RUNTIME_PLATFORM:-}"
+    local report="dist/runtime-platform-wheel-build-report.json"
     local wheel
 
     if [[ -z "${executable}" ]]; then
-        echo "Set HISTDATACOM_SIDECAR_EXECUTABLE to build a bundled sidecar wheel." >&2
+        echo "Set HISTDATACOM_RUNTIME_EXECUTABLE to build a bundled runtime wheel." >&2
         exit 2
     fi
 
@@ -97,10 +97,10 @@ sidecar_platform_wheel()
     fi
 
     if [[ -z "${platform_key}" ]]; then
-        platform_key=$(current_sidecar_platform)
+        platform_key=$(current_runtime_platform)
     fi
 
-    python scripts/sidecar_platform_wheel.py \
+    python scripts/runtime_platform_wheel.py \
         --platform-key "${platform_key}" \
         --executable "${executable}" \
         --fetch-report "${fetch_report}" \
@@ -119,7 +119,7 @@ PY
     python scripts/inspect_wheel.py \
         --wheel "${wheel}" \
         --require-bundled-platform "${platform_key}" \
-        --report "dist/$(basename "${wheel%.whl}")-sidecar-wheel-report.json"
+        --report "dist/$(basename "${wheel%.whl}")-runtime-wheel-report.json"
 }
 
 sign_dist_artifacts()
@@ -258,8 +258,8 @@ build()
     rm -rf ./dist
     install_release_frontend
     python -m build
-    if [[ -n "${HISTDATACOM_SIDECAR_EXECUTABLE:-}" ]]; then
-        sidecar_platform_wheel
+    if [[ -n "${HISTDATACOM_RUNTIME_EXECUTABLE:-}" ]]; then
+        runtime_platform_wheel
     fi
     python -m twine check dist/*.whl dist/*.tar.gz
     validate_dist_artifact_sizes
@@ -283,10 +283,10 @@ verify_release_install()
         "${report_args[@]}" \
         --require-external-runtime-provisioning \
         --check-executable-version \
-        --start-sidecar \
-        --hermetic-sidecar-smoke \
-        --default-routing-sidecar-smoke \
-        --quality-sidecar-smoke \
+        --start-runtime \
+        --hermetic-runtime-smoke \
+        --default-routing-runtime-smoke \
+        --quality-runtime-smoke \
         --live-stop-timeout 90 \
         --download-smoke
 }
@@ -342,10 +342,10 @@ destroyenv()
 histdatacom_test()
 {
     (
-        local sidecar_state
+        local runtime_state
 
-        sidecar_state=$(mktemp -d)
-        trap 'rm -rf "${sidecar_state}"' EXIT
+        runtime_state=$(mktemp -d)
+        trap 'rm -rf "${runtime_state}"' EXIT
 
         echo "${bold}testing histdatacom -h test pip environment${normal}"
         histdatacom -h
@@ -353,12 +353,12 @@ histdatacom_test()
         histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
         echo "${bold}testing histdatacom --version test pip environment${normal}"
         histdatacom --version
-        echo "${bold}testing histdatacom-sidecar status test pip environment${normal}"
-        histdatacom-sidecar --state-dir "${sidecar_state}" --json status >/dev/null
-        echo "${bold}testing histdatacom-sidecar doctor test pip environment${normal}"
-        histdatacom-sidecar --state-dir "${sidecar_state}" --json doctor >/dev/null
-        echo "${bold}testing histdatacom-sidecar-worker help test pip environment${normal}"
-        histdatacom-sidecar-worker --help >/dev/null
+        echo "${bold}testing histdatacom runtime status test pip environment${normal}"
+        histdatacom runtime --state-dir "${runtime_state}" --json status >/dev/null
+        echo "${bold}testing histdatacom runtime doctor test pip environment${normal}"
+        histdatacom runtime --state-dir "${runtime_state}" --json doctor >/dev/null
+        echo "${bold}testing runtime worker help test pip environment${normal}"
+        python -m histdatacom.orchestration.worker --help >/dev/null
     )
 }
 
@@ -369,9 +369,9 @@ case "${1:-}" in
     build)
         build
         ;;
-    sidecar_wheel)
+    runtime_wheel)
         install_release_frontend
-        sidecar_platform_wheel
+        runtime_platform_wheel
         ;;
     pypi)
         prepare_release_upload "PyPI" "${pypi_branch}"
@@ -400,7 +400,7 @@ case "${1:-}" in
         destroyenv
         ;;
     *)
-        echo "Usage: $0 {dev|build|sidecar_wheel|pypi|testpypi|testpypi_preflight|testpypi_install|pypi_install}" >&2
+        echo "Usage: $0 {dev|build|runtime_wheel|pypi|testpypi|testpypi_preflight|testpypi_install|pypi_install}" >&2
         exit 2
         ;;
 esac

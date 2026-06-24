@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "sidecar": "temporal",
+  "runtime": "temporal",
   "distribution_strategy": "metadata-wheel-with-verified-runtime-provisioning",
   "embedded_binary": false,
   "resource_files": [

@@ -395,6 +395,10 @@ def main(
         from histdatacom.orchestration.cli import jobs_main
 
         return jobs_main(sys.argv[2:])
+    if not options and len(sys.argv) > 1 and sys.argv[1] == "runtime":
+        from histdatacom.orchestration.cli import main as runtime_main
+
+        return runtime_main(sys.argv[2:])
 
     if not options:
         options = Options()

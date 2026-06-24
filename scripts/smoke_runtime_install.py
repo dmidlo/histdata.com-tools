@@ -1,4 +1,4 @@
-"""Smoke-test an installed histdatacom package and its sidecar resources."""
+"""Smoke-test an installed histdatacom package and runtime resources."""
 
 from __future__ import annotations
 
@@ -24,8 +24,6 @@ EXPECTED_ASSETS = (
 )
 EXPECTED_CONSOLE_SCRIPTS = {
     "histdatacom": "histdatacom.histdata_com:main",
-    "histdatacom-sidecar": "histdatacom.orchestration.cli:main",
-    "histdatacom-sidecar-worker": "histdatacom.orchestration.worker:main",
 }
 QUALITY_REPORT_SCHEMA_VERSION = "histdatacom.quality-report.v1"
 QUALITY_SMOKE_CLEAN_ROWS = (
@@ -166,14 +164,14 @@ def check_package_metadata(*, expect_temporal_extra: bool) -> dict[str, Any]:
     }
 
 
-def check_sidecar_resources(
+def check_runtime_resources(
     *,
     require_bundled_current_platform: bool = False,
     require_external_runtime_provisioning: bool = False,
     check_executable_version: bool = False,
     temporal_executable: Path | None = None,
 ) -> dict[str, Any]:
-    """Validate installed sidecar resources for the current platform."""
+    """Validate installed runtime resources for the current platform."""
     from histdatacom.orchestration.resources import (
         TemporalExecutableUnavailable,
         current_platform_key,
@@ -189,7 +187,7 @@ def check_sidecar_resources(
     runtime_index = load_temporal_runtime_index(manifest)
     for asset in EXPECTED_ASSETS:
         if not runtime_asset(asset).is_file():
-            raise SystemExit(f"sidecar asset is not a file: {asset}")
+            raise SystemExit(f"runtime asset is not a file: {asset}")
 
     platform_key = current_platform_key()
     platform_resource = manifest.platforms.get(platform_key)
@@ -197,7 +195,7 @@ def check_sidecar_resources(
     if platform_resource is None:
         supported = ", ".join(sorted(manifest.platforms))
         raise SystemExit(
-            f"current platform {platform_key!r} is not declared in sidecar "
+            f"current platform {platform_key!r} is not declared in runtime "
             f"manifest. Supported platforms: {supported}"
         )
     executable_version = ""
@@ -220,7 +218,7 @@ def check_sidecar_resources(
         ) as executable_path:
             if not executable_path.is_file():
                 raise SystemExit(
-                    f"bundled sidecar executable is missing: {executable_path}"
+                    f"bundled runtime executable is missing: {executable_path}"
                 )
             if check_executable_version:
                 with temporal_runtime_executable_path(
@@ -240,7 +238,7 @@ def check_sidecar_resources(
             )
         try:
             with packaged_temporal_executable_path(platform_key):
-                raise SystemExit("metadata-only sidecar resource exposed an executable")
+                raise SystemExit("metadata-only runtime resource exposed an executable")
         except TemporalExecutableUnavailable as err:
             if "not bundled in this distribution" not in str(err):
                 raise
@@ -267,7 +265,7 @@ def check_sidecar_resources(
         )
 
     return {
-        "sidecar": manifest.sidecar,
+        "runtime": manifest.runtime,
         "distribution_strategy": manifest.distribution_strategy,
         "runtime_index_version": runtime_index.version,
         "embedded_binary": manifest.embedded_binary,
@@ -298,17 +296,18 @@ def check_cli_smoke(
     state_dir: Path,
     *,
     require_bundled_current_platform: bool = False,
-    start_sidecar: bool = False,
+    start_runtime: bool = False,
 ) -> dict[str, Any]:
-    """Run offline CLI smoke checks against a temporary sidecar state dir."""
+    """Run offline CLI smoke checks against a temporary runtime state dir."""
     state_dir.mkdir(parents=True, exist_ok=True)
-    _run([_script_path("histdatacom"), "--version"])
-    _run([_script_path("histdatacom-sidecar-worker"), "--help"])
+    histdatacom = _script_path("histdatacom")
+    _run([histdatacom, "--version"])
+    _run([sys.executable, "-m", "histdatacom.orchestration.worker", "--help"])
 
-    sidecar_script = _script_path("histdatacom-sidecar")
     status = _run_json(
         [
-            sidecar_script,
+            histdatacom,
+            "runtime",
             "--state-dir",
             str(state_dir),
             "--json",
@@ -316,11 +315,12 @@ def check_cli_smoke(
         ]
     )
     if status.get("state") not in {"running", "stopped"}:
-        raise SystemExit(f"unexpected sidecar status payload: {status}")
+        raise SystemExit(f"unexpected runtime status payload: {status}")
 
     doctor = _run_json(
         [
-            sidecar_script,
+            histdatacom,
+            "runtime",
             "--state-dir",
             str(state_dir),
             "--json",
@@ -329,22 +329,23 @@ def check_cli_smoke(
     )
     platform = doctor.get("platform", {})
     if not isinstance(platform, dict) or not platform.get("supported"):
-        raise SystemExit(f"unexpected sidecar doctor payload: {doctor}")
+        raise SystemExit(f"unexpected runtime doctor payload: {doctor}")
     if (
         require_bundled_current_platform
         and platform.get("executable_bundled") is not True
     ):
         raise SystemExit(
-            "sidecar doctor did not report a bundled current-platform "
+            "runtime doctor did not report a bundled current-platform "
             f"executable: {doctor}"
         )
 
     start_state = ""
     stop_state = ""
-    if start_sidecar:
+    if start_runtime:
         start = _run_json(
             [
-                sidecar_script,
+                histdatacom,
+                "runtime",
                 "--state-dir",
                 str(state_dir),
                 "--json",
@@ -355,10 +356,11 @@ def check_cli_smoke(
         )
         start_state = str(start.get("state", ""))
         if start_state != "running":
-            raise SystemExit(f"unexpected sidecar start payload: {start}")
+            raise SystemExit(f"unexpected runtime start payload: {start}")
         stop = _run_json(
             [
-                sidecar_script,
+                histdatacom,
+                "runtime",
                 "--state-dir",
                 str(state_dir),
                 "--json",
@@ -375,7 +377,7 @@ def check_cli_smoke(
     }
 
 
-def check_live_sidecar_smoke(
+def check_live_runtime_smoke(
     *,
     workspace: Path,
     runtime_home: Path,
@@ -385,7 +387,7 @@ def check_live_sidecar_smoke(
     completion_timeout: float,
     stop_timeout: float,
 ) -> dict[str, Any]:
-    """Run an external HistData.com sidecar smoke."""
+    """Run an external HistData.com runtime smoke."""
     from histdatacom.sidecar.live_smoke import (
         LiveSidecarSmokeError,
         diagnostics_json,
@@ -406,12 +408,12 @@ def check_live_sidecar_smoke(
         )
     except LiveSidecarSmokeError as err:
         raise SystemExit(
-            "live sidecar smoke failed with diagnostics:\n"
+            "live runtime smoke failed with diagnostics:\n"
             f"{diagnostics_json(err.diagnostics)}"
         ) from err
 
 
-def check_hermetic_sidecar_smoke(
+def check_hermetic_runtime_smoke(
     *,
     workspace: Path,
     runtime_home: Path,
@@ -421,7 +423,7 @@ def check_hermetic_sidecar_smoke(
     completion_timeout: float,
     stop_timeout: float,
 ) -> dict[str, Any]:
-    """Run a local-only Temporal sidecar smoke for installed wheels."""
+    """Run a local-only Temporal runtime smoke for installed wheels."""
     from histdatacom.sidecar.live_smoke import (
         LiveSidecarSmokeError,
         diagnostics_json,
@@ -442,12 +444,12 @@ def check_hermetic_sidecar_smoke(
         )
     except LiveSidecarSmokeError as err:
         raise SystemExit(
-            "hermetic sidecar smoke failed with diagnostics:\n"
+            "hermetic runtime smoke failed with diagnostics:\n"
             f"{diagnostics_json(err.diagnostics)}"
         ) from err
 
 
-def check_default_routing_sidecar_smoke(
+def check_default_routing_runtime_smoke(
     *,
     workspace: Path,
     runtime_home: Path,
@@ -478,12 +480,12 @@ def check_default_routing_sidecar_smoke(
         )
     except LiveSidecarSmokeError as err:
         raise SystemExit(
-            "default-routing sidecar smoke failed with diagnostics:\n"
+            "default-routing runtime smoke failed with diagnostics:\n"
             f"{diagnostics_json(err.diagnostics)}"
         ) from err
 
 
-def check_quality_sidecar_smoke(
+def check_quality_runtime_smoke(
     *,
     workspace: Path,
     runtime_home: Path,
@@ -492,8 +494,8 @@ def check_quality_sidecar_smoke(
     startup_timeout: float,
     stop_timeout: float,
 ) -> dict[str, Any]:
-    """Run installed CLI quality checks through the packaged sidecar."""
-    smoke_env = _quality_sidecar_env(
+    """Run installed CLI quality checks through the packaged runtime."""
+    smoke_env = _quality_runtime_env(
         workspace=workspace,
         runtime_home=runtime_home,
     )
@@ -504,7 +506,7 @@ def check_quality_sidecar_smoke(
     start_payload: dict[str, Any] | None = None
     stop_payload: dict[str, Any] | None = None
     try:
-        start_payload = _start_quality_sidecar(
+        start_payload = _start_quality_runtime(
             workspace=workspace,
             runtime_home=runtime_home,
             temporal_executable=temporal_executable,
@@ -542,7 +544,7 @@ def check_quality_sidecar_smoke(
             runtime_home=runtime_home,
             env=smoke_env,
         )
-        jobs = _validate_quality_sidecar_jobs(
+        jobs = _validate_quality_runtime_jobs(
             jobs_payload,
             clean_target=fixtures["clean"],
             clean_report=clean_report,
@@ -550,13 +552,13 @@ def check_quality_sidecar_smoke(
             dirty_report=dirty_report,
         )
     finally:
-        stop_payload = _stop_quality_sidecar(
+        stop_payload = _stop_quality_runtime(
             workspace=workspace,
             runtime_home=runtime_home,
             stop_timeout=stop_timeout,
             env=smoke_env,
         )
-        _validate_quality_sidecar_stop(stop_payload)
+        _validate_quality_runtime_stop(stop_payload)
 
     return {
         "start_state": str((start_payload or {}).get("state", "")),
@@ -575,14 +577,14 @@ def check_quality_sidecar_smoke(
     }
 
 
-def _quality_sidecar_env(
+def _quality_runtime_env(
     *,
     workspace: Path,
     runtime_home: Path,
 ) -> dict[str, str]:
     env = dict(os.environ)
-    env["HISTDATACOM_SIDECAR_WORKSPACE"] = str(workspace)
-    env["HISTDATACOM_SIDECAR_HOME"] = str(runtime_home)
+    env["HISTDATACOM_RUNTIME_WORKSPACE"] = str(workspace)
+    env["HISTDATACOM_RUNTIME_HOME"] = str(runtime_home)
     return env
 
 
@@ -602,7 +604,7 @@ def _write_quality_smoke_fixtures(data_directory: Path) -> dict[str, Path]:
     return {"clean": clean, "dirty": dirty}
 
 
-def _start_quality_sidecar(
+def _start_quality_runtime(
     *,
     workspace: Path,
     runtime_home: Path,
@@ -611,7 +613,8 @@ def _start_quality_sidecar(
     env: Mapping[str, str],
 ) -> dict[str, Any]:
     command = [
-        _script_path("histdatacom-sidecar"),
+        _script_path("histdatacom"),
+        "runtime",
         "--workspace",
         str(workspace),
         "--runtime-home",
@@ -625,7 +628,7 @@ def _start_quality_sidecar(
         command.extend(["--executable", str(temporal_executable)])
     payload = _run_json(command, env=env)
     if payload.get("state") != "running":
-        raise SystemExit(f"quality sidecar did not start: {payload}")
+        raise SystemExit(f"quality runtime did not start: {payload}")
     return payload
 
 
@@ -640,7 +643,7 @@ def _run_quality_cli(
     return _run(
         [
             _script_path("histdatacom"),
-            "--no-sidecar-start",
+            "--no-orchestration-start",
             "--data-directory",
             str(data_directory),
             "--quality",
@@ -709,13 +712,13 @@ def _quality_jobs_payload(
 ) -> dict[str, Any]:
     return _run_json(
         [
-            _script_path("histdatacom-sidecar"),
+            _script_path("histdatacom"),
+            "jobs",
             "--workspace",
             str(workspace),
             "--runtime-home",
             str(runtime_home),
             "--json",
-            "jobs",
             "list",
             "--offline",
         ],
@@ -723,7 +726,7 @@ def _quality_jobs_payload(
     )
 
 
-def _validate_quality_sidecar_jobs(
+def _validate_quality_runtime_jobs(
     jobs_payload: Mapping[str, Any],
     *,
     clean_target: Path,
@@ -733,7 +736,7 @@ def _validate_quality_sidecar_jobs(
 ) -> dict[str, Any]:
     jobs = jobs_payload.get("jobs")
     if not isinstance(jobs, list):
-        raise SystemExit(f"sidecar jobs payload missing jobs: {jobs_payload}")
+        raise SystemExit(f"runtime jobs payload missing jobs: {jobs_payload}")
     clean_job = _find_quality_job(jobs, clean_target, clean_report)
     dirty_job = _find_quality_job(jobs, dirty_target, dirty_report)
     _validate_quality_job(clean_job, expected_status="completed")
@@ -771,7 +774,7 @@ def _find_quality_job(
             continue
         return job
     raise SystemExit(
-        "sidecar jobs did not include quality request for " f"{expected_target}"
+        "runtime jobs did not include quality request for " f"{expected_target}"
     )
 
 
@@ -782,7 +785,7 @@ def _validate_quality_job(
 ) -> None:
     if _normalized_quality_job_status(job) != expected_status:
         raise SystemExit(
-            "sidecar quality job had unexpected status: "
+            "runtime quality job had unexpected status: "
             f"expected={expected_status} job={job}"
         )
     artifacts = job.get("artifacts")
@@ -790,14 +793,14 @@ def _validate_quality_job(
         isinstance(artifact, Mapping) and artifact.get("kind") == "quality-report"
         for artifact in artifacts
     ):
-        raise SystemExit(f"sidecar quality job missing quality-report artifact: {job}")
+        raise SystemExit(f"runtime quality job missing quality-report artifact: {job}")
 
 
 def _normalized_quality_job_status(job: Mapping[str, Any]) -> str:
     return str(job.get("status", "") or "").strip().lower()
 
 
-def _stop_quality_sidecar(
+def _stop_quality_runtime(
     *,
     workspace: Path,
     runtime_home: Path,
@@ -806,7 +809,8 @@ def _stop_quality_sidecar(
 ) -> dict[str, Any]:
     return _run_json(
         [
-            _script_path("histdatacom-sidecar"),
+            _script_path("histdatacom"),
+            "runtime",
             "--workspace",
             str(workspace),
             "--runtime-home",
@@ -820,12 +824,12 @@ def _stop_quality_sidecar(
     )
 
 
-def _validate_quality_sidecar_stop(payload: Mapping[str, Any]) -> None:
+def _validate_quality_runtime_stop(payload: Mapping[str, Any]) -> None:
     if payload.get("state") != "stopped":
-        raise SystemExit(f"quality sidecar did not stop cleanly: {payload}")
+        raise SystemExit(f"quality runtime did not stop cleanly: {payload}")
     pids = payload.get("pids")
     if isinstance(pids, Mapping) and pids:
-        raise SystemExit(f"quality sidecar stop left running processes: {payload}")
+        raise SystemExit(f"quality runtime stop left running processes: {payload}")
 
 
 def _quality_smoke_case_result(
@@ -845,7 +849,7 @@ def _quality_smoke_case_result(
 
 
 def main() -> None:
-    """Run install-time sidecar smoke checks."""
+    """Run install-time runtime smoke checks."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--wheel-dir",
@@ -860,7 +864,7 @@ def main() -> None:
     parser.add_argument(
         "--state-dir",
         type=Path,
-        help="state directory used for offline sidecar CLI checks",
+        help="state directory used for offline runtime CLI checks",
     )
     parser.add_argument(
         "--expect-temporal-extra",
@@ -891,12 +895,12 @@ def main() -> None:
         help="run the packaged Temporal executable with --version",
     )
     parser.add_argument(
-        "--start-sidecar",
+        "--start-runtime",
         action="store_true",
-        help="start the sidecar without --executable and then stop it",
+        help="start the runtime without --executable and then stop it",
     )
     parser.add_argument(
-        "--live-sidecar-smoke",
+        "--live-runtime-smoke",
         action="store_true",
         help=(
             "external HistData.com operator-gated smoke that starts Temporal "
@@ -905,7 +909,7 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--hermetic-sidecar-smoke",
+        "--hermetic-runtime-smoke",
         action="store_true",
         help=(
             "deterministic installed-wheel smoke that starts Temporal workers, "
@@ -914,7 +918,7 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--default-routing-sidecar-smoke",
+        "--default-routing-runtime-smoke",
         action="store_true",
         help=(
             "deterministic installed-wheel smoke that starts Temporal with "
@@ -923,35 +927,35 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--quality-sidecar-smoke",
+        "--quality-runtime-smoke",
         action="store_true",
         help=(
             "deterministic installed-wheel smoke that runs clean and dirty "
-            "histdatacom --quality commands through the local sidecar"
+            "histdatacom --quality commands through the local runtime"
         ),
     )
     parser.add_argument(
         "--temporal-executable",
         type=Path,
         help=(
-            "Temporal executable for live sidecar smokes; defaults to "
+            "Temporal executable for live runtime smokes; defaults to "
             "HISTDATACOM_TEMPORAL_EXECUTABLE or the packaged executable"
         ),
     )
     parser.add_argument(
         "--live-workspace",
         type=Path,
-        help="workspace path used for live sidecar smoke runtime scoping",
+        help="workspace path used for live runtime smoke scoping",
     )
     parser.add_argument(
         "--live-runtime-home",
         type=Path,
-        help="runtime home used for live sidecar smoke state/logs/SQLite",
+        help="runtime home used for live smoke state/logs/SQLite",
     )
     parser.add_argument(
         "--live-data-dir",
         type=Path,
-        help="HistData data directory used by the live sidecar smoke job",
+        help="HistData data directory used by the live runtime smoke job",
     )
     parser.add_argument(
         "--live-startup-timeout",
@@ -969,7 +973,7 @@ def main() -> None:
         "--live-stop-timeout",
         type=float,
         default=30.0,
-        help="seconds to wait for live sidecar processes to stop",
+        help="seconds to wait for live runtime processes to stop",
     )
     args = parser.parse_args()
     if args.wheel is not None and args.wheel_dir is not None:
@@ -984,13 +988,13 @@ def main() -> None:
         ).name
 
     with tempfile.TemporaryDirectory() as temporary_dir:
-        state_dir = args.state_dir or Path(temporary_dir) / "sidecar-state"
+        state_dir = args.state_dir or Path(temporary_dir) / "runtime-state"
         report = {
             "wheel": wheel_name,
             "package": check_package_metadata(
                 expect_temporal_extra=args.expect_temporal_extra
             ),
-            "sidecar": check_sidecar_resources(
+            "runtime": check_runtime_resources(
                 require_bundled_current_platform=(
                     args.require_bundled_current_platform
                 ),
@@ -1001,10 +1005,10 @@ def main() -> None:
                 temporal_executable=args.temporal_executable,
             ),
             "cli": None,
-            "hermetic_sidecar": None,
-            "default_routing_sidecar": None,
-            "quality_sidecar": None,
-            "live_sidecar": None,
+            "hermetic_runtime": None,
+            "default_routing_runtime": None,
+            "quality_runtime": None,
+            "live_runtime": None,
         }
         if not args.skip_cli:
             report["cli"] = check_cli_smoke(
@@ -1012,9 +1016,9 @@ def main() -> None:
                 require_bundled_current_platform=(
                     args.require_bundled_current_platform
                 ),
-                start_sidecar=args.start_sidecar,
+                start_runtime=args.start_runtime,
             )
-        if args.hermetic_sidecar_smoke:
+        if args.hermetic_runtime_smoke:
             live_workspace = args.live_workspace or Path(temporary_dir) / (
                 "live-workspace"
             )
@@ -1022,7 +1026,7 @@ def main() -> None:
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
             live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
-            report["hermetic_sidecar"] = check_hermetic_sidecar_smoke(
+            report["hermetic_runtime"] = check_hermetic_runtime_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,
                 data_directory=live_data_dir,
@@ -1031,7 +1035,7 @@ def main() -> None:
                 completion_timeout=args.live_completion_timeout,
                 stop_timeout=args.live_stop_timeout,
             )
-        if args.default_routing_sidecar_smoke:
+        if args.default_routing_runtime_smoke:
             live_workspace = args.live_workspace or Path(temporary_dir) / (
                 "live-workspace"
             )
@@ -1039,7 +1043,7 @@ def main() -> None:
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
             live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
-            report["default_routing_sidecar"] = check_default_routing_sidecar_smoke(
+            report["default_routing_runtime"] = check_default_routing_runtime_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,
                 data_directory=live_data_dir,
@@ -1048,7 +1052,7 @@ def main() -> None:
                 completion_timeout=args.live_completion_timeout,
                 stop_timeout=args.live_stop_timeout,
             )
-        if args.quality_sidecar_smoke:
+        if args.quality_runtime_smoke:
             live_workspace = args.live_workspace or Path(temporary_dir) / (
                 "live-workspace"
             )
@@ -1056,7 +1060,7 @@ def main() -> None:
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
             live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
-            report["quality_sidecar"] = check_quality_sidecar_smoke(
+            report["quality_runtime"] = check_quality_runtime_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,
                 data_directory=live_data_dir,
@@ -1064,7 +1068,7 @@ def main() -> None:
                 startup_timeout=args.live_startup_timeout,
                 stop_timeout=args.live_stop_timeout,
             )
-        if args.live_sidecar_smoke:
+        if args.live_runtime_smoke:
             live_workspace = args.live_workspace or Path(temporary_dir) / (
                 "live-workspace"
             )
@@ -1072,7 +1076,7 @@ def main() -> None:
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
             live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
-            report["live_sidecar"] = check_live_sidecar_smoke(
+            report["live_runtime"] = check_live_runtime_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,
                 data_directory=live_data_dir,

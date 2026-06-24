@@ -1,7 +1,7 @@
 # Temporal CLI Notice
 
 HistDataCom platform wheels may bundle the Temporal CLI executable as the
-local sidecar runtime used by `histdatacom-sidecar`.
+local orchestration runtime used by `histdatacom runtime`.
 
 - Upstream project: https://github.com/temporalio/cli
 - License: MIT

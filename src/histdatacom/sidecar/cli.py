@@ -1,4 +1,4 @@
-"""Command-line interface for Temporal sidecar lifecycle operations."""
+"""Command-line interface for Temporal orchestration runtime operations."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def _add_common_args(
     *,
     include_defaults: bool,
 ) -> None:
-    """Add common sidecar options to a parser or subparser."""
+    """Add common runtime options to a parser or subparser."""
     workspace_default = (
         str(default_sidecar_workspace())
         if include_defaults
@@ -92,12 +92,14 @@ def _add_common_args(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the sidecar lifecycle argument parser."""
-    parser = argparse.ArgumentParser(prog="histdatacom sidecar")
+    """Build the orchestration runtime lifecycle argument parser."""
+    parser = argparse.ArgumentParser(prog="histdatacom runtime")
     _add_common_args(parser, include_defaults=True)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    start = subparsers.add_parser("start", help="start the local sidecar")
+    start = subparsers.add_parser(
+        "start", help="start the local orchestration runtime"
+    )
     _add_common_args(start, include_defaults=False)
     start.add_argument(
         "--executable",
@@ -107,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--startup-timeout",
         type=float,
         default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
-        help="seconds to wait for the sidecar process to stay alive",
+        help="seconds to wait for runtime processes to stay alive",
     )
     _add_worker_fleet_args(start)
     start.add_argument(
@@ -116,10 +118,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="extra arguments appended after 'temporal server start-dev'",
     )
 
-    status = subparsers.add_parser("status", help="show sidecar status")
+    status = subparsers.add_parser(
+        "status", help="show orchestration runtime status"
+    )
     _add_common_args(status, include_defaults=False)
 
-    stop = subparsers.add_parser("stop", help="stop the local sidecar")
+    stop = subparsers.add_parser(
+        "stop", help="stop the local orchestration runtime"
+    )
     _add_common_args(stop, include_defaults=False)
     stop.add_argument(
         "--stop-timeout",
@@ -128,7 +134,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="seconds to wait for process shutdown",
     )
 
-    restart = subparsers.add_parser("restart", help="restart the sidecar")
+    restart = subparsers.add_parser(
+        "restart", help="restart the orchestration runtime"
+    )
     _add_common_args(restart, include_defaults=False)
     restart.add_argument(
         "--executable",
@@ -138,7 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--startup-timeout",
         type=float,
         default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
-        help="seconds to wait for the sidecar process to stay alive",
+        help="seconds to wait for runtime processes to stay alive",
     )
     restart.add_argument(
         "--stop-timeout",
@@ -153,13 +161,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="extra arguments appended after 'temporal server start-dev'",
     )
 
-    doctor = subparsers.add_parser("doctor", help="show sidecar diagnostics")
+    doctor = subparsers.add_parser(
+        "doctor", help="show orchestration runtime diagnostics"
+    )
     _add_common_args(doctor, include_defaults=False)
 
     maintenance = subparsers.add_parser(
         "maintenance",
         aliases=("cleanup",),
-        help="prune sidecar logs and status metadata",
+        help="prune orchestration runtime logs and status metadata",
     )
     _add_common_args(maintenance, include_defaults=False)
     _add_maintenance_args(maintenance)
@@ -205,7 +215,7 @@ def _add_jobs_args(parser: argparse.ArgumentParser) -> None:
     submit.add_argument(
         "--start",
         action="store_true",
-        help="start the sidecar if it is not already running",
+        help="start the runtime if it is not already running",
     )
     submit.add_argument(
         "--submit-only",
@@ -319,7 +329,7 @@ def _write_payload(payload: dict, *, as_json: bool) -> None:
 
 
 def _status_exit_code(status: SidecarStatus) -> int:
-    """Return shell exit code for a sidecar status."""
+    """Return shell exit code for runtime status."""
     return 0 if status.state in {"running", "stopped"} else 1
 
 
@@ -331,11 +341,11 @@ def _extra_args(args: Sequence[str]) -> tuple[str, ...]:
 
 
 def _add_worker_fleet_args(parser: argparse.ArgumentParser) -> None:
-    """Add worker fleet options for supervised sidecar lifecycle commands."""
+    """Add worker fleet options for supervised runtime lifecycle commands."""
     parser.add_argument(
         "--namespace",
         default=DEFAULT_TEMPORAL_NAMESPACE,
-        help="Temporal namespace used by the local sidecar worker fleet",
+        help="Temporal namespace used by the local runtime worker fleet",
     )
     parser.add_argument(
         "--task-queue-prefix",
@@ -346,7 +356,7 @@ def _add_worker_fleet_args(parser: argparse.ArgumentParser) -> None:
         "--cpu-utilization",
         default="medium",
         help=(
-            "CPU policy used to derive sidecar worker concurrency "
+            "CPU policy used to derive runtime worker concurrency "
             "(low, medium, high, or percent 1-200)"
         ),
     )
@@ -402,12 +412,12 @@ def _add_job_command_common_args(
 
 
 def _add_maintenance_args(parser: argparse.ArgumentParser) -> None:
-    """Add retention options for sidecar maintenance."""
+    """Add retention options for runtime maintenance."""
     defaults = SidecarRetentionPolicy()
     parser.add_argument(
         "--allow-running",
         action="store_true",
-        help="allow cleanup while the sidecar is running",
+        help="allow cleanup while the runtime is running",
     )
     parser.add_argument(
         "--max-log-bytes",
@@ -511,7 +521,7 @@ def _retention_policy(args: argparse.Namespace) -> SidecarRetentionPolicy:
 
 
 def _write_maintenance_payload(payload: dict, *, as_json: bool) -> None:
-    """Write a sidecar maintenance payload."""
+    """Write a runtime maintenance payload."""
     if as_json:
         print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
         return
@@ -528,7 +538,7 @@ def _write_maintenance_payload(payload: dict, *, as_json: bool) -> None:
 
 
 def _run_jobs_command(args: argparse.Namespace) -> int:
-    """Run sidecar job control commands."""
+    """Run orchestration job control commands."""
     supervisor = _supervisor(args)
     config = (
         None
@@ -638,7 +648,7 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run sidecar lifecycle commands."""
+    """Run orchestration runtime lifecycle commands."""
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -698,7 +708,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0 if result.state == "completed" else 1
         if args.command == "jobs":
             return _run_jobs_command(args)
-        parser.error(f"unsupported sidecar command: {args.command}")
+        parser.error(f"unsupported runtime command: {args.command}")
     except (
         RuntimeError,
         SidecarResourceError,

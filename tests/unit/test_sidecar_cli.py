@@ -21,7 +21,7 @@ from histdatacom.sidecar.runtime import build_sidecar_runtime_policy
 
 
 class _StatusOnlySupervisor:
-    """Test double for sidecar CLI dispatch."""
+    """Test double for runtime CLI dispatch."""
 
     def __init__(self, state: str = "stopped") -> None:
         self.state = state
@@ -84,9 +84,9 @@ class _FakeStatus:
         return {
             "state": self.state,
             "message": self.message,
-            "state_dir": "/tmp/sidecar",
-            "pid_file": "/tmp/sidecar/sidecar.pid.json",
-            "lock_file": "/tmp/sidecar/sidecar.lock",
+            "state_dir": "/tmp/runtime",
+            "pid_file": "/tmp/runtime/runtime.pid.json",
+            "lock_file": "/tmp/runtime/runtime.lock",
             "logs": {},
             "pids": {},
             "command": [],
@@ -152,7 +152,7 @@ def test_sidecar_lifecycle_cli_commands_delegate_to_supervisor(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """Start, stop, and restart should be first-class sidecar commands."""
+    """Start, stop, and restart should be first-class runtime commands."""
     supervisor = _LifecycleSupervisor()
     monkeypatch.setattr(cli, "_supervisor", lambda args: supervisor)
 
@@ -295,6 +295,35 @@ def test_histdatacom_main_dispatches_jobs_command(
 
     assert histdata_com.main() == 0
     assert captured["argv"] == ("list", "--json")
+
+
+def test_histdatacom_main_dispatches_runtime_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The top-level histdatacom command should route runtime diagnostics."""
+    import histdatacom.histdata_com as histdata_com
+    import histdatacom.orchestration.cli as orchestration_cli
+
+    captured: dict[str, tuple[str, ...]] = {}
+
+    def fake_runtime_main(argv: list[str]) -> int:
+        captured["argv"] = tuple(argv)
+        return 0
+
+    monkeypatch.setattr(orchestration_cli, "main", fake_runtime_main)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "runtime",
+            "status",
+            "--json",
+        ],
+    )
+
+    assert histdata_com.main() == 0
+    assert captured["argv"] == ("status", "--json")
 
 
 def test_histdatacom_main_does_not_route_sidecar_command(

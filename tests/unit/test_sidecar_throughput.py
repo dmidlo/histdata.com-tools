@@ -133,11 +133,11 @@ def test_default_throughput_matrix_covers_issue_180_operations(
 def test_throughput_report_serializes_performance_envelope(
     tmp_path: Path,
 ) -> None:
-    """Reports should include sidecar metrics and tuning policy."""
+    """Reports should include runtime metrics and tuning policy."""
     [scenario, *_] = default_throughput_benchmark_matrix(
         data_directory=tmp_path
     )
-    sidecar = _runtime_result("sidecar", scenario.name, 2.0, 0.75)
+    runtime = _runtime_result("temporal-runtime", scenario.name, 2.0, 0.75)
     runtime_policy = build_sidecar_runtime_policy(
         workspace=tmp_path / "workspace",
         runtime_home=tmp_path / "runtime",
@@ -156,11 +156,11 @@ def test_throughput_report_serializes_performance_envelope(
         comparisons=(
             ThroughputComparison(
                 scenario=scenario,
-                sidecar=sidecar,
+                runtime=runtime,
             ),
         ),
-        sidecar_startup=BenchmarkMeasurement(
-            name="sidecar-startup",
+        runtime_startup=BenchmarkMeasurement(
+            name="runtime-startup",
             work_item_count=1,
             elapsed_seconds=0.25,
             cpu_seconds=0.0,
@@ -173,7 +173,8 @@ def test_throughput_report_serializes_performance_envelope(
     payload = report.to_dict()
 
     assert payload["issue"] == 180
-    assert payload["comparisons"][0]["sidecar"]["runtime"] == "sidecar"
+    assert payload["comparisons"][0]["runtime"]["runtime"] == "temporal-runtime"
+    assert payload["runtime_startup"]["name"] == "runtime-startup"
     assert "baseline" not in payload["comparisons"][0]
     assert payload["accepted_envelope"]["batch_default"]
     assert payload["accepted_envelope"]["influx_batch_default"]

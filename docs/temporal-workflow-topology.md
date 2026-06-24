@@ -88,9 +88,9 @@ Known lanes:
 - `cpu-file`
 - `influx`
 
-`histdatacom-sidecar-worker config --json` exposes the resolved namespace,
+`python -m histdatacom.orchestration.worker config --json` exposes the resolved namespace,
 target host, task queues, lane, and worker concurrency. See
-`docs/temporal-sidecar-performance.md` for the current lane sizing policy.
+`docs/temporal-orchestration-performance.md` for the current lane sizing policy.
 
 ## Status Queries
 
@@ -102,7 +102,7 @@ activity implementation modules.
 
 ## Control Surface
 
-`histdatacom-sidecar jobs inspect`, `progress`, `logs`, `artifacts`, `result`,
+`histdatacom jobs inspect`, `progress`, `logs`, `artifacts`, `result`,
 `cancel`, `retry`, and `resume` use the same bounded status and artifact
 contracts. Workflow IDs use the format `histdatacom-<request-id>`.
 

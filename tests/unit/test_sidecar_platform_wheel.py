@@ -1,4 +1,4 @@
-"""Tests for Temporal sidecar platform-wheel build helpers."""
+"""Tests for Temporal runtime platform-wheel build helpers."""
 
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ def _load_script() -> ModuleType:
     script_path = (
         Path(__file__).resolve().parents[2]
         / "scripts"
-        / "sidecar_platform_wheel.py"
+        / "runtime_platform_wheel.py"
     )
     spec = importlib.util.spec_from_file_location(
-        "sidecar_platform_wheel", script_path
+        "runtime_platform_wheel", script_path
     )
     assert spec is not None
     assert spec.loader is not None
@@ -28,7 +28,7 @@ def _load_script() -> ModuleType:
 
 
 def _write_manifest(source_root: Path) -> None:
-    """Write a minimal sidecar manifest into a temporary source tree."""
+    """Write a minimal runtime manifest into a temporary source tree."""
     asset_root = source_root / "src/histdatacom/sidecar/assets"
     asset_root.mkdir(parents=True)
     (asset_root / "third-party/temporal-cli").mkdir(parents=True)
@@ -44,7 +44,7 @@ def _write_manifest(source_root: Path) -> None:
         json.dumps(
             {
                 "schema_version": 1,
-                "sidecar": "temporal",
+                "runtime": "temporal",
                 "distribution_strategy": (
                     "metadata-wheel-with-verified-runtime-provisioning"
                 ),
@@ -148,7 +148,7 @@ def test_copy_source_tree_excludes_local_data_and_release_state(
     assert not (staged / "venv").exists()
 
 
-def test_prepare_sidecar_binary_patches_manifest_and_copies_executable(
+def test_prepare_runtime_binary_patches_manifest_and_copies_executable(
     tmp_path: Path,
 ) -> None:
     """A supplied Temporal binary should become a declared package asset."""
@@ -159,7 +159,7 @@ def test_prepare_sidecar_binary_patches_manifest_and_copies_executable(
     executable.write_text("#!/bin/sh\n", encoding="utf-8")
     executable.chmod(0o755)
 
-    report = module.prepare_sidecar_binary(
+    report = module.prepare_runtime_binary(
         source_root=source_root,
         platform_key="macos-arm64",
         executable=executable,

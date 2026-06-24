@@ -1,4 +1,4 @@
-"""Tests for wheel sidecar resource inspection."""
+"""Tests for wheel runtime resource inspection."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def _wheel_info(path: str, mode: int = 0o644) -> ZipInfo:
 
 
 def _base_manifest() -> dict[str, object]:
-    """Return the repository sidecar manifest fixture."""
+    """Return the repository runtime manifest fixture."""
     manifest_path = (
         Path(__file__).resolve().parents[2]
         / "src/histdatacom/sidecar/assets/manifest.json"
@@ -85,7 +85,7 @@ def _provenance() -> dict[str, object]:
             "size_bytes": len(EXECUTABLE_BYTES),
             "version_probe": "temporal version 1.7.2",
         },
-        "builder": "scripts/sidecar_platform_wheel.py",
+        "builder": "scripts/runtime_platform_wheel.py",
     }
 
 
@@ -94,10 +94,10 @@ def _write_common_assets(
     *,
     manifest: dict[str, object],
 ) -> None:
-    """Write common sidecar assets to a fake wheel."""
+    """Write common runtime assets to a fake wheel."""
     wheel.writestr(
         "histdatacom/sidecar/assets/README.md",
-        "sidecar assets",
+        "runtime assets",
     )
     wheel.writestr(
         "histdatacom/sidecar/assets/runtime-defaults.json",
@@ -171,11 +171,6 @@ def _write_dist_info(wheel: ZipFile, *, tag: str) -> None:
             [
                 "[console_scripts]",
                 "histdatacom = histdatacom.histdata_com:main",
-                "histdatacom-sidecar = histdatacom.orchestration.cli:main",
-                (
-                    "histdatacom-sidecar-worker = "
-                    "histdatacom.orchestration.worker:main"
-                ),
                 "",
             ]
         ),
@@ -235,9 +230,9 @@ def test_inspect_wheel_accepts_bundled_platform_executable(
         require_bundled_platforms={"macos-arm64"},
     )
 
-    assert report["sidecar"]["embedded_binary"] is True
-    assert report["sidecar"]["bundled_platforms"] == ["macos-arm64"]
-    assert report["sidecar"]["provenance"]["macos-arm64"]["version"] == "1.7.2"
+    assert report["runtime"]["embedded_binary"] is True
+    assert report["runtime"]["bundled_platforms"] == ["macos-arm64"]
+    assert report["runtime"]["provenance"]["macos-arm64"]["version"] == "1.7.2"
     assert set(module.EXPECTED_METADATA_CLASSIFIERS) <= set(
         report["classifiers"]
     )
@@ -258,12 +253,12 @@ def test_inspect_wheel_accepts_metadata_only_fallback(
 
     report = module.inspect_wheel(wheel_path)
 
-    assert report["sidecar"]["embedded_binary"] is False
-    assert report["sidecar"]["bundled_platforms"] == []
-    assert report["sidecar"]["provenance"] == {}
+    assert report["runtime"]["embedded_binary"] is False
+    assert report["runtime"]["bundled_platforms"] == []
+    assert report["runtime"]["provenance"] == {}
     assert (
         "temporal-cli-provenance.json"
-        not in report["sidecar"]["resource_files"]
+        not in report["runtime"]["resource_files"]
     )
     assert report["wheel_tags"] == ["py3-none-any"]
 

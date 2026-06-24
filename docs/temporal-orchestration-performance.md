@@ -1,8 +1,8 @@
-# Temporal Sidecar Performance Baseline
+# Temporal Orchestration Performance Baseline
 
 Issues: #166, #180, #181, #187
 
-See `docs/temporal-sidecar-operations.md` for lifecycle commands, runtime
+See `docs/temporal-orchestration-operations.md` for lifecycle commands, runtime
 paths, troubleshooting, and worker startup guidance. This page is limited to
 the performance baseline and lane sizing policy.
 
@@ -17,22 +17,22 @@ The retired manager-backed runtime had three distinct concurrency behaviors:
 - Influx import uses bounded line-protocol batches and writes sequentially
   through one `InfluxBatchWriter`.
 
-The sidecar keeps those lanes separate as orchestration, network, CPU/file, and
+The runtime keeps those lanes separate as orchestration, network, CPU/file, and
 Influx task queues. Workflow payloads stay bounded to metadata, artifacts, and
 status events; downloaded archives, CSV files, and cache data remain on disk.
 
-## Sidecar Worker Policy
+## Runtime Worker Policy
 
-`histdatacom.sidecar.performance.build_sidecar_concurrency_profile()` derives a
-lane policy from the existing `cpu_utilization` setting:
+The runtime concurrency profile derives a lane policy from the existing
+`cpu_utilization` setting:
 
 - orchestration: `1`
 - network: `get_pool_cpu_count(cpu_utilization) * 3`
 - cpu-file: `get_pool_cpu_count(cpu_utilization)`
 - influx: `1`
 
-`histdatacom-sidecar start` and `histdatacom-sidecar restart` pass the same
-policy to every supervised worker lane. `histdatacom-sidecar-worker` exposes
+`histdatacom runtime start` and `histdatacom runtime restart` pass the same
+policy to every supervised worker lane. `python -m histdatacom.orchestration.worker` exposes
 the same flags for manual lane debugging:
 
 - `--cpu-utilization`
@@ -47,13 +47,12 @@ lane, so operators can tune a hot lane without changing the package.
 Inspect resolved worker settings with:
 
 ```sh
-histdatacom-sidecar-worker config --lane network --json
+python -m histdatacom.orchestration.worker config --lane network --json
 ```
 
 ## Benchmark Coverage
 
-`histdatacom.sidecar.performance.benchmark_operation()` captures compact local
-metrics:
+The operation benchmark captures compact local metrics:
 
 - elapsed wall-clock seconds
 - process CPU seconds
@@ -74,9 +73,9 @@ operations:
 This keeps the baseline runnable without HistData.com, Temporal server, or
 InfluxDB availability.
 
-`histdatacom.sidecar.performance.benchmark_partition_batching()` compares the
+The partition-batching benchmark compares the
 old coarse pair/timeframe partition shape with the period-batch fanout used by
-the sidecar. Its metadata reports:
+the runtime. Its metadata reports:
 
 - coarse partition count
 - period batch count
@@ -156,7 +155,7 @@ single batch, `ValidateUrlsWorkflow`, `DownloadArchivesWorkflow`,
 `ImportWorkflow` still run in dependency order so work-item forwarding remains
 correct.
 
-## Influx Sidecar Contract
+## Influx Runtime Contract
 
 Issue #187 accepts deterministic contract-backed Influx coverage when no real
 InfluxDB service is available. The contract test executes `ImportWorkflow`
@@ -195,13 +194,13 @@ cache builds are CPU-bound and memory headroom remains stable.
 
 ## Live Throughput Matrix
 
-Issue #180 added an operator-gated benchmark script for the live Temporal
-sidecar request matrix:
+Issue #180 added an operator-gated benchmark for the live Temporal runtime
+request matrix:
 
 ```sh
-HISTDATACOM_LIVE_SIDECAR_THROUGHPUT=1 \
+HISTDATACOM_LIVE_RUNTIME_THROUGHPUT=1 \
 HISTDATACOM_TEMPORAL_EXECUTABLE=/opt/local/bin/temporal \
-python scripts/benchmark_sidecar_throughput.py \
+python scripts/benchmark_runtime_throughput.py \
   --workspace /tmp/histdatacom-issue180-benchmark/workspace \
   --runtime-home /tmp/histdatacom-issue180-benchmark/runtime \
   --data-directory /tmp/histdatacom-issue180-benchmark/data \
@@ -250,7 +249,7 @@ contract-backed workflow test described above, and Docker-backed live
 writer/query validation is available through
 `python scripts/smoke_influx_docker.py`.
 
-| Scenario | Retired baseline elapsed | Sidecar elapsed | Ratio | Sidecar process CPU | Artifacts | Failures/retries |
+| Scenario | Retired baseline elapsed | Runtime elapsed | Ratio | Runtime process CPU | Artifacts | Failures/retries |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | repository-refresh | 0.054s | 0.944s | 17.482x | 2.670s | 1 | 0/0 |
 | validate-url | 0.388s | 0.665s | 1.716x | 0.320s | 0 | 0/0 |
@@ -258,12 +257,12 @@ writer/query validation is available through
 | download-extract | 1.883s | 2.492s | 1.323x | 0.630s | 2 | 0/0 |
 | cache-merge-no-influx | 1.791s | 2.338s | 1.306x | 0.700s | 3 | 0/0 |
 
-Sidecar startup was 0.133s in this run. The fan-out scenario used EURUSD and
+Runtime startup was 0.133s in this run. The fan-out scenario used EURUSD and
 GBPUSD ASCII tick data for 202201 through 202203 with
-`max_work_items_per_batch=1` and `max_parallel_child_workflows=2`. The sidecar
+`max_work_items_per_batch=1` and `max_parallel_child_workflows=2`. The runtime
 summary reported six planned work items, six `SymbolTimeframeWorkflow` child
 results, seven total child stages including dataset planning, and no failures
-or retries. The sidecar path successfully forwarded planned work items through
+or retries. The runtime path successfully forwarded planned work items through
 live Temporal child workflows and produced expected ZIP, CSV, and cache
 artifacts for the non-fan-out artifact scenarios.
 
@@ -282,7 +281,7 @@ No lane default changes are warranted from the issue #180 measurements:
 - Keep the production batch default at `64` work items per child workflow.
 - Keep the production fan-out default at `4` parallel child workflows.
 
-The sidecar has fixed orchestration overhead, so repository-only and
+The runtime has fixed orchestration overhead, so repository-only and
 single-item jobs include startup and workflow bookkeeping costs. That tradeoff
 is acceptable for the Temporal migration because the live path proves bounded
 workflow history, real activity handoff, artifact references instead of

@@ -1,4 +1,4 @@
-"""Tests for installed-package sidecar smoke helpers."""
+"""Tests for installed-package runtime smoke helpers."""
 
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ def _module():
     script_path = (
         Path(__file__).resolve().parents[2]
         / "scripts"
-        / "smoke_sidecar_install.py"
+        / "smoke_runtime_install.py"
     )
     spec = importlib.util.spec_from_file_location(
-        "smoke_sidecar_install",
+        "smoke_runtime_install",
         script_path,
     )
     assert spec is not None
@@ -34,7 +34,7 @@ def test_install_wheel_installs_temporal_extra_with_direct_reference(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """Starting the sidecar smoke should install the Temporal extra."""
+    """Runtime smoke should install the Temporal extra when requested."""
     module = _module()
     wheel = tmp_path / "histdatacom-0.0.0-py3-none-any.whl"
     wheel.touch()
@@ -63,11 +63,11 @@ def test_install_wheel_installs_temporal_extra_with_direct_reference(
     ]
 
 
-def test_check_live_sidecar_smoke_returns_live_report(
+def test_check_live_runtime_smoke_returns_live_report(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """Install smoke should expose the operator-gated live sidecar check."""
+    """Install smoke should expose the operator-gated live runtime check."""
     module = _module()
     captured: dict[str, Any] = {}
 
@@ -85,7 +85,7 @@ def test_check_live_sidecar_smoke_returns_live_report(
         fake_run_live_sidecar_smoke,
     )
 
-    report = module.check_live_sidecar_smoke(
+    report = module.check_live_runtime_smoke(
         workspace=tmp_path / "workspace",
         runtime_home=tmp_path / "runtime",
         data_directory=tmp_path / "data",
@@ -105,11 +105,11 @@ def test_check_live_sidecar_smoke_returns_live_report(
     assert captured["stop_timeout"] == 5.0
 
 
-def test_check_hermetic_sidecar_smoke_returns_hermetic_report(
+def test_check_hermetic_runtime_smoke_returns_hermetic_report(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """Install smoke should expose the release-gating hermetic sidecar check."""
+    """Install smoke should expose the release-gating hermetic runtime check."""
     module = _module()
     captured: dict[str, Any] = {}
 
@@ -127,7 +127,7 @@ def test_check_hermetic_sidecar_smoke_returns_hermetic_report(
         fake_run_hermetic_sidecar_smoke,
     )
 
-    report = module.check_hermetic_sidecar_smoke(
+    report = module.check_hermetic_runtime_smoke(
         workspace=tmp_path / "workspace",
         runtime_home=tmp_path / "runtime",
         data_directory=tmp_path / "data",
@@ -147,7 +147,7 @@ def test_check_hermetic_sidecar_smoke_returns_hermetic_report(
     assert captured["stop_timeout"] == 5.0
 
 
-def test_check_default_routing_sidecar_smoke_returns_report(
+def test_check_default_routing_runtime_smoke_returns_report(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -171,7 +171,7 @@ def test_check_default_routing_sidecar_smoke_returns_report(
         fake_run_default_client_routing_sidecar_smoke,
     )
 
-    report = module.check_default_routing_sidecar_smoke(
+    report = module.check_default_routing_runtime_smoke(
         workspace=tmp_path / "workspace",
         runtime_home=tmp_path / "runtime",
         data_directory=tmp_path / "data",
@@ -191,7 +191,7 @@ def test_check_default_routing_sidecar_smoke_returns_report(
     assert captured["stop_timeout"] == 5.0
 
 
-def test_check_quality_sidecar_smoke_runs_installed_quality_cli(
+def test_check_quality_runtime_smoke_runs_installed_quality_cli(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -269,7 +269,7 @@ def test_check_quality_sidecar_smoke_runs_installed_quality_cli(
     monkeypatch.setattr(module, "_run", fake_run)
     monkeypatch.setattr(module, "_run_json", fake_run_json)
 
-    report = module.check_quality_sidecar_smoke(
+    report = module.check_quality_runtime_smoke(
         workspace=tmp_path / "workspace",
         runtime_home=tmp_path / "runtime",
         data_directory=tmp_path / "data",
@@ -288,28 +288,28 @@ def test_check_quality_sidecar_smoke_runs_installed_quality_cli(
     assert report["jobs"]["dirty_status"] == "failed"
     assert any(command[0].endswith("histdatacom") for command in commands)
     assert any(
-        command[:2] == ["/venv/bin/histdatacom-sidecar", "--workspace"]
+        command[:3] == ["/venv/bin/histdatacom", "runtime", "--workspace"]
         and "start" in command
         and "--executable" in command
         for command in commands
     )
-    assert any("--no-sidecar-start" in command for command in commands)
+    assert any("--no-orchestration-start" in command for command in commands)
     assert all(
-        env.get("HISTDATACOM_SIDECAR_WORKSPACE") == str(tmp_path / "workspace")
+        env.get("HISTDATACOM_RUNTIME_WORKSPACE") == str(tmp_path / "workspace")
         for env in run_envs
     )
     assert all(
-        env.get("HISTDATACOM_SIDECAR_HOME") == str(tmp_path / "runtime")
+        env.get("HISTDATACOM_RUNTIME_HOME") == str(tmp_path / "runtime")
         for env in run_envs
     )
 
 
-def test_quality_sidecar_smoke_rejects_shutdown_leaks() -> None:
-    """Quality smoke should fail if sidecar stop leaves live PIDs."""
+def test_quality_runtime_smoke_rejects_shutdown_leaks() -> None:
+    """Quality smoke should fail if runtime stop leaves live PIDs."""
     module = _module()
 
     try:
-        module._validate_quality_sidecar_stop(
+        module._validate_quality_runtime_stop(
             {"state": "stopped", "pids": {"worker": 123}}
         )
     except SystemExit as err:
@@ -318,7 +318,7 @@ def test_quality_sidecar_smoke_rejects_shutdown_leaks() -> None:
         raise AssertionError("expected shutdown leak to fail")
 
 
-def test_check_sidecar_resources_reports_external_runtime_resolution(
+def test_check_runtime_resources_reports_external_runtime_resolution(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -336,7 +336,7 @@ def test_check_sidecar_resources_reports_external_runtime_resolution(
         archive_size_bytes=1024,
     )
     manifest = SimpleNamespace(
-        sidecar="temporal",
+        runtime="temporal",
         distribution_strategy="metadata-only",
         embedded_binary=False,
         platforms={"linux-x86_64": resource},
@@ -413,7 +413,7 @@ def test_check_sidecar_resources_reports_external_runtime_resolution(
         ),
     )
 
-    report = module.check_sidecar_resources(
+    report = module.check_runtime_resources(
         require_external_runtime_provisioning=True,
         check_executable_version=True,
     )
@@ -427,7 +427,7 @@ def test_check_sidecar_resources_reports_external_runtime_resolution(
     ]
 
 
-def test_check_sidecar_resources_rejects_explicit_runtime_for_external_preflight(
+def test_check_runtime_resources_rejects_explicit_runtime_for_external_preflight(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -439,7 +439,7 @@ def test_check_sidecar_resources_rejects_explicit_runtime_for_external_preflight
     executable.write_text("#!/bin/sh\necho temporal\n", encoding="utf-8")
     executable.chmod(0o755)
     manifest = SimpleNamespace(
-        sidecar="temporal",
+        runtime="temporal",
         distribution_strategy="metadata-only",
         embedded_binary=False,
         platforms={"linux-x86_64": SimpleNamespace(bundled=False)},
@@ -508,7 +508,7 @@ def test_check_sidecar_resources_rejects_explicit_runtime_for_external_preflight
     )
 
     try:
-        module.check_sidecar_resources(
+        module.check_runtime_resources(
             require_external_runtime_provisioning=True,
             check_executable_version=True,
             temporal_executable=executable,

@@ -87,7 +87,7 @@ def _manifest_with_bundled_resource(
 ) -> SidecarManifest:
     return SidecarManifest(
         schema_version=1,
-        sidecar="temporal",
+        runtime="temporal",
         distribution_strategy="test",
         embedded_binary=True,
         resource_files=(),

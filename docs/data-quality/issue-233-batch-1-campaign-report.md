@@ -43,10 +43,10 @@ The hosted GitHub `.repo` index was reachable and the listed batch rows matched 
 
 ## Deferred Boundaries
 
-- #240: full-surface execution needs a storage-backed installed/platform-wheel sidecar environment.
+- #240: full-surface execution needs a storage-backed installed/platform-wheel runtime environment.
 - #225: non-ASCII quality support is not complete, so those formats must not be treated as deeply clean.
 - #223: canonical cache artifacts still need deep cache validation.
-- #224: installed-package sidecar quality smoke remains the release-grade proof path for the packaged Temporal executable.
+- #224: installed-package runtime quality smoke remains the release-grade proof path for the packaged Temporal executable.
 
 ## Resume Path
 

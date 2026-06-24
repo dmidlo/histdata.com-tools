@@ -1119,7 +1119,7 @@ def test_default_state_dir_accepts_environment_override(
     """Environment override should support tests and GUI launchers."""
     from histdatacom.sidecar.supervisor import default_sidecar_state_dir
 
-    monkeypatch.setenv("HISTDATACOM_SIDECAR_HOME", str(tmp_path))
+    monkeypatch.setenv("HISTDATACOM_RUNTIME_HOME", str(tmp_path))
     workspace = tmp_path / "workspace"
     workspace.mkdir(parents=True)
     monkeypatch.chdir(workspace)

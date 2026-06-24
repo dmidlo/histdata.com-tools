@@ -145,24 +145,25 @@ def test_download_smoke_uses_bounded_historical_m1_download(
     assert "now" not in command
     assert json_commands == [
         [
-            str(tmp_path / "venv" / "bin" / "histdatacom-sidecar"),
+            str(tmp_path / "venv" / "bin" / "histdatacom"),
+            "runtime",
             "--json",
             "stop",
         ]
     ]
     assert captured_envs[0]["VIRTUAL_ENV"] == str(tmp_path / "venv")
-    assert captured_envs[0]["HISTDATACOM_SIDECAR_HOME"] == str(
-        tmp_path / "download-smoke-sidecar-runtime"
+    assert captured_envs[0]["HISTDATACOM_RUNTIME_HOME"] == str(
+        tmp_path / "download-smoke-runtime"
     )
-    assert captured_envs[0]["HISTDATACOM_SIDECAR_WORKSPACE"] == str(
-        tmp_path / "download-smoke-sidecar-workspace"
+    assert captured_envs[0]["HISTDATACOM_RUNTIME_WORKSPACE"] == str(
+        tmp_path / "download-smoke-runtime-workspace"
     )
     assert captured_envs[0]["HISTDATACOM_TEMPORAL_CACHE_DIR"] == str(
         tmp_path / "temporal-runtime-cache"
     )
     assert captured_envs[1] == captured_envs[0]
     assert report["files"] == ["HISTDATA_COM_ASCII_EURUSD_M1202201.zip"]
-    assert report["sidecar_stop"] == {"state": "stopped"}
+    assert report["runtime_stop"] == {"state": "stopped"}
 
 
 def test_release_verification_environment_isolates_runtime_overrides(
@@ -173,8 +174,8 @@ def test_release_verification_environment_isolates_runtime_overrides(
     module = _module()
     monkeypatch.setenv("HISTDATACOM_TEMPORAL_EXECUTABLE", "/tmp/temporal")
     monkeypatch.setenv("HISTDATACOM_TEMPORAL_OFFLINE", "1")
-    monkeypatch.setenv("HISTDATACOM_SIDECAR_HOME", "/tmp/runtime")
-    monkeypatch.setenv("HISTDATACOM_SIDECAR_WORKSPACE", "/tmp/workspace")
+    monkeypatch.setenv("HISTDATACOM_RUNTIME_HOME", "/tmp/runtime")
+    monkeypatch.setenv("HISTDATACOM_RUNTIME_WORKSPACE", "/tmp/workspace")
 
     env = module._release_verification_environment(
         venv_dir=tmp_path / "venv",
@@ -183,8 +184,8 @@ def test_release_verification_environment_isolates_runtime_overrides(
 
     assert "HISTDATACOM_TEMPORAL_EXECUTABLE" not in env
     assert "HISTDATACOM_TEMPORAL_OFFLINE" not in env
-    assert "HISTDATACOM_SIDECAR_HOME" not in env
-    assert "HISTDATACOM_SIDECAR_WORKSPACE" not in env
+    assert "HISTDATACOM_RUNTIME_HOME" not in env
+    assert "HISTDATACOM_RUNTIME_WORKSPACE" not in env
     assert env["HISTDATACOM_TEMPORAL_CACHE_DIR"] == str(
         tmp_path / "temporal-runtime-cache"
     )
@@ -207,10 +208,10 @@ def test_cli_parity_probe_requires_current_flags(
                 stdout=" ".join(module.EXPECTED_HELP_TOKENS),
                 stderr="",
             )
-        if executable == "histdatacom-sidecar":
+        if executable == "histdatacom" and "runtime" in command:
             return SimpleNamespace(
                 returncode=0,
-                stdout=" ".join(module.EXPECTED_SIDECAR_COMMANDS),
+                stdout=" ".join(module.EXPECTED_RUNTIME_COMMANDS),
                 stderr="",
             )
         return SimpleNamespace(returncode=0, stdout="worker help", stderr="")
@@ -225,7 +226,7 @@ def test_cli_parity_probe_requires_current_flags(
 
     assert report["version"] == "0.79.0"
     assert "--quality" in report["required_help_tokens"]
-    assert "doctor" in report["sidecar_commands"]
+    assert "doctor" in report["runtime_commands"]
 
 
 def test_cli_parity_probe_fails_on_stale_help(
@@ -253,7 +254,7 @@ def test_cli_parity_probe_fails_on_stale_help(
         )
 
 
-def test_smoke_sidecar_install_probe_passes_strong_flags(
+def test_smoke_runtime_install_probe_passes_strong_flags(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -269,11 +270,11 @@ def test_smoke_sidecar_install_probe_passes_strong_flags(
         require_external_runtime_provisioning=True,
         check_executable_version=True,
         temporal_executable=None,
-        start_sidecar=True,
-        hermetic_sidecar_smoke=True,
-        default_routing_sidecar_smoke=True,
-        quality_sidecar_smoke=True,
-        live_sidecar_smoke=True,
+        start_runtime=True,
+        hermetic_runtime_smoke=True,
+        default_routing_runtime_smoke=True,
+        quality_runtime_smoke=True,
+        live_runtime_smoke=True,
     )
 
     def fake_run_json(command: list[str], **_: Any) -> dict[str, str]:
@@ -282,7 +283,7 @@ def test_smoke_sidecar_install_probe_passes_strong_flags(
 
     monkeypatch.setattr(module, "_run_json", fake_run_json)
 
-    report = module._smoke_sidecar_install_probe(
+    report = module._smoke_runtime_install_probe(
         venv_python=tmp_path / "venv" / "bin" / "python",
         venv_dir=tmp_path / "venv",
         root=tmp_path,
@@ -294,14 +295,14 @@ def test_smoke_sidecar_install_probe_passes_strong_flags(
     assert "--require-bundled-current-platform" in command
     assert "--require-external-runtime-provisioning" in command
     assert "--check-executable-version" in command
-    assert "--start-sidecar" in command
-    assert "--hermetic-sidecar-smoke" in command
-    assert "--default-routing-sidecar-smoke" in command
-    assert "--quality-sidecar-smoke" in command
-    assert "--live-sidecar-smoke" in command
+    assert "--start-runtime" in command
+    assert "--hermetic-runtime-smoke" in command
+    assert "--default-routing-runtime-smoke" in command
+    assert "--quality-runtime-smoke" in command
+    assert "--live-runtime-smoke" in command
 
 
-def test_smoke_sidecar_install_probe_exposes_venv_scripts(
+def test_smoke_runtime_install_probe_exposes_venv_scripts(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -317,11 +318,11 @@ def test_smoke_sidecar_install_probe_exposes_venv_scripts(
         require_external_runtime_provisioning=False,
         check_executable_version=False,
         temporal_executable=tmp_path / "temporal",
-        start_sidecar=False,
-        hermetic_sidecar_smoke=False,
-        default_routing_sidecar_smoke=False,
-        quality_sidecar_smoke=False,
-        live_sidecar_smoke=False,
+        start_runtime=False,
+        hermetic_runtime_smoke=False,
+        default_routing_runtime_smoke=False,
+        quality_runtime_smoke=False,
+        live_runtime_smoke=False,
     )
 
     def fake_run_json(command: list[str], **kwargs: Any) -> dict[str, str]:
@@ -330,7 +331,7 @@ def test_smoke_sidecar_install_probe_exposes_venv_scripts(
 
     monkeypatch.setattr(module, "_run_json", fake_run_json)
 
-    module._smoke_sidecar_install_probe(
+    module._smoke_runtime_install_probe(
         venv_python=tmp_path / "venv" / "bin" / "python",
         venv_dir=tmp_path / "venv",
         root=tmp_path,
@@ -341,7 +342,7 @@ def test_smoke_sidecar_install_probe_exposes_venv_scripts(
     assert captured_env["PATH"].split(":")[0] == str(tmp_path / "venv" / "bin")
 
 
-def test_smoke_sidecar_install_probe_accepts_explicit_developer_runtime(
+def test_smoke_runtime_install_probe_accepts_explicit_developer_runtime(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -357,11 +358,11 @@ def test_smoke_sidecar_install_probe_accepts_explicit_developer_runtime(
         require_external_runtime_provisioning=False,
         check_executable_version=True,
         temporal_executable=tmp_path / "temporal",
-        start_sidecar=False,
-        hermetic_sidecar_smoke=False,
-        default_routing_sidecar_smoke=False,
-        quality_sidecar_smoke=False,
-        live_sidecar_smoke=False,
+        start_runtime=False,
+        hermetic_runtime_smoke=False,
+        default_routing_runtime_smoke=False,
+        quality_runtime_smoke=False,
+        live_runtime_smoke=False,
     )
 
     def fake_run_json(command: list[str], **_: Any) -> dict[str, str]:
@@ -370,7 +371,7 @@ def test_smoke_sidecar_install_probe_accepts_explicit_developer_runtime(
 
     monkeypatch.setattr(module, "_run_json", fake_run_json)
 
-    module._smoke_sidecar_install_probe(
+    module._smoke_runtime_install_probe(
         venv_python=tmp_path / "venv" / "bin" / "python",
         venv_dir=tmp_path / "venv",
         root=tmp_path,

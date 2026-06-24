@@ -837,17 +837,17 @@ The normal user path does not require process lifecycle commands. Maintainers
 can inspect and manage the local runtime through the lower-level lifecycle CLI:
 
 ```sh
-histdatacom-sidecar doctor --json
-histdatacom-sidecar status --json
-histdatacom-sidecar start
-histdatacom-sidecar start --executable /path/to/temporal
-histdatacom-sidecar stop
+histdatacom runtime doctor --json
+histdatacom runtime status --json
+histdatacom runtime start
+histdatacom runtime start --executable /path/to/temporal
+histdatacom runtime stop
 ```
 
 `status` and `doctor` report component health for the server and each worker
 lane: `orchestration`, `network`, `cpu-file`, and `influx`.
 
-Use `--workspace` or `HISTDATACOM_SIDECAR_WORKSPACE` for cron, service
+Use `--workspace` or `HISTDATACOM_RUNTIME_WORKSPACE` for cron, service
 managers, GUI launchers, and other contexts where the current working directory
 may not be stable.
 
@@ -900,12 +900,12 @@ runtime. `options.use_orchestration = False` is not supported.
 
 #### Runtime Troubleshooting and Contributor Docs
 
-See [Temporal Sidecar Operations](docs/temporal-sidecar-operations.md) for the
+See [Temporal Orchestration Operations](docs/temporal-orchestration-operations.md) for the
 runtime path layout, port policy, lifecycle commands, job controls,
 cancellation/resume behavior, and troubleshooting guidance. See
 [Temporal Workflow Topology](docs/temporal-workflow-topology.md) for workflow,
 activity, task queue, and testing boundaries. See
-[Temporal Sidecar Performance Baseline](docs/temporal-sidecar-performance.md)
+[Temporal Orchestration Performance Baseline](docs/temporal-orchestration-performance.md)
 for lane sizing and benchmark policy.
 
 ---
@@ -1342,24 +1342,24 @@ uploads `coverage.xml` plus the `htmlcov/` report for every Python and OS matrix
 leg. The first-pass gate is total-only. Per-package or domain thresholds belong
 with the broader testing work tracked in issues #9 and #68.
 
-The live Temporal sidecar smoke is not collected by default pytest because it
+The live Temporal runtime smoke is not collected by default pytest because it
 requires a real Temporal executable and starts local worker processes. Bundled
 platform-wheel release smoke uses
-`scripts/smoke_sidecar_install.py --hermetic-sidecar-smoke`, which submits a
+`scripts/smoke_runtime_install.py --hermetic-runtime-smoke`, which submits a
 local-only dataset-planning workflow with an explicit worker config and does
 not contact HistData.com. Bundled platform-wheel release smoke also runs
-`scripts/smoke_sidecar_install.py --default-routing-sidecar-smoke`, which
-starts the sidecar with non-default worker routing and submits without an
+`scripts/smoke_runtime_install.py --default-routing-runtime-smoke`, which
+starts the runtime with non-default worker routing and submits without an
 explicit worker config so the installed package must resolve the running
-frontend, namespace, and queues from persisted sidecar state. Run
-`scripts/smoke_sidecar_install.py --quality-sidecar-smoke` to exercise the
+frontend, namespace, and queues from persisted runtime state. Run
+`scripts/smoke_runtime_install.py --quality-runtime-smoke` to exercise the
 installed `histdatacom --quality` console command against clean and dirty
 local M1 fixtures through the packaged `DataQualityWorkflow` without contacting
 HistData.com or InfluxDB. Run
-`scripts/smoke_sidecar_install.py --live-sidecar-smoke` separately when an
+`scripts/smoke_runtime_install.py --live-runtime-smoke` separately when an
 operator intentionally wants external HistData.com URL-validation coverage.
 These commands fail on shutdown leaks: stop exceptions, missing stop status,
-persistent `stopping` status, or known remaining sidecar PIDs.
+persistent `stopping` status, or known remaining runtime PIDs.
 
 ---
 

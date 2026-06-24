@@ -1,4 +1,4 @@
-"""Reproducible live sidecar throughput benchmarks."""
+"""Reproducible live runtime throughput benchmarks."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ from histdatacom.sidecar.workflows import (
     MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY,
 )
 
-LIVE_SIDECAR_THROUGHPUT_ENV = "HISTDATACOM_LIVE_SIDECAR_THROUGHPUT"
+LIVE_RUNTIME_THROUGHPUT_ENV = "HISTDATACOM_LIVE_RUNTIME_THROUGHPUT"
 DEFAULT_THROUGHPUT_REQUEST_PREFIX = "live-throughput"
 DEFAULT_THROUGHPUT_PERIOD = "202201"
 DEFAULT_THROUGHPUT_FANOUT_END_PERIOD = "202203"
@@ -112,21 +112,21 @@ class RuntimeBenchmarkResult:
 
 @dataclass(frozen=True, slots=True)
 class ThroughputComparison:
-    """Sidecar measurement for one benchmark scenario."""
+    """Runtime measurement for one benchmark scenario."""
 
     scenario: ThroughputBenchmarkScenario
-    sidecar: RuntimeBenchmarkResult
+    runtime: RuntimeBenchmarkResult
     baseline: RuntimeBenchmarkResult | None = None
 
     @property
-    def sidecar_to_baseline_elapsed_ratio(self) -> float | None:
-        """Return sidecar elapsed seconds divided by an optional baseline."""
+    def runtime_to_baseline_elapsed_ratio(self) -> float | None:
+        """Return runtime elapsed seconds divided by an optional baseline."""
         if self.baseline is None:
             return None
         baseline_elapsed = self.baseline.measurement.elapsed_seconds
         if baseline_elapsed <= 0:
             return 0.0
-        return float(self.sidecar.measurement.elapsed_seconds) / float(
+        return float(self.runtime.measurement.elapsed_seconds) / float(
             baseline_elapsed
         )
 
@@ -134,22 +134,22 @@ class ThroughputComparison:
         """Return JSON-compatible measurement metadata."""
         payload: dict[str, JSONValue] = {
             "scenario": self.scenario.to_dict(),
-            "sidecar": self.sidecar.to_dict(),
+            "runtime": self.runtime.to_dict(),
         }
         if self.baseline is not None:
             payload["baseline"] = self.baseline.to_dict()
-            payload["sidecar_to_baseline_elapsed_ratio"] = (
-                self.sidecar_to_baseline_elapsed_ratio
+            payload["runtime_to_baseline_elapsed_ratio"] = (
+                self.runtime_to_baseline_elapsed_ratio
             )
         return payload
 
 
 @dataclass(frozen=True, slots=True)
 class ThroughputBenchmarkReport:
-    """Complete live sidecar throughput benchmark report."""
+    """Complete live runtime throughput benchmark report."""
 
     comparisons: tuple[ThroughputComparison, ...]
-    sidecar_startup: BenchmarkMeasurement
+    runtime_startup: BenchmarkMeasurement
     worker_config: SidecarWorkerConfig
     started_status: SidecarStatus
     stopped_status: SidecarStatus | None = None
@@ -166,7 +166,7 @@ class ThroughputBenchmarkReport:
             "comparisons": [
                 comparison.to_dict() for comparison in self.comparisons
             ],
-            "sidecar_startup": self.sidecar_startup.to_dict(),
+            "runtime_startup": self.runtime_startup.to_dict(),
             "worker_config": self.worker_config.to_dict(),
             "started_status": self.started_status.to_dict(),
             "stopped_status": (
@@ -391,7 +391,7 @@ def run_live_sidecar_throughput_benchmark(
     supervisor_factory: Callable[..., SidecarSupervisor] = SidecarSupervisor,
     submit_job: SubmitObservedJob | None = None,
 ) -> ThroughputBenchmarkReport:
-    """Run live sidecar throughput measurements."""
+    """Run live runtime throughput measurements."""
     scenario_matrix = tuple(
         scenarios
         if scenarios is not None
@@ -417,7 +417,7 @@ def run_live_sidecar_throughput_benchmark(
     started_status: SidecarStatus | None = None
     stopped_status: SidecarStatus | None = None
     worker_config: SidecarWorkerConfig | None = None
-    sidecar_startup: BenchmarkMeasurement | None = None
+    runtime_startup: BenchmarkMeasurement | None = None
     try:
         started_status, startup_seconds = measure_startup(
             lambda: supervisor.start(
@@ -425,20 +425,20 @@ def run_live_sidecar_throughput_benchmark(
                 startup_timeout=startup_timeout,
             )
         )
-        sidecar_startup = BenchmarkMeasurement(
-            name="sidecar-startup",
+        runtime_startup = BenchmarkMeasurement(
+            name="runtime-startup",
             work_item_count=1,
             elapsed_seconds=startup_seconds,
             cpu_seconds=0.0,
             peak_rss_bytes=0,
-            metadata={"runtime": "sidecar"},
+            metadata={"runtime": "temporal-runtime"},
         )
         worker_config = build_sidecar_worker_config(
             runtime_policy=supervisor.runtime_policy,
             namespace=namespace,
             task_queue_prefix=task_queue_prefix,
         )
-        sidecar_results = {
+        runtime_results = {
             result.scenario: result
             for result in (
                 _benchmark_sidecar_scenario(
@@ -459,20 +459,20 @@ def run_live_sidecar_throughput_benchmark(
     if (
         started_status is None
         or worker_config is None
-        or sidecar_startup is None
+        or runtime_startup is None
     ):
-        raise RuntimeError("sidecar throughput benchmark did not start")
+        raise RuntimeError("runtime throughput benchmark did not start")
 
     comparisons = tuple(
         ThroughputComparison(
             scenario=scenario,
-            sidecar=sidecar_results[scenario.name],
+            runtime=runtime_results[scenario.name],
         )
         for scenario in scenario_matrix
     )
     return ThroughputBenchmarkReport(
         comparisons=comparisons,
-        sidecar_startup=sidecar_startup,
+        runtime_startup=runtime_startup,
         worker_config=worker_config,
         started_status=started_status,
         stopped_status=stopped_status,
@@ -533,11 +533,11 @@ def _benchmark_sidecar_scenario(
         captured["payload"] = _sidecar_payload(result)
 
     measurement = benchmark_operation(
-        f"sidecar:{scenario.name}",
+        f"runtime:{scenario.name}",
         run,
         work_item_count=scenario.work_item_count,
         metadata={
-            "runtime": "sidecar",
+            "runtime": "temporal-runtime",
             "operations": list(scenario.operations),
         },
     )
@@ -548,7 +548,7 @@ def _benchmark_sidecar_scenario(
         _mapping(captured.get("cpu_after")),
     )
     return RuntimeBenchmarkResult(
-        runtime="sidecar",
+        runtime="temporal-runtime",
         scenario=scenario.name,
         measurement=measurement,
         status=str(payload.get("status") or "UNKNOWN"),
@@ -563,8 +563,8 @@ def _benchmark_sidecar_scenario(
                 _int_metric(stage, "child_stage_count")
                 for stage in stage_results
             ),
-            "sidecar_process_cpu_seconds": sidecar_cpu_seconds,
-            "sidecar_process_cpu_utilization_ratio": (
+            "runtime_process_cpu_seconds": sidecar_cpu_seconds,
+            "runtime_process_cpu_utilization_ratio": (
                 sidecar_cpu_seconds / measurement.elapsed_seconds
                 if measurement.elapsed_seconds > 0
                 else 0.0

@@ -1,4 +1,4 @@
-"""Tests for Temporal sidecar runtime path and port policy."""
+"""Tests for Temporal runtime path and port policy."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def test_default_runtime_home_uses_macos_application_support() -> None:
         environ={},
         platform_name="Darwin",
         home=home,
-    ) == (home / "Library" / "Application Support" / "histdatacom" / "sidecar")
+    ) == (home / "Library" / "Application Support" / "histdatacom" / "runtime")
 
 
 def test_default_runtime_home_uses_linux_xdg_state_home() -> None:
@@ -31,7 +31,7 @@ def test_default_runtime_home_uses_linux_xdg_state_home() -> None:
         environ={"XDG_STATE_HOME": "/state"},
         platform_name="Linux",
         home="/home/alice",
-    ) == Path("/state/histdatacom/sidecar")
+    ) == Path("/state/histdatacom/runtime")
 
 
 def test_default_runtime_home_uses_windows_local_app_data() -> None:
@@ -40,11 +40,11 @@ def test_default_runtime_home_uses_windows_local_app_data() -> None:
         environ={"LOCALAPPDATA": "C:/Users/Alice/AppData/Local"},
         platform_name="Windows",
         home="C:/Users/Alice",
-    ) == Path("C:/Users/Alice/AppData/Local/histdatacom/sidecar")
+    ) == Path("C:/Users/Alice/AppData/Local/histdatacom/runtime")
 
 
 def test_runtime_policy_scopes_paths_by_workspace(tmp_path: Path) -> None:
-    """Same-named workspaces should not share sidecar runtime state."""
+    """Same-named workspaces should not share runtime state."""
     runtime_home = tmp_path / "runtime"
     left = tmp_path / "left" / "project"
     right = tmp_path / "right" / "project"
@@ -74,7 +74,7 @@ def test_runtime_policy_scopes_paths_by_workspace(tmp_path: Path) -> None:
 def test_runtime_policy_stays_outside_download_data_dir(
     tmp_path: Path,
 ) -> None:
-    """Sidecar state should not be placed inside data downloads/caches."""
+    """Runtime state should not be placed inside data downloads/caches."""
     workspace = tmp_path / "workspace"
     runtime_home = tmp_path / "runtime"
     data_dir = workspace / "data"
@@ -120,14 +120,14 @@ def test_environment_port_collision_fails_clearly(tmp_path: Path) -> None:
             workspace=tmp_path / "workspace",
             runtime_home=tmp_path / "runtime",
             environ={
-                "HISTDATACOM_SIDECAR_PORT": "19000",
-                "HISTDATACOM_SIDECAR_UI_PORT": "20000",
+                "HISTDATACOM_RUNTIME_PORT": "19000",
+                "HISTDATACOM_RUNTIME_UI_PORT": "20000",
             },
             check_ports=True,
             port_available=lambda bind_ip, port: port != 19000,
         )
 
-    assert "HISTDATACOM_SIDECAR_PORT=19000" in str(err.value)
+    assert "HISTDATACOM_RUNTIME_PORT=19000" in str(err.value)
     assert "blocked=(19000,)" in str(err.value)
 
 

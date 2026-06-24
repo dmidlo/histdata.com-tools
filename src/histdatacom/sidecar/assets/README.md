@@ -15,7 +15,7 @@ package.
 
 Bundled executable wheels remain an explicit offline/private artifact path.
 Those wheels stage an explicit Temporal executable with
-`scripts/sidecar_platform_wheel.py`, patch `manifest.json`, write
+the platform-wheel helper, patch `manifest.json`, write
 `temporal-cli-provenance.json`, include the executable under
 `assets/bin/<platform>/`, and retag the artifact with the matching platform
 wheel tag.

@@ -111,7 +111,7 @@ HISTDATACOM_SKIP_GPG_SIGNING=1 bash pypi.sh testpypi
 
 Local uploads also preflight distribution file sizes before calling Twine.
 PyPI and TestPyPI commonly default to a 100 MB per-file upload limit, and the
-bundled Temporal sidecar wheels can exceed that default. If the project has a
+bundled Temporal runtime wheels can exceed that default. If the project has a
 confirmed raised limit, set `HISTDATACOM_ALLOW_OVERSIZE_UPLOAD=1`; if the
 confirmed project-specific limit is different, set
 `HISTDATACOM_MAX_UPLOAD_FILE_BYTES` to that byte count:
@@ -131,9 +131,9 @@ python -m twine check dist/*.whl dist/*.tar.gz
 It also gates distribution file sizes, inspects the built wheel metadata
 directly, and installs the wheel into a fresh virtual environment before any
 upload command can run. The smoke check uses
-`scripts/smoke_sidecar_install.py`, which validates package metadata, console
-entry points, packaged sidecar resources, current-platform manifest support,
-and offline `histdatacom-sidecar status`/`doctor` behavior. Legacy `setup.py`
+`scripts/smoke_runtime_install.py`, which validates package metadata, console
+entry points, packaged runtime resources, current-platform manifest support,
+and offline `histdatacom runtime status`/`doctor` behavior. Legacy `setup.py`
 commands are intentionally unsupported; this project is built from
 `pyproject.toml`.
 
@@ -165,17 +165,17 @@ venv/bin/python scripts/fetch_temporal_cli.py \
   --output-dir .temporal-cli/macos-arm64/bin \
   --report .temporal-cli/macos-arm64/temporal-cli-report.json
 
-HISTDATACOM_SIDECAR_EXECUTABLE=.temporal-cli/macos-arm64/bin/temporal \
+HISTDATACOM_RUNTIME_EXECUTABLE=.temporal-cli/macos-arm64/bin/temporal \
 HISTDATACOM_FETCH_REPORT=.temporal-cli/macos-arm64/temporal-cli-report.json \
 bash pypi.sh build
 ```
 
-Set `HISTDATACOM_SIDECAR_PLATFORM` when cross-building from a prepared
+Set `HISTDATACOM_RUNTIME_PLATFORM` when cross-building from a prepared
 platform artifact, for example `linux-x86_64` or `windows-x86_64`. The helper
-uses `scripts/sidecar_platform_wheel.py` to stage a temporary source tree,
+uses `scripts/runtime_platform_wheel.py` to stage a temporary source tree,
 patch `manifest.json`, include `assets/bin/<platform>/temporal`, and retag the
 wheel to the manifest platform tag. The source tree remains metadata-only and
-`src/histdatacom/sidecar/assets/bin/` is ignored by Git to prevent committing
+the package runtime asset bin directory is ignored by Git to prevent committing
 oversized executable artifacts.
 
 Bundled platform wheel smoke should install the built wheel directly:
@@ -184,31 +184,31 @@ Bundled platform wheel smoke should install the built wheel directly:
 python scripts/inspect_wheel.py \
   --wheel dist/histdatacom-*-py3-none-<platform-tag>.whl \
   --require-bundled-platform <platform-key>
-python scripts/smoke_sidecar_install.py \
+python scripts/smoke_runtime_install.py \
   --wheel dist/histdatacom-*-py3-none-<platform-tag>.whl \
   --require-bundled-current-platform \
   --check-executable-version \
   --expect-temporal-extra \
-  --start-sidecar \
-  --quality-sidecar-smoke
+  --start-runtime \
+  --quality-runtime-smoke
 ```
 
-Sidecar runtime documentation must be reviewed for every release that changes
-sidecar CLI flags, runtime paths, worker queues, package resources, or bundled
+Runtime documentation must be reviewed for every release that changes
+runtime CLI flags, runtime paths, worker queues, package resources, or bundled
 executable behavior:
 
-- `README.md` for the user-facing sidecar compatibility summary.
-- `docs/temporal-sidecar-operations.md` for lifecycle commands, state layout,
+- `README.md` for the user-facing orchestration runtime summary.
+- `docs/temporal-orchestration-operations.md` for lifecycle commands, state layout,
   logs, SQLite persistence, troubleshooting, cancellation/resume behavior, and
   GUI-oriented job control.
 - `docs/temporal-workflow-topology.md` for workflow, activity, task queue, and
   testing boundaries.
-- `docs/temporal-sidecar-performance.md` for lane sizing and benchmark policy.
+- `docs/temporal-orchestration-performance.md` for lane sizing and benchmark policy.
 
 Release notes should clearly state whether the published wheel is still
 metadata-only or includes a bundled Temporal executable for each supported
 platform. They should also call out the `histdatacom[temporal]` extra whenever
-sidecar client or worker dependency behavior changes.
+runtime client or worker dependency behavior changes.
 
 Package metadata is declared in `pyproject.toml`. Local release environments
 must use `setuptools>=77` so the built artifacts include current SPDX license
@@ -216,7 +216,7 @@ metadata.
 
 The upload commands use local `.pypirc` credentials and GPG detached
 signatures, matching the historical release process. Move to the GitHub
-Trusted Publishing path only after the branch, sidecar, runner, and approval
+Trusted Publishing path only after the branch, runtime, runner, and approval
 model is reviewed as a separate release-engineering change.
 
 After a TestPyPI dry run, install from TestPyPI in a disposable environment:
@@ -229,8 +229,8 @@ This runs `scripts/verify_testpypi_install.py`, which downloads the exact
 `histdatacom` wheel from TestPyPI without dependencies, installs that artifact
 into a fresh virtual environment with dependencies resolved from PyPI, and
 checks parity against the current package surface: version metadata, console
-entry points, sidecar assets, current CLI flags, sidecar lifecycle probes,
-deterministic sidecar workflow smokes, quality-mode sidecar smokes, and a small
+entry points, runtime assets, current CLI flags, runtime lifecycle probes,
+deterministic runtime workflow smokes, quality-mode runtime smokes, and a small
 live download/extract smoke. The default local verification requires the
 external Temporal runtime resolver to satisfy `temporal --version` from a
 first-run download or the isolated verification cache, so a stale artifact that
@@ -249,12 +249,13 @@ The CI workflow builds and tests the package on pull requests, pushes to
 `main`, and manual dispatches.
 
 CI inspects the built wheel with `scripts/inspect_wheel.py`, writes
-`dist/sidecar-wheel-report.json`, uploads that report with the distribution
+`dist/runtime-wheel-report.json`, uploads that report with the distribution
 artifacts, and then installs the built wheel on Ubuntu, macOS, and Windows.
-Those platform smoke checks verify the sidecar resource manifest and the
-offline sidecar CLI probes against the artifact that would be published. They
+Those platform smoke checks verify the runtime resource manifest and the
+Those platform smoke checks verify the runtime resource manifest and the
+offline runtime CLI probes against the artifact that would be published. They
 also run the installed `histdatacom --quality` command through the packaged
-Temporal sidecar against clean and dirty local fixtures.
+Temporal runtime against clean and dirty local fixtures.
 
 CI also runs `actionlint` against every workflow. The same workflow lint is
 available locally through pre-commit, so workflow syntax and common GitHub
@@ -293,7 +294,7 @@ requires a matching protected environment approval and OIDC Trusted Publishing
 configured on the target index.
 
 Release artifact provenance covers everything under `dist/`, including the
-sidecar wheel inspection report. The release build runs the same sidecar wheel
+runtime wheel inspection report. The release build runs the same runtime wheel
 smoke used by local `pypi.sh build` before attestations and artifact upload.
 
 ## Rollback And Yank Guidance
@@ -320,8 +321,8 @@ changes introduce moderate, high, or critical vulnerabilities in runtime or
 development scopes. `pip-audit` installs the package with all optional runtime
 and integration extras, audits the resulting Python environment, and uploads a
 JSON report. Before `pip-audit` runs, the workflow verifies that the `all`
-extra installed the Temporal runtime dependency and that sidecar package
-resources import correctly, so the new sidecar dependency surface is included
+extra installed the Temporal runtime dependency and that runtime package
+resources import correctly, so the runtime dependency surface is included
 in the audit environment. CodeQL analyzes the Python source with no build step;
 it only has `security-events: write` so GitHub can receive code-scanning
 results.
@@ -351,7 +352,7 @@ surface:
 - Optional dependency findings affect users who install extras such as
   `histdatacom[pandas]`, `histdatacom[arrow]`, `histdatacom[influx]`, or
   `histdatacom[jupyter]`; patch those ranges and mention the affected extra in
-  release notes. Treat `histdatacom[temporal]` the same way once sidecar
+  release notes. Treat `histdatacom[temporal]` the same way once runtime
   runtime dependencies are involved in a finding.
 - Development and build findings block contributor or release hygiene but do
   not automatically require a PyPI release unless the vulnerable package is

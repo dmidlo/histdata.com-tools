@@ -100,7 +100,7 @@
       "follow_up_issue": 240,
       "kind": "cli-attempt",
       "status": "blocked",
-      "summary": "Source checkout CLI could not start the default sidecar because the sdist fallback manifest has no bundled macos-arm64 Temporal executable."
+      "summary": "Source checkout CLI could not start the default runtime because the sdist fallback manifest has no bundled macos-arm64 Temporal executable."
     },
     {
       "follow_up_issue": 240,
