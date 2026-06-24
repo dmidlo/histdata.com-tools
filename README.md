@@ -558,6 +558,11 @@ Quality findings use three severities:
 Target status rolls up from findings: any error makes a target `failed`; warnings
 without errors make it `warning`; otherwise it is `clean`.
 
+Reviewed source-data defects are documented under
+`docs/data-quality/known-data-defects.md`. These records explain known vendor
+anomalies for future batch interpretation, but they do not downgrade quality
+severities or silence repo-quality failures.
+
 The default process exit policy fails on any error:
 
 ```sh

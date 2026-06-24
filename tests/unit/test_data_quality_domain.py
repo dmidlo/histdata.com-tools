@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from histdatacom.data_quality import (
     CROSS_INSTRUMENT_METADATA_KEY,
     DOMAIN_CALENDAR_SESSION_RULE_ID,
@@ -251,6 +253,49 @@ def test_cross_instrument_run_rule_compares_triangular_fx_sets(
     assert error.metadata["samples"][0]["direct_symbol"] == "EURGBP"
 
 
+def test_cross_instrument_run_rule_preserves_issue_242_data_defect(
+    tmp_path: Path,
+) -> None:
+    """The reviewed AUDCAD 2008 triangle defect should remain a hard error."""
+    _write_single_m1_close(
+        tmp_path,
+        symbol="AUDCHF",
+        period="2008",
+        timestamp="20080601 170200",
+        close="0.994400",
+    )
+    _write_single_m1_close(
+        tmp_path,
+        symbol="CADCHF",
+        period="2008",
+        timestamp="20080601 170200",
+        close="1.046900",
+    )
+    _write_single_m1_close(
+        tmp_path,
+        symbol="AUDCAD",
+        period="2008",
+        timestamp="20080601 170200",
+        close="1.041700",
+    )
+
+    report = _domain_run_report_for_paths((tmp_path,))
+
+    error = _finding(report, "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR")
+    sample = error.metadata["samples"][0]
+    assert report.status is QualityStatus.FAILED
+    assert sample["relationship"] == "AUDCHF / CADCHF ~= AUDCAD"
+    assert sample["direct_symbol"] == "AUDCAD"
+    assert sample["numerator_symbol"] == "AUDCHF"
+    assert sample["denominator_symbol"] == "CADCHF"
+    assert sample["timeframe"] == M1
+    assert sample["period"] == "2008"
+    assert sample["timestamp_utc_ms"] == 1212357720000
+    assert sample["direct_price"] == 1.0417
+    assert sample["implied_price"] == pytest.approx(0.9498519438341771)
+    assert sample["relative_difference"] == pytest.approx(0.088171312437192)
+
+
 def test_cross_instrument_run_rule_warns_for_stale_join_risk(
     tmp_path: Path,
 ) -> None:
@@ -329,6 +374,25 @@ def _write_m1_prices(
             timeframe=M1,
             filename=f"DAT_ASCII_{symbol}_M1_201202.csv",
             rows=rows,
+        ),
+    )
+
+
+def _write_single_m1_close(
+    directory: Path,
+    *,
+    symbol: str,
+    period: str,
+    timestamp: str,
+    close: str,
+) -> Path:
+    return write_ascii_case(
+        directory,
+        HistDataAsciiCase(
+            name=f"m1_{symbol.lower()}_{period}",
+            timeframe=M1,
+            filename=f"DAT_ASCII_{symbol}_M1_{period}.csv",
+            rows=(f"{timestamp};{close};{close};{close};{close};0",),
         ),
     )
 
