@@ -21,7 +21,6 @@ DEFAULT_FOLLOW_UP_ISSUES = {
     "cache_deep_validation": 223,
     "installed_quality_smoke": 224,
     "non_ascii_quality_boundary": 225,
-    "sidecar_provenance": 229,
 }
 GIB = 1024**3
 
@@ -270,11 +269,6 @@ def _deferred_scope(
                 "scope": "canonical cache deep validation",
                 "reason": "Cache quality rules are tracked separately.",
                 "issue": follow_up_issues.get("cache_deep_validation"),
-            },
-            {
-                "scope": "sidecar provenance validation",
-                "reason": "Lineage checks are tracked separately.",
-                "issue": follow_up_issues.get("sidecar_provenance"),
             },
         ]
     )

@@ -713,8 +713,12 @@ Data-quality checks:
   keeps workflow history limited to counters, policy decisions, progress,
   failures, and artifact references.
 - Quality mode supports focused groups with `--quality-checks`: `inventory`,
-  `ingestion`, `time`, `bars`, `ticks`, `domain`, and `modeling`. The default
-  is `all`.
+  `ingestion`, `time`, `bars`, `ticks`, `domain`, `modeling`, and
+  `provenance`. The default is `all`.
+- The `provenance` group is optional and offline. It checks local quality
+  targets against `.histdatacom/manifest-status.sqlite3` when present; explicit
+  provenance runs without a store record a clean info result instead of failing
+  file-only workflows.
 - `histdatacom --repo-quality` runs the same offline quality workflow and then
   writes bounded per-instrument summary metadata back to the local `.repo`
   helper file. It stores status, counts, checked groups, format/timeframe/period

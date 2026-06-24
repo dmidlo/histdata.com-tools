@@ -28,6 +28,7 @@ from histdatacom.manifest_store import (
     STATUS_STORE_REF_KEY,
 )
 from histdatacom.data_quality import (
+    PROVENANCE_METADATA_KEY,
     QualityFinding,
     QualityLocation,
     QualityReport,
@@ -1164,6 +1165,7 @@ def test_data_quality_activity_preserves_coverage_manifest_metadata(
 
     detailed_report = json.loads(report_path.read_text(encoding="utf-8"))
     manifest = detailed_report["metadata"]["coverage_manifest"]
+    assert PROVENANCE_METADATA_KEY not in detailed_report["metadata"]
     assert manifest["expected_source"] == "metadata"
     assert manifest["missing"] == [
         {

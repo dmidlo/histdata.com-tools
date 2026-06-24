@@ -17,11 +17,6 @@
       "issue": 223,
       "reason": "Cache quality rules are tracked separately.",
       "scope": "canonical cache deep validation"
-    },
-    {
-      "issue": 229,
-      "reason": "Lineage checks are tracked separately.",
-      "scope": "sidecar provenance validation"
     }
   ],
   "dimensions": [

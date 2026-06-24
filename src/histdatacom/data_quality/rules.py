@@ -31,6 +31,7 @@ from histdatacom.data_quality.profiles import (
     QualityProfile,
     quality_profile_from_value,
 )
+from histdatacom.data_quality.provenance import provenance_quality_run_rules
 from histdatacom.data_quality.symbols import (
     HistDataCrossInstrumentConsistencyRule,
     domain_quality_rules,
@@ -98,6 +99,12 @@ def quality_run_rules_for_groups(
         rules.extend(_bars_quality_run_rules(quality_profile))
     if "all" in normalized or "domain" in normalized:
         rules.extend(_domain_quality_run_rules(quality_profile))
+    if "all" in normalized or "provenance" in normalized:
+        rules.extend(
+            provenance_quality_run_rules(
+                explicit="provenance" in normalized and "all" not in normalized
+            )
+        )
     return tuple(rules)
 
 

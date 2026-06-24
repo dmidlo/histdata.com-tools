@@ -1,6 +1,6 @@
 # Issue 233 Batch 1 Campaign Report
 
-Parent: #93. Depends on: #232. Related: #223, #224, #225, #229, #240.
+Parent: #93. Depends on: #232. Related: #223, #224, #225, #240.
 
 ## Result
 
@@ -46,7 +46,6 @@ The hosted GitHub `.repo` index was reachable and the listed batch rows matched 
 - #240: full-surface execution needs a storage-backed installed/platform-wheel sidecar environment.
 - #225: non-ASCII quality support is not complete, so those formats must not be treated as deeply clean.
 - #223: canonical cache artifacts still need deep cache validation.
-- #229: sidecar provenance checks are still separate from file-content quality.
 - #224: installed-package sidecar quality smoke remains the release-grade proof path for the packaged Temporal executable.
 
 ## Resume Path

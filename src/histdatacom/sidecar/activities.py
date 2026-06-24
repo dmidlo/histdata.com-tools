@@ -35,6 +35,7 @@ from histdatacom.data_quality import (
     discover_quality_targets,
     normalize_quality_check_groups,
     quality_profile_report_metadata,
+    provenance_manifest_metadata,
     quality_rules_for_groups,
     quality_run_rules_for_groups,
     run_quality_assessment,
@@ -292,6 +293,25 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
         profile_metadata = quality_profile_report_metadata(
             request.quality_profile
         )
+        quality_metadata: dict[str, JSONValue] = {
+            "operation": "data-quality",
+            "check_groups": list(check_groups),
+            "request_id": request.request_id,
+            **profile_metadata,
+            "coverage_manifest": coverage_manifest_metadata(
+                roots=discovery.roots,
+                request=request.to_dict(),
+                expected_dimensions=_quality_expected_dimensions(
+                    request.metadata
+                ),
+            ),
+        }
+        if "all" in check_groups or "provenance" in check_groups:
+            quality_metadata["provenance_manifest"] = (
+                provenance_manifest_metadata(
+                    roots=discovery.roots,
+                )
+            )
         report = run_quality_assessment(
             discovery.targets,
             quality_rules_for_groups(
@@ -302,19 +322,7 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
                 check_groups,
                 profile=request.quality_profile,
             ),
-            metadata={
-                "operation": "data-quality",
-                "check_groups": list(check_groups),
-                "request_id": request.request_id,
-                **profile_metadata,
-                "coverage_manifest": coverage_manifest_metadata(
-                    roots=discovery.roots,
-                    request=request.to_dict(),
-                    expected_dimensions=_quality_expected_dimensions(
-                        request.metadata
-                    ),
-                ),
-            },
+            metadata=quality_metadata,
         )
         artifact = write_quality_report(report, _quality_report_path(request))
         decision = exit_policy.evaluate(report.summary())

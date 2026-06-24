@@ -151,7 +151,7 @@ Data quality:
   --quality-checks GROUP [GROUP ...]
                         quality check groups to run; defaults to all.
                         Supported: all, inventory, ingestion, time, bars,
-                        ticks, domain, modeling
+                        ticks, domain, modeling, provenance
   --quality-report PATH
                         write the full machine-readable JSON quality report to
                         PATH
@@ -432,6 +432,13 @@ Supported groups:
 | `ticks` | tick bid/ask ordering, spread, duplicate/stale/burst/one-sided quote behavior, spread regimes |
 | `domain` | symbol metadata, quote conventions, calendar/session tags, cross-instrument consistency |
 | `modeling` | advisory modeling-readiness checks for bid-only bars, leakage risk, spread-cost assumptions, target horizon feasibility |
+| `provenance` | optional sidecar manifest/status lineage checks for artifact paths, sizes, checksums, cache metadata, stale caches, and orphan files |
+
+`provenance` checks are only applied when a local sidecar
+`.histdatacom/manifest-status.sqlite3` store is available. Explicit
+`--quality-checks provenance` runs without a store return a clean info finding
+that records the missing store; ordinary file-only quality runs are not failed by
+the absence of sidecar provenance data.
 
 #### Quality Profiles
 

@@ -30,6 +30,7 @@ QUALITY_CHECK_GROUPS = (
     "ticks",
     "domain",
     "modeling",
+    "provenance",
 )
 
 _FORMAT_CODE_PATTERN = "|".join(known_histdata_format_codes())
