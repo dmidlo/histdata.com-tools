@@ -262,6 +262,7 @@ build()
         sidecar_platform_wheel
     fi
     python -m twine check dist/*.whl dist/*.tar.gz
+    validate_dist_artifact_sizes
     inspect_wheel_metadata
     smoke_wheel_install
 }
@@ -280,7 +281,7 @@ verify_release_install()
         --version "$(current_package_version)" \
         --index-url "${index_url}" \
         "${report_args[@]}" \
-        --require-bundled-current-platform \
+        --require-external-runtime-provisioning \
         --check-executable-version \
         --start-sidecar \
         --hermetic-sidecar-smoke \

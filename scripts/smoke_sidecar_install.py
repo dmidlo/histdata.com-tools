@@ -167,10 +167,12 @@ def check_package_metadata(*, expect_temporal_extra: bool) -> dict[str, Any]:
 def check_sidecar_resources(
     *,
     require_bundled_current_platform: bool = False,
+    require_external_runtime_provisioning: bool = False,
     check_executable_version: bool = False,
+    temporal_executable: Path | None = None,
 ) -> dict[str, Any]:
     """Validate installed sidecar resources for the current platform."""
-    from histdatacom.sidecar import (
+    from histdatacom.sidecar.resources import (
         SidecarExecutableUnavailable,
         current_platform_key,
         inspect_temporal_runtime_cache,
@@ -198,6 +200,18 @@ def check_sidecar_resources(
         )
     executable_version = ""
     resolver_source = ""
+    resolver_network_fetch = False
+    runtime_resolution: dict[str, Any] | None = None
+    if require_external_runtime_provisioning and platform_resource.bundled:
+        raise SystemExit(
+            "external runtime provisioning was required, but the installed "
+            f"wheel bundles a Temporal executable for {platform_key!r}"
+        )
+    if require_external_runtime_provisioning and not check_executable_version:
+        raise SystemExit(
+            "--require-external-runtime-provisioning must be combined with "
+            "--check-executable-version so the resolver is exercised"
+        )
     if platform_resource.bundled:
         with sidecar_executable_path(platform_key) as executable_path:
             if not executable_path.is_file():
@@ -205,11 +219,16 @@ def check_sidecar_resources(
                     f"bundled sidecar executable is missing: {executable_path}"
                 )
             if check_executable_version:
-                completed = _run([str(executable_path), "--version"])
+                with temporal_runtime_executable_path(
+                    explicit_executable=temporal_executable,
+                ) as resolution:
+                    completed = _run([str(resolution.executable), "--version"])
+                    runtime_resolution = resolution.to_dict()
+                    resolver_source = resolution.source
+                    resolver_network_fetch = resolution.network_fetch
                 executable_version = (
                     completed.stdout.strip() or completed.stderr.strip()
                 )
-                resolver_source = "packaged"
     else:
         if require_bundled_current_platform:
             raise SystemExit(
@@ -222,12 +241,26 @@ def check_sidecar_resources(
             if "not bundled in this distribution" not in str(err):
                 raise
         if check_executable_version:
-            with temporal_runtime_executable_path() as resolution:
+            with temporal_runtime_executable_path(
+                explicit_executable=temporal_executable,
+            ) as resolution:
                 completed = _run([str(resolution.executable), "--version"])
                 executable_version = (
                     completed.stdout.strip() or completed.stderr.strip()
                 )
+                runtime_resolution = resolution.to_dict()
                 resolver_source = resolution.source
+                resolver_network_fetch = resolution.network_fetch
+
+    if require_external_runtime_provisioning and resolver_source not in {
+        "cache",
+        "download",
+    }:
+        raise SystemExit(
+            "external runtime provisioning must resolve from the pinned cache "
+            "or first-run download path, not "
+            f"{resolver_source or 'an unexercised resolver'}"
+        )
 
     return {
         "sidecar": manifest.sidecar,
@@ -250,7 +283,9 @@ def check_sidecar_resources(
             for entry in inspect_temporal_runtime_cache()
             if entry.platform_key == platform_key
         ],
+        "runtime_resolution": runtime_resolution,
         "resolver_source": resolver_source,
+        "resolver_network_fetch": resolver_network_fetch,
         "executable_version": executable_version,
     }
 
@@ -839,6 +874,14 @@ def main() -> None:
         help="require the installed wheel to bundle this platform executable",
     )
     parser.add_argument(
+        "--require-external-runtime-provisioning",
+        action="store_true",
+        help=(
+            "require the installed wheel to use the pinned external Temporal "
+            "runtime resolver instead of a bundled or explicit executable"
+        ),
+    )
+    parser.add_argument(
         "--check-executable-version",
         action="store_true",
         help="run the packaged Temporal executable with --version",
@@ -947,7 +990,11 @@ def main() -> None:
                 require_bundled_current_platform=(
                     args.require_bundled_current_platform
                 ),
+                require_external_runtime_provisioning=(
+                    args.require_external_runtime_provisioning
+                ),
                 check_executable_version=args.check_executable_version,
+                temporal_executable=args.temporal_executable,
             ),
             "cli": None,
             "hermetic_sidecar": None,

@@ -157,9 +157,37 @@ def test_download_smoke_uses_bounded_historical_m1_download(
     assert captured_envs[0]["HISTDATACOM_SIDECAR_WORKSPACE"] == str(
         tmp_path / "download-smoke-sidecar-workspace"
     )
+    assert captured_envs[0]["HISTDATACOM_TEMPORAL_CACHE_DIR"] == str(
+        tmp_path / "temporal-runtime-cache"
+    )
     assert captured_envs[1] == captured_envs[0]
     assert report["files"] == ["HISTDATA_COM_ASCII_EURUSD_M1202201.zip"]
     assert report["sidecar_stop"] == {"state": "stopped"}
+
+
+def test_release_verification_environment_isolates_runtime_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Release parity should not be satisfied by host runtime overrides."""
+    module = _module()
+    monkeypatch.setenv("HISTDATACOM_TEMPORAL_EXECUTABLE", "/tmp/temporal")
+    monkeypatch.setenv("HISTDATACOM_TEMPORAL_OFFLINE", "1")
+    monkeypatch.setenv("HISTDATACOM_SIDECAR_HOME", "/tmp/runtime")
+    monkeypatch.setenv("HISTDATACOM_SIDECAR_WORKSPACE", "/tmp/workspace")
+
+    env = module._release_verification_environment(
+        venv_dir=tmp_path / "venv",
+        root=tmp_path,
+    )
+
+    assert "HISTDATACOM_TEMPORAL_EXECUTABLE" not in env
+    assert "HISTDATACOM_TEMPORAL_OFFLINE" not in env
+    assert "HISTDATACOM_SIDECAR_HOME" not in env
+    assert "HISTDATACOM_SIDECAR_WORKSPACE" not in env
+    assert env["HISTDATACOM_TEMPORAL_CACHE_DIR"] == str(
+        tmp_path / "temporal-runtime-cache"
+    )
 
 
 def test_cli_parity_probe_requires_current_flags(
@@ -238,7 +266,9 @@ def test_smoke_sidecar_install_probe_passes_strong_flags(
         live_completion_timeout=4.0,
         live_stop_timeout=5.0,
         require_bundled_current_platform=True,
+        require_external_runtime_provisioning=True,
         check_executable_version=True,
+        temporal_executable=None,
         start_sidecar=True,
         hermetic_sidecar_smoke=True,
         default_routing_sidecar_smoke=True,
@@ -262,6 +292,7 @@ def test_smoke_sidecar_install_probe_passes_strong_flags(
     assert report == {"ok": "true"}
     command = commands[0]
     assert "--require-bundled-current-platform" in command
+    assert "--require-external-runtime-provisioning" in command
     assert "--check-executable-version" in command
     assert "--start-sidecar" in command
     assert "--hermetic-sidecar-smoke" in command
@@ -283,7 +314,9 @@ def test_smoke_sidecar_install_probe_exposes_venv_scripts(
         live_completion_timeout=4.0,
         live_stop_timeout=5.0,
         require_bundled_current_platform=False,
+        require_external_runtime_provisioning=False,
         check_executable_version=False,
+        temporal_executable=tmp_path / "temporal",
         start_sidecar=False,
         hermetic_sidecar_smoke=False,
         default_routing_sidecar_smoke=False,
@@ -308,6 +341,48 @@ def test_smoke_sidecar_install_probe_exposes_venv_scripts(
     assert captured_env["PATH"].split(":")[0] == str(tmp_path / "venv" / "bin")
 
 
+def test_smoke_sidecar_install_probe_accepts_explicit_developer_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Developers should be able to pass a local Temporal executable explicitly."""
+    module = _module()
+    commands: list[list[str]] = []
+    args = SimpleNamespace(
+        timeout=30.0,
+        live_startup_timeout=3.0,
+        live_completion_timeout=4.0,
+        live_stop_timeout=5.0,
+        require_bundled_current_platform=False,
+        require_external_runtime_provisioning=False,
+        check_executable_version=True,
+        temporal_executable=tmp_path / "temporal",
+        start_sidecar=False,
+        hermetic_sidecar_smoke=False,
+        default_routing_sidecar_smoke=False,
+        quality_sidecar_smoke=False,
+        live_sidecar_smoke=False,
+    )
+
+    def fake_run_json(command: list[str], **_: Any) -> dict[str, str]:
+        commands.append(command)
+        return {"ok": "true"}
+
+    monkeypatch.setattr(module, "_run_json", fake_run_json)
+
+    module._smoke_sidecar_install_probe(
+        venv_python=tmp_path / "venv" / "bin" / "python",
+        venv_dir=tmp_path / "venv",
+        root=tmp_path,
+        args=args,
+    )
+
+    assert "--temporal-executable" in commands[0]
+    assert commands[0][commands[0].index("--temporal-executable") + 1] == str(
+        tmp_path / "temporal"
+    )
+
+
 def test_parse_args_defines_live_timeout_defaults() -> None:
     """The CLI should provide every timeout passed to the smoke script."""
     module = _module()
@@ -317,3 +392,5 @@ def test_parse_args_defines_live_timeout_defaults() -> None:
     assert args.live_startup_timeout == 30.0
     assert args.live_completion_timeout == 180.0
     assert args.live_stop_timeout == 90.0
+    assert args.require_external_runtime_provisioning is False
+    assert args.temporal_executable is None

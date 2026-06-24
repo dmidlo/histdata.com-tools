@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import importlib.util
 import json
 from pathlib import Path
@@ -9,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from histdatacom.sidecar import live_smoke
+from histdatacom.sidecar.resources import SidecarExecutableUnavailable
 
 
 def _module():
@@ -314,6 +316,210 @@ def test_quality_sidecar_smoke_rejects_shutdown_leaks() -> None:
         assert "left running processes" in str(err)
     else:  # pragma: no cover - defensive assertion shape
         raise AssertionError("expected shutdown leak to fail")
+
+
+def test_check_sidecar_resources_reports_external_runtime_resolution(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Release smoke should prove first-run Temporal resolver behavior."""
+    import histdatacom.sidecar.resources as sidecar_resources
+
+    module = _module()
+    executable = tmp_path / "temporal"
+    executable.write_text("#!/bin/sh\necho temporal\n", encoding="utf-8")
+    executable.chmod(0o755)
+    resource = SimpleNamespace(bundled=False)
+    artifact = SimpleNamespace(
+        archive_name="temporal.tar.gz",
+        archive_sha256="a" * 64,
+        archive_size_bytes=1024,
+    )
+    manifest = SimpleNamespace(
+        sidecar="temporal",
+        distribution_strategy="metadata-only",
+        embedded_binary=False,
+        platforms={"linux-x86_64": resource},
+    )
+    runtime_index = SimpleNamespace(
+        version="1.7.2",
+        platforms={"linux-x86_64": artifact},
+    )
+    resolution_payload = {
+        "executable": str(executable),
+        "source": "download",
+        "platform": "linux-x86_64",
+        "version": "1.7.2",
+        "network_fetch": True,
+    }
+    resolution = SimpleNamespace(
+        executable=executable,
+        source="download",
+        network_fetch=True,
+        to_dict=lambda: resolution_payload,
+    )
+    cache_entry = SimpleNamespace(
+        platform_key="linux-x86_64",
+        to_dict=lambda: {"path": str(tmp_path / "cache"), "valid": True},
+    )
+
+    @contextmanager
+    def missing_bundled_executable(*_: Any, **__: Any):
+        raise SidecarExecutableUnavailable("not bundled in this distribution")
+        yield  # pragma: no cover
+
+    @contextmanager
+    def resolved_runtime(**_: Any):
+        yield resolution
+
+    monkeypatch.setattr(
+        sidecar_resources, "current_platform_key", lambda: "linux-x86_64"
+    )
+    monkeypatch.setattr(
+        sidecar_resources, "load_sidecar_manifest", lambda: manifest
+    )
+    monkeypatch.setattr(
+        sidecar_resources,
+        "load_temporal_runtime_index",
+        lambda _manifest: runtime_index,
+    )
+    monkeypatch.setattr(
+        sidecar_resources,
+        "sidecar_asset",
+        lambda _asset: executable,
+    )
+    monkeypatch.setattr(
+        sidecar_resources,
+        "sidecar_executable_path",
+        missing_bundled_executable,
+    )
+    monkeypatch.setattr(
+        sidecar_resources,
+        "temporal_runtime_executable_path",
+        resolved_runtime,
+    )
+    monkeypatch.setattr(
+        sidecar_resources,
+        "inspect_temporal_runtime_cache",
+        lambda: (cache_entry,),
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda command: SimpleNamespace(
+            returncode=0,
+            stdout="temporal version 1.7.2\n",
+            stderr="",
+        ),
+    )
+
+    report = module.check_sidecar_resources(
+        require_external_runtime_provisioning=True,
+        check_executable_version=True,
+    )
+
+    assert report["platform_bundled"] is False
+    assert report["runtime_resolution"] == resolution_payload
+    assert report["resolver_source"] == "download"
+    assert report["resolver_network_fetch"] is True
+    assert report["runtime_cache_entries"] == [
+        {"path": str(tmp_path / "cache"), "valid": True}
+    ]
+
+
+def test_check_sidecar_resources_rejects_explicit_runtime_for_external_preflight(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Production preflight should not pass through an explicit override."""
+    import histdatacom.sidecar.resources as sidecar_resources
+
+    module = _module()
+    executable = tmp_path / "temporal"
+    executable.write_text("#!/bin/sh\necho temporal\n", encoding="utf-8")
+    executable.chmod(0o755)
+    manifest = SimpleNamespace(
+        sidecar="temporal",
+        distribution_strategy="metadata-only",
+        embedded_binary=False,
+        platforms={"linux-x86_64": SimpleNamespace(bundled=False)},
+    )
+    runtime_index = SimpleNamespace(
+        version="1.7.2",
+        platforms={
+            "linux-x86_64": SimpleNamespace(
+                archive_name="temporal.tar.gz",
+                archive_sha256="a" * 64,
+                archive_size_bytes=1024,
+            )
+        },
+    )
+    resolution = SimpleNamespace(
+        executable=executable,
+        source="explicit",
+        network_fetch=False,
+        to_dict=lambda: {"source": "explicit"},
+    )
+
+    @contextmanager
+    def missing_bundled_executable(*_: Any, **__: Any):
+        raise SidecarExecutableUnavailable("not bundled in this distribution")
+        yield  # pragma: no cover
+
+    @contextmanager
+    def resolved_runtime(**_: Any):
+        yield resolution
+
+    monkeypatch.setattr(
+        sidecar_resources, "current_platform_key", lambda: "linux-x86_64"
+    )
+    monkeypatch.setattr(
+        sidecar_resources, "load_sidecar_manifest", lambda: manifest
+    )
+    monkeypatch.setattr(
+        sidecar_resources,
+        "load_temporal_runtime_index",
+        lambda _manifest: runtime_index,
+    )
+    monkeypatch.setattr(
+        sidecar_resources, "sidecar_asset", lambda _asset: executable
+    )
+    monkeypatch.setattr(
+        sidecar_resources,
+        "sidecar_executable_path",
+        missing_bundled_executable,
+    )
+    monkeypatch.setattr(
+        sidecar_resources,
+        "temporal_runtime_executable_path",
+        resolved_runtime,
+    )
+    monkeypatch.setattr(
+        sidecar_resources, "inspect_temporal_runtime_cache", lambda: ()
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda command: SimpleNamespace(
+            returncode=0,
+            stdout="temporal version 1.7.2\n",
+            stderr="",
+        ),
+    )
+
+    try:
+        module.check_sidecar_resources(
+            require_external_runtime_provisioning=True,
+            check_executable_version=True,
+            temporal_executable=executable,
+        )
+    except SystemExit as err:
+        assert (
+            "must resolve from the pinned cache or first-run download"
+            in str(err)
+        )
+    else:  # pragma: no cover - defensive assertion shape
+        raise AssertionError("expected explicit release runtime to fail")
 
 
 def _quality_report_payload(*, status: str) -> dict[str, Any]:

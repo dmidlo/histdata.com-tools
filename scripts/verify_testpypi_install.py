@@ -233,6 +233,26 @@ def _venv_environment(venv_dir: Path) -> dict[str, str]:
     return env
 
 
+def _release_verification_environment(
+    *,
+    venv_dir: Path,
+    root: Path,
+) -> dict[str, str]:
+    """Return an isolated environment for installed release parity probes."""
+    env = _venv_environment(venv_dir)
+    for key in (
+        "HISTDATACOM_TEMPORAL_EXECUTABLE",
+        "HISTDATACOM_TEMPORAL_OFFLINE",
+        "HISTDATACOM_SIDECAR_HOME",
+        "HISTDATACOM_SIDECAR_WORKSPACE",
+    ):
+        env.pop(key, None)
+    env["HISTDATACOM_TEMPORAL_CACHE_DIR"] = str(
+        root / "temporal-runtime-cache"
+    )
+    return env
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -408,6 +428,8 @@ def _smoke_sidecar_install_probe(
     ]
     if args.require_bundled_current_platform:
         command.append("--require-bundled-current-platform")
+    if args.require_external_runtime_provisioning:
+        command.append("--require-external-runtime-provisioning")
     if args.check_executable_version:
         command.append("--check-executable-version")
     if args.start_sidecar:
@@ -420,8 +442,9 @@ def _smoke_sidecar_install_probe(
         command.append("--quality-sidecar-smoke")
     if args.live_sidecar_smoke:
         command.append("--live-sidecar-smoke")
-    env = _venv_environment(venv_dir)
-    env["HISTDATACOM_TEMPORAL_CACHE_DIR"] = str(root / "temporal-runtime-cache")
+    if args.temporal_executable:
+        command.extend(["--temporal-executable", str(args.temporal_executable)])
+    env = _release_verification_environment(venv_dir=venv_dir, root=root)
     return _run_json(
         command,
         env=env,
@@ -437,7 +460,7 @@ def _download_smoke_probe(
 ) -> dict[str, Any]:
     """Run a small live download/extract smoke through installed CLI defaults."""
     data_dir = root / "download-smoke-data"
-    env = _venv_environment(venv_dir)
+    env = _release_verification_environment(venv_dir=venv_dir, root=root)
     env["HISTDATACOM_SIDECAR_HOME"] = str(root / "download-smoke-sidecar-runtime")
     env["HISTDATACOM_SIDECAR_WORKSPACE"] = str(
         root / "download-smoke-sidecar-workspace"
@@ -645,9 +668,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="require TestPyPI to install a bundled wheel for this platform",
     )
     parser.add_argument(
+        "--require-external-runtime-provisioning",
+        action="store_true",
+        help=(
+            "require the installed wheel to provision or reuse the pinned "
+            "external Temporal runtime from the isolated verification cache"
+        ),
+    )
+    parser.add_argument(
         "--check-executable-version",
         action="store_true",
         help="run the packaged Temporal executable with --version",
+    )
+    parser.add_argument(
+        "--temporal-executable",
+        type=Path,
+        help=(
+            "explicit Temporal executable for developer smoke runs; production "
+            "release preflight should omit this so resolver provisioning is proven"
+        ),
     )
     parser.add_argument(
         "--start-sidecar",

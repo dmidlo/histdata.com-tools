@@ -182,6 +182,11 @@ def test_local_publishing_script_enforces_branch_contract() -> None:
     assert "HISTDATACOM_MAX_UPLOAD_FILE_BYTES" in script
     assert "HISTDATACOM_ALLOW_OVERSIZE_UPLOAD" in script
     assert "validate_dist_artifact_sizes" in script
+    assert "python -m twine check dist/*.whl dist/*.tar.gz" in script
+    assert (
+        "python -m twine check dist/*.whl dist/*.tar.gz\n"
+        "    validate_dist_artifact_sizes"
+    ) in script
     assert "upload_dist_artifacts pypi" in script
     assert "upload_dist_artifacts testpypi" in script
     assert "testpypi_preflight)" in script
@@ -191,7 +196,7 @@ def test_local_publishing_script_enforces_branch_contract() -> None:
     assert "dist/testpypi-preflight-report.json" in script
     assert "verify_release_install" in script
     assert "scripts/verify_testpypi_install.py" in script
-    assert "--require-bundled-current-platform" in script
+    assert "--require-external-runtime-provisioning" in script
     assert "--live-stop-timeout 90" in script
     assert "--download-smoke" in script
     assert 'python -m twine upload -r "${repository}"' in script
@@ -220,5 +225,9 @@ def test_release_docs_mark_local_publishing_as_current_path() -> None:
     assert "HISTDATACOM_SKIP_GPG_SIGNING=1" in release_docs
     assert "HISTDATACOM_ALLOW_OVERSIZE_UPLOAD=1" in release_docs
     assert "HISTDATACOM_MAX_UPLOAD_FILE_BYTES" in release_docs
+    assert "keyring" in release_docs
+    assert "HISTDATACOM_TEMPORAL_CACHE_DIR" in release_docs
+    assert "network access" in release_docs
     assert "python -m twine check dist/*.whl dist/*.tar.gz" in release_docs
     assert "scripts/fetch_temporal_cli.py" in release_docs
+    assert "external Temporal runtime resolver" in release_docs

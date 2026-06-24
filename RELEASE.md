@@ -75,13 +75,14 @@ bash pypi.sh pypi
 ```
 
 `bash pypi.sh testpypi_preflight` is the local release preflight that does not
-contact TestPyPI or require keyring credentials. It builds `dist/`, creates a
-temporary local simple index from those artifacts, installs through
-`scripts/verify_testpypi_install.py`, and runs the same bundled-sidecar,
-CLI-parity, quality-smoke, default-routing, sidecar lifecycle, and live
-download/extract checks used after a real TestPyPI upload. The preflight writes
-`dist/local-simple-index-report.json` and `dist/testpypi-preflight-report.json`
-for auditability.
+contact TestPyPI or require keyring credentials. It builds `dist/`, applies the
+same distribution file-size gate used before upload, creates a temporary local
+simple index from those artifacts, installs through
+`scripts/verify_testpypi_install.py`, and runs the same external Temporal
+runtime resolver, CLI-parity, quality-smoke, default-routing, lifecycle, and
+live download/extract checks used after a real TestPyPI upload. The preflight
+writes `dist/local-simple-index-report.json` and
+`dist/testpypi-preflight-report.json` for auditability.
 
 `bash pypi.sh testpypi` is guarded to run from `dev` by default. Override the
 branch name only for a deliberate repository policy change:
@@ -94,10 +95,15 @@ HISTDATACOM_TESTPYPI_BRANCH=release-candidate bash pypi.sh testpypi
 commands refuse to run with uncommitted tracked changes before building,
 signing, or uploading artifacts.
 
-Local uploads sign distributions by default. On a TestPyPI verification
-machine without the release GPG secret key, set
-`HISTDATACOM_SKIP_GPG_SIGNING=1` explicitly to upload unsigned TestPyPI
-artifacts:
+Actual TestPyPI and PyPI upload commands require upload credentials. The local
+workflow uses Twine with `.pypirc`; Twine may read the token from keyring when
+the password is intentionally omitted from `.pypirc`. Keep upload credentials
+out of the repository. The local preflight does not need TestPyPI/PyPI
+credentials or keyring access.
+
+Local uploads sign distributions by default. On a TestPyPI verification machine
+without the release GPG secret key, set `HISTDATACOM_SKIP_GPG_SIGNING=1`
+explicitly to upload unsigned TestPyPI artifacts:
 
 ```sh
 HISTDATACOM_SKIP_GPG_SIGNING=1 bash pypi.sh testpypi
@@ -122,19 +128,31 @@ python -m build
 python -m twine check dist/*.whl dist/*.tar.gz
 ```
 
-It also inspects the built wheel metadata directly and installs the wheel into
-a fresh virtual environment before any upload command can run. The smoke check
-uses `scripts/smoke_sidecar_install.py`, which validates package metadata,
-console entry points, packaged sidecar resources, current-platform manifest
-support, and offline `histdatacom-sidecar status`/`doctor` behavior. Legacy
-`setup.py` commands are intentionally unsupported; this project is built from
+It also gates distribution file sizes, inspects the built wheel metadata
+directly, and installs the wheel into a fresh virtual environment before any
+upload command can run. The smoke check uses
+`scripts/smoke_sidecar_install.py`, which validates package metadata, console
+entry points, packaged sidecar resources, current-platform manifest support,
+and offline `histdatacom-sidecar status`/`doctor` behavior. Legacy `setup.py`
+commands are intentionally unsupported; this project is built from
 `pyproject.toml`.
 
-Source distributions and universal fallback wheels are metadata-only sidecar
-artifacts. They must declare every supported platform and fail explicitly when
-a Temporal executable is requested from an artifact that does not bundle one.
-Platform wheels are built from explicit Temporal executable artifacts and must
-set the current platform manifest entry to `bundled: true`.
+Source distributions and normal wheels are metadata-only orchestration
+artifacts. They must declare every supported platform and use the pinned
+external Temporal runtime resolver when a Temporal executable is needed. The
+resolver checks `HISTDATACOM_TEMPORAL_EXECUTABLE` only for explicit developer
+or private-runtime overrides, then packaged/private bundled wheels, then a
+verified cache, then a first-run download from the pinned runtime index. Set
+`HISTDATACOM_TEMPORAL_CACHE_DIR` to isolate or preseed the cache, and set
+`HISTDATACOM_TEMPORAL_OFFLINE=1` only when a verified cache entry, explicit
+executable, or private bundled wheel is already available. The release
+preflight intentionally clears host runtime overrides so normal artifacts prove
+the cache/download path; network access is required for first-run provisioning
+when the isolated cache is empty.
+
+Platform wheels are private/offline artifacts built from explicit Temporal
+executable artifacts and must set the current platform manifest entry to
+`bundled: true`.
 
 To build a platform wheel locally, provide the executable artifact and the
 fetch report generated for that exact artifact:
@@ -213,9 +231,11 @@ into a fresh virtual environment with dependencies resolved from PyPI, and
 checks parity against the current package surface: version metadata, console
 entry points, sidecar assets, current CLI flags, sidecar lifecycle probes,
 deterministic sidecar workflow smokes, quality-mode sidecar smokes, and a small
-live download/extract smoke. The default local verification requires a bundled
-wheel for the current platform so stale metadata-only TestPyPI artifacts are
-rejected before production publishing.
+live download/extract smoke. The default local verification requires the
+external Temporal runtime resolver to satisfy `temporal --version` from a
+first-run download or the isolated verification cache, so a stale artifact that
+only has package metadata but cannot provision the pinned runtime is rejected
+before production publishing.
 
 After a production publish, verify the PyPI install path:
 
