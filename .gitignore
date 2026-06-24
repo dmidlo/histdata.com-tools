@@ -15,6 +15,7 @@ __pycache__
 .histdatacom/
 build/
 dist/
+.temporal-cli/
 *.egg-info
 src/histdatacom/sidecar/assets/bin/
 influxdb.yaml
