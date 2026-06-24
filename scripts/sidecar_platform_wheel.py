@@ -26,12 +26,18 @@ PROVENANCE_FILENAME = "temporal-cli-provenance.json"
 DEFAULT_PYTHON_TAG = "py3"
 DEFAULT_ABI_TAG = "none"
 IGNORED_COPY_NAMES = {
+    ".coverage",
+    ".eggs",
     ".git",
     ".mypy_cache",
+    ".pypirc",
     ".pytest_cache",
     ".ruff_cache",
+    ".temporal-cli",
     ".tox",
+    ".venv",
     "build",
+    "data",
     "dist",
     "htmlcov",
     "venv",
@@ -385,6 +391,7 @@ def prepare_sidecar_binary(
 def _ignore_copy_names(directory: str, names: list[str]) -> set[str]:
     """Return top-level and generated names to exclude from the build copy."""
     ignored = {name for name in names if name in IGNORED_COPY_NAMES}
+    ignored.update(name for name in names if name.startswith(".coverage."))
     ignored.update(name for name in names if name.endswith(".egg-info"))
     return ignored
 

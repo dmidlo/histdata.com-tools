@@ -102,6 +102,52 @@ def _fetch_report() -> dict[str, str]:
     }
 
 
+def test_copy_source_tree_excludes_local_data_and_release_state(
+    tmp_path: Path,
+) -> None:
+    """Platform-wheel staging should copy package inputs, not local artifacts."""
+    module = _load_script()
+    source_root = tmp_path / "repo"
+    (source_root / "src/histdatacom").mkdir(parents=True)
+    (source_root / "src/histdatacom/__init__.py").write_text(
+        "__version__ = '0.0.0'\n",
+        encoding="utf-8",
+    )
+    (source_root / "pyproject.toml").write_text(
+        "[project]\nname = 'histdatacom'\n",
+        encoding="utf-8",
+    )
+    for path in (
+        ".git/config",
+        ".pypirc",
+        ".temporal-cli/macos-arm64/bin/temporal",
+        ".coverage.123",
+        "build/temp.txt",
+        "data/.repo",
+        "data/ASCII/M1/eurusd/2026/DAT_ASCII_EURUSD_M1_202606.csv",
+        "dist/histdatacom-0.0.0.tar.gz",
+        "src/histdatacom.egg-info/PKG-INFO",
+        "venv/pyvenv.cfg",
+    ):
+        candidate = source_root / path
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.write_text("local state\n", encoding="utf-8")
+
+    staged = module._copy_source_tree(source_root, tmp_path / "work")
+
+    assert (staged / "pyproject.toml").is_file()
+    assert (staged / "src/histdatacom/__init__.py").is_file()
+    assert not (staged / ".git").exists()
+    assert not (staged / ".pypirc").exists()
+    assert not (staged / ".temporal-cli").exists()
+    assert not (staged / ".coverage.123").exists()
+    assert not (staged / "build").exists()
+    assert not (staged / "data").exists()
+    assert not (staged / "dist").exists()
+    assert not (staged / "src/histdatacom.egg-info").exists()
+    assert not (staged / "venv").exists()
+
+
 def test_prepare_sidecar_binary_patches_manifest_and_copies_executable(
     tmp_path: Path,
 ) -> None:
