@@ -74,7 +74,7 @@ def build_full_dataset_campaign_report(
     status = _campaign_status(
         missing_symbols=missing_symbols,
         disk_status=str(disk["status"]),
-        deferred_work_items=int(totals["deferred_work_item_count"]),
+        deferred_work_items=_int(totals["deferred_work_item_count"]),
     )
     return {
         "schema_version": CAMPAIGN_REPORT_SCHEMA_VERSION,
@@ -88,19 +88,21 @@ def build_full_dataset_campaign_report(
         },
         "data_directory": data_directory,
         "current_yearmonth": resolved_current,
-        "symbols": rows,
-        "dimensions": [
-            _dimension_report(csv_format, timeframe)
-            for csv_format, timeframe in dimensions
-        ],
+        "symbols": _json_value(rows),
+        "dimensions": _json_value(
+            [
+                _dimension_report(csv_format, timeframe)
+                for csv_format, timeframe in dimensions
+            ]
+        ),
         "totals": totals,
         "disk_preflight": disk,
         "missing_symbols": list(missing_symbols),
-        "deferred_scope": deferred,
+        "deferred_scope": _json_value(deferred),
         "command_lines": [str(command) for command in command_lines],
-        "observations": [
-            _json_mapping(observation) for observation in observations
-        ],
+        "observations": _json_value(
+            [_json_mapping(observation) for observation in observations]
+        ),
     }
 
 
@@ -159,7 +161,7 @@ def _symbol_campaign_row(
         "work_item_count": work_item_count,
         "deep_quality_work_item_count": deep_quality_count,
         "deferred_work_item_count": deferred_count,
-        "dimensions": dimension_rows,
+        "dimensions": _json_value(dimension_rows),
     }
 
 
@@ -193,14 +195,18 @@ def _campaign_totals(rows: Iterable[Mapping[str, Any]]) -> dict[str, JSONValue]:
         "work_item_count": totals["work_item_count"],
         "deep_quality_work_item_count": totals["deep_quality_work_item_count"],
         "deferred_work_item_count": totals["deferred_work_item_count"],
-        "work_items_by_dimension": [
-            {
-                "format": csv_format,
-                "timeframe": timeframe,
-                "work_item_count": count,
-            }
-            for (csv_format, timeframe), count in sorted(by_dimension.items())
-        ],
+        "work_items_by_dimension": _json_value(
+            [
+                {
+                    "format": csv_format,
+                    "timeframe": timeframe,
+                    "work_item_count": count,
+                }
+                for (csv_format, timeframe), count in sorted(
+                    by_dimension.items()
+                )
+            ]
+        ),
     }
 
 
@@ -247,7 +253,7 @@ def _deferred_scope(
     follow_up_issues: Mapping[str, int],
 ) -> list[dict[str, JSONValue]]:
     deferred: list[dict[str, JSONValue]] = []
-    if int(totals.get("deferred_work_item_count") or 0):
+    if _int(totals.get("deferred_work_item_count")):
         deferred.append(
             {
                 "scope": "non-ascii and inventory-only format coverage",

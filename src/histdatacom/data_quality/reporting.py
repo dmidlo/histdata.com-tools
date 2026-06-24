@@ -10,8 +10,10 @@ import json
 from pathlib import Path
 
 from histdatacom.data_quality.contracts import (
+    QualityFinding,
     QualityReport,
     QualityRunSummary,
+    QualitySeverity,
     QualityStatus,
     QualityTargetSummary,
 )
@@ -258,10 +260,126 @@ def bounded_quality_payload(
         "target_summaries": [
             summary.to_dict() for summary in report.target_summaries
         ],
+        "cross_target_summaries": _cross_target_summaries(report),
         "report_schema_version": QUALITY_REPORT_SCHEMA_VERSION,
         "report_artifact": None if artifact is None else artifact.to_dict(),
         "exit_decision": decision.to_dict(),
     }
+
+
+def _cross_target_summaries(
+    report: QualityReport,
+) -> list[JSONValue]:
+    """Return compact symbol summaries for run-level warning/error findings."""
+    summaries: list[JSONValue] = []
+    for result in report.rule_results:
+        if result.target.symbol:
+            continue
+        for finding in result.findings:
+            if finding.severity is QualitySeverity.INFO:
+                continue
+            for target in _finding_symbol_targets(finding):
+                summaries.append(
+                    {
+                        "target": target,
+                        "rule_count": 1,
+                        "finding_count": 1,
+                        "info_count": 0,
+                        "warning_count": int(
+                            finding.severity is QualitySeverity.WARNING
+                        ),
+                        "error_count": int(
+                            finding.severity is QualitySeverity.ERROR
+                        ),
+                        "status": (
+                            QualityStatus.FAILED.value
+                            if finding.severity is QualitySeverity.ERROR
+                            else QualityStatus.WARNING.value
+                        ),
+                        "max_severity": finding.severity.value,
+                    }
+                )
+    return summaries
+
+
+def _finding_symbol_targets(
+    finding: QualityFinding,
+) -> tuple[dict[str, JSONValue], ...]:
+    fallback = {
+        "data_format": finding.target.data_format,
+        "timeframe": finding.target.timeframe,
+        "period": finding.target.period,
+    }
+    records: set[tuple[str, str, str, str]] = set()
+    location_metadata = finding.location.metadata
+    contexts = _finding_contexts(finding)
+    for context in contexts:
+        symbols = _symbols_from_mapping(context) | _symbols_from_mapping(
+            location_metadata
+        )
+        data_format = (
+            _string_field(context, "data_format") or fallback["data_format"]
+        )
+        timeframe = (
+            _string_field(context, "timeframe")
+            or _string_field(location_metadata, "timeframe")
+            or fallback["timeframe"]
+        )
+        period = (
+            _string_field(context, "period")
+            or _string_field(location_metadata, "period")
+            or fallback["period"]
+        )
+        for symbol in symbols:
+            records.add((symbol, data_format, timeframe, period))
+    return tuple(
+        {
+            "kind": "cross-target-finding",
+            "path": finding.target.path,
+            "data_format": data_format,
+            "timeframe": timeframe,
+            "symbol": symbol,
+            "period": period,
+            "metadata": {
+                "code": finding.code,
+                "rule_id": finding.rule_id,
+            },
+        }
+        for symbol, data_format, timeframe, period in sorted(records)
+    )
+
+
+def _finding_contexts(
+    finding: QualityFinding,
+) -> tuple[Mapping[str, JSONValue], ...]:
+    metadata = finding.metadata
+    samples = metadata.get("samples")
+    contexts: list[Mapping[str, JSONValue]] = [metadata]
+    if isinstance(samples, list):
+        contexts.extend(
+            sample for sample in samples if isinstance(sample, Mapping)
+        )
+    return tuple(contexts)
+
+
+def _symbols_from_mapping(value: Mapping[str, JSONValue]) -> set[str]:
+    symbols: set[str] = set()
+    for key, item in value.items():
+        if key == "symbols" and isinstance(item, list):
+            symbols.update(_normalized_symbol(symbol) for symbol in item)
+        elif key == "symbol" or key.endswith("_symbol"):
+            symbols.add(_normalized_symbol(item))
+    symbols.discard("")
+    return symbols
+
+
+def _normalized_symbol(value: object) -> str:
+    text = str(value or "").strip().upper()
+    return text if text.isalnum() else ""
+
+
+def _string_field(value: Mapping[str, JSONValue], key: str) -> str:
+    return str(value.get(key, "") or "")
 
 
 def _target_count(report: QualityReport, status: QualityStatus) -> int:

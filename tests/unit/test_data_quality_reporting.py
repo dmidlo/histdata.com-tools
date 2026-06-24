@@ -15,6 +15,7 @@ from histdatacom.data_quality import (
     QualitySeverity,
     QualityTarget,
     QualityTargetKind,
+    bounded_quality_payload,
     format_quality_console_summary,
     quality_report_to_json,
     write_quality_report,
@@ -72,6 +73,36 @@ def test_quality_report_writer_returns_sidecar_artifact_ref(
         json.loads(output.read_text(encoding="utf-8"))["summary"]["error_count"]
         == 1
     )
+
+
+def test_bounded_payload_keeps_cross_target_finding_summaries(
+    tmp_path: Path,
+) -> None:
+    """Run-level findings should stay visible without full rule history."""
+    report = _cross_target_report(tmp_path)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("domain",),
+        discovery={},
+        report=report,
+        decision=QualityExitPolicy.from_values(fail_on="never").evaluate(
+            report.summary()
+        ),
+        artifact=None,
+    )
+
+    summaries = payload["cross_target_summaries"]
+
+    assert "rule_results" not in payload
+    assert isinstance(summaries, list)
+    assert {summary["target"]["symbol"] for summary in summaries} == {
+        "AUDCAD",
+        "AUDCHF",
+        "CADCHF",
+    }
+    assert {summary["target"]["period"] for summary in summaries} == {"2008"}
+    assert {summary["status"] for summary in summaries} == {"failed"}
+    assert {summary["error_count"] for summary in summaries} == {1}
 
 
 def test_quality_console_summary_separates_target_statuses(
@@ -160,6 +191,51 @@ def _mixed_report(tmp_path: Path) -> QualityReport:
                 rule_id="file.exists",
                 target=failed,
                 findings=(error_finding,),
+            ),
+        ),
+    )
+
+
+def _cross_target_report(tmp_path: Path) -> QualityReport:
+    directory = QualityTarget(
+        path=str(tmp_path / "data" / "ASCII" / "M1"),
+        kind=QualityTargetKind.DIRECTORY,
+        data_format="ascii",
+    )
+    finding = QualityFinding(
+        severity=QualitySeverity.ERROR,
+        code="DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
+        message="triangular relationship differs from the direct pair",
+        rule_id="domain.cross_instrument_consistency",
+        target=directory,
+        location=QualityLocation(
+            path=directory.path,
+            metadata={
+                "direct_symbol": "AUDCAD",
+                "period": "2008",
+                "timeframe": "M1",
+            },
+        ),
+        metadata={
+            "samples": [
+                {
+                    "denominator_symbol": "CADCHF",
+                    "direct_symbol": "AUDCAD",
+                    "numerator_symbol": "AUDCHF",
+                    "period": "2008",
+                    "relationship": "AUDCHF / CADCHF ~= AUDCAD",
+                    "timeframe": "M1",
+                }
+            ]
+        },
+    )
+    return QualityReport(
+        targets=(directory,),
+        rule_results=(
+            QualityRuleResult(
+                rule_id="domain.cross_instrument_consistency",
+                target=directory,
+                findings=(finding,),
             ),
         ),
     )

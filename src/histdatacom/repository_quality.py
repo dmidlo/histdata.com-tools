@@ -102,7 +102,22 @@ def _target_summaries_by_symbol(
         symbol = _target_value(summary, "symbol")
         if symbol:
             grouped[symbol.lower()].append(summary)
+    for summary in _cross_target_summaries(quality_payload):
+        symbol = _target_value(summary, "symbol")
+        if symbol:
+            grouped[symbol.lower()].append(summary)
     return dict(grouped)
+
+
+def _cross_target_summaries(
+    quality_payload: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], ...]:
+    summaries = quality_payload.get("cross_target_summaries") or []
+    if not isinstance(summaries, list):
+        return ()
+    return tuple(
+        summary for summary in summaries if isinstance(summary, Mapping)
+    )
 
 
 def _quality_summary(
@@ -150,7 +165,9 @@ def _quality_summary(
         "operation": "repo-quality-refresh",
         "request_id": request_id,
         "report_schema_version": str(
-            quality_payload.get("report_schema_version", "") or ""
+            quality_payload.get("report_schema_version", "")
+            or quality_payload.get("schema_version", "")
+            or ""
         ),
         "status": _worst_value(status_counts, _STATUS_ORDER, "clean"),
         "max_severity": _worst_max_severity(summaries),

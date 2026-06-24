@@ -84,6 +84,79 @@ def test_repository_quality_payload_updates_legacy_pair_entries() -> None:
     assert quality["report_artifact"]["path"] == "/tmp/quality.json"
 
 
+def test_repository_quality_attributes_cross_target_findings() -> None:
+    """Run-level domain findings should update each involved symbol."""
+    repo = {
+        "audcad": {"start": "200709", "end": "202606"},
+        "audchf": {"start": "200803", "end": "202606"},
+        "cadchf": {"start": "200803", "end": "202606"},
+        "audjpy": {"start": "200208", "end": "202606"},
+    }
+    payload = {
+        "operation": "data-quality",
+        "check_groups": ["all"],
+        "report_schema_version": "histdatacom.quality-report.v1",
+        "report_artifact": {
+            "kind": "quality-report",
+            "path": ".quality/issue-241/ascii-m1-all-quality-report.json",
+            "sha256": "abc",
+        },
+        "exit_decision": {"exit_code": 1, "reason": "error threshold"},
+        "target_summaries": [
+            {
+                "target": {
+                    "symbol": symbol.upper(),
+                    "data_format": "ascii",
+                    "timeframe": "M1",
+                    "period": "2008",
+                },
+                "finding_count": 0,
+                "info_count": 0,
+                "warning_count": 0,
+                "error_count": 0,
+                "status": "clean",
+                "max_severity": "info",
+            }
+            for symbol in repo
+        ],
+        "cross_target_summaries": [
+            {
+                "target": {
+                    "symbol": symbol.upper(),
+                    "data_format": "ascii",
+                    "timeframe": "M1",
+                    "period": "2008",
+                },
+                "finding_count": 1,
+                "info_count": 0,
+                "warning_count": 0,
+                "error_count": 1,
+                "status": "failed",
+                "max_severity": "error",
+            }
+            for symbol in ("audcad", "audchf", "cadchf")
+        ],
+    }
+
+    updated = repository_data_with_quality_payload(
+        repo,
+        payload,
+        request_id="issue-233-ascii-m1-all-quality",
+        checked_at_utc="2026-06-23T00:00:00Z",
+    )
+
+    for symbol in ("audcad", "audchf", "cadchf"):
+        quality = updated[symbol]["quality"]
+        assert quality["status"] == "failed"
+        assert quality["max_severity"] == "error"
+        assert quality["error_count"] == 1
+        assert quality["failed_target_count"] == 1
+        assert quality["report_artifact"]["path"].endswith(
+            "ascii-m1-all-quality-report.json"
+        )
+    assert updated["audjpy"]["quality"]["status"] == "clean"
+
+
 def test_repository_quality_columns_are_display_safe() -> None:
     """Table renderers should get stable strings for missing and present data."""
     assert repository_quality_columns({"start": "200005", "end": "202606"}) == {
