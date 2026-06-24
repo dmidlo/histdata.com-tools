@@ -108,7 +108,7 @@ def test_storage_backed_campaign_plan_updates_repo_before_cache_cleanup() -> (
     assert commands[0] == {
         "step": "download_extract_slice",
         "command": (
-            "histdatacom -D -X -p audusd -f ascii -t M1 "
+            "histdatacom -D -X -p audusd -f ascii -t 1-minute-bar-quotes "
             "--data-directory data"
         ),
     }
@@ -175,6 +175,10 @@ def test_storage_backed_campaign_plan_can_remove_slice_artifacts() -> None:
     assert plan["cleanup_policy"]["mode"] == "working-artifacts"
     assert plan["cleanup_policy"]["preserves_repo_file"] is True
     assert plan["cleanup_policy"]["preserves_quality_reports"] is True
+    assert plan["slices"][0]["commands"][0]["command"] == (
+        "histdatacom -D -X -p audusd -f ascii -t tick-data-quotes "
+        "--data-directory '/Volumes/histdata/data root'"
+    )
     assert cleanup["step"] == "cleanup_after_repo_quality"
     assert cleanup["command"] == (
         "rm -rf '/Volumes/histdata/data root/ASCII/T/audusd'"

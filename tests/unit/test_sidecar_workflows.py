@@ -707,6 +707,7 @@ def test_workflow_topology_documents_expected_hierarchy() -> None:
         activity_policies["data_quality"]["retry_policy"]["name"]
         == RetryPolicyName.NONE.value
     )
+    assert activity_policies["data_quality"]["heartbeat_timeout_seconds"] == 300
     assert (
         activity_policies["download_archives"]["heartbeat_timeout_seconds"]
         == 60

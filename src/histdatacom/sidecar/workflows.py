@@ -499,7 +499,7 @@ ACTIVITY_EXECUTION_POLICIES = {
     "data_quality": ActivityExecutionPolicy(
         activity_name="data_quality",
         start_to_close_timeout_seconds=1800,
-        heartbeat_timeout_seconds=30,
+        heartbeat_timeout_seconds=300,
         retry_policy=NO_RETRY_POLICY,
     ),
     "validate_urls": ActivityExecutionPolicy(

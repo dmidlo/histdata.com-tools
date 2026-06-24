@@ -532,7 +532,7 @@ def _slice_commands(
                 "-f",
                 csv_format,
                 "-t",
-                timeframe,
+                _cli_timeframe_arg(timeframe),
                 "--data-directory",
                 data_directory,
             ),
@@ -673,6 +673,12 @@ def _slice_target_path(
     return str(
         Path(data_directory) / Format(csv_format).name / timeframe / symbol
     )
+
+
+def _cli_timeframe_arg(timeframe: str) -> str:
+    if timeframe in Timeframe.list_keys():
+        return str(Timeframe[timeframe].value)
+    return str(Timeframe(timeframe).value)
 
 
 def _slice_report_path(

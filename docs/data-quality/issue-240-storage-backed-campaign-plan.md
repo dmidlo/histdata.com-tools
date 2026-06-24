@@ -92,7 +92,7 @@ For one slice:
 histdatacom -D -X \
   -p etxeur \
   -f ascii \
-  -t M1 \
+  -t 1-minute-bar-quotes \
   --data-directory /Volumes/histdata/data
 
 histdatacom --repo-quality \
