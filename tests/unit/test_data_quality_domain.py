@@ -148,10 +148,14 @@ def test_domain_symbol_metadata_reports_known_metals_and_indexes(
 
     assert metal.metadata["symbol_metadata"]["asset_class"] == "metal"
     assert metal.metadata["symbol_metadata"]["known"] is True
-    assert metal.metadata["symbol_metadata"]["precision_rule"] is None
+    assert metal.metadata["symbol_metadata"]["precision_rule"]["name"] == (
+        "metal_three_decimal_bid"
+    )
     assert index.metadata["symbol_metadata"]["asset_class"] == "index"
     assert index.metadata["symbol_metadata"]["known"] is True
-    assert index.metadata["symbol_metadata"]["precision_rule"] is None
+    assert index.metadata["symbol_metadata"]["precision_rule"]["name"] == (
+        "index_three_decimal_bid"
+    )
 
 
 def test_domain_symbol_metadata_supports_enum_value_aliases(

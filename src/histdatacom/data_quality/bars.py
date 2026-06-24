@@ -27,6 +27,9 @@ from histdatacom.data_quality.polars_cache import (
     read_quality_polars_cache,
 )
 from histdatacom.data_quality.symbols import (
+    ASSET_CLASS_INDEX,
+    ASSET_CLASS_METAL,
+    ASSET_CLASS_OIL,
     ASSET_CLASS_UNKNOWN,
     HistDataSymbolMetadata,
     HistDataSymbolPrecisionRule,
@@ -103,6 +106,23 @@ class HistDataM1OutlierThresholds:
 
 
 DEFAULT_M1_OUTLIER_THRESHOLDS = HistDataM1OutlierThresholds()
+DEFAULT_M1_OUTLIER_THRESHOLDS_BY_ASSET_CLASS = {
+    ASSET_CLASS_METAL: HistDataM1OutlierThresholds(
+        max_range_ratio=0.03,
+        max_open_jump_ratio=0.03,
+        return_absolute_ratio=0.03,
+    ),
+    ASSET_CLASS_OIL: HistDataM1OutlierThresholds(
+        max_range_ratio=0.08,
+        max_open_jump_ratio=0.08,
+        return_absolute_ratio=0.08,
+    ),
+    ASSET_CLASS_INDEX: HistDataM1OutlierThresholds(
+        max_range_ratio=0.06,
+        max_open_jump_ratio=0.06,
+        return_absolute_ratio=0.06,
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -751,7 +771,11 @@ class HistDataAsciiM1OutlierRule:
     thresholds_by_asset_class: Mapping[
         str,
         HistDataM1OutlierThresholds,
-    ] = field(default_factory=dict)
+    ] = field(
+        default_factory=lambda: dict(
+            DEFAULT_M1_OUTLIER_THRESHOLDS_BY_ASSET_CLASS
+        )
+    )
     warning_severity: QualitySeverity = QualitySeverity.WARNING
     rule_id: str = ASCII_M1_OUTLIER_RULE_ID
     description: str = (

@@ -323,25 +323,36 @@ class QualityProfile:
             config,
             {
                 "thresholds",
+                "thresholds_by_asset_class",
                 "zero_spread_severity",
                 "negative_spread_severity",
                 "schema_severity",
             },
             ASCII_TICK_SPREAD_RULE_ID,
         )
-        thresholds = _mapping_field(
-            config,
-            "thresholds",
-            path=ASCII_TICK_SPREAD_RULE_ID,
+        return _tick_spread_thresholds(
+            _mapping_field(
+                config,
+                "thresholds",
+                path=ASCII_TICK_SPREAD_RULE_ID,
+            ),
+            base=DEFAULT_TICK_SPREAD_THRESHOLDS,
+            path=f"{ASCII_TICK_SPREAD_RULE_ID}.thresholds",
         )
-        return HistDataTickSpreadThresholds(
-            zero_spread_run_length=_int_field(
-                thresholds,
-                "zero_spread_run_length",
-                DEFAULT_TICK_SPREAD_THRESHOLDS.zero_spread_run_length,
-                minimum=1,
-                path=f"{ASCII_TICK_SPREAD_RULE_ID}.thresholds",
-            )
+
+    def tick_spread_thresholds_by_asset_class(
+        self,
+    ) -> dict[str, HistDataTickSpreadThresholds]:
+        """Return configured tick spread thresholds by asset class."""
+        config = self.rule_config(ASCII_TICK_SPREAD_RULE_ID)
+        return _tick_spread_threshold_mapping(
+            _mapping_field(
+                config,
+                "thresholds_by_asset_class",
+                path=ASCII_TICK_SPREAD_RULE_ID,
+            ),
+            key_normalizer=_lower_key,
+            path=f"{ASCII_TICK_SPREAD_RULE_ID}.thresholds_by_asset_class",
         )
 
     def tick_microstructure_thresholds(
@@ -355,6 +366,7 @@ class QualityProfile:
                 "thresholds",
                 "thresholds_by_symbol",
                 "thresholds_by_session",
+                "thresholds_by_asset_class",
                 "thresholds_by_symbol_session",
                 "session_name",
                 "warning_severity",
@@ -401,6 +413,24 @@ class QualityProfile:
             path=f"{ASCII_TICK_MICROSTRUCTURE_RULE_ID}.thresholds_by_session",
         )
 
+    def tick_microstructure_thresholds_by_asset_class(
+        self,
+    ) -> dict[str, HistDataTickMicrostructureThresholds]:
+        """Return tick microstructure thresholds keyed by asset class."""
+        config = self.rule_config(ASCII_TICK_MICROSTRUCTURE_RULE_ID)
+        return _tick_microstructure_threshold_mapping(
+            _mapping_field(
+                config,
+                "thresholds_by_asset_class",
+                path=ASCII_TICK_MICROSTRUCTURE_RULE_ID,
+            ),
+            key_normalizer=_lower_key,
+            path=(
+                f"{ASCII_TICK_MICROSTRUCTURE_RULE_ID}."
+                "thresholds_by_asset_class"
+            ),
+        )
+
     def tick_microstructure_thresholds_by_symbol_session(
         self,
     ) -> dict[str, HistDataTickMicrostructureThresholds]:
@@ -431,7 +461,12 @@ class QualityProfile:
         config = self.rule_config(ASCII_TICK_SPREAD_REGIME_RULE_ID)
         _reject_unknown_keys(
             config,
-            {"thresholds", "warning_severity", "schema_severity"},
+            {
+                "thresholds",
+                "thresholds_by_asset_class",
+                "warning_severity",
+                "schema_severity",
+            },
             ASCII_TICK_SPREAD_REGIME_RULE_ID,
         )
         return _tick_spread_regime_thresholds(
@@ -442,6 +477,24 @@ class QualityProfile:
             ),
             base=DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS,
             path=f"{ASCII_TICK_SPREAD_REGIME_RULE_ID}.thresholds",
+        )
+
+    def tick_spread_regime_thresholds_by_asset_class(
+        self,
+    ) -> dict[str, HistDataTickSpreadRegimeThresholds]:
+        """Return tick spread-regime thresholds keyed by asset class."""
+        config = self.rule_config(ASCII_TICK_SPREAD_REGIME_RULE_ID)
+        return _tick_spread_regime_threshold_mapping(
+            _mapping_field(
+                config,
+                "thresholds_by_asset_class",
+                path=ASCII_TICK_SPREAD_REGIME_RULE_ID,
+            ),
+            key_normalizer=_lower_key,
+            path=(
+                f"{ASCII_TICK_SPREAD_REGIME_RULE_ID}."
+                "thresholds_by_asset_class"
+            ),
         )
 
     def cross_instrument_tolerance(self) -> HistDataCrossInstrumentTolerance:
@@ -592,11 +645,14 @@ def validate_quality_profile(profile: QualityProfile) -> None:
     profile.m1_outlier_thresholds_by_asset_class()
     profile.m1_tick_reconstruction_tolerance()
     profile.tick_spread_thresholds()
+    profile.tick_spread_thresholds_by_asset_class()
     profile.tick_microstructure_thresholds()
     profile.tick_microstructure_thresholds_by_symbol()
     profile.tick_microstructure_thresholds_by_session()
+    profile.tick_microstructure_thresholds_by_asset_class()
     profile.tick_microstructure_thresholds_by_symbol_session()
     profile.tick_spread_regime_thresholds()
+    profile.tick_spread_regime_thresholds_by_asset_class()
     profile.cross_instrument_tolerance()
     profile.modeling_profile_assumptions()
     _validate_configured_severities(profile)
@@ -670,6 +726,25 @@ def _m1_outlier_threshold_mapping(
     return result
 
 
+def _tick_spread_threshold_mapping(
+    value: Mapping[str, JSONValue],
+    *,
+    key_normalizer: Any,
+    path: str,
+) -> dict[str, HistDataTickSpreadThresholds]:
+    result: dict[str, HistDataTickSpreadThresholds] = {}
+    for key, config in value.items():
+        profile_key = str(key_normalizer(str(key)))
+        if not profile_key:
+            continue
+        result[profile_key] = _tick_spread_thresholds(
+            _expect_mapping(config, path=f"{path}.{key}"),
+            base=DEFAULT_TICK_SPREAD_THRESHOLDS,
+            path=f"{path}.{key}",
+        )
+    return result
+
+
 def _tick_microstructure_threshold_mapping(
     value: Mapping[str, JSONValue],
     *,
@@ -684,6 +759,25 @@ def _tick_microstructure_threshold_mapping(
         result[profile_key] = _tick_microstructure_thresholds(
             _expect_mapping(config, path=f"{path}.{key}"),
             base=DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS,
+            path=f"{path}.{key}",
+        )
+    return result
+
+
+def _tick_spread_regime_threshold_mapping(
+    value: Mapping[str, JSONValue],
+    *,
+    key_normalizer: Any,
+    path: str,
+) -> dict[str, HistDataTickSpreadRegimeThresholds]:
+    result: dict[str, HistDataTickSpreadRegimeThresholds] = {}
+    for key, config in value.items():
+        profile_key = str(key_normalizer(str(key)))
+        if not profile_key:
+            continue
+        result[profile_key] = _tick_spread_regime_thresholds(
+            _expect_mapping(config, path=f"{path}.{key}"),
+            base=DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS,
             path=f"{path}.{key}",
         )
     return result
@@ -772,6 +866,28 @@ def _m1_outlier_thresholds(
             minimum=2,
             path=path,
         ),
+    )
+
+
+def _tick_spread_thresholds(
+    value: Mapping[str, JSONValue],
+    *,
+    base: HistDataTickSpreadThresholds,
+    path: str,
+) -> HistDataTickSpreadThresholds:
+    _reject_unknown_keys(
+        value,
+        {"zero_spread_run_length"},
+        path,
+    )
+    return HistDataTickSpreadThresholds(
+        zero_spread_run_length=_int_field(
+            value,
+            "zero_spread_run_length",
+            base.zero_spread_run_length,
+            minimum=1,
+            path=path,
+        )
     )
 
 

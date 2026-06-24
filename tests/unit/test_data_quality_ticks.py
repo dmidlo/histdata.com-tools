@@ -90,6 +90,55 @@ def test_clean_tick_file_reports_spread_summary(
     assert regimes.metadata["regime_shift_count"] == 0
 
 
+def test_non_fx_tick_reports_select_asset_class_thresholds(
+    tmp_path: Path,
+) -> None:
+    """Known non-FX tick reports should expose calibrated asset thresholds."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="tick_spxusd_asset_thresholds",
+            timeframe=TICK,
+            filename="DAT_ASCII_SPXUSD_T_201202.csv",
+            rows=(
+                "20120201 000000000,4500.100,4500.600,0",
+                "20120201 000100000,4500.200,4500.700,0",
+                "20120201 000200000,4500.300,4500.800,0",
+            ),
+        ),
+    )
+
+    report = _report_for_path(path)
+
+    spread = _finding(report.findings, "ASCII_TICK_SPREAD_SUMMARY")
+    microstructure = _finding(
+        report.findings,
+        "ASCII_TICK_MICROSTRUCTURE_SUMMARY",
+    )
+    regimes = _finding(report.findings, "ASCII_TICK_SPREAD_REGIME_SUMMARY")
+    assert report.status is QualityStatus.CLEAN
+    assert spread.metadata["threshold_profile"]["source"] == "asset_class"
+    assert spread.metadata["threshold_profile"]["asset_class_key"] == "index"
+    assert (
+        spread.metadata["threshold_profile"]["values"]["zero_spread_run_length"]
+        == 2
+    )
+    assert microstructure.metadata["threshold_profile"]["source"] == (
+        "asset_class"
+    )
+    assert (
+        microstructure.metadata["threshold_profile"]["values"][
+            "one_sided_run_length"
+        ]
+        == 3
+    )
+    assert regimes.metadata["threshold_profile"]["source"] == "asset_class"
+    assert (
+        regimes.metadata["threshold_profile"]["values"]["minimum_wide_spread"]
+        == 0.5
+    )
+
+
 def test_m1_files_are_ignored_by_tick_spread_rule(
     tmp_path: Path,
 ) -> None:

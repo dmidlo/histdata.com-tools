@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from histdatacom.data_quality import (
+    ASSET_CLASS_METAL,
     DEFAULT_QUALITY_PROFILE_SOURCE,
     QUALITY_PROFILE_SCHEMA_VERSION,
     HistDataAsciiM1OutlierRule,
@@ -37,7 +38,13 @@ def test_default_profile_keeps_rule_defaults() -> None:
 
     assert isinstance(outlier_rule, HistDataAsciiM1OutlierRule)
     assert outlier_rule.thresholds.max_open_jump_ratio == 0.005
-    assert outlier_rule.thresholds_by_asset_class == {}
+    assert ASSET_CLASS_METAL in outlier_rule.thresholds_by_asset_class
+    assert (
+        outlier_rule.thresholds_by_asset_class[
+            ASSET_CLASS_METAL
+        ].max_open_jump_ratio
+        == 0.03
+    )
     metadata = quality_profile_report_metadata(None)["quality_profile"]
     assert metadata["source"] == DEFAULT_QUALITY_PROFILE_SOURCE
     assert metadata["is_default"] is True

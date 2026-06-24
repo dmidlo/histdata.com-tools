@@ -8,6 +8,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TypeVar
 import zipfile
 
 from histdatacom.data_quality.contracts import (
@@ -26,7 +27,13 @@ from histdatacom.data_quality.calendar import (
     classify_histdata_timestamp,
 )
 from histdatacom.data_quality.polars_cache import read_quality_polars_cache
-from histdatacom.data_quality.symbols import normalize_histdata_symbol
+from histdatacom.data_quality.symbols import (
+    ASSET_CLASS_INDEX,
+    ASSET_CLASS_METAL,
+    ASSET_CLASS_OIL,
+    normalize_histdata_symbol,
+    symbol_metadata_for,
+)
 from histdatacom.histdata_ascii import (
     EST_NO_DST_OFFSET_MS,
     TICK,
@@ -48,6 +55,7 @@ DEFAULT_SESSION_PROFILE = "default"
 DUPLICATE_TICK_OWNER_RULE_ID = "time.ascii.timestamp_sequence"
 DUPLICATE_TICK_OWNER_FINDING_CODE = "ASCII_TICK_DUPLICATE_ROW"
 SPECIAL_SPREAD_REGIMES = ("daily_rollover", "sunday_open", "friday_close")
+_ThresholdT = TypeVar("_ThresholdT")
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +76,17 @@ class HistDataTickSpreadThresholds:
 
 
 DEFAULT_TICK_SPREAD_THRESHOLDS = HistDataTickSpreadThresholds()
+DEFAULT_TICK_SPREAD_THRESHOLDS_BY_ASSET_CLASS = {
+    ASSET_CLASS_METAL: HistDataTickSpreadThresholds(
+        zero_spread_run_length=2,
+    ),
+    ASSET_CLASS_OIL: HistDataTickSpreadThresholds(
+        zero_spread_run_length=2,
+    ),
+    ASSET_CLASS_INDEX: HistDataTickSpreadThresholds(
+        zero_spread_run_length=2,
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +129,29 @@ class HistDataTickMicrostructureThresholds:
 
 
 DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS = HistDataTickMicrostructureThresholds()
+DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS_BY_ASSET_CLASS = {
+    ASSET_CLASS_METAL: HistDataTickMicrostructureThresholds(
+        stale_quote_run_length=4,
+        stale_max_gap_ms=120_000,
+        burst_max_interval_ms=250,
+        burst_run_length=4,
+        one_sided_run_length=3,
+    ),
+    ASSET_CLASS_OIL: HistDataTickMicrostructureThresholds(
+        stale_quote_run_length=4,
+        stale_max_gap_ms=120_000,
+        burst_max_interval_ms=250,
+        burst_run_length=4,
+        one_sided_run_length=3,
+    ),
+    ASSET_CLASS_INDEX: HistDataTickMicrostructureThresholds(
+        stale_quote_run_length=4,
+        stale_max_gap_ms=180_000,
+        burst_max_interval_ms=500,
+        burst_run_length=4,
+        one_sided_run_length=3,
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +195,67 @@ class HistDataTickSpreadRegimeThresholds:
 
 
 DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS = HistDataTickSpreadRegimeThresholds()
+DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS_BY_ASSET_CLASS = {
+    ASSET_CLASS_METAL: HistDataTickSpreadRegimeThresholds(
+        wide_spread_multiplier=5.0,
+        jump_spread_multiplier=3.0,
+        regime_median_multiplier=3.0,
+        minimum_wide_spread=0.05,
+        minimum_spread_jump=0.05,
+    ),
+    ASSET_CLASS_OIL: HistDataTickSpreadRegimeThresholds(
+        wide_spread_multiplier=5.0,
+        jump_spread_multiplier=3.0,
+        regime_median_multiplier=3.0,
+        minimum_wide_spread=0.02,
+        minimum_spread_jump=0.02,
+    ),
+    ASSET_CLASS_INDEX: HistDataTickSpreadRegimeThresholds(
+        wide_spread_multiplier=5.0,
+        jump_spread_multiplier=3.0,
+        regime_median_multiplier=3.0,
+        minimum_wide_spread=0.5,
+        minimum_spread_jump=0.5,
+    ),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _TickSpreadThresholdSelection:
+    thresholds: HistDataTickSpreadThresholds
+    source: str
+    symbol_key: str
+    asset_class_key: str
+    profile_key: str
+
+    def to_metadata(self) -> dict[str, JSONValue]:
+        """Return JSON-compatible threshold selection metadata."""
+        return {
+            "source": self.source,
+            "symbol_key": self.symbol_key,
+            "asset_class_key": self.asset_class_key,
+            "profile_key": self.profile_key,
+            "values": self.thresholds.to_metadata(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _TickSpreadRegimeThresholdSelection:
+    thresholds: HistDataTickSpreadRegimeThresholds
+    source: str
+    symbol_key: str
+    asset_class_key: str
+    profile_key: str
+
+    def to_metadata(self) -> dict[str, JSONValue]:
+        """Return JSON-compatible threshold selection metadata."""
+        return {
+            "source": self.source,
+            "symbol_key": self.symbol_key,
+            "asset_class_key": self.asset_class_key,
+            "profile_key": self.profile_key,
+            "values": self.thresholds.to_metadata(),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +264,7 @@ class _TickMicrostructureThresholdSelection:
     source: str
     symbol_key: str
     session_key: str
+    asset_class_key: str
     profile_key: str
 
     def to_metadata(self) -> dict[str, JSONValue]:
@@ -169,6 +273,7 @@ class _TickMicrostructureThresholdSelection:
             "source": self.source,
             "symbol_key": self.symbol_key,
             "session_key": self.session_key,
+            "asset_class_key": self.asset_class_key,
             "profile_key": self.profile_key,
             "values": self.thresholds.to_metadata(),
         }
@@ -518,6 +623,14 @@ class HistDataAsciiTickSpreadRule:
     """Validate tick bid/ask ordering and zero-spread regimes."""
 
     thresholds: HistDataTickSpreadThresholds = DEFAULT_TICK_SPREAD_THRESHOLDS
+    thresholds_by_asset_class: Mapping[
+        str,
+        HistDataTickSpreadThresholds,
+    ] = field(
+        default_factory=lambda: dict(
+            DEFAULT_TICK_SPREAD_THRESHOLDS_BY_ASSET_CLASS
+        )
+    )
     zero_spread_severity: QualitySeverity = QualitySeverity.WARNING
     negative_spread_severity: QualitySeverity = QualitySeverity.ERROR
     schema_severity: QualitySeverity = QualitySeverity.ERROR
@@ -573,19 +686,24 @@ class HistDataAsciiTickSpreadRule:
                 ),
             )
 
+        threshold_selection = _spread_threshold_selection(
+            target,
+            thresholds=self.thresholds,
+            thresholds_by_asset_class=self.thresholds_by_asset_class,
+        )
         scan = _scan_tick_spread_rows(
             text,
             target=target,
             delimiter=delimiter,
             columns=columns,
             source_member=payload.source_member,
-            thresholds=self.thresholds,
+            thresholds=threshold_selection.thresholds,
         )
         return _spread_findings(
             target=target,
             scan=scan,
             source_member=payload.source_member,
-            thresholds=self.thresholds,
+            threshold_selection=threshold_selection,
             zero_spread_severity=self.zero_spread_severity,
             negative_spread_severity=self.negative_spread_severity,
             schema_severity=self.schema_severity,
@@ -608,6 +726,14 @@ class HistDataAsciiTickMicrostructureRule:
         str,
         HistDataTickMicrostructureThresholds,
     ] = field(default_factory=dict)
+    thresholds_by_asset_class: Mapping[
+        str,
+        HistDataTickMicrostructureThresholds,
+    ] = field(
+        default_factory=lambda: dict(
+            DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS_BY_ASSET_CLASS
+        )
+    )
     thresholds_by_symbol_session: Mapping[
         str,
         HistDataTickMicrostructureThresholds,
@@ -678,6 +804,7 @@ class HistDataAsciiTickMicrostructureRule:
             thresholds=self.thresholds,
             thresholds_by_symbol=self.thresholds_by_symbol,
             thresholds_by_session=self.thresholds_by_session,
+            thresholds_by_asset_class=self.thresholds_by_asset_class,
             thresholds_by_symbol_session=self.thresholds_by_symbol_session,
             session_name=self.session_name,
         )
@@ -704,6 +831,14 @@ class HistDataAsciiTickSpreadRegimeRule:
 
     thresholds: HistDataTickSpreadRegimeThresholds = (
         DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS
+    )
+    thresholds_by_asset_class: Mapping[
+        str,
+        HistDataTickSpreadRegimeThresholds,
+    ] = field(
+        default_factory=lambda: dict(
+            DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS_BY_ASSET_CLASS
+        )
     )
     warning_severity: QualitySeverity = QualitySeverity.WARNING
     schema_severity: QualitySeverity = QualitySeverity.WARNING
@@ -768,19 +903,24 @@ class HistDataAsciiTickSpreadRegimeRule:
                 ),
             )
 
+        threshold_selection = _spread_regime_threshold_selection(
+            target,
+            thresholds=self.thresholds,
+            thresholds_by_asset_class=self.thresholds_by_asset_class,
+        )
         scan = _scan_tick_spread_regime_rows(
             text,
             target=target,
             delimiter=delimiter,
             columns=columns,
             source_member=payload.source_member,
-            thresholds=self.thresholds,
+            thresholds=threshold_selection.thresholds,
         )
         return _spread_regime_findings(
             target=target,
             scan=scan,
             source_member=payload.source_member,
-            thresholds=self.thresholds,
+            threshold_selection=threshold_selection,
             severity=self.warning_severity,
             rule_id=self.rule_id,
         )
@@ -1828,12 +1968,77 @@ def _one_sided_quote_direction(
     return ""
 
 
+def _spread_threshold_selection(
+    target: QualityTarget,
+    *,
+    thresholds: HistDataTickSpreadThresholds,
+    thresholds_by_asset_class: Mapping[str, HistDataTickSpreadThresholds],
+) -> _TickSpreadThresholdSelection:
+    symbol_key = normalize_histdata_symbol(target.symbol)
+    asset_class_key = symbol_metadata_for(target.symbol).asset_class.lower()
+    asset_profiles = _normalized_asset_class_thresholds(
+        thresholds_by_asset_class
+    )
+    if asset_class_key in asset_profiles:
+        return _TickSpreadThresholdSelection(
+            thresholds=asset_profiles[asset_class_key],
+            source="asset_class",
+            symbol_key=symbol_key,
+            asset_class_key=asset_class_key,
+            profile_key=asset_class_key,
+        )
+
+    return _TickSpreadThresholdSelection(
+        thresholds=thresholds,
+        source="default",
+        symbol_key=symbol_key,
+        asset_class_key=asset_class_key,
+        profile_key=DEFAULT_SESSION_PROFILE,
+    )
+
+
+def _spread_regime_threshold_selection(
+    target: QualityTarget,
+    *,
+    thresholds: HistDataTickSpreadRegimeThresholds,
+    thresholds_by_asset_class: Mapping[
+        str,
+        HistDataTickSpreadRegimeThresholds,
+    ],
+) -> _TickSpreadRegimeThresholdSelection:
+    symbol_key = normalize_histdata_symbol(target.symbol)
+    asset_class_key = symbol_metadata_for(target.symbol).asset_class.lower()
+    asset_profiles = _normalized_asset_class_thresholds(
+        thresholds_by_asset_class
+    )
+    if asset_class_key in asset_profiles:
+        return _TickSpreadRegimeThresholdSelection(
+            thresholds=asset_profiles[asset_class_key],
+            source="asset_class",
+            symbol_key=symbol_key,
+            asset_class_key=asset_class_key,
+            profile_key=asset_class_key,
+        )
+
+    return _TickSpreadRegimeThresholdSelection(
+        thresholds=thresholds,
+        source="default",
+        symbol_key=symbol_key,
+        asset_class_key=asset_class_key,
+        profile_key=DEFAULT_SESSION_PROFILE,
+    )
+
+
 def _microstructure_threshold_selection(
     target: QualityTarget,
     *,
     thresholds: HistDataTickMicrostructureThresholds,
     thresholds_by_symbol: Mapping[str, HistDataTickMicrostructureThresholds],
     thresholds_by_session: Mapping[str, HistDataTickMicrostructureThresholds],
+    thresholds_by_asset_class: Mapping[
+        str,
+        HistDataTickMicrostructureThresholds,
+    ],
     thresholds_by_symbol_session: Mapping[
         str,
         HistDataTickMicrostructureThresholds,
@@ -1841,6 +2046,7 @@ def _microstructure_threshold_selection(
     session_name: str,
 ) -> _TickMicrostructureThresholdSelection:
     symbol_key = normalize_histdata_symbol(target.symbol)
+    asset_class_key = symbol_metadata_for(target.symbol).asset_class.lower()
     session_key = _normalize_session_key(session_name)
     profile_key = f"{symbol_key}:{session_key}" if symbol_key else session_key
 
@@ -1853,6 +2059,7 @@ def _microstructure_threshold_selection(
             source="symbol-session",
             symbol_key=symbol_key,
             session_key=session_key,
+            asset_class_key=asset_class_key,
             profile_key=profile_key,
         )
 
@@ -1863,6 +2070,7 @@ def _microstructure_threshold_selection(
             source="symbol",
             symbol_key=symbol_key,
             session_key=session_key,
+            asset_class_key=asset_class_key,
             profile_key=symbol_key,
         )
 
@@ -1873,7 +2081,21 @@ def _microstructure_threshold_selection(
             source="session",
             symbol_key=symbol_key,
             session_key=session_key,
+            asset_class_key=asset_class_key,
             profile_key=session_key,
+        )
+
+    asset_profiles = _normalized_asset_class_thresholds(
+        thresholds_by_asset_class
+    )
+    if asset_class_key in asset_profiles:
+        return _TickMicrostructureThresholdSelection(
+            thresholds=asset_profiles[asset_class_key],
+            source="asset_class",
+            symbol_key=symbol_key,
+            session_key=session_key,
+            asset_class_key=asset_class_key,
+            profile_key=asset_class_key,
         )
 
     return _TickMicrostructureThresholdSelection(
@@ -1881,6 +2103,7 @@ def _microstructure_threshold_selection(
         source="default",
         symbol_key=symbol_key,
         session_key=session_key,
+        asset_class_key=asset_class_key,
         profile_key=DEFAULT_SESSION_PROFILE,
     )
 
@@ -1916,6 +2139,16 @@ def _normalized_symbol_session_thresholds(
     return normalized
 
 
+def _normalized_asset_class_thresholds(
+    thresholds: Mapping[str, _ThresholdT],
+) -> dict[str, _ThresholdT]:
+    return {
+        str(asset_class).strip().lower(): value
+        for asset_class, value in thresholds.items()
+        if str(asset_class).strip()
+    }
+
+
 def _split_symbol_session_key(key: str) -> tuple[str, str]:
     raw = str(key or "").strip()
     separator = ":" if ":" in raw else "/"
@@ -1935,10 +2168,11 @@ def _spread_regime_findings(
     target: QualityTarget,
     scan: _TickSpreadRegimeScan,
     source_member: str,
-    thresholds: HistDataTickSpreadRegimeThresholds,
+    threshold_selection: _TickSpreadRegimeThresholdSelection,
     severity: QualitySeverity,
     rule_id: str,
 ) -> tuple[QualityFinding, ...]:
+    thresholds = threshold_selection.thresholds
     baseline_profile, baseline_source = _spread_regime_baseline(scan)
     baseline_median = _median_or_none(baseline_profile.values) or 0.0
     findings: list[QualityFinding] = [
@@ -1990,6 +2224,7 @@ def _spread_regime_findings(
                         scan.special_regime_profiles
                     )
                 ),
+                "threshold_profile": threshold_selection.to_metadata(),
                 "thresholds": thresholds.to_metadata(),
             },
         )
@@ -2005,7 +2240,7 @@ def _spread_regime_findings(
                 samples=scan.wide_spreads,
                 row_count=scan.wide_spread_count,
                 source_member=source_member,
-                thresholds=thresholds,
+                threshold_selection=threshold_selection,
                 rule_id=rule_id,
                 column="spread",
             )
@@ -2021,7 +2256,7 @@ def _spread_regime_findings(
                 samples=scan.spread_jumps,
                 row_count=scan.spread_jump_count,
                 source_member=source_member,
-                thresholds=thresholds,
+                threshold_selection=threshold_selection,
                 rule_id=rule_id,
                 column="spread",
             )
@@ -2037,7 +2272,7 @@ def _spread_regime_findings(
                 samples=scan.regime_shifts,
                 row_count=scan.regime_shift_count,
                 source_member=source_member,
-                thresholds=thresholds,
+                threshold_selection=threshold_selection,
                 rule_id=rule_id,
                 column="spread",
             )
@@ -2054,7 +2289,7 @@ def _spread_regime_sample_finding(
     samples: list[_TickSpreadRegimeSample],
     row_count: int,
     source_member: str,
-    thresholds: HistDataTickSpreadRegimeThresholds,
+    threshold_selection: _TickSpreadRegimeThresholdSelection,
     rule_id: str,
     column: str,
 ) -> QualityFinding:
@@ -2091,7 +2326,8 @@ def _spread_regime_sample_finding(
         metadata={
             **_base_metadata(target, source_member=source_member),
             "row_count": row_count,
-            "thresholds": thresholds.to_metadata(),
+            "threshold_profile": threshold_selection.to_metadata(),
+            "thresholds": threshold_selection.thresholds.to_metadata(),
             "samples": _spread_regime_samples(samples),
         },
     )
@@ -2194,12 +2430,13 @@ def _spread_findings(
     target: QualityTarget,
     scan: _TickSpreadScan,
     source_member: str,
-    thresholds: HistDataTickSpreadThresholds,
+    threshold_selection: _TickSpreadThresholdSelection,
     zero_spread_severity: QualitySeverity,
     negative_spread_severity: QualitySeverity,
     schema_severity: QualitySeverity,
     rule_id: str,
 ) -> tuple[QualityFinding, ...]:
+    thresholds = threshold_selection.thresholds
     findings: list[QualityFinding] = [
         _finding(
             target,
@@ -2218,6 +2455,7 @@ def _spread_findings(
                 "zero_spread_run_count": scan.zero_spread_run_count,
                 "min_spread": scan.min_spread,
                 "max_spread": scan.max_spread,
+                "threshold_profile": threshold_selection.to_metadata(),
                 "thresholds": thresholds.to_metadata(),
             },
         )
@@ -2270,7 +2508,7 @@ def _spread_findings(
                 samples=scan.zero_spread_runs,
                 zero_spread_count=scan.zero_spread_count,
                 source_member=source_member,
-                thresholds=thresholds,
+                threshold_selection=threshold_selection,
                 severity=zero_spread_severity,
                 rule_id=rule_id,
             )
@@ -2325,7 +2563,7 @@ def _zero_spread_run_finding(
     samples: list[_ZeroSpreadRunSample],
     zero_spread_count: int,
     source_member: str,
-    thresholds: HistDataTickSpreadThresholds,
+    threshold_selection: _TickSpreadThresholdSelection,
     severity: QualitySeverity,
     rule_id: str,
 ) -> QualityFinding:
@@ -2355,7 +2593,8 @@ def _zero_spread_run_finding(
             **_base_metadata(target, source_member=source_member),
             "row_count": len(samples),
             "zero_spread_count": zero_spread_count,
-            "thresholds": thresholds.to_metadata(),
+            "threshold_profile": threshold_selection.to_metadata(),
+            "thresholds": threshold_selection.thresholds.to_metadata(),
             "samples": _zero_spread_run_samples(samples),
         },
     )

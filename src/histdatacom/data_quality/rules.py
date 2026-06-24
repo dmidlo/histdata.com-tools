@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, TypeVar
 
 from histdatacom.data_quality.contracts import (
     QualityRule,
@@ -11,6 +11,7 @@ from histdatacom.data_quality.contracts import (
     QualitySeverity,
 )
 from histdatacom.data_quality.bars import (
+    DEFAULT_M1_OUTLIER_THRESHOLDS_BY_ASSET_CLASS,
     HistDataAsciiM1BarIntegrityRule,
     HistDataAsciiM1OutlierRule,
     HistDataAsciiM1PrecisionRule,
@@ -41,11 +42,16 @@ from histdatacom.data_quality.time import (
     HistDataAsciiTimestampSequenceRule,
 )
 from histdatacom.data_quality.ticks import (
+    DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS_BY_ASSET_CLASS,
+    DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS_BY_ASSET_CLASS,
+    DEFAULT_TICK_SPREAD_THRESHOLDS_BY_ASSET_CLASS,
     HistDataAsciiTickMicrostructureRule,
     HistDataAsciiTickSpreadRegimeRule,
     HistDataAsciiTickSpreadRule,
 )
 from histdatacom.runtime_contracts import JSONValue
+
+_ThresholdT = TypeVar("_ThresholdT")
 
 
 def quality_rules_for_groups(
@@ -180,8 +186,9 @@ def _bars_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
         HistDataAsciiM1OutlierRule(
             thresholds=profile.m1_outlier_thresholds(),
             thresholds_by_symbol=profile.m1_outlier_thresholds_by_symbol(),
-            thresholds_by_asset_class=(
-                profile.m1_outlier_thresholds_by_asset_class()
+            thresholds_by_asset_class=_merged_thresholds(
+                DEFAULT_M1_OUTLIER_THRESHOLDS_BY_ASSET_CLASS,
+                profile.m1_outlier_thresholds_by_asset_class(),
             ),
             warning_severity=profile.severity(
                 "bars.ascii.m1_outliers",
@@ -211,6 +218,10 @@ def _ticks_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
     return (
         HistDataAsciiTickSpreadRule(
             thresholds=profile.tick_spread_thresholds(),
+            thresholds_by_asset_class=_merged_thresholds(
+                DEFAULT_TICK_SPREAD_THRESHOLDS_BY_ASSET_CLASS,
+                profile.tick_spread_thresholds_by_asset_class(),
+            ),
             zero_spread_severity=profile.severity(
                 "ticks.ascii.spread",
                 "zero_spread_severity",
@@ -235,6 +246,10 @@ def _ticks_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
             thresholds_by_session=(
                 profile.tick_microstructure_thresholds_by_session()
             ),
+            thresholds_by_asset_class=_merged_thresholds(
+                DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS_BY_ASSET_CLASS,
+                profile.tick_microstructure_thresholds_by_asset_class(),
+            ),
             thresholds_by_symbol_session=(
                 profile.tick_microstructure_thresholds_by_symbol_session()
             ),
@@ -247,6 +262,10 @@ def _ticks_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
         ),
         HistDataAsciiTickSpreadRegimeRule(
             thresholds=profile.tick_spread_regime_thresholds(),
+            thresholds_by_asset_class=_merged_thresholds(
+                DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS_BY_ASSET_CLASS,
+                profile.tick_spread_regime_thresholds_by_asset_class(),
+            ),
             warning_severity=profile.severity(
                 "ticks.ascii.spread_regimes",
                 "warning_severity",
@@ -259,6 +278,19 @@ def _ticks_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
             ),
         ),
     )
+
+
+def _merged_thresholds(
+    defaults: Mapping[str, _ThresholdT],
+    overrides: Mapping[str, _ThresholdT],
+) -> dict[str, _ThresholdT]:
+    merged = {
+        str(key).strip().lower(): value for key, value in defaults.items()
+    }
+    merged.update(
+        {str(key).strip().lower(): value for key, value in overrides.items()}
+    )
+    return merged
 
 
 def _domain_quality_run_rules(

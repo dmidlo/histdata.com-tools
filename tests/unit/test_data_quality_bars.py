@@ -267,8 +267,8 @@ def test_m1_tick_reconstruction_unavailable_without_matching_tick(
     assert unavailable.metadata["samples"][0]["tick_path"] == ""
 
 
-def test_symbol_metadata_identifies_fx_precision_classes() -> None:
-    """FX metadata should distinguish JPY and non-JPY quote precision."""
+def test_symbol_metadata_identifies_asset_class_precision_profiles() -> None:
+    """Symbol metadata should expose asset-specific precision profiles."""
     eurusd = symbol_metadata_for("EURUSD")
     usdjpy = symbol_metadata_for("USDJPY")
     xauusd = symbol_metadata_for("XAUUSD")
@@ -292,13 +292,19 @@ def test_symbol_metadata_identifies_fx_precision_classes() -> None:
     assert usdjpy.precision_rule.tick_size == "0.001"
 
     assert xauusd.asset_class == ASSET_CLASS_METAL
-    assert xauusd.precision_rule is None
+    assert xauusd.precision_rule is not None
+    assert xauusd.precision_rule.expected_decimal_places == (3,)
+    assert xauusd.precision_rule.name != eurusd.precision_rule.name
 
     assert wtiusd.asset_class == ASSET_CLASS_OIL
-    assert wtiusd.precision_rule is None
+    assert wtiusd.precision_rule is not None
+    assert wtiusd.precision_rule.expected_decimal_places == (3,)
+    assert wtiusd.precision_rule.name != eurusd.precision_rule.name
 
     assert spxusd.asset_class == ASSET_CLASS_INDEX
-    assert spxusd.precision_rule is None
+    assert spxusd.precision_rule is not None
+    assert spxusd.precision_rule.expected_decimal_places == (3,)
+    assert spxusd.precision_rule.name != eurusd.precision_rule.name
 
     assert unknown.asset_class == ASSET_CLASS_UNKNOWN
     assert unknown.precision_rule is None
@@ -371,14 +377,14 @@ def test_unexpected_m1_precision_warns_with_expected_rule_context(
     assert regime.metadata["samples"][0]["observed_decimal_places"] == [4, 6]
 
 
-def test_known_non_fx_symbols_warn_until_precision_rules_exist(
+def test_known_non_fx_symbols_use_calibrated_precision_rules(
     tmp_path: Path,
 ) -> None:
-    """Known non-FX symbols should be classified but threshold-light."""
+    """Known non-FX symbols should not fall back to unavailable precision."""
     path = write_ascii_case(
         tmp_path,
         HistDataAsciiCase(
-            name="m1_xauusd_precision_unavailable",
+            name="m1_xauusd_precision_calibrated",
             timeframe=M1,
             filename="DAT_ASCII_XAUUSD_M1_201202.csv",
             rows=("20120201 000000;1730.120;1730.125;1730.100;1730.110;0",),
@@ -387,11 +393,18 @@ def test_known_non_fx_symbols_warn_until_precision_rules_exist(
 
     report = _report_for_path(path)
 
-    finding = _finding(report.findings, "ASCII_M1_PRECISION_RULE_UNAVAILABLE")
-    assert report.status is QualityStatus.WARNING
-    assert finding.metadata["symbol_metadata"]["asset_class"] == "metal"
-    assert finding.metadata["symbol_metadata"]["precision_rule"] is None
-    assert finding.metadata["observed_decimal_places"] == {"3": 4}
+    summary = _finding(report.findings, "ASCII_M1_PRECISION_SUMMARY")
+    assert report.status is QualityStatus.CLEAN
+    assert summary.metadata["precision_rule_available"] is True
+    assert summary.metadata["symbol_metadata"]["asset_class"] == "metal"
+    assert summary.metadata["symbol_metadata"]["precision_rule"]["name"] == (
+        "metal_three_decimal_bid"
+    )
+    assert summary.metadata["observed_decimal_places"] == {"3": 4}
+    assert not any(
+        finding.code == "ASCII_M1_PRECISION_RULE_UNAVAILABLE"
+        for finding in report.findings
+    )
 
 
 def test_unknown_symbols_warn_without_precision_thresholds(
@@ -602,6 +615,40 @@ def test_m1_outlier_thresholds_can_be_overridden_by_asset_class(
     assert summary.metadata["open_jump_count"] == 0
     assert summary.metadata["threshold_selection"]["source"] == "asset_class"
     assert summary.metadata["threshold_selection"]["key"] == ASSET_CLASS_FX
+
+
+def test_m1_outliers_select_default_non_fx_asset_thresholds(
+    tmp_path: Path,
+) -> None:
+    """Known non-FX symbols should select calibrated asset thresholds."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="m1_xauusd_asset_outlier_thresholds",
+            timeframe=M1,
+            filename="DAT_ASCII_XAUUSD_M1_201202.csv",
+            rows=(
+                "20120201 000000;1730.120;1730.125;1730.100;1730.110;0",
+                "20120201 000100;1730.110;1730.125;1730.100;1730.120;0",
+            ),
+        ),
+    )
+
+    report = _report_for_path(path)
+
+    summary = _finding(report.findings, "ASCII_M1_OUTLIER_SUMMARY")
+    assert report.status is QualityStatus.CLEAN
+    assert (
+        summary.metadata["symbol_metadata"]["asset_class"] == ASSET_CLASS_METAL
+    )
+    assert summary.metadata["threshold_selection"]["source"] == "asset_class"
+    assert summary.metadata["threshold_selection"]["key"] == ASSET_CLASS_METAL
+    assert (
+        summary.metadata["threshold_selection"]["thresholds"][
+            "max_open_jump_ratio"
+        ]
+        == 0.03
+    )
 
 
 def test_invalid_m1_ohlc_rows_fail_with_row_context(

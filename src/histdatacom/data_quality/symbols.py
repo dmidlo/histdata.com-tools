@@ -39,6 +39,9 @@ ASSET_CLASS_UNKNOWN = "unknown"
 
 FX_NON_JPY_PRECISION_RULE_NAME = "fx_non_jpy_six_decimal_bid"
 FX_JPY_PRECISION_RULE_NAME = "fx_jpy_three_decimal_bid"
+METAL_PRECISION_RULE_NAME = "metal_three_decimal_bid"
+OIL_PRECISION_RULE_NAME = "oil_three_decimal_bid"
+INDEX_PRECISION_RULE_NAME = "index_three_decimal_bid"
 
 M1_BID_PRICE_COLUMNS = ("open", "high", "low", "close")
 TICK_BID_ASK_PRICE_COLUMNS = ("bid", "ask")
@@ -461,6 +464,24 @@ FX_JPY_PRECISION_RULE = HistDataSymbolPrecisionRule(
     pip_size="0.01",
     tick_size="0.001",
 )
+METAL_PRECISION_RULE = HistDataSymbolPrecisionRule(
+    name=METAL_PRECISION_RULE_NAME,
+    expected_decimal_places=(3,),
+    pip_size="0.01",
+    tick_size="0.001",
+)
+OIL_PRECISION_RULE = HistDataSymbolPrecisionRule(
+    name=OIL_PRECISION_RULE_NAME,
+    expected_decimal_places=(3,),
+    pip_size="0.01",
+    tick_size="0.001",
+)
+INDEX_PRECISION_RULE = HistDataSymbolPrecisionRule(
+    name=INDEX_PRECISION_RULE_NAME,
+    expected_decimal_places=(3,),
+    pip_size="1",
+    tick_size="0.001",
+)
 
 
 def normalize_histdata_symbol(symbol: str) -> str:
@@ -509,6 +530,7 @@ def symbol_metadata_for(symbol: str) -> HistDataSymbolMetadata:
             quote=quote,
             pair_key=pair_key,
             source=source,
+            precision_rule=METAL_PRECISION_RULE,
             aliases=_aliases_for_symbol(normalized),
         )
 
@@ -521,6 +543,7 @@ def symbol_metadata_for(symbol: str) -> HistDataSymbolMetadata:
             quote=quote,
             pair_key=pair_key,
             source=source,
+            precision_rule=OIL_PRECISION_RULE,
             aliases=_aliases_for_symbol(normalized),
         )
 
@@ -533,6 +556,7 @@ def symbol_metadata_for(symbol: str) -> HistDataSymbolMetadata:
             quote=quote,
             pair_key=pair_key,
             source=source,
+            precision_rule=INDEX_PRECISION_RULE,
             aliases=_aliases_for_symbol(normalized),
         )
 
