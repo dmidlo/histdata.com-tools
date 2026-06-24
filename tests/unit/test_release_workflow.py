@@ -179,10 +179,21 @@ def test_local_publishing_script_enforces_branch_contract() -> None:
     assert "--check-version" in script
     assert "python -m twine check dist/*.whl dist/*.tar.gz" in script
     assert "HISTDATACOM_SKIP_GPG_SIGNING" in script
+    assert "HISTDATACOM_MAX_UPLOAD_FILE_BYTES" in script
+    assert "HISTDATACOM_ALLOW_OVERSIZE_UPLOAD" in script
+    assert "validate_dist_artifact_sizes" in script
     assert "upload_dist_artifacts pypi" in script
     assert "upload_dist_artifacts testpypi" in script
+    assert "testpypi_preflight)" in script
+    assert "testpypi_preflight()" in script
+    assert "scripts/build_local_simple_index.py" in script
+    assert '"file://${local_index}/simple/"' in script
+    assert "dist/testpypi-preflight-report.json" in script
+    assert "verify_release_install" in script
     assert "scripts/verify_testpypi_install.py" in script
     assert "--require-bundled-current-platform" in script
+    assert "--live-stop-timeout 90" in script
+    assert "--download-smoke" in script
     assert 'python -m twine upload -r "${repository}"' in script
 
 
@@ -201,8 +212,13 @@ def test_release_docs_mark_local_publishing_as_current_path() -> None:
     assert (
         "`bash pypi.sh testpypi` is guarded to run from `dev`" in release_docs
     )
+    assert "bash pypi.sh testpypi_preflight" in release_docs
+    assert "dist/testpypi-preflight-report.json" in release_docs
+    assert "dist/local-simple-index-report.json" in release_docs
     assert "`bash pypi.sh pypi` is guarded to run from `main`" in release_docs
     assert "HISTDATACOM_FETCH_REPORT" in release_docs
     assert "HISTDATACOM_SKIP_GPG_SIGNING=1" in release_docs
+    assert "HISTDATACOM_ALLOW_OVERSIZE_UPLOAD=1" in release_docs
+    assert "HISTDATACOM_MAX_UPLOAD_FILE_BYTES" in release_docs
     assert "python -m twine check dist/*.whl dist/*.tar.gz" in release_docs
     assert "scripts/fetch_temporal_cli.py" in release_docs

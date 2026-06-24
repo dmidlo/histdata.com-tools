@@ -140,11 +140,59 @@ upload_dist_artifacts()
     local artifacts=(dist/*.whl dist/*.tar.gz)
     local signatures=(dist/*.asc)
 
+    validate_dist_artifact_sizes
+
     if [[ -e "${signatures[0]}" ]]; then
         artifacts+=("${signatures[@]}")
     fi
 
     python -m twine upload -r "${repository}" --config-file .pypirc "${artifacts[@]}"
+}
+
+validate_dist_artifact_sizes()
+{
+    local max_bytes="${HISTDATACOM_MAX_UPLOAD_FILE_BYTES:-100000000}"
+    local allow_oversize="${HISTDATACOM_ALLOW_OVERSIZE_UPLOAD:-}"
+    local oversized=()
+    local artifact
+    local size
+
+    if ! [[ "${max_bytes}" =~ ^[0-9]+$ ]]; then
+        echo "HISTDATACOM_MAX_UPLOAD_FILE_BYTES must be an integer byte count: ${max_bytes}" >&2
+        exit 2
+    fi
+
+    for artifact in dist/*.whl dist/*.tar.gz; do
+        [[ -e "${artifact}" ]] || continue
+        size=$(python - "${artifact}" <<'PY'
+import sys
+from pathlib import Path
+
+print(Path(sys.argv[1]).stat().st_size)
+PY
+)
+        if (( size > max_bytes )); then
+            oversized+=("${artifact}:${size}")
+        fi
+    done
+
+    if ((${#oversized[@]} == 0)); then
+        return
+    fi
+
+    {
+        echo "pypi.sh: one or more distribution files exceed ${max_bytes} bytes."
+        printf '  %s\n' "${oversized[@]}"
+    } >&2
+
+    if [[ "${allow_oversize}" == "1" ]]; then
+        echo "pypi.sh: continuing because HISTDATACOM_ALLOW_OVERSIZE_UPLOAD=1." >&2
+        return
+    fi
+
+    echo "Set HISTDATACOM_ALLOW_OVERSIZE_UPLOAD=1 only after confirming the PyPI/TestPyPI project upload limit has been raised." >&2
+    echo "Alternatively set HISTDATACOM_MAX_UPLOAD_FILE_BYTES to the confirmed project-specific limit." >&2
+    exit 2
 }
 
 current_git_branch()
@@ -218,6 +266,54 @@ build()
     smoke_wheel_install
 }
 
+verify_release_install()
+{
+    local index_url="$1"
+    local report="${2:-}"
+    local report_args=()
+
+    if [[ -n "${report}" ]]; then
+        report_args=(--report "${report}")
+    fi
+
+    python scripts/verify_testpypi_install.py \
+        --version "$(current_package_version)" \
+        --index-url "${index_url}" \
+        "${report_args[@]}" \
+        --require-bundled-current-platform \
+        --check-executable-version \
+        --start-sidecar \
+        --hermetic-sidecar-smoke \
+        --default-routing-sidecar-smoke \
+        --quality-sidecar-smoke \
+        --live-stop-timeout 90 \
+        --download-smoke
+}
+
+testpypi_preflight()
+{
+    local local_index
+    local local_index_url
+
+    build
+    local_index=$(mktemp -d)
+
+    (
+        trap 'rm -rf "${local_index}"' EXIT
+
+        python scripts/build_local_simple_index.py \
+            --dist-dir dist \
+            --output-root "${local_index}" \
+            --report "dist/local-simple-index-report.json"
+        local_index_url="file://${local_index}/simple/"
+
+        echo "${bold}verifying histdatacom from local TestPyPI-style index: ${local_index_url}${normal}"
+        verify_release_install \
+            "${local_index_url}" \
+            "dist/testpypi-preflight-report.json"
+    )
+}
+
 buildenv()
 {
     echo "${bold}setting up test pip environment${normal}"
@@ -288,17 +384,12 @@ case "${1:-}" in
         sign_dist_artifacts
         upload_dist_artifacts testpypi
         ;;
+    testpypi_preflight)
+        testpypi_preflight
+        ;;
     testpypi_install)
         echo "${bold}verifying histdatacom from testpypi: https://test.pypi.org/simple/${normal}"
-        python scripts/verify_testpypi_install.py \
-            --version "$(current_package_version)" \
-            --require-bundled-current-platform \
-            --check-executable-version \
-            --start-sidecar \
-            --hermetic-sidecar-smoke \
-            --default-routing-sidecar-smoke \
-            --quality-sidecar-smoke \
-            --download-smoke
+        verify_release_install "https://test.pypi.org/simple/"
         ;;
     pypi_install)
         buildenv
@@ -308,7 +399,7 @@ case "${1:-}" in
         destroyenv
         ;;
     *)
-        echo "Usage: $0 {dev|build|sidecar_wheel|pypi|testpypi|testpypi_install|pypi_install}" >&2
+        echo "Usage: $0 {dev|build|sidecar_wheel|pypi|testpypi|testpypi_preflight|testpypi_install|pypi_install}" >&2
         exit 2
         ;;
 esac

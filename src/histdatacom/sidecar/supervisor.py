@@ -59,8 +59,11 @@ DEFAULT_WORKER_LANES = tuple(TaskQueueLane)
 WORKER_COMPONENT_PREFIX = "worker:"
 
 ProcessFactory = Callable[..., Any]
+CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 ProcessExists = Callable[[int], bool]
 ProcessTerminate = Callable[[int], None]
+ProcessKill = Callable[[int], None]
+WaitPid = Callable[[int, int], tuple[int, int]]
 FrontendReadyProbe = Callable[[SidecarRuntimePolicy], bool]
 WorkerDependencyProbe = Callable[[], bool]
 
@@ -115,6 +118,8 @@ def _process_exists(pid: int) -> bool:
     """Return whether a process exists for a PID."""
     if pid <= 0:
         return False
+    if _reap_child_process(pid):
+        return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -124,11 +129,41 @@ def _process_exists(pid: int) -> bool:
     return True
 
 
+def _reap_child_process(pid: int) -> bool:
+    """Return whether an exited child PID was reaped."""
+    waitpid = cast(WaitPid | None, getattr(os, "waitpid", None))
+    wnohang = getattr(os, "WNOHANG", None)
+    if waitpid is None or not isinstance(wnohang, int) or pid <= 0:
+        return False
+    try:
+        waited_pid, _status = waitpid(pid, wnohang)
+    except ChildProcessError:
+        return False
+    except OSError:
+        return False
+    return waited_pid == pid
+
+
 def _terminate_process(pid: int) -> None:
     """Request process termination for a PID."""
     if pid <= 0:
         return
     os.kill(pid, signal.SIGTERM)
+
+
+def _kill_process(pid: int) -> None:
+    """Force process termination for a PID."""
+    if pid <= 0:
+        return
+    os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+
+
+def _namespace_already_exists(
+    completed: subprocess.CompletedProcess[str],
+) -> bool:
+    """Return whether namespace creation failed because it already exists."""
+    detail = f"{completed.stdout}\n{completed.stderr}".lower()
+    return "already exist" in detail or "already_exist" in detail
 
 
 def _load_runtime_defaults() -> dict[str, Any]:
@@ -207,6 +242,58 @@ def build_temporal_start_command(
     return tuple(args)
 
 
+def build_temporal_namespace_describe_command(
+    executable: Path | str,
+    namespace: str,
+    *,
+    runtime_policy: SidecarRuntimePolicy,
+) -> tuple[str, ...]:
+    """Build the Temporal CLI command that checks a namespace."""
+    return _build_temporal_namespace_command(
+        executable,
+        "describe",
+        namespace,
+        runtime_policy=runtime_policy,
+    )
+
+
+def build_temporal_namespace_create_command(
+    executable: Path | str,
+    namespace: str,
+    *,
+    runtime_policy: SidecarRuntimePolicy,
+) -> tuple[str, ...]:
+    """Build the Temporal CLI command that creates a namespace."""
+    return _build_temporal_namespace_command(
+        executable,
+        "create",
+        namespace,
+        runtime_policy=runtime_policy,
+    )
+
+
+def _build_temporal_namespace_command(
+    executable: Path | str,
+    action: str,
+    namespace: str,
+    *,
+    runtime_policy: SidecarRuntimePolicy,
+) -> tuple[str, ...]:
+    target_host = f"{runtime_policy.ports.bind_ip}:{runtime_policy.ports.grpc}"
+    return (
+        str(executable),
+        "operator",
+        "namespace",
+        action,
+        "--address",
+        target_host,
+        "--namespace",
+        namespace,
+        "--command-timeout",
+        "10s",
+    )
+
+
 def build_sidecar_worker_start_command(
     config: SidecarWorkerConfig,
 ) -> tuple[str, ...]:
@@ -272,7 +359,9 @@ class SidecarSupervisor:
         runtime_policy: SidecarRuntimePolicy | None = None,
         process_exists: ProcessExists = _process_exists,
         process_terminate: ProcessTerminate = _terminate_process,
+        process_kill: ProcessKill = _kill_process,
         process_factory: ProcessFactory = subprocess.Popen,
+        command_runner: CommandRunner = subprocess.run,
         port_available: PortAvailabilityProbe = is_port_available,
         frontend_ready: FrontendReadyProbe = _temporal_frontend_ready,
         worker_dependency_available: WorkerDependencyProbe = (
@@ -294,7 +383,9 @@ class SidecarSupervisor:
         self.paths: SidecarPaths = self.runtime_policy.paths
         self._process_exists = process_exists
         self._process_terminate = process_terminate
+        self._process_kill = process_kill
         self._process_factory = process_factory
+        self._command_runner = command_runner
         self._port_available = port_available
         self._frontend_ready = frontend_ready
         self._worker_dependency_available = worker_dependency_available
@@ -609,6 +700,7 @@ class SidecarSupervisor:
                     f"See log: {self.paths.server_log}"
                 )
             self._wait_for_frontend(server_process, runtime_policy, deadline)
+            self._ensure_namespace(executable, runtime_policy)
 
             base_worker_config = self._worker_config(runtime_policy)
             for lane in self.worker_lanes:
@@ -1076,6 +1168,53 @@ class SidecarSupervisor:
         poll = getattr(process, "poll", lambda: None)
         return poll() is None
 
+    def _ensure_namespace(
+        self,
+        executable: Path,
+        runtime_policy: SidecarRuntimePolicy,
+    ) -> None:
+        """Ensure a non-default local namespace exists before workers start."""
+        if self.namespace == DEFAULT_TEMPORAL_NAMESPACE:
+            return
+
+        describe = self._run_temporal_command(
+            build_temporal_namespace_describe_command(
+                executable,
+                self.namespace,
+                runtime_policy=runtime_policy,
+            )
+        )
+        if describe.returncode == 0:
+            return
+
+        create = self._run_temporal_command(
+            build_temporal_namespace_create_command(
+                executable,
+                self.namespace,
+                runtime_policy=runtime_policy,
+            )
+        )
+        if create.returncode == 0 or _namespace_already_exists(create):
+            return
+
+        raise RuntimeError(
+            "Temporal namespace could not be created: "
+            f"{self.namespace!r}; stdout={create.stdout!r}; "
+            f"stderr={create.stderr!r}"
+        )
+
+    def _run_temporal_command(
+        self,
+        command: Sequence[str],
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a short Temporal CLI control-plane command."""
+        return self._command_runner(
+            list(command),
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
     def _wait_for_frontend(
         self,
         server_process: Any,
@@ -1324,7 +1463,21 @@ class SidecarSupervisor:
     ) -> dict[str, int]:
         """Terminate known component PIDs and return any still running."""
         self._terminate_pids(pids)
-        deadline = time.monotonic() + stop_timeout
+        still_running = self._wait_for_process_exit(pids, stop_timeout)
+        if not still_running:
+            return {}
+
+        self._kill_pids(still_running)
+        kill_timeout = min(5.0, max(0.0, stop_timeout))
+        return self._wait_for_process_exit(still_running, kill_timeout)
+
+    def _wait_for_process_exit(
+        self,
+        pids: Mapping[str, int],
+        timeout: float,
+    ) -> dict[str, int]:
+        """Return PIDs that still exist after waiting up to timeout seconds."""
+        deadline = time.monotonic() + max(0.0, timeout)
         while time.monotonic() < deadline:
             if not any(self._process_exists(pid) for pid in pids.values()):
                 break
@@ -1343,6 +1496,15 @@ class SidecarSupervisor:
         ):
             if pid > 0 and self._process_exists(pid):
                 self._process_terminate(pid)
+
+    def _kill_pids(self, pids: Mapping[str, int]) -> None:
+        """Force termination for all known component PIDs."""
+        for component, pid in sorted(
+            pids.items(),
+            key=lambda item: 1 if item[0] == "server" else 0,
+        ):
+            if pid > 0 and self._process_exists(pid):
+                self._process_kill(pid)
 
     def _remove_state_files(self) -> None:
         """Remove PID and lock files."""

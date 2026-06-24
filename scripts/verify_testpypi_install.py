@@ -214,6 +214,16 @@ def _venv_python(venv_dir: Path) -> Path:
     return _script_path(venv_dir, "python")
 
 
+def _venv_environment(venv_dir: Path) -> dict[str, str]:
+    """Return an environment that exposes installed console scripts."""
+    env = os.environ.copy()
+    script_dir = _venv_python(venv_dir).parent
+    env["PATH"] = str(script_dir) + os.pathsep + env.get("PATH", "")
+    env["VIRTUAL_ENV"] = str(venv_dir)
+    env.pop("PYTHONHOME", None)
+    return env
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -366,6 +376,7 @@ def _cli_parity_probe(
 def _smoke_sidecar_install_probe(
     *,
     venv_python: Path,
+    venv_dir: Path,
     root: Path,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
@@ -402,7 +413,11 @@ def _smoke_sidecar_install_probe(
         command.append("--quality-sidecar-smoke")
     if args.live_sidecar_smoke:
         command.append("--live-sidecar-smoke")
-    return _run_json(command, timeout=args.timeout)
+    return _run_json(
+        command,
+        env=_venv_environment(venv_dir),
+        timeout=args.timeout,
+    )
 
 
 def _download_smoke_probe(
@@ -413,22 +428,43 @@ def _download_smoke_probe(
 ) -> dict[str, Any]:
     """Run a small live download/extract smoke through installed CLI defaults."""
     data_dir = root / "download-smoke-data"
-    completed = _run(
-        [
-            str(_script_path(venv_dir, "histdatacom")),
-            "-p",
-            "eurusd",
-            "-f",
-            "ascii",
-            "-t",
-            "tick-data-quotes",
-            "-s",
-            "now",
-            "--data-directory",
-            str(data_dir),
-            "-D",
-        ],
-        timeout=timeout,
+    env = _venv_environment(venv_dir)
+    env["HISTDATACOM_SIDECAR_HOME"] = str(root / "download-smoke-sidecar-runtime")
+    env["HISTDATACOM_SIDECAR_WORKSPACE"] = str(
+        root / "download-smoke-sidecar-workspace"
+    )
+    command = [
+        str(_script_path(venv_dir, "histdatacom")),
+        "-p",
+        "eurusd",
+        "-f",
+        "ascii",
+        "-t",
+        "1-minute-bar-quotes",
+        "-s",
+        "202201",
+        "-e",
+        "202202",
+        "--data-directory",
+        str(data_dir),
+        "-D",
+    ]
+    try:
+        completed = _run(command, env=env, timeout=timeout)
+    except BaseException:
+        try:
+            _run_json(
+                [str(_script_path(venv_dir, "histdatacom-sidecar")), "--json", "stop"],
+                env=env,
+                timeout=90.0,
+            )
+        except SystemExit:
+            pass
+        raise
+    sidecar_stop = _run_json(
+        [str(_script_path(venv_dir, "histdatacom-sidecar")), "--json", "stop"],
+        env=env,
+        timeout=90.0,
     )
     files = sorted(path.name for path in data_dir.rglob("*") if path.is_file())
     if not files:
@@ -437,6 +473,7 @@ def _download_smoke_probe(
         "returncode": completed.returncode,
         "data_directory": str(data_dir),
         "files": files,
+        "sidecar_stop": sidecar_stop,
     }
 
 
@@ -501,6 +538,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             ),
             "installed_smoke": _smoke_sidecar_install_probe(
                 venv_python=venv_python,
+                venv_dir=venv_dir,
                 root=root,
                 args=args,
             ),
@@ -573,6 +611,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=float,
         default=300.0,
         help="live download smoke timeout in seconds",
+    )
+    parser.add_argument(
+        "--live-startup-timeout",
+        type=float,
+        default=30.0,
+        help="seconds to wait for the live Temporal frontend to start",
+    )
+    parser.add_argument(
+        "--live-completion-timeout",
+        type=float,
+        default=180.0,
+        help="seconds to wait for the live sidecar smoke job to complete",
+    )
+    parser.add_argument(
+        "--live-stop-timeout",
+        type=float,
+        default=90.0,
+        help="seconds to wait for live sidecar processes to stop",
     )
     parser.add_argument(
         "--require-bundled-current-platform",

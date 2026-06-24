@@ -104,6 +104,64 @@ def test_install_wheel_resolves_dependencies_from_pypi(
     ]
 
 
+def test_download_smoke_uses_bounded_historical_m1_download(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Download parity should not depend on current-month tick volume."""
+    module = _module()
+    commands: list[list[str]] = []
+    json_commands: list[list[str]] = []
+    captured_envs: list[dict[str, str]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        commands.append(command)
+        captured_envs.append(kwargs["env"])
+        data_dir = Path(command[command.index("--data-directory") + 1])
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "HISTDATA_COM_ASCII_EURUSD_M1202201.zip").touch()
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def fake_run_json(command: list[str], **kwargs: Any) -> dict[str, str]:
+        json_commands.append(command)
+        captured_envs.append(kwargs["env"])
+        return {"state": "stopped"}
+
+    monkeypatch.setattr(module, "_run", fake_run)
+    monkeypatch.setattr(module, "_run_json", fake_run_json)
+
+    report = module._download_smoke_probe(
+        venv_dir=tmp_path / "venv",
+        root=tmp_path,
+        timeout=30.0,
+    )
+
+    command = commands[0]
+    assert "-t" in command
+    assert command[command.index("-t") + 1] == "1-minute-bar-quotes"
+    assert command[command.index("-s") + 1] == "202201"
+    assert command[command.index("-e") + 1] == "202202"
+    assert "tick-data-quotes" not in command
+    assert "now" not in command
+    assert json_commands == [
+        [
+            str(tmp_path / "venv" / "bin" / "histdatacom-sidecar"),
+            "--json",
+            "stop",
+        ]
+    ]
+    assert captured_envs[0]["VIRTUAL_ENV"] == str(tmp_path / "venv")
+    assert captured_envs[0]["HISTDATACOM_SIDECAR_HOME"] == str(
+        tmp_path / "download-smoke-sidecar-runtime"
+    )
+    assert captured_envs[0]["HISTDATACOM_SIDECAR_WORKSPACE"] == str(
+        tmp_path / "download-smoke-sidecar-workspace"
+    )
+    assert captured_envs[1] == captured_envs[0]
+    assert report["files"] == ["HISTDATA_COM_ASCII_EURUSD_M1202201.zip"]
+    assert report["sidecar_stop"] == {"state": "stopped"}
+
+
 def test_cli_parity_probe_requires_current_flags(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -196,6 +254,7 @@ def test_smoke_sidecar_install_probe_passes_strong_flags(
 
     report = module._smoke_sidecar_install_probe(
         venv_python=tmp_path / "venv" / "bin" / "python",
+        venv_dir=tmp_path / "venv",
         root=tmp_path,
         args=args,
     )
@@ -209,3 +268,52 @@ def test_smoke_sidecar_install_probe_passes_strong_flags(
     assert "--default-routing-sidecar-smoke" in command
     assert "--quality-sidecar-smoke" in command
     assert "--live-sidecar-smoke" in command
+
+
+def test_smoke_sidecar_install_probe_exposes_venv_scripts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The smoke script should see console entry points without activation."""
+    module = _module()
+    captured_env: dict[str, str] = {}
+    args = SimpleNamespace(
+        timeout=30.0,
+        live_startup_timeout=3.0,
+        live_completion_timeout=4.0,
+        live_stop_timeout=5.0,
+        require_bundled_current_platform=False,
+        check_executable_version=False,
+        start_sidecar=False,
+        hermetic_sidecar_smoke=False,
+        default_routing_sidecar_smoke=False,
+        quality_sidecar_smoke=False,
+        live_sidecar_smoke=False,
+    )
+
+    def fake_run_json(command: list[str], **kwargs: Any) -> dict[str, str]:
+        captured_env.update(kwargs["env"])
+        return {"ok": "true"}
+
+    monkeypatch.setattr(module, "_run_json", fake_run_json)
+
+    module._smoke_sidecar_install_probe(
+        venv_python=tmp_path / "venv" / "bin" / "python",
+        venv_dir=tmp_path / "venv",
+        root=tmp_path,
+        args=args,
+    )
+
+    assert captured_env["VIRTUAL_ENV"] == str(tmp_path / "venv")
+    assert captured_env["PATH"].split(":")[0] == str(tmp_path / "venv" / "bin")
+
+
+def test_parse_args_defines_live_timeout_defaults() -> None:
+    """The CLI should provide every timeout passed to the smoke script."""
+    module = _module()
+
+    args = module.parse_args([])
+
+    assert args.live_startup_timeout == 30.0
+    assert args.live_completion_timeout == 180.0
+    assert args.live_stop_timeout == 90.0

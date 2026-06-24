@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
+import histdatacom.sidecar.supervisor as supervisor_module
 from histdatacom.sidecar.supervisor import (
     SIDECAR_STATE_SCHEMA_VERSION,
     SidecarPaths,
     SidecarSupervisor,
+    build_temporal_namespace_create_command,
+    build_temporal_namespace_describe_command,
     build_sidecar_worker_start_command,
     build_temporal_start_command,
 )
@@ -74,8 +78,14 @@ def _supervisor(
     paths: SidecarPaths | None = None,
     process_exists=lambda pid: False,
     process_terminate=lambda pid: None,
+    process_kill=lambda pid: None,
     process_factory=lambda command, **kwargs: _FakeProcess(1234),
+    command_runner=lambda command, **kwargs: subprocess.CompletedProcess(
+        command, 0, stdout="", stderr=""
+    ),
     worker_lanes=tuple(TaskQueueLane),
+    namespace: str = "default",
+    task_queue_prefix: str = "histdatacom",
 ) -> SidecarSupervisor:
     """Create a supervisor with deterministic fake readiness probes."""
     return SidecarSupervisor(
@@ -83,12 +93,16 @@ def _supervisor(
         runtime_policy=runtime_policy,
         process_exists=process_exists,
         process_terminate=process_terminate,
+        process_kill=process_kill,
         process_factory=process_factory,
+        command_runner=command_runner,
         port_available=lambda bind_ip, port: True,
         frontend_ready=lambda runtime_policy: True,
         worker_dependency_available=lambda: True,
         sleep=lambda seconds: None,
         worker_lanes=worker_lanes,
+        namespace=namespace,
+        task_queue_prefix=task_queue_prefix,
     )
 
 
@@ -205,6 +219,48 @@ def test_build_temporal_start_command_uses_runtime_defaults(
     )
 
 
+def test_build_temporal_namespace_commands_use_runtime_address(
+    tmp_path: Path,
+) -> None:
+    """Namespace provisioning should target the selected local frontend."""
+    executable = _executable(tmp_path)
+    policy = _policy(tmp_path)
+    target_host = f"{policy.ports.bind_ip}:{policy.ports.grpc}"
+
+    assert build_temporal_namespace_describe_command(
+        executable,
+        "histdatacom-smoke",
+        runtime_policy=policy,
+    ) == (
+        str(executable),
+        "operator",
+        "namespace",
+        "describe",
+        "--address",
+        target_host,
+        "--namespace",
+        "histdatacom-smoke",
+        "--command-timeout",
+        "10s",
+    )
+    assert build_temporal_namespace_create_command(
+        executable,
+        "histdatacom-smoke",
+        runtime_policy=policy,
+    ) == (
+        str(executable),
+        "operator",
+        "namespace",
+        "create",
+        "--address",
+        target_host,
+        "--namespace",
+        "histdatacom-smoke",
+        "--command-timeout",
+        "10s",
+    )
+
+
 def test_build_sidecar_worker_start_command_uses_lane_config(
     tmp_path: Path,
 ) -> None:
@@ -312,6 +368,63 @@ def test_start_writes_state_and_is_idempotent_for_running_sidecar(
     assert state["runtime_policy"]["paths"]["sqlite_db"] == str(paths.sqlite_db)
     assert paths.runtime_manifest.exists()
     assert not paths.lock_file.exists()
+
+
+def test_start_creates_non_default_namespace_before_workers(
+    tmp_path: Path,
+) -> None:
+    """Custom local namespaces should be provisioned before workers connect."""
+    executable = _executable(tmp_path)
+    policy = _policy(tmp_path)
+    events: list[tuple[str, str]] = []
+    live_pids: set[int] = set()
+    next_pid = iter(range(2000, 2003))
+
+    def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
+        pid = next(next_pid)
+        live_pids.add(pid)
+        label = "server"
+        if "histdatacom.sidecar.worker" in command:
+            label = f"worker:{command[command.index('--lane') + 1]}"
+            _write_ready_marker_from_command(command, pid)
+        events.append(("process", label))
+        return _FakeProcess(pid)
+
+    def command_runner(
+        command: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        action = command[command.index("namespace") + 1]
+        events.append(("namespace", action))
+        return subprocess.CompletedProcess(
+            command,
+            1 if action == "describe" else 0,
+            stdout="",
+            stderr="not found" if action == "describe" else "",
+        )
+
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: pid in live_pids,
+        process_factory=process_factory,
+        command_runner=command_runner,
+        namespace="histdatacom-smoke",
+        task_queue_prefix="histdatacom-smoke",
+        worker_lanes=(TaskQueueLane.NETWORK,),
+    )
+
+    status = supervisor.start(executable=executable)
+    state = json.loads(policy.paths.pid_file.read_text(encoding="utf-8"))
+
+    assert status.state == "running"
+    assert events == [
+        ("process", "server"),
+        ("namespace", "describe"),
+        ("namespace", "create"),
+        ("process", "worker:network"),
+    ]
+    assert state["worker_fleet"]["namespace"] == "histdatacom-smoke"
+    assert state["worker_fleet"]["task_queue_prefix"] == "histdatacom-smoke"
 
 
 def test_start_repairs_stale_pid_and_lock_files(tmp_path: Path) -> None:
@@ -662,6 +775,73 @@ def test_stop_terminates_all_known_processes_and_removes_state(
     assert terminated == [200, 300, 100]
     assert not paths.pid_file.exists()
     assert not paths.lock_file.exists()
+
+
+def test_stop_force_kills_processes_that_ignore_termination(
+    tmp_path: Path,
+) -> None:
+    """Stopping should escalate when known processes survive SIGTERM."""
+    paths = SidecarPaths.from_state_dir(tmp_path / "state")
+    paths.state_dir.mkdir(parents=True)
+    paths.pid_file.write_text(
+        json.dumps(
+            {
+                "pids": {
+                    "server": 100,
+                    "worker:orchestration": 200,
+                    "worker:network": 300,
+                },
+                "command": ["/tmp/temporal", "server", "start-dev"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    live_pids = {100, 200, 300}
+    terminated: list[int] = []
+    killed: list[int] = []
+
+    def terminate(pid: int) -> None:
+        terminated.append(pid)
+
+    def kill(pid: int) -> None:
+        killed.append(pid)
+        live_pids.discard(pid)
+
+    supervisor = _supervisor(
+        paths=paths,
+        process_exists=lambda pid: pid in live_pids,
+        process_terminate=terminate,
+        process_kill=kill,
+    )
+
+    status = supervisor.stop(stop_timeout=0.0)
+
+    assert status.state == "stopped"
+    assert terminated == [200, 300, 100]
+    assert killed == [200, 300, 100]
+    assert not paths.pid_file.exists()
+    assert not paths.lock_file.exists()
+
+
+def test_process_exists_treats_reaped_child_pid_as_dead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exited children should not keep shutdown status in a running state."""
+    kill_calls: list[tuple[int, int]] = []
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "_reap_child_process",
+        lambda pid: pid == 700,
+    )
+    monkeypatch.setattr(
+        supervisor_module.os,
+        "kill",
+        lambda pid, sig: kill_calls.append((pid, sig)),
+    )
+
+    assert not supervisor_module._process_exists(700)
+    assert kill_calls == []
 
 
 def test_restart_stops_existing_fleet_and_starts_new_fleet(

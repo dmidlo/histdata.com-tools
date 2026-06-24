@@ -11,13 +11,17 @@ ready to move deployment out of the local maintainer workflow.
 
 1. Build and validate locally from any reviewed branch with
    `bash pypi.sh build`.
-2. TestPyPI dry run: check out `dev`, confirm the tree is clean, then run
+2. Local TestPyPI-style preflight: run `bash pypi.sh testpypi_preflight`.
+   This builds the artifacts, serves them through a local simple index, and
+   verifies the installed package exactly like the TestPyPI install harness
+   without requiring upload credentials.
+3. TestPyPI dry run: check out `dev`, confirm the tree is clean, then run
    `bash pypi.sh testpypi`. Verify install behavior from TestPyPI before any
    production release.
-3. PyPI production release: merge or fast-forward the reviewed release state to
+4. PyPI production release: merge or fast-forward the reviewed release state to
    `main`, confirm the same version passed TestPyPI from `dev`, then run
    `bash pypi.sh pypi` from `main`.
-4. Emergency branch overrides are explicit: set
+5. Emergency branch overrides are explicit: set
    `HISTDATACOM_ALLOW_RELEASE_BRANCH_MISMATCH=1` only after reviewing why the
    normal `dev` -> TestPyPI and `main` -> PyPI branch policy cannot be used.
 
@@ -65,9 +69,19 @@ The existing local workflow is the current publishing workflow:
 
 ```sh
 bash pypi.sh build
+bash pypi.sh testpypi_preflight
 bash pypi.sh testpypi
 bash pypi.sh pypi
 ```
+
+`bash pypi.sh testpypi_preflight` is the local release preflight that does not
+contact TestPyPI or require keyring credentials. It builds `dist/`, creates a
+temporary local simple index from those artifacts, installs through
+`scripts/verify_testpypi_install.py`, and runs the same bundled-sidecar,
+CLI-parity, quality-smoke, default-routing, sidecar lifecycle, and live
+download/extract checks used after a real TestPyPI upload. The preflight writes
+`dist/local-simple-index-report.json` and `dist/testpypi-preflight-report.json`
+for auditability.
 
 `bash pypi.sh testpypi` is guarded to run from `dev` by default. Override the
 branch name only for a deliberate repository policy change:
@@ -87,6 +101,18 @@ artifacts:
 
 ```sh
 HISTDATACOM_SKIP_GPG_SIGNING=1 bash pypi.sh testpypi
+```
+
+Local uploads also preflight distribution file sizes before calling Twine.
+PyPI and TestPyPI commonly default to a 100 MB per-file upload limit, and the
+bundled Temporal sidecar wheels can exceed that default. If the project has a
+confirmed raised limit, set `HISTDATACOM_ALLOW_OVERSIZE_UPLOAD=1`; if the
+confirmed project-specific limit is different, set
+`HISTDATACOM_MAX_UPLOAD_FILE_BYTES` to that byte count:
+
+```sh
+HISTDATACOM_ALLOW_OVERSIZE_UPLOAD=1 bash pypi.sh testpypi
+HISTDATACOM_MAX_UPLOAD_FILE_BYTES=200000000 bash pypi.sh testpypi
 ```
 
 `pypi.sh build` now uses the PEP 517 build frontend:
