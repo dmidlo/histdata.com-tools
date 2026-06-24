@@ -731,8 +731,8 @@ it during the migration.
 The foreground rollback runtime has been removed after its release-window
 deprecation period. `--foreground` is no longer a valid CLI flag, and API code
 that sets `options.use_sidecar = False` raises a clear `ValueError`. If the
-sidecar cannot be started or contacted, CLI calls exit nonzero with a clear
-error and API calls raise `SidecarUnavailableError`; the runtime never silently
+runtime cannot be started or contacted, CLI calls exit nonzero with a clear
+error and API calls raise `OrchestrationUnavailableError`; the runtime never silently
 falls back to a local non-sidecar execution path.
 
 #### Runtime Model and Install Surface
@@ -776,9 +776,10 @@ distribution path, not the normal PyPI release path. The executable and the
 Python Temporal SDK are separate concerns: base installs provide the SDK, while
 the runtime resolver owns executable availability.
 
-Default sidecar submissions are built from resolved runtime context and
-`RunRequest` payloads. New orchestration work should use `RunRequest`,
-sidecar workflows, and sidecar activities. Legacy helper surfaces now accept
+Default orchestration submissions are built from resolved runtime context and
+`RunRequest` payloads exposed by `histdatacom.orchestration`. New automation
+work should use the orchestration facade instead of importing the private
+runtime implementation package directly. Legacy helper surfaces now accept
 explicit argument dictionaries rather than ambient parser state; parser globals
 are not part of runtime selection.
 
@@ -798,17 +799,19 @@ alternate cache root, and `HISTDATACOM_TEMPORAL_OFFLINE=1` disables first-run
 network provisioning. Offline environments fail with instructions to pre-seed
 the cache, install an offline/private bundle, or pass an explicit executable.
 
-#### Public Sidecar API Boundary
+#### Public Orchestration API Boundary
 
-New GUI and automation integrations should submit work through the sidecar-era
-public surface:
+New GUI and automation integrations should submit work through the public
+orchestration surface:
 
 - `histdatacom.Options` passed to `histdatacom.main(options)` or
   `histdatacom(options)`
-- `histdatacom.sidecar.contracts.RunRequest`
+- `histdatacom.orchestration.contracts.RunRequest`
 - `histdatacom-sidecar` lifecycle and jobs commands
-- `histdatacom.sidecar.client` job-control helpers for submit, inspect, list,
-  cancel, resume, progress, and artifact polling
+- `histdatacom.orchestration.client` job-control helpers for submit, inspect,
+  list, cancel, resume, progress, and artifact polling
+- `histdatacom.orchestration.telemetry` helpers for job status, progress, logs,
+  results, and artifacts
 
 Do not build new validate/download/extract/cache/import automation by importing
 `Repo`, `Scraper`, `Api.validate_caches`, `Api.merge_caches`, or
@@ -871,9 +874,9 @@ histdatacom-sidecar jobs cancel histdatacom-<request-id> --reason "operator stop
 - `--sidecar-submit-only` submits a job and returns job metadata instead of waiting for cache artifacts or workflow results.
 - Waited sidecar `-A` / `-U` repository requests keep the historical output contract: API calls return the available-data dictionary, and CLI calls render the repository table.
 - API calls with `options.api_return_type` return the requested `polars`, `pandas`, or `arrow` object after a completed sidecar job by materializing cache artifacts on disk.
-- If the sidecar is unavailable, CLI calls exit nonzero with a clear error and API calls raise `SidecarUnavailableError`.
+- If orchestration is unavailable, CLI calls exit nonzero with a clear error and API calls raise `OrchestrationUnavailableError`.
 
-Sidecar-backed API calls use the same public `Options` object and sidecar
+Orchestration-backed API calls use the same public `Options` object and runtime
 defaults:
 
 ```python

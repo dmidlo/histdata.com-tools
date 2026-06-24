@@ -12,11 +12,11 @@ import histdatacom
 from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.options import Options
 from histdatacom.runtime_contracts import WorkStatus
-from histdatacom.sidecar.client import (
-    SidecarJobHandle,
-    SidecarJobResult,
-    SidecarUnavailableError,
-    TemporalDependencyError,
+from histdatacom.orchestration.client import (
+    JobHandle,
+    JobResult,
+    OrchestrationUnavailableError,
+    RuntimeDependencyError,
 )
 from tests.fixtures.histdata_ascii.quality_cases import (
     CLEAN_M1_CASE,
@@ -51,10 +51,10 @@ def _sidecar_repository_options() -> Options:
     return options
 
 
-def _job_result(*, status: str = "completed") -> SidecarJobResult:
+def _job_result(*, status: str = "completed") -> JobResult:
     """Return a fake sidecar job result."""
-    return SidecarJobResult(
-        handle=SidecarJobHandle(
+    return JobResult(
+        handle=JobHandle(
             request_id="run-test",
             workflow_id="histdatacom-run-test",
             run_id="run-fake",
@@ -71,7 +71,7 @@ def _sidecar_repository_result(
     status: str = "completed",
     failure_code: str = "",
     include_quality: bool = False,
-) -> SidecarJobResult:
+) -> JobResult:
     """Return a completed sidecar result with repository metrics."""
     available_data = {
         "gbpusd": {"start": "200005", "end": "202212"},
@@ -101,7 +101,7 @@ def _sidecar_repository_result(
             "retryable": True,
             "detail": {},
         }
-    return SidecarJobResult(
+    return JobResult(
         handle=_job_result().handle,
         status="completed",
         result={
@@ -123,7 +123,7 @@ def _sidecar_quality_result(
     exit_code: int = 0,
     report_path: str = "/tmp/quality.json",
     error: str = "",
-) -> SidecarJobResult:
+) -> JobResult:
     """Return a sidecar result containing bounded quality metadata."""
     quality_status = (
         "failed" if error_count else "warning" if warning_count else "clean"
@@ -214,7 +214,7 @@ def _sidecar_quality_result(
             "retryable": False,
             "detail": {},
         }
-    return SidecarJobResult(
+    return JobResult(
         handle=_job_result().handle,
         status="completed",
         result={
@@ -226,7 +226,7 @@ def _sidecar_quality_result(
     )
 
 
-def _sidecar_cache_result(tmp_path: Path) -> SidecarJobResult:
+def _sidecar_cache_result(tmp_path: Path) -> JobResult:
     """Return a completed sidecar result with a cache artifact."""
     from histdatacom.api import Api
     from histdatacom.histdata_ascii import CACHE_FILENAME, write_polars_cache
@@ -250,7 +250,7 @@ def _sidecar_cache_result(tmp_path: Path) -> SidecarJobResult:
             "work_id": "work-cache",
         },
     }
-    return SidecarJobResult(
+    return JobResult(
         handle=_job_result().handle,
         status="completed",
         result={
@@ -270,7 +270,7 @@ def _sidecar_cache_result(tmp_path: Path) -> SidecarJobResult:
 def _sidecar_terminal_result(
     status: WorkStatus,
     tmp_path: Path | None = None,
-) -> SidecarJobResult:
+) -> JobResult:
     """Return a failed or cancelled sidecar result payload."""
     message = (
         "validation failed"
@@ -294,7 +294,7 @@ def _sidecar_terminal_result(
         stage_result["artifacts"] = cache_result.result["stage_results"][0][
             "artifacts"
         ]
-    return SidecarJobResult(
+    return JobResult(
         handle=_job_result().handle,
         status=status.value.lower(),
         result={
@@ -319,7 +319,7 @@ def test_api_options_can_submit_sidecar_job_and_return_result(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _job_result()
@@ -376,7 +376,7 @@ def test_data_quality_cli_submits_quality_request_to_sidecar(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _sidecar_quality_result(target_count=expected_count)
@@ -425,7 +425,7 @@ def test_data_quality_cli_missing_path_reports_sidecar_failure(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _sidecar_quality_result(
@@ -475,7 +475,7 @@ def test_data_quality_api_returns_sidecar_quality_payload(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _sidecar_quality_result(
@@ -518,7 +518,7 @@ def test_data_quality_api_runs_inventory_rules_for_corrupt_zip(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _sidecar_quality_result(
@@ -583,7 +583,7 @@ def test_data_quality_api_writes_coverage_manifest_from_metadata(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _sidecar_quality_result(
@@ -628,7 +628,7 @@ def test_data_quality_cli_writes_json_report_artifact(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _sidecar_quality_result(report_path=str(report_path.resolve()))
@@ -673,7 +673,7 @@ def test_data_quality_cli_exit_policy_fails_on_errors(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _sidecar_quality_result(
@@ -721,7 +721,7 @@ def test_back_to_back_sidecar_api_calls_do_not_leak_global_args(
 
     captured: list[tuple[object, dict[str, object]]] = []
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured.append((request, kwargs))
         return _job_result()
 
@@ -763,7 +763,7 @@ def test_api_default_runtime_uses_sidecar(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _job_result()
@@ -797,7 +797,7 @@ def test_cli_default_runtime_uses_sidecar(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _job_result()
@@ -841,7 +841,7 @@ def test_back_to_back_cli_sidecar_requests_use_fresh_parser_state(
 
     captured: list[tuple[object, dict[str, object]]] = []
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured.append((request, kwargs))
         return _job_result()
 
@@ -1022,7 +1022,7 @@ def test_api_sidecar_dataframe_return_is_materialized_from_cache_artifacts(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _sidecar_cache_result(tmp_path)
@@ -1065,7 +1065,7 @@ def test_api_waited_sidecar_terminal_failure_returns_payload(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _sidecar_terminal_result(status, tmp_path)
@@ -1096,7 +1096,7 @@ def test_api_sidecar_repository_request_returns_available_data(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _sidecar_repository_result()
@@ -1141,7 +1141,7 @@ def test_influx_cli_config_is_captured_before_sidecar_handoff(
     monkeypatch.chdir(tmp_path)
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
         return _job_result()
@@ -1214,7 +1214,7 @@ def test_api_sidecar_repository_failure_returns_available_data(
     """Repository API failure behavior should preserve output parity."""
     import histdatacom.histdata_com as histdata_com
 
-    def fake_submit(*args: object, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(*args: object, **kwargs: object) -> JobResult:
         return _sidecar_repository_result(
             status="failed",
             failure_code="REPOSITORY_NETWORK_ERROR",
@@ -1238,7 +1238,7 @@ def test_cli_sidecar_repository_request_prints_legacy_table(
     """Waited sidecar repository CLI calls should keep table output."""
     import histdatacom.histdata_com as histdata_com
 
-    def fake_submit(*args: object, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(*args: object, **kwargs: object) -> JobResult:
         return _sidecar_repository_result()
 
     monkeypatch.setattr(
@@ -1270,7 +1270,7 @@ def test_cli_sidecar_repository_request_can_print_quality_columns(
     """Repository table quality columns should be opt-in."""
     import histdatacom.histdata_com as histdata_com
 
-    def fake_submit(*args: object, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(*args: object, **kwargs: object) -> JobResult:
         return _sidecar_repository_result(include_quality=True)
 
     monkeypatch.setattr(
@@ -1318,7 +1318,7 @@ def test_cli_waited_sidecar_terminal_failure_exits_nonzero(
     """CLI waited terminal failures should be shell-friendly."""
     import histdatacom.histdata_com as histdata_com
 
-    def fake_submit(*args: object, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(*args: object, **kwargs: object) -> JobResult:
         return _sidecar_terminal_result(status)
 
     monkeypatch.setattr(
@@ -1362,7 +1362,7 @@ def test_cli_sidecar_repository_failure_exits_nonzero(
     """Repository CLI failure behavior should preserve output parity."""
     import histdatacom.histdata_com as histdata_com
 
-    def fake_submit(*args: object, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(*args: object, **kwargs: object) -> JobResult:
         return _sidecar_repository_result(
             status="failed",
             failure_code="REPOSITORY_NETWORK_ERROR",
@@ -1394,10 +1394,10 @@ def test_api_sidecar_repository_submit_only_keeps_job_payload_return(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
-        return SidecarJobResult(
+        return JobResult(
             handle=_job_result().handle,
             status="submitted",
         )
@@ -1429,10 +1429,10 @@ def test_api_sidecar_submit_only_keeps_job_payload_return(
 
     captured: dict[str, object] = {}
 
-    def fake_submit(request, **kwargs: object) -> SidecarJobResult:
+    def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
-        return SidecarJobResult(
+        return JobResult(
             handle=_job_result().handle,
             status="submitted",
         )
@@ -1463,7 +1463,7 @@ def test_api_sidecar_unavailable_error_is_raised(
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> object:
-        raise SidecarUnavailableError("not running")
+        raise OrchestrationUnavailableError("not running")
 
     monkeypatch.setattr(
         histdata_com,
@@ -1471,7 +1471,7 @@ def test_api_sidecar_unavailable_error_is_raised(
         fake_submit,
     )
 
-    with pytest.raises(SidecarUnavailableError, match="not running"):
+    with pytest.raises(OrchestrationUnavailableError, match="not running"):
         histdata_com.main(_sidecar_options())
 
 
@@ -1483,7 +1483,7 @@ def test_cli_sidecar_unavailable_exits_nonzero(
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> object:
-        raise SidecarUnavailableError("not running")
+        raise OrchestrationUnavailableError("not running")
 
     monkeypatch.setattr(
         histdata_com,
@@ -1522,7 +1522,7 @@ def test_api_temporal_dependency_error_is_sidecar_unavailable(
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> object:
-        raise TemporalDependencyError("Temporal support requires temporalio.")
+        raise RuntimeDependencyError("Temporal support requires temporalio.")
 
     monkeypatch.setattr(
         histdata_com,
@@ -1530,7 +1530,7 @@ def test_api_temporal_dependency_error_is_sidecar_unavailable(
         fake_submit,
     )
 
-    with pytest.raises(SidecarUnavailableError, match="temporalio"):
+    with pytest.raises(OrchestrationUnavailableError, match="temporalio"):
         histdata_com.main(_sidecar_options())
 
 
@@ -1542,7 +1542,7 @@ def test_cli_temporal_dependency_error_exits_nonzero_without_traceback(
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> object:
-        raise TemporalDependencyError("Temporal support requires temporalio.")
+        raise RuntimeDependencyError("Temporal support requires temporalio.")
 
     monkeypatch.setattr(
         histdata_com,

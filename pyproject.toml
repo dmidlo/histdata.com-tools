@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "histdatacom"
 dynamic = ["version"]
-description = "A command-line utility and Python ETL package that downloads currency exchange rates from Histdata.com with a default Temporal sidecar runtime and optional InfluxDB/Jupyter integrations."
+description = "A command-line utility and Python ETL package that downloads currency exchange rates from Histdata.com with a default Temporal orchestration runtime and optional InfluxDB/Jupyter integrations."
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10.0"
 license = "MIT"
@@ -140,8 +140,8 @@ Homepage = "https://github.com/dmidlo/histdata.com-tools"
 
 [project.scripts]
 histdatacom = "histdatacom.histdata_com:main"
-histdatacom-sidecar = "histdatacom.sidecar.cli:main"
-histdatacom-sidecar-worker = "histdatacom.sidecar.worker:main"
+histdatacom-sidecar = "histdatacom.orchestration.cli:main"
+histdatacom-sidecar-worker = "histdatacom.orchestration.worker:main"
 
 [tool.setuptools.package-dir]
 "" = "src"

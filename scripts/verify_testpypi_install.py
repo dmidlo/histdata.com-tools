@@ -45,16 +45,16 @@ import sys
 from importlib import metadata
 
 import histdatacom
-from histdatacom.runtime_contracts import RunRequest as RuntimeRunRequest
-from histdatacom.sidecar.contracts import RunRequest as SidecarRunRequest
-from histdatacom.sidecar.resources import (
+from histdatacom.orchestration.contracts import RunRequest
+from histdatacom.orchestration.resources import (
     current_platform_key,
-    load_sidecar_manifest,
+    load_runtime_manifest,
     load_temporal_runtime_index,
-    sidecar_asset,
-    sidecar_executable_path,
-    sidecar_platform_resource,
+    packaged_temporal_executable_path,
+    runtime_asset,
+    runtime_platform_resource,
 )
+from histdatacom.runtime_contracts import RunRequest as RuntimeRunRequest
 
 expected_version = sys.argv[1]
 require_bundled = sys.argv[2] == "1"
@@ -77,8 +77,8 @@ entry_points = {
 }
 expected_scripts = {
     "histdatacom": "histdatacom.histdata_com:main",
-    "histdatacom-sidecar": "histdatacom.sidecar.cli:main",
-    "histdatacom-sidecar-worker": "histdatacom.sidecar.worker:main",
+    "histdatacom-sidecar": "histdatacom.orchestration.cli:main",
+    "histdatacom-sidecar-worker": "histdatacom.orchestration.worker:main",
 }
 for name, target in expected_scripts.items():
     if entry_points.get(name) != target:
@@ -105,13 +105,13 @@ expected_assets = (
     "third-party/temporal-cli/NOTICE.md",
 )
 for asset in expected_assets:
-    if not sidecar_asset(asset).is_file():
+    if not runtime_asset(asset).is_file():
         raise SystemExit(f"sidecar asset is not packaged: {asset}")
 
-manifest = load_sidecar_manifest()
+manifest = load_runtime_manifest()
 runtime_index = load_temporal_runtime_index(manifest)
 platform_key = current_platform_key()
-resource = sidecar_platform_resource(platform_key, manifest)
+resource = runtime_platform_resource(platform_key, manifest)
 artifact = runtime_index.platforms.get(platform_key)
 if artifact is None:
     raise SystemExit(f"runtime index does not support current platform: {platform_key}")
@@ -121,15 +121,21 @@ if require_bundled:
         raise SystemExit(
             f"current platform {platform_key!r} is not bundled in TestPyPI wheel"
         )
-    with sidecar_executable_path(platform_key, manifest) as executable_path:
+    with packaged_temporal_executable_path(
+        platform_key, manifest
+    ) as executable_path:
         executable = str(executable_path)
 else:
     if resource.bundled:
-        with sidecar_executable_path(platform_key, manifest) as executable_path:
+        with packaged_temporal_executable_path(
+            platform_key, manifest
+        ) as executable_path:
             executable = str(executable_path)
 
-if SidecarRunRequest is not RuntimeRunRequest:
-    raise SystemExit("sidecar RunRequest is not the runtime contract RunRequest")
+if RunRequest is not RuntimeRunRequest:
+    raise SystemExit(
+        "orchestration RunRequest is not the runtime contract RunRequest"
+    )
 
 print(json.dumps({
     "distribution_name": dist.metadata["Name"],

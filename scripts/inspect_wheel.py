@@ -39,8 +39,8 @@ EXPECTED_SIDECAR_PLATFORMS = {
 }
 EXPECTED_CONSOLE_SCRIPTS = {
     "histdatacom = histdatacom.histdata_com:main",
-    "histdatacom-sidecar = histdatacom.sidecar.cli:main",
-    "histdatacom-sidecar-worker = histdatacom.sidecar.worker:main",
+    "histdatacom-sidecar = histdatacom.orchestration.cli:main",
+    "histdatacom-sidecar-worker = histdatacom.orchestration.worker:main",
 }
 EXPECTED_METADATA_CLASSIFIERS = {
     "Operating System :: MacOS",

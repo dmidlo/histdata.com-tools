@@ -167,7 +167,10 @@ def _write_ready_marker(state_dir: Path | str, lane: str, pid: int) -> None:
 
 def _write_ready_marker_from_command(command: list[str], pid: int) -> None:
     """Write a fake readiness marker for worker subprocess commands."""
-    if "histdatacom.sidecar.worker" not in command or "--lane" not in command:
+    if (
+        "histdatacom.orchestration.worker" not in command
+        or "--lane" not in command
+    ):
         return
     lane = command[command.index("--lane") + 1]
     state_dir = command[command.index("--state-dir") + 1]
@@ -321,7 +324,7 @@ def test_build_sidecar_worker_start_command_uses_lane_config(
     assert command[:3] == (
         command[0],
         "-m",
-        "histdatacom.sidecar.worker",
+        "histdatacom.orchestration.worker",
     )
     assert "--workspace" in command
     assert str(policy.workspace) in command
@@ -479,7 +482,7 @@ def test_start_creates_non_default_namespace_before_workers(
         pid = next(next_pid)
         live_pids.add(pid)
         label = "server"
-        if "histdatacom.sidecar.worker" in command:
+        if "histdatacom.orchestration.worker" in command:
             label = f"worker:{command[command.index('--lane') + 1]}"
             _write_ready_marker_from_command(command, pid)
         events.append(("process", label))
@@ -614,7 +617,7 @@ def test_start_fails_when_worker_crashes_before_ready(
     def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
         nonlocal calls
         calls += 1
-        if "histdatacom.sidecar.worker" in command:
+        if "histdatacom.orchestration.worker" in command:
             return _LateCrashingProcess(501, live_polls=1)
         return _FakeProcess(500)
 

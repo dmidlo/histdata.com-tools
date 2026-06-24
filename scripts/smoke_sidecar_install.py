@@ -24,8 +24,8 @@ EXPECTED_ASSETS = (
 )
 EXPECTED_CONSOLE_SCRIPTS = {
     "histdatacom": "histdatacom.histdata_com:main",
-    "histdatacom-sidecar": "histdatacom.sidecar.cli:main",
-    "histdatacom-sidecar-worker": "histdatacom.sidecar.worker:main",
+    "histdatacom-sidecar": "histdatacom.orchestration.cli:main",
+    "histdatacom-sidecar-worker": "histdatacom.orchestration.worker:main",
 }
 QUALITY_REPORT_SCHEMA_VERSION = "histdatacom.quality-report.v1"
 QUALITY_SMOKE_CLEAN_ROWS = (
@@ -120,8 +120,8 @@ def install_wheel(
 def check_package_metadata(*, expect_temporal_extra: bool) -> dict[str, Any]:
     """Validate installed package metadata and console entry points."""
     import histdatacom
+    from histdatacom.orchestration.contracts import RunRequest
     from histdatacom.runtime_contracts import RunRequest as RuntimeRunRequest
-    from histdatacom.sidecar.contracts import RunRequest
 
     dist = metadata.distribution("histdatacom")
     scripts = {
@@ -153,13 +153,15 @@ def check_package_metadata(*, expect_temporal_extra: bool) -> dict[str, Any]:
     if importlib.util.find_spec("temporalio") is None:
         raise SystemExit("temporalio distribution is installed but missing")
     if RunRequest is not RuntimeRunRequest:
-        raise SystemExit("sidecar contract RunRequest does not match runtime contract")
+        raise SystemExit(
+            "orchestration contract RunRequest does not match runtime contract"
+        )
 
     return {
         "name": dist.metadata["Name"],
         "version": installed_version,
         "console_scripts": sorted(EXPECTED_CONSOLE_SCRIPTS),
-        "sidecar_contracts": ["RunRequest"],
+        "orchestration_contracts": ["RunRequest"],
         "temporalio_version": temporalio_version,
     }
 
@@ -172,21 +174,21 @@ def check_sidecar_resources(
     temporal_executable: Path | None = None,
 ) -> dict[str, Any]:
     """Validate installed sidecar resources for the current platform."""
-    from histdatacom.sidecar.resources import (
-        SidecarExecutableUnavailable,
+    from histdatacom.orchestration.resources import (
+        TemporalExecutableUnavailable,
         current_platform_key,
         inspect_temporal_runtime_cache,
-        load_sidecar_manifest,
+        load_runtime_manifest,
         load_temporal_runtime_index,
-        sidecar_asset,
-        sidecar_executable_path,
+        packaged_temporal_executable_path,
+        runtime_asset,
         temporal_runtime_executable_path,
     )
 
-    manifest = load_sidecar_manifest()
+    manifest = load_runtime_manifest()
     runtime_index = load_temporal_runtime_index(manifest)
     for asset in EXPECTED_ASSETS:
-        if not sidecar_asset(asset).is_file():
+        if not runtime_asset(asset).is_file():
             raise SystemExit(f"sidecar asset is not a file: {asset}")
 
     platform_key = current_platform_key()
@@ -213,7 +215,9 @@ def check_sidecar_resources(
             "--check-executable-version so the resolver is exercised"
         )
     if platform_resource.bundled:
-        with sidecar_executable_path(platform_key) as executable_path:
+        with packaged_temporal_executable_path(
+            platform_key
+        ) as executable_path:
             if not executable_path.is_file():
                 raise SystemExit(
                     f"bundled sidecar executable is missing: {executable_path}"
@@ -235,9 +239,9 @@ def check_sidecar_resources(
                 f"current platform {platform_key!r} is not bundled in this wheel"
             )
         try:
-            with sidecar_executable_path(platform_key):
+            with packaged_temporal_executable_path(platform_key):
                 raise SystemExit("metadata-only sidecar resource exposed an executable")
-        except SidecarExecutableUnavailable as err:
+        except TemporalExecutableUnavailable as err:
             if "not bundled in this distribution" not in str(err):
                 raise
         if check_executable_version:

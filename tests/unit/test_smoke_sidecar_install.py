@@ -9,8 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from histdatacom.orchestration.resources import TemporalExecutableUnavailable
 from histdatacom.sidecar import live_smoke
-from histdatacom.sidecar.resources import SidecarExecutableUnavailable
 
 
 def _module():
@@ -323,7 +323,7 @@ def test_check_sidecar_resources_reports_external_runtime_resolution(
     tmp_path: Path,
 ) -> None:
     """Release smoke should prove first-run Temporal resolver behavior."""
-    import histdatacom.sidecar.resources as sidecar_resources
+    import histdatacom.orchestration.resources as orchestration_resources
 
     module = _module()
     executable = tmp_path / "temporal"
@@ -365,7 +365,7 @@ def test_check_sidecar_resources_reports_external_runtime_resolution(
 
     @contextmanager
     def missing_bundled_executable(*_: Any, **__: Any):
-        raise SidecarExecutableUnavailable("not bundled in this distribution")
+        raise TemporalExecutableUnavailable("not bundled in this distribution")
         yield  # pragma: no cover
 
     @contextmanager
@@ -373,33 +373,33 @@ def test_check_sidecar_resources_reports_external_runtime_resolution(
         yield resolution
 
     monkeypatch.setattr(
-        sidecar_resources, "current_platform_key", lambda: "linux-x86_64"
+        orchestration_resources, "current_platform_key", lambda: "linux-x86_64"
     )
     monkeypatch.setattr(
-        sidecar_resources, "load_sidecar_manifest", lambda: manifest
+        orchestration_resources, "load_runtime_manifest", lambda: manifest
     )
     monkeypatch.setattr(
-        sidecar_resources,
+        orchestration_resources,
         "load_temporal_runtime_index",
         lambda _manifest: runtime_index,
     )
     monkeypatch.setattr(
-        sidecar_resources,
-        "sidecar_asset",
+        orchestration_resources,
+        "runtime_asset",
         lambda _asset: executable,
     )
     monkeypatch.setattr(
-        sidecar_resources,
-        "sidecar_executable_path",
+        orchestration_resources,
+        "packaged_temporal_executable_path",
         missing_bundled_executable,
     )
     monkeypatch.setattr(
-        sidecar_resources,
+        orchestration_resources,
         "temporal_runtime_executable_path",
         resolved_runtime,
     )
     monkeypatch.setattr(
-        sidecar_resources,
+        orchestration_resources,
         "inspect_temporal_runtime_cache",
         lambda: (cache_entry,),
     )
@@ -432,7 +432,7 @@ def test_check_sidecar_resources_rejects_explicit_runtime_for_external_preflight
     tmp_path: Path,
 ) -> None:
     """Production preflight should not pass through an explicit override."""
-    import histdatacom.sidecar.resources as sidecar_resources
+    import histdatacom.orchestration.resources as orchestration_resources
 
     module = _module()
     executable = tmp_path / "temporal"
@@ -463,7 +463,7 @@ def test_check_sidecar_resources_rejects_explicit_runtime_for_external_preflight
 
     @contextmanager
     def missing_bundled_executable(*_: Any, **__: Any):
-        raise SidecarExecutableUnavailable("not bundled in this distribution")
+        raise TemporalExecutableUnavailable("not bundled in this distribution")
         yield  # pragma: no cover
 
     @contextmanager
@@ -471,31 +471,31 @@ def test_check_sidecar_resources_rejects_explicit_runtime_for_external_preflight
         yield resolution
 
     monkeypatch.setattr(
-        sidecar_resources, "current_platform_key", lambda: "linux-x86_64"
+        orchestration_resources, "current_platform_key", lambda: "linux-x86_64"
     )
     monkeypatch.setattr(
-        sidecar_resources, "load_sidecar_manifest", lambda: manifest
+        orchestration_resources, "load_runtime_manifest", lambda: manifest
     )
     monkeypatch.setattr(
-        sidecar_resources,
+        orchestration_resources,
         "load_temporal_runtime_index",
         lambda _manifest: runtime_index,
     )
     monkeypatch.setattr(
-        sidecar_resources, "sidecar_asset", lambda _asset: executable
+        orchestration_resources, "runtime_asset", lambda _asset: executable
     )
     monkeypatch.setattr(
-        sidecar_resources,
-        "sidecar_executable_path",
+        orchestration_resources,
+        "packaged_temporal_executable_path",
         missing_bundled_executable,
     )
     monkeypatch.setattr(
-        sidecar_resources,
+        orchestration_resources,
         "temporal_runtime_executable_path",
         resolved_runtime,
     )
     monkeypatch.setattr(
-        sidecar_resources, "inspect_temporal_runtime_cache", lambda: ()
+        orchestration_resources, "inspect_temporal_runtime_cache", lambda: ()
     )
     monkeypatch.setattr(
         module,
@@ -633,5 +633,5 @@ def test_check_package_metadata_requires_core_temporal_dependency(
 
     report = module.check_package_metadata(expect_temporal_extra=False)
 
-    assert report["sidecar_contracts"] == ["RunRequest"]
+    assert report["orchestration_contracts"] == ["RunRequest"]
     assert report["temporalio_version"] == "1.10.0"

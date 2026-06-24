@@ -171,8 +171,11 @@ def _write_dist_info(wheel: ZipFile, *, tag: str) -> None:
             [
                 "[console_scripts]",
                 "histdatacom = histdatacom.histdata_com:main",
-                "histdatacom-sidecar = histdatacom.sidecar.cli:main",
-                "histdatacom-sidecar-worker = histdatacom.sidecar.worker:main",
+                "histdatacom-sidecar = histdatacom.orchestration.cli:main",
+                (
+                    "histdatacom-sidecar-worker = "
+                    "histdatacom.orchestration.worker:main"
+                ),
                 "",
             ]
         ),

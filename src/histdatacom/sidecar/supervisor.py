@@ -305,7 +305,7 @@ def build_sidecar_worker_start_command(
     return (
         sys.executable,
         "-m",
-        "histdatacom.sidecar.worker",
+        "histdatacom.orchestration.worker",
         "--workspace",
         str(config.runtime_policy.workspace),
         "--runtime-home",

@@ -41,13 +41,13 @@ from histdatacom.repository_output import (
 from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
-from histdatacom.sidecar.client import (
-    SidecarUnavailableError,
+from histdatacom.orchestration.client import (
+    OrchestrationUnavailableError,
     submit_run_request_and_observe_sync,
 )
-from histdatacom.sidecar.cutover import (
+from histdatacom.orchestration.cutover import (
     FOREGROUND_RUNTIME_REMOVED_MESSAGE,
-    should_submit_to_sidecar,
+    should_submit_to_orchestration,
 )
 from histdatacom.utils import (
     load_influx_yaml,
@@ -153,7 +153,7 @@ class _HistDataCom:  # noqa:R701
                 start_if_needed=self.context.sidecar_start,
                 wait_for_result=self.context.sidecar_wait_result,
             )
-        except SidecarUnavailableError as err:
+        except OrchestrationUnavailableError as err:
             if self.context.from_api:
                 raise
             print(f"error: {err}", file=sys.stderr)  # noqa:T201
@@ -262,7 +262,7 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
     options.api_return_type = args["api_return_type"]
     _attach_influx_config_metadata(options, args)
     try:
-        should_submit_to_sidecar(args)
+        should_submit_to_orchestration(args)
     except ValueError as err:
         raise ValueError(FOREGROUND_RUNTIME_REMOVED_MESSAGE) from err
     request = RunRequest.from_options(options)
@@ -392,9 +392,9 @@ def main(
                             ]
     """
     if not options and len(sys.argv) > 1 and sys.argv[1] == "sidecar":
-        from histdatacom.sidecar.cli import main as sidecar_main
+        from histdatacom.orchestration.cli import main as orchestration_main
 
-        return sidecar_main(sys.argv[2:])
+        return orchestration_main(sys.argv[2:])
 
     if not options:
         options = Options()
