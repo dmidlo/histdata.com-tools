@@ -80,6 +80,15 @@ HISTDATACOM_TESTPYPI_BRANCH=release-candidate bash pypi.sh testpypi
 commands refuse to run with uncommitted tracked changes before building,
 signing, or uploading artifacts.
 
+Local uploads sign distributions by default. On a TestPyPI verification
+machine without the release GPG secret key, set
+`HISTDATACOM_SKIP_GPG_SIGNING=1` explicitly to upload unsigned TestPyPI
+artifacts:
+
+```sh
+HISTDATACOM_SKIP_GPG_SIGNING=1 bash pypi.sh testpypi
+```
+
 `pypi.sh build` now uses the PEP 517 build frontend:
 
 ```sh

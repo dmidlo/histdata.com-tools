@@ -178,10 +178,12 @@ def test_local_publishing_script_enforces_branch_contract() -> None:
     assert '--fetch-report "${fetch_report}"' in script
     assert "--check-version" in script
     assert "python -m twine check dist/*.whl dist/*.tar.gz" in script
+    assert "HISTDATACOM_SKIP_GPG_SIGNING" in script
+    assert "upload_dist_artifacts pypi" in script
+    assert "upload_dist_artifacts testpypi" in script
     assert "scripts/verify_testpypi_install.py" in script
     assert "--require-bundled-current-platform" in script
-    assert "python -m twine upload -r testpypi" in script
-    assert "python -m twine upload -r pypi" in script
+    assert 'python -m twine upload -r "${repository}"' in script
 
 
 def test_release_docs_mark_local_publishing_as_current_path() -> None:
@@ -201,5 +203,6 @@ def test_release_docs_mark_local_publishing_as_current_path() -> None:
     )
     assert "`bash pypi.sh pypi` is guarded to run from `main`" in release_docs
     assert "HISTDATACOM_FETCH_REPORT" in release_docs
+    assert "HISTDATACOM_SKIP_GPG_SIGNING=1" in release_docs
     assert "python -m twine check dist/*.whl dist/*.tar.gz" in release_docs
     assert "scripts/fetch_temporal_cli.py" in release_docs

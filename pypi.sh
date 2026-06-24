@@ -126,7 +126,25 @@ sign_dist_artifacts()
 {
     local artifacts=(dist/*.whl dist/*.tar.gz)
 
+    if [[ "${HISTDATACOM_SKIP_GPG_SIGNING:-}" == "1" ]]; then
+        echo "pypi.sh: skipping GPG signing because HISTDATACOM_SKIP_GPG_SIGNING=1." >&2
+        return
+    fi
+
     gpg --detach-sign --armor "${artifacts[@]}"
+}
+
+upload_dist_artifacts()
+{
+    local repository="$1"
+    local artifacts=(dist/*.whl dist/*.tar.gz)
+    local signatures=(dist/*.asc)
+
+    if [[ -e "${signatures[0]}" ]]; then
+        artifacts+=("${signatures[@]}")
+    fi
+
+    python -m twine upload -r "${repository}" --config-file .pypirc "${artifacts[@]}"
 }
 
 current_git_branch()
@@ -262,13 +280,13 @@ case "${1:-}" in
         prepare_release_upload "PyPI" "${pypi_branch}"
         build
         sign_dist_artifacts
-        python -m twine upload -r pypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
+        upload_dist_artifacts pypi
         ;;
     testpypi)
         prepare_release_upload "TestPyPI" "${testpypi_branch}"
         build
         sign_dist_artifacts
-        python -m twine upload -r testpypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
+        upload_dist_artifacts testpypi
         ;;
     testpypi_install)
         echo "${bold}verifying histdatacom from testpypi: https://test.pypi.org/simple/${normal}"
