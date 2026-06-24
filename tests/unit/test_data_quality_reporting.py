@@ -53,7 +53,7 @@ def test_quality_json_report_is_deterministic_and_investigable(
     assert finding["target"]["symbol"] == "EURUSD"
 
 
-def test_quality_report_writer_returns_sidecar_artifact_ref(
+def test_quality_report_writer_returns_orchestration_artifact_ref(
     tmp_path: Path,
 ) -> None:
     """Written reports should have a stable quality-report artifact surface."""

@@ -39,7 +39,7 @@ def _base_manifest() -> dict[str, object]:
     """Return the repository runtime manifest fixture."""
     manifest_path = (
         Path(__file__).resolve().parents[2]
-        / "src/histdatacom/sidecar/assets/manifest.json"
+        / "src/histdatacom/orchestration/assets/manifest.json"
     )
     loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
@@ -96,15 +96,15 @@ def _write_common_assets(
 ) -> None:
     """Write common runtime assets to a fake wheel."""
     wheel.writestr(
-        "histdatacom/sidecar/assets/README.md",
+        "histdatacom/orchestration/assets/README.md",
         "runtime assets",
     )
     wheel.writestr(
-        "histdatacom/sidecar/assets/runtime-defaults.json",
+        "histdatacom/orchestration/assets/runtime-defaults.json",
         "{}",
     )
     wheel.writestr(
-        "histdatacom/sidecar/assets/temporal-runtime-index.json",
+        "histdatacom/orchestration/assets/temporal-runtime-index.json",
         json.dumps(
             {
                 "schema_version": 1,
@@ -129,15 +129,15 @@ def _write_common_assets(
         ),
     )
     wheel.writestr(
-        "histdatacom/sidecar/assets/third-party/temporal-cli/LICENSE",
+        "histdatacom/orchestration/assets/third-party/temporal-cli/LICENSE",
         "MIT\n",
     )
     wheel.writestr(
-        "histdatacom/sidecar/assets/third-party/temporal-cli/NOTICE.md",
+        "histdatacom/orchestration/assets/third-party/temporal-cli/NOTICE.md",
         "Temporal CLI notice\n",
     )
     wheel.writestr(
-        "histdatacom/sidecar/assets/manifest.json",
+        "histdatacom/orchestration/assets/manifest.json",
         json.dumps(manifest),
     )
 
@@ -213,12 +213,12 @@ def test_inspect_wheel_accepts_bundled_platform_executable(
     with ZipFile(wheel_path, "w") as wheel:
         _write_common_assets(wheel, manifest=manifest)
         wheel.writestr(
-            "histdatacom/sidecar/assets/temporal-cli-provenance.json",
+            "histdatacom/orchestration/assets/temporal-cli-provenance.json",
             json.dumps(_provenance()),
         )
         wheel.writestr(
             _wheel_info(
-                "histdatacom/sidecar/assets/bin/macos-arm64/temporal",
+                "histdatacom/orchestration/assets/bin/macos-arm64/temporal",
                 mode=0o755,
             ),
             EXECUTABLE_BYTES,
@@ -284,7 +284,7 @@ def test_inspect_wheel_rejects_bundled_platform_without_provenance(
         _write_common_assets(wheel, manifest=manifest)
         wheel.writestr(
             _wheel_info(
-                "histdatacom/sidecar/assets/bin/macos-arm64/temporal",
+                "histdatacom/orchestration/assets/bin/macos-arm64/temporal",
                 mode=0o755,
             ),
             EXECUTABLE_BYTES,

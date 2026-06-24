@@ -198,7 +198,9 @@ def _run_json(
             f"stderr:\n{completed.stderr}"
         ) from err
     if not isinstance(payload, dict):
-        raise SystemExit(f"command emitted non-object JSON: {' '.join(command)}")
+        raise SystemExit(
+            f"command emitted non-object JSON: {' '.join(command)}"
+        )
     return payload
 
 
@@ -250,9 +252,7 @@ def _release_verification_environment(
         "HISTDATACOM_RUNTIME_WORKSPACE",
     ):
         env.pop(key, None)
-    env["HISTDATACOM_TEMPORAL_CACHE_DIR"] = str(
-        root / "temporal-runtime-cache"
-    )
+    env["HISTDATACOM_TEMPORAL_CACHE_DIR"] = str(root / "temporal-runtime-cache")
     return env
 
 
@@ -388,7 +388,9 @@ def _cli_parity_probe(
         [str(histdatacom), "runtime", "--help"], timeout=timeout
     ).stdout
     missing_commands = [
-        command for command in EXPECTED_RUNTIME_COMMANDS if command not in runtime_help
+        command
+        for command in EXPECTED_RUNTIME_COMMANDS
+        if command not in runtime_help
     ]
     if missing_commands:
         raise SystemExit(
@@ -606,7 +608,10 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
                 encoding="utf-8",
             )
         if args.keep_env:
-            print(f"kept TestPyPI verification environment: {root}", file=sys.stderr)
+            print(
+                f"kept TestPyPI verification environment: {root}",
+                file=sys.stderr,
+            )
         return report
 
 

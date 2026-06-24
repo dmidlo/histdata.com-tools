@@ -1,4 +1,4 @@
-"""Tests for sidecar provenance data-quality checks."""
+"""Tests for orchestration provenance data-quality checks."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from tests.fixtures.histdata_ascii.quality_cases import (
 )
 
 
-def test_clean_sidecar_lineage_produces_provenance_section(
+def test_clean_orchestration_lineage_produces_provenance_section(
     tmp_path: Path,
 ) -> None:
     """Matching files, artifacts, checksums, and cache metadata should pass."""
@@ -52,7 +52,7 @@ def test_clean_sidecar_lineage_produces_provenance_section(
 def test_provenance_reports_missing_artifact(
     tmp_path: Path,
 ) -> None:
-    """Sidecar artifact refs to files that are gone should be hard failures."""
+    """Orchestration artifact refs to files that are gone should be hard failures."""
     paths = _write_lineage(tmp_path)
     paths.cache.unlink()
 
@@ -116,7 +116,7 @@ def test_provenance_reports_cache_metadata_mismatch(
 def test_provenance_reports_orphan_discovered_file(
     tmp_path: Path,
 ) -> None:
-    """Discovered files absent from sidecar artifacts should be warnings."""
+    """Discovered files absent from orchestration artifacts should be warnings."""
     _write_lineage(tmp_path)
     orphan = tmp_path / "DAT_ASCII_GBPUSD_M1_201202.csv"
     orphan.write_text(CLEAN_M1_CASE.text, encoding="utf-8")
@@ -133,7 +133,7 @@ def test_provenance_reports_orphan_discovered_file(
 def test_explicit_provenance_without_store_is_clean_info(
     tmp_path: Path,
 ) -> None:
-    """File-only quality runs should not fail when no sidecar store exists."""
+    """File-only quality runs should not fail when no orchestration store exists."""
     write_ascii_case(tmp_path, CLEAN_M1_CASE)
 
     report = _provenance_report(tmp_path)
@@ -143,7 +143,7 @@ def test_explicit_provenance_without_store_is_clean_info(
     assert report.status is QualityStatus.CLEAN
     assert finding.severity is QualitySeverity.INFO
     assert manifest["available"] is False
-    assert manifest["reason"] == "no sidecar manifest/status store found"
+    assert manifest["reason"] == "no orchestration manifest/status store found"
 
 
 @dataclass(frozen=True, slots=True)

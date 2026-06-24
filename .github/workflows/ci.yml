@@ -102,8 +102,8 @@ jobs:
           assert dist.metadata["Name"] == "histdatacom"
           assert metadata.version("histdatacom") == histdatacom.__version__
           assert scripts["histdatacom"] == "histdatacom.histdata_com:main"
-          assert "histdatacom-sidecar" not in scripts
-          assert "histdatacom-sidecar-worker" not in scripts
+          assert "histdatacom-orchestration" not in scripts
+          assert "histdatacom-orchestration-worker" not in scripts
           PY
         shell: bash
 

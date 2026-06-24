@@ -103,7 +103,7 @@ class _HistDataCom:  # noqa:R701
           - ArgParser()():
               - ()(): use an IIFE to allow argparse to get garbage collected
               - ()(): ArgParser.__call__ returns updated Options object
-              - vars(...): get the __dict__ representation of the object
+              - Options.to_dict(): get the declared option values
               - ArgParser._arg_list_to_set(...)
                   - Normalize iterable user arguments whose values are lists and
                     make them sets instead
@@ -163,35 +163,43 @@ class _HistDataCom:  # noqa:R701
         if (
             self.context.data_quality or self.context.repo_quality_refresh
         ) and self.context.orchestration_wait_result:
-            quality_payload = _quality_payload_from_sidecar_payload(payload)
+            quality_payload = _quality_payload_from_orchestration_payload(
+                payload
+            )
             if quality_payload is not None:
                 if self.context.from_api:
                     return quality_payload
                 print(  # noqa:T201
-                    _format_sidecar_quality_console_summary(quality_payload)
+                    _format_orchestration_quality_console_summary(
+                        quality_payload
+                    )
                 )
-                quality_exit_code = _quality_sidecar_exit_code(quality_payload)
+                quality_exit_code = _quality_orchestration_exit_code(
+                    quality_payload
+                )
                 if quality_exit_code:
                     raise SystemExit(quality_exit_code)
-                if _sidecar_payload_failed(payload):
-                    _print_sidecar_payload_failure(payload)
+                if _orchestration_payload_failed(payload):
+                    _print_orchestration_payload_failure(payload)
                     raise SystemExit(1)
                 return payload
 
-        if self._should_materialize_sidecar_repository_return():
-            if _sidecar_repository_payload_failed(payload):
+        if self._should_materialize_orchestration_repository_return():
+            if _orchestration_repository_payload_failed(payload):
                 if self.context.from_api:
                     return (
-                        _repository_available_data_from_sidecar_payload(payload)
+                        _repository_available_data_from_orchestration_payload(
+                            payload
+                        )
                         or {}
                     )
                 print_repository_failure(
-                    _repository_failure_code_from_sidecar_payload(payload)
+                    _repository_failure_code_from_orchestration_payload(payload)
                 )
                 raise SystemExit(1)
 
-            available_data = _repository_available_data_from_sidecar_payload(
-                payload
+            available_data = (
+                _repository_available_data_from_orchestration_payload(payload)
             )
             if available_data is not None:
                 if self.context.from_api:
@@ -202,27 +210,28 @@ class _HistDataCom:  # noqa:R701
                 )
                 raise SystemExit(0)
 
-        if self.context.orchestration_wait_result and _sidecar_payload_failed(
-            payload
+        if (
+            self.context.orchestration_wait_result
+            and _orchestration_payload_failed(payload)
         ):
             if not self.context.from_api:
                 print(
                     json.dumps(payload, indent=2, sort_keys=True)
                 )  # noqa:T201
-                _print_sidecar_payload_failure(payload)
+                _print_orchestration_payload_failure(payload)
                 raise SystemExit(1)
             return payload
 
-        if self._should_materialize_sidecar_api_return(payload):
-            records = _cache_records_from_sidecar_payload(payload)
+        if self._should_materialize_orchestration_api_return(payload):
+            records = _cache_records_from_orchestration_payload(payload)
             if records:
-                return self._materialize_sidecar_api_return(records)
+                return self._materialize_orchestration_api_return(records)
         if not self.context.from_api:
             print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
         return payload
 
-    def _should_materialize_sidecar_repository_return(self) -> bool:
-        """Return whether a waited sidecar repo request should mimic legacy IO."""
+    def _should_materialize_orchestration_repository_return(self) -> bool:
+        """Return whether a waited orchestration repo request should mimic legacy IO."""
         return bool(
             self.context.orchestration_wait_result
             and (
@@ -231,7 +240,9 @@ class _HistDataCom:  # noqa:R701
             )
         )
 
-    def _should_materialize_sidecar_api_return(self, payload: dict) -> bool:
+    def _should_materialize_orchestration_api_return(
+        self, payload: dict
+    ) -> bool:
         """Return whether a completed orchestration run should mimic API returns."""
         return bool(
             self.context.from_api
@@ -241,7 +252,7 @@ class _HistDataCom:  # noqa:R701
             and payload.get("result")
         )
 
-    def _materialize_sidecar_api_return(
+    def _materialize_orchestration_api_return(
         self,
         records: list[Record],
     ) -> list | PolarsDataFrame | DataFrame | Table:
@@ -256,7 +267,7 @@ class _HistDataCom:  # noqa:R701
 
 def _resolve_runtime_context(options: Options) -> RuntimeContext:
     """Resolve launch values without touching process-global config."""
-    args = ArgParser.arg_list_to_set(vars(options)).copy()
+    args = ArgParser.arg_list_to_set(options.to_dict()).copy()
     args["default_download_dir"] = set_working_data_dir(args["data_directory"])
     args["api_return_type"] = normalize_api_return_type(args["api_return_type"])
     options.api_return_type = args["api_return_type"]
@@ -308,7 +319,7 @@ def _attach_influx_config_metadata(
     options: Options,
     args: dict[str, Any],
 ) -> None:
-    """Snapshot caller-local Influx config before sidecar handoff."""
+    """Snapshot caller-local Influx config before orchestration handoff."""
     if not bool(args.get("import_to_influxdb")):
         return
     metadata = dict(getattr(options, "metadata", {}) or {})
@@ -341,7 +352,7 @@ def _attach_influx_config_metadata(
 
 
 def _validate_influx_metadata_config(config: Mapping[str, Any]) -> None:
-    """Validate serialized sidecar Influx connection keys."""
+    """Validate serialized orchestration Influx connection keys."""
     missing = [
         key
         for key in ("INFLUX_ORG", "INFLUX_BUCKET", "INFLUX_URL", "INFLUX_TOKEN")
@@ -408,7 +419,7 @@ def main(
     return _HistDataCom(options).run()
 
 
-def _cache_records_from_sidecar_payload(payload: dict) -> list[Record]:
+def _cache_records_from_orchestration_payload(payload: dict) -> list[Record]:
     """Return legacy records reconstructed from orchestration cache artifacts."""
     records: list[Record] = []
     seen_paths: set[str] = set()
@@ -426,7 +437,7 @@ def _cache_records_from_sidecar_payload(payload: dict) -> list[Record]:
     return records
 
 
-def _repository_available_data_from_sidecar_payload(
+def _repository_available_data_from_orchestration_payload(
     payload: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     """Return legacy repository data from orchestration result metrics."""
@@ -443,25 +454,27 @@ def _repository_available_data_from_sidecar_payload(
     return None
 
 
-def _sidecar_repository_payload_failed(payload: Mapping[str, Any]) -> bool:
+def _orchestration_repository_payload_failed(
+    payload: Mapping[str, Any],
+) -> bool:
     """Return whether the waited orchestration result represents repo failure."""
     result = payload.get("result")
     if isinstance(result, Mapping):
         status = str(result.get("status", "") or "").lower()
         if status in {"failed", "cancelled"}:
             return True
-    return bool(_repository_failure_code_from_sidecar_payload(payload))
+    return bool(_repository_failure_code_from_orchestration_payload(payload))
 
 
-def _sidecar_payload_failed(payload: Mapping[str, Any]) -> bool:
+def _orchestration_payload_failed(payload: Mapping[str, Any]) -> bool:
     """Return whether a waited orchestration result represents failed work."""
-    return _sidecar_failure_status(payload) in {
+    return _orchestration_failure_status(payload) in {
         WorkStatus.FAILED,
         WorkStatus.CANCELLED,
     }
 
 
-def _sidecar_failure_status(
+def _orchestration_failure_status(
     payload: Mapping[str, Any],
 ) -> WorkStatus | None:
     """Return the terminal failure status from an orchestration payload."""
@@ -481,10 +494,10 @@ def _sidecar_failure_status(
     return None
 
 
-def _print_sidecar_payload_failure(payload: Mapping[str, Any]) -> None:
+def _print_orchestration_payload_failure(payload: Mapping[str, Any]) -> None:
     """Print a concise CLI error for failed waited orchestration jobs."""
-    status = _sidecar_failure_status(payload) or WorkStatus.FAILED
-    message = _sidecar_failure_message(payload)
+    status = _orchestration_failure_status(payload) or WorkStatus.FAILED
+    message = _orchestration_failure_message(payload)
     suffix = f": {message}" if message else ""
     print(
         f"error: orchestration job {status.value.lower()}{suffix}",
@@ -492,7 +505,7 @@ def _print_sidecar_payload_failure(payload: Mapping[str, Any]) -> None:
     )  # noqa:T201
 
 
-def _sidecar_failure_message(payload: Mapping[str, Any]) -> str:
+def _orchestration_failure_message(payload: Mapping[str, Any]) -> str:
     """Return the first useful failure message from an orchestration payload."""
     for item in _iter_mapping_payloads(payload):
         failure = item.get("failure")
@@ -504,7 +517,7 @@ def _sidecar_failure_message(payload: Mapping[str, Any]) -> str:
     return ""
 
 
-def _repository_failure_code_from_sidecar_payload(
+def _repository_failure_code_from_orchestration_payload(
     payload: Mapping[str, Any],
 ) -> str:
     """Return the first structured failure code in an orchestration payload."""
@@ -518,7 +531,7 @@ def _repository_failure_code_from_sidecar_payload(
     return ""
 
 
-def _quality_payload_from_sidecar_payload(
+def _quality_payload_from_orchestration_payload(
     payload: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     """Return the bounded quality payload from an orchestration result."""
@@ -540,10 +553,10 @@ def _is_data_quality_payload(value: object) -> TypeGuard[Mapping[str, Any]]:
     )
 
 
-def _format_sidecar_quality_console_summary(
+def _format_orchestration_quality_console_summary(
     quality_payload: Mapping[str, Any],
 ) -> str:
-    """Return a compact CLI summary from sidecar quality metadata."""
+    """Return a compact CLI summary from orchestration quality metadata."""
     summary = _mapping_from_payload(quality_payload.get("summary"))
     check_groups = quality_payload.get("check_groups")
     checks = (
@@ -593,7 +606,7 @@ def _format_sidecar_quality_console_summary(
     return "\n".join(lines)
 
 
-def _quality_sidecar_exit_code(quality_payload: Mapping[str, Any]) -> int:
+def _quality_orchestration_exit_code(quality_payload: Mapping[str, Any]) -> int:
     decision = _mapping_from_payload(quality_payload.get("exit_decision"))
     try:
         return int(decision.get("exit_code", 0) or 0)

@@ -49,7 +49,7 @@ the package is allowed to fetch.
 The index lives as package data under:
 
 ```text
-src/histdatacom/sidecar/assets/temporal-runtime-index.json
+src/histdatacom/orchestration/assets/temporal-runtime-index.json
 ```
 
 That file is intentionally package-owned, not user-owned. It pins the binaries

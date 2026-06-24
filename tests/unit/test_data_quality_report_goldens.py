@@ -44,7 +44,11 @@ GOLDEN_CASES: tuple[tuple[str, str, str], ...] = (
     ),
     ("cache_target_report", "report", "_cache_target_report_payload"),
     ("run_scoped_report", "report", "_run_scoped_report_payload"),
-    ("sidecar_bounded_payload", "bounded", "_sidecar_bounded_payload"),
+    (
+        "orchestration_bounded_payload",
+        "bounded",
+        "_orchestration_bounded_payload",
+    ),
 )
 
 
@@ -328,7 +332,7 @@ def _run_scoped_report_payload() -> dict[str, JSONValue]:
     return quality_report_payload(_run_scoped_report())
 
 
-def _sidecar_bounded_payload() -> dict[str, JSONValue]:
+def _orchestration_bounded_payload() -> dict[str, JSONValue]:
     report = _run_scoped_report()
     artifact = ArtifactRef(
         kind="quality-report",

@@ -24,10 +24,10 @@ from histdatacom.runtime_contracts import (
     WorkItem,
     WorkStatus,
 )
-from histdatacom.sidecar.control import (
+from histdatacom.orchestration.control import (
     JobLifecycle,
     JobProgressSnapshot,
-    SidecarJobSnapshot,
+    OrchestrationJobSnapshot,
 )
 
 ASCII_M1_URL = (
@@ -44,7 +44,7 @@ def _expected_ascii_m1_dir(base_dir: Path) -> str:
 def test_record_write_creates_manifest_without_legacy_meta(
     tmp_path: Path,
 ) -> None:
-    """Record writes should upsert the manifest without legacy sidecars."""
+    """Record writes should upsert the manifest without legacy orchestrations."""
     record = Record(url=ASCII_M1_URL, status=WorkStatus.CSV_FILE.value)
 
     record.write_manifest_status(base_dir=str(tmp_path))
@@ -292,12 +292,12 @@ def test_manifest_store_persists_dataset_plan_work_items(
     ]
 
 
-def test_manifest_store_persists_sidecar_job_snapshots(
+def test_manifest_store_persists_orchestration_job_snapshots(
     tmp_path: Path,
 ) -> None:
-    """Sidecar job status should be queryable without Temporal history."""
+    """Orchestration job status should be queryable without Temporal history."""
     store = ManifestStatusStore(tmp_path)
-    snapshot = SidecarJobSnapshot(
+    snapshot = OrchestrationJobSnapshot(
         job_id="histdatacom-run-1",
         request_id="run-1",
         workflow_id="histdatacom-run-1",

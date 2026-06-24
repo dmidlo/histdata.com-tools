@@ -233,7 +233,7 @@ def test_cli_parity_probe_fails_on_stale_help(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """A TestPyPI wheel missing sidecar/data-quality flags should fail."""
+    """A TestPyPI wheel missing orchestration/data-quality flags should fail."""
     module = _module()
 
     def fake_run(command: list[str], **_: Any) -> SimpleNamespace:
@@ -258,7 +258,7 @@ def test_smoke_runtime_install_probe_passes_strong_flags(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """The harness should be able to require full installed sidecar parity."""
+    """The harness should be able to require full installed orchestration parity."""
     module = _module()
     commands: list[list[str]] = []
     args = SimpleNamespace(

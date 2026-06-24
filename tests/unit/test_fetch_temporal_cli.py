@@ -13,7 +13,7 @@ from types import ModuleType
 
 import pytest
 
-from histdatacom.sidecar.resources import load_temporal_runtime_index
+from histdatacom.orchestration.resources import load_temporal_runtime_index
 
 
 def _load_script() -> ModuleType:
@@ -34,7 +34,7 @@ def _load_script() -> ModuleType:
 
 
 def test_temporal_cli_asset_table_covers_declared_platforms() -> None:
-    """Pinned release metadata should cover every sidecar wheel target."""
+    """Pinned release metadata should cover every orchestration wheel target."""
     module = _load_script()
 
     assert set(module.TEMPORAL_CLI_ASSETS) == {

@@ -12,12 +12,12 @@ from typing import Any
 from zipfile import ZipFile
 
 EXPECTED_BASE_RUNTIME_ASSETS = {
-    "histdatacom/sidecar/assets/README.md",
-    "histdatacom/sidecar/assets/manifest.json",
-    "histdatacom/sidecar/assets/runtime-defaults.json",
-    "histdatacom/sidecar/assets/temporal-runtime-index.json",
-    "histdatacom/sidecar/assets/third-party/temporal-cli/LICENSE",
-    "histdatacom/sidecar/assets/third-party/temporal-cli/NOTICE.md",
+    "histdatacom/orchestration/assets/README.md",
+    "histdatacom/orchestration/assets/manifest.json",
+    "histdatacom/orchestration/assets/runtime-defaults.json",
+    "histdatacom/orchestration/assets/temporal-runtime-index.json",
+    "histdatacom/orchestration/assets/third-party/temporal-cli/LICENSE",
+    "histdatacom/orchestration/assets/third-party/temporal-cli/NOTICE.md",
 }
 EXPECTED_BASE_RUNTIME_RESOURCE_FILES = {
     "README.md",
@@ -163,9 +163,13 @@ def _validate_third_party_notice_manifest(manifest: dict[str, Any]) -> None:
     if temporal_cli.get("license") != "MIT":
         raise SystemExit("Temporal CLI third-party notice must declare MIT")
     if temporal_cli.get("license_file") != TEMPORAL_CLI_LICENSE_RESOURCE:
-        raise SystemExit("Temporal CLI third-party notice has wrong license file")
+        raise SystemExit(
+            "Temporal CLI third-party notice has wrong license file"
+        )
     if temporal_cli.get("notice_file") != TEMPORAL_CLI_NOTICE_RESOURCE:
-        raise SystemExit("Temporal CLI third-party notice has wrong notice file")
+        raise SystemExit(
+            "Temporal CLI third-party notice has wrong notice file"
+        )
     if (
         temporal_cli.get("bundled_provenance_file")
         != TEMPORAL_CLI_PROVENANCE_RESOURCE
@@ -190,7 +194,7 @@ def _validate_temporal_cli_provenance(
             f"runtime platform {platform_key} has unexpected provenance "
             f"resource: {provenance_resource}"
         )
-    provenance_path = f"histdatacom/sidecar/assets/{provenance_resource}"
+    provenance_path = f"histdatacom/orchestration/assets/{provenance_resource}"
     if provenance_path not in names:
         raise SystemExit(
             f"runtime provenance missing for {platform_key}: {provenance_path}"
@@ -199,7 +203,7 @@ def _validate_temporal_cli_provenance(
         TEMPORAL_CLI_LICENSE_RESOURCE,
         TEMPORAL_CLI_NOTICE_RESOURCE,
     ):
-        required_path = f"histdatacom/sidecar/assets/{required_resource}"
+        required_path = f"histdatacom/orchestration/assets/{required_resource}"
         if required_path not in names:
             raise SystemExit(
                 f"runtime third-party notice resource missing: {required_path}"
@@ -207,7 +211,9 @@ def _validate_temporal_cli_provenance(
 
     loaded = json.loads(wheel.read(provenance_path).decode("utf-8"))
     if not isinstance(loaded, dict):
-        raise SystemExit(f"runtime provenance must be an object: {provenance_path}")
+        raise SystemExit(
+            f"runtime provenance must be an object: {provenance_path}"
+        )
     provenance: dict[str, Any] = loaded
     if provenance.get("schema_version") != 1:
         raise SystemExit("Temporal CLI provenance schema_version must be 1")
@@ -334,7 +340,7 @@ def inspect_wheel(
         )
         entry_points = wheel.read(entry_points_path).decode("utf-8")
         manifest = json.loads(
-            wheel.read("histdatacom/sidecar/assets/manifest.json").decode(
+            wheel.read("histdatacom/orchestration/assets/manifest.json").decode(
                 "utf-8"
             )
         )
@@ -355,7 +361,7 @@ def inspect_wheel(
             executable = resource.get("executable")
             if not executable:
                 raise SystemExit(f"runtime platform {key} has no executable")
-            executable_path = f"histdatacom/sidecar/assets/{executable}"
+            executable_path = f"histdatacom/orchestration/assets/{executable}"
             if resource.get("bundled"):
                 bundled_platforms.add(str(key))
                 expected_resource_files.add(str(executable))
@@ -385,13 +391,15 @@ def inspect_wheel(
                         f"runtime executable is not executable for {key}: "
                         f"{executable_path}"
                     )
-                provenance_reports[str(key)] = _validate_temporal_cli_provenance(
-                    wheel=wheel,
-                    names=names,
-                    platform_key=str(key),
-                    executable_resource=str(executable),
-                    executable_path=executable_path,
-                    provenance_resource=provenance,
+                provenance_reports[str(key)] = (
+                    _validate_temporal_cli_provenance(
+                        wheel=wheel,
+                        names=names,
+                        platform_key=str(key),
+                        executable_resource=str(executable),
+                        executable_path=executable_path,
+                        provenance_resource=provenance,
+                    )
                 )
             elif executable_path in names:
                 raise SystemExit(
@@ -402,9 +410,7 @@ def inspect_wheel(
                 raise SystemExit(
                     f"runtime platform {key} declares provenance but is not bundled"
                 )
-        provenance_asset = (
-            f"histdatacom/sidecar/assets/{TEMPORAL_CLI_PROVENANCE_RESOURCE}"
-        )
+        provenance_asset = f"histdatacom/orchestration/assets/{TEMPORAL_CLI_PROVENANCE_RESOURCE}"
         if not bundled_platforms and provenance_asset in names:
             raise SystemExit(
                 "metadata-only runtime wheel must not package bundled provenance"
@@ -433,9 +439,7 @@ def inspect_wheel(
     if "temporal" not in provides_extra:
         raise SystemExit("temporal optional extra missing from wheel metadata")
     classifiers = set(wheel_metadata.get_all("Classifier", []))
-    missing_classifiers = sorted(
-        EXPECTED_METADATA_CLASSIFIERS - classifiers
-    )
+    missing_classifiers = sorted(EXPECTED_METADATA_CLASSIFIERS - classifiers)
     if missing_classifiers:
         raise SystemExit(
             "wheel metadata missing platform classifiers: "

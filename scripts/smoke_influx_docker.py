@@ -422,7 +422,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             keep_container=args.keep_container,
         )
     except DockerInfluxSmokeError as err:
-        print(json.dumps(err.diagnostics, indent=2, sort_keys=True), file=sys.stderr)
+        print(
+            json.dumps(err.diagnostics, indent=2, sort_keys=True),
+            file=sys.stderr,
+        )
         return 1
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0

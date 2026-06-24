@@ -13,7 +13,7 @@ def test_concurrency() -> None:
 def test_get_pool_cpu_count_uses_existing_cpu_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The public CPU policy remains available for sidecar worker sizing."""
+    """The public CPU policy remains available for orchestration worker sizing."""
     import histdatacom.concurrency as concurrency
 
     monkeypatch.setattr(concurrency, "cpu_count", lambda: 8)

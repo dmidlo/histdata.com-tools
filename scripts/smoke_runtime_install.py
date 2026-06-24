@@ -94,7 +94,9 @@ def _run_json(
             f"stdout:\n{completed.stdout}"
         ) from err
     if not isinstance(payload, dict):
-        raise SystemExit(f"command emitted non-object JSON: {' '.join(command)}")
+        raise SystemExit(
+            f"command emitted non-object JSON: {' '.join(command)}"
+        )
     return payload
 
 
@@ -111,7 +113,9 @@ def install_wheel(
         install_target = (
             "histdatacom[temporal] @ " f"{resolved_wheel.resolve().as_uri()}"
         )
-    subprocess.check_call([sys.executable, "-m", "pip", "install", install_target])
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", install_target]
+    )
     return resolved_wheel
 
 
@@ -213,9 +217,7 @@ def check_runtime_resources(
             "--check-executable-version so the resolver is exercised"
         )
     if platform_resource.bundled:
-        with packaged_temporal_executable_path(
-            platform_key
-        ) as executable_path:
+        with packaged_temporal_executable_path(platform_key) as executable_path:
             if not executable_path.is_file():
                 raise SystemExit(
                     f"bundled runtime executable is missing: {executable_path}"
@@ -238,7 +240,9 @@ def check_runtime_resources(
             )
         try:
             with packaged_temporal_executable_path(platform_key):
-                raise SystemExit("metadata-only runtime resource exposed an executable")
+                raise SystemExit(
+                    "metadata-only runtime resource exposed an executable"
+                )
         except TemporalExecutableUnavailable as err:
             if "not bundled in this distribution" not in str(err):
                 raise
@@ -388,15 +392,15 @@ def check_live_runtime_smoke(
     stop_timeout: float,
 ) -> dict[str, Any]:
     """Run an external HistData.com runtime smoke."""
-    from histdatacom.sidecar.live_smoke import (
-        LiveSidecarSmokeError,
+    from histdatacom.orchestration.live_smoke import (
+        LiveOrchestrationSmokeError,
         diagnostics_json,
-        run_live_sidecar_smoke,
+        run_live_orchestration_smoke,
     )
 
     try:
         return dict(
-            run_live_sidecar_smoke(
+            run_live_orchestration_smoke(
                 workspace=workspace,
                 runtime_home=runtime_home,
                 data_directory=data_directory,
@@ -406,7 +410,7 @@ def check_live_runtime_smoke(
                 stop_timeout=stop_timeout,
             ).to_dict()
         )
-    except LiveSidecarSmokeError as err:
+    except LiveOrchestrationSmokeError as err:
         raise SystemExit(
             "live runtime smoke failed with diagnostics:\n"
             f"{diagnostics_json(err.diagnostics)}"
@@ -424,15 +428,15 @@ def check_hermetic_runtime_smoke(
     stop_timeout: float,
 ) -> dict[str, Any]:
     """Run a local-only Temporal runtime smoke for installed wheels."""
-    from histdatacom.sidecar.live_smoke import (
-        LiveSidecarSmokeError,
+    from histdatacom.orchestration.live_smoke import (
+        LiveOrchestrationSmokeError,
         diagnostics_json,
-        run_hermetic_sidecar_smoke,
+        run_hermetic_orchestration_smoke,
     )
 
     try:
         return dict(
-            run_hermetic_sidecar_smoke(
+            run_hermetic_orchestration_smoke(
                 workspace=workspace,
                 runtime_home=runtime_home,
                 data_directory=data_directory,
@@ -442,7 +446,7 @@ def check_hermetic_runtime_smoke(
                 stop_timeout=stop_timeout,
             ).to_dict()
         )
-    except LiveSidecarSmokeError as err:
+    except LiveOrchestrationSmokeError as err:
         raise SystemExit(
             "hermetic runtime smoke failed with diagnostics:\n"
             f"{diagnostics_json(err.diagnostics)}"
@@ -460,15 +464,15 @@ def check_default_routing_runtime_smoke(
     stop_timeout: float,
 ) -> dict[str, Any]:
     """Run local-only smoke through default client routing."""
-    from histdatacom.sidecar.live_smoke import (
-        LiveSidecarSmokeError,
+    from histdatacom.orchestration.live_smoke import (
+        LiveOrchestrationSmokeError,
         diagnostics_json,
-        run_default_client_routing_sidecar_smoke,
+        run_default_client_routing_orchestration_smoke,
     )
 
     try:
         return dict(
-            run_default_client_routing_sidecar_smoke(
+            run_default_client_routing_orchestration_smoke(
                 workspace=workspace,
                 runtime_home=runtime_home,
                 data_directory=data_directory,
@@ -478,7 +482,7 @@ def check_default_routing_runtime_smoke(
                 stop_timeout=stop_timeout,
             ).to_dict()
         )
-    except LiveSidecarSmokeError as err:
+    except LiveOrchestrationSmokeError as err:
         raise SystemExit(
             "default-routing runtime smoke failed with diagnostics:\n"
             f"{diagnostics_json(err.diagnostics)}"
@@ -675,12 +679,16 @@ def _validate_quality_report(
     if not isinstance(payload, dict):
         raise SystemExit(f"quality report is not a JSON object: {path}")
     if payload.get("schema_version") != QUALITY_REPORT_SCHEMA_VERSION:
-        raise SystemExit(f"quality report has unexpected schema version: {path}")
+        raise SystemExit(
+            f"quality report has unexpected schema version: {path}"
+        )
     summary = payload.get("summary")
     if not isinstance(summary, dict):
         raise SystemExit(f"quality report missing summary: {path}")
     if summary.get("target_count") != 1:
-        raise SystemExit(f"quality report expected one target: {path} {summary}")
+        raise SystemExit(
+            f"quality report expected one target: {path} {summary}"
+        )
     if summary.get("status") != expected_status:
         raise SystemExit(
             "quality report had unexpected status: "
@@ -694,12 +702,15 @@ def _validate_quality_report(
         )
     if max_errors is not None and error_count > max_errors:
         raise SystemExit(
-            f"quality report expected at most {max_errors} errors: " f"{path} {summary}"
+            f"quality report expected at most {max_errors} errors: "
+            f"{path} {summary}"
         )
     if not payload.get("target_summaries"):
         raise SystemExit(f"quality report missing target summaries: {path}")
     metadata = payload.get("metadata")
-    if not isinstance(metadata, dict) or metadata.get("operation") != ("data-quality"):
+    if not isinstance(metadata, dict) or metadata.get("operation") != (
+        "data-quality"
+    ):
         raise SystemExit(f"quality report missing operation metadata: {path}")
     return payload
 
@@ -790,10 +801,13 @@ def _validate_quality_job(
         )
     artifacts = job.get("artifacts")
     if not isinstance(artifacts, list) or not any(
-        isinstance(artifact, Mapping) and artifact.get("kind") == "quality-report"
+        isinstance(artifact, Mapping)
+        and artifact.get("kind") == "quality-report"
         for artifact in artifacts
     ):
-        raise SystemExit(f"runtime quality job missing quality-report artifact: {job}")
+        raise SystemExit(
+            f"runtime quality job missing quality-report artifact: {job}"
+        )
 
 
 def _normalized_quality_job_status(job: Mapping[str, Any]) -> str:
@@ -829,7 +843,9 @@ def _validate_quality_runtime_stop(payload: Mapping[str, Any]) -> None:
         raise SystemExit(f"quality runtime did not stop cleanly: {payload}")
     pids = payload.get("pids")
     if isinstance(pids, Mapping) and pids:
-        raise SystemExit(f"quality runtime stop left running processes: {payload}")
+        raise SystemExit(
+            f"quality runtime stop left running processes: {payload}"
+        )
 
 
 def _quality_smoke_case_result(
@@ -843,7 +859,9 @@ def _quality_smoke_case_result(
         "returncode": completed.returncode,
         "report": str(report_path),
         "status": (
-            str(summary.get("status", "")) if isinstance(summary, Mapping) else ""
+            str(summary.get("status", ""))
+            if isinstance(summary, Mapping)
+            else ""
         ),
     }
 
@@ -1025,7 +1043,9 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
+                "live-data"
+            )
             report["hermetic_runtime"] = check_hermetic_runtime_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,
@@ -1042,15 +1062,19 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
-            report["default_routing_runtime"] = check_default_routing_runtime_smoke(
-                workspace=live_workspace,
-                runtime_home=live_runtime_home,
-                data_directory=live_data_dir,
-                temporal_executable=args.temporal_executable,
-                startup_timeout=args.live_startup_timeout,
-                completion_timeout=args.live_completion_timeout,
-                stop_timeout=args.live_stop_timeout,
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
+                "live-data"
+            )
+            report["default_routing_runtime"] = (
+                check_default_routing_runtime_smoke(
+                    workspace=live_workspace,
+                    runtime_home=live_runtime_home,
+                    data_directory=live_data_dir,
+                    temporal_executable=args.temporal_executable,
+                    startup_timeout=args.live_startup_timeout,
+                    completion_timeout=args.live_completion_timeout,
+                    stop_timeout=args.live_stop_timeout,
+                )
             )
         if args.quality_runtime_smoke:
             live_workspace = args.live_workspace or Path(temporary_dir) / (
@@ -1059,7 +1083,9 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
+                "live-data"
+            )
             report["quality_runtime"] = check_quality_runtime_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,
@@ -1075,7 +1101,9 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
+                "live-data"
+            )
             report["live_runtime"] = check_live_runtime_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,

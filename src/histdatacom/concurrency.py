@@ -1,4 +1,4 @@
-"""CPU worker sizing policy shared by sidecar runtime components."""
+"""CPU worker sizing policy shared by orchestration runtime components."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ def get_pool_cpu_count(count: str | int | None = None) -> int:  # noqa:CCR001
     """Return the worker count derived from the shared CPU policy.
 
     The public `-c/--cpu_utilization` sizing contract remains in use by
-    sidecar worker and performance policies.
+    orchestration worker and performance policies.
     """
     try:
         real_vcpu_count = cpu_count()

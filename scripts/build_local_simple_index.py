@@ -18,7 +18,9 @@ def collect_artifacts(dist_dir: Path) -> list[Path]:
         for path in dist_dir.glob(pattern)
     )
     if not artifacts:
-        raise SystemExit(f"no histdatacom distribution artifacts found in {dist_dir}")
+        raise SystemExit(
+            f"no histdatacom distribution artifacts found in {dist_dir}"
+        )
     return artifacts
 
 

@@ -4,10 +4,10 @@
 
 ### Changed
 
-- **temporal-sidecar**: make the Temporal sidecar the default CLI/API runtime.
+- **temporal-orchestration**: make the Temporal orchestration the default CLI/API runtime.
   The foreground runtime remains available as a compatibility rollback through
-  `--foreground` or `Options.use_sidecar = False`, and default sidecar runs
-  start the bundled local sidecar when needed.
+  `--foreground` or `Options.use_orchestration = False`, and default orchestration runs
+  start the bundled local orchestration when needed.
 
 ## 0.78.4 (2022-12-13)
 

@@ -1,4 +1,4 @@
-"""Tests for the Temporal sidecar-era legacy helper boundary."""
+"""Tests for the Temporal orchestration-era legacy helper boundary."""
 
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ def test_scraper_archive_download_helper_warns_without_network(
 def test_api_cache_validation_helpers_warn_without_cache_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Direct Api cache helpers should make sidecar bypass explicit."""
+    """Direct Api cache helpers should make orchestration bypass explicit."""
     from histdatacom.api import Api
 
     record = SimpleNamespace(data_format="zip", data_timeframe="M1")

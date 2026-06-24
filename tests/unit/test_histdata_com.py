@@ -31,8 +31,8 @@ def test_histdata_com() -> None:
     assert True  # noqa:S101 # sourcery skip # act
 
 
-def _sidecar_options(api_return_type: str = "polars") -> Options:
-    """Return a small API request configured for sidecar execution."""
+def _orchestration_options(api_return_type: str = "polars") -> Options:
+    """Return a small API request configured for orchestration execution."""
     options = Options()
     options.pairs = {"eurusd"}
     options.formats = {"ascii"}
@@ -42,8 +42,8 @@ def _sidecar_options(api_return_type: str = "polars") -> Options:
     return options
 
 
-def _sidecar_repository_options() -> Options:
-    """Return an API repository request configured for sidecar execution."""
+def _orchestration_repository_options() -> Options:
+    """Return an API repository request configured for orchestration execution."""
     options = Options()
     options.available_remote_data = True
     options.pairs = {"eurusd", "gbpusd"}
@@ -52,7 +52,7 @@ def _sidecar_repository_options() -> Options:
 
 
 def _job_result(*, status: str = "completed") -> JobResult:
-    """Return a fake sidecar job result."""
+    """Return a fake orchestration job result."""
     return JobResult(
         handle=JobHandle(
             request_id="run-test",
@@ -66,13 +66,13 @@ def _job_result(*, status: str = "completed") -> JobResult:
     )
 
 
-def _sidecar_repository_result(
+def _orchestration_repository_result(
     *,
     status: str = "completed",
     failure_code: str = "",
     include_quality: bool = False,
 ) -> JobResult:
-    """Return a completed sidecar result with repository metrics."""
+    """Return a completed orchestration result with repository metrics."""
     available_data = {
         "gbpusd": {"start": "200005", "end": "202212"},
         "eurusd": {"start": "200005", "end": "202212"},
@@ -113,7 +113,7 @@ def _sidecar_repository_result(
     )
 
 
-def _sidecar_quality_result(
+def _orchestration_quality_result(
     *,
     status: str = WorkStatus.COMPLETED.value,
     target_count: int = 1,
@@ -124,7 +124,7 @@ def _sidecar_quality_result(
     report_path: str = "/tmp/quality.json",
     error: str = "",
 ) -> JobResult:
-    """Return a sidecar result containing bounded quality metadata."""
+    """Return an orchestration result containing bounded quality metadata."""
     quality_status = (
         "failed" if error_count else "warning" if warning_count else "clean"
     )
@@ -226,8 +226,8 @@ def _sidecar_quality_result(
     )
 
 
-def _sidecar_cache_result(tmp_path: Path) -> JobResult:
-    """Return a completed sidecar result with a cache artifact."""
+def _orchestration_cache_result(tmp_path: Path) -> JobResult:
+    """Return a completed orchestration result with a cache artifact."""
     from histdatacom.api import Api
     from histdatacom.histdata_ascii import CACHE_FILENAME, write_polars_cache
 
@@ -267,11 +267,11 @@ def _sidecar_cache_result(tmp_path: Path) -> JobResult:
     )
 
 
-def _sidecar_terminal_result(
+def _orchestration_terminal_result(
     status: WorkStatus,
     tmp_path: Path | None = None,
 ) -> JobResult:
-    """Return a failed or cancelled sidecar result payload."""
+    """Return a failed or cancelled orchestration result payload."""
     message = (
         "validation failed"
         if status == WorkStatus.FAILED
@@ -289,7 +289,7 @@ def _sidecar_terminal_result(
         "failure": failure,
     }
     if tmp_path is not None:
-        cache_result = _sidecar_cache_result(tmp_path)
+        cache_result = _orchestration_cache_result(tmp_path)
         stage_result["stage"] = "merge_cache"
         stage_result["artifacts"] = cache_result.result["stage_results"][0][
             "artifacts"
@@ -311,10 +311,10 @@ def _sidecar_terminal_result(
     )
 
 
-def test_api_options_can_submit_sidecar_job_and_return_result(
+def test_api_options_can_submit_orchestration_job_and_return_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """API callers should submit sidecar-backed jobs by default."""
+    """API callers should submit orchestration-backed jobs by default."""
     import histdatacom.histdata_com as histdata_com
 
     captured: dict[str, object] = {}
@@ -330,7 +330,7 @@ def test_api_options_can_submit_sidecar_job_and_return_result(
         fake_submit,
     )
 
-    result = histdata_com.main(_sidecar_options())
+    result = histdata_com.main(_orchestration_options())
 
     assert result["status"] == "completed"
     assert result["result"] == {"workflow_name": "HistDataRunWorkflow"}
@@ -351,14 +351,14 @@ def test_api_options_can_submit_sidecar_job_and_return_result(
         ("empty-directory", 0),
     ),
 )
-def test_data_quality_cli_submits_quality_request_to_sidecar(
+def test_data_quality_cli_submits_quality_request_to_orchestration(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     target_kind: str,
     expected_count: int,
 ) -> None:
-    """Quality CLI should submit an offline quality request to sidecar."""
+    """Quality CLI should submit an offline quality request to orchestration."""
     import histdatacom.histdata_com as histdata_com
 
     root = tmp_path / target_kind
@@ -379,7 +379,7 @@ def test_data_quality_cli_submits_quality_request_to_sidecar(
     def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
-        return _sidecar_quality_result(target_count=expected_count)
+        return _orchestration_quality_result(target_count=expected_count)
 
     monkeypatch.setattr(
         histdata_com,
@@ -415,12 +415,12 @@ def test_data_quality_cli_submits_quality_request_to_sidecar(
     assert f"targets: {expected_count}" in output
 
 
-def test_data_quality_cli_missing_path_reports_sidecar_failure(
+def test_data_quality_cli_missing_path_reports_orchestration_failure(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    """Missing quality targets should surface sidecar activity failure."""
+    """Missing quality targets should surface orchestration activity failure."""
     import histdatacom.histdata_com as histdata_com
 
     captured: dict[str, object] = {}
@@ -428,7 +428,7 @@ def test_data_quality_cli_missing_path_reports_sidecar_failure(
     def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
-        return _sidecar_quality_result(
+        return _orchestration_quality_result(
             status=WorkStatus.FAILED.value,
             target_count=0,
             error="quality target path does not exist",
@@ -460,11 +460,11 @@ def test_data_quality_cli_missing_path_reports_sidecar_failure(
     assert "orchestration job failed" in output.err
 
 
-def test_data_quality_api_returns_sidecar_quality_payload(
+def test_data_quality_api_returns_orchestration_quality_payload(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """API quality runs should return the bounded sidecar quality payload."""
+    """API quality runs should return the bounded orchestration quality payload."""
     import histdatacom.histdata_com as histdata_com
 
     csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
@@ -478,7 +478,7 @@ def test_data_quality_api_returns_sidecar_quality_payload(
     def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
-        return _sidecar_quality_result(
+        return _orchestration_quality_result(
             target_count=1,
             report_path=str(tmp_path / "quality.json"),
         )
@@ -503,7 +503,7 @@ def test_data_quality_api_runs_inventory_rules_for_corrupt_zip(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """API quality runs should submit inventory checks to the sidecar."""
+    """API quality runs should submit inventory checks to the orchestration."""
     import histdatacom.histdata_com as histdata_com
 
     archive = write_corrupt_zip(
@@ -521,7 +521,7 @@ def test_data_quality_api_runs_inventory_rules_for_corrupt_zip(
     def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
-        return _sidecar_quality_result(
+        return _orchestration_quality_result(
             status=WorkStatus.FAILED.value,
             target_count=1,
             finding_count=1,
@@ -586,7 +586,7 @@ def test_data_quality_api_writes_coverage_manifest_from_metadata(
     def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
-        return _sidecar_quality_result(
+        return _orchestration_quality_result(
             status=WorkStatus.FAILED.value,
             target_count=1,
             finding_count=1,
@@ -631,7 +631,9 @@ def test_data_quality_cli_writes_json_report_artifact(
     def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
-        return _sidecar_quality_result(report_path=str(report_path.resolve()))
+        return _orchestration_quality_result(
+            report_path=str(report_path.resolve())
+        )
 
     monkeypatch.setattr(
         histdata_com,
@@ -676,7 +678,7 @@ def test_data_quality_cli_exit_policy_fails_on_errors(
     def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
-        return _sidecar_quality_result(
+        return _orchestration_quality_result(
             status=WorkStatus.FAILED.value,
             target_count=1,
             finding_count=1,
@@ -713,10 +715,10 @@ def test_data_quality_cli_exit_policy_fails_on_errors(
     assert "decision: quality error threshold exceeded" in output
 
 
-def test_back_to_back_sidecar_api_calls_do_not_leak_global_args(
+def test_back_to_back_orchestration_api_calls_do_not_leak_global_args(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Sidecar submissions should use per-call context, not global args."""
+    """Orchestration submissions should use per-call context, not global args."""
     import histdatacom.histdata_com as histdata_com
 
     captured: list[tuple[object, dict[str, object]]] = []
@@ -730,10 +732,10 @@ def test_back_to_back_sidecar_api_calls_do_not_leak_global_args(
         "submit_run_request_and_observe_sync",
         fake_submit,
     )
-    first_options = _sidecar_options("polars")
+    first_options = _orchestration_options("polars")
     first_options.orchestration_start = False
     first_options.orchestration_wait_result = False
-    second_options = _sidecar_options("arrow")
+    second_options = _orchestration_options("arrow")
     second_options.orchestration_start = True
     second_options.orchestration_wait_result = True
 
@@ -755,10 +757,10 @@ def test_back_to_back_sidecar_api_calls_do_not_leak_global_args(
     }
 
 
-def test_api_default_runtime_uses_sidecar(
+def test_api_default_runtime_uses_orchestration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """API calls should submit to sidecar by default."""
+    """API calls should submit to orchestration by default."""
     import histdatacom.histdata_com as histdata_com
 
     captured: dict[str, object] = {}
@@ -789,10 +791,10 @@ def test_api_default_runtime_uses_sidecar(
     }
 
 
-def test_cli_default_runtime_uses_sidecar(
+def test_cli_default_runtime_uses_orchestration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CLI calls should submit to sidecar by default."""
+    """CLI calls should submit to orchestration by default."""
     import histdatacom.histdata_com as histdata_com
 
     captured: dict[str, object] = {}
@@ -832,11 +834,11 @@ def test_cli_default_runtime_uses_sidecar(
     }
 
 
-def test_back_to_back_cli_sidecar_requests_use_fresh_parser_state(
+def test_back_to_back_cli_orchestration_requests_use_fresh_parser_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CLI sidecar requests should not reuse parser state in one process."""
+    """CLI orchestration requests should not reuse parser state in one process."""
     import histdatacom.histdata_com as histdata_com
 
     captured: list[tuple[object, dict[str, object]]] = []
@@ -949,7 +951,9 @@ def test_cli_foreground_flag_is_rejected(
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
-        lambda *args, **kwargs: pytest.fail("sidecar should not be submitted"),
+        lambda *args, **kwargs: pytest.fail(
+            "orchestration should not be submitted"
+        ),
     )
     monkeypatch.setattr(
         sys,
@@ -1008,14 +1012,14 @@ def test_api_foreground_opt_out_is_rejected(
         ("arrow", "pyarrow", "Table"),
     ),
 )
-def test_api_sidecar_dataframe_return_is_materialized_from_cache_artifacts(
+def test_api_orchestration_dataframe_return_is_materialized_from_cache_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     api_return_type: str,
     expected_module: str,
     expected_name: str,
 ) -> None:
-    """API sidecar runs should preserve the legacy dataframe return contract."""
+    """API orchestration runs should preserve the legacy dataframe return contract."""
     import importlib
 
     import histdatacom.histdata_com as histdata_com
@@ -1025,7 +1029,7 @@ def test_api_sidecar_dataframe_return_is_materialized_from_cache_artifacts(
     def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
-        return _sidecar_cache_result(tmp_path)
+        return _orchestration_cache_result(tmp_path)
 
     monkeypatch.setattr(
         histdata_com,
@@ -1033,7 +1037,7 @@ def test_api_sidecar_dataframe_return_is_materialized_from_cache_artifacts(
         fake_submit,
     )
 
-    result = histdata_com.main(_sidecar_options(api_return_type))
+    result = histdata_com.main(_orchestration_options(api_return_type))
 
     expected_type = getattr(
         importlib.import_module(expected_module), expected_name
@@ -1054,7 +1058,7 @@ def test_api_sidecar_dataframe_return_is_materialized_from_cache_artifacts(
         (WorkStatus.CANCELLED, "cancelled"),
     ),
 )
-def test_api_waited_sidecar_terminal_failure_returns_payload(
+def test_api_waited_orchestration_terminal_failure_returns_payload(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     status: WorkStatus,
@@ -1068,7 +1072,7 @@ def test_api_waited_sidecar_terminal_failure_returns_payload(
     def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
-        return _sidecar_terminal_result(status, tmp_path)
+        return _orchestration_terminal_result(status, tmp_path)
 
     monkeypatch.setattr(
         histdata_com,
@@ -1076,7 +1080,7 @@ def test_api_waited_sidecar_terminal_failure_returns_payload(
         fake_submit,
     )
 
-    result = histdata_com.main(_sidecar_options("polars"))
+    result = histdata_com.main(_orchestration_options("polars"))
 
     assert isinstance(result, dict)
     assert result["status"] == expected
@@ -1088,10 +1092,10 @@ def test_api_waited_sidecar_terminal_failure_returns_payload(
     }
 
 
-def test_api_sidecar_repository_request_returns_available_data(
+def test_api_orchestration_repository_request_returns_available_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Waited sidecar repository API calls should return the legacy dict."""
+    """Waited orchestration repository API calls should return the legacy dict."""
     import histdatacom.histdata_com as histdata_com
 
     captured: dict[str, object] = {}
@@ -1099,7 +1103,7 @@ def test_api_sidecar_repository_request_returns_available_data(
     def fake_submit(request, **kwargs: object) -> JobResult:
         captured["request"] = request
         captured["kwargs"] = kwargs
-        return _sidecar_repository_result()
+        return _orchestration_repository_result()
 
     monkeypatch.setattr(
         histdata_com,
@@ -1107,7 +1111,7 @@ def test_api_sidecar_repository_request_returns_available_data(
         fake_submit,
     )
 
-    result = histdata_com.main(_sidecar_repository_options())
+    result = histdata_com.main(_orchestration_repository_options())
 
     assert list(result) == ["gbpusd", "eurusd"]
     assert result["eurusd"] == {"start": "200005", "end": "202212"}
@@ -1119,7 +1123,7 @@ def test_api_sidecar_repository_request_returns_available_data(
     }
 
 
-def test_influx_cli_config_is_captured_before_sidecar_handoff(
+def test_influx_cli_config_is_captured_before_orchestration_handoff(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1151,7 +1155,7 @@ def test_influx_cli_config_is_captured_before_sidecar_handoff(
         "submit_run_request_and_observe_sync",
         fake_submit,
     )
-    options = _sidecar_options()
+    options = _orchestration_options()
     options.import_to_influxdb = True
 
     histdata_com.main(options)
@@ -1173,7 +1177,7 @@ def test_influx_cli_config_is_captured_before_sidecar_handoff(
     }
 
 
-def test_influx_cli_config_validation_happens_before_sidecar_handoff(
+def test_influx_cli_config_validation_happens_before_orchestration_handoff(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1194,28 +1198,30 @@ def test_influx_cli_config_validation_happens_before_sidecar_handoff(
     monkeypatch.chdir(tmp_path)
 
     def fail_submit(*args: object, **kwargs: object) -> None:
-        raise AssertionError("malformed config should not submit to sidecar")
+        raise AssertionError(
+            "malformed config should not submit to orchestration"
+        )
 
     monkeypatch.setattr(
         histdata_com,
         "submit_run_request_and_observe_sync",
         fail_submit,
     )
-    options = _sidecar_options()
+    options = _orchestration_options()
     options.import_to_influxdb = True
 
     with pytest.raises(InfluxConfigurationError, match="token"):
         histdata_com.main(options)
 
 
-def test_api_sidecar_repository_failure_returns_available_data(
+def test_api_orchestration_repository_failure_returns_available_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Repository API failure behavior should preserve output parity."""
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> JobResult:
-        return _sidecar_repository_result(
+        return _orchestration_repository_result(
             status="failed",
             failure_code="REPOSITORY_NETWORK_ERROR",
         )
@@ -1226,20 +1232,20 @@ def test_api_sidecar_repository_failure_returns_available_data(
         fake_submit,
     )
 
-    result = histdata_com.main(_sidecar_repository_options())
+    result = histdata_com.main(_orchestration_repository_options())
 
     assert result["eurusd"] == {"start": "200005", "end": "202212"}
 
 
-def test_cli_sidecar_repository_request_prints_legacy_table(
+def test_cli_orchestration_repository_request_prints_legacy_table(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Waited sidecar repository CLI calls should keep table output."""
+    """Waited orchestration repository CLI calls should keep table output."""
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> JobResult:
-        return _sidecar_repository_result()
+        return _orchestration_repository_result()
 
     monkeypatch.setattr(
         histdata_com,
@@ -1263,7 +1269,7 @@ def test_cli_sidecar_repository_request_prints_legacy_table(
     assert '"status"' not in output
 
 
-def test_cli_sidecar_repository_request_can_print_quality_columns(
+def test_cli_orchestration_repository_request_can_print_quality_columns(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1271,7 +1277,7 @@ def test_cli_sidecar_repository_request_can_print_quality_columns(
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> JobResult:
-        return _sidecar_repository_result(include_quality=True)
+        return _orchestration_repository_result(include_quality=True)
 
     monkeypatch.setattr(
         histdata_com,
@@ -1308,7 +1314,7 @@ def test_cli_sidecar_repository_request_can_print_quality_columns(
         (WorkStatus.CANCELLED, "cancelled"),
     ),
 )
-def test_cli_waited_sidecar_terminal_failure_exits_nonzero(
+def test_cli_waited_orchestration_terminal_failure_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     status: WorkStatus,
@@ -1318,7 +1324,7 @@ def test_cli_waited_sidecar_terminal_failure_exits_nonzero(
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> JobResult:
-        return _sidecar_terminal_result(status)
+        return _orchestration_terminal_result(status)
 
     monkeypatch.setattr(
         histdata_com,
@@ -1353,7 +1359,7 @@ def test_cli_waited_sidecar_terminal_failure_exits_nonzero(
     assert "Traceback" not in captured.err
 
 
-def test_cli_sidecar_repository_failure_exits_nonzero(
+def test_cli_orchestration_repository_failure_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1361,7 +1367,7 @@ def test_cli_sidecar_repository_failure_exits_nonzero(
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> JobResult:
-        return _sidecar_repository_result(
+        return _orchestration_repository_result(
             status="failed",
             failure_code="REPOSITORY_NETWORK_ERROR",
         )
@@ -1384,10 +1390,10 @@ def test_cli_sidecar_repository_failure_exits_nonzero(
     assert "Unable to fetch repo list" in capsys.readouterr().out
 
 
-def test_api_sidecar_repository_submit_only_keeps_job_payload_return(
+def test_api_orchestration_repository_submit_only_keeps_job_payload_return(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Submit-only sidecar repository calls should not materialize data."""
+    """Submit-only orchestration repository calls should not materialize data."""
     import histdatacom.histdata_com as histdata_com
 
     captured: dict[str, object] = {}
@@ -1405,7 +1411,7 @@ def test_api_sidecar_repository_submit_only_keeps_job_payload_return(
         "submit_run_request_and_observe_sync",
         fake_submit,
     )
-    options = _sidecar_repository_options()
+    options = _orchestration_repository_options()
     options.orchestration_wait_result = False
 
     result = histdata_com.main(options)
@@ -1419,10 +1425,10 @@ def test_api_sidecar_repository_submit_only_keeps_job_payload_return(
     }
 
 
-def test_api_sidecar_submit_only_keeps_job_payload_return(
+def test_api_orchestration_submit_only_keeps_job_payload_return(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Submit-only sidecar API calls should not try to read cache artifacts."""
+    """Submit-only orchestration API calls should not try to read cache artifacts."""
     import histdatacom.histdata_com as histdata_com
 
     captured: dict[str, object] = {}
@@ -1440,7 +1446,7 @@ def test_api_sidecar_submit_only_keeps_job_payload_return(
         "submit_run_request_and_observe_sync",
         fake_submit,
     )
-    options = _sidecar_options()
+    options = _orchestration_options()
     options.orchestration_wait_result = False
 
     result = histdata_com.main(options)
@@ -1454,10 +1460,10 @@ def test_api_sidecar_submit_only_keeps_job_payload_return(
     }
 
 
-def test_api_sidecar_unavailable_error_is_raised(
+def test_api_orchestration_unavailable_error_is_raised(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """API callers should get a catchable sidecar-unavailable exception."""
+    """API callers should get a catchable orchestration-unavailable exception."""
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> object:
@@ -1470,14 +1476,14 @@ def test_api_sidecar_unavailable_error_is_raised(
     )
 
     with pytest.raises(OrchestrationUnavailableError, match="not running"):
-        histdata_com.main(_sidecar_options())
+        histdata_com.main(_orchestration_options())
 
 
-def test_cli_sidecar_unavailable_exits_nonzero(
+def test_cli_orchestration_unavailable_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """CLI sidecar failures should be shell-friendly."""
+    """CLI orchestration failures should be shell-friendly."""
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> object:
@@ -1512,10 +1518,10 @@ def test_cli_sidecar_unavailable_exits_nonzero(
     assert "not running" in capsys.readouterr().err
 
 
-def test_api_temporal_dependency_error_is_sidecar_unavailable(
+def test_api_temporal_dependency_error_is_orchestration_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """API callers should catch missing Temporal SDK as sidecar unavailable."""
+    """API callers should catch missing Temporal SDK as orchestration unavailable."""
     import histdatacom.histdata_com as histdata_com
 
     def fake_submit(*args: object, **kwargs: object) -> object:
@@ -1528,7 +1534,7 @@ def test_api_temporal_dependency_error_is_sidecar_unavailable(
     )
 
     with pytest.raises(OrchestrationUnavailableError, match="temporalio"):
-        histdata_com.main(_sidecar_options())
+        histdata_com.main(_orchestration_options())
 
 
 def test_cli_temporal_dependency_error_exits_nonzero_without_traceback(
@@ -1572,14 +1578,14 @@ def test_cli_temporal_dependency_error_exits_nonzero_without_traceback(
     assert "Traceback" not in captured.err
 
 
-def test_version_does_not_submit_sidecar_job(
+def test_version_does_not_submit_orchestration_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Version remains a local fast path even when sidecar is requested."""
+    """Version remains a local fast path even when orchestration is requested."""
     import histdatacom.histdata_com as histdata_com
 
     def fail_submit(*args: object, **kwargs: object) -> object:
-        raise AssertionError("sidecar should not be used for version")
+        raise AssertionError("orchestration should not be used for version")
 
     monkeypatch.setattr(
         histdata_com,
@@ -1593,15 +1599,15 @@ def test_version_does_not_submit_sidecar_job(
     assert histdata_com.main(options) == histdatacom.__version__
 
 
-def test_cli_sidecar_version_exits_without_job_submission(
+def test_cli_orchestration_version_exits_without_job_submission(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """CLI version remains a zero-exit fast path in sidecar mode."""
+    """CLI version remains a zero-exit fast path in orchestration mode."""
     import histdatacom.histdata_com as histdata_com
 
     def fail_submit(*args: object, **kwargs: object) -> object:
-        raise AssertionError("sidecar should not be used for version")
+        raise AssertionError("orchestration should not be used for version")
 
     monkeypatch.setattr(
         histdata_com,

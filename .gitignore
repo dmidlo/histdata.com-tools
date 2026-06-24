@@ -17,7 +17,7 @@ build/
 dist/
 .temporal-cli/
 *.egg-info
-src/histdatacom/sidecar/assets/bin/
+src/histdatacom/orchestration/assets/bin/
 influxdb.yaml
 prospector_results.json
 output.pstats

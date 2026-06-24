@@ -24,7 +24,7 @@ MANIFEST_DB_FILENAME = "manifest-status.sqlite3"
 MANIFEST_SCHEMA_VERSION = 1
 DATASET_PLAN_REF_KEY = "dataset_plan_ref"
 DATASET_PLAN_BATCHES_KEY = "dataset_plan_batches"
-STATUS_STORE_REF_KEY = "sidecar_status_store"
+STATUS_STORE_REF_KEY = "orchestration_status_store"
 STATUS_STORE_REF_KIND = "manifest_status_store"
 DEFAULT_DATASET_PLAN_INLINE_WORK_ITEM_LIMIT = 64
 PLAN_SPILL_METADATA_KEY = "temporal_plan_spill"
@@ -45,7 +45,7 @@ class ManifestMigrationResult:
 
 
 class ManifestStatusStore:
-    """Manifest/status store for records, artifacts, and sidecar jobs."""
+    """Manifest/status store for records, artifacts, and orchestration jobs."""
 
     def __init__(self, root_dir: str | Path):
         """Create a store rooted at a data directory."""
@@ -572,7 +572,7 @@ class ManifestStatusStore:
         return snapshot
 
     def write_job_snapshot(self, snapshot: Any) -> None:
-        """Persist a GUI-ready sidecar job snapshot."""
+        """Persist a GUI-ready orchestration job snapshot."""
         payload = _mapping_payload(snapshot)
         job_id = str(
             payload.get("job_id", "") or payload.get("workflow_id", "")
@@ -635,7 +635,7 @@ class ManifestStatusStore:
                         progress_payload.get("current_stage", "")
                         or "job_snapshot"
                     ),
-                    message="Sidecar job snapshot stored.",
+                    message="Orchestration job snapshot stored.",
                     work_id=job_id,
                     timestamp_utc=now,
                 ),
@@ -670,7 +670,7 @@ class ManifestStatusStore:
                 )
 
     def get_job_snapshot(self, job_id: str) -> dict[str, Any] | None:
-        """Return one stored sidecar job snapshot payload."""
+        """Return one stored orchestration job snapshot payload."""
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT payload_json FROM jobs WHERE job_id = ?",
@@ -686,7 +686,7 @@ class ManifestStatusStore:
         status: WorkStatus | str | None = None,
         limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]:
-        """List stored sidecar job snapshots without querying Temporal."""
+        """List stored orchestration job snapshots without querying Temporal."""
         where = ""
         params: list[Any] = []
         if status is not None:
@@ -783,7 +783,7 @@ class ManifestStatusStore:
         max_artifacts_per_owner: int,
         max_dataset_plans_per_request: int,
     ) -> dict[str, int]:
-        """Prune append-only sidecar rows while preserving current work items."""
+        """Prune append-only orchestration rows while preserving current work items."""
         _validate_retention_limit("max_job_snapshots", max_job_snapshots)
         _validate_retention_limit(
             "max_status_events_per_owner",
@@ -1406,8 +1406,12 @@ def _live_snapshot_payload(
                 "updated_at_utc": updated_at,
             },
         },
-        "sidecar_state": str(stored_payload.get("sidecar_state", "") or ""),
-        "sidecar_message": str(stored_payload.get("sidecar_message", "") or ""),
+        "orchestration_state": str(
+            stored_payload.get("orchestration_state", "") or ""
+        ),
+        "orchestration_message": str(
+            stored_payload.get("orchestration_message", "") or ""
+        ),
         "updated_at_utc": updated_at,
         "metadata": {
             **stored_metadata,

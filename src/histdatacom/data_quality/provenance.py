@@ -1,4 +1,4 @@
-"""Sidecar provenance and manifest lineage checks."""
+"""Orchestration provenance and manifest lineage checks."""
 
 from __future__ import annotations
 
@@ -95,13 +95,13 @@ class _StoreEvaluation:
 
 @dataclass(frozen=True, slots=True)
 class HistDataProvenanceManifestRule:
-    """Validate local files against sidecar manifest/status lineage records."""
+    """Validate local files against orchestration manifest/status lineage records."""
 
     explicit: bool = False
     max_findings: int = _DEFAULT_MAX_FINDINGS
     rule_id: str = PROVENANCE_MANIFEST_RULE_ID
     description: str = (
-        "Compare discovered files to sidecar manifest/status artifact lineage."
+        "Compare discovered files to orchestration manifest/status artifact lineage."
     )
 
     def evaluate_run(
@@ -213,7 +213,7 @@ def _unavailable_report(
         "schema_version": PROVENANCE_MANIFEST_SCHEMA_VERSION,
         "available": False,
         "status": "unavailable",
-        "reason": "no sidecar manifest/status store found",
+        "reason": "no orchestration manifest/status store found",
         "roots": cast(JSONValue, _string_list(config.get("roots"))),
         "store_count": 0,
         "target_count": len(targets),
@@ -237,7 +237,7 @@ def _unavailable_report(
         severity=QualitySeverity.INFO,
         code="PROVENANCE_STORE_UNAVAILABLE",
         message=(
-            "No sidecar manifest/status store was found; provenance checks "
+            "No orchestration manifest/status store was found; provenance checks "
             "were not applied."
         ),
         rule_id=rule_id,
@@ -274,7 +274,7 @@ def _evaluate_store(
                 _FindingTemplate(
                     severity=QualitySeverity.ERROR,
                     code="PROVENANCE_STORE_UNREADABLE",
-                    message="Sidecar manifest/status store could not be read.",
+                    message="Orchestration manifest/status store could not be read.",
                     location_path=str(store_ref.db_path),
                     metadata={
                         "store_root": str(store_ref.root),
@@ -353,7 +353,7 @@ def _evaluate_store(
             _FindingTemplate(
                 severity=QualitySeverity.WARNING,
                 code="PROVENANCE_ORPHAN_TARGET",
-                message="Discovered quality target is not referenced by sidecar artifacts.",
+                message="Discovered quality target is not referenced by orchestration artifacts.",
                 location_path=target.path,
                 metadata={
                     **_target_metadata(target),
@@ -385,7 +385,7 @@ def _append_lifecycle_findings(
             _FindingTemplate(
                 severity=QualitySeverity.WARNING,
                 code="PROVENANCE_STATUS_HISTORY_MISSING",
-                message="Work item has no sidecar status history.",
+                message="Work item has no orchestration status history.",
                 metadata={
                     "work_id": work_item.work_id,
                     "status": work_item.status.value,
@@ -429,7 +429,7 @@ def _append_artifact_file_findings(
             _FindingTemplate(
                 severity=QualitySeverity.ERROR,
                 code="PROVENANCE_ARTIFACT_MISSING",
-                message="Sidecar artifact reference points to a missing file.",
+                message="Orchestration artifact reference points to a missing file.",
                 location_path=location_path,
                 metadata={
                     "artifact_kind": artifact_kind,
@@ -447,7 +447,7 @@ def _append_artifact_file_findings(
             _FindingTemplate(
                 severity=QualitySeverity.ERROR,
                 code="PROVENANCE_ARTIFACT_SIZE_MISMATCH",
-                message="Sidecar artifact size does not match the file on disk.",
+                message="Orchestration artifact size does not match the file on disk.",
                 location_path=location_path,
                 metadata={
                     "artifact_kind": artifact_kind,
@@ -467,7 +467,7 @@ def _append_artifact_file_findings(
                 _FindingTemplate(
                     severity=QualitySeverity.ERROR,
                     code="PROVENANCE_ARTIFACT_CHECKSUM_MISMATCH",
-                    message="Sidecar artifact checksum does not match the file on disk.",
+                    message="Orchestration artifact checksum does not match the file on disk.",
                     location_path=location_path,
                     metadata={
                         "artifact_kind": artifact_kind,
@@ -736,7 +736,7 @@ def _provenance_config(
     status_store_ref = metadata.get(STATUS_STORE_REF_KEY)
     if isinstance(status_store_ref, Mapping):
         _merge_status_store_ref(config, status_store_ref)
-    raw_status_store = metadata.get("sidecar_status_store")
+    raw_status_store = metadata.get("orchestration_status_store")
     if isinstance(raw_status_store, Mapping):
         _merge_status_store_ref(config, raw_status_store)
 

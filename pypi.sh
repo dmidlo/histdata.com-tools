@@ -72,7 +72,7 @@ smoke_wheel_install()
 current_runtime_platform()
 {
     python - <<'PY'
-from histdatacom.sidecar.resources import current_platform_key
+from histdatacom.orchestration.resources import current_platform_key
 
 print(current_platform_key())
 PY

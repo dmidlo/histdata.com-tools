@@ -4,25 +4,47 @@ from histdatacom.fx_enums import Pairs
 from histdatacom.fx_enums import Format
 from histdatacom.fx_enums import Timeframe
 
-_REMOVED_ORCHESTRATION_OPTION_REPLACEMENTS = {
-    "use_sidecar": "use_orchestration",
-    "sidecar_start": "orchestration_start",
-    "sidecar_wait_result": "orchestration_wait_result",
-}
-
 
 class Options:
     """An intra-class DTO for Default Arguments for _HistDataCom class."""
 
-    def __setattr__(self, name: str, value: object) -> None:
-        """Reject removed public option names before they become stale state."""
-        replacement = _REMOVED_ORCHESTRATION_OPTION_REPLACEMENTS.get(name)
-        if replacement is not None:
-            raise AttributeError(
-                f"Options.{name} has been removed; use "
-                f"Options.{replacement}."
-            )
-        super().__setattr__(name, value)
+    __slots__ = (
+        "api_return_type",
+        "available_remote_data",
+        "batch_size",
+        "by",
+        "cpu_utilization",
+        "data_directory",
+        "data_quality",
+        "delete_after_influx",
+        "download_data_archives",
+        "end_yearmonth",
+        "extract_csvs",
+        "formats",
+        "from_api",
+        "import_to_influxdb",
+        "metadata",
+        "orchestration_start",
+        "orchestration_wait_result",
+        "pairs",
+        "quality_check_groups",
+        "quality_fail_on",
+        "quality_max_errors",
+        "quality_max_warnings",
+        "quality_paths",
+        "quality_profile",
+        "quality_profile_path",
+        "quality_report_path",
+        "repo_quality_columns",
+        "repo_quality_refresh",
+        "start_yearmonth",
+        "timeframes",
+        "update_remote_data",
+        "use_orchestration",
+        "validate_urls",
+        "version",
+        "zip_persist",
+    )
 
     # argparse uses a thin class to create a namespace for cli/shell arguments
     # to live in normally argparse.ArgumentParser.parse_args(namespace=...)
@@ -66,3 +88,7 @@ class Options:
         self.orchestration_start: bool = True
         self.orchestration_wait_result: bool = True
         self.metadata: dict = {}
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a mutable mapping of option names to current values."""
+        return {name: getattr(self, name) for name in self.__slots__}

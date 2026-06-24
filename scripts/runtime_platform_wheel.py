@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
-ASSET_ROOT = Path("src/histdatacom/sidecar/assets")
+ASSET_ROOT = Path("src/histdatacom/orchestration/assets")
 MANIFEST_FILENAME = "manifest.json"
 TEMPORAL_CLI_COMPONENT = "temporal-cli"
 TEMPORAL_CLI_REPOSITORY = "https://github.com/temporalio/cli"
@@ -82,9 +82,13 @@ def _load_manifest(source_root: Path) -> dict[str, Any]:
     try:
         loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
     except FileNotFoundError as err:
-        raise SystemExit(f"runtime manifest not found: {manifest_path}") from err
+        raise SystemExit(
+            f"runtime manifest not found: {manifest_path}"
+        ) from err
     if not isinstance(loaded, dict):
-        raise SystemExit(f"runtime manifest must contain an object: {manifest_path}")
+        raise SystemExit(
+            f"runtime manifest must contain an object: {manifest_path}"
+        )
     return loaded
 
 
@@ -93,9 +97,13 @@ def _load_fetch_report(report_path: Path) -> dict[str, Any]:
     try:
         loaded = json.loads(report_path.read_text(encoding="utf-8"))
     except FileNotFoundError as err:
-        raise SystemExit(f"Temporal CLI fetch report not found: {report_path}") from err
+        raise SystemExit(
+            f"Temporal CLI fetch report not found: {report_path}"
+        ) from err
     if not isinstance(loaded, dict):
-        raise SystemExit(f"Temporal CLI fetch report must be an object: {report_path}")
+        raise SystemExit(
+            f"Temporal CLI fetch report must be an object: {report_path}"
+        )
     return loaded
 
 
@@ -111,7 +119,9 @@ def _resource_path(relative_path: str) -> PurePosixPath:
     """Validate and return a manifest resource path."""
     resource_path = PurePosixPath(relative_path)
     if resource_path.is_absolute() or ".." in resource_path.parts:
-        raise SystemExit(f"runtime resource path must be relative: {relative_path}")
+        raise SystemExit(
+            f"runtime resource path must be relative: {relative_path}"
+        )
     return resource_path
 
 
@@ -176,7 +186,9 @@ def _report_string(report: Mapping[str, Any], key: str) -> str:
     """Return a required non-empty string from a fetch report."""
     value = report.get(key)
     if not isinstance(value, str) or not value.strip():
-        raise SystemExit(f"Temporal CLI fetch report missing string field: {key}")
+        raise SystemExit(
+            f"Temporal CLI fetch report missing string field: {key}"
+        )
     return value
 
 
@@ -235,7 +247,9 @@ def _ensure_asset_file(source_root: Path, relative_path: str) -> None:
     """Fail if a required runtime asset file is missing from the source tree."""
     asset_path = _asset_path(source_root, relative_path)
     if not asset_path.is_file():
-        raise SystemExit(f"runtime asset is required for bundled wheels: {relative_path}")
+        raise SystemExit(
+            f"runtime asset is required for bundled wheels: {relative_path}"
+        )
 
 
 def _merge_resource_files(
@@ -311,7 +325,9 @@ def prepare_runtime_binary(
     resolved_source = source_root.resolve()
     resolved_executable = executable.expanduser().resolve()
     if not resolved_executable.is_file():
-        raise SystemExit(f"Temporal executable is not a file: {resolved_executable}")
+        raise SystemExit(
+            f"Temporal executable is not a file: {resolved_executable}"
+        )
 
     manifest = _load_manifest(resolved_source)
     normalized_fetch_report = _validate_fetch_report(
@@ -323,7 +339,9 @@ def prepare_runtime_binary(
     resource = _platform_resource(manifest, platform_key)
     relative_executable = str(resource.get("executable", ""))
     if not relative_executable:
-        raise SystemExit(f"platform {platform_key!r} has no executable resource path")
+        raise SystemExit(
+            f"platform {platform_key!r} has no executable resource path"
+        )
     _resource_path(relative_executable)
 
     if not _is_windows_platform(platform_key) and not os.access(
@@ -450,14 +468,22 @@ def _retag_wheel(
             f"stdout:\n{completed.stdout}\n"
             f"stderr:\n{completed.stderr}"
         )
-    outputs = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    outputs = [
+        line.strip() for line in completed.stdout.splitlines() if line.strip()
+    ]
     if outputs:
         candidate = Path(outputs[-1])
-        return candidate if candidate.is_absolute() else wheel_path.parent / candidate
+        return (
+            candidate
+            if candidate.is_absolute()
+            else wheel_path.parent / candidate
+        )
 
     retagged = sorted(wheel_path.parent.glob("histdatacom-*.whl"))
     if len(retagged) != 1:
-        raise SystemExit(f"could not identify retagged wheel in {wheel_path.parent}")
+        raise SystemExit(
+            f"could not identify retagged wheel in {wheel_path.parent}"
+        )
     return retagged[0]
 
 
@@ -493,7 +519,9 @@ def build_platform_wheel(
         check_version=check_version,
     )
     wheel_tags = [str(tag) for tag in prepare_report["wheel_tags"]]
-    resolved_platform_tag = platform_tag or (wheel_tags[0] if wheel_tags else "")
+    resolved_platform_tag = platform_tag or (
+        wheel_tags[0] if wheel_tags else ""
+    )
     if not resolved_platform_tag:
         raise SystemExit(
             f"platform {platform_key!r} does not declare any wheel tags"
@@ -513,7 +541,9 @@ def build_platform_wheel(
         build_command.append("--no-isolation")
     _run(build_command, cwd=staged_source)
 
-    retagged = _retag_wheel(_single_wheel(work_dist), platform_tag=resolved_platform_tag)
+    retagged = _retag_wheel(
+        _single_wheel(work_dist), platform_tag=resolved_platform_tag
+    )
     dist_dir.mkdir(parents=True, exist_ok=True)
     final_wheel = dist_dir / retagged.name
     shutil.copy2(retagged, final_wheel)
@@ -593,7 +623,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     fetch_report = _load_fetch_report(args.fetch_report)
 
     if args.work_dir is None:
-        with tempfile.TemporaryDirectory(prefix="histdatacom-runtime-wheel-") as tmp:
+        with tempfile.TemporaryDirectory(
+            prefix="histdatacom-runtime-wheel-"
+        ) as tmp:
             report = build_platform_wheel(
                 source_root=args.source_root,
                 work_root=Path(tmp),

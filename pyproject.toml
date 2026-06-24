@@ -148,7 +148,7 @@ histdatacom = "histdatacom.histdata_com:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"histdatacom.sidecar" = [
+"histdatacom.orchestration" = [
     "assets/README.md",
     "assets/*.json",
     "assets/bin/*/*",

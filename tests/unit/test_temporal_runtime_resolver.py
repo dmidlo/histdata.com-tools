@@ -12,12 +12,12 @@ from typing import Iterator
 
 import pytest
 
-from histdatacom.sidecar import resources as resources_module
-from histdatacom.sidecar.resources import (
+from histdatacom.orchestration import resources as resources_module
+from histdatacom.orchestration.resources import (
     TEMPORAL_EXECUTABLE_ENV,
     TEMPORAL_OFFLINE_ENV,
-    SidecarManifest,
-    SidecarPlatformResource,
+    OrchestrationManifest,
+    OrchestrationPlatformResource,
     TemporalRuntimeArtifact,
     TemporalRuntimeChecksumError,
     TemporalRuntimeIndex,
@@ -84,8 +84,8 @@ def _index(
 def _manifest_with_bundled_resource(
     *,
     provenance: str = "temporal-cli-provenance.json",
-) -> SidecarManifest:
-    return SidecarManifest(
+) -> OrchestrationManifest:
+    return OrchestrationManifest(
         schema_version=1,
         runtime="temporal",
         distribution_strategy="test",
@@ -93,7 +93,7 @@ def _manifest_with_bundled_resource(
         resource_files=(),
         runtime_artifact_index="temporal-runtime-index.json",
         platforms={
-            "linux-x86_64": SidecarPlatformResource(
+            "linux-x86_64": OrchestrationPlatformResource(
                 key="linux-x86_64",
                 bundled=True,
                 executable="bin/linux-x86_64/temporal",
@@ -198,12 +198,12 @@ def test_packaged_bundle_requires_matching_provenance(
 
     monkeypatch.setattr(
         resources_module,
-        "sidecar_executable_path",
+        "orchestration_executable_path",
         fake_packaged_executable,
     )
     monkeypatch.setattr(
         resources_module,
-        "read_sidecar_asset_text",
+        "read_orchestration_asset_text",
         lambda _path: _packaged_provenance(
             artifact=artifact,
             index=index,
@@ -244,12 +244,12 @@ def test_packaged_bundle_rejects_provenance_mismatch(
 
     monkeypatch.setattr(
         resources_module,
-        "sidecar_executable_path",
+        "orchestration_executable_path",
         fake_packaged_executable,
     )
     monkeypatch.setattr(
         resources_module,
-        "read_sidecar_asset_text",
+        "read_orchestration_asset_text",
         lambda _path: _packaged_provenance(
             artifact=artifact,
             index=index,

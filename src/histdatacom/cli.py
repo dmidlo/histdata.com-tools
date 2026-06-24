@@ -138,7 +138,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         # __dict__ representation of it to set argparse argument defaults.
 
         self.arg_namespace = options if options is not None else Options()
-        self._default_args = self.arg_namespace.__dict__
+        self._default_args = self.arg_namespace.to_dict()
         self.set_defaults(**self._default_args)
 
     @classmethod

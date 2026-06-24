@@ -8,12 +8,12 @@ import os
 from pathlib import Path
 from typing import Sequence
 
-from histdatacom.sidecar.throughput import (
+from histdatacom.orchestration.throughput import (
     DEFAULT_THROUGHPUT_FANOUT_END_PERIOD,
     DEFAULT_THROUGHPUT_PERIOD,
     LIVE_RUNTIME_THROUGHPUT_ENV,
     default_throughput_benchmark_matrix,
-    run_live_sidecar_throughput_benchmark,
+    run_live_orchestration_throughput_benchmark,
     write_throughput_report,
 )
 
@@ -98,7 +98,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_work_items_per_batch=args.max_work_items_per_batch,
         max_parallel_child_workflows=args.max_parallel_child_workflows,
     )
-    report = run_live_sidecar_throughput_benchmark(
+    report = run_live_orchestration_throughput_benchmark(
         workspace=args.workspace,
         runtime_home=args.runtime_home,
         data_directory=args.data_directory,

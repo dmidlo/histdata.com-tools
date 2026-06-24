@@ -396,7 +396,7 @@ class StageResult:
 
 @dataclass(frozen=True, slots=True)
 class RunRequest:
-    """Serializable job request shared by CLI, API, sidecar, and GUI."""
+    """Serializable job request shared by CLI, API, orchestration, and GUI."""
 
     request_id: str
     pairs: tuple[str, ...] = ()

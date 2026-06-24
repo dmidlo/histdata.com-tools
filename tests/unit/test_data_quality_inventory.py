@@ -277,8 +277,8 @@ def test_zip_extra_member_is_reported_as_warning(tmp_path: Path) -> None:
     assert finding.metadata["extra_members"] == ["README.txt"]
 
 
-def test_zip_vendor_txt_sidecar_is_allowed(tmp_path: Path) -> None:
-    """Live HistData ZIPs include a same-stem TXT sidecar beside the CSV."""
+def test_zip_vendor_txt_orchestration_is_allowed(tmp_path: Path) -> None:
+    """Live HistData ZIPs include a same-stem TXT orchestration beside the CSV."""
     archive = write_zip_case(
         tmp_path,
         CLEAN_M1_CASE,

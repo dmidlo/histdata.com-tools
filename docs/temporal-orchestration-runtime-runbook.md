@@ -142,9 +142,8 @@ Default-runtime failure policy:
   when no healthy runtime is running.
 - `--foreground` is rejected by the CLI.
 - `Options.use_orchestration = False` is rejected by API runtime resolution.
-- Removed pre-V1 rollback option attributes such as `Options.use_sidecar`,
-  `Options.sidecar_start`, and `Options.sidecar_wait_result` are removed and
-  raise `AttributeError` if assigned.
+- The `Options` object is slotted; unpublished runtime fields raise
+  `AttributeError` instead of becoming stale per-call state.
 - Metadata-only wheels and unsupported platforms fail runtime starts with a
   `OrchestrationUnavailableError`/nonzero CLI exit when no explicit executable,
   verified bundle, verified cache entry, or allowed first-run download is

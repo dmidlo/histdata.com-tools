@@ -118,16 +118,16 @@ def test_orchestration_cli_flags_preserve_default_runtime_controls(
     assert options.validate_urls
 
 
-def test_sidecar_cli_flags_are_no_longer_public(
+def test_orchestration_cli_flags_are_no_longer_public(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The top-level CLI should not accept old sidecar flag spelling."""
+    """The top-level CLI should not accept old orchestration flag spelling."""
     monkeypatch.setattr(
         sys,
         "argv",
         [
             "histdatacom",
-            "--sidecar-submit-only",
+            "--orchestration-submit-only",
             "-V",
             "-p",
             "eurusd",
@@ -146,7 +146,7 @@ def test_sidecar_cli_flags_are_no_longer_public(
     assert err.value.code == 2
 
 
-def test_help_advertises_orchestration_jobs_not_sidecar() -> None:
+def test_help_advertises_orchestration_jobs_not_orchestration() -> None:
     """Main help should point users at orchestration job telemetry."""
     parser = ArgParser(Options())
     parser._set_args()
@@ -155,8 +155,7 @@ def test_help_advertises_orchestration_jobs_not_sidecar() -> None:
     assert "Orchestration:" in help_text
     assert "histdatacom jobs --help" in help_text
     assert "--submit-only" in help_text
-    assert "--sidecar-submit-only" not in help_text
-    assert "Sidecar:" not in help_text
+    assert "--orchestration-submit-only" not in help_text
 
 
 def test_foreground_cli_flag_is_no_longer_accepted(
@@ -226,9 +225,6 @@ def test_options_expose_orchestration_named_runtime_controls() -> None:
     assert options.use_orchestration
     assert not options.orchestration_start
     assert not options.orchestration_wait_result
-    assert not hasattr(options, "use_sidecar")
-    assert not hasattr(options, "sidecar_start")
-    assert not hasattr(options, "sidecar_wait_result")
 
 
 def test_data_quality_cli_mode_bypasses_legacy_prerequisites(

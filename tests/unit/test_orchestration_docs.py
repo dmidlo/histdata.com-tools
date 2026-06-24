@@ -35,7 +35,9 @@ def test_user_orchestration_guide_avoids_runtime_internals() -> None:
         "state/runtime.pid.json",
         "sqlite/temporal.db",
         "temporal-worker-<lane>.log",
-        "sidecar",
+        "--state-dir",
+        "--grpc-port",
+        "--ui-port",
         "migration-era",
     )
     for term in internal_terms:

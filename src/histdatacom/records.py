@@ -1,4 +1,4 @@
-"""Record work object used by sidecar, legacy helpers, and cache code."""
+"""Record work object used by orchestration, legacy helpers, and cache code."""
 
 import os
 import warnings
@@ -134,7 +134,7 @@ class Record:  # noqa:H601
         self.write_manifest_status(base_dir=base_dir)
 
     def delete_manifest_status(self, base_dir: str = "") -> None:
-        """Delete manifest/status state and any legacy ``.meta`` sidecar."""
+        """Delete manifest/status state and any legacy ``.meta`` orchestration."""
         meta_path = Path(self.data_dir, ".meta")
         if meta_path.exists():
             meta_path.unlink()

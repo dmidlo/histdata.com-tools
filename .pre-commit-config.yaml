@@ -77,6 +77,17 @@ repos:
       - python
     args:
       - --version
+  - id: architecture-diagrams
+    name: architecture-diagrams
+    entry: scripts/run_dev_tool.py python
+    language: system
+    args:
+      - tests/architecture/generate_diagrams.py
+    pass_filenames: false
+    always_run: True
+    verbose: True
+    stages:
+      - pre-commit
   - id: coverage-run
     name: coverage-run
     entry: scripts/run_dev_tool.py coverage

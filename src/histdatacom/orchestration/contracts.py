@@ -1,4 +1,4 @@
-"""Public orchestration runtime contracts."""
+"""Public orchestration-facing runtime contract imports."""
 
 from __future__ import annotations
 

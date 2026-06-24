@@ -102,7 +102,7 @@ OPERATION_RESUME_POLICIES: dict[str, OperationResumePolicy] = {
         partial_artifact_disposition=PartialArtifactDisposition.REUSE_COMPLETE,
         resume_mode=ResumeMode.REPLAY,
         cleanup_summary=(
-            "Validation writes only complete record metadata sidecars; no "
+            "Validation writes only complete record metadata artifacts; no "
             "partial data artifact is promoted."
         ),
         resume_summary=(
@@ -115,7 +115,7 @@ OPERATION_RESUME_POLICIES: dict[str, OperationResumePolicy] = {
         partial_artifact_disposition=PartialArtifactDisposition.REUSE_COMPLETE,
         resume_mode=ResumeMode.REPLAY,
         cleanup_summary=(
-            "Validation writes only complete record metadata sidecars; no "
+            "Validation writes only complete record metadata artifacts; no "
             "partial data artifact is promoted."
         ),
         resume_summary=(
@@ -185,7 +185,7 @@ OPERATION_RESUME_POLICIES: dict[str, OperationResumePolicy] = {
         resume_mode=ResumeMode.REPLAY,
         cleanup_summary=(
             "Merge assembly records bounded metadata and does not promote "
-            "partial merged data in sidecar mode."
+            "partial merged data in orchestration mode."
         ),
         resume_summary=(
             "Resume replays merge assembly from complete cache artifacts."
@@ -264,7 +264,7 @@ def cancellation_metadata(
 
 
 def job_cancellation_metadata(reason: str = "") -> dict[str, JSONValue]:
-    """Return GUI-ready cancellation semantics for a whole sidecar job."""
+    """Return GUI-ready cancellation semantics for a whole orchestration job."""
     return {
         "cancelled": True,
         "reason": reason,

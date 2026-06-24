@@ -254,11 +254,11 @@ def _member_findings(
         )
         return tuple(findings)
 
-    expected_sidecar = str(Path(expected_member).with_suffix(".txt"))
+    expected_text_member = str(Path(expected_member).with_suffix(".txt"))
     extra_members = tuple(
         member
         for member in members
-        if member not in {expected_member, expected_sidecar}
+        if member not in {expected_member, expected_text_member}
     )
     if extra_members:
         findings.append(
