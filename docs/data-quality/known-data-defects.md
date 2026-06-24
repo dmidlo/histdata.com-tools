@@ -45,3 +45,47 @@ Future full-dataset batches should treat this as an already-reviewed vendor
 data defect when interpreting #233/#241 outputs, but the default quality result
 should remain failed/error so repo-quality metadata and release gates do not
 silently hide the anomaly.
+
+## EURUSD 2001 M1 Non-Positive OHLC Row
+
+- Tracking issue: #243
+- Parent issue: #235
+- Tracker issue: #93
+- Source report: `data/.quality/issue-235/issue-235-ascii-m1-eurusd-quality.json`
+- Source report SHA-256:
+  `ea28fdf32980aaac92d24e063df815565b0675e1396faf06872dcf0d8aacfe56`
+- Source CSV: `data/ASCII/M1/eurusd/2001/DAT_ASCII_EURUSD_M1_2001.csv`
+- Source CSV SHA-256:
+  `d21fd56cc2f1df019abf8e6fe46cf52e5bfe8e0caa554b3110cf94564ac7905a`
+- Rule: `bars.ascii.m1_ohlc`
+- Code: `ASCII_M1_PRICE_NON_POSITIVE`
+- Classification: reviewed source-data defect
+- Decision: keep as a hard error
+
+The #235 batch-3 ASCII/M1 quality run found one `EURUSD` 2001 row where all
+OHLC prices are non-positive:
+
+```text
+20010911 201200;-.000100;-.000100;-.000100;-.000100;0
+```
+
+HistData source timestamps are fixed EST without daylight-saving adjustment.
+The source timestamp `20010911 201200` normalizes to
+`2001-09-12T01:12:00Z`.
+
+Nearby rows contain ordinary positive EURUSD prices before and after the
+defect:
+
+```text
+20010911 182500;0.911100;0.911100;0.911000;0.911000;0
+20010911 182600;0.910900;0.910900;0.910800;0.910800;0
+20010911 201200;-.000100;-.000100;-.000100;-.000100;0
+20010911 212300;0.910900;0.910900;0.910800;0.910800;0
+20010911 212600;0.910700;0.910700;0.910600;0.910600;0
+```
+
+This is not a timestamp normalization issue and not an OHLC ordering issue. It
+is a vendor/source row with an impossible negative bid price across all OHLC
+columns. Future full-dataset batches should treat this as an already-reviewed
+source-data defect, but the default quality result should remain failed/error
+so operator-facing repo-quality metadata does not hide the anomaly.
