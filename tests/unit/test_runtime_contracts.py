@@ -134,6 +134,16 @@ def test_run_request_round_trips_options_payload() -> None:
     options.quality_fail_on = "warning"
     options.quality_max_errors = 2
     options.quality_max_warnings = 5
+    options.quality_profile_path = "profiles/strict.json"
+    options.quality_profile = {
+        "schema_version": "histdatacom.quality-profile.v1",
+        "name": "strict",
+        "rules": {
+            "ingestion.ascii.row_count": {
+                "min_row_count": 10,
+            }
+        },
+    }
     options.repo_quality_refresh = True
     options.repo_quality_columns = True
 
@@ -156,6 +166,11 @@ def test_run_request_round_trips_options_payload() -> None:
     assert restored.quality_fail_on == "warning"
     assert restored.quality_max_errors == 2
     assert restored.quality_max_warnings == 5
+    assert restored.quality_profile_path == "profiles/strict.json"
+    assert restored.quality_profile["name"] == "strict"
+    assert restored.quality_profile["rules"] == {
+        "ingestion.ascii.row_count": {"min_row_count": 10}
+    }
     assert restored.repo_quality_refresh
     assert restored.repo_quality_columns
 

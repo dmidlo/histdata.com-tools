@@ -77,6 +77,11 @@ from rich import print  # pylint: disable=redefined-builtin
 from histdatacom import Options
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.data_quality import QUALITY_CHECK_GROUPS, QUALITY_EXIT_TRIGGERS
+from histdatacom.data_quality.profiles import (
+    QualityProfileError,
+    load_quality_profile_file,
+    quality_profile_from_mapping,
+)
 from histdatacom.fx_enums import (
     Format,
     Pairs,
@@ -205,6 +210,16 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     "--quality-max-warnings requires --quality or --repo-quality"
                 )
                 raise SystemExit(1)
+            if self.arg_namespace.quality_profile_path:
+                print(  # noqa:T201
+                    "--quality-profile requires --quality or --repo-quality"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_profile:
+                print(  # noqa:T201
+                    "quality_profile requires --quality or --repo-quality"
+                )
+                raise SystemExit(1)
             return
 
         legacy_flags = {
@@ -231,6 +246,26 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             self.arg_namespace.quality_paths = (
                 self.arg_namespace.data_directory,
             )
+        self._load_quality_profile()
+
+    def _load_quality_profile(self) -> None:
+        """Validate and embed an operator quality profile, when configured."""
+        try:
+            if self.arg_namespace.quality_profile_path:
+                profile = load_quality_profile_file(
+                    self.arg_namespace.quality_profile_path
+                )
+            elif self.arg_namespace.quality_profile:
+                profile = quality_profile_from_mapping(
+                    self.arg_namespace.quality_profile,
+                    source="api-options",
+                )
+            else:
+                return
+        except QualityProfileError as exc:
+            print(f"quality profile error: {exc}")  # noqa:T201
+            raise SystemExit(1) from exc
+        self.arg_namespace.quality_profile = profile.to_request_payload()
 
     def _clean_from_api_args(self) -> list:  # noqa:CCR001
         """Build the args list from api Options.
@@ -263,6 +298,13 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             if self.arg_namespace.quality_report_path:
                 args.extend(
                     ["--quality-report", self.arg_namespace.quality_report_path]
+                )
+            if self.arg_namespace.quality_profile_path:
+                args.extend(
+                    [
+                        "--quality-profile",
+                        self.arg_namespace.quality_profile_path,
+                    ]
                 )
             args.extend(
                 ["--quality-fail-on", self.arg_namespace.quality_fail_on]
@@ -1076,6 +1118,16 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             type=str,
             metavar="PATH",
             help="write the full machine-readable JSON quality report to PATH",
+        )
+        quality_args.add_argument(
+            "--quality-profile",
+            dest="quality_profile_path",
+            type=str,
+            metavar="PATH",
+            help=(
+                "read a JSON quality profile with rule thresholds, "
+                "severities, and modeling assumptions"
+            ),
         )
         quality_args.add_argument(
             "--quality-fail-on",

@@ -423,6 +423,8 @@ class RunRequest:
     quality_fail_on: str = "error"
     quality_max_errors: int = 0
     quality_max_warnings: int = 0
+    quality_profile_path: str = ""
+    quality_profile: dict[str, JSONValue] = field(default_factory=dict)
     repo_quality_refresh: bool = False
     repo_quality_columns: bool = False
     metadata: dict[str, JSONValue] = field(default_factory=dict)
@@ -492,6 +494,10 @@ class RunRequest:
             quality_max_warnings=int(
                 getattr(options, "quality_max_warnings", 0) or 0
             ),
+            quality_profile_path=str(
+                getattr(options, "quality_profile_path", "") or ""
+            ),
+            quality_profile=dict(getattr(options, "quality_profile", {}) or {}),
             repo_quality_refresh=bool(
                 getattr(options, "repo_quality_refresh", False)
             ),
@@ -529,6 +535,8 @@ class RunRequest:
             "quality_fail_on": self.quality_fail_on,
             "quality_max_errors": self.quality_max_errors,
             "quality_max_warnings": self.quality_max_warnings,
+            "quality_profile_path": self.quality_profile_path,
+            "quality_profile": dict(self.quality_profile),
             "repo_quality_refresh": self.repo_quality_refresh,
             "repo_quality_columns": self.repo_quality_columns,
             "metadata": dict(self.metadata),
@@ -575,6 +583,10 @@ class RunRequest:
             ),
             quality_max_errors=int(data.get("quality_max_errors", 0) or 0),
             quality_max_warnings=int(data.get("quality_max_warnings", 0) or 0),
+            quality_profile_path=str(
+                data.get("quality_profile_path", "") or ""
+            ),
+            quality_profile=dict(data.get("quality_profile") or {}),
             repo_quality_refresh=bool(data.get("repo_quality_refresh", False)),
             repo_quality_columns=bool(data.get("repo_quality_columns", False)),
             metadata=dict(data.get("metadata") or {}),

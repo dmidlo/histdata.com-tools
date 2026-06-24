@@ -90,6 +90,7 @@
     "reason": "quality error threshold exceeded: 1 > 0"
   },
   "operation": "data-quality",
+  "quality_profile": {},
   "report_artifact": {
     "kind": "quality-report",
     "metadata": {

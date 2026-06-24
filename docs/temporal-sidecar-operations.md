@@ -725,6 +725,13 @@ Data-quality checks:
 - Use `--quality-report PATH` to write the full JSON report. The report schema
   is `histdatacom.quality-report.v1`; console output remains a bounded human
   summary with clean, warning, and failed file sections.
+- Use `--quality-profile PATH` to embed a validated
+  `histdatacom.quality-profile.v1` JSON profile into the `DataQualityWorkflow`
+  request. Profiles tune rule thresholds, severities, precision/tick-size
+  overrides, gap/session tolerances, tick microstructure profiles,
+  cross-instrument tolerances, and modeling-readiness assumptions. The workflow
+  keeps only bounded profile metadata in history while the full report records
+  the active profile source, name, configured rule IDs, and assumption keys.
 - Warnings are advisory by default. Errors make a target failed and make the
   process exit nonzero under the default `--quality-fail-on error` policy.
   CI jobs that want warnings to fail should pass
@@ -766,6 +773,35 @@ Warning files
 
 Failed files
 - none
+```
+
+Example strict profile run:
+
+```json
+{
+  "schema_version": "histdatacom.quality-profile.v1",
+  "name": "strict-ci",
+  "rules": {
+    "ingestion.ascii.row_count": {
+      "min_row_count": 100,
+      "tiny_severity": "error"
+    },
+    "time.ascii.gaps": {
+      "tolerance": {
+        "suspicious_gap_ms": 300000
+      },
+      "warning_severity": "error"
+    }
+  }
+}
+```
+
+```sh
+histdatacom --quality \
+  --quality-target data/ \
+  --quality-profile profiles/strict-ci.json \
+  --quality-fail-on warning \
+  --quality-report reports/quality-strict.json
 ```
 
 Example failing ingestion run:

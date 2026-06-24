@@ -34,6 +34,7 @@ from histdatacom.data_quality import (
     coverage_manifest_metadata,
     discover_quality_targets,
     normalize_quality_check_groups,
+    quality_profile_report_metadata,
     quality_rules_for_groups,
     quality_run_rules_for_groups,
     run_quality_assessment,
@@ -288,14 +289,24 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
             max_errors=request.quality_max_errors,
             max_warnings=request.quality_max_warnings,
         )
+        profile_metadata = quality_profile_report_metadata(
+            request.quality_profile
+        )
         report = run_quality_assessment(
             discovery.targets,
-            quality_rules_for_groups(check_groups),
-            run_rules=quality_run_rules_for_groups(check_groups),
+            quality_rules_for_groups(
+                check_groups,
+                profile=request.quality_profile,
+            ),
+            run_rules=quality_run_rules_for_groups(
+                check_groups,
+                profile=request.quality_profile,
+            ),
             metadata={
                 "operation": "data-quality",
                 "check_groups": list(check_groups),
                 "request_id": request.request_id,
+                **profile_metadata,
                 "coverage_manifest": coverage_manifest_metadata(
                     roots=discovery.roots,
                     request=request.to_dict(),
@@ -727,7 +738,8 @@ def _refresh_repo_quality_metadata(
         _portable_repo_quality_payload(quality_payload, repo_path=repo_path),
         request_id=request.request_id,
     )
-    return write_repository_data_file(updated, repo_path)
+    artifact: ArtifactRef = write_repository_data_file(updated, repo_path)
+    return artifact
 
 
 def _portable_repo_quality_payload(

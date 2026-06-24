@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
@@ -625,6 +625,13 @@ class HistDataAsciiM1BarIntegrityRule:
 class HistDataAsciiM1PrecisionRule:
     """Validate M1 price precision against symbol-aware expectations."""
 
+    precision_rules_by_symbol: Mapping[str, HistDataSymbolPrecisionRule] = (
+        field(default_factory=dict)
+    )
+    precision_rules_by_asset_class: Mapping[
+        str,
+        HistDataSymbolPrecisionRule,
+    ] = field(default_factory=dict)
     warning_severity: QualitySeverity = QualitySeverity.WARNING
     rule_id: str = ASCII_M1_PRECISION_RULE_ID
     description: str = (
@@ -637,7 +644,11 @@ class HistDataAsciiM1PrecisionRule:
         if not _is_m1_ascii_market_target(target):
             return ()
 
-        symbol_metadata = symbol_metadata_for(target.symbol)
+        symbol_metadata = _precision_symbol_metadata(
+            target.symbol,
+            precision_rules_by_symbol=self.precision_rules_by_symbol,
+            precision_rules_by_asset_class=self.precision_rules_by_asset_class,
+        )
         if target.kind is QualityTargetKind.CACHE:
             cache_scan = _scan_m1_precision_polars_cache(target)
             if cache_scan is not None:
@@ -3175,6 +3186,39 @@ def _outlier_threshold_selection(
         source="default",
         key="default",
     )
+
+
+def _precision_symbol_metadata(
+    symbol: str,
+    *,
+    precision_rules_by_symbol: Mapping[str, HistDataSymbolPrecisionRule],
+    precision_rules_by_asset_class: Mapping[str, HistDataSymbolPrecisionRule],
+) -> HistDataSymbolMetadata:
+    symbol_metadata = symbol_metadata_for(symbol)
+    normalized_symbol = normalize_histdata_symbol(
+        symbol_metadata.normalized_symbol
+    )
+    normalized_symbol_rules = {
+        normalize_histdata_symbol(key): rule
+        for key, rule in precision_rules_by_symbol.items()
+    }
+    if normalized_symbol in normalized_symbol_rules:
+        return replace(
+            symbol_metadata,
+            precision_rule=normalized_symbol_rules[normalized_symbol],
+        )
+
+    normalized_asset_rules = {
+        str(key).strip().lower(): rule
+        for key, rule in precision_rules_by_asset_class.items()
+    }
+    asset_key = symbol_metadata.asset_class.lower()
+    if asset_key in normalized_asset_rules:
+        return replace(
+            symbol_metadata,
+            precision_rule=normalized_asset_rules[asset_key],
+        )
+    return symbol_metadata
 
 
 def _precision_regime_shifts(

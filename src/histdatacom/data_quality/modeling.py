@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from histdatacom.data_quality.contracts import (
     QualityFinding,
@@ -44,6 +44,7 @@ MISSING_ASSUMPTION_MARKERS = {
 class HistDataModelingReadinessRule:
     """Emit advisory modeling/backtest assumption findings."""
 
+    assumptions: Mapping[str, JSONValue] = field(default_factory=dict)
     warning_severity: QualitySeverity = QualitySeverity.WARNING
     rule_id: str = MODELING_READINESS_RULE_ID
     description: str = (
@@ -56,7 +57,10 @@ class HistDataModelingReadinessRule:
         if not _is_histdata_ascii_market_target(target):
             return ()
 
-        assumptions = _modeling_assumptions(target)
+        assumptions = {
+            **self.assumptions,
+            **_modeling_assumptions(target),
+        }
         profile = _modeling_readiness_metadata(target, assumptions)
         findings: list[QualityFinding] = [
             _modeling_finding(

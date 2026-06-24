@@ -261,6 +261,7 @@ def bounded_quality_payload(
             summary.to_dict() for summary in report.target_summaries
         ],
         "cross_target_summaries": _cross_target_summaries(report),
+        "quality_profile": _quality_profile_metadata(report),
         "report_schema_version": QUALITY_REPORT_SCHEMA_VERSION,
         "report_artifact": None if artifact is None else artifact.to_dict(),
         "exit_decision": decision.to_dict(),
@@ -300,6 +301,14 @@ def _cross_target_summaries(
                     }
                 )
     return summaries
+
+
+def _quality_profile_metadata(report: QualityReport) -> dict[str, JSONValue]:
+    """Return compact quality-profile metadata when present."""
+    profile = report.metadata.get("quality_profile")
+    if isinstance(profile, dict):
+        return dict(profile)
+    return {}
 
 
 def _finding_symbol_targets(

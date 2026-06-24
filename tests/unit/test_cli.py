@@ -1,11 +1,13 @@
 """Pytest unit tests for histdatacom.cli.py."""
 
+import json
 from pathlib import Path
 import sys
 
 import pytest
 
 from histdatacom import Options
+from histdatacom.data_quality import QUALITY_PROFILE_SCHEMA_VERSION
 from histdatacom.cli import ArgParser
 
 
@@ -216,6 +218,43 @@ def test_data_quality_cli_mode_bypasses_legacy_prerequisites(
     assert not options.import_to_influxdb
 
 
+def test_data_quality_cli_loads_quality_profile_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Quality mode should embed validated JSON profile files."""
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "cli-profile",
+                "rules": {"ingestion.ascii.row_count": {"min_row_count": 10}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile",
+            str(profile_path),
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.quality_profile_path == str(profile_path)
+    assert options.quality_profile["name"] == "cli-profile"
+    assert options.quality_profile["source"] == "file"
+    assert options.quality_profile["source_path"] == str(profile_path)
+
+
 def test_data_quality_cli_defaults_to_data_directory(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -295,6 +334,7 @@ def test_repo_quality_columns_are_display_only_for_repo_table(
         ["histdatacom", "--quality-fail-on", "warning"],
         ["histdatacom", "--quality-max-errors", "1"],
         ["histdatacom", "--quality-max-warnings", "1"],
+        ["histdatacom", "--quality-profile", "quality-profile.json"],
         ["histdatacom", "--quality", "-D"],
         ["histdatacom", "--repo-quality", "-A"],
         ["histdatacom", "--repo-quality-columns"],
@@ -351,6 +391,32 @@ def test_api_repo_quality_refresh_accepts_default_format_matrix(
 
     assert parsed.repo_quality_refresh is True
     assert parsed.quality_paths == (str(tmp_path),)
+
+
+def test_api_quality_options_accept_inline_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """API callers can pass an inline quality profile dict."""
+    monkeypatch.setattr(sys, "argv", ["histdatacom"])
+    options = Options()
+    options.from_api = True
+    options.data_quality = True
+    options.quality_paths = (str(tmp_path),)
+    options.quality_profile = {
+        "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+        "name": "api-profile",
+        "modeling_assumptions": {"target_horizon_minutes": 5},
+    }
+
+    parsed = ArgParser(options)()
+
+    assert parsed.data_quality is True
+    assert parsed.quality_profile["name"] == "api-profile"
+    assert parsed.quality_profile["source"] == "api-options"
+    assert parsed.quality_profile["modeling_assumptions"] == {
+        "target_horizon_minutes": 5
+    }
 
 
 def test_argparser_bare_construction_uses_fresh_option_namespace(

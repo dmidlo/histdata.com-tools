@@ -999,6 +999,11 @@ def test_data_quality_activity_writes_report_and_bounded_metrics(
         quality_paths=(str(csv_path),),
         quality_check_groups=("inventory",),
         quality_report_path=str(report_path),
+        quality_profile={
+            "schema_version": "histdatacom.quality-profile.v1",
+            "name": "activity-profile",
+            "modeling_assumptions": {"target_horizon_minutes": 5},
+        },
     )
 
     payload = data_quality_activity(
@@ -1017,6 +1022,8 @@ def test_data_quality_activity_writes_report_and_bounded_metrics(
     assert quality["summary"]["target_count"] == 1
     assert quality["summary"]["finding_count"] >= 0
     assert quality["report_artifact"]["path"] == str(report_path.resolve())
+    assert quality["quality_profile"]["name"] == "activity-profile"
+    assert quality["quality_profile"]["source"] == "operator-config"
     assert quality["target_summaries"][0]["target"]["kind"] == "csv"
     assert "targets" not in quality
     assert "rule_results" not in quality
@@ -1026,6 +1033,9 @@ def test_data_quality_activity_writes_report_and_bounded_metrics(
         "histdatacom.quality-report.v1"
     )
     assert detailed_report["target_summaries"][0]["target"]["kind"] == "csv"
+    assert detailed_report["metadata"]["quality_profile"]["name"] == (
+        "activity-profile"
+    )
 
 
 def test_data_quality_activity_refreshes_repo_quality_metadata(

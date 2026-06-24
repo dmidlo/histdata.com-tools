@@ -79,6 +79,8 @@ class RuntimeContext:
     quality_fail_on: str
     quality_max_errors: int
     quality_max_warnings: int
+    quality_profile_path: str
+    quality_profile: Mapping[str, Any]
     repo_quality_refresh: bool
     repo_quality_columns: bool
     available_remote_data: bool
@@ -292,6 +294,8 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         quality_fail_on=str(args["quality_fail_on"]),
         quality_max_errors=int(args["quality_max_errors"]),
         quality_max_warnings=int(args["quality_max_warnings"]),
+        quality_profile_path=str(args.get("quality_profile_path") or ""),
+        quality_profile=dict(args.get("quality_profile") or {}),
         repo_quality_refresh=bool(args["repo_quality_refresh"]),
         repo_quality_columns=bool(args["repo_quality_columns"]),
         available_remote_data=bool(args["available_remote_data"]),

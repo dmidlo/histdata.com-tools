@@ -83,7 +83,7 @@ histdatacom -h
 ```txt
 usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION]
                    [--data-directory DATA_DIRECTORY] [--sidecar] [--sidecar-start] [--no-sidecar-start] [--sidecar-submit-only] [--quality] [--quality-target PATH [PATH ...]] [--quality-checks GROUP [GROUP ...]]
-                   [--quality-report PATH] [--quality-fail-on SEVERITY] [--quality-max-errors COUNT] [--quality-max-warnings COUNT]
+                   [--quality-report PATH] [--quality-profile PATH] [--quality-fail-on SEVERITY] [--quality-max-errors COUNT] [--quality-max-warnings COUNT]
 
 options:
   -h, --help            show this help message and exit
@@ -155,6 +155,9 @@ Data quality:
   --quality-report PATH
                         write the full machine-readable JSON quality report to
                         PATH
+  --quality-profile PATH
+                        read a JSON quality profile with rule thresholds,
+                        severities, and modeling assumptions
   --quality-fail-on SEVERITY
                         exit non-zero when configured thresholds are exceeded
                         for error, warning, or never. Defaults to error
@@ -429,6 +432,76 @@ Supported groups:
 | `ticks` | tick bid/ask ordering, spread, duplicate/stale/burst/one-sided quote behavior, spread regimes |
 | `domain` | symbol metadata, quote conventions, calendar/session tags, cross-instrument consistency |
 | `modeling` | advisory modeling-readiness checks for bid-only bars, leakage risk, spread-cost assumptions, target horizon feasibility |
+
+#### Quality Profiles
+
+Use `--quality-profile PATH` to load a versioned JSON profile that tunes rule
+thresholds, severities, precision profiles, gap/session tolerance, tick
+microstructure profiles, cross-instrument tolerance, and modeling-readiness
+assumptions. The report metadata includes the active `quality_profile` source,
+name, configured rule IDs, and configured modeling-assumption keys.
+
+Strict CI profiles can promote warnings to errors or tighten thresholds:
+
+```json
+{
+  "schema_version": "histdatacom.quality-profile.v1",
+  "name": "strict-ci",
+  "rules": {
+    "ingestion.ascii.row_count": {
+      "min_row_count": 100,
+      "tiny_severity": "error"
+    },
+    "time.ascii.gaps": {
+      "tolerance": {
+        "suspicious_gap_ms": 300000
+      },
+      "warning_severity": "error"
+    }
+  }
+}
+```
+
+Exploratory research profiles can loosen market-anomaly thresholds and record
+modeling assumptions without changing global defaults:
+
+```json
+{
+  "schema_version": "histdatacom.quality-profile.v1",
+  "name": "exploratory-research",
+  "rules": {
+    "bars.ascii.m1_outliers": {
+      "thresholds_by_asset_class": {
+        "fx": {
+          "max_open_jump_ratio": 0.01
+        }
+      }
+    },
+    "ticks.ascii.microstructure": {
+      "session_name": "rollover",
+      "thresholds_by_symbol_session": {
+        "EURUSD:rollover": {
+          "one_sided_run_length": 4
+        }
+      }
+    }
+  },
+  "modeling_assumptions": {
+    "ask_side_execution_model": true,
+    "current_bar_action_timing": "after_bar_close",
+    "spread_cost_model": "fixed_session_profile",
+    "target_horizon_minutes": 5
+  }
+}
+```
+
+```sh
+histdatacom --quality \
+  --quality-target data/ \
+  --quality-profile profiles/strict-ci.json \
+  --quality-fail-on warning \
+  --quality-report reports/quality.json
+```
 
 Format support is explicit in every discovered target's `quality_support`
 metadata. The current quality boundary is:

@@ -492,6 +492,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "discovery",
         "exit_decision",
         "operation",
+        "quality_profile",
         "report_artifact",
         "report_schema_version",
         "summary",
@@ -501,6 +502,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     assert payload["report_schema_version"] == QUALITY_REPORT_SCHEMA_VERSION
     assert "rule_results" not in payload
     assert "findings" not in payload
+    assert isinstance(payload["quality_profile"], dict)
     _assert_summary(_mapping(payload["summary"]))
 
     for target_summary in _list(payload["target_summaries"]):
