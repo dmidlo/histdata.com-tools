@@ -1,0 +1,152 @@
+{
+  "metadata": {
+    "check_groups": [
+      "time",
+      "bars"
+    ],
+    "operation": "data-quality"
+  },
+  "rule_results": [
+    {
+      "findings": [
+        {
+          "code": "ASCII_TIMESTAMP_DUPLICATE",
+          "location": {
+            "column": "datetime",
+            "metadata": {
+              "duplicate_of_row": 1
+            },
+            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+            "row_number": 2,
+            "timestamp_source": "20120201 000000",
+            "timestamp_utc_ms": 1328072400000
+          },
+          "message": "Duplicate timestamp found in M1 rows.",
+          "metadata": {},
+          "rule_id": "time.ascii.timestamp",
+          "severity": "warning",
+          "target": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "metadata": {
+              "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
+            },
+            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "M1"
+          }
+        }
+      ],
+      "max_severity": "warning",
+      "rule_id": "time.ascii.timestamp",
+      "status": "warning",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {
+          "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
+        },
+        "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "M1"
+      }
+    },
+    {
+      "findings": [
+        {
+          "code": "ASCII_M1_OHLC_INVALID",
+          "location": {
+            "column": "high",
+            "metadata": {},
+            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+            "row_number": 3,
+            "timestamp_source": "20120201 000100",
+            "timestamp_utc_ms": 1328072460000
+          },
+          "message": "M1 OHLC values violate high/low ordering.",
+          "metadata": {
+            "close": 1.30656,
+            "high": 1.30647,
+            "low": 1.30656,
+            "open": 1.30657
+          },
+          "rule_id": "bars.ascii.m1.ohlc",
+          "severity": "error",
+          "target": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "metadata": {
+              "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
+            },
+            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "M1"
+          }
+        }
+      ],
+      "max_severity": "error",
+      "rule_id": "bars.ascii.m1.ohlc",
+      "status": "failed",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {
+          "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
+        },
+        "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "M1"
+      }
+    }
+  ],
+  "schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 1,
+    "finding_count": 2,
+    "info_count": 0,
+    "max_severity": "error",
+    "rule_count": 2,
+    "status": "failed",
+    "target_count": 1,
+    "warning_count": 1
+  },
+  "target_summaries": [
+    {
+      "error_count": 1,
+      "finding_count": 2,
+      "info_count": 0,
+      "max_severity": "error",
+      "rule_count": 2,
+      "status": "failed",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {
+          "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
+        },
+        "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "M1"
+      },
+      "warning_count": 1
+    }
+  ],
+  "targets": [
+    {
+      "data_format": "ascii",
+      "kind": "csv",
+      "metadata": {
+        "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
+      },
+      "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+      "period": "201202",
+      "symbol": "EURUSD",
+      "timeframe": "M1"
+    }
+  ]
+}

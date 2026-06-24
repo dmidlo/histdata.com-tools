@@ -1,0 +1,110 @@
+{
+  "metadata": {
+    "check_groups": [
+      "ingestion"
+    ],
+    "operation": "data-quality"
+  },
+  "rule_results": [
+    {
+      "findings": [
+        {
+          "code": "ASCII_SCHEMA_SUMMARY",
+          "location": {
+            "column": "",
+            "metadata": {},
+            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+            "row_number": null,
+            "timestamp_source": "",
+            "timestamp_utc_ms": null
+          },
+          "message": "ASCII M1 schema profile.",
+          "metadata": {
+            "columns": [
+              "datetime",
+              "open",
+              "high",
+              "low",
+              "close",
+              "vol"
+            ],
+            "row_count": 3
+          },
+          "rule_id": "ingestion.ascii.schema",
+          "severity": "info",
+          "target": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "metadata": {
+              "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+            },
+            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "M1"
+          }
+        }
+      ],
+      "max_severity": "info",
+      "rule_id": "ingestion.ascii.schema",
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {
+          "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+        },
+        "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "M1"
+      }
+    }
+  ],
+  "schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 0,
+    "finding_count": 1,
+    "info_count": 1,
+    "max_severity": "info",
+    "rule_count": 1,
+    "status": "clean",
+    "target_count": 1,
+    "warning_count": 0
+  },
+  "target_summaries": [
+    {
+      "error_count": 0,
+      "finding_count": 1,
+      "info_count": 1,
+      "max_severity": "info",
+      "rule_count": 1,
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {
+          "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+        },
+        "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "M1"
+      },
+      "warning_count": 0
+    }
+  ],
+  "targets": [
+    {
+      "data_format": "ascii",
+      "kind": "csv",
+      "metadata": {
+        "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+      },
+      "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+      "period": "201202",
+      "symbol": "EURUSD",
+      "timeframe": "M1"
+    }
+  ]
+}

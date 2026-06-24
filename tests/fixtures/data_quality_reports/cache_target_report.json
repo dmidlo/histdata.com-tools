@@ -1,0 +1,114 @@
+{
+  "metadata": {
+    "check_groups": [
+      "ingestion"
+    ],
+    "operation": "data-quality"
+  },
+  "rule_results": [
+    {
+      "findings": [
+        {
+          "code": "ASCII_CACHE_SCHEMA_SUMMARY",
+          "location": {
+            "column": "",
+            "metadata": {},
+            "path": "/quality-fixtures/data/ASCII/M1/eurusd/2012/02/.data",
+            "row_number": null,
+            "timestamp_source": "",
+            "timestamp_utc_ms": null
+          },
+          "message": "Canonical Polars cache schema profile.",
+          "metadata": {
+            "row_count": 3,
+            "schema": {
+              "close": "Float64",
+              "datetime": "Int64",
+              "high": "Float64",
+              "low": "Float64",
+              "open": "Float64",
+              "vol": "Int64"
+            }
+          },
+          "rule_id": "ingestion.ascii.cache_schema",
+          "severity": "info",
+          "target": {
+            "data_format": "ascii",
+            "kind": "cache",
+            "metadata": {
+              "cache_schema": "polars-ipc",
+              "filename": ".data"
+            },
+            "path": "/quality-fixtures/data/ASCII/M1/eurusd/2012/02/.data",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "M1"
+          }
+        }
+      ],
+      "max_severity": "info",
+      "rule_id": "ingestion.ascii.cache_schema",
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "cache",
+        "metadata": {
+          "cache_schema": "polars-ipc",
+          "filename": ".data"
+        },
+        "path": "/quality-fixtures/data/ASCII/M1/eurusd/2012/02/.data",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "M1"
+      }
+    }
+  ],
+  "schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 0,
+    "finding_count": 1,
+    "info_count": 1,
+    "max_severity": "info",
+    "rule_count": 1,
+    "status": "clean",
+    "target_count": 1,
+    "warning_count": 0
+  },
+  "target_summaries": [
+    {
+      "error_count": 0,
+      "finding_count": 1,
+      "info_count": 1,
+      "max_severity": "info",
+      "rule_count": 1,
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "cache",
+        "metadata": {
+          "cache_schema": "polars-ipc",
+          "filename": ".data"
+        },
+        "path": "/quality-fixtures/data/ASCII/M1/eurusd/2012/02/.data",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "M1"
+      },
+      "warning_count": 0
+    }
+  ],
+  "targets": [
+    {
+      "data_format": "ascii",
+      "kind": "cache",
+      "metadata": {
+        "cache_schema": "polars-ipc",
+        "filename": ".data"
+      },
+      "path": "/quality-fixtures/data/ASCII/M1/eurusd/2012/02/.data",
+      "period": "201202",
+      "symbol": "EURUSD",
+      "timeframe": "M1"
+    }
+  ]
+}

@@ -486,6 +486,10 @@ The JSON report includes deterministic top-level summary fields:
 }
 ```
 
+The report payload is a public automation contract. Compatibility expectations
+and the golden-fixture update workflow are documented in
+`docs/data-quality/report-compatibility.md`.
+
 A malformed M1 CSV fails ingestion and exits nonzero by default because
 `--quality-fail-on error` with `--quality-max-errors 0` is the default policy:
 

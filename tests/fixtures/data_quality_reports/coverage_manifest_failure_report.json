@@ -1,0 +1,131 @@
+{
+  "metadata": {
+    "check_groups": [
+      "inventory"
+    ],
+    "coverage_manifest": {
+      "duplicates": [],
+      "expected_count": 2,
+      "expected_source": "metadata",
+      "missing": [
+        {
+          "data_format": "ascii",
+          "period": "201203",
+          "symbol": "EURUSD",
+          "timeframe": "M1"
+        }
+      ],
+      "missing_count": 1,
+      "present_count": 1,
+      "schema_version": "histdatacom.coverage-manifest.v1",
+      "unexpected": []
+    },
+    "operation": "data-quality"
+  },
+  "rule_results": [
+    {
+      "findings": [
+        {
+          "code": "COVERAGE_PERIOD_MISSING",
+          "location": {
+            "column": "",
+            "metadata": {
+              "dimension": {
+                "data_format": "ascii",
+                "period": "201203",
+                "symbol": "EURUSD",
+                "timeframe": "M1"
+              }
+            },
+            "path": "/quality-fixtures/data",
+            "row_number": null,
+            "timestamp_source": "",
+            "timestamp_utc_ms": null
+          },
+          "message": "Expected dataset period is missing from local targets.",
+          "metadata": {
+            "dimension": {
+              "data_format": "ascii",
+              "period": "201203",
+              "symbol": "EURUSD",
+              "timeframe": "M1"
+            }
+          },
+          "rule_id": "inventory.coverage_manifest",
+          "severity": "error",
+          "target": {
+            "data_format": "ascii",
+            "kind": "directory",
+            "metadata": {
+              "root": "/quality-fixtures/data"
+            },
+            "path": "/quality-fixtures/data",
+            "period": "",
+            "symbol": "",
+            "timeframe": "M1"
+          }
+        }
+      ],
+      "max_severity": "error",
+      "rule_id": "inventory.coverage_manifest",
+      "status": "failed",
+      "target": {
+        "data_format": "ascii",
+        "kind": "directory",
+        "metadata": {
+          "root": "/quality-fixtures/data"
+        },
+        "path": "/quality-fixtures/data",
+        "period": "",
+        "symbol": "",
+        "timeframe": "M1"
+      }
+    }
+  ],
+  "schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 1,
+    "finding_count": 1,
+    "info_count": 0,
+    "max_severity": "error",
+    "rule_count": 1,
+    "status": "failed",
+    "target_count": 1,
+    "warning_count": 0
+  },
+  "target_summaries": [
+    {
+      "error_count": 1,
+      "finding_count": 1,
+      "info_count": 0,
+      "max_severity": "error",
+      "rule_count": 1,
+      "status": "failed",
+      "target": {
+        "data_format": "ascii",
+        "kind": "directory",
+        "metadata": {
+          "root": "/quality-fixtures/data"
+        },
+        "path": "/quality-fixtures/data",
+        "period": "",
+        "symbol": "",
+        "timeframe": "M1"
+      },
+      "warning_count": 0
+    }
+  ],
+  "targets": [
+    {
+      "data_format": "ascii",
+      "kind": "directory",
+      "metadata": {
+        "root": "/quality-fixtures/data"
+      },
+      "path": "/quality-fixtures/data",
+      "period": "",
+      "symbol": "",
+      "timeframe": "M1"
+    }
+  ]
+}

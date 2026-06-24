@@ -1,0 +1,103 @@
+{
+  "metadata": {
+    "check_groups": [
+      "inventory"
+    ],
+    "operation": "data-quality"
+  },
+  "rule_results": [
+    {
+      "findings": [
+        {
+          "code": "ZIP_CORRUPT",
+          "location": {
+            "column": "",
+            "metadata": {},
+            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+            "row_number": null,
+            "timestamp_source": "",
+            "timestamp_utc_ms": null
+          },
+          "message": "ZIP archive could not be opened.",
+          "metadata": {
+            "error": "File is not a zip file",
+            "error_type": "BadZipFile"
+          },
+          "rule_id": "inventory.zip.integrity",
+          "severity": "error",
+          "target": {
+            "data_format": "ascii",
+            "kind": "zip",
+            "metadata": {
+              "filename": "DAT_ASCII_EURUSD_M1_201202.zip"
+            },
+            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "M1"
+          }
+        }
+      ],
+      "max_severity": "error",
+      "rule_id": "inventory.zip.integrity",
+      "status": "failed",
+      "target": {
+        "data_format": "ascii",
+        "kind": "zip",
+        "metadata": {
+          "filename": "DAT_ASCII_EURUSD_M1_201202.zip"
+        },
+        "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "M1"
+      }
+    }
+  ],
+  "schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 1,
+    "finding_count": 1,
+    "info_count": 0,
+    "max_severity": "error",
+    "rule_count": 1,
+    "status": "failed",
+    "target_count": 1,
+    "warning_count": 0
+  },
+  "target_summaries": [
+    {
+      "error_count": 1,
+      "finding_count": 1,
+      "info_count": 0,
+      "max_severity": "error",
+      "rule_count": 1,
+      "status": "failed",
+      "target": {
+        "data_format": "ascii",
+        "kind": "zip",
+        "metadata": {
+          "filename": "DAT_ASCII_EURUSD_M1_201202.zip"
+        },
+        "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "M1"
+      },
+      "warning_count": 0
+    }
+  ],
+  "targets": [
+    {
+      "data_format": "ascii",
+      "kind": "zip",
+      "metadata": {
+        "filename": "DAT_ASCII_EURUSD_M1_201202.zip"
+      },
+      "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+      "period": "201202",
+      "symbol": "EURUSD",
+      "timeframe": "M1"
+    }
+  ]
+}

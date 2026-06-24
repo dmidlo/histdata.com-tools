@@ -1,0 +1,120 @@
+{
+  "metadata": {
+    "check_groups": [
+      "domain"
+    ],
+    "operation": "data-quality"
+  },
+  "rule_results": [
+    {
+      "findings": [
+        {
+          "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
+          "location": {
+            "column": "",
+            "metadata": {
+              "direct_symbol": "AUDCAD",
+              "period": "2008",
+              "timeframe": "M1"
+            },
+            "path": "/quality-fixtures/data/ASCII/M1",
+            "row_number": null,
+            "timestamp_source": "",
+            "timestamp_utc_ms": null
+          },
+          "message": "Triangular FX relationship differs from the direct pair.",
+          "metadata": {
+            "row_count": 11191,
+            "samples": [
+              {
+                "denominator_symbol": "CADCHF",
+                "direct_price": 1.0417,
+                "direct_symbol": "AUDCAD",
+                "implied_price": 0.9498519438341771,
+                "numerator_symbol": "AUDCHF",
+                "period": "2008",
+                "relationship": "AUDCHF / CADCHF ~= AUDCAD",
+                "relative_difference": 0.088171312437192,
+                "timeframe": "M1",
+                "timestamp_utc_ms": 1212357720000
+              }
+            ]
+          },
+          "rule_id": "domain.cross_instrument_consistency",
+          "severity": "error",
+          "target": {
+            "data_format": "ascii",
+            "kind": "directory",
+            "metadata": {
+              "root": "/quality-fixtures/data/ASCII/M1"
+            },
+            "path": "/quality-fixtures/data/ASCII/M1",
+            "period": "",
+            "symbol": "",
+            "timeframe": "M1"
+          }
+        }
+      ],
+      "max_severity": "error",
+      "rule_id": "domain.cross_instrument_consistency",
+      "status": "failed",
+      "target": {
+        "data_format": "ascii",
+        "kind": "directory",
+        "metadata": {
+          "root": "/quality-fixtures/data/ASCII/M1"
+        },
+        "path": "/quality-fixtures/data/ASCII/M1",
+        "period": "",
+        "symbol": "",
+        "timeframe": "M1"
+      }
+    }
+  ],
+  "schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 1,
+    "finding_count": 1,
+    "info_count": 0,
+    "max_severity": "error",
+    "rule_count": 1,
+    "status": "failed",
+    "target_count": 1,
+    "warning_count": 0
+  },
+  "target_summaries": [
+    {
+      "error_count": 1,
+      "finding_count": 1,
+      "info_count": 0,
+      "max_severity": "error",
+      "rule_count": 1,
+      "status": "failed",
+      "target": {
+        "data_format": "ascii",
+        "kind": "directory",
+        "metadata": {
+          "root": "/quality-fixtures/data/ASCII/M1"
+        },
+        "path": "/quality-fixtures/data/ASCII/M1",
+        "period": "",
+        "symbol": "",
+        "timeframe": "M1"
+      },
+      "warning_count": 0
+    }
+  ],
+  "targets": [
+    {
+      "data_format": "ascii",
+      "kind": "directory",
+      "metadata": {
+        "root": "/quality-fixtures/data/ASCII/M1"
+      },
+      "path": "/quality-fixtures/data/ASCII/M1",
+      "period": "",
+      "symbol": "",
+      "timeframe": "M1"
+    }
+  ]
+}

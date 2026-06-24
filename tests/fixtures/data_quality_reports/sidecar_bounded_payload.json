@@ -1,0 +1,141 @@
+{
+  "check_groups": [
+    "domain"
+  ],
+  "cross_target_summaries": [
+    {
+      "error_count": 1,
+      "finding_count": 1,
+      "info_count": 0,
+      "max_severity": "error",
+      "rule_count": 1,
+      "status": "failed",
+      "target": {
+        "data_format": "ascii",
+        "kind": "cross-target-finding",
+        "metadata": {
+          "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
+          "rule_id": "domain.cross_instrument_consistency"
+        },
+        "path": "/quality-fixtures/data/ASCII/M1",
+        "period": "2008",
+        "symbol": "AUDCAD",
+        "timeframe": "M1"
+      },
+      "warning_count": 0
+    },
+    {
+      "error_count": 1,
+      "finding_count": 1,
+      "info_count": 0,
+      "max_severity": "error",
+      "rule_count": 1,
+      "status": "failed",
+      "target": {
+        "data_format": "ascii",
+        "kind": "cross-target-finding",
+        "metadata": {
+          "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
+          "rule_id": "domain.cross_instrument_consistency"
+        },
+        "path": "/quality-fixtures/data/ASCII/M1",
+        "period": "2008",
+        "symbol": "AUDCHF",
+        "timeframe": "M1"
+      },
+      "warning_count": 0
+    },
+    {
+      "error_count": 1,
+      "finding_count": 1,
+      "info_count": 0,
+      "max_severity": "error",
+      "rule_count": 1,
+      "status": "failed",
+      "target": {
+        "data_format": "ascii",
+        "kind": "cross-target-finding",
+        "metadata": {
+          "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
+          "rule_id": "domain.cross_instrument_consistency"
+        },
+        "path": "/quality-fixtures/data/ASCII/M1",
+        "period": "2008",
+        "symbol": "CADCHF",
+        "timeframe": "M1"
+      },
+      "warning_count": 0
+    }
+  ],
+  "discovery": {
+    "metadata": {
+      "supported_kinds": [
+        "zip",
+        "csv",
+        "cache"
+      ]
+    },
+    "roots": [
+      "/quality-fixtures/data/ASCII/M1"
+    ],
+    "target_count": 3
+  },
+  "exit_decision": {
+    "exit_code": 1,
+    "policy": {
+      "fail_on": "error",
+      "max_errors": 0,
+      "max_warnings": 0
+    },
+    "reason": "quality error threshold exceeded: 1 > 0"
+  },
+  "operation": "data-quality",
+  "report_artifact": {
+    "kind": "quality-report",
+    "metadata": {
+      "error_count": 1,
+      "finding_count": 1,
+      "max_severity": "error",
+      "schema_version": "histdatacom.quality-report.v1",
+      "status": "failed",
+      "target_count": 1,
+      "warning_count": 0
+    },
+    "path": "/quality-fixtures/reports/run-scoped-report.json",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size_bytes": 4096
+  },
+  "report_schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 1,
+    "finding_count": 1,
+    "info_count": 0,
+    "max_severity": "error",
+    "rule_count": 1,
+    "status": "failed",
+    "target_count": 1,
+    "warning_count": 0
+  },
+  "target_summaries": [
+    {
+      "error_count": 1,
+      "finding_count": 1,
+      "info_count": 0,
+      "max_severity": "error",
+      "rule_count": 1,
+      "status": "failed",
+      "target": {
+        "data_format": "ascii",
+        "kind": "directory",
+        "metadata": {
+          "root": "/quality-fixtures/data/ASCII/M1"
+        },
+        "path": "/quality-fixtures/data/ASCII/M1",
+        "period": "",
+        "symbol": "",
+        "timeframe": "M1"
+      },
+      "warning_count": 0
+    }
+  ]
+}
