@@ -57,7 +57,7 @@ TEMPORAL_EXECUTION_STATUS_METADATA_KEY = "temporal_execution_status"
 
 
 class SidecarUnavailableError(RuntimeError):
-    """Raised when a sidecar-backed run is requested but unavailable."""
+    """Raised when an orchestrated run is requested but unavailable."""
 
 
 class TemporalDependencyError(SidecarUnavailableError):
@@ -1252,8 +1252,9 @@ def _ensure_sidecar_available(
         return status
     if not start_if_needed:
         raise SidecarUnavailableError(
-            "Temporal sidecar is not running. Start it with "
-            "`histdatacom sidecar start` or enable sidecar_start."
+            "Temporal orchestration is not running. Rerun without "
+            "--no-orchestration-start or start the runtime before submitting "
+            "work."
         )
     try:
         started = supervisor.start()

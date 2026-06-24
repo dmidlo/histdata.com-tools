@@ -63,14 +63,14 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeContext:
-    """Resolved launch context for sidecar execution."""
+    """Resolved launch context for orchestrated execution."""
 
     args: Mapping[str, Any]
     request: RunRequest
     version: bool
     from_api: bool
-    sidecar_start: bool
-    sidecar_wait_result: bool
+    orchestration_start: bool
+    orchestration_wait_result: bool
     api_return_type: str | None
     data_quality: bool
     quality_paths: tuple[str, ...]
@@ -141,17 +141,17 @@ class _HistDataCom:  # noqa:R701
                 print(histdatacom.__version__)  # noqa:T201
             return histdatacom.__version__
 
-        return self._run_sidecar_job()
+        return self._run_orchestration_job()
 
-    def _run_sidecar_job(
+    def _run_orchestration_job(
         self,
     ) -> list | dict | PolarsDataFrame | DataFrame | Table:
-        """Submit this run to the Temporal sidecar client boundary."""
+        """Submit this run to the Temporal orchestration client boundary."""
         try:
             result = submit_run_request_and_observe_sync(
                 self.context.request,
-                start_if_needed=self.context.sidecar_start,
-                wait_for_result=self.context.sidecar_wait_result,
+                start_if_needed=self.context.orchestration_start,
+                wait_for_result=self.context.orchestration_wait_result,
             )
         except OrchestrationUnavailableError as err:
             if self.context.from_api:
@@ -162,7 +162,7 @@ class _HistDataCom:  # noqa:R701
         payload = result.to_dict()
         if (
             self.context.data_quality or self.context.repo_quality_refresh
-        ) and self.context.sidecar_wait_result:
+        ) and self.context.orchestration_wait_result:
             quality_payload = _quality_payload_from_sidecar_payload(payload)
             if quality_payload is not None:
                 if self.context.from_api:
@@ -202,7 +202,7 @@ class _HistDataCom:  # noqa:R701
                 )
                 raise SystemExit(0)
 
-        if self.context.sidecar_wait_result and _sidecar_payload_failed(
+        if self.context.orchestration_wait_result and _sidecar_payload_failed(
             payload
         ):
             if not self.context.from_api:
@@ -224,7 +224,7 @@ class _HistDataCom:  # noqa:R701
     def _should_materialize_sidecar_repository_return(self) -> bool:
         """Return whether a waited sidecar repo request should mimic legacy IO."""
         return bool(
-            self.context.sidecar_wait_result
+            self.context.orchestration_wait_result
             and (
                 self.context.available_remote_data
                 or self.context.update_remote_data
@@ -232,11 +232,11 @@ class _HistDataCom:  # noqa:R701
         )
 
     def _should_materialize_sidecar_api_return(self, payload: dict) -> bool:
-        """Return whether a completed sidecar run should mimic API returns."""
+        """Return whether a completed orchestration run should mimic API returns."""
         return bool(
             self.context.from_api
             and self.context.api_return_type
-            and self.context.sidecar_wait_result
+            and self.context.orchestration_wait_result
             and payload.get("status") == "completed"
             and payload.get("result")
         )
@@ -245,7 +245,7 @@ class _HistDataCom:  # noqa:R701
         self,
         records: list[Record],
     ) -> list | PolarsDataFrame | DataFrame | Table:
-        """Rebuild the legacy API dataframe return from sidecar cache artifacts."""
+        """Rebuild the legacy API dataframe return from cache artifacts."""
         from histdatacom.api import Api
 
         return Api().merge_records(
@@ -274,8 +274,8 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         request=request,
         version=bool(args["version"]),
         from_api=bool(args["from_api"]),
-        sidecar_start=bool(args["sidecar_start"]),
-        sidecar_wait_result=bool(args["sidecar_wait_result"]),
+        orchestration_start=bool(args["orchestration_start"]),
+        orchestration_wait_result=bool(args["orchestration_wait_result"]),
         api_return_type=args["api_return_type"],
         data_quality=bool(args["data_quality"]),
         quality_paths=tuple(
@@ -405,7 +405,7 @@ def main(
 
 
 def _cache_records_from_sidecar_payload(payload: dict) -> list[Record]:
-    """Return legacy records reconstructed from sidecar cache artifacts."""
+    """Return legacy records reconstructed from orchestration cache artifacts."""
     records: list[Record] = []
     seen_paths: set[str] = set()
     for artifact in _iter_artifact_payloads(payload):
@@ -425,7 +425,7 @@ def _cache_records_from_sidecar_payload(payload: dict) -> list[Record]:
 def _repository_available_data_from_sidecar_payload(
     payload: Mapping[str, Any],
 ) -> dict[str, Any] | None:
-    """Return legacy repository data from sidecar result metrics."""
+    """Return legacy repository data from orchestration result metrics."""
     for item in _iter_mapping_payloads(payload):
         metrics = item.get("metrics")
         if not isinstance(metrics, Mapping) or "available_data" not in metrics:
@@ -440,7 +440,7 @@ def _repository_available_data_from_sidecar_payload(
 
 
 def _sidecar_repository_payload_failed(payload: Mapping[str, Any]) -> bool:
-    """Return whether the waited sidecar result represents repo failure."""
+    """Return whether the waited orchestration result represents repo failure."""
     result = payload.get("result")
     if isinstance(result, Mapping):
         status = str(result.get("status", "") or "").lower()
@@ -450,7 +450,7 @@ def _sidecar_repository_payload_failed(payload: Mapping[str, Any]) -> bool:
 
 
 def _sidecar_payload_failed(payload: Mapping[str, Any]) -> bool:
-    """Return whether a waited sidecar result represents failed work."""
+    """Return whether a waited orchestration result represents failed work."""
     return _sidecar_failure_status(payload) in {
         WorkStatus.FAILED,
         WorkStatus.CANCELLED,
@@ -460,7 +460,7 @@ def _sidecar_payload_failed(payload: Mapping[str, Any]) -> bool:
 def _sidecar_failure_status(
     payload: Mapping[str, Any],
 ) -> WorkStatus | None:
-    """Return the terminal failure status from a sidecar payload."""
+    """Return the terminal failure status from an orchestration payload."""
     candidates: list[Any] = [payload.get("status")]
     result = payload.get("result")
     if isinstance(result, Mapping):
@@ -478,18 +478,18 @@ def _sidecar_failure_status(
 
 
 def _print_sidecar_payload_failure(payload: Mapping[str, Any]) -> None:
-    """Print a concise CLI error for failed waited sidecar jobs."""
+    """Print a concise CLI error for failed waited orchestration jobs."""
     status = _sidecar_failure_status(payload) or WorkStatus.FAILED
     message = _sidecar_failure_message(payload)
     suffix = f": {message}" if message else ""
     print(
-        f"error: sidecar job {status.value.lower()}{suffix}",
+        f"error: orchestration job {status.value.lower()}{suffix}",
         file=sys.stderr,
     )  # noqa:T201
 
 
 def _sidecar_failure_message(payload: Mapping[str, Any]) -> str:
-    """Return the first useful failure message from a sidecar payload."""
+    """Return the first useful failure message from an orchestration payload."""
     for item in _iter_mapping_payloads(payload):
         failure = item.get("failure")
         if isinstance(failure, Mapping) and failure.get("message"):
@@ -503,7 +503,7 @@ def _sidecar_failure_message(payload: Mapping[str, Any]) -> str:
 def _repository_failure_code_from_sidecar_payload(
     payload: Mapping[str, Any],
 ) -> str:
-    """Return the first structured failure code in a sidecar result payload."""
+    """Return the first structured failure code in an orchestration payload."""
     for item in _iter_mapping_payloads(payload):
         failure = item.get("failure")
         if not isinstance(failure, Mapping):
@@ -517,7 +517,7 @@ def _repository_failure_code_from_sidecar_payload(
 def _quality_payload_from_sidecar_payload(
     payload: Mapping[str, Any],
 ) -> dict[str, Any] | None:
-    """Return the bounded quality payload from a sidecar result."""
+    """Return the bounded quality payload from an orchestration result."""
     for item in _iter_mapping_payloads(payload):
         quality = item.get("quality")
         if _is_data_quality_payload(quality):
@@ -690,7 +690,7 @@ def _record_from_cache_artifact(
 
 
 def _iter_mapping_payloads(value: object) -> list[Mapping[str, Any]]:
-    """Collect dictionaries from nested sidecar result payloads."""
+    """Collect dictionaries from nested orchestration result payloads."""
     payloads: list[Mapping[str, Any]] = []
     if isinstance(value, Mapping):
         payloads.append(value)
@@ -703,7 +703,7 @@ def _iter_mapping_payloads(value: object) -> list[Mapping[str, Any]]:
 
 
 def _iter_artifact_payloads(value: object) -> list[dict]:
-    """Collect artifact dictionaries from nested sidecar result payloads."""
+    """Collect artifact dictionaries from nested orchestration result payloads."""
     artifacts: list[dict] = []
     if isinstance(value, dict):
         if "kind" in value and "path" in value:

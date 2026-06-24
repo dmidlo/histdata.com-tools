@@ -6,14 +6,14 @@ import warnings
 
 
 class LegacyHelperSideEffectWarning(RuntimeWarning):
-    """Warn when direct helper use bypasses sidecar orchestration."""
+    """Warn when direct helper use bypasses Temporal orchestration."""
 
 
 LEGACY_HELPER_WARNING = (
-    "Direct use of {surface} bypasses the Temporal sidecar runtime. "
+    "Direct use of {surface} bypasses the Temporal orchestration runtime. "
     "GUI and automation callers should submit histdatacom.Options or "
     "RunRequest payloads through histdatacom.main(...), histdatacom(...), or "
-    "histdatacom.sidecar client/job-control APIs so work has durable status, "
+    "histdatacom.orchestration client/job-control APIs so work has durable status, "
     "cancellation, retry/resume, and worker-lane routing. Activity-stage "
     "helpers remain supported for Temporal activities and tests."
 )

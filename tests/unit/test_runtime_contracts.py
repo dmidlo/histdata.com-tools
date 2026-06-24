@@ -1,4 +1,4 @@
-"""Tests for sidecar runtime contracts."""
+"""Tests for Temporal orchestration runtime contracts."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ ASCII_M1_URL = (
 
 
 def test_work_status_normalizes_legacy_and_future_states() -> None:
-    """Legacy Record statuses should map into stable sidecar values."""
+    """Legacy Record statuses should map into stable orchestration values."""
     assert WorkStatus.from_value("") is WorkStatus.PLANNED
     assert WorkStatus.from_value("URL_VALID") is WorkStatus.URL_VALID
     assert WorkStatus.from_value("url_valid") is WorkStatus.URL_VALID
@@ -112,7 +112,7 @@ def test_work_item_preserves_unknown_legacy_status_text() -> None:
 
 
 def test_run_request_round_trips_options_payload() -> None:
-    """Options should convert into JSON-safe sidecar run requests."""
+    """Options should convert into JSON-safe orchestration run requests."""
     options = Options()
     options.pairs = {"eurusd", "gbpusd"}
     options.formats = {"ascii"}

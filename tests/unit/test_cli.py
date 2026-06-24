@@ -112,9 +112,9 @@ def test_orchestration_cli_flags_preserve_default_runtime_controls(
 
     options = ArgParser(Options())()
 
-    assert options.use_sidecar
-    assert options.sidecar_start
-    assert not options.sidecar_wait_result
+    assert options.use_orchestration
+    assert options.orchestration_start
+    assert not options.orchestration_wait_result
     assert options.validate_urls
 
 
@@ -211,8 +211,8 @@ def test_no_orchestration_start_cli_flag_requires_running_runtime(
 
     options = ArgParser(Options())()
 
-    assert options.use_sidecar
-    assert not options.sidecar_start
+    assert options.use_orchestration
+    assert not options.orchestration_start
     assert options.validate_urls
 
 
@@ -226,8 +226,9 @@ def test_options_expose_orchestration_named_runtime_controls() -> None:
     assert options.use_orchestration
     assert not options.orchestration_start
     assert not options.orchestration_wait_result
-    assert not options.sidecar_start
-    assert not options.sidecar_wait_result
+    assert not hasattr(options, "use_sidecar")
+    assert not hasattr(options, "sidecar_start")
+    assert not hasattr(options, "sidecar_wait_result")
 
 
 def test_data_quality_cli_mode_bypasses_legacy_prerequisites(
@@ -533,8 +534,8 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
     assert first_options.extract_csvs
     assert first_options.import_to_influxdb
     assert first_options.delete_after_influx
-    assert not first_options.sidecar_start
-    assert not first_options.sidecar_wait_result
+    assert not first_options.orchestration_start
+    assert not first_options.orchestration_wait_result
 
     assert second_options.pairs == ["gbpusd"]
     assert second_options.formats == ["ascii"]
@@ -545,8 +546,8 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
     assert not second_options.extract_csvs
     assert not second_options.import_to_influxdb
     assert not second_options.delete_after_influx
-    assert second_options.sidecar_start
-    assert second_options.sidecar_wait_result
+    assert second_options.orchestration_start
+    assert second_options.orchestration_wait_result
 
 
 @pytest.mark.parametrize(
@@ -620,12 +621,12 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
         ),
     ),
 )
-def test_legacy_behavior_flags_keep_sidecar_request_shape(
+def test_behavior_flags_keep_orchestration_request_shape(
     flag: str,
     expected: dict[str, bool],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Legacy CLI flags should parse the same before sidecar submission."""
+    """Behavior CLI flags should parse the same before orchestration."""
     monkeypatch.setattr(
         sys,
         "argv",

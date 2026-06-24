@@ -457,7 +457,7 @@ def test_data_quality_cli_missing_path_reports_sidecar_failure(
     assert captured["request"].data_quality
     output = capsys.readouterr()
     assert "quality target path does not exist" in output.out
-    assert "sidecar job failed" in output.err
+    assert "orchestration job failed" in output.err
 
 
 def test_data_quality_api_returns_sidecar_quality_payload(
@@ -731,11 +731,11 @@ def test_back_to_back_sidecar_api_calls_do_not_leak_global_args(
         fake_submit,
     )
     first_options = _sidecar_options("polars")
-    first_options.sidecar_start = False
-    first_options.sidecar_wait_result = False
+    first_options.orchestration_start = False
+    first_options.orchestration_wait_result = False
     second_options = _sidecar_options("arrow")
-    second_options.sidecar_start = True
-    second_options.sidecar_wait_result = True
+    second_options.orchestration_start = True
+    second_options.orchestration_wait_result = True
 
     first_result = histdata_com.main(first_options)
     second_result = histdata_com.main(second_options)
@@ -990,7 +990,7 @@ def test_api_foreground_opt_out_is_rejected(
         fail_submit,
     )
     options = Options()
-    options.use_sidecar = False
+    options.use_orchestration = False
     options.pairs = {"eurusd"}
     options.formats = {"ascii"}
     options.timeframes = {"M1"}
@@ -1349,7 +1349,7 @@ def test_cli_waited_sidecar_terminal_failure_exits_nonzero(
     assert err.value.code == 1
     assert f'"status": "{expected}"' in captured.out
     assert f'"status": "{status.value}"' in captured.out
-    assert f"error: sidecar job {expected}" in captured.err
+    assert f"error: orchestration job {expected}" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -1406,7 +1406,7 @@ def test_api_sidecar_repository_submit_only_keeps_job_payload_return(
         fake_submit,
     )
     options = _sidecar_repository_options()
-    options.sidecar_wait_result = False
+    options.orchestration_wait_result = False
 
     result = histdata_com.main(options)
 
@@ -1441,7 +1441,7 @@ def test_api_sidecar_submit_only_keeps_job_payload_return(
         fake_submit,
     )
     options = _sidecar_options()
-    options.sidecar_wait_result = False
+    options.orchestration_wait_result = False
 
     result = histdata_com.main(options)
 
@@ -1588,7 +1588,7 @@ def test_version_does_not_submit_sidecar_job(
     )
     options = Options()
     options.version = True
-    options.use_sidecar = True
+    options.use_orchestration = True
 
     assert histdata_com.main(options) == histdatacom.__version__
 

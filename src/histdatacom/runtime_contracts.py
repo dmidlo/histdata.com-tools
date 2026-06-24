@@ -1,4 +1,4 @@
-"""Serializable runtime contracts for the Temporal sidecar migration."""
+"""Serializable runtime contracts for Temporal orchestration."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def _normalized_status_text(value: str | "WorkStatus" | None) -> str:
 
 
 class WorkStatus(str, Enum):
-    """Stable public status values for sidecar work items."""
+    """Stable public status values for orchestrated work items."""
 
     PLANNED = "PLANNED"
     URL_NEW = "URL_NEW"
@@ -179,7 +179,7 @@ class FailureInfo:
 
 @dataclass(frozen=True, slots=True)
 class StatusEvent:
-    """A GUI/CLI-readable status event emitted by sidecar jobs."""
+    """A GUI/CLI-readable status event emitted by orchestration jobs."""
 
     status: WorkStatus
     stage: str
@@ -258,7 +258,7 @@ class WorkItem:
 
     @classmethod
     def from_record(cls, record: Any, work_id: str = "") -> "WorkItem":
-        """Create a sidecar work item from the legacy Record shape."""
+        """Create an orchestrated work item from the legacy Record shape."""
         values = {
             field_name: str(getattr(record, field_name, "") or "")
             for field_name in RECORD_FIELDS

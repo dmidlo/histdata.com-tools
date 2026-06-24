@@ -365,11 +365,11 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args.append("-I")
         if self.arg_namespace.delete_after_influx:
             args.append("-d")
-        if self.arg_namespace.sidecar_start:
+        if self.arg_namespace.orchestration_start:
             args.append("--orchestration-start")
         else:
             args.append("--no-orchestration-start")
-        if not self.arg_namespace.sidecar_wait_result:
+        if not self.arg_namespace.orchestration_wait_result:
             args.append("--submit-only")
         return args
 
@@ -1038,7 +1038,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         )
         orchestration_args.add_argument(
             "--orchestration-start",
-            dest="sidecar_start",
+            dest="orchestration_start",
             action="store_true",
             help=(
                 "start the local orchestration runtime only when no healthy "
@@ -1047,7 +1047,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         )
         orchestration_args.add_argument(
             "--no-orchestration-start",
-            dest="sidecar_start",
+            dest="orchestration_start",
             action="store_false",
             help=(
                 "submit only when a healthy orchestration runtime is already "
@@ -1056,7 +1056,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         )
         orchestration_args.add_argument(
             "--submit-only",
-            dest="sidecar_wait_result",
+            dest="orchestration_wait_result",
             action="store_false",
             help="submit the orchestration job without waiting for its result",
         )

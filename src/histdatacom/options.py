@@ -4,9 +4,25 @@ from histdatacom.fx_enums import Pairs
 from histdatacom.fx_enums import Format
 from histdatacom.fx_enums import Timeframe
 
+_REMOVED_ORCHESTRATION_OPTION_REPLACEMENTS = {
+    "use_sidecar": "use_orchestration",
+    "sidecar_start": "orchestration_start",
+    "sidecar_wait_result": "orchestration_wait_result",
+}
+
 
 class Options:
     """An intra-class DTO for Default Arguments for _HistDataCom class."""
+
+    def __setattr__(self, name: str, value: object) -> None:
+        """Reject removed public option names before they become stale state."""
+        replacement = _REMOVED_ORCHESTRATION_OPTION_REPLACEMENTS.get(name)
+        if replacement is not None:
+            raise AttributeError(
+                f"Options.{name} has been removed; use "
+                f"Options.{replacement}."
+            )
+        super().__setattr__(name, value)
 
     # argparse uses a thin class to create a namespace for cli/shell arguments
     # to live in normally argparse.ArgumentParser.parse_args(namespace=...)
@@ -46,34 +62,7 @@ class Options:
         self.quality_profile: dict = {}
         self.repo_quality_refresh: bool = False
         self.repo_quality_columns: bool = False
-        self.use_sidecar: bool = True
-        self.sidecar_start: bool = True
-        self.sidecar_wait_result: bool = True
+        self.use_orchestration: bool = True
+        self.orchestration_start: bool = True
+        self.orchestration_wait_result: bool = True
         self.metadata: dict = {}
-
-    @property
-    def use_orchestration(self) -> bool:
-        """Return whether requests use the orchestration runtime."""
-        return self.use_sidecar
-
-    @use_orchestration.setter
-    def use_orchestration(self, value: bool) -> None:
-        self.use_sidecar = value
-
-    @property
-    def orchestration_start(self) -> bool:
-        """Return whether the runtime may be started automatically."""
-        return self.sidecar_start
-
-    @orchestration_start.setter
-    def orchestration_start(self, value: bool) -> None:
-        self.sidecar_start = value
-
-    @property
-    def orchestration_wait_result(self) -> bool:
-        """Return whether submissions wait for a completed result."""
-        return self.sidecar_wait_result
-
-    @orchestration_wait_result.setter
-    def orchestration_wait_result(self, value: bool) -> None:
-        self.sidecar_wait_result = value

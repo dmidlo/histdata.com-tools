@@ -16,18 +16,18 @@ API runs:
 histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
-Default requests submit a `RunRequest` to the sidecar and start the bundled
-local sidecar when no healthy sidecar is running. `--sidecar` remains accepted
-as a compatibility alias for scripts that already passed it during migration.
+Default requests submit a `RunRequest` through Temporal orchestration and start
+the local runtime when no healthy runtime is running.
 
 Default sidecar submissions are built from resolved runtime context and
 `RunRequest` payloads. The foreground rollback runtime has been removed after
 its release-window deprecation period: `--foreground` is no longer accepted,
-and API code that sets `Options.use_sidecar = False` receives a clear
-`ValueError`. Legacy helper surfaces accept explicit argument dictionaries
-rather than ambient parser state. New orchestration behavior should be
-expressed as `RunRequest` payloads, Temporal workflows, and Temporal
-activities.
+and API code that sets `Options.use_orchestration = False` receives a clear
+`ValueError`. Removed sidecar-named option attributes raise `AttributeError`
+instead of becoming stale state. Legacy helper surfaces accept explicit
+argument dictionaries rather than ambient parser state. New orchestration
+behavior should be expressed as `RunRequest` payloads, Temporal workflows, and
+Temporal activities.
 
 ## Public API Boundary
 
@@ -136,10 +136,13 @@ recovery paths.
 
 Default-runtime failure policy:
 
-- Default CLI/API runs use the sidecar and start it when no healthy sidecar is
-  running.
+- Default CLI/API runs use Temporal orchestration and start the local runtime
+  when no healthy runtime is running.
 - `--foreground` is rejected by the CLI.
-- `Options.use_sidecar = False` is rejected by API runtime resolution.
+- `Options.use_orchestration = False` is rejected by API runtime resolution.
+- Sidecar-named option attributes such as `Options.use_sidecar`,
+  `Options.sidecar_start`, and `Options.sidecar_wait_result` are removed and
+  raise `AttributeError` if assigned.
 - Metadata-only wheels and unsupported platforms fail sidecar starts with a
   `SidecarUnavailableError`/nonzero CLI exit when no explicit executable,
   verified bundle, verified cache entry, or allowed first-run download is
@@ -389,14 +392,14 @@ Submit without waiting for the workflow result:
 histdatacom --sidecar --sidecar-start --sidecar-submit-only -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
-Sidecar-backed API calls use the same public options and sidecar defaults:
+Orchestrated API calls use the same public options and runtime defaults:
 
 ```python
 import histdatacom
 from histdatacom.options import Options
 
 options = Options()
-options.sidecar_wait_result = True
+options.orchestration_wait_result = True
 options.api_return_type = "polars"
 options.formats = {"ascii"}
 options.timeframes = {"1-minute-bar-quotes"}
@@ -406,14 +409,14 @@ options.start_yearmonth = "now"
 data = histdatacom(options)
 ```
 
-Set `options.sidecar_start = False` when an API caller should require a
-pre-started sidecar instead of starting one. `options.use_sidecar = False` is
-no longer supported.
+Set `options.orchestration_start = False` when an API caller should require a
+pre-started runtime instead of starting one. `options.use_orchestration = False`
+is no longer supported.
 
-When `sidecar_wait_result` is `True`, API calls with `api_return_type` return
-the requested `polars`, `pandas`, or `arrow` object by materializing completed
-cache artifacts on disk. When `sidecar_wait_result` is `False`, the call
-returns the sidecar job payload instead.
+When `orchestration_wait_result` is `True`, API calls with `api_return_type`
+return the requested `polars`, `pandas`, or `arrow` object by materializing
+completed cache artifacts on disk. When `orchestration_wait_result` is `False`,
+the call returns the orchestration job payload instead.
 
 Waited sidecar repository requests preserve the historical output surface. API
 calls using `available_remote_data` or `update_remote_data` return
