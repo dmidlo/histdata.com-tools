@@ -162,6 +162,16 @@ After a TestPyPI dry run, install from TestPyPI in a disposable environment:
 bash pypi.sh testpypi_install
 ```
 
+This runs `scripts/verify_testpypi_install.py`, which downloads the exact
+`histdatacom` wheel from TestPyPI without dependencies, installs that artifact
+into a fresh virtual environment with dependencies resolved from PyPI, and
+checks parity against the current package surface: version metadata, console
+entry points, sidecar assets, current CLI flags, sidecar lifecycle probes,
+deterministic sidecar workflow smokes, quality-mode sidecar smokes, and a small
+live download/extract smoke. The default local verification requires a bundled
+wheel for the current platform so stale metadata-only TestPyPI artifacts are
+rejected before production publishing.
+
 After a production publish, verify the PyPI install path:
 
 ```sh

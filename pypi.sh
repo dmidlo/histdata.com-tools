@@ -126,6 +126,15 @@ current_git_branch()
     git rev-parse --abbrev-ref HEAD
 }
 
+current_package_version()
+{
+    python - <<'PY'
+import histdatacom
+
+print(histdatacom.__version__)
+PY
+}
+
 require_clean_release_tree()
 {
     if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -254,11 +263,16 @@ case "${1:-}" in
         python -m twine upload -r testpypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
         ;;
     testpypi_install)
-        buildenv
-        echo "${bold}installing histdatacom from testpypi: https://test.pypi.org/simple/${normal}"
-        python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ histdatacom
-        histdatacom_test
-        destroyenv
+        echo "${bold}verifying histdatacom from testpypi: https://test.pypi.org/simple/${normal}"
+        python scripts/verify_testpypi_install.py \
+            --version "$(current_package_version)" \
+            --require-bundled-current-platform \
+            --check-executable-version \
+            --start-sidecar \
+            --hermetic-sidecar-smoke \
+            --default-routing-sidecar-smoke \
+            --quality-sidecar-smoke \
+            --download-smoke
         ;;
     pypi_install)
         buildenv

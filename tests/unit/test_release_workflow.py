@@ -173,6 +173,8 @@ def test_local_publishing_script_enforces_branch_contract() -> None:
     assert 'prepare_release_upload "PyPI" "${pypi_branch}"' in script
     assert "HISTDATACOM_ALLOW_RELEASE_BRANCH_MISMATCH" in script
     assert "refusing release upload with uncommitted tracked changes" in script
+    assert "scripts/verify_testpypi_install.py" in script
+    assert "--require-bundled-current-platform" in script
     assert "python -m twine upload -r testpypi" in script
     assert "python -m twine upload -r pypi" in script
 
