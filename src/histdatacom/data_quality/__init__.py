@@ -53,9 +53,11 @@ from histdatacom.data_quality.contracts import (
     QualityTargetSummary,
 )
 from histdatacom.data_quality.campaign import (
+    CAMPAIGN_PLAN_SCHEMA_VERSION,
     CAMPAIGN_REPORT_SCHEMA_VERSION,
     DEEP_QUALITY_DIMENSIONS,
     build_full_dataset_campaign_report,
+    build_storage_backed_campaign_plan,
 )
 from histdatacom.data_quality.discovery import (
     QUALITY_CHECK_GROUPS,
@@ -223,6 +225,7 @@ __all__ = [
     "ASSET_CLASS_UNKNOWN",
     "COVERAGE_MANIFEST_SCHEMA_VERSION",
     "CAMPAIGN_REPORT_SCHEMA_VERSION",
+    "CAMPAIGN_PLAN_SCHEMA_VERSION",
     "CALENDAR_PROFILE_SCHEMA_VERSION",
     "CONFIGURABLE_QUALITY_RULE_IDS",
     "CROSS_INSTRUMENT_METADATA_KEY",
@@ -316,6 +319,7 @@ __all__ = [
     "bars_quality_run_rules",
     "bounded_quality_payload",
     "build_full_dataset_campaign_report",
+    "build_storage_backed_campaign_plan",
     "calendar_policy_metadata",
     "calendar_profile_from_mapping",
     "calendar_quality_rules",

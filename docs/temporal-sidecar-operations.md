@@ -726,6 +726,17 @@ Data-quality checks:
   quality report. Ordinary `-A` and `-U` repository commands do not run quality
   checks. Use `histdatacom -A --repo-quality-columns` to display previously
   stored quality summaries in repository table output.
+- Full-dataset campaign batches should run as bounded symbol/format/timeframe
+  slices. For each slice, run download/extract, then `--repo-quality`; normal
+  execution keeps cache artifacts. The `.repo` file and detailed quality reports
+  are the durable audit artifacts. When disk pressure requires cleanup, run it
+  only after `--repo-quality` succeeds and never remove `.repo` or reports. The
+  issue-240 cache cleanup removes canonical `.data` cache files with
+  `find <slice-target> -name .data -type f -delete`; more aggressive low-disk
+  runs may remove the entire slice working directory after `.repo` and reports
+  have been written. Source checkouts whose doctor output reports
+  `platform.executable_bundled=false` need an explicit Temporal executable or an
+  installed bundled platform wheel before campaign execution.
 - Use `--quality-report PATH` to write the full JSON report. The report schema
   is `histdatacom.quality-report.v1`; console output remains a bounded human
   summary with clean, warning, and failed file sections.

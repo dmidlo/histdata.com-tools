@@ -410,6 +410,30 @@ columns in repository output, use:
 histdatacom -A --repo-quality-columns
 ```
 
+#### Full-Dataset Quality Campaigns
+
+Full HistData.com quality campaigns should run in bounded
+symbol/format/timeframe slices from an installed bundled platform wheel, or
+from a source checkout started with an explicit Temporal executable. Do not run
+the full repository surface as one accumulating local scrape.
+
+For each slice, run download/extract first, then run `--repo-quality` so `.repo`
+keeps bounded findings and the detailed JSON report path. Normal campaign
+execution keeps the generated cache artifacts. For low-disk campaign runs, only
+clean after the repo-quality command succeeds; the issue-240 batch cleanup mode
+removes canonical `.data` cache files, and a more aggressive low-disk mode may
+remove the slice working directory after `.repo` and the quality report have
+been written.
+
+```sh
+histdatacom -D -X -p eurusd -f ascii -t M1 --data-directory /Volumes/histdata/data
+histdatacom --repo-quality \
+  --quality-target /Volumes/histdata/data/ASCII/M1/eurusd \
+  --quality-report /Volumes/histdata/reports/eurusd-ascii-m1-quality.json \
+  --data-directory /Volumes/histdata/data
+find /Volumes/histdata/data/ASCII/M1/eurusd -name .data -type f -delete
+```
+
 #### Quality Targets and Check Groups
 
 Quality groups are composable. `all` is the default and cannot be combined with

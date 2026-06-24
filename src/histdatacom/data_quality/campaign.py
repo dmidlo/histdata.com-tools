@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import shlex
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 from histdatacom.activity_stages import (
     DEFAULT_REPOSITORY_URL,
@@ -17,11 +19,17 @@ from histdatacom.runtime_contracts import JSONValue
 from histdatacom.utils import get_current_datemonth_gmt_minus5
 
 CAMPAIGN_REPORT_SCHEMA_VERSION = "histdatacom.data-quality-campaign.v1"
+CAMPAIGN_PLAN_SCHEMA_VERSION = "histdatacom.data-quality-campaign-plan.v1"
 DEFAULT_FOLLOW_UP_ISSUES = {
     "cache_deep_validation": 223,
     "installed_quality_smoke": 224,
     "non_ascii_quality_boundary": 225,
 }
+DEFAULT_CAMPAIGN_SLICE_SYMBOL_COUNT = 1
+DEFAULT_CAMPAIGN_REPORTS_DIRECTORY = ".quality/campaign"
+DEFAULT_CAMPAIGN_QUALITY_CHECKS = ("all",)
+DEFAULT_CAMPAIGN_CLEANUP_MODE = "none"
+CAMPAIGN_CLEANUP_MODES = ("none", "cache", "working-artifacts")
 GIB = 1024**3
 
 
@@ -102,6 +110,125 @@ def build_full_dataset_campaign_report(
         "observations": _json_value(
             [_json_mapping(observation) for observation in observations]
         ),
+    }
+
+
+def build_storage_backed_campaign_plan(
+    *,
+    issue_number: int,
+    repo_data: Mapping[str, Any],
+    symbols: Iterable[str],
+    data_directory: str,
+    reports_directory: str = DEFAULT_CAMPAIGN_REPORTS_DIRECTORY,
+    disk_total_bytes: int | None = None,
+    disk_used_bytes: int | None = None,
+    disk_available_bytes: int | None = None,
+    minimum_free_bytes: int | None = None,
+    current_yearmonth: str | None = None,
+    repo_url: str = DEFAULT_REPOSITORY_URL,
+    formats: Iterable[str] | None = None,
+    timeframes: Iterable[str] | None = None,
+    slice_symbol_count: int = DEFAULT_CAMPAIGN_SLICE_SYMBOL_COUNT,
+    cleanup_mode: str = DEFAULT_CAMPAIGN_CLEANUP_MODE,
+    quality_checks: Iterable[str] = DEFAULT_CAMPAIGN_QUALITY_CHECKS,
+    platform_executable_bundled: bool | None = None,
+) -> dict[str, JSONValue]:
+    """Return an executable, bounded full-dataset campaign plan.
+
+    The plan intentionally keeps ordinary repo refresh separate from
+    ``--repo-quality``. Each slice downloads/extracts only a bounded
+    symbol/format/timeframe surface, writes detailed quality reports, updates
+    ``.repo`` with bounded findings, and then performs any explicitly selected
+    disk-pressure cleanup.
+    """
+    normalized_symbols = tuple(str(symbol).lower() for symbol in symbols)
+    normalized_cleanup_mode = _cleanup_mode(cleanup_mode)
+    normalized_quality_checks = tuple(str(check) for check in quality_checks)
+    normalized_slice_size = _positive_int(
+        slice_symbol_count,
+        default=DEFAULT_CAMPAIGN_SLICE_SYMBOL_COUNT,
+    )
+    selected_dimensions = _selected_dimensions(
+        formats=formats,
+        timeframes=timeframes,
+    )
+    report = build_full_dataset_campaign_report(
+        issue_number=issue_number,
+        repo_data=repo_data,
+        symbols=normalized_symbols,
+        data_directory=data_directory,
+        disk_total_bytes=disk_total_bytes,
+        disk_used_bytes=disk_used_bytes,
+        disk_available_bytes=disk_available_bytes,
+        minimum_free_bytes=minimum_free_bytes,
+        current_yearmonth=current_yearmonth,
+        repo_url=repo_url,
+    )
+    slices = _campaign_execution_slices(
+        issue_number=issue_number,
+        repo_data=repo_data,
+        symbols=normalized_symbols,
+        dimensions=selected_dimensions,
+        data_directory=data_directory,
+        reports_directory=reports_directory,
+        current_yearmonth=str(report["current_yearmonth"]),
+        slice_symbol_count=normalized_slice_size,
+        cleanup_mode=normalized_cleanup_mode,
+        quality_checks=normalized_quality_checks,
+    )
+    return {
+        "schema_version": CAMPAIGN_PLAN_SCHEMA_VERSION,
+        "issue_number": issue_number,
+        "status": _campaign_plan_status(
+            report,
+            platform_executable_bundled=platform_executable_bundled,
+            cleanup_mode=normalized_cleanup_mode,
+        ),
+        "campaign_report": report,
+        "execution_environment": {
+            "data_directory": data_directory,
+            "reports_directory": reports_directory,
+            "requires_storage_backed_data_root": True,
+            "requires_bundled_platform_wheel": True,
+            "platform_executable_bundled": platform_executable_bundled,
+            "source_checkout_sdist_fallback_expected": (
+                platform_executable_bundled is False
+            ),
+            "source_checkout_sdist_fallback_action": (
+                "Install a bundled platform wheel or pass "
+                "histdatacom-sidecar start --executable /path/to/temporal."
+            ),
+        },
+        "preflight_commands": [
+            _shell_command(
+                "histdatacom-sidecar",
+                "doctor",
+                "--json",
+            ),
+            _shell_command(
+                "histdatacom",
+                "-U",
+                "-p",
+                *normalized_symbols,
+                "--repo-quality-columns",
+                "--data-directory",
+                data_directory,
+            ),
+        ],
+        "repo_quality_contract": {
+            "required_after_each_slice": True,
+            "repo_path": str(Path(data_directory) / ".repo"),
+            "preserve_repo_file": True,
+            "preserve_quality_reports": True,
+            "quality_checks": list(normalized_quality_checks),
+            "summary_storage": (
+                "Each slice runs --repo-quality so bounded findings are stored "
+                "in .repo while detailed findings remain in the JSON report."
+            ),
+        },
+        "cleanup_policy": _cleanup_policy(normalized_cleanup_mode),
+        "slice_count": len(slices),
+        "slices": _json_value(slices),
     }
 
 
@@ -290,6 +417,319 @@ def _campaign_status(
     if disk_status in {"unknown", "observed"}:
         return "preflighted"
     return "ready"
+
+
+def _selected_dimensions(
+    *,
+    formats: Iterable[str] | None,
+    timeframes: Iterable[str] | None,
+) -> tuple[tuple[str, str], ...]:
+    return cast(
+        tuple[tuple[str, str], ...],
+        valid_dataset_dimensions(
+            tuple(formats or sorted(Format.list_values())),
+            tuple(timeframes or sorted(Timeframe.list_keys())),
+        ),
+    )
+
+
+def _campaign_execution_slices(
+    *,
+    issue_number: int,
+    repo_data: Mapping[str, Any],
+    symbols: tuple[str, ...],
+    dimensions: tuple[tuple[str, str], ...],
+    data_directory: str,
+    reports_directory: str,
+    current_yearmonth: str,
+    slice_symbol_count: int,
+    cleanup_mode: str,
+    quality_checks: tuple[str, ...],
+) -> list[dict[str, JSONValue]]:
+    slices: list[dict[str, JSONValue]] = []
+    for csv_format, timeframe in dimensions:
+        deep_supported = (csv_format, timeframe) in DEEP_QUALITY_DIMENSIONS
+        for symbol_group in _symbol_groups(symbols, slice_symbol_count):
+            slice_index = len(slices) + 1
+            target_paths = [
+                _slice_target_path(
+                    data_directory,
+                    csv_format=csv_format,
+                    timeframe=timeframe,
+                    symbol=symbol,
+                )
+                for symbol in symbol_group
+            ]
+            report_path = _slice_report_path(
+                reports_directory,
+                issue_number=issue_number,
+                slice_index=slice_index,
+                csv_format=csv_format,
+                timeframe=timeframe,
+                symbols=symbol_group,
+            )
+            work_item_count = sum(
+                _dimension_work_item_count(
+                    repo_data,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    current_yearmonth=current_yearmonth,
+                )
+                for symbol in symbol_group
+            )
+            slices.append(
+                {
+                    "slice_id": _slice_id(
+                        issue_number=issue_number,
+                        slice_index=slice_index,
+                        csv_format=csv_format,
+                        timeframe=timeframe,
+                        symbols=symbol_group,
+                    ),
+                    "slice_index": slice_index,
+                    "symbols": list(symbol_group),
+                    "format": csv_format,
+                    "timeframe": timeframe,
+                    "deep_quality_supported": deep_supported,
+                    "work_item_count": work_item_count,
+                    "target_paths": target_paths,
+                    "quality_report": report_path,
+                    "commands": _slice_commands(
+                        data_directory=data_directory,
+                        csv_format=csv_format,
+                        timeframe=timeframe,
+                        symbols=symbol_group,
+                        target_paths=target_paths,
+                        report_path=report_path,
+                        cleanup_mode=cleanup_mode,
+                        quality_checks=quality_checks,
+                    ),
+                }
+            )
+    return slices
+
+
+def _slice_commands(
+    *,
+    data_directory: str,
+    csv_format: str,
+    timeframe: str,
+    symbols: tuple[str, ...],
+    target_paths: list[str],
+    report_path: str,
+    cleanup_mode: str,
+    quality_checks: tuple[str, ...],
+) -> list[dict[str, JSONValue]]:
+    commands: list[dict[str, JSONValue]] = [
+        {
+            "step": "download_extract_slice",
+            "command": _shell_command(
+                "histdatacom",
+                "-D",
+                "-X",
+                "-p",
+                *symbols,
+                "-f",
+                csv_format,
+                "-t",
+                timeframe,
+                "--data-directory",
+                data_directory,
+            ),
+        },
+        {
+            "step": "refresh_repo_quality",
+            "command": _shell_command(
+                "histdatacom",
+                "--repo-quality",
+                "--quality-target",
+                *target_paths,
+                "--quality-checks",
+                *quality_checks,
+                "--quality-report",
+                report_path,
+                "--data-directory",
+                data_directory,
+            ),
+            "updates_repo": True,
+            "repo_path": str(Path(data_directory) / ".repo"),
+        },
+    ]
+    cleanup_command = _cleanup_command(cleanup_mode, target_paths)
+    if cleanup_command:
+        commands.append(
+            {
+                "step": "cleanup_after_repo_quality",
+                "command": cleanup_command,
+                "preserves_repo": True,
+                "preserves_quality_reports": True,
+            }
+        )
+    return commands
+
+
+def _campaign_plan_status(
+    report: Mapping[str, JSONValue],
+    *,
+    platform_executable_bundled: bool | None,
+    cleanup_mode: str,
+) -> str:
+    if report.get("status") == "failed":
+        return "failed"
+    if platform_executable_bundled is False:
+        return "needs-platform-wheel"
+    if report.get("status") == "blocked" and cleanup_mode != "none":
+        return "slice-cleanup-required"
+    if report.get("status") == "blocked":
+        return "blocked"
+    if platform_executable_bundled is None:
+        return "preflight-required"
+    return "ready"
+
+
+def _cleanup_policy(cleanup_mode: str) -> dict[str, JSONValue]:
+    match cleanup_mode:
+        case "none":
+            removes = "nothing"
+            command_shape = ""
+        case "cache":
+            removes = "canonical .data cache files under each slice target"
+            command_shape = "find <slice-target> -name .data -type f -delete"
+        case "working-artifacts":
+            removes = (
+                "slice target directories after --repo-quality has written "
+                "the detailed report and .repo summary"
+            )
+            command_shape = "rm -rf <slice-target>"
+        case _:
+            raise ValueError(f"unknown campaign cleanup mode: {cleanup_mode}")
+
+    return {
+        "mode": cleanup_mode,
+        "removes": removes,
+        "command_shape": command_shape,
+        "runs_after_repo_quality": True,
+        "preserves_repo_file": True,
+        "preserves_quality_reports": True,
+    }
+
+
+def _cleanup_command(cleanup_mode: str, target_paths: list[str]) -> str:
+    if cleanup_mode == "none":
+        return ""
+    if cleanup_mode == "cache":
+        return " && ".join(
+            _shell_command(
+                "find",
+                target_path,
+                "-name",
+                ".data",
+                "-type",
+                "f",
+                "-delete",
+            )
+            for target_path in target_paths
+        )
+    if cleanup_mode == "working-artifacts":
+        return _shell_command("rm", "-rf", *target_paths)
+    raise ValueError(f"unknown campaign cleanup mode: {cleanup_mode}")
+
+
+def _dimension_work_item_count(
+    repo_data: Mapping[str, Any],
+    *,
+    symbol: str,
+    timeframe: str,
+    current_yearmonth: str,
+) -> int:
+    entry = repo_data.get(symbol)
+    if not isinstance(entry, Mapping):
+        return 0
+    return len(
+        iter_dataset_periods(
+            str(entry.get("start", "") or ""),
+            str(entry.get("end", "") or ""),
+            timeframe=timeframe,
+            current_yearmonth=current_yearmonth,
+        )
+    )
+
+
+def _symbol_groups(
+    symbols: tuple[str, ...],
+    slice_symbol_count: int,
+) -> Iterable[tuple[str, ...]]:
+    for offset in range(0, len(symbols), slice_symbol_count):
+        yield symbols[offset : offset + slice_symbol_count]
+
+
+def _slice_target_path(
+    data_directory: str,
+    *,
+    csv_format: str,
+    timeframe: str,
+    symbol: str,
+) -> str:
+    return str(
+        Path(data_directory) / Format(csv_format).name / timeframe / symbol
+    )
+
+
+def _slice_report_path(
+    reports_directory: str,
+    *,
+    issue_number: int,
+    slice_index: int,
+    csv_format: str,
+    timeframe: str,
+    symbols: tuple[str, ...],
+) -> str:
+    identifier = _slice_id(
+        issue_number=issue_number,
+        slice_index=slice_index,
+        csv_format=csv_format,
+        timeframe=timeframe,
+        symbols=symbols,
+    )
+    filename = f"{identifier}-quality.json"
+    return str(Path(reports_directory) / filename)
+
+
+def _slice_id(
+    *,
+    issue_number: int,
+    slice_index: int,
+    csv_format: str,
+    timeframe: str,
+    symbols: tuple[str, ...],
+) -> str:
+    return (
+        f"issue-{issue_number}-{slice_index:03d}-"
+        f"{csv_format}-{timeframe.lower()}-{'-'.join(symbols)}"
+    )
+
+
+def _shell_command(*parts: str) -> str:
+    return " ".join(shlex.quote(str(part)) for part in parts)
+
+
+def _cleanup_mode(value: str) -> str:
+    normalized = str(value).strip().lower()
+    if normalized not in CAMPAIGN_CLEANUP_MODES:
+        msg = (
+            "cleanup_mode must be one of "
+            f"{', '.join(CAMPAIGN_CLEANUP_MODES)}"
+        )
+        raise ValueError(msg)
+    return normalized
+
+
+def _positive_int(value: int, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _repo_pair_count(repo_data: Mapping[str, Any]) -> int:
