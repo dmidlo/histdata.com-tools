@@ -19,6 +19,7 @@ from histdatacom.data_quality.contracts import (
 )
 from histdatacom.data_quality.polars_cache import (
     read_fresh_sibling_polars_cache,
+    read_quality_polars_cache,
 )
 from histdatacom.histdata_ascii import (
     columns_for_timeframe,
@@ -119,11 +120,14 @@ class _RowScan:
 @dataclass(slots=True)
 class _SchemaScan:
     parsed_row_count: int = 0
+    missing_columns: list[str] = field(default_factory=list)
     bad_timestamp_count: int = 0
     bad_numeric_count: int = 0
     bad_volume_count: int = 0
+    bad_dtype_count: int = 0
     shifted_row_count: int = 0
     invalid_row_count: int = 0
+    bad_dtypes: list[_SchemaSample] = field(default_factory=list)
     bad_timestamps: list[_SchemaSample] = field(default_factory=list)
     bad_numerics: list[_SchemaSample] = field(default_factory=list)
     bad_volumes: list[_SchemaSample] = field(default_factory=list)
@@ -424,7 +428,7 @@ class HistDataAsciiSchemaIngestionRule:
 
     def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
         """Return strict typed schema findings for one target."""
-        if not _is_ascii_text_target(target):
+        if not _is_ascii_schema_target(target):
             return ()
 
         try:
@@ -468,6 +472,14 @@ def ingestion_quality_rules() -> tuple[QualityRule, ...]:
 def _is_ingestion_count_target(target: QualityTarget) -> bool:
     return (
         _is_ascii_text_target(target) or target.kind is QualityTargetKind.CACHE
+    )
+
+
+def _is_ascii_schema_target(target: QualityTarget) -> bool:
+    return _is_ascii_text_target(target) or (
+        target.data_format == "ascii"
+        and target.kind is QualityTargetKind.CACHE
+        and bool(target.timeframe)
     )
 
 
@@ -700,16 +712,105 @@ def _schema_scan_from_polars_cache(
     target: QualityTarget,
     columns: tuple[str, ...],
 ) -> _SchemaScan | None:
-    cache = read_fresh_sibling_polars_cache(
-        target,
-        required_columns=columns,
+    cache = (
+        read_quality_polars_cache(target, required_columns=())
+        if target.kind is QualityTargetKind.CACHE
+        else read_fresh_sibling_polars_cache(
+            target,
+            required_columns=columns,
+        )
     )
     if cache is None:
         return None
     height = getattr(cache.frame, "height", None)
     if not isinstance(height, int):
         return None
-    return _SchemaScan(parsed_row_count=height)
+    if target.kind is not QualityTargetKind.CACHE:
+        return _SchemaScan(parsed_row_count=height)
+    return _scan_cache_schema(cache.frame, columns=columns)
+
+
+def _scan_cache_schema(frame: Any, *, columns: tuple[str, ...]) -> _SchemaScan:
+    scan = _SchemaScan()
+    height = getattr(frame, "height", 0)
+    scan.parsed_row_count = int(height or 0)
+    available_columns = set(getattr(frame, "columns", ()))
+    scan.missing_columns.extend(
+        column for column in columns if column not in available_columns
+    )
+    for column in scan.missing_columns[:MAX_ROW_SAMPLES]:
+        _append_schema_sample(
+            scan.invalid_rows,
+            _SchemaSample(
+                row_number=1,
+                column=column,
+                raw_value="",
+                error="required cache column is missing",
+            ),
+        )
+    if scan.missing_columns:
+        scan.invalid_row_count = scan.parsed_row_count
+
+    for column in columns:
+        if column not in available_columns:
+            continue
+        dtype = str(frame.schema.get(column, ""))
+        expected = _expected_cache_dtype(column, columns)
+        if not _cache_dtype_matches(dtype, expected):
+            scan.bad_dtype_count += 1
+            _append_schema_sample(
+                scan.bad_dtypes,
+                _SchemaSample(
+                    row_number=1,
+                    column=column,
+                    raw_value=dtype,
+                    error=f"expected {expected} cache dtype",
+                ),
+            )
+
+        series = frame.get_column(column)
+        for row_number, value in enumerate(series, start=1):
+            if column == "datetime":
+                if value is None:
+                    scan.bad_timestamp_count += 1
+                    _append_schema_sample(
+                        scan.bad_timestamps,
+                        _SchemaSample(
+                            row_number=row_number,
+                            column=column,
+                            raw_value="",
+                            error="timestamp must be a non-null UTC millisecond integer",
+                        ),
+                    )
+                continue
+
+            if column == columns[-1]:
+                if not _cache_volume_is_valid(value):
+                    scan.bad_volume_count += 1
+                    _append_schema_sample(
+                        scan.bad_volumes,
+                        _SchemaSample(
+                            row_number=row_number,
+                            column=column,
+                            raw_value="" if value is None else str(value),
+                            error=f"expected int32 volume between 0 and {INT32_MAX}",
+                        ),
+                    )
+                continue
+
+            if not _cache_price_is_valid(value):
+                scan.bad_numeric_count += 1
+                _append_schema_sample(
+                    scan.bad_numerics,
+                    _SchemaSample(
+                        row_number=row_number,
+                        column=column,
+                        raw_value="" if value is None else str(value),
+                        error="expected finite cache price value",
+                    ),
+                )
+
+    return scan
 
 
 def _scan_schema_rows(
@@ -804,6 +905,37 @@ def _schema_findings(
 ) -> tuple[QualityFinding, ...]:
     findings: list[QualityFinding] = []
     price_columns = columns[1:-1]
+    if scan.missing_columns:
+        findings.append(
+            _schema_finding(
+                target,
+                code="ASCII_CACHE_SCHEMA_MISSING_COLUMNS",
+                message="Polars cache is missing required HistData columns.",
+                samples=scan.invalid_rows,
+                metadata={
+                    "columns": list(columns),
+                    "missing_columns": list(scan.missing_columns),
+                    "source_member": source_member,
+                },
+                row_count=max(scan.invalid_row_count, 1),
+            )
+        )
+    if scan.bad_dtypes:
+        findings.append(
+            _schema_finding(
+                target,
+                code="ASCII_CACHE_DTYPE_INVALID",
+                message="Polars cache column dtypes do not match the "
+                "canonical HistData schema.",
+                samples=scan.bad_dtypes,
+                metadata={
+                    "columns": list(columns),
+                    "price_columns": list(price_columns),
+                    "source_member": source_member,
+                },
+                row_count=scan.bad_dtype_count,
+            )
+        )
     if scan.shifted_rows:
         findings.append(
             _schema_finding(
@@ -967,6 +1099,38 @@ def _parse_price_value(value: str) -> float:
         msg = "expected finite decimal number"
         raise ValueError(msg)
     return parsed
+
+
+def _expected_cache_dtype(column: str, columns: tuple[str, ...]) -> str:
+    if column == "datetime":
+        return "Int64"
+    if column == columns[-1]:
+        return "integer"
+    return "float"
+
+
+def _cache_dtype_matches(dtype: str, expected: str) -> bool:
+    if expected == "Int64":
+        return dtype == "Int64"
+    if expected == "integer":
+        return dtype.startswith(("Int", "UInt"))
+    if expected == "float":
+        return dtype.startswith("Float")
+    return False
+
+
+def _cache_price_is_valid(value: object) -> bool:
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(parsed)
+
+
+def _cache_volume_is_valid(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return False
+    return 0 <= value <= INT32_MAX
 
 
 def _parse_volume_value(value: str) -> int:

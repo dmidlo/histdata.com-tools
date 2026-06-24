@@ -21,7 +21,7 @@ from histdatacom.data_quality.contracts import (
     QualityTargetKind,
 )
 from histdatacom.data_quality.polars_cache import (
-    read_fresh_sibling_polars_cache,
+    read_quality_polars_cache,
 )
 from histdatacom.fx_enums import Pairs
 from histdatacom.histdata_ascii import M1, TICK, read_ascii_file
@@ -874,7 +874,12 @@ def _is_ascii_text_target(target: QualityTarget) -> bool:
     return (
         target.data_format == "ascii"
         and target.timeframe in {M1, TICK}
-        and target.kind in {QualityTargetKind.CSV, QualityTargetKind.ZIP}
+        and target.kind
+        in {
+            QualityTargetKind.CSV,
+            QualityTargetKind.ZIP,
+            QualityTargetKind.CACHE,
+        }
     )
 
 
@@ -973,7 +978,7 @@ def _cross_instrument_series_from_polars_cache(
             "ask",
         )
     )
-    cache = read_fresh_sibling_polars_cache(
+    cache = read_quality_polars_cache(
         target,
         required_columns=columns,
     )

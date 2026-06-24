@@ -1,4 +1,4 @@
-"""Fresh sibling Polars cache helpers for data-quality scans."""
+"""Polars cache helpers for data-quality scans."""
 
 from __future__ import annotations
 
@@ -12,10 +12,11 @@ from histdatacom.histdata_ascii import CACHE_FILENAME, read_polars_cache
 
 @dataclass(frozen=True, slots=True)
 class FreshPolarsCache:
-    """A Polars IPC cache that is safe to use for a CSV target."""
+    """A Polars IPC cache that is safe to use for a quality scan."""
 
     path: Path
     frame: Any
+    source: str = "sibling"
 
 
 def read_fresh_sibling_polars_cache(
@@ -45,4 +46,28 @@ def read_fresh_sibling_polars_cache(
     columns = set(getattr(frame, "columns", ()))
     if not set(required_columns).issubset(columns):
         return None
-    return FreshPolarsCache(path=cache_path, frame=frame)
+    return FreshPolarsCache(path=cache_path, frame=frame, source="sibling")
+
+
+def read_quality_polars_cache(
+    target: QualityTarget,
+    *,
+    required_columns: tuple[str, ...],
+) -> FreshPolarsCache | None:
+    """Return a direct cache target or fresh sibling CSV cache, if usable."""
+    if target.kind is QualityTargetKind.CACHE:
+        cache_path = Path(target.path)
+        try:
+            frame = read_polars_cache(cache_path)
+        except (OSError, ValueError):
+            return None
+
+        columns = set(getattr(frame, "columns", ()))
+        if not set(required_columns).issubset(columns):
+            return None
+        return FreshPolarsCache(path=cache_path, frame=frame, source="direct")
+
+    return read_fresh_sibling_polars_cache(
+        target,
+        required_columns=required_columns,
+    )

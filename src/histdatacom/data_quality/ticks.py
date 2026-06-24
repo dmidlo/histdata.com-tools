@@ -25,8 +25,10 @@ from histdatacom.data_quality.calendar import (
     SESSION_STATE_MARKET_OPEN,
     classify_histdata_timestamp,
 )
+from histdatacom.data_quality.polars_cache import read_quality_polars_cache
 from histdatacom.data_quality.symbols import normalize_histdata_symbol
 from histdatacom.histdata_ascii import (
+    EST_NO_DST_OFFSET_MS,
     TICK,
     columns_for_timeframe,
     delimiter_for_timeframe,
@@ -796,12 +798,19 @@ def _is_tick_ascii_text_target(target: QualityTarget) -> bool:
     return (
         target.data_format == "ascii"
         and target.timeframe == TICK
-        and target.kind in {QualityTargetKind.CSV, QualityTargetKind.ZIP}
+        and target.kind
+        in {
+            QualityTargetKind.CSV,
+            QualityTargetKind.ZIP,
+            QualityTargetKind.CACHE,
+        }
     )
 
 
 def _read_text_payload(target: QualityTarget) -> _TextPayload:
     path = Path(target.path)
+    if target.kind is QualityTargetKind.CACHE:
+        return _TextPayload(_tick_cache_text(target).encode("utf-8"))
     if target.kind is QualityTargetKind.CSV:
         try:
             return _TextPayload(path.read_bytes())
@@ -858,6 +867,65 @@ def _source_error(
         message=message,
         metadata={"error_type": type(exc).__name__, "error": str(exc)},
     )
+
+
+def _tick_cache_text(target: QualityTarget) -> str:
+    columns = columns_for_timeframe(TICK)
+    cache = read_quality_polars_cache(
+        target,
+        required_columns=columns,
+    )
+    if cache is None:
+        raise _SourceReadError(
+            code="ASCII_TICK_SPREAD_CACHE_SCHEMA_UNSUPPORTED",
+            message="Polars cache is missing columns required for tick "
+            "spread checks.",
+            metadata={"required_columns": list(columns)},
+        )
+
+    lines: list[str] = []
+    try:
+        for row in cache.frame.select(list(columns)).iter_rows(named=False):
+            timestamp_source = _cache_tick_timestamp_source(row[0])
+            lines.append(
+                ",".join(
+                    (
+                        timestamp_source,
+                        _cache_cell(row[1]),
+                        _cache_cell(row[2]),
+                        _cache_cell(row[3]),
+                    )
+                )
+            )
+    except Exception as exc:
+        raise _SourceReadError(
+            code="ASCII_TICK_SPREAD_CACHE_SCHEMA_UNSUPPORTED",
+            message="Polars cache could not be projected for tick spread "
+            "checks.",
+            metadata={
+                "required_columns": list(columns),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        ) from exc
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _cache_tick_timestamp_source(value: object) -> str:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return ""
+    utc_ms = value
+    source_ms = utc_ms - EST_NO_DST_OFFSET_MS
+    seconds, milliseconds = divmod(source_ms, 1000)
+    try:
+        source_dt = datetime.fromtimestamp(seconds, tz=timezone.utc)
+    except (OSError, OverflowError, ValueError):
+        return ""
+    return f"{source_dt:%Y%m%d %H%M%S}{milliseconds:03d}"
+
+
+def _cache_cell(value: object) -> str:
+    return "" if value is None else str(value)
 
 
 def _scan_tick_spread_rows(

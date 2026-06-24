@@ -24,7 +24,7 @@ from histdatacom.data_quality.contracts import (
     QualityTargetKind,
 )
 from histdatacom.data_quality.polars_cache import (
-    read_fresh_sibling_polars_cache,
+    read_quality_polars_cache,
 )
 from histdatacom.data_quality.symbols import (
     ASSET_CLASS_UNKNOWN,
@@ -584,7 +584,7 @@ class HistDataAsciiM1BarIntegrityRule:
 
     def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
         """Return M1 bar-integrity findings for one target."""
-        if not _is_m1_ascii_text_target(target):
+        if not _is_m1_ascii_market_target(target):
             return ()
 
         try:
@@ -634,10 +634,22 @@ class HistDataAsciiM1PrecisionRule:
 
     def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
         """Return M1 precision findings for one target."""
-        if not _is_m1_ascii_text_target(target):
+        if not _is_m1_ascii_market_target(target):
             return ()
 
         symbol_metadata = symbol_metadata_for(target.symbol)
+        if target.kind is QualityTargetKind.CACHE:
+            cache_scan = _scan_m1_precision_polars_cache(target)
+            if cache_scan is not None:
+                return _precision_findings(
+                    target=target,
+                    scan=cache_scan,
+                    source_member="",
+                    symbol_metadata=symbol_metadata,
+                    severity=self.warning_severity,
+                    rule_id=self.rule_id,
+                )
+
         polars_scan = _scan_m1_precision_polars_csv(
             target,
             symbol_metadata=symbol_metadata,
@@ -739,7 +751,7 @@ class HistDataAsciiM1OutlierRule:
 
     def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
         """Return M1 outlier findings for one target."""
-        if not _is_m1_ascii_text_target(target):
+        if not _is_m1_ascii_market_target(target):
             return ()
 
         try:
@@ -875,6 +887,19 @@ def _is_m1_ascii_text_target(target: QualityTarget) -> bool:
     )
 
 
+def _is_m1_ascii_market_target(target: QualityTarget) -> bool:
+    return (
+        target.data_format == "ascii"
+        and target.timeframe == M1
+        and target.kind
+        in {
+            QualityTargetKind.CSV,
+            QualityTargetKind.ZIP,
+            QualityTargetKind.CACHE,
+        }
+    )
+
+
 def _is_tick_ascii_text_target(target: QualityTarget) -> bool:
     return (
         target.data_format == "ascii"
@@ -991,7 +1016,7 @@ def _m1_bar_sample_rows_for_target(target: QualityTarget) -> _M1BarSampleRows:
 def _m1_bar_sample_rows_from_polars_cache(
     target: QualityTarget,
 ) -> _M1BarSampleRows | None:
-    cache = read_fresh_sibling_polars_cache(
+    cache = read_quality_polars_cache(
         target,
         required_columns=("datetime", "open", "high", "low", "close"),
     )
@@ -1243,6 +1268,21 @@ def _scan_m1_precision_polars_csv(
         )
         scan.regime_shift_count = len(scan.regime_shifts)
     return scan
+
+
+def _scan_m1_precision_polars_cache(
+    target: QualityTarget,
+) -> _M1PrecisionScan | None:
+    cache = read_quality_polars_cache(
+        target,
+        required_columns=("datetime", *M1_PRICE_COLUMNS),
+    )
+    if cache is None:
+        return None
+    height = getattr(cache.frame, "height", None)
+    if not isinstance(height, int):
+        return None
+    return _M1PrecisionScan(parsed_row_count=height)
 
 
 def _polars_decimal_places_expr(column: str) -> Any:
@@ -2328,6 +2368,9 @@ def _precision_findings(
                 "regime_shift_count": scan.regime_shift_count,
                 "precision_rule_available": (
                     symbol_metadata.precision_rule is not None
+                ),
+                "raw_decimal_precision_preserved": (
+                    target.kind is not QualityTargetKind.CACHE
                 ),
             },
         )

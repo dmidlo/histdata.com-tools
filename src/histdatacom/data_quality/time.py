@@ -22,7 +22,7 @@ from histdatacom.data_quality.contracts import (
     QualityTargetKind,
 )
 from histdatacom.data_quality.polars_cache import (
-    read_fresh_sibling_polars_cache,
+    read_quality_polars_cache,
 )
 from histdatacom.histdata_ascii import (
     EST_NO_DST_OFFSET_MS,
@@ -680,6 +680,7 @@ def _is_ascii_text_target(target: QualityTarget) -> bool:
     return target.data_format == "ascii" and target.kind in {
         QualityTargetKind.CSV,
         QualityTargetKind.ZIP,
+        QualityTargetKind.CACHE,
     }
 
 
@@ -761,6 +762,16 @@ def _timestamp_scan_for_target(target: QualityTarget) -> _TimestampScan:
         if boundary is not None:
             _cache_timestamp_boundary(key, boundary)
         return cache_scan
+    if target.kind is QualityTargetKind.CACHE:
+        raise _SourceReadError(
+            code="ASCII_TIME_CACHE_SCHEMA_UNSUPPORTED",
+            message="Polars cache is missing timestamp data required for "
+            "time checks.",
+            metadata={
+                "required_columns": ["datetime"],
+                "timeframe": target.timeframe,
+            },
+        )
 
     delimiter = delimiter_for_timeframe(target.timeframe)
     columns = columns_for_timeframe(target.timeframe)
@@ -804,17 +815,17 @@ def _timestamp_scan_for_target(target: QualityTarget) -> _TimestampScan:
 def _timestamp_scan_from_polars_cache(
     target: QualityTarget,
 ) -> _TimestampScan | None:
-    if target.timeframe != "M1":
+    if target.timeframe not in {"M1", "T"}:
         return None
 
-    cache = read_fresh_sibling_polars_cache(
+    cache = read_quality_polars_cache(
         target,
         required_columns=("datetime",),
     )
     if cache is None:
         return None
 
-    projected = _project_m1_timestamp_cache_frame(cache.frame, target)
+    projected = _project_timestamp_cache_frame(cache.frame, target)
     if projected is None:
         return None
 
@@ -838,6 +849,11 @@ def _timestamp_scan_from_polars_cache(
         _timestamp_sample_from_projected_row(row, target=target)
         for row in projected.head(MAX_TIMESTAMP_SAMPLES).iter_rows(named=True)
     )
+    if target.timeframe == "T":
+        scan.valid_rows.extend(
+            _timestamp_sample_from_projected_row(row, target=target)
+            for row in projected.iter_rows(named=True)
+        )
 
     if target.period:
         period_mismatches = projected.filter(
@@ -861,30 +877,31 @@ def _timestamp_scan_from_polars_cache(
             )
         )
 
-    granularity_drifts = projected.filter(
-        projected["datetime"] % M1_GRANULARITY_MS != 0
-    )
-    scan.m1_granularity_drift_count = granularity_drifts.height
-    for row in granularity_drifts.head(MAX_TIMESTAMP_SAMPLES).iter_rows(
-        named=True
-    ):
-        sample = _m1_granularity_drift_sample(
-            row_number=int(row["_row_number"]),
-            timestamp_source=str(row["_source_timestamp"]),
-            timestamp_utc_ms=int(row["datetime"]),
-            source_member="",
+    if target.timeframe == "M1":
+        granularity_drifts = projected.filter(
+            projected["datetime"] % M1_GRANULARITY_MS != 0
         )
-        if sample is not None:
-            scan.m1_granularity_drifts.append(sample)
+        scan.m1_granularity_drift_count = granularity_drifts.height
+        for row in granularity_drifts.head(MAX_TIMESTAMP_SAMPLES).iter_rows(
+            named=True
+        ):
+            sample = _m1_granularity_drift_sample(
+                row_number=int(row["_row_number"]),
+                timestamp_source=str(row["_source_timestamp"]),
+                timestamp_utc_ms=int(row["datetime"]),
+                source_member="",
+            )
+            if sample is not None:
+                scan.m1_granularity_drifts.append(sample)
 
-    scan.sequence_scan = _scan_timestamp_sequence_polars(
-        target,
-        projected,
-    )
+        scan.sequence_scan = _scan_timestamp_sequence_polars(
+            target,
+            projected,
+        )
     return scan
 
 
-def _project_m1_timestamp_cache_frame(
+def _project_timestamp_cache_frame(
     frame: Any,
     target: QualityTarget,
 ) -> Any | None:
@@ -896,10 +913,23 @@ def _project_m1_timestamp_cache_frame(
             pl.Datetime("ms")
         )
         utc_datetime = pl.col("datetime").cast(pl.Datetime("ms"))
+        source_timestamp_format = (
+            "%Y%m%d %H%M%S%3f" if target.timeframe == "T" else "%Y%m%d %H%M%S"
+        )
+        frame_columns = set(getattr(frame, "columns", ()))
+        row_value_exprs = []
+        if target.timeframe == "T" and {"bid", "ask", "vol"}.issubset(
+            frame_columns
+        ):
+            row_value_exprs = [
+                pl.col("bid").cast(pl.Utf8).alias("_row_bid"),
+                pl.col("ask").cast(pl.Utf8).alias("_row_ask"),
+                pl.col("vol").cast(pl.Utf8).alias("_row_vol"),
+            ]
         return frame.select(
             [
                 pl.col("datetime"),
-                source_datetime.dt.strftime("%Y%m%d %H%M%S").alias(
+                source_datetime.dt.strftime(source_timestamp_format).alias(
                     "_source_timestamp"
                 ),
                 source_datetime.dt.year().alias("_source_year"),
@@ -916,6 +946,7 @@ def _project_m1_timestamp_cache_frame(
                     "_source_period"
                 ),
                 utc_datetime.dt.strftime(period_format).alias("_utc_period"),
+                *row_value_exprs,
             ]
         ).with_row_index("_row_number", offset=1)
     except Exception:
@@ -931,6 +962,14 @@ def _timestamp_sample_from_projected_row(
     source_month = int(row["_source_month"])
     source_day = int(row["_source_day"])
     source_weekday = int(row["_source_weekday"])
+    row_values: tuple[str, ...] = ()
+    if target.timeframe == "T":
+        row_values = (
+            str(row["_source_timestamp"]),
+            str(row.get("_row_bid", "")),
+            str(row.get("_row_ask", "")),
+            str(row.get("_row_vol", "")),
+        )
     return _TimestampSample(
         row_number=int(row["_row_number"]),
         timestamp_source=str(row["_source_timestamp"]),
@@ -950,6 +989,7 @@ def _timestamp_sample_from_projected_row(
         ).toordinal(),
         source_time_of_day_ms=int(row["_source_time_of_day_ms"]),
         source_member="",
+        row_values=row_values,
     )
 
 

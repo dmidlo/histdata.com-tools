@@ -1190,7 +1190,12 @@ def _is_ascii_text_target(target: QualityTarget) -> bool:
     return (
         target.data_format == "ascii"
         and target.timeframe in {M1, TICK}
-        and target.kind in {QualityTargetKind.CSV, QualityTargetKind.ZIP}
+        and target.kind
+        in {
+            QualityTargetKind.CSV,
+            QualityTargetKind.ZIP,
+            QualityTargetKind.CACHE,
+        }
     )
 
 
