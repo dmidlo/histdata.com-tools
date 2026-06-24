@@ -104,6 +104,7 @@ sidecar_platform_wheel()
         --platform-key "${platform_key}" \
         --executable "${executable}" \
         --fetch-report "${fetch_report}" \
+        --check-version \
         --dist-dir dist \
         --report "${report}"
 
@@ -194,7 +195,7 @@ build()
     if [[ -n "${HISTDATACOM_SIDECAR_EXECUTABLE:-}" ]]; then
         sidecar_platform_wheel
     fi
-    python -m twine check dist/*
+    python -m twine check dist/*.whl dist/*.tar.gz
     inspect_wheel_metadata
     smoke_wheel_install
 }

@@ -84,7 +84,7 @@ signing, or uploading artifacts.
 
 ```sh
 python -m build
-python -m twine check dist/*
+python -m twine check dist/*.whl dist/*.tar.gz
 ```
 
 It also inspects the built wheel metadata directly and installs the wheel into
