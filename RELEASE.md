@@ -5,30 +5,33 @@ validate both source distributions and wheels before publishing.
 
 ## Release Decision Tree
 
-Use GitHub Actions for release artifact builds and provenance. Use the local
-publisher only as a fallback while Trusted Publishing is being verified or if
-GitHub Actions is unavailable.
+Local publishing is the authoritative release path today. GitHub Actions
+publishing is future architecture and remains guarded until the repository is
+ready to move deployment out of the local maintainer workflow.
 
-1. Build and validate only: run the `Release` workflow manually with
-   `release_target=build-only`, or push a `v*` tag. This builds, validates,
-   attests, and uploads artifacts. It does not publish.
-2. TestPyPI dry run: configure the TestPyPI Trusted Publisher, then run the
-   `Release` workflow manually with `release_target=testpypi`. Approve the
-   `testpypi` environment deployment, then verify install behavior from
-   TestPyPI.
-3. PyPI production release: configure the PyPI Trusted Publisher, confirm the
-   same version passed TestPyPI, then run the `Release` workflow manually with
-   `release_target=pypi` and `testpypi_dry_run_confirmed=true`. Approve the
-   `pypi` environment deployment.
-4. Local fallback: run `bash pypi.sh build`, then `bash pypi.sh testpypi` or
-   `bash pypi.sh pypi` only when the GitHub Trusted Publishing path is not
-   available.
+1. Build and validate locally from any reviewed branch with
+   `bash pypi.sh build`.
+2. TestPyPI dry run: check out `dev`, confirm the tree is clean, then run
+   `bash pypi.sh testpypi`. Verify install behavior from TestPyPI before any
+   production release.
+3. PyPI production release: merge or fast-forward the reviewed release state to
+   `main`, confirm the same version passed TestPyPI from `dev`, then run
+   `bash pypi.sh pypi` from `main`.
+4. Emergency branch overrides are explicit: set
+   `HISTDATACOM_ALLOW_RELEASE_BRANCH_MISMATCH=1` only after reviewing why the
+   normal `dev` -> TestPyPI and `main` -> PyPI branch policy cannot be used.
 
-Tag pushes are intentionally build-only. Production publishing is reachable
-only from manual `workflow_dispatch`, the `pypi` environment approval gate, and
-the explicit TestPyPI dry-run confirmation input.
+Tag pushes are intentionally build-only in the release workflow. The dormant
+GitHub Actions PyPI publishing path is reachable only from manual
+`workflow_dispatch`, the `pypi` environment approval gate, the `main` branch,
+and the explicit TestPyPI dry-run confirmation input.
 
 ## Trusted Publishing Configuration
+
+Trusted Publishing is the target GitHub Actions deployment model, not the
+current publishing path. Keep the configuration notes below current so the
+future migration is straightforward, but publish with `pypi.sh` until the
+Actions release path is deliberately enabled.
 
 The GitHub repository has protected `testpypi` and `pypi` environments with
 required reviewer approval. Configure the matching Trusted Publishers in
@@ -58,13 +61,24 @@ attestations and PyPI Trusted Publishing attestations.
 
 ## Local Publishing
 
-The existing local workflow remains available:
+The existing local workflow is the current publishing workflow:
 
 ```sh
 bash pypi.sh build
 bash pypi.sh testpypi
 bash pypi.sh pypi
 ```
+
+`bash pypi.sh testpypi` is guarded to run from `dev` by default. Override the
+branch name only for a deliberate repository policy change:
+
+```sh
+HISTDATACOM_TESTPYPI_BRANCH=release-candidate bash pypi.sh testpypi
+```
+
+`bash pypi.sh pypi` is guarded to run from `main` by default. Both upload
+commands refuse to run with uncommitted tracked changes before building,
+signing, or uploading artifacts.
 
 `pypi.sh build` now uses the PEP 517 build frontend:
 
@@ -137,9 +151,10 @@ Package metadata is declared in `pyproject.toml`. Local release environments
 must use `setuptools>=77` so the built artifacts include current SPDX license
 metadata.
 
-The upload commands still use local `.pypirc` credentials and GPG detached
-signatures, matching the historical release process. Prefer the GitHub Trusted
-Publishing path once the PyPI and TestPyPI publishers are verified.
+The upload commands use local `.pypirc` credentials and GPG detached
+signatures, matching the historical release process. Move to the GitHub
+Trusted Publishing path only after the branch, sidecar, runner, and approval
+model is reviewed as a separate release-engineering change.
 
 After a TestPyPI dry run, install from TestPyPI in a disposable environment:
 
@@ -196,9 +211,11 @@ updated. Release workflow concurrency does not cancel in-progress runs, so a
 manual publish cannot be interrupted by a later tag or dispatch event.
 
 The release workflow builds artifacts on `v*` tags and manual dispatches. It
-does not publish automatically on tag push. Publishing to TestPyPI or PyPI
-requires a manual workflow dispatch, a matching protected environment approval,
-and OIDC Trusted Publishing configured on the target index.
+does not publish automatically on tag push. The dormant publish jobs are branch
+guarded to match local policy: TestPyPI is only dispatchable from `dev`, and
+PyPI is only dispatchable from `main`. Publishing through GitHub Actions also
+requires a matching protected environment approval and OIDC Trusted Publishing
+configured on the target index.
 
 Release artifact provenance covers everything under `dist/`, including the
 sidecar wheel inspection report. The release build runs the same sidecar wheel

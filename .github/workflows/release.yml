@@ -314,7 +314,7 @@ jobs:
     name: Publish to TestPyPI
     needs: assemble-release-artifacts
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && inputs.release_target == 'testpypi'
+    if: github.event_name == 'workflow_dispatch' && inputs.release_target == 'testpypi' && github.ref == 'refs/heads/dev'
     environment:
       name: testpypi
       url: https://test.pypi.org/p/histdatacom
@@ -339,7 +339,7 @@ jobs:
     name: Publish to PyPI
     needs: assemble-release-artifacts
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && inputs.release_target == 'pypi'
+    if: github.event_name == 'workflow_dispatch' && inputs.release_target == 'pypi' && github.ref == 'refs/heads/main'
     environment:
       name: pypi
       url: https://pypi.org/p/histdatacom

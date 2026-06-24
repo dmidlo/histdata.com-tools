@@ -46,6 +46,13 @@ def _pyproject_config() -> dict[str, object]:
     return loaded
 
 
+def _project_text(relative_path: str) -> str:
+    """Return repository file text for release policy assertions."""
+    return (Path(__file__).resolve().parents[2] / relative_path).read_text(
+        encoding="utf-8"
+    )
+
+
 def _step_run(job: dict[str, object], step_name: str) -> str:
     """Return the shell command for a named workflow step."""
     steps = job["steps"]
@@ -130,6 +137,16 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
     }
     assert jobs["publish-testpypi"]["needs"] == "assemble-release-artifacts"
     assert jobs["publish-pypi"]["needs"] == "assemble-release-artifacts"
+    assert jobs["publish-testpypi"]["if"] == (
+        "github.event_name == 'workflow_dispatch' && "
+        "inputs.release_target == 'testpypi' && "
+        "github.ref == 'refs/heads/dev'"
+    )
+    assert jobs["publish-pypi"]["if"] == (
+        "github.event_name == 'workflow_dispatch' && "
+        "inputs.release_target == 'pypi' && "
+        "github.ref == 'refs/heads/main'"
+    )
 
 
 def test_package_metadata_advertises_platform_wheel_support() -> None:
@@ -144,3 +161,35 @@ def test_package_metadata_advertises_platform_wheel_support() -> None:
         "Operating System :: POSIX",
         "Operating System :: POSIX :: Linux",
     } <= classifiers
+
+
+def test_local_publishing_script_enforces_branch_contract() -> None:
+    """Local release uploads should map dev to TestPyPI and main to PyPI."""
+    script = _project_text("pypi.sh")
+
+    assert 'testpypi_branch="${HISTDATACOM_TESTPYPI_BRANCH:-dev}"' in script
+    assert 'pypi_branch="${HISTDATACOM_PYPI_BRANCH:-main}"' in script
+    assert 'prepare_release_upload "TestPyPI" "${testpypi_branch}"' in script
+    assert 'prepare_release_upload "PyPI" "${pypi_branch}"' in script
+    assert "HISTDATACOM_ALLOW_RELEASE_BRANCH_MISMATCH" in script
+    assert "refusing release upload with uncommitted tracked changes" in script
+    assert "python -m twine upload -r testpypi" in script
+    assert "python -m twine upload -r pypi" in script
+
+
+def test_release_docs_mark_local_publishing_as_current_path() -> None:
+    """Release docs should not imply Actions deployment is active today."""
+    release_docs = _project_text("RELEASE.md")
+
+    assert (
+        "Local publishing is the authoritative release path today."
+        in release_docs
+    )
+    assert "GitHub Actions" in release_docs
+    assert "publishing is future architecture" in release_docs
+    assert "TestPyPI is only dispatchable from `dev`" in release_docs
+    assert "PyPI is only dispatchable from `main`" in release_docs
+    assert (
+        "`bash pypi.sh testpypi` is guarded to run from `dev`" in release_docs
+    )
+    assert "`bash pypi.sh pypi` is guarded to run from `main`" in release_docs

@@ -5,6 +5,8 @@ set -euo pipefail
 bold=$(tput bold 2>/dev/null || true)
 normal=$(tput sgr0 2>/dev/null || true)
 project_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+testpypi_branch="${HISTDATACOM_TESTPYPI_BRANCH:-dev}"
+pypi_branch="${HISTDATACOM_PYPI_BRANCH:-main}"
 
 cd "${project_root}"
 
@@ -119,6 +121,55 @@ sign_dist_artifacts()
     gpg --detach-sign --armor "${artifacts[@]}"
 }
 
+current_git_branch()
+{
+    git rev-parse --abbrev-ref HEAD
+}
+
+require_clean_release_tree()
+{
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        echo "pypi.sh: refusing release upload with uncommitted tracked changes." >&2
+        echo "Commit or stash changes before publishing." >&2
+        exit 2
+    fi
+}
+
+require_release_branch()
+{
+    local target="$1"
+    local expected_branch="$2"
+    local branch
+
+    branch=$(current_git_branch)
+
+    if [[ "${branch}" == "HEAD" ]]; then
+        echo "pypi.sh: refusing ${target} upload from detached HEAD." >&2
+        echo "Check out ${expected_branch} before publishing." >&2
+        exit 2
+    fi
+
+    if [[ "${branch}" != "${expected_branch}" ]]; then
+        if [[ "${HISTDATACOM_ALLOW_RELEASE_BRANCH_MISMATCH:-}" == "1" ]]; then
+            echo "pypi.sh: overriding ${target} branch guard from ${branch}; expected ${expected_branch}." >&2
+            return
+        fi
+
+        echo "pypi.sh: refusing ${target} upload from ${branch}; expected ${expected_branch}." >&2
+        echo "Set HISTDATACOM_ALLOW_RELEASE_BRANCH_MISMATCH=1 only for an explicitly reviewed emergency." >&2
+        exit 2
+    fi
+}
+
+prepare_release_upload()
+{
+    local target="$1"
+    local expected_branch="$2"
+
+    require_release_branch "${target}" "${expected_branch}"
+    require_clean_release_tree
+}
+
 build()
 {
     rm -rf ./dist
@@ -191,11 +242,13 @@ case "${1:-}" in
         sidecar_platform_wheel
         ;;
     pypi)
+        prepare_release_upload "PyPI" "${pypi_branch}"
         build
         sign_dist_artifacts
         python -m twine upload -r pypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
         ;;
     testpypi)
+        prepare_release_upload "TestPyPI" "${testpypi_branch}"
         build
         sign_dist_artifacts
         python -m twine upload -r testpypi --config-file .pypirc dist/*.whl dist/*.tar.gz dist/*.asc
