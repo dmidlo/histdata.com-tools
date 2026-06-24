@@ -101,10 +101,20 @@ a Temporal executable is requested from an artifact that does not bundle one.
 Platform wheels are built from explicit Temporal executable artifacts and must
 set the current platform manifest entry to `bundled: true`.
 
-To build a platform wheel locally, provide the executable artifact:
+To build a platform wheel locally, provide the executable artifact and the
+fetch report generated for that exact artifact:
 
 ```sh
-HISTDATACOM_SIDECAR_EXECUTABLE=/path/to/temporal bash pypi.sh build
+venv/bin/python scripts/fetch_temporal_cli.py \
+  --platform-key macos-arm64 \
+  --version 1.7.2 \
+  --download-dir .temporal-cli/macos-arm64/downloads \
+  --output-dir .temporal-cli/macos-arm64/bin \
+  --report .temporal-cli/macos-arm64/temporal-cli-report.json
+
+HISTDATACOM_SIDECAR_EXECUTABLE=.temporal-cli/macos-arm64/bin/temporal \
+HISTDATACOM_FETCH_REPORT=.temporal-cli/macos-arm64/temporal-cli-report.json \
+bash pypi.sh build
 ```
 
 Set `HISTDATACOM_SIDECAR_PLATFORM` when cross-building from a prepared

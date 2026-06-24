@@ -173,6 +173,9 @@ def test_local_publishing_script_enforces_branch_contract() -> None:
     assert 'prepare_release_upload "PyPI" "${pypi_branch}"' in script
     assert "HISTDATACOM_ALLOW_RELEASE_BRANCH_MISMATCH" in script
     assert "refusing release upload with uncommitted tracked changes" in script
+    assert 'fetch_report="${HISTDATACOM_FETCH_REPORT:-}"' in script
+    assert "Set HISTDATACOM_FETCH_REPORT" in script
+    assert '--fetch-report "${fetch_report}"' in script
     assert "scripts/verify_testpypi_install.py" in script
     assert "--require-bundled-current-platform" in script
     assert "python -m twine upload -r testpypi" in script
@@ -195,3 +198,5 @@ def test_release_docs_mark_local_publishing_as_current_path() -> None:
         "`bash pypi.sh testpypi` is guarded to run from `dev`" in release_docs
     )
     assert "`bash pypi.sh pypi` is guarded to run from `main`" in release_docs
+    assert "HISTDATACOM_FETCH_REPORT" in release_docs
+    assert "scripts/fetch_temporal_cli.py" in release_docs

@@ -81,12 +81,18 @@ PY
 sidecar_platform_wheel()
 {
     local executable="${HISTDATACOM_SIDECAR_EXECUTABLE:-}"
+    local fetch_report="${HISTDATACOM_FETCH_REPORT:-}"
     local platform_key="${HISTDATACOM_SIDECAR_PLATFORM:-}"
     local report="dist/sidecar-platform-wheel-build-report.json"
     local wheel
 
     if [[ -z "${executable}" ]]; then
         echo "Set HISTDATACOM_SIDECAR_EXECUTABLE to build a bundled sidecar wheel." >&2
+        exit 2
+    fi
+
+    if [[ -z "${fetch_report}" ]]; then
+        echo "Set HISTDATACOM_FETCH_REPORT to the fetch_temporal_cli.py JSON report for the bundled executable." >&2
         exit 2
     fi
 
@@ -97,6 +103,7 @@ sidecar_platform_wheel()
     python scripts/sidecar_platform_wheel.py \
         --platform-key "${platform_key}" \
         --executable "${executable}" \
+        --fetch-report "${fetch_report}" \
         --dist-dir dist \
         --report "${report}"
 
