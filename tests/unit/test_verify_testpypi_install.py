@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -145,7 +146,7 @@ def test_download_smoke_uses_bounded_historical_m1_download(
     assert "now" not in command
     assert json_commands == [
         [
-            str(tmp_path / "venv" / "bin" / "histdatacom"),
+            str(module._script_path(tmp_path / "venv", "histdatacom")),
             "runtime",
             "--json",
             "stop",
@@ -199,7 +200,7 @@ def test_cli_parity_probe_requires_current_flags(
     module = _module()
 
     def fake_run(command: list[str], **_: Any) -> SimpleNamespace:
-        executable = Path(command[0]).name
+        executable = Path(command[0]).stem
         if executable == "histdatacom" and "--version" in command:
             return SimpleNamespace(returncode=0, stdout="0.79.0\n", stderr="")
         if executable == "histdatacom" and "-h" in command:
@@ -237,7 +238,7 @@ def test_cli_parity_probe_fails_on_stale_help(
     module = _module()
 
     def fake_run(command: list[str], **_: Any) -> SimpleNamespace:
-        executable = Path(command[0]).name
+        executable = Path(command[0]).stem
         if executable == "histdatacom" and "--version" in command:
             return SimpleNamespace(returncode=0, stdout="0.79.0\n", stderr="")
         if executable == "histdatacom" and "-h" in command:
@@ -339,7 +340,9 @@ def test_smoke_runtime_install_probe_exposes_venv_scripts(
     )
 
     assert captured_env["VIRTUAL_ENV"] == str(tmp_path / "venv")
-    assert captured_env["PATH"].split(":")[0] == str(tmp_path / "venv" / "bin")
+    assert captured_env["PATH"].split(os.pathsep)[0] == str(
+        module._venv_python(tmp_path / "venv").parent
+    )
 
 
 def test_smoke_runtime_install_probe_accepts_explicit_developer_runtime(

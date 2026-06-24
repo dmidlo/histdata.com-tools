@@ -61,7 +61,9 @@ jobs:
         run: python scripts/smoke_runtime_install.py --expect-temporal-extra --skip-cli
 
       - name: Run pip-audit
-        run: python -m pip_audit --local --strict --format=json --output=pip-audit.json --progress-spinner=off
+        run: |
+          python -m pip freeze --exclude-editable > pip-audit-requirements.txt
+          python -m pip_audit --requirement pip-audit-requirements.txt --strict --format=json --output=pip-audit.json --progress-spinner=off
 
       - name: Upload pip-audit report
         if: always()

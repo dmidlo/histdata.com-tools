@@ -5,7 +5,7 @@ from __future__ import annotations
 import shlex
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, cast
 
 from histdatacom.activity_stages import (
@@ -218,7 +218,7 @@ def build_storage_backed_campaign_plan(
         ],
         "repo_quality_contract": {
             "required_after_each_slice": True,
-            "repo_path": str(Path(data_directory) / ".repo"),
+            "repo_path": _plan_path(data_directory, ".repo"),
             "preserve_repo_file": True,
             "preserve_quality_reports": True,
             "quality_checks": list(normalized_quality_checks),
@@ -557,7 +557,7 @@ def _slice_commands(
                 data_directory,
             ),
             "updates_repo": True,
-            "repo_path": str(Path(data_directory) / ".repo"),
+            "repo_path": _plan_path(data_directory, ".repo"),
         },
     ]
     cleanup_command = _cleanup_command(cleanup_mode, target_paths)
@@ -675,8 +675,8 @@ def _slice_target_path(
     timeframe: str,
     symbol: str,
 ) -> str:
-    return str(
-        Path(data_directory) / Format(csv_format).name / timeframe / symbol
+    return _plan_path(
+        data_directory, Format(csv_format).name, timeframe, symbol
     )
 
 
@@ -703,7 +703,14 @@ def _slice_report_path(
         symbols=symbols,
     )
     filename = f"{identifier}-quality.json"
-    return str(Path(reports_directory) / filename)
+    return _plan_path(reports_directory, filename)
+
+
+def _plan_path(root: str, *parts: str) -> str:
+    """Return stable command-plan paths independent of the host OS."""
+    normalized_root = str(root).replace("\\", "/")
+    normalized_parts = [str(part).replace("\\", "/") for part in parts]
+    return str(PurePosixPath(normalized_root, *normalized_parts))
 
 
 def _slice_id(

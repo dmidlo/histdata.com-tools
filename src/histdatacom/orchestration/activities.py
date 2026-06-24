@@ -772,7 +772,7 @@ def _portable_repo_artifact_path(value: str, *, repo_path: Path) -> str:
     if not value or not path.is_absolute():
         return value
     try:
-        return str(path.resolve().relative_to(repo_path.parent.resolve()))
+        return path.resolve().relative_to(repo_path.parent.resolve()).as_posix()
     except ValueError:
         return value
 
