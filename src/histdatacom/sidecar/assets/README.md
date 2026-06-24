@@ -1,21 +1,25 @@
-# HistDataCom Temporal Sidecar Assets
+# HistDataCom Temporal Runtime Assets
 
 This package-data directory is the stable PyPI payload surface for the
-Temporal sidecar migration.
+Temporal orchestration runtime.
 
-The source tree ships metadata, runtime defaults, and third-party notice
-material only. Release builds create platform wheels by staging an explicit
-Temporal executable with `scripts/sidecar_platform_wheel.py`. That staged wheel
-patches `manifest.json`, writes `temporal-cli-provenance.json`, includes the
-executable under `assets/bin/<platform>/`, and retags the artifact with the
-matching platform wheel tag.
+The normal PyPI/TestPyPI source distribution and universal wheel ship metadata,
+runtime defaults, third-party notice material, and the packaged Temporal
+artifact index. They do not embed the Temporal executable.
 
-Bundled platform wheel provenance records the Temporal CLI version, upstream
-release asset name and URL, expected and verified archive SHA-256 digests, the
-packaged executable path, and the packaged executable SHA-256 digest. The
-Temporal CLI notice and MIT license are stored under
-`third-party/temporal-cli/`.
+The accepted V1.0 design is metadata-only wheel distribution plus verified
+first-run runtime provisioning. The resolver implemented after this design
+should read the packaged artifact index, download only pinned Temporal CLI
+release artifacts, verify archive SHA-256 checksums before extraction, and cache
+the executable outside the installed package.
 
-Source distributions, unsupported platforms, and universal fallback wheels
-must fail sidecar executable lookup with a clear message instead of silently
-falling back to an unmanaged system binary.
+Bundled executable wheels remain an explicit offline/private artifact path.
+Those wheels stage an explicit Temporal executable with
+`scripts/sidecar_platform_wheel.py`, patch `manifest.json`, write
+`temporal-cli-provenance.json`, include the executable under
+`assets/bin/<platform>/`, and retag the artifact with the matching platform
+wheel tag.
+
+Metadata-only artifacts and unsupported platforms must fail executable lookup
+with a clear message until the runtime resolver can provision a verified cache
+entry. They must not silently fall back to an unmanaged system binary.

@@ -285,8 +285,15 @@ class QualityFinding:
 class QualityRule(Protocol):
     """Protocol implemented by concrete data-quality checks."""
 
-    rule_id: str
-    description: str
+    @property
+    def rule_id(self) -> str:
+        """Return the stable quality-rule identifier."""
+        ...
+
+    @property
+    def description(self) -> str:
+        """Return the human-readable rule description."""
+        ...
 
     def evaluate(self, target: QualityTarget) -> Iterable[QualityFinding]:
         """Return findings for one target."""
@@ -295,8 +302,15 @@ class QualityRule(Protocol):
 class QualityRunRule(Protocol):
     """Protocol implemented by checks that need the full target set."""
 
-    rule_id: str
-    description: str
+    @property
+    def rule_id(self) -> str:
+        """Return the stable quality-run rule identifier."""
+        ...
+
+    @property
+    def description(self) -> str:
+        """Return the human-readable run-rule description."""
+        ...
 
     def evaluate_run(
         self,

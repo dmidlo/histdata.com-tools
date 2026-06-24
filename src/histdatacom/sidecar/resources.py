@@ -61,6 +61,7 @@ class SidecarManifest:
     distribution_strategy: str
     embedded_binary: bool
     resource_files: tuple[str, ...]
+    runtime_artifact_index: str
     platforms: dict[str, SidecarPlatformResource]
     sdist_fallback: str
 
@@ -79,6 +80,7 @@ class SidecarManifest:
             resource_files=tuple(
                 str(item) for item in data.get("resource_files", [])
             ),
+            runtime_artifact_index=str(data.get("runtime_artifact_index", "")),
             platforms=platforms,
             sdist_fallback=str(data.get("sdist_fallback", "")),
         )

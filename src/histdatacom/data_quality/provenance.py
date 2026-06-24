@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import hashlib
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import Any, cast
 
 from histdatacom.data_quality.contracts import (
     QualityFinding,
@@ -209,18 +209,18 @@ def _unavailable_report(
     explicit: bool,
     rule_id: str,
 ) -> QualityReport:
-    manifest = {
+    manifest: dict[str, JSONValue] = {
         "schema_version": PROVENANCE_MANIFEST_SCHEMA_VERSION,
         "available": False,
         "status": "unavailable",
         "reason": "no sidecar manifest/status store found",
-        "roots": _string_list(config.get("roots")),
+        "roots": cast(JSONValue, _string_list(config.get("roots"))),
         "store_count": 0,
         "target_count": len(targets),
         "finding_count": int(explicit),
         "emitted_finding_count": int(explicit),
         "finding_limit_reached": False,
-        "stores": [],
+        "stores": cast(JSONValue, []),
     }
     if not explicit:
         return QualityReport(metadata={PROVENANCE_METADATA_KEY: manifest})
@@ -243,7 +243,7 @@ def _unavailable_report(
         rule_id=rule_id,
         target=target,
         metadata={
-            "roots": _string_list(config.get("roots")),
+            "roots": cast(JSONValue, _string_list(config.get("roots"))),
             "target_count": len(targets),
         },
     )
@@ -661,7 +661,7 @@ def _provenance_manifest_payload(
         "schema_version": PROVENANCE_MANIFEST_SCHEMA_VERSION,
         "available": True,
         "status": "checked",
-        "roots": roots,
+        "roots": cast(JSONValue, roots),
         "store_count": len(evaluations),
         "target_count": sum(
             evaluation.target_count for evaluation in evaluations

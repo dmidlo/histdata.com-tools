@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import cast
 
 from histdatacom.data_quality.contracts import (
     QualityFinding,
@@ -450,7 +451,7 @@ def _modeling_readiness_metadata(
             "leakage_assumptions": leakage_assumptions,
             "calendar_regime_assumptions": calendar_regime_assumptions,
             "target_horizon": target_horizon,
-            "configured_assumption_keys": assumption_keys,
+            "configured_assumption_keys": cast(JSONValue, assumption_keys),
         },
         "advisory": True,
         "data_defect": False,
@@ -602,8 +603,8 @@ def _leakage_assumptions(
     transform_keys = _configured_keys(assumptions, _LEAKAGE_SENSITIVE_KEYS)
     policy_keys = _configured_keys(assumptions, _TRAINING_ONLY_POLICY_KEYS)
     return {
-        "leakage_sensitive_transform_keys": transform_keys,
-        "training_only_policy_keys": policy_keys,
+        "leakage_sensitive_transform_keys": cast(JSONValue, transform_keys),
+        "training_only_policy_keys": cast(JSONValue, policy_keys),
         "training_only_policy_configured": bool(policy_keys),
         "train_test_leakage_risk": bool(transform_keys) and not policy_keys,
     }
@@ -621,7 +622,7 @@ def _calendar_regime_assumptions(
     target_tags = _target_calendar_event_tags(target)
     return {
         "required": required,
-        "configured_policy_keys": configured_keys,
+        "configured_policy_keys": cast(JSONValue, configured_keys),
         "configured_tags": _assumption_values(
             assumptions,
             _CALENDAR_REGIME_TAG_KEYS,

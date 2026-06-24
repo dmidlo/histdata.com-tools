@@ -424,12 +424,13 @@ def _selected_dimensions(
     formats: Iterable[str] | None,
     timeframes: Iterable[str] | None,
 ) -> tuple[tuple[str, str], ...]:
-    return cast(
-        tuple[tuple[str, str], ...],
-        valid_dataset_dimensions(
-            tuple(formats or sorted(Format.list_values())),
-            tuple(timeframes or sorted(Timeframe.list_keys())),
-        ),
+    dimensions = valid_dataset_dimensions(
+        tuple(formats or sorted(Format.list_values())),
+        tuple(timeframes or sorted(Timeframe.list_keys())),
+    )
+    return tuple(
+        (str(csv_format), str(timeframe))
+        for csv_format, timeframe in dimensions
     )
 
 
@@ -487,22 +488,25 @@ def _campaign_execution_slices(
                         symbols=symbol_group,
                     ),
                     "slice_index": slice_index,
-                    "symbols": list(symbol_group),
+                    "symbols": cast(JSONValue, list(symbol_group)),
                     "format": csv_format,
                     "timeframe": timeframe,
                     "deep_quality_supported": deep_supported,
                     "work_item_count": work_item_count,
-                    "target_paths": target_paths,
+                    "target_paths": cast(JSONValue, target_paths),
                     "quality_report": report_path,
-                    "commands": _slice_commands(
-                        data_directory=data_directory,
-                        csv_format=csv_format,
-                        timeframe=timeframe,
-                        symbols=symbol_group,
-                        target_paths=target_paths,
-                        report_path=report_path,
-                        cleanup_mode=cleanup_mode,
-                        quality_checks=quality_checks,
+                    "commands": cast(
+                        JSONValue,
+                        _slice_commands(
+                            data_directory=data_directory,
+                            csv_format=csv_format,
+                            timeframe=timeframe,
+                            symbols=symbol_group,
+                            target_paths=target_paths,
+                            report_path=report_path,
+                            cleanup_mode=cleanup_mode,
+                            quality_checks=quality_checks,
+                        ),
                     ),
                 }
             )

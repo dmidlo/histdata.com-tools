@@ -104,6 +104,31 @@ def _write_common_assets(
         "{}",
     )
     wheel.writestr(
+        "histdatacom/sidecar/assets/temporal-runtime-index.json",
+        json.dumps(
+            {
+                "schema_version": 1,
+                "component": "temporal-cli",
+                "version": "1.7.2",
+                "platforms": {
+                    "macos-arm64": {
+                        "archive_name": (
+                            "temporal_cli_1.7.2_darwin_arm64.tar.gz"
+                        ),
+                        "archive_sha256": ARCHIVE_SHA256,
+                        "archive_size_bytes": 123,
+                        "archive_url": (
+                            "https://github.com/temporalio/cli/releases/"
+                            "download/v1.7.2/"
+                            "temporal_cli_1.7.2_darwin_arm64.tar.gz"
+                        ),
+                        "executable_name": "temporal",
+                    }
+                },
+            }
+        ),
+    )
+    wheel.writestr(
         "histdatacom/sidecar/assets/third-party/temporal-cli/LICENSE",
         "MIT\n",
     )

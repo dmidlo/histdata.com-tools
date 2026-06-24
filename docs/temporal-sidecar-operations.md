@@ -79,29 +79,33 @@ pip install histdatacom
 
 `histdatacom[temporal]` remains accepted as a backwards-compatible extra for
 automation written during migration, and `histdatacom[all]` still includes the
-same SDK dependency. Source distributions and universal fallback wheels include
-sidecar metadata, resource manifests, and CLI entry points. Platform wheels can
-include the Temporal server executable as package data. On a bundled platform wheel,
-`histdatacom-sidecar start` resolves the packaged executable through
-`importlib.resources`; on metadata-only artifacts and unsupported platforms,
-development and operator smoke tests should pass an explicit Temporal
-executable path to `histdatacom-sidecar start --executable`. The Python SDK and
-the server executable are separate distribution concerns: base installs provide
-the SDK, while bundled platform wheels provide the executable.
+same SDK dependency. Source distributions and universal wheels include runtime
+metadata, resource manifests, third-party notices, and CLI entry points.
 
-Release automation builds the metadata-only sdist/fallback wheel first, then
-builds bundled Temporal platform wheels for Linux x86_64, Linux arm64, macOS
-Intel, macOS arm64, and Windows x86_64. The bundled wheels use pinned Temporal
-CLI `1.7.2` release artifacts and verify SHA-256 checksums before bundling. The
-platform wheel payload includes `temporal-cli-provenance.json` plus the Temporal
-CLI notice and MIT license under `third-party/temporal-cli/`; metadata-only
-fallback artifacts intentionally omit executable provenance. Every bundled wheel
-must pass `scripts/inspect_wheel.py --require-bundled-platform`, install on its
-matching GitHub-hosted runner, run
-`histdatacom-sidecar doctor --json` with
+The accepted V1.0 packaging design keeps normal PyPI/TestPyPI artifacts
+metadata-only and provisions the pinned Temporal executable through a verified
+runtime cache on first use. The design is documented in
+`docs/temporal-binary-provisioning.md`; #250 implements the resolver and #251
+hardens release preflight around that resolver.
+
+Until the resolver lands, metadata-only artifacts and unsupported platforms
+should pass an explicit Temporal executable path to
+`histdatacom-sidecar start --executable`. Bundled executable wheels remain an
+offline/private distribution path, not the normal PyPI release path. The Python
+SDK and the server executable are separate distribution concerns: base installs
+provide the SDK, while the runtime resolver owns executable availability.
+
+Release automation should build the metadata-only sdist/fallback wheel for
+normal PyPI/TestPyPI publication, enforce the upload-size gate, and smoke a clean
+install through the runtime resolver. Existing bundled platform-wheel tooling may
+still build offline/private artifacts with pinned Temporal CLI `1.7.2` release
+artifacts, SHA-256 verification, `temporal-cli-provenance.json`, and Temporal CLI
+notice/license resources, but those wheels require an explicit operator decision.
+Bundled wheels must pass `scripts/inspect_wheel.py --require-bundled-platform`,
+install on a matching runner, run `histdatacom-sidecar doctor --json` with
 `platform.executable_bundled == true`, probe the executable version, start the
-sidecar without `--executable`, and run the installed-wheel hermetic sidecar
-smoke job. The hermetic smoke uses a local-only dataset-planning request:
+runtime without `--executable`, and run the installed-wheel hermetic smoke job.
+The hermetic smoke uses a local-only dataset-planning request:
 `available_remote_data`, `update_remote_data`, `validate_urls`, download,
 extract, and import flags are all false. It still starts the packaged Temporal
 executable, starts workers, submits a workflow, waits for completion, validates
@@ -124,11 +128,11 @@ minimal non-Influx request with URL validation enabled, so it can detect vendor
 availability, network, and website/form drift, but it should not be the default
 PyPI publish gate for otherwise-good platform wheels.
 
-Rollback behavior is intentionally conservative. If a platform executable or
-wheel is bad after publish, yank the affected platform wheel and cut a
-replacement release. The sdist and universal fallback wheel are metadata-only
-recovery artifacts; they keep the package installable while operators provide
-an explicit Temporal executable path.
+Rollback behavior is intentionally conservative. If the Python artifact is bad,
+yank it and cut a replacement release. If a remote Temporal artifact is bad or
+unreachable, fix the packaged artifact index in a patch release. Explicit
+operator executables, pre-seeded caches, and offline/private bundles remain
+recovery paths.
 
 Default-runtime failure policy:
 
@@ -241,14 +245,14 @@ Check status:
 histdatacom-sidecar status --json
 ```
 
-Start with the packaged executable on a bundled platform wheel:
+Start with a packaged executable on an offline/private bundled wheel:
 
 ```sh
 histdatacom-sidecar start
 ```
 
-Start with an explicit Temporal executable on metadata-only artifacts or when
-testing an operator-provided executable:
+Start with an explicit Temporal executable on metadata-only artifacts until the
+runtime resolver provisions a verified cache entry:
 
 ```sh
 histdatacom-sidecar start --executable /path/to/temporal
@@ -635,12 +639,13 @@ Dependency install problems:
   extra `histdatacom[temporal]` remains accepted for migration-era install
   scripts.
 
-Temporal executable not bundled:
+Temporal executable unavailable:
 
 - Symptom: `doctor` reports `executable_bundled: false`, or start cannot find a
-  packaged executable.
-- Fix: install a platform wheel that bundles the current platform executable,
-  or pass `--executable /path/to/temporal` for development and operator tests.
+  packaged or cached executable.
+- Fix: after #250, pre-seed the verified runtime cache or allow first-run
+  provisioning. Until then, pass `--executable /path/to/temporal` or install an
+  offline/private bundled artifact for development and operator tests.
 
 Sidecar unavailable:
 
@@ -735,8 +740,8 @@ Data-quality checks:
   `find <slice-target> -name .data -type f -delete`; more aggressive low-disk
   runs may remove the entire slice working directory after `.repo` and reports
   have been written. Source checkouts whose doctor output reports
-  `platform.executable_bundled=false` need an explicit Temporal executable or an
-  installed bundled platform wheel before campaign execution.
+  `platform.executable_bundled=false` need an explicit Temporal executable until
+  the verified runtime cache resolver is available.
 - Use `--quality-report PATH` to write the full JSON report. The report schema
   is `histdatacom.quality-report.v1`; console output remains a bounded human
   summary with clean, warning, and failed file sections.
@@ -890,11 +895,12 @@ Unit tests should keep most coverage independent from live Temporal and Influx:
 Live smoke tests belong behind explicit operator setup because they require a
 Temporal executable, and live import coverage requires a real Influx target or
 the Docker-backed `scripts/smoke_influx_docker.py` helper.
-Package release smoke should validate metadata, console entry points, packaged
-sidecar resources, and offline `status`/`doctor` behavior for every wheel. For
-bundled platform wheels, release smoke should also require
-`doctor.platform.executable_bundled == true`, run the packaged executable
-version probe, start the sidecar without `--executable`, and run
+Package release smoke should validate metadata, console entry points, runtime
+resources, and offline `status`/`doctor` behavior for every wheel. After #250,
+normal metadata-only release smoke should exercise the verified resolver with an
+isolated cache. For bundled offline/private wheels, release smoke should also
+require `doctor.platform.executable_bundled == true`, run the packaged
+executable version probe, start the runtime without `--executable`, and run
 `--hermetic-sidecar-smoke` plus `--default-routing-sidecar-smoke`. Use
 `--live-sidecar-smoke` separately when the
 operator intentionally wants to include external HistData.com availability and

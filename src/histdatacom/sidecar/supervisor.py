@@ -642,7 +642,8 @@ class SidecarSupervisor:
                 "executable_bundled": executable_bundled,
                 "message": (
                     "No packaged Temporal executable is available in this "
-                    "artifact. Install a bundled platform wheel or pass "
+                    "artifact. Use a verified runtime cache when available, "
+                    "install an offline/private bundled wheel, or pass "
                     "--executable."
                     if not executable_bundled
                     else "Packaged Temporal executable is available."

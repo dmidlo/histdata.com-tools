@@ -46,7 +46,7 @@ def _write_manifest(source_root: Path) -> None:
                 "schema_version": 1,
                 "sidecar": "temporal",
                 "distribution_strategy": (
-                    "platform-wheel-with-sdist-metadata-fallback"
+                    "metadata-wheel-with-verified-runtime-provisioning"
                 ),
                 "embedded_binary": False,
                 "resource_files": [

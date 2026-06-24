@@ -18,6 +18,7 @@ EXPECTED_ASSETS = (
     "README.md",
     "manifest.json",
     "runtime-defaults.json",
+    "temporal-runtime-index.json",
     "third-party/temporal-cli/LICENSE",
     "third-party/temporal-cli/NOTICE.md",
 )

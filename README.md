@@ -32,6 +32,7 @@ Works on MacOS, Linux & Windows Systems.
     - [Warning, Error, and Exit Policy](#warning-error-and-exit-policy)
   - [Temporal Sidecar Compatibility](#temporal-sidecar-compatibility)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
+    - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
     - [Lifecycle and Diagnostics](#lifecycle-and-diagnostics)
     - [Sidecar Jobs and Automation](#sidecar-jobs-and-automation)
     - [Sidecar Troubleshooting and Contributor Docs](#sidecar-troubleshooting-and-contributor-docs)
@@ -413,9 +414,10 @@ histdatacom -A --repo-quality-columns
 #### Full-Dataset Quality Campaigns
 
 Full HistData.com quality campaigns should run in bounded
-symbol/format/timeframe slices from an installed bundled platform wheel, or
-from a source checkout started with an explicit Temporal executable. Do not run
-the full repository surface as one accumulating local scrape.
+symbol/format/timeframe slices from an environment with a verified Temporal
+executable: a future provisioned cache, an offline/private bundled artifact, or
+a source checkout started with an explicit executable. Do not run the full
+repository surface as one accumulating local scrape.
 
 For each slice, run download/extract first, then run `--repo-quality` so `.repo`
 keeps bounded findings and the detailed JSON report path. Normal campaign
@@ -759,21 +761,38 @@ records. Existing `.meta` files remain readable as migration inputs; successful
 imports write the manifest row and remove the legacy file, while missing or
 corrupt legacy files are reported without blocking manifest-backed operation.
 
-Source distributions and universal fallback wheels include sidecar metadata and
-CLI entry points. Platform wheels can bundle the Temporal server executable
-under the sidecar package resources. On a bundled platform wheel,
-`histdatacom-sidecar start` works without `--executable`; on metadata-only
-artifacts and unsupported platforms, default sidecar startup requires an
-operator-provided Temporal executable through the sidecar lifecycle command.
-The bundled executable and the Python Temporal SDK are separate concerns: base
-installs provide the SDK, while bundled platform wheels provide the local
-Temporal server executable.
+Source distributions and universal wheels include orchestration metadata, CLI
+entry points, runtime defaults, and third-party notices. The accepted V1.0
+packaging design keeps normal PyPI and TestPyPI artifacts metadata-only and
+provisions the pinned Temporal executable through a verified runtime cache on
+first use. See [Temporal Binary Provisioning](docs/temporal-binary-provisioning.md)
+for the production design and the #250/#251 implementation split.
+
+Until that resolver lands, metadata-only artifacts still require an explicit
+Temporal executable through the lifecycle command. Bundled executable wheels
+remain an offline/private distribution path, not the normal PyPI release path.
+The executable and the Python Temporal SDK are separate concerns: base installs
+provide the SDK, while the runtime resolver owns executable availability.
 
 Default sidecar submissions are built from resolved runtime context and
 `RunRequest` payloads. New orchestration work should use `RunRequest`,
 sidecar workflows, and sidecar activities. Legacy helper surfaces now accept
 explicit argument dictionaries rather than ambient parser state; parser globals
 are not part of runtime selection.
+
+#### Binary Provisioning and PyPI Packaging
+
+The binary provisioning design is intentionally modeled like the HistData
+repository file: a small package-owned index pins the allowed remote Temporal
+artifacts by version, platform, URL, checksum, size, and provenance metadata.
+Normal PyPI artifacts stay below upload limits because they ship the index and
+not the binary.
+
+The future resolver should prefer explicit operator overrides, then verified
+private/offline bundles, then a verified per-user cache, and finally a first-run
+download when network provisioning is allowed. Offline environments should fail
+with instructions to pre-seed the cache, install an offline/private bundle, or
+pass an explicit executable.
 
 #### Public Sidecar API Boundary
 
@@ -1267,14 +1286,18 @@ installs and hook behavior do not drift independently.
 
 ### Release Operator Path
 
-Tagged releases and manual release runs build a metadata-only sdist/fallback
-wheel plus bundled Temporal sidecar wheels for Linux x86_64, Linux arm64, macOS
-Intel, macOS arm64, and Windows x86_64. The release workflow downloads Temporal
-CLI `1.7.2` from the pinned upstream release, verifies SHA-256 checksums before
-bundling, embeds local `temporal-cli-provenance.json` plus Temporal CLI
-notice/license resources in bundled platform wheels, inspects every wheel with
-the sidecar manifest checker, smoke-installs each platform wheel on a matching
-GitHub-hosted runner, and attaches artifact provenance before upload or publish.
+Tagged releases and manual release runs should build the normal metadata-only
+sdist and universal wheel for PyPI/TestPyPI. The V1.0 provisioning design moves
+Temporal executable availability into a verified first-run resolver backed by a
+packaged artifact index and a per-user cache. Release preflight should prove the
+normal wheel is under the upload-size gate and that a clean install can provision
+or locate the pinned runtime through the resolver.
+
+The existing bundled platform-wheel tooling remains useful for offline/private
+artifacts and emergency operator recovery, but those artifacts are not the
+default PyPI path. They should be uploaded to the normal PyPI project only after
+the project-specific size limit is confirmed and the release operator explicitly
+opts in.
 
 Use `release_target=build-only` for dry runs, `release_target=testpypi` for the
 first publish rehearsal, and `release_target=pypi` only after setting
@@ -1282,12 +1305,11 @@ first publish rehearsal, and `release_target=pypi` only after setting
 contains only publishable sdists and wheels; JSON build and checksum reports are
 uploaded separately as release reports.
 
-If a bundled platform wheel fails after release, prefer yanking the affected
-file on PyPI and cutting a replacement release. The sdist and universal fallback
-wheel intentionally remain metadata-only rollback artifacts: users can still
-install `histdatacom` and start the sidecar with
-`histdatacom-sidecar start --executable /path/to/temporal` until a corrected
-platform wheel is available.
+If runtime provisioning fails after release, prefer yanking the affected package
+only when the Python artifact itself is wrong. Bad or unreachable Temporal
+runtime artifacts should be handled by fixing the artifact index in a patch
+release, while explicit executable overrides and pre-seeded caches remain
+operator recovery paths.
 
 ### Coverage Policy
 

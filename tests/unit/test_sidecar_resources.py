@@ -29,10 +29,18 @@ def test_sidecar_manifest_loads_packaged_strategy() -> None:
     assert manifest.schema_version == 1
     assert manifest.sidecar == "temporal"
     assert manifest.distribution_strategy == (
-        "platform-wheel-with-sdist-metadata-fallback"
+        "metadata-wheel-with-verified-runtime-provisioning"
     )
     assert not manifest.embedded_binary
+    assert all(not resource.bundled for resource in manifest.platforms.values())
+    assert all(
+        not resource_file.startswith("bin/")
+        for resource_file in manifest.resource_files
+    )
+    assert "runtime resolver provisions" in manifest.sdist_fallback
+    assert manifest.runtime_artifact_index == "temporal-runtime-index.json"
     assert "runtime-defaults.json" in manifest.resource_files
+    assert "temporal-runtime-index.json" in manifest.resource_files
     assert "third-party/temporal-cli/LICENSE" in manifest.resource_files
     assert "third-party/temporal-cli/NOTICE.md" in manifest.resource_files
     assert "linux-x86_64" in manifest.platforms
@@ -42,12 +50,21 @@ def test_sidecar_assets_are_readable_from_importlib_resources() -> None:
     """Editable and wheel installs should expose sidecar package data."""
     manifest_text = read_sidecar_asset_text("manifest.json")
     defaults_text = read_sidecar_asset_text("runtime-defaults.json")
+    runtime_index_text = read_sidecar_asset_text("temporal-runtime-index.json")
     license_text = read_sidecar_asset_text("third-party/temporal-cli/LICENSE")
     notice_text = read_sidecar_asset_text("third-party/temporal-cli/NOTICE.md")
 
     assert sidecar_asset("README.md").is_file()
     assert json.loads(manifest_text)["sidecar"] == "temporal"
     assert json.loads(defaults_text)["persistence"]["driver"] == "sqlite"
+    runtime_index = json.loads(runtime_index_text)
+    assert runtime_index["component"] == "temporal-cli"
+    assert runtime_index["version"] == "1.7.2"
+    assert runtime_index["platforms"]["macos-arm64"]["archive_size_bytes"] > 0
+    assert (
+        runtime_index["platforms"]["macos-arm64"]["archive_sha256"]
+        == "561ac68bdb6c16c8e8cbbd49f12578218ff1776007c3f3ae0d0196c8c9a73e79"
+    )
     assert "MIT License" in license_text
     assert "Temporal CLI" in notice_text
 
@@ -71,7 +88,7 @@ def test_declared_platform_without_binary_fails_clearly() -> None:
 
     message = str(err.value)
     assert "not bundled in this distribution" in message
-    assert "platform-wheel-with-sdist-metadata-fallback" in message
+    assert "metadata-wheel-with-verified-runtime-provisioning" in message
     assert "bin/linux-x86_64/temporal" in message
 
 
@@ -88,7 +105,7 @@ def test_bundled_platform_executable_resolves_from_resources(
             "schema_version": 1,
             "sidecar": "temporal",
             "distribution_strategy": (
-                "platform-wheel-with-sdist-metadata-fallback"
+                "metadata-wheel-with-verified-runtime-provisioning"
             ),
             "embedded_binary": True,
             "resource_files": [

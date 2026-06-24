@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "component": "temporal-cli",
+  "version": "1.7.2",
+  "release_base_url": "https://github.com/temporalio/cli/releases/download/v1.7.2",
+  "upstream_repository": "https://github.com/temporalio/cli",
+  "license": "MIT",
+  "license_url": "https://github.com/temporalio/cli/blob/main/LICENSE",
+  "platforms": {
+    "linux-x86_64": {
+      "system": "linux",
+      "machine": "x86_64",
+      "archive_name": "temporal_cli_1.7.2_linux_amd64.tar.gz",
+      "archive_format": "tar.gz",
+      "archive_url": "https://github.com/temporalio/cli/releases/download/v1.7.2/temporal_cli_1.7.2_linux_amd64.tar.gz",
+      "archive_sha256": "e2f548af84e820b7d71f25fc6461a4e6a1ab7cdb6a80fde3c375641b0772375b",
+      "archive_size_bytes": 113285713,
+      "executable_name": "temporal"
+    },
+    "linux-arm64": {
+      "system": "linux",
+      "machine": "arm64",
+      "archive_name": "temporal_cli_1.7.2_linux_arm64.tar.gz",
+      "archive_format": "tar.gz",
+      "archive_url": "https://github.com/temporalio/cli/releases/download/v1.7.2/temporal_cli_1.7.2_linux_arm64.tar.gz",
+      "archive_sha256": "0d60307cf036f5e29cf0d298dabc9dd62f1cce80f72cbfdbdb0e54ad7790a701",
+      "archive_size_bytes": 109535944,
+      "executable_name": "temporal"
+    },
+    "macos-x86_64": {
+      "system": "macos",
+      "machine": "x86_64",
+      "archive_name": "temporal_cli_1.7.2_darwin_amd64.tar.gz",
+      "archive_format": "tar.gz",
+      "archive_url": "https://github.com/temporalio/cli/releases/download/v1.7.2/temporal_cli_1.7.2_darwin_amd64.tar.gz",
+      "archive_sha256": "bc0929b79aa1792d77fe8412ee9dcb05ffcc33c5d6ed3bb5f352d3bc4b8a37a4",
+      "archive_size_bytes": 114337408,
+      "executable_name": "temporal"
+    },
+    "macos-arm64": {
+      "system": "macos",
+      "machine": "arm64",
+      "archive_name": "temporal_cli_1.7.2_darwin_arm64.tar.gz",
+      "archive_format": "tar.gz",
+      "archive_url": "https://github.com/temporalio/cli/releases/download/v1.7.2/temporal_cli_1.7.2_darwin_arm64.tar.gz",
+      "archive_sha256": "561ac68bdb6c16c8e8cbbd49f12578218ff1776007c3f3ae0d0196c8c9a73e79",
+      "archive_size_bytes": 114888911,
+      "executable_name": "temporal"
+    },
+    "windows-x86_64": {
+      "system": "windows",
+      "machine": "x86_64",
+      "archive_name": "temporal_cli_1.7.2_windows_amd64.zip",
+      "archive_format": "zip",
+      "archive_url": "https://github.com/temporalio/cli/releases/download/v1.7.2/temporal_cli_1.7.2_windows_amd64.zip",
+      "archive_sha256": "5289e7b404ad01cf51c6754bc0f0684daed89186cac5f0f3f15329b52342cc34",
+      "archive_size_bytes": 114330151,
+      "executable_name": "temporal.exe"
+    }
+  }
+}

@@ -15,6 +15,7 @@ EXPECTED_BASE_SIDECAR_ASSETS = {
     "histdatacom/sidecar/assets/README.md",
     "histdatacom/sidecar/assets/manifest.json",
     "histdatacom/sidecar/assets/runtime-defaults.json",
+    "histdatacom/sidecar/assets/temporal-runtime-index.json",
     "histdatacom/sidecar/assets/third-party/temporal-cli/LICENSE",
     "histdatacom/sidecar/assets/third-party/temporal-cli/NOTICE.md",
 }
@@ -22,6 +23,7 @@ EXPECTED_BASE_SIDECAR_RESOURCE_FILES = {
     "README.md",
     "manifest.json",
     "runtime-defaults.json",
+    "temporal-runtime-index.json",
     "third-party/temporal-cli/LICENSE",
     "third-party/temporal-cli/NOTICE.md",
 }
@@ -465,7 +467,7 @@ def inspect_wheel(
     if manifest["sidecar"] != "temporal":
         raise SystemExit("sidecar manifest does not describe Temporal")
     if manifest["distribution_strategy"] != (
-        "platform-wheel-with-sdist-metadata-fallback"
+        "metadata-wheel-with-verified-runtime-provisioning"
     ):
         raise SystemExit("unexpected sidecar distribution strategy")
     embedded_binary = bool(manifest["embedded_binary"])

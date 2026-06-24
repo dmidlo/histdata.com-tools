@@ -1,15 +1,17 @@
 {
   "schema_version": 1,
   "sidecar": "temporal",
-  "distribution_strategy": "platform-wheel-with-sdist-metadata-fallback",
+  "distribution_strategy": "metadata-wheel-with-verified-runtime-provisioning",
   "embedded_binary": false,
   "resource_files": [
     "README.md",
     "manifest.json",
     "runtime-defaults.json",
+    "temporal-runtime-index.json",
     "third-party/temporal-cli/LICENSE",
     "third-party/temporal-cli/NOTICE.md"
   ],
+  "runtime_artifact_index": "temporal-runtime-index.json",
   "third_party_notices": {
     "temporal_cli": {
       "name": "Temporal CLI",
@@ -20,7 +22,7 @@
       "bundled_provenance_file": "temporal-cli-provenance.json"
     }
   },
-  "sdist_fallback": "metadata-only; platform wheel builds patch this manifest with a bundled Temporal executable",
+  "sdist_fallback": "metadata-only; runtime resolver provisions a verified pinned Temporal executable or uses an explicit operator override",
   "platforms": {
     "linux-x86_64": {
       "bundled": false,
