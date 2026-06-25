@@ -32,3 +32,7 @@ pip-audit.json
 !data/
 data/*
 !data/.repo
+
+# Local data-quality runs can include machine-specific paths before
+# publication sanitation. Track publishable reports under docs/data-quality/.
+data/.quality/

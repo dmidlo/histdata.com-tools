@@ -37,7 +37,7 @@
                 "timeframe": "M1"
               }
             },
-            "path": "/quality-fixtures/data",
+            "path": "data",
             "row_number": null,
             "timestamp_source": "",
             "timestamp_utc_ms": null
@@ -57,9 +57,9 @@
             "data_format": "ascii",
             "kind": "directory",
             "metadata": {
-              "root": "/quality-fixtures/data"
+              "root": "data"
             },
-            "path": "/quality-fixtures/data",
+            "path": "data",
             "period": "",
             "symbol": "",
             "timeframe": "M1"
@@ -73,9 +73,9 @@
         "data_format": "ascii",
         "kind": "directory",
         "metadata": {
-          "root": "/quality-fixtures/data"
+          "root": "data"
         },
-        "path": "/quality-fixtures/data",
+        "path": "data",
         "period": "",
         "symbol": "",
         "timeframe": "M1"
@@ -105,9 +105,9 @@
         "data_format": "ascii",
         "kind": "directory",
         "metadata": {
-          "root": "/quality-fixtures/data"
+          "root": "data"
         },
-        "path": "/quality-fixtures/data",
+        "path": "data",
         "period": "",
         "symbol": "",
         "timeframe": "M1"
@@ -120,9 +120,9 @@
       "data_format": "ascii",
       "kind": "directory",
       "metadata": {
-        "root": "/quality-fixtures/data"
+        "root": "data"
       },
-      "path": "/quality-fixtures/data",
+      "path": "data",
       "period": "",
       "symbol": "",
       "timeframe": "M1"

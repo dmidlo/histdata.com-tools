@@ -17,7 +17,7 @@
               "period": "2008",
               "timeframe": "M1"
             },
-            "path": "/quality-fixtures/data/ASCII/M1",
+            "path": "data/ASCII/M1",
             "row_number": null,
             "timestamp_source": "",
             "timestamp_utc_ms": null
@@ -46,9 +46,9 @@
             "data_format": "ascii",
             "kind": "directory",
             "metadata": {
-              "root": "/quality-fixtures/data/ASCII/M1"
+              "root": "data/ASCII/M1"
             },
-            "path": "/quality-fixtures/data/ASCII/M1",
+            "path": "data/ASCII/M1",
             "period": "",
             "symbol": "",
             "timeframe": "M1"
@@ -62,9 +62,9 @@
         "data_format": "ascii",
         "kind": "directory",
         "metadata": {
-          "root": "/quality-fixtures/data/ASCII/M1"
+          "root": "data/ASCII/M1"
         },
-        "path": "/quality-fixtures/data/ASCII/M1",
+        "path": "data/ASCII/M1",
         "period": "",
         "symbol": "",
         "timeframe": "M1"
@@ -94,9 +94,9 @@
         "data_format": "ascii",
         "kind": "directory",
         "metadata": {
-          "root": "/quality-fixtures/data/ASCII/M1"
+          "root": "data/ASCII/M1"
         },
-        "path": "/quality-fixtures/data/ASCII/M1",
+        "path": "data/ASCII/M1",
         "period": "",
         "symbol": "",
         "timeframe": "M1"
@@ -109,9 +109,9 @@
       "data_format": "ascii",
       "kind": "directory",
       "metadata": {
-        "root": "/quality-fixtures/data/ASCII/M1"
+        "root": "data/ASCII/M1"
       },
-      "path": "/quality-fixtures/data/ASCII/M1",
+      "path": "data/ASCII/M1",
       "period": "",
       "symbol": "",
       "timeframe": "M1"

@@ -13,7 +13,7 @@
           "location": {
             "column": "",
             "metadata": {},
-            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
             "row_number": null,
             "timestamp_source": "",
             "timestamp_utc_ms": null
@@ -31,7 +31,7 @@
             "metadata": {
               "filename": "DAT_ASCII_EURUSD_M1_201202.zip"
             },
-            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
             "period": "201202",
             "symbol": "EURUSD",
             "timeframe": "M1"
@@ -47,7 +47,7 @@
         "metadata": {
           "filename": "DAT_ASCII_EURUSD_M1_201202.zip"
         },
-        "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
         "period": "201202",
         "symbol": "EURUSD",
         "timeframe": "M1"
@@ -79,7 +79,7 @@
         "metadata": {
           "filename": "DAT_ASCII_EURUSD_M1_201202.zip"
         },
-        "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
         "period": "201202",
         "symbol": "EURUSD",
         "timeframe": "M1"
@@ -94,7 +94,7 @@
       "metadata": {
         "filename": "DAT_ASCII_EURUSD_M1_201202.zip"
       },
-      "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+      "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
       "period": "201202",
       "symbol": "EURUSD",
       "timeframe": "M1"

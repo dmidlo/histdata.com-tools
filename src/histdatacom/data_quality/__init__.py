@@ -130,6 +130,10 @@ from histdatacom.data_quality.reporting import (
     quality_report_to_json,
     write_quality_report,
 )
+from histdatacom.publication_safety import (
+    publish_safe_json_value,
+    publish_safe_path,
+)
 from histdatacom.data_quality.profiles import (
     DEFAULT_QUALITY_PROFILE_NAME,
     DEFAULT_QUALITY_PROFILE_SOURCE,
@@ -347,6 +351,8 @@ __all__ = [
     "payload_extension_for_format",
     "provenance_manifest_metadata",
     "provenance_quality_run_rules",
+    "publish_safe_json_value",
+    "publish_safe_path",
     "quality_metadata_from_filename",
     "quality_report_payload",
     "quality_report_to_json",

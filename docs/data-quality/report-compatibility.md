@@ -5,6 +5,14 @@ Automation can rely on the top-level report payload shape, bounded runtime
 payload shape, severity/status vocabulary, target summaries, rule-result layout,
 finding context, and quality-report artifact metadata.
 
+## Path Publication Safety
+
+Quality report JSON is publish-safe by default. Path-like fields are serialized
+as relative project/report paths so generated reports can be reviewed or shared
+without exposing local home directories, temporary directories, or sidecar
+workspace roots. Callers that need exact local paths for debugging can opt into
+raw payloads through the reporting API.
+
 ## Compatibility Contract
 
 Compatible v1 changes:
@@ -36,7 +44,7 @@ The golden suite covers:
 - run-scoped finding detailed report;
 - bounded runtime payload with quality-report artifact metadata.
 
-The fixtures intentionally use stable `/quality-fixtures/...` paths instead of
+The fixtures intentionally use stable `quality-fixtures/...` paths instead of
 machine-local absolute paths.
 
 ## Update Workflow

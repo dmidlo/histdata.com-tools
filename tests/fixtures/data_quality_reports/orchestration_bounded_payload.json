@@ -17,7 +17,7 @@
           "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
           "rule_id": "domain.cross_instrument_consistency"
         },
-        "path": "/quality-fixtures/data/ASCII/M1",
+        "path": "data/ASCII/M1",
         "period": "2008",
         "symbol": "AUDCAD",
         "timeframe": "M1"
@@ -38,7 +38,7 @@
           "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
           "rule_id": "domain.cross_instrument_consistency"
         },
-        "path": "/quality-fixtures/data/ASCII/M1",
+        "path": "data/ASCII/M1",
         "period": "2008",
         "symbol": "AUDCHF",
         "timeframe": "M1"
@@ -59,7 +59,7 @@
           "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
           "rule_id": "domain.cross_instrument_consistency"
         },
-        "path": "/quality-fixtures/data/ASCII/M1",
+        "path": "data/ASCII/M1",
         "period": "2008",
         "symbol": "CADCHF",
         "timeframe": "M1"
@@ -76,7 +76,7 @@
       ]
     },
     "roots": [
-      "/quality-fixtures/data/ASCII/M1"
+      "data/ASCII/M1"
     ],
     "target_count": 3
   },
@@ -102,7 +102,7 @@
       "target_count": 1,
       "warning_count": 0
     },
-    "path": "/quality-fixtures/reports/run-scoped-report.json",
+    "path": "quality-fixtures/reports/run-scoped-report.json",
     "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "size_bytes": 4096
   },
@@ -129,9 +129,9 @@
         "data_format": "ascii",
         "kind": "directory",
         "metadata": {
-          "root": "/quality-fixtures/data/ASCII/M1"
+          "root": "data/ASCII/M1"
         },
-        "path": "/quality-fixtures/data/ASCII/M1",
+        "path": "data/ASCII/M1",
         "period": "",
         "symbol": "",
         "timeframe": "M1"

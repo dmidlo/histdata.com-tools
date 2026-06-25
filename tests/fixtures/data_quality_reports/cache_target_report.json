@@ -13,7 +13,7 @@
           "location": {
             "column": "",
             "metadata": {},
-            "path": "/quality-fixtures/data/ASCII/M1/eurusd/2012/02/.data",
+            "path": "data/ASCII/M1/eurusd/2012/02/.data",
             "row_number": null,
             "timestamp_source": "",
             "timestamp_utc_ms": null
@@ -39,7 +39,7 @@
               "cache_schema": "polars-ipc",
               "filename": ".data"
             },
-            "path": "/quality-fixtures/data/ASCII/M1/eurusd/2012/02/.data",
+            "path": "data/ASCII/M1/eurusd/2012/02/.data",
             "period": "201202",
             "symbol": "EURUSD",
             "timeframe": "M1"
@@ -56,7 +56,7 @@
           "cache_schema": "polars-ipc",
           "filename": ".data"
         },
-        "path": "/quality-fixtures/data/ASCII/M1/eurusd/2012/02/.data",
+        "path": "data/ASCII/M1/eurusd/2012/02/.data",
         "period": "201202",
         "symbol": "EURUSD",
         "timeframe": "M1"
@@ -89,7 +89,7 @@
           "cache_schema": "polars-ipc",
           "filename": ".data"
         },
-        "path": "/quality-fixtures/data/ASCII/M1/eurusd/2012/02/.data",
+        "path": "data/ASCII/M1/eurusd/2012/02/.data",
         "period": "201202",
         "symbol": "EURUSD",
         "timeframe": "M1"
@@ -105,7 +105,7 @@
         "cache_schema": "polars-ipc",
         "filename": ".data"
       },
-      "path": "/quality-fixtures/data/ASCII/M1/eurusd/2012/02/.data",
+      "path": "data/ASCII/M1/eurusd/2012/02/.data",
       "period": "201202",
       "symbol": "EURUSD",
       "timeframe": "M1"

@@ -6,6 +6,10 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from histdatacom.publication_safety import (
+    publish_safe_json_value,
+    publish_safe_path,
+)
 from histdatacom.observability import utc_now_iso
 from histdatacom.runtime_contracts import JSONValue
 
@@ -69,7 +73,7 @@ def repository_quality_columns(
     artifact = quality.get("report_artifact")
     report = ""
     if isinstance(artifact, Mapping):
-        report = str(artifact.get("path", "") or "")
+        report = publish_safe_path(str(artifact.get("path", "") or ""))
     return {
         "status": str(quality.get("status", "") or ""),
         "targets": str(quality.get("target_count", "") or ""),
@@ -241,7 +245,10 @@ def _string_list(value: Any) -> list[str]:
 def _mapping_or_none(value: Any) -> dict[str, JSONValue] | None:
     if not isinstance(value, Mapping):
         return None
-    return {str(key): _json_value(item) for key, item in value.items()}
+    safe = publish_safe_json_value(
+        {str(key): _json_value(item) for key, item in value.items()}
+    )
+    return safe if isinstance(safe, dict) else None
 
 
 def _json_value(value: Any) -> JSONValue:

@@ -526,12 +526,11 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "size_bytes",
     }
     assert artifact["kind"] == "quality-report"
-    assert (
-        artifact["path"] == "/quality-fixtures/reports/run-scoped-report.json"
-    )
+    assert artifact["path"] == "quality-fixtures/reports/run-scoped-report.json"
     assert len(str(artifact["sha256"])) == 64
     artifact_metadata = _mapping(artifact["metadata"])
     assert artifact_metadata["schema_version"] == QUALITY_REPORT_SCHEMA_VERSION
+    assert not str(artifact["path"]).startswith("/")
 
     decision = _mapping(payload["exit_decision"])
     assert set(decision) == {"exit_code", "policy", "reason"}
@@ -666,7 +665,9 @@ def _assert_target(
         target_kind_values.add("cross-target-finding")
     assert target["kind"] in target_kind_values
     assert isinstance(target["path"], str)
-    assert target["path"].startswith("/quality-fixtures")
+    assert not target["path"].startswith("/")
+    assert "/Users/" not in target["path"]
+    assert "/home/" not in target["path"]
     assert isinstance(target["metadata"], dict)
 
 

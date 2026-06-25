@@ -1063,7 +1063,8 @@ def test_data_quality_activity_writes_report_and_bounded_metrics(
     assert report_path.exists()
     assert quality["summary"]["target_count"] == 1
     assert quality["summary"]["finding_count"] >= 0
-    assert quality["report_artifact"]["path"] == str(report_path.resolve())
+    assert quality["report_artifact"]["path"] == "reports/quality.json"
+    assert str(tmp_path) not in json.dumps(quality, sort_keys=True)
     assert quality["quality_profile"]["name"] == "activity-profile"
     assert quality["quality_profile"]["source"] == "operator-config"
     assert quality["target_summaries"][0]["target"]["kind"] == "csv"

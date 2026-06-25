@@ -35,6 +35,7 @@ from histdatacom.data_quality import (
     coverage_manifest_metadata,
     discover_quality_targets,
     normalize_quality_check_groups,
+    publish_safe_path,
     quality_profile_report_metadata,
     provenance_manifest_metadata,
     quality_rules_for_groups,
@@ -774,12 +775,14 @@ def _portable_repo_quality_payload(
 
 def _portable_repo_artifact_path(value: str, *, repo_path: Path) -> str:
     path = Path(value)
-    if not value or not path.is_absolute():
-        return value
+    if not value:
+        return ""
+    if not path.is_absolute():
+        return publish_safe_path(value)
     try:
         return path.resolve().relative_to(repo_path.parent.resolve()).as_posix()
     except ValueError:
-        return value
+        return publish_safe_path(value)
 
 
 def _quality_expected_dimensions(

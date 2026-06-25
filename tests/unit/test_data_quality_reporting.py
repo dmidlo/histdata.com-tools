@@ -17,9 +17,13 @@ from histdatacom.data_quality import (
     QualityTargetKind,
     bounded_quality_payload,
     format_quality_console_summary,
+    publish_safe_json_value,
+    publish_safe_path,
+    quality_report_payload,
     quality_report_to_json,
     write_quality_report,
 )
+from histdatacom.runtime_contracts import ArtifactRef
 
 
 def test_quality_json_report_is_deterministic_and_investigable(
@@ -51,6 +55,62 @@ def test_quality_json_report_is_deterministic_and_investigable(
     assert finding["location"]["timestamp_source"] == "20120201 000600"
     assert finding["location"]["timestamp_utc_ms"] == 1328072760000
     assert finding["target"]["symbol"] == "EURUSD"
+    assert str(tmp_path) not in first
+
+
+def test_quality_report_payload_is_publish_safe_by_default(
+    tmp_path: Path,
+) -> None:
+    """Public report JSON should not expose local filesystem roots."""
+    report = _mixed_report(tmp_path)
+    payload = quality_report_payload(report)
+    encoded = json.dumps(payload, sort_keys=True)
+
+    assert str(tmp_path) not in encoded
+    assert "/Users/" not in encoded
+    assert "/home/" not in encoded
+    assert payload["targets"][0]["path"] == "clean.csv"
+    assert (
+        payload["rule_results"][1]["findings"][0]["location"]["path"]
+        == "warning.csv"
+    )
+
+
+def test_quality_report_payload_can_preserve_raw_local_paths(
+    tmp_path: Path,
+) -> None:
+    """Local debugging callers can still opt into exact report paths."""
+    report = _mixed_report(tmp_path)
+    payload = quality_report_payload(report, publish_safe=False)
+
+    assert payload["targets"][0]["path"] == str(tmp_path / "clean.csv")
+
+
+def test_publish_safe_json_value_sanitizes_nested_path_metadata() -> None:
+    """Metadata path fields and embedded local paths should be publishable."""
+    payload = {
+        "m1_path": (
+            "/Users/alice/projects/histdata.com-tools/data/ASCII/M1/"
+            "eurusd/2012/DAT_ASCII_EURUSD_M1_2012.csv"
+        ),
+        "message": (
+            "read /Users/alice/projects/histdata.com-tools/"
+            "data/ASCII/M1/eurusd/2012/input.csv"
+        ),
+        "store_root": (
+            "/Users/alice/Library/Application Support/histdatacom/"
+            "sidecar/workspaces/project/manifests"
+        ),
+    }
+
+    safe = publish_safe_json_value(payload)
+
+    assert safe["m1_path"] == (
+        "data/ASCII/M1/eurusd/2012/DAT_ASCII_EURUSD_M1_2012.csv"
+    )
+    assert safe["message"] == "read data/ASCII/M1/eurusd/2012/input.csv"
+    assert safe["store_root"] == "manifests"
+    assert publish_safe_path("/tmp/quality.json") == "quality.json"
 
 
 def test_quality_report_writer_returns_orchestration_artifact_ref(
@@ -103,6 +163,45 @@ def test_bounded_payload_keeps_cross_target_finding_summaries(
     assert {summary["target"]["period"] for summary in summaries} == {"2008"}
     assert {summary["status"] for summary in summaries} == {"failed"}
     assert {summary["error_count"] for summary in summaries} == {1}
+
+
+def test_bounded_payload_sanitizes_discovery_and_artifact_paths(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration metadata should be safe to persist in reports."""
+    report = _mixed_report(tmp_path)
+    artifact = ArtifactRef(
+        kind="quality-report",
+        path=str(tmp_path / "reports" / "quality.json"),
+    )
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("inventory",),
+        discovery={
+            "roots": [str(tmp_path / "data" / "ASCII")],
+            "metadata": {
+                "store_path": (
+                    "/Users/alice/Library/Application Support/histdatacom/"
+                    "sidecar/workspaces/project/manifests/.histdatacom/"
+                    "manifest-status.sqlite3"
+                )
+            },
+        },
+        report=report,
+        decision=QualityExitPolicy.from_values(fail_on="never").evaluate(
+            report.summary()
+        ),
+        artifact=artifact,
+    )
+    encoded = json.dumps(payload, sort_keys=True)
+
+    assert str(tmp_path) not in encoded
+    assert "/Users/" not in encoded
+    assert payload["discovery"]["roots"] == ["data/ASCII"]
+    assert payload["discovery"]["metadata"]["store_path"] == (
+        ".histdatacom/manifest-status.sqlite3"
+    )
+    assert payload["report_artifact"]["path"] == "reports/quality.json"
 
 
 def test_quality_console_summary_separates_target_statuses(

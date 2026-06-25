@@ -1,0 +1,1156 @@
+{
+  "issue_summaries": {
+    "issue-233": {
+      "error_count": 916,
+      "finding_count": 3475,
+      "report_count": 6,
+      "status_counts": {
+        "clean": 2,
+        "failed": 1,
+        "unknown": 3
+      },
+      "target_count": 2074,
+      "warning_count": 1098
+    },
+    "issue-234": {
+      "error_count": 0,
+      "finding_count": 5135,
+      "report_count": 10,
+      "status_counts": {
+        "warning": 10
+      },
+      "target_count": 267,
+      "warning_count": 2112
+    },
+    "issue-235": {
+      "error_count": 1,
+      "finding_count": 5399,
+      "report_count": 10,
+      "status_counts": {
+        "failed": 1,
+        "warning": 9
+      },
+      "target_count": 276,
+      "warning_count": 2269
+    },
+    "issue-236": {
+      "error_count": 0,
+      "finding_count": 5104,
+      "report_count": 10,
+      "status_counts": {
+        "warning": 10
+      },
+      "target_count": 265,
+      "warning_count": 2119
+    },
+    "issue-237": {
+      "error_count": 0,
+      "finding_count": 5072,
+      "report_count": 10,
+      "status_counts": {
+        "warning": 10
+      },
+      "target_count": 266,
+      "warning_count": 2077
+    },
+    "issue-238": {
+      "error_count": 0,
+      "finding_count": 4943,
+      "report_count": 10,
+      "status_counts": {
+        "warning": 10
+      },
+      "target_count": 249,
+      "warning_count": 2117
+    },
+    "issue-239": {
+      "error_count": 0,
+      "finding_count": 1727,
+      "report_count": 6,
+      "status_counts": {
+        "warning": 6
+      },
+      "target_count": 97,
+      "warning_count": 682
+    },
+    "issue-241": {
+      "error_count": 1,
+      "finding_count": 6642,
+      "report_count": 1,
+      "status_counts": {
+        "failed": 1
+      },
+      "target_count": 778,
+      "warning_count": 3015
+    },
+    "unscoped": {
+      "error_count": 0,
+      "finding_count": 16,
+      "report_count": 2,
+      "status_counts": {
+        "clean": 2
+      },
+      "target_count": 2,
+      "warning_count": 0
+    }
+  },
+  "publication_safety": {
+    "full_quality_battery_rerun": false,
+    "raw_local_paths_sanitized": true,
+    "sanitize_in_place": true
+  },
+  "reports": [
+    {
+      "error_count": 0,
+      "finding_count": 518,
+      "info_count": 518,
+      "issue": "issue-233",
+      "rule_count": 3,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "c66c8f8fdd0d7b2f05fdba2bd6026d6a16119725b96456756214b4f0a54809df",
+      "size_bytes": 2384116,
+      "source": "data/.quality/issue-233/ascii-m1-ingestion-quality-report.json",
+      "status": "clean",
+      "target_count": 518,
+      "warning_count": 0
+    },
+    {
+      "error_count": 0,
+      "finding_count": 0,
+      "info_count": 0,
+      "issue": "issue-233",
+      "rule_count": 0,
+      "schema_version": "",
+      "sha256": "d1810f0814f1ee364667bc0d54716d31b79274fd69ae254e22adcf17c6563d83",
+      "size_bytes": 634,
+      "source": "data/.quality/issue-233/ascii-m1-ingestion-quality-summary.json",
+      "status": "unknown",
+      "target_count": 0,
+      "warning_count": 0
+    },
+    {
+      "error_count": 0,
+      "finding_count": 0,
+      "info_count": 0,
+      "issue": "issue-233",
+      "rule_count": 1,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "6273e2091be327b317699e98243d500f6041151b6395d32b32eb012dbc6c1593",
+      "size_bytes": 1413823,
+      "source": "data/.quality/issue-233/ascii-m1-inventory-quality-report.json",
+      "status": "clean",
+      "target_count": 777,
+      "warning_count": 0
+    },
+    {
+      "error_count": 0,
+      "finding_count": 0,
+      "info_count": 0,
+      "issue": "issue-233",
+      "rule_count": 0,
+      "schema_version": "",
+      "sha256": "23682dae27720a18803171e5faced286ed13ed657c1283d7ec48d675f46f0443",
+      "size_bytes": 546,
+      "source": "data/.quality/issue-233/ascii-m1-inventory-quality-summary.json",
+      "status": "unknown",
+      "target_count": 0,
+      "warning_count": 0
+    },
+    {
+      "error_count": 916,
+      "finding_count": 2957,
+      "info_count": 943,
+      "issue": "issue-233",
+      "rule_count": 20,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "4e3a43b0691e39f444ece031f8b92555c34e010c0253a03faaffcf00998c850d",
+      "size_bytes": 13823848,
+      "source": "data/.quality/issue-233/ascii-m1-quality-report.json",
+      "status": "failed",
+      "target_count": 779,
+      "warning_count": 1098
+    },
+    {
+      "error_count": 0,
+      "finding_count": 0,
+      "info_count": 0,
+      "issue": "issue-233",
+      "rule_count": 0,
+      "schema_version": "",
+      "sha256": "6289758244fa45d49183eeb073c913be88a513d319807bb5eb91002175f1edbb",
+      "size_bytes": 908,
+      "source": "data/.quality/issue-233/ascii-m1-summary.json",
+      "status": "unknown",
+      "target_count": 0,
+      "warning_count": 0
+    },
+    {
+      "error_count": 0,
+      "finding_count": 190,
+      "info_count": 115,
+      "issue": "issue-234",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "80d2363f0a3b146054962c84d4e67aefaf052e490bc0419f0987457ab1d6f90f",
+      "size_bytes": 1603680,
+      "source": "data/.quality/issue-234/issue-234-001-ascii-m1-etxeur-quality.json",
+      "status": "warning",
+      "target_count": 12,
+      "warning_count": 75
+    },
+    {
+      "error_count": 0,
+      "finding_count": 632,
+      "info_count": 369,
+      "issue": "issue-234",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "ad1b555214402d6d73b6bf9cd470b63dbfa0d767cf3f969213db3a2f76f17c62",
+      "size_bytes": 5239276,
+      "source": "data/.quality/issue-234/issue-234-ascii-m1-euraud-quality.json",
+      "status": "warning",
+      "target_count": 32,
+      "warning_count": 263
+    },
+    {
+      "error_count": 0,
+      "finding_count": 531,
+      "info_count": 309,
+      "issue": "issue-234",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "d83f04a3e93043686eae0cecd7289a4e8f38b0519a46b6beb8bcb793dd54304f",
+      "size_bytes": 4374843,
+      "source": "data/.quality/issue-234/issue-234-ascii-m1-eurcad-quality.json",
+      "status": "warning",
+      "target_count": 27,
+      "warning_count": 222
+    },
+    {
+      "error_count": 0,
+      "finding_count": 619,
+      "info_count": 369,
+      "issue": "issue-234",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "c4c497bfefb2d496d2448b0d6157a91e8842b82244673509d00c107c751c3fa6",
+      "size_bytes": 5098520,
+      "source": "data/.quality/issue-234/issue-234-ascii-m1-eurchf-quality.json",
+      "status": "warning",
+      "target_count": 32,
+      "warning_count": 250
+    },
+    {
+      "error_count": 0,
+      "finding_count": 450,
+      "info_count": 273,
+      "issue": "issue-234",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "df8dc02bb09f343d0604e2bacd1fffd90fa1b030f6bde675b58411f8ec95afa6",
+      "size_bytes": 3749518,
+      "source": "data/.quality/issue-234/issue-234-ascii-m1-eurczk-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 177
+    },
+    {
+      "error_count": 0,
+      "finding_count": 466,
+      "info_count": 297,
+      "issue": "issue-234",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "d3d60626b4a1116d75bca2984100fa9a0f14657a547368dd65ffc87d7f8a7337",
+      "size_bytes": 3809618,
+      "source": "data/.quality/issue-234/issue-234-ascii-m1-eurdkk-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 169
+    },
+    {
+      "error_count": 0,
+      "finding_count": 624,
+      "info_count": 369,
+      "issue": "issue-234",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "531147fc59fcae91fa1e46c37c45537bfbcf144fcd600a88c3f9491fc1f9fda1",
+      "size_bytes": 5168496,
+      "source": "data/.quality/issue-234/issue-234-ascii-m1-eurgbp-quality.json",
+      "status": "warning",
+      "target_count": 32,
+      "warning_count": 255
+    },
+    {
+      "error_count": 0,
+      "finding_count": 436,
+      "info_count": 256,
+      "issue": "issue-234",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "3585bfa49417081d5fad61e73085928ed47bc99f6965df1583cd985edf0354fd",
+      "size_bytes": 3744895,
+      "source": "data/.quality/issue-234/issue-234-ascii-m1-eurhuf-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 180
+    },
+    {
+      "error_count": 0,
+      "finding_count": 671,
+      "info_count": 369,
+      "issue": "issue-234",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "e084a8b231ff424dd94f2254de9c2527feef81b904cb3ae98cb69e8aee301eaa",
+      "size_bytes": 5555955,
+      "source": "data/.quality/issue-234/issue-234-ascii-m1-eurjpy-quality.json",
+      "status": "warning",
+      "target_count": 32,
+      "warning_count": 302
+    },
+    {
+      "error_count": 0,
+      "finding_count": 516,
+      "info_count": 297,
+      "issue": "issue-234",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "1273e4a3152260d7b58760548273107bcc9b8913042a2210cecfd968152691be",
+      "size_bytes": 4312651,
+      "source": "data/.quality/issue-234/issue-234-ascii-m1-eurnok-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 219
+    },
+    {
+      "error_count": 0,
+      "finding_count": 508,
+      "info_count": 297,
+      "issue": "issue-235",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "f3ae9a9c927730f24fcd961ee26e6516cda87afb0967572a448d46e2cd10f1c9",
+      "size_bytes": 4205658,
+      "source": "data/.quality/issue-235/issue-235-ascii-m1-eurnzd-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 211
+    },
+    {
+      "error_count": 0,
+      "finding_count": 455,
+      "info_count": 273,
+      "issue": "issue-235",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "51c1853fba361a289abcb814576a69df677faf014a1cbaf593438d62f1d160d2",
+      "size_bytes": 3746984,
+      "source": "data/.quality/issue-235/issue-235-ascii-m1-eurpln-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 182
+    },
+    {
+      "error_count": 0,
+      "finding_count": 515,
+      "info_count": 297,
+      "issue": "issue-235",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "7899d6f074d06dd144f2242cc21ea4283100e9ea6baa83aa5ec3d64b450fec81",
+      "size_bytes": 4268171,
+      "source": "data/.quality/issue-235/issue-235-ascii-m1-eursek-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 218
+    },
+    {
+      "error_count": 0,
+      "finding_count": 473,
+      "info_count": 266,
+      "issue": "issue-235",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "a80be9aa96a316abc54129f9baaaee2253ee4748e7e71a1aef55eba965d2ef97",
+      "size_bytes": 4053567,
+      "source": "data/.quality/issue-235/issue-235-ascii-m1-eurtry-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 207
+    },
+    {
+      "error_count": 1,
+      "finding_count": 674,
+      "info_count": 391,
+      "issue": "issue-235",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "3f610016125657a149b95adb31710264518d490395e07688e96642b5c5aac572",
+      "size_bytes": 5623635,
+      "source": "data/.quality/issue-235/issue-235-ascii-m1-eurusd-quality.json",
+      "status": "failed",
+      "target_count": 34,
+      "warning_count": 282
+    },
+    {
+      "error_count": 0,
+      "finding_count": 404,
+      "info_count": 249,
+      "issue": "issue-235",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "95b2aab6eb4a54497f1cc0c6e824dc6e0c1a3c6102ea867ba6a60fe4480fbc55",
+      "size_bytes": 3360947,
+      "source": "data/.quality/issue-235/issue-235-ascii-m1-frxeur-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 155
+    },
+    {
+      "error_count": 0,
+      "finding_count": 528,
+      "info_count": 309,
+      "issue": "issue-235",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "ace9b5c34f2c063961b9796865288468434b3adf89a0f13658b11702d6585cd4",
+      "size_bytes": 4397528,
+      "source": "data/.quality/issue-235/issue-235-ascii-m1-gbpaud-quality.json",
+      "status": "warning",
+      "target_count": 27,
+      "warning_count": 219
+    },
+    {
+      "error_count": 0,
+      "finding_count": 533,
+      "info_count": 309,
+      "issue": "issue-235",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "34dd2b25f6f3f98e0bf7133a7086df738d89c581630a2569e5f06eb76bd36e02",
+      "size_bytes": 4411116,
+      "source": "data/.quality/issue-235/issue-235-ascii-m1-gbpcad-quality.json",
+      "status": "warning",
+      "target_count": 27,
+      "warning_count": 224
+    },
+    {
+      "error_count": 0,
+      "finding_count": 633,
+      "info_count": 369,
+      "issue": "issue-235",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "0cf2b49f9f53b2d0e16759300fb9720fd5c0afee75c2d96af53e6ae4b2a41140",
+      "size_bytes": 5237544,
+      "source": "data/.quality/issue-235/issue-235-ascii-m1-gbpchf-quality.json",
+      "status": "warning",
+      "target_count": 32,
+      "warning_count": 264
+    },
+    {
+      "error_count": 0,
+      "finding_count": 676,
+      "info_count": 369,
+      "issue": "issue-235",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "1ef3e4ed371a36649bf0f045492c46c6a325105b4965ca9c0f4623f7edd28ae5",
+      "size_bytes": 5635171,
+      "source": "data/.quality/issue-235/issue-235-ascii-m1-gbpjpy-quality.json",
+      "status": "warning",
+      "target_count": 32,
+      "warning_count": 307
+    },
+    {
+      "error_count": 0,
+      "finding_count": 511,
+      "info_count": 297,
+      "issue": "issue-236",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "a1858e1da3232611fa166430e87e5a34875e989dc7e8a23a43a69e687a36e4bb",
+      "size_bytes": 4249656,
+      "source": "data/.quality/issue-236/issue-236-ascii-m1-gbpnzd-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 214
+    },
+    {
+      "error_count": 0,
+      "finding_count": 686,
+      "info_count": 392,
+      "issue": "issue-236",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "9911209afbf749a961904c601bec20d4c12d2a8e9979ad4f28d37f123093eae8",
+      "size_bytes": 5686316,
+      "source": "data/.quality/issue-236/issue-236-ascii-m1-gbpusd-quality.json",
+      "status": "warning",
+      "target_count": 34,
+      "warning_count": 294
+    },
+    {
+      "error_count": 0,
+      "finding_count": 416,
+      "info_count": 255,
+      "issue": "issue-236",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "4b439f361127833229b0a97fa2b95091ac0ae6120b05bc547871657656f03686",
+      "size_bytes": 3396357,
+      "source": "data/.quality/issue-236/issue-236-ascii-m1-grxeur-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 161
+    },
+    {
+      "error_count": 0,
+      "finding_count": 395,
+      "info_count": 249,
+      "issue": "issue-236",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "ea78f79272eff19f6a19d450affb1559fffc265afa550dd0c3648ae5fe6e9fa9",
+      "size_bytes": 3228389,
+      "source": "data/.quality/issue-236/issue-236-ascii-m1-hkxhkd-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 146
+    },
+    {
+      "error_count": 0,
+      "finding_count": 441,
+      "info_count": 272,
+      "issue": "issue-236",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "d5ba31d4f1ac39d64a14026b66430e9dd810bb64ff22dcd0594cf33bef8d2807",
+      "size_bytes": 3549283,
+      "source": "data/.quality/issue-236/issue-236-ascii-m1-jpxjpy-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 169
+    },
+    {
+      "error_count": 0,
+      "finding_count": 431,
+      "info_count": 272,
+      "issue": "issue-236",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "b718617e442db7090fc3ff5d1c7e31b013e5d1fb72facb7a6025bed006106ac9",
+      "size_bytes": 3422442,
+      "source": "data/.quality/issue-236/issue-236-ascii-m1-nsxusd-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 159
+    },
+    {
+      "error_count": 0,
+      "finding_count": 516,
+      "info_count": 297,
+      "issue": "issue-236",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "d4595b27257d608f42ff080140ee1606bf171cd83b8eec5d54f0cdd0e51e16ba",
+      "size_bytes": 4321265,
+      "source": "data/.quality/issue-236/issue-236-ascii-m1-nzdcad-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 219
+    },
+    {
+      "error_count": 0,
+      "finding_count": 530,
+      "info_count": 297,
+      "issue": "issue-236",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "4a5f6ba6f9333623619ccb712267ad96e086e1f3be3c1291d92356ed80aec828",
+      "size_bytes": 4465434,
+      "source": "data/.quality/issue-236/issue-236-ascii-m1-nzdchf-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 233
+    },
+    {
+      "error_count": 0,
+      "finding_count": 592,
+      "info_count": 321,
+      "issue": "issue-236",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "6e98184a9300a358e33be2578c5e6caada07f00d97d181b2250085df58dca873",
+      "size_bytes": 4968948,
+      "source": "data/.quality/issue-236/issue-236-ascii-m1-nzdjpy-quality.json",
+      "status": "warning",
+      "target_count": 28,
+      "warning_count": 271
+    },
+    {
+      "error_count": 0,
+      "finding_count": 586,
+      "info_count": 333,
+      "issue": "issue-236",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "3255814df701755d7f1dc7e60af7707b89e798c1fe58ac6caa1da9dadfe7fb56",
+      "size_bytes": 4927075,
+      "source": "data/.quality/issue-236/issue-236-ascii-m1-nzdusd-quality.json",
+      "status": "warning",
+      "target_count": 29,
+      "warning_count": 253
+    },
+    {
+      "error_count": 0,
+      "finding_count": 537,
+      "info_count": 297,
+      "issue": "issue-237",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "0fa5a68a723d2b1bdfce6420e4b405c2fb8e5eeae1e6bdcc9fafa943dfd8b031",
+      "size_bytes": 4481822,
+      "source": "data/.quality/issue-237/issue-237-ascii-m1-sgdjpy-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 240
+    },
+    {
+      "error_count": 0,
+      "finding_count": 438,
+      "info_count": 273,
+      "issue": "issue-237",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "4df07965ac5960c8f0e33f51cff42cbe7c04955d43126825ddcdff3490ae6fdb",
+      "size_bytes": 3496057,
+      "source": "data/.quality/issue-237/issue-237-ascii-m1-spxusd-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 165
+    },
+    {
+      "error_count": 0,
+      "finding_count": 427,
+      "info_count": 258,
+      "issue": "issue-237",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "c83350ce06d2666ec02054290bf5508f996b7ec70d026ca977d786ddb1a2c59a",
+      "size_bytes": 3467245,
+      "source": "data/.quality/issue-237/issue-237-ascii-m1-udxusd-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 169
+    },
+    {
+      "error_count": 0,
+      "finding_count": 426,
+      "info_count": 259,
+      "issue": "issue-237",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "f1e323aab65dd2be95277f6143a79449f773f2fda89afe22246ba4e1e1810075",
+      "size_bytes": 3438082,
+      "source": "data/.quality/issue-237/issue-237-ascii-m1-ukxgbp-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 167
+    },
+    {
+      "error_count": 0,
+      "finding_count": 667,
+      "info_count": 391,
+      "issue": "issue-237",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "3750adc36df566cf3419b907b44b69787629f34e959c7b10d7d133450577854b",
+      "size_bytes": 5514346,
+      "source": "data/.quality/issue-237/issue-237-ascii-m1-usdcad-quality.json",
+      "status": "warning",
+      "target_count": 34,
+      "warning_count": 276
+    },
+    {
+      "error_count": 0,
+      "finding_count": 680,
+      "info_count": 391,
+      "issue": "issue-237",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "97d2ab2d714a843b3975a71fee8b7d62d5686bf50d060d6f970fe79f1af39c4e",
+      "size_bytes": 5659997,
+      "source": "data/.quality/issue-237/issue-237-ascii-m1-usdchf-quality.json",
+      "status": "warning",
+      "target_count": 34,
+      "warning_count": 289
+    },
+    {
+      "error_count": 0,
+      "finding_count": 469,
+      "info_count": 273,
+      "issue": "issue-237",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "51989375fae94bfcb4d108457cce5fbadd88e2ef0e83ec7dfcab2d1acbb7bdae",
+      "size_bytes": 3905840,
+      "source": "data/.quality/issue-237/issue-237-ascii-m1-usdczk-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 196
+    },
+    {
+      "error_count": 0,
+      "finding_count": 503,
+      "info_count": 297,
+      "issue": "issue-237",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "ce44f71bb020e0991b632b230b29ebc1fc3198a810f9d07f5fff4507461efcd1",
+      "size_bytes": 4129703,
+      "source": "data/.quality/issue-237/issue-237-ascii-m1-usddkk-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 206
+    },
+    {
+      "error_count": 0,
+      "finding_count": 462,
+      "info_count": 297,
+      "issue": "issue-237",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "f66ba2bce3326c33422b1f0b8aad0d2ed697129a0ec29abc6d749a55f1cc73cc",
+      "size_bytes": 3775936,
+      "source": "data/.quality/issue-237/issue-237-ascii-m1-usdhkd-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 165
+    },
+    {
+      "error_count": 0,
+      "finding_count": 463,
+      "info_count": 259,
+      "issue": "issue-237",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "3f3e6cdae7ec93a3d97d2043a776158e4d6fb2c3a2777b209f7b03fe33be50b9",
+      "size_bytes": 3935338,
+      "source": "data/.quality/issue-237/issue-237-ascii-m1-usdhuf-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 204
+    },
+    {
+      "error_count": 0,
+      "finding_count": 722,
+      "info_count": 391,
+      "issue": "issue-238",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "9dfd62a9a39f85974eb3eb79e6e105f6f249814347973e59d85147110d2a4e46",
+      "size_bytes": 6030661,
+      "source": "data/.quality/issue-238/issue-238-ascii-m1-usdjpy-quality.json",
+      "status": "warning",
+      "target_count": 34,
+      "warning_count": 331
+    },
+    {
+      "error_count": 0,
+      "finding_count": 479,
+      "info_count": 273,
+      "issue": "issue-238",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "a68c1b8d4a056a16d274b7859e2f0e00ac83f86f73452bd0194b7b7c06ef7744",
+      "size_bytes": 4007563,
+      "source": "data/.quality/issue-238/issue-238-ascii-m1-usdmxn-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 206
+    },
+    {
+      "error_count": 0,
+      "finding_count": 527,
+      "info_count": 297,
+      "issue": "issue-238",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "cb1e6178156694c2ef5b26ea01d8efd27b05f177ee3bb808a15cd7541f26997d",
+      "size_bytes": 4432748,
+      "source": "data/.quality/issue-238/issue-238-ascii-m1-usdnok-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 230
+    },
+    {
+      "error_count": 0,
+      "finding_count": 475,
+      "info_count": 273,
+      "issue": "issue-238",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "8bbdb7c72544059081286c63fef9e15def58a35ac7508ddfab1fa0425aa4fff3",
+      "size_bytes": 3936843,
+      "source": "data/.quality/issue-238/issue-238-ascii-m1-usdpln-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 202
+    },
+    {
+      "error_count": 0,
+      "finding_count": 528,
+      "info_count": 297,
+      "issue": "issue-238",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "a2e71ed4e2ebfcf255967febf241eaff943cfed5425021752b1e2b49d966b2ee",
+      "size_bytes": 4425203,
+      "source": "data/.quality/issue-238/issue-238-ascii-m1-usdsek-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 231
+    },
+    {
+      "error_count": 0,
+      "finding_count": 489,
+      "info_count": 297,
+      "issue": "issue-238",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "02da22cfd473e835735184af40953655001055d1704f64075770c0b71b050b50",
+      "size_bytes": 3957190,
+      "source": "data/.quality/issue-238/issue-238-ascii-m1-usdsgd-quality.json",
+      "status": "warning",
+      "target_count": 26,
+      "warning_count": 192
+    },
+    {
+      "error_count": 0,
+      "finding_count": 477,
+      "info_count": 272,
+      "issue": "issue-238",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "829ff71362fc36355bf8dc42ff013d8a6c44fb1afbb71e93d6b28f782bff97ea",
+      "size_bytes": 4032297,
+      "source": "data/.quality/issue-238/issue-238-ascii-m1-usdtry-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 205
+    },
+    {
+      "error_count": 0,
+      "finding_count": 489,
+      "info_count": 273,
+      "issue": "issue-238",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "9f39472d90c26dcb557c7e0029ebeb6931de85ff3d568512380e036e0909eebb",
+      "size_bytes": 4144425,
+      "source": "data/.quality/issue-238/issue-238-ascii-m1-usdzar-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 216
+    },
+    {
+      "error_count": 0,
+      "finding_count": 286,
+      "info_count": 172,
+      "issue": "issue-238",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "773497b8ad247a852630fef471aace6cef36610c3526e3e536cc4a678ba72599",
+      "size_bytes": 2338181,
+      "source": "data/.quality/issue-238/issue-238-ascii-m1-wtiusd-quality.json",
+      "status": "warning",
+      "target_count": 16,
+      "warning_count": 114
+    },
+    {
+      "error_count": 0,
+      "finding_count": 471,
+      "info_count": 281,
+      "issue": "issue-238",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "142b31398b4dd47337e2f44416330c9e9ce5e83a3b934ae5b387879944af7f7e",
+      "size_bytes": 3804007,
+      "source": "data/.quality/issue-238/issue-238-ascii-m1-xagusd-quality.json",
+      "status": "warning",
+      "target_count": 25,
+      "warning_count": 190
+    },
+    {
+      "error_count": 0,
+      "finding_count": 189,
+      "info_count": 123,
+      "issue": "issue-239",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "85b0850290a026b54fed9d9d84c7f491dba19df6ba6450b07771c08ec8b67a91",
+      "size_bytes": 1540983,
+      "source": "data/.quality/issue-239/issue-239-ascii-m1-xauaud-quality.json",
+      "status": "warning",
+      "target_count": 12,
+      "warning_count": 66
+    },
+    {
+      "error_count": 0,
+      "finding_count": 193,
+      "info_count": 122,
+      "issue": "issue-239",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "a0e81fa8ec90ae7fa34f6c9e6f2723a0c9a6a29462ee49366ad6ee21d6e5ab34",
+      "size_bytes": 1571920,
+      "source": "data/.quality/issue-239/issue-239-ascii-m1-xauchf-quality.json",
+      "status": "warning",
+      "target_count": 12,
+      "warning_count": 71
+    },
+    {
+      "error_count": 0,
+      "finding_count": 189,
+      "info_count": 122,
+      "issue": "issue-239",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "a02f00d31d005c98e95523e8a5d8eb8d8f0a2e3d6fb421d66e75ddd693fe7dff",
+      "size_bytes": 1539793,
+      "source": "data/.quality/issue-239/issue-239-ascii-m1-xaueur-quality.json",
+      "status": "warning",
+      "target_count": 12,
+      "warning_count": 67
+    },
+    {
+      "error_count": 0,
+      "finding_count": 192,
+      "info_count": 122,
+      "issue": "issue-239",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "1575568da023b0c6a975e818cfab03746b14514b3da3ecbcc02dd7672e45981a",
+      "size_bytes": 1576579,
+      "source": "data/.quality/issue-239/issue-239-ascii-m1-xaugbp-quality.json",
+      "status": "warning",
+      "target_count": 12,
+      "warning_count": 70
+    },
+    {
+      "error_count": 0,
+      "finding_count": 451,
+      "info_count": 283,
+      "issue": "issue-239",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "b2c0555043dfba0ddf3076d5e5190b676b0e4c0151434373f4cfff566aa646d1",
+      "size_bytes": 3583319,
+      "source": "data/.quality/issue-239/issue-239-ascii-m1-xauusd-quality.json",
+      "status": "warning",
+      "target_count": 25,
+      "warning_count": 168
+    },
+    {
+      "error_count": 0,
+      "finding_count": 513,
+      "info_count": 273,
+      "issue": "issue-239",
+      "rule_count": 21,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "80f7eb3bdfbba367c6632fd6975b7dd06ebe8f5baf427bc4fa6a2e8c64c5e0b2",
+      "size_bytes": 4387637,
+      "source": "data/.quality/issue-239/issue-239-ascii-m1-zarjpy-quality.json",
+      "status": "warning",
+      "target_count": 24,
+      "warning_count": 240
+    },
+    {
+      "error_count": 1,
+      "finding_count": 6642,
+      "info_count": 3626,
+      "issue": "issue-241",
+      "rule_count": 19,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "73ab82a02a8a5ffc40b1e0314b46ed720e4fea36652efc35855bf41744130255",
+      "size_bytes": 40632523,
+      "source": "data/.quality/issue-241/ascii-m1-all-quality-report.json",
+      "status": "failed",
+      "target_count": 778,
+      "warning_count": 3015
+    },
+    {
+      "error_count": 0,
+      "finding_count": 9,
+      "info_count": 9,
+      "issue": "unscoped",
+      "rule_count": 10,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "d5467ce02125b1c131d24abdbafc994b3920c816f54e7c571e22973e050b4e1b",
+      "size_bytes": 52747,
+      "source": "data/.quality/reports/run-92a6621e60044fc687a09f09df9b60cd.json",
+      "status": "clean",
+      "target_count": 1,
+      "warning_count": 0
+    },
+    {
+      "error_count": 0,
+      "finding_count": 7,
+      "info_count": 7,
+      "issue": "unscoped",
+      "rule_count": 9,
+      "schema_version": "histdatacom.quality-report.v1",
+      "sha256": "3ace37bdf2835d290f2761399b16d6e5f1dc67664af36808619cda880e8d0f9a",
+      "size_bytes": 57689,
+      "source": "data/.quality/reports/run-b49f799d1f68434391e87d62432b12f6.json",
+      "status": "clean",
+      "target_count": 1,
+      "warning_count": 0
+    }
+  ],
+  "schema_version": "histdatacom.data-quality-publication-index.v1",
+  "source": "data/.quality",
+  "status_counts": {
+    "clean": 4,
+    "failed": 3,
+    "unknown": 3,
+    "warning": 55
+  },
+  "top_finding_codes": [
+    {
+      "count": 2665,
+      "name": "ASCII_ROW_COUNT_SUMMARY"
+    },
+    {
+      "count": 1886,
+      "name": "DOMAIN_SYMBOL_METADATA_SUMMARY"
+    },
+    {
+      "count": 1886,
+      "name": "MODELING_READINESS_SUMMARY"
+    },
+    {
+      "count": 1886,
+      "name": "MODELING_BID_ONLY_EXECUTION_RISK"
+    },
+    {
+      "count": 1886,
+      "name": "MODELING_CURRENT_BAR_LEAKAGE_RISK"
+    },
+    {
+      "count": 1886,
+      "name": "MODELING_SPREAD_COST_MISSING"
+    },
+    {
+      "count": 1629,
+      "name": "ASCII_TIMESTAMP_EST_NO_DST_SUMMARY"
+    },
+    {
+      "count": 1629,
+      "name": "ASCII_TIMESTAMP_SEQUENCE_SUMMARY"
+    },
+    {
+      "count": 1629,
+      "name": "ASCII_TIMESTAMP_GAP_SUMMARY"
+    },
+    {
+      "count": 1628,
+      "name": "ASCII_M1_OHLC_SUMMARY"
+    },
+    {
+      "count": 1628,
+      "name": "ASCII_M1_PRECISION_SUMMARY"
+    },
+    {
+      "count": 1628,
+      "name": "ASCII_M1_OUTLIER_SUMMARY"
+    },
+    {
+      "count": 1627,
+      "name": "DOMAIN_CALENDAR_SESSION_SUMMARY"
+    },
+    {
+      "count": 1572,
+      "name": "ASCII_TIMESTAMP_SUSPICIOUS_GAP"
+    },
+    {
+      "count": 1422,
+      "name": "ASCII_TIMESTAMP_EXPECTED_SESSION_CLOSURE_GAP"
+    }
+  ],
+  "top_rule_ids": [
+    {
+      "count": 3639,
+      "name": "inventory.zip.integrity"
+    },
+    {
+      "count": 3123,
+      "name": "ingestion.ascii.row_count"
+    },
+    {
+      "count": 3123,
+      "name": "ingestion.ascii.text"
+    },
+    {
+      "count": 3123,
+      "name": "ingestion.ascii.schema"
+    },
+    {
+      "count": 2605,
+      "name": "time.ascii.est_no_dst"
+    },
+    {
+      "count": 2605,
+      "name": "time.ascii.sequence"
+    },
+    {
+      "count": 2605,
+      "name": "time.ascii.gaps"
+    },
+    {
+      "count": 2604,
+      "name": "bars.ascii.m1_ohlc"
+    },
+    {
+      "count": 2604,
+      "name": "bars.ascii.m1_precision"
+    },
+    {
+      "count": 2604,
+      "name": "bars.ascii.m1_outliers"
+    },
+    {
+      "count": 2604,
+      "name": "ticks.ascii.spread"
+    },
+    {
+      "count": 2604,
+      "name": "ticks.ascii.microstructure"
+    },
+    {
+      "count": 2604,
+      "name": "ticks.ascii.spread_regimes"
+    },
+    {
+      "count": 2603,
+      "name": "domain.symbol_metadata"
+    },
+    {
+      "count": 2603,
+      "name": "domain.calendar_sessions"
+    }
+  ],
+  "totals": {
+    "error_count": 918,
+    "finding_count": 37513,
+    "info_count": 21106,
+    "report_count": 65,
+    "rule_count": 1238,
+    "source_bytes": 285293487,
+    "target_count": 4274,
+    "warning_count": 15489
+  }
+}

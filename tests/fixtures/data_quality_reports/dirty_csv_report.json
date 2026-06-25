@@ -16,7 +16,7 @@
             "metadata": {
               "duplicate_of_row": 1
             },
-            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
             "row_number": 2,
             "timestamp_source": "20120201 000000",
             "timestamp_utc_ms": 1328072400000
@@ -31,7 +31,7 @@
             "metadata": {
               "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
             },
-            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
             "period": "201202",
             "symbol": "EURUSD",
             "timeframe": "M1"
@@ -47,7 +47,7 @@
         "metadata": {
           "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
         },
-        "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
         "period": "201202",
         "symbol": "EURUSD",
         "timeframe": "M1"
@@ -60,7 +60,7 @@
           "location": {
             "column": "high",
             "metadata": {},
-            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
             "row_number": 3,
             "timestamp_source": "20120201 000100",
             "timestamp_utc_ms": 1328072460000
@@ -80,7 +80,7 @@
             "metadata": {
               "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
             },
-            "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
             "period": "201202",
             "symbol": "EURUSD",
             "timeframe": "M1"
@@ -96,7 +96,7 @@
         "metadata": {
           "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
         },
-        "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
         "period": "201202",
         "symbol": "EURUSD",
         "timeframe": "M1"
@@ -128,7 +128,7 @@
         "metadata": {
           "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
         },
-        "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
         "period": "201202",
         "symbol": "EURUSD",
         "timeframe": "M1"
@@ -143,7 +143,7 @@
       "metadata": {
         "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
       },
-      "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+      "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
       "period": "201202",
       "symbol": "EURUSD",
       "timeframe": "M1"

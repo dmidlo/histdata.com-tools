@@ -81,7 +81,7 @@ def test_repository_quality_payload_updates_legacy_pair_entries() -> None:
     assert quality["formats"] == ["ascii"]
     assert quality["timeframes"] == ["M1", "T"]
     assert quality["periods"] == ["201202"]
-    assert quality["report_artifact"]["path"] == "/tmp/quality.json"
+    assert quality["report_artifact"]["path"] == "quality.json"
 
 
 def test_repository_quality_attributes_cross_target_findings() -> None:
@@ -178,5 +178,5 @@ def test_repository_quality_columns_are_display_safe() -> None:
         "status": "clean",
         "targets": "4",
         "findings": "",
-        "report": "/tmp/quality.json",
+        "report": "quality.json",
     }

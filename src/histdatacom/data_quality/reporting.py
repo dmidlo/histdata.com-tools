@@ -17,6 +17,10 @@ from histdatacom.data_quality.contracts import (
     QualityStatus,
     QualityTargetSummary,
 )
+from histdatacom.publication_safety import (
+    publish_safe_json_mapping,
+    publish_safe_path,
+)
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 
 QUALITY_REPORT_SCHEMA_VERSION = "histdatacom.quality-report.v1"
@@ -147,17 +151,27 @@ class QualityExitDecision:
         }
 
 
-def quality_report_payload(report: QualityReport) -> dict[str, JSONValue]:
+def quality_report_payload(
+    report: QualityReport,
+    *,
+    publish_safe: bool = True,
+) -> dict[str, JSONValue]:
     """Return the stable JSON report payload for a quality report."""
     payload: dict[str, JSONValue] = dict(report.to_dict())
     payload["schema_version"] = QUALITY_REPORT_SCHEMA_VERSION
-    return payload
+    if not publish_safe:
+        return payload
+    return _publish_safe_mapping(payload)
 
 
-def quality_report_to_json(report: QualityReport) -> str:
+def quality_report_to_json(
+    report: QualityReport,
+    *,
+    publish_safe: bool = True,
+) -> str:
     """Return deterministic formatted JSON for a quality report."""
     return json.dumps(
-        quality_report_payload(report),
+        quality_report_payload(report, publish_safe=publish_safe),
         indent=2,
         sort_keys=True,
     )
@@ -166,11 +180,15 @@ def quality_report_to_json(report: QualityReport) -> str:
 def write_quality_report(
     report: QualityReport,
     path: str | Path,
+    *,
+    publish_safe: bool = True,
 ) -> ArtifactRef:
     """Write a JSON quality report and return its artifact reference."""
     output = Path(path).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
-    encoded = f"{quality_report_to_json(report)}\n".encode("utf-8")
+    encoded = (
+        f"{quality_report_to_json(report, publish_safe=publish_safe)}\n"
+    ).encode("utf-8")
     output.write_bytes(encoded)
     digest = hashlib.sha256(encoded).hexdigest()
     summary = report.summary()
@@ -196,6 +214,7 @@ def format_quality_console_summary(
     *,
     check_groups: tuple[str, ...] = (),
     artifact: ArtifactRef | None = None,
+    publish_safe: bool = True,
 ) -> str:
     """Return a human-readable quality summary derived from the report."""
     summary = report.summary()
@@ -219,7 +238,10 @@ def format_quality_console_summary(
         ),
     ]
     if artifact is not None:
-        lines.append(f"report: {artifact.path}")
+        report_path = (
+            publish_safe_path(artifact.path) if publish_safe else artifact.path
+        )
+        lines.append(f"report: {report_path}")
     if summary.target_count == 0:
         lines.append("No data quality targets discovered.")
 
@@ -231,7 +253,7 @@ def format_quality_console_summary(
     for status, title in sections:
         lines.extend(("", title))
         target_lines = tuple(
-            _format_target_summary(item)
+            _format_target_summary(item, publish_safe=publish_safe)
             for item in report.target_summaries
             if item.status is status
         )
@@ -250,9 +272,10 @@ def bounded_quality_payload(
     report: QualityReport,
     decision: QualityExitDecision,
     artifact: ArtifactRef | None,
+    publish_safe: bool = True,
 ) -> dict[str, JSONValue]:
     """Return a bounded result payload without detailed findings."""
-    return {
+    payload: dict[str, JSONValue] = {
         "operation": operation,
         "check_groups": list(check_groups),
         "discovery": dict(discovery),
@@ -266,6 +289,9 @@ def bounded_quality_payload(
         "report_artifact": None if artifact is None else artifact.to_dict(),
         "exit_decision": decision.to_dict(),
     }
+    if not publish_safe:
+        return payload
+    return _publish_safe_mapping(payload)
 
 
 def _cross_target_summaries(
@@ -397,10 +423,23 @@ def _target_count(report: QualityReport, status: QualityStatus) -> int:
     )
 
 
-def _format_target_summary(summary: QualityTargetSummary) -> str:
+def _format_target_summary(
+    summary: QualityTargetSummary,
+    *,
+    publish_safe: bool = True,
+) -> str:
     target = summary.target
+    target_path = (
+        publish_safe_path(target.path) if publish_safe else target.path
+    )
     return (
-        f"- {target.kind.value}: {target.path} "
+        f"- {target.kind.value}: {target_path} "
         f"(findings={summary.finding_count}, "
         f"warnings={summary.warning_count}, errors={summary.error_count})"
     )
+
+
+def _publish_safe_mapping(
+    payload: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    return publish_safe_json_mapping(payload)
