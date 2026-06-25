@@ -88,6 +88,7 @@ from histdatacom.fx_enums import (
     Timeframe,
     get_valid_format_timeframes,
 )
+from histdatacom.verbosity import normalize_verbosity
 from histdatacom.utils import (
     get_current_datemonth_gmt_minus5,
     get_year_from_datemonth,
@@ -129,8 +130,10 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog=(
                 "Commands:\n"
+                "  analytics   Run offline data analytics operations\n"
                 "  jobs        Inspect and control orchestrated work\n"
                 "  runtime     Inspect and manage the orchestration runtime\n\n"
+                "Run `histdatacom analytics --help` for analytics commands.\n"
                 "Run `histdatacom jobs --help` for job telemetry commands."
             ),
         )
@@ -290,6 +293,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args = [
                 *["--data-directory", self.arg_namespace.data_directory],
             ]
+            if self.arg_namespace.verbosity:
+                args.append("-" + "v" * self.arg_namespace.verbosity)
             if self.arg_namespace.data_quality:
                 args.append("--quality")
             if self.arg_namespace.repo_quality_refresh:
@@ -345,6 +350,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             *["-c", self.arg_namespace.cpu_utilization],
             *["-b", self.arg_namespace.batch_size],
         ]
+        if self.arg_namespace.verbosity:
+            args.append("-" + "v" * self.arg_namespace.verbosity)
 
         if self.arg_namespace.start_yearmonth:
             args.extend(["-s", self.arg_namespace.start_yearmonth])
@@ -1037,6 +1044,17 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             type=str,
             help='Directory Used to save data. default is "./data/"',
         )
+        system_args.add_argument(
+            "-v",
+            "--verbose",
+            dest="verbosity",
+            action="count",
+            default=0,
+            help=(
+                "increase logging verbosity; repeat as -vv for debug and "
+                "-vvv for trace"
+            ),
+        )
         orchestration_args.add_argument(
             "--orchestration-start",
             dest="orchestration_start",
@@ -1187,6 +1205,9 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         self._check_for_ascii_if_influx()
         self._check_for_ascii_if_api()
         self._check_for_supported_format_timeframe_combination()
+        self.arg_namespace.verbosity = normalize_verbosity(
+            self.arg_namespace.verbosity
+        )
         get_pool_cpu_count(self.arg_namespace.cpu_utilization)
 
     def __call__(self) -> Options:

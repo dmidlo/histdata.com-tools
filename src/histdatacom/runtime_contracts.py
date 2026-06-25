@@ -427,6 +427,7 @@ class RunRequest:
     quality_profile: dict[str, JSONValue] = field(default_factory=dict)
     repo_quality_refresh: bool = False
     repo_quality_columns: bool = False
+    verbosity: int = 0
     metadata: dict[str, JSONValue] = field(default_factory=dict)
 
     @classmethod
@@ -436,6 +437,7 @@ class RunRequest:
         repo_sort = str(getattr(options, "by", "") or "")
         if repo_sort:
             metadata["repo_sort"] = repo_sort
+        verbosity = max(0, int(getattr(options, "verbosity", 0) or 0))
         return cls(
             request_id=request_id or new_request_id(),
             pairs=tuple(sorted(getattr(options, "pairs", ()) or ())),
@@ -504,6 +506,7 @@ class RunRequest:
             repo_quality_columns=bool(
                 getattr(options, "repo_quality_columns", False)
             ),
+            verbosity=verbosity,
             metadata=metadata,
         )
 
@@ -539,6 +542,7 @@ class RunRequest:
             "quality_profile": dict(self.quality_profile),
             "repo_quality_refresh": self.repo_quality_refresh,
             "repo_quality_columns": self.repo_quality_columns,
+            "verbosity": self.verbosity,
             "metadata": dict(self.metadata),
         }
 
@@ -589,5 +593,6 @@ class RunRequest:
             quality_profile=dict(data.get("quality_profile") or {}),
             repo_quality_refresh=bool(data.get("repo_quality_refresh", False)),
             repo_quality_columns=bool(data.get("repo_quality_columns", False)),
+            verbosity=max(0, int(data.get("verbosity", 0) or 0)),
             metadata=dict(data.get("metadata") or {}),
         )

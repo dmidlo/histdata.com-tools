@@ -42,6 +42,7 @@ class Options:
         "update_remote_data",
         "use_orchestration",
         "validate_urls",
+        "verbosity",
         "version",
         "zip_persist",
     )
@@ -87,6 +88,7 @@ class Options:
         self.use_orchestration: bool = True
         self.orchestration_start: bool = True
         self.orchestration_wait_result: bool = True
+        self.verbosity: int = 0
         self.metadata: dict = {}
 
     def to_dict(self) -> dict[str, object]:

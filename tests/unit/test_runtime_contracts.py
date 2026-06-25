@@ -175,6 +175,18 @@ def test_run_request_round_trips_options_payload() -> None:
     assert restored.repo_quality_columns
 
 
+def test_run_request_carries_verbosity() -> None:
+    """Verbosity should survive CLI/API to orchestration serialization."""
+    options = Options()
+    options.verbosity = 3
+
+    request = RunRequest.from_options(options, request_id="run-verbose")
+    restored = RunRequest.from_dict(request.to_dict())
+
+    assert request.verbosity == 3
+    assert restored.verbosity == 3
+
+
 def test_stage_result_round_trips_artifacts_events_and_failure() -> None:
     """Activity results should remain JSON-compatible and structured."""
     result = StageResult(

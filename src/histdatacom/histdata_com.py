@@ -54,6 +54,7 @@ from histdatacom.utils import (
     set_working_data_dir,
     normalize_api_return_type,
 )
+from histdatacom.verbosity import configure_logging
 
 if TYPE_CHECKING:
     from pandas import DataFrame
@@ -86,6 +87,7 @@ class RuntimeContext:
     available_remote_data: bool
     update_remote_data: bool
     import_to_influxdb: bool
+    verbosity: int
 
 
 class _HistDataCom:  # noqa:R701
@@ -110,6 +112,7 @@ class _HistDataCom:  # noqa:R701
           - .copy(): decouple for GC using a hard copy of user args
         """
         self.options = ArgParser(options)()
+        configure_logging(self.options.verbosity)
         self.context = _resolve_runtime_context(self.options)
         self.options.api_return_type = self.context.api_return_type
 
@@ -312,6 +315,7 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         available_remote_data=bool(args["available_remote_data"]),
         update_remote_data=bool(args["update_remote_data"]),
         import_to_influxdb=bool(args["import_to_influxdb"]),
+        verbosity=int(args["verbosity"]),
     )
 
 
@@ -410,6 +414,10 @@ def main(
         from histdatacom.orchestration.cli import main as runtime_main
 
         return runtime_main(sys.argv[2:])
+    if not options and len(sys.argv) > 1 and sys.argv[1] == "analytics":
+        from histdatacom.data_analytics.cli import main as analytics_main
+
+        return analytics_main(sys.argv[2:])
 
     if not options:
         options = Options()

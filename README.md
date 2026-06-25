@@ -31,6 +31,8 @@ Works on MacOS, Linux & Windows Systems.
     - [Quality Targets and Check Groups](#quality-targets-and-check-groups)
     - [Clean and Failing Examples](#clean-and-failing-examples)
     - [Warning, Error, and Exit Policy](#warning-error-and-exit-policy)
+  - [Data Analytics](#data-analytics)
+    - [Feed-Regime Detection](#feed-regime-detection)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -84,7 +86,7 @@ histdatacom -h
 ```
 
 ```txt
-usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION]
+usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION] [-v]
                    [--data-directory DATA_DIRECTORY] [--orchestration-start] [--no-orchestration-start] [--submit-only] [--quality] [--repo-quality] [--repo-quality-columns] [--quality-target PATH [PATH ...]] [--quality-checks GROUP [GROUP ...]]
                    [--quality-report PATH] [--quality-profile PATH] [--quality-fail-on SEVERITY] [--quality-max-errors COUNT] [--quality-max-warnings COUNT]
 
@@ -133,6 +135,8 @@ System:
                         OR integer percent 1-200
   --data-directory DATA_DIRECTORY
                         Directory Used to save data. default is "./data/"
+  -v, --verbose         increase logging verbosity; repeat as -vv for debug and
+                        -vvv for trace
 
 Orchestration:
   --orchestration-start
@@ -187,8 +191,11 @@ Info:
                         repository table output
 
 Commands:
+  analytics   Run offline data analytics operations
   jobs        Inspect and control orchestrated work
+  runtime     Inspect and manage the orchestration runtime
 
+Run `histdatacom analytics --help` for analytics commands.
 Run `histdatacom jobs --help` for job telemetry commands.
 ```
 
@@ -729,6 +736,41 @@ histdatacom --quality \
 For CI/offline use, run against checked-in fixtures or downloaded artifacts in a
 workspace cache. The command needs only local filesystem access; network access,
 HistData.com availability, Temporal, and InfluxDB are not required.
+
+---
+
+### Data Analytics
+
+Data analytics operations describe market-data behavior for downstream feature
+engineering, dashboards, and modeling decisions. They are separate from
+`histdatacom --quality`: analytics reports do not produce clean/warning/failed
+statuses and do not downgrade repository quality metadata.
+
+#### Feed-Regime Detection
+
+`histdatacom analytics feed-regimes` profiles local ASCII tick artifacts by
+month or year, then segments long histories into feed-behavior eras such as
+sparse, transitional, and dense periods. The report includes tick density,
+inter-arrival intervals, quote update cadence, zero-change runs, spread
+statistics, quiet-gap counts, regime boundaries, and summary metadata.
+
+```sh
+histdatacom analytics feed-regimes \
+  --target data/ASCII/T/eurusd \
+  --bucket month \
+  --report reports/eurusd-feed-regimes.json
+```
+
+Use `--json` to print the full machine-readable payload to stdout:
+
+```sh
+histdatacom analytics feed-regimes --target data/ --json
+```
+
+Use these outputs to choose modeling windows, session filters, feature
+normalization strategies, or dashboard annotations. Treat surprising regimes as
+research signals; run `histdatacom --quality` separately when you need
+readability, timestamp consistency, ZIP integrity, or pass/fail validation.
 
 ---
 

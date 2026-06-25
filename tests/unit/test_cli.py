@@ -153,9 +153,49 @@ def test_help_advertises_orchestration_jobs_not_orchestration() -> None:
     help_text = parser.format_help()
 
     assert "Orchestration:" in help_text
+    assert "analytics   Run offline data analytics operations" in help_text
+    assert "histdatacom analytics --help" in help_text
     assert "histdatacom jobs --help" in help_text
     assert "--submit-only" in help_text
     assert "--orchestration-submit-only" not in help_text
+
+
+def test_help_advertises_verbosity_flags() -> None:
+    """Issue #13: main help should expose -v/-vv/-vvv."""
+    parser = ArgParser(Options())
+    parser._set_args()
+    help_text = parser.format_help()
+
+    assert "-v, --verbose" in help_text
+    assert "-vvv for trace" in help_text
+
+
+def test_verbose_cli_count_is_normalized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated -v flags should become an integer verbosity level."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-vv",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.verbosity == 2
+    assert options.validate_urls
 
 
 def test_help_describes_end_yearmonth_as_end_period() -> None:
