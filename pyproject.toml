@@ -79,7 +79,7 @@ all = [
     "temporalio>=1.10,<2",
 ]
 test = [
-    "coverage==7.14.2",
+    "coverage==7.14.3",
     "ipykernel",
     "influxdb-client>=1.50.0",
     "nbclient",
@@ -92,12 +92,12 @@ test = [
 ]
 lint = [
     "black==26.5.1",
-    "commitizen==4.16.3",
+    "commitizen==4.16.4",
     "mypy==2.1.0",
     "pandas-stubs==3.0.3.260530",
     "pre-commit==4.6.0",
     "pyroma==5.0.1",
-    "ruff==0.15.18",
+    "ruff==0.15.19",
     "shellcheck-py==0.11.0.1",
     "types-PyYAML==6.0.12.20260518",
 ]
@@ -111,8 +111,8 @@ release = [
 dev = [
     "build==1.5.0",
     "black==26.5.1",
-    "commitizen==4.16.3",
-    "coverage==7.14.2",
+    "commitizen==4.16.4",
+    "coverage==7.14.3",
     "ipykernel",
     "influxdb-client>=1.50.0",
     "ipywidgets",
@@ -128,7 +128,7 @@ dev = [
     "pyarrow>=24.0.0",
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
-    "ruff==0.15.18",
+    "ruff==0.15.19",
     "setuptools==82.0.1",
     "shellcheck-py==0.11.0.1",
     "temporalio>=1.10,<2",
