@@ -9,7 +9,7 @@ from importlib import import_module
 from inspect import isawaitable
 import logging
 from pathlib import Path
-from typing import Any, Mapping, cast
+from typing import Any, Mapping
 
 from histdatacom.cancellation import (
     PartialArtifactDisposition,
@@ -1810,39 +1810,35 @@ def _config_log_context(
     config: OrchestrationWorkerConfig,
     **values: Any,
 ) -> dict[str, object]:
-    return cast(
-        dict[str, object],
-        safe_log_extra(
-            namespace=config.namespace,
-            target_host=config.target_host,
-            task_queue=config.task_queue,
-            lane=config.lane.value,
-            **values,
-        ),
+    context: dict[str, object] = safe_log_extra(
+        namespace=config.namespace,
+        target_host=config.target_host,
+        task_queue=config.task_queue,
+        lane=config.lane.value,
+        **values,
     )
+    return context
 
 
 def _request_log_context(
     request: RunRequest,
     **values: Any,
 ) -> dict[str, object]:
-    return cast(
-        dict[str, object],
-        safe_log_extra(
-            request_id=request.request_id,
-            operations=_request_operation_names(request),
-            pairs_count=len(request.pairs),
-            formats=list(request.formats),
-            timeframes=list(request.timeframes),
-            start_yearmonth=request.start_yearmonth,
-            end_yearmonth=request.end_yearmonth,
-            api_return_type=request.api_return_type,
-            data_quality=request.data_quality,
-            repo_quality_refresh=request.repo_quality_refresh,
-            metadata_key_count=len(request.metadata),
-            **values,
-        ),
+    context: dict[str, object] = safe_log_extra(
+        request_id=request.request_id,
+        operations=_request_operation_names(request),
+        pairs_count=len(request.pairs),
+        formats=list(request.formats),
+        timeframes=list(request.timeframes),
+        start_yearmonth=request.start_yearmonth,
+        end_yearmonth=request.end_yearmonth,
+        api_return_type=request.api_return_type,
+        data_quality=request.data_quality,
+        repo_quality_refresh=request.repo_quality_refresh,
+        metadata_key_count=len(request.metadata),
+        **values,
     )
+    return context
 
 
 def _request_operation_names(request: RunRequest) -> tuple[str, ...]:
@@ -1872,17 +1868,15 @@ def _status_log_context(
     status: OrchestrationStatus,
     **values: Any,
 ) -> dict[str, object]:
-    return cast(
-        dict[str, object],
-        safe_log_extra(
-            orchestration_state=status.state,
-            orchestration_running=status.running,
-            state_dir=status.state_dir,
-            pid_count=len(status.pids),
-            log_components=sorted(status.logs),
-            **values,
-        ),
+    context: dict[str, object] = safe_log_extra(
+        orchestration_state=status.state,
+        orchestration_running=status.running,
+        state_dir=status.state_dir,
+        pid_count=len(status.pids),
+        log_components=sorted(status.logs),
+        **values,
     )
+    return context
 
 
 async def _maybe_await(value: Any) -> Any:
