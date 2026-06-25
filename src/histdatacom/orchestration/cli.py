@@ -30,7 +30,10 @@ from histdatacom.orchestration.client import (
     retry_job_sync,
     submit_control_job_sync,
 )
-from histdatacom.orchestration.control import CONTROL_SCHEMA_VERSION
+from histdatacom.orchestration.control import (
+    CONTROL_SCHEMA_VERSION,
+    OrchestrationJobSnapshot,
+)
 from histdatacom.orchestration.maintenance import (
     OrchestrationRetentionPolicy,
     run_orchestration_maintenance,
@@ -41,6 +44,10 @@ from histdatacom.orchestration.queues import (
     OrchestrationWorkerConfig,
 )
 from histdatacom.orchestration.resources import OrchestrationResourceError
+from histdatacom.orchestration.rich_progress import (
+    render_job_progress,
+    watch_job_progress,
+)
 from histdatacom.orchestration.runtime import (
     PortAllocationError,
     OrchestrationPaths,
@@ -276,6 +283,18 @@ def _add_jobs_args(parser: argparse.ArgumentParser) -> None:
                     "mark the replacement run to recompute completed artifacts "
                     "instead of reusing them"
                 ),
+            )
+        if command == "progress":
+            job_parser.add_argument(
+                "--watch",
+                action="store_true",
+                help="live-refresh the Rich progress display until completion",
+            )
+            job_parser.add_argument(
+                "--interval",
+                type=float,
+                default=1.0,
+                help="seconds between progress refreshes in watch mode",
             )
 
 
@@ -587,7 +606,20 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
         _write_control_payload(snapshot.to_dict(), as_json=args.json)
         return 0
     if args.jobs_command == "progress":
-        snapshot = inspect_job_status_sync(args.workflow_id, **identity_kwargs)
+
+        def fetch_snapshot() -> OrchestrationJobSnapshot:
+            return inspect_job_status_sync(args.workflow_id, **identity_kwargs)
+
+        if getattr(args, "watch", False) and not args.json:
+            watch_job_progress(
+                fetch_snapshot,
+                interval_seconds=args.interval,
+            )
+            return 0
+        snapshot = fetch_snapshot()
+        if not args.json:
+            render_job_progress(snapshot)
+            return 0
         payload = {
             "schema_version": CONTROL_SCHEMA_VERSION,
             "workflow_id": snapshot.workflow_id,

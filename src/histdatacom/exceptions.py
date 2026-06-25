@@ -699,9 +699,7 @@ def _redact_report_value(key: str, value: JSONValue) -> JSONValue:
         }
     if isinstance(value, list):
         return [_redact_report_value(key, item) for item in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
+    return value
 
 
 def _is_sensitive_detail_key(key: str) -> bool:

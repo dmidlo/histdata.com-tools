@@ -983,6 +983,10 @@ Submit a job through the default orchestration runtime:
 histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
+Interactive waited CLI runs render a live Rich progress view while the Temporal
+job is running; piped output and API calls keep the machine-readable result
+path.
+
 Submit without waiting for completion:
 
 ```sh
@@ -993,10 +997,14 @@ The JSON control surface supports job inspection and future GUI polling:
 
 ```sh
 histdatacom jobs list --json
+histdatacom jobs progress histdatacom-<request-id> --watch
 histdatacom jobs progress histdatacom-<request-id> --json
 histdatacom jobs artifacts histdatacom-<request-id> --json
 histdatacom jobs cancel histdatacom-<request-id> --reason "operator stop"
 ```
+
+Omit `--json` on `jobs progress` for the Rich terminal progress view; add
+`--watch` to live-refresh it until the job reaches a terminal state.
 
 - `histdatacom --version` stays local and does not require orchestration.
 - `-A`, `-U`, `-V`, `-D`, `-X`, and `-I` keep their existing option semantics before an orchestration request is submitted.

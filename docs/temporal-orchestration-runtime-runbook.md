@@ -374,6 +374,10 @@ already running:
 histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
+Interactive waited CLI requests render a live Rich progress view while the
+Temporal job is running; piped output and API calls keep the machine-readable
+result path.
+
 Require an already-running runtime instead of autostarting one:
 
 ```sh
@@ -434,6 +438,7 @@ Inspect and control jobs:
 ```sh
 histdatacom jobs list --json
 histdatacom jobs inspect histdatacom-<request-id> --json
+histdatacom jobs progress histdatacom-<request-id> --watch
 histdatacom jobs progress histdatacom-<request-id> --json
 histdatacom jobs logs histdatacom-<request-id> --json
 histdatacom jobs artifacts histdatacom-<request-id> --json
@@ -442,6 +447,9 @@ histdatacom jobs cancel histdatacom-<request-id> --reason "operator stop"
 histdatacom jobs retry histdatacom-<request-id> --reason "transient failure"
 histdatacom jobs resume histdatacom-<request-id> --reason "continue run"
 ```
+
+Omit `--json` on `jobs progress` for the Rich terminal progress view; add
+`--watch` to live-refresh it until the job reaches a terminal state.
 
 The workflow ID format is `histdatacom-<request_id>`.
 

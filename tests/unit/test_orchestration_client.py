@@ -609,6 +609,32 @@ def test_submit_and_observe_reuses_running_orchestration(
     assert temporal_client.started[0]["id"] == "histdatacom-run-test"
 
 
+def test_submit_and_observe_notifies_progress_observer(
+    tmp_path: Path,
+) -> None:
+    """Waited jobs should notify optional foreground progress observers."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient()
+    supervisor = _FakeSupervisor(current_state="running")
+    snapshots: list[OrchestrationJobSnapshot] = []
+
+    result = asyncio.run(
+        client.submit_run_request_and_observe(
+            RunRequest(request_id="run-test"),
+            config=config,
+            client=temporal_client,
+            supervisor=supervisor,  # type: ignore[arg-type]
+            progress_observer=snapshots.append,
+            progress_interval_seconds=0.1,
+        )
+    )
+
+    assert result.status == "completed"
+    assert len(snapshots) == 2
+    assert snapshots[0].lifecycle == JobLifecycle.SUBMITTED
+    assert snapshots[-1].lifecycle == JobLifecycle.SUCCEEDED
+
+
 def test_submit_and_observe_logs_bounded_lifecycle_metadata(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,

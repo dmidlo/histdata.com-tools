@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from importlib import import_module
 from inspect import isawaitable
 import logging
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from histdatacom.cancellation import (
     PartialArtifactDisposition,
@@ -61,6 +62,7 @@ CONTROL_EXECUTION_METADATA_KEY = "control_execution"
 TEMPORAL_EXECUTION_STATUS_PREFIX = "WORKFLOW_EXECUTION_STATUS_"
 TEMPORAL_EXECUTION_STATUS_METADATA_KEY = "temporal_execution_status"
 LOGGER = logging.getLogger(__name__)
+ProgressObserver = Callable[[OrchestrationJobSnapshot], None]
 
 
 class OrchestrationUnavailableError(DependencyOperationError):
@@ -261,6 +263,8 @@ async def submit_run_request_and_observe(
     wait_for_result: bool = True,
     status_store: ManifestStatusStore | None = None,
     workflow: Any = DEFAULT_RUN_WORKFLOW_NAME,
+    progress_observer: ProgressObserver | None = None,
+    progress_interval_seconds: float = 1.0,
 ) -> OrchestrationJobResult:
     """Submit a run through a healthy orchestration and optionally await its result."""
     resolved_supervisor = supervisor or OrchestrationSupervisor(
@@ -353,6 +357,7 @@ async def submit_run_request_and_observe(
             snapshot=submitted_snapshot,
         )
 
+    _notify_progress_observer(progress_observer, submitted_snapshot)
     LOGGER.info(
         "Waiting for HistData orchestration job request_id=%s workflow_id=%s",
         request.request_id,
@@ -366,12 +371,24 @@ async def submit_run_request_and_observe(
             wait_for_result=True,
         ),
     )
-    result = await observe_workflow_result(raw_handle)
+    if progress_observer is not None:
+        result = await _observe_workflow_result_with_progress(
+            raw_handle,
+            handle=handle,
+            orchestration_status=orchestration_status,
+            config=resolved_config,
+            status_store=status_store,
+            progress_observer=progress_observer,
+            progress_interval_seconds=progress_interval_seconds,
+        )
+    else:
+        result = await observe_workflow_result(raw_handle)
     snapshot = _persist_job_snapshot(
         submitted_snapshot.with_result(result),
         config=resolved_config,
         status_store=status_store,
     )
+    _notify_progress_observer(progress_observer, snapshot)
     observed = OrchestrationJobResult(
         handle=handle,
         status=_observed_job_result_status(result, snapshot),
@@ -464,6 +481,71 @@ async def observe_workflow_result(workflow_handle: Any) -> Any:
     if result is None:
         raise TypeError("Temporal workflow handle must define result()")
     return await _maybe_await(result())
+
+
+async def _observe_workflow_result_with_progress(
+    workflow_handle: Any,
+    *,
+    handle: OrchestrationJobHandle,
+    orchestration_status: OrchestrationStatus | None,
+    config: OrchestrationWorkerConfig,
+    status_store: ManifestStatusStore | None,
+    progress_observer: ProgressObserver,
+    progress_interval_seconds: float,
+) -> Any:
+    """Await a workflow result while periodically notifying progress UI."""
+    result_task = asyncio.create_task(observe_workflow_result(workflow_handle))
+    interval_seconds = max(0.1, progress_interval_seconds)
+    while not result_task.done():
+        done, _pending = await asyncio.wait(
+            {result_task},
+            timeout=interval_seconds,
+        )
+        if done:
+            break
+        try:
+            snapshot = await _inspect_workflow_handle(
+                workflow_handle,
+                handle=handle,
+                orchestration_status=orchestration_status,
+            )
+        except Exception as err:
+            LOGGER.debug(
+                "Progress query skipped for workflow_id=%s: %s",
+                handle.workflow_id,
+                err,
+                extra=safe_log_extra(
+                    workflow_id=handle.workflow_id,
+                    run_id=handle.run_id,
+                ),
+            )
+            continue
+        _notify_progress_observer(
+            progress_observer,
+            _persist_job_snapshot(
+                snapshot,
+                config=config,
+                status_store=status_store,
+            ),
+        )
+    return await result_task
+
+
+def _notify_progress_observer(
+    progress_observer: ProgressObserver | None,
+    snapshot: OrchestrationJobSnapshot,
+) -> None:
+    if progress_observer is None:
+        return
+    try:
+        progress_observer(snapshot)
+    except Exception as err:  # pragma: no cover - defensive terminal UI guard
+        LOGGER.debug(
+            "Progress observer failed for workflow_id=%s: %s",
+            snapshot.workflow_id,
+            err,
+            extra=safe_log_extra(workflow_id=snapshot.workflow_id),
+        )
 
 
 async def inspect_job_status(
@@ -1728,12 +1810,15 @@ def _config_log_context(
     config: OrchestrationWorkerConfig,
     **values: Any,
 ) -> dict[str, object]:
-    return safe_log_extra(
-        namespace=config.namespace,
-        target_host=config.target_host,
-        task_queue=config.task_queue,
-        lane=config.lane.value,
-        **values,
+    return cast(
+        dict[str, object],
+        safe_log_extra(
+            namespace=config.namespace,
+            target_host=config.target_host,
+            task_queue=config.task_queue,
+            lane=config.lane.value,
+            **values,
+        ),
     )
 
 
@@ -1741,19 +1826,22 @@ def _request_log_context(
     request: RunRequest,
     **values: Any,
 ) -> dict[str, object]:
-    return safe_log_extra(
-        request_id=request.request_id,
-        operations=_request_operation_names(request),
-        pairs_count=len(request.pairs),
-        formats=list(request.formats),
-        timeframes=list(request.timeframes),
-        start_yearmonth=request.start_yearmonth,
-        end_yearmonth=request.end_yearmonth,
-        api_return_type=request.api_return_type,
-        data_quality=request.data_quality,
-        repo_quality_refresh=request.repo_quality_refresh,
-        metadata_key_count=len(request.metadata),
-        **values,
+    return cast(
+        dict[str, object],
+        safe_log_extra(
+            request_id=request.request_id,
+            operations=_request_operation_names(request),
+            pairs_count=len(request.pairs),
+            formats=list(request.formats),
+            timeframes=list(request.timeframes),
+            start_yearmonth=request.start_yearmonth,
+            end_yearmonth=request.end_yearmonth,
+            api_return_type=request.api_return_type,
+            data_quality=request.data_quality,
+            repo_quality_refresh=request.repo_quality_refresh,
+            metadata_key_count=len(request.metadata),
+            **values,
+        ),
     )
 
 
@@ -1784,13 +1872,16 @@ def _status_log_context(
     status: OrchestrationStatus,
     **values: Any,
 ) -> dict[str, object]:
-    return safe_log_extra(
-        orchestration_state=status.state,
-        orchestration_running=status.running,
-        state_dir=status.state_dir,
-        pid_count=len(status.pids),
-        log_components=sorted(status.logs),
-        **values,
+    return cast(
+        dict[str, object],
+        safe_log_extra(
+            orchestration_state=status.state,
+            orchestration_running=status.running,
+            state_dir=status.state_dir,
+            pid_count=len(status.pids),
+            log_components=sorted(status.logs),
+            **values,
+        ),
     )
 
 

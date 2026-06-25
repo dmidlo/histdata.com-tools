@@ -834,6 +834,70 @@ def test_cli_default_runtime_uses_orchestration(
     }
 
 
+def test_interactive_cli_waited_job_uses_rich_progress_observer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interactive waited CLI calls should render foreground job progress."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    class FakeProgressRenderer:
+        def __enter__(self):
+            captured["entered"] = True
+            return self
+
+        def __exit__(self, *exc_info: object) -> None:
+            captured["exited"] = True
+
+        def update(self, snapshot: object) -> None:
+            captured["progress_snapshot"] = snapshot
+
+    def fake_submit(request, **kwargs: object) -> JobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        observer = kwargs.get("progress_observer")
+        if callable(observer):
+            observer("progress")
+        return _job_result()
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "LiveJobProgressRenderer",
+        FakeProgressRenderer,
+    )
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    assert histdata_com.main() is None
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert captured["entered"] is True
+    assert captured["exited"] is True
+    assert callable(kwargs["progress_observer"])
+    assert captured["progress_snapshot"] == "progress"
+
+
 def test_back_to_back_cli_orchestration_requests_use_fresh_parser_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

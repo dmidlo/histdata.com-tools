@@ -50,6 +50,7 @@ from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import FailureInfo, RunRequest, WorkStatus
 from histdatacom.orchestration.client import (
+    JobResult,
     OrchestrationUnavailableError,
     submit_run_request_and_observe_sync,
 )
@@ -57,6 +58,7 @@ from histdatacom.orchestration.cutover import (
     FOREGROUND_RUNTIME_REMOVED_MESSAGE,
     should_submit_to_orchestration,
 )
+from histdatacom.orchestration.rich_progress import LiveJobProgressRenderer
 from histdatacom.utils import (
     load_influx_yaml,
     set_working_data_dir,
@@ -159,11 +161,7 @@ class _HistDataCom:  # noqa:R701
     ) -> list | dict | PolarsDataFrame | DataFrame | Table:
         """Submit this run to the Temporal orchestration client boundary."""
         try:
-            result = submit_run_request_and_observe_sync(
-                self.context.request,
-                start_if_needed=self.context.orchestration_start,
-                wait_for_result=self.context.orchestration_wait_result,
-            )
+            result = self._submit_orchestration_job()
         except OrchestrationUnavailableError as err:
             if self.context.from_api:
                 raise
@@ -246,6 +244,28 @@ class _HistDataCom:  # noqa:R701
         if not self.context.from_api:
             print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
         return payload
+
+    def _submit_orchestration_job(self) -> JobResult:
+        """Submit an orchestration job with foreground progress when useful."""
+        kwargs = {
+            "start_if_needed": self.context.orchestration_start,
+            "wait_for_result": self.context.orchestration_wait_result,
+        }
+        if (
+            self.context.from_api
+            or not self.context.orchestration_wait_result
+            or not sys.stdout.isatty()
+        ):
+            return submit_run_request_and_observe_sync(
+                self.context.request,
+                **kwargs,
+            )
+        with LiveJobProgressRenderer() as progress_renderer:
+            return submit_run_request_and_observe_sync(
+                self.context.request,
+                progress_observer=progress_renderer.update,
+                **kwargs,
+            )
 
     def _should_materialize_orchestration_repository_return(self) -> bool:
         """Return whether a waited orchestration repo request should mimic legacy IO."""

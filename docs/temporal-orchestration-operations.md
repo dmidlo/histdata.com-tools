@@ -77,6 +77,10 @@ Submit work and wait for the result:
 histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
+Interactive waited CLI requests render a live Rich progress view while the
+Temporal job is running; piped output and API calls keep the machine-readable
+result path.
+
 Require an already-running healthy runtime:
 
 ```sh
@@ -152,9 +156,13 @@ histdatacom jobs inspect histdatacom-<request-id> --json
 Read progress and logs:
 
 ```sh
+histdatacom jobs progress histdatacom-<request-id> --watch
 histdatacom jobs progress histdatacom-<request-id> --json
 histdatacom jobs logs histdatacom-<request-id> --json
 ```
+
+Omit `--json` on `jobs progress` for the Rich terminal progress view; add
+`--watch` to live-refresh it until the job reaches a terminal state.
 
 Read artifacts and results:
 

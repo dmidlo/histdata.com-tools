@@ -9,10 +9,12 @@ from pathlib import Path
 import pytest
 
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
+from histdatacom.runtime_contracts import ArtifactRef, StatusEvent
 from histdatacom.orchestration import client as orchestration_client
 from histdatacom.orchestration import cli
 from histdatacom.orchestration.control import (
     JobLifecycle,
+    JobProgressSnapshot,
     OrchestrationJobList,
     OrchestrationJobSnapshot,
 )
@@ -119,6 +121,55 @@ def _snapshot(
         lifecycle=lifecycle,
         status=status,
     )
+
+
+def _snapshot_with_progress(
+    *,
+    status: WorkStatus = WorkStatus.UNKNOWN,
+) -> OrchestrationJobSnapshot:
+    """Return a fake control snapshot with progress telemetry."""
+    progress = JobProgressSnapshot(
+        workflow_name="HistDataRunWorkflow",
+        request_id="run-cli",
+        status=status,
+        current_stage="download EURUSD M1 2024",
+        total_children=4,
+        completed_children=2,
+        unit="datasets",
+        started_at_utc="2026-06-25T12:00:00Z",
+        updated_at_utc="2026-06-25T12:00:02Z",
+        rate_per_second=1.0,
+        planned_children=(
+            "plan",
+            "download EURUSD M1 2024",
+            "quality",
+            "cache",
+        ),
+        completed_stages=("plan",),
+        events=(
+            StatusEvent(
+                status=WorkStatus.UNKNOWN,
+                stage="plan",
+                message="Planned 4 datasets.",
+                timestamp_utc="2026-06-25T12:00:00Z",
+            ),
+            StatusEvent(
+                status=WorkStatus.UNKNOWN,
+                stage="download EURUSD M1 2024",
+                message="Downloading CSV ZIP.",
+                timestamp_utc="2026-06-25T12:00:02Z",
+            ),
+        ),
+        artifacts=(
+            ArtifactRef(
+                kind="cache",
+                path="/tmp/histdatacom/EURUSD.csv",
+                size_bytes=4096,
+                sha256="0123456789abcdef",
+            ),
+        ),
+    )
+    return _snapshot(status=status).with_progress(progress)
 
 
 def test_orchestration_status_cli_emits_json(monkeypatch, capsys) -> None:
@@ -403,6 +454,102 @@ def test_orchestration_jobs_inspect_cli_emits_control_snapshot_json(
     assert exit_code == 0
     assert payload["workflow_id"] == "histdatacom-run-cli"
     assert payload["lifecycle"] == JobLifecycle.RUNNING.value
+
+
+def test_orchestration_jobs_progress_cli_renders_rich_dashboard(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Jobs progress should default to a human Rich progress dashboard."""
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(
+        cli,
+        "inspect_job_status_sync",
+        lambda workflow_id, **kwargs: _snapshot_with_progress(),
+    )
+
+    exit_code = cli.main(["jobs", "progress", "histdatacom-run-cli"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "HistData job progress" in output
+    assert "download EURUSD M1 2024" in output
+    assert "2/4 datasets" in output
+    assert "Recent Events" in output
+    assert "/tmp/histdatacom/EURUSD.csv" in output
+
+
+def test_orchestration_jobs_progress_json_keeps_machine_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Jobs progress JSON should stay stable for automation."""
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(
+        cli,
+        "inspect_job_status_sync",
+        lambda workflow_id, **kwargs: _snapshot_with_progress(),
+    )
+
+    exit_code = cli.main(["jobs", "--json", "progress", "histdatacom-run-cli"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["workflow_id"] == "histdatacom-run-cli"
+    assert payload["progress"]["completed_children"] == 2
+    assert payload["progress"]["current_stage"] == "download EURUSD M1 2024"
+
+
+def test_orchestration_jobs_progress_watch_uses_live_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Progress watch should delegate polling to the Rich live renderer."""
+    captured: dict[str, object] = {}
+
+    def fake_watch(fetch_snapshot, *, interval_seconds: float):
+        captured["snapshot"] = fetch_snapshot()
+        captured["interval_seconds"] = interval_seconds
+        return captured["snapshot"]
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(
+        cli,
+        "inspect_job_status_sync",
+        lambda workflow_id, **kwargs: _snapshot_with_progress(
+            status=WorkStatus.COMPLETED
+        ),
+    )
+    monkeypatch.setattr(cli, "watch_job_progress", fake_watch)
+
+    exit_code = cli.main(
+        [
+            "jobs",
+            "progress",
+            "histdatacom-run-cli",
+            "--watch",
+            "--interval",
+            "0.25",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["interval_seconds"] == 0.25
+    assert isinstance(captured["snapshot"], OrchestrationJobSnapshot)
 
 
 def test_orchestration_jobs_cli_resolves_config_from_running_supervisor(
