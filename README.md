@@ -114,7 +114,7 @@ Config:
                         set a start year and month for data. e.g. -s 2000-04
                         or -s 2015-00
   -e, --end_yearmonth END_YEARMONTH
-                        set a start year and month for data. e.g. -e 2020-00
+                        set an end year and month for data. e.g. -e 2020-00
                         or -e 2022-04
 
 Influxdb:

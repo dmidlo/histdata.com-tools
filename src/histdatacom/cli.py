@@ -998,7 +998,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             "--end_yearmonth",
             type=(lambda v: self._validate_yearmonth_format(v)),
             help=(
-                "set a start year and month for data."  # noqa:BLK100
+                "set an end year and month for data."  # noqa:BLK100
                 " e.g. -e 2020-00 or -e 2022-04"
             ),
         )

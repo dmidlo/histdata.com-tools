@@ -158,6 +158,16 @@ def test_help_advertises_orchestration_jobs_not_orchestration() -> None:
     assert "--orchestration-submit-only" not in help_text
 
 
+def test_help_describes_end_yearmonth_as_end_period() -> None:
+    """Issue #29: -e help must not describe the start period."""
+    parser = ArgParser(Options())
+    parser._set_args()
+    help_text = parser.format_help()
+
+    assert "set an end year and month for data. e.g. -e 2020-00" in help_text
+    assert "set a start year and month for data. e.g. -e" not in help_text
+
+
 def test_foreground_cli_flag_is_no_longer_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
