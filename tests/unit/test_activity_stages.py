@@ -13,6 +13,7 @@ from urllib.error import URLError
 import pytest
 import requests
 
+from histdatacom.exceptions import HistDataNoDataError, UrlValidationError
 from histdatacom.activity_stages import (
     UrlPageData,
     build_cache_work_item,
@@ -22,6 +23,7 @@ from histdatacom.activity_stages import (
     fetch_histdata_page_data,
     import_to_influx_work_item,
     merge_cache_work_items,
+    parse_histdata_form_metadata,
     read_repository_data_file,
     repository_data_with_record,
     repository_refresh_stage,
@@ -170,6 +172,67 @@ def test_validate_url_work_item_parses_form_metadata(
     assert output.work_item.encoding == "gzip"
     assert output.work_item.bytes_length == "123"
     assert output.result.metrics["encoding"] == "gzip"
+
+
+def test_parse_form_metadata_ignores_inputs_outside_download_form() -> None:
+    """Only form#file_down values should be used for archive metadata."""
+    metadata = parse_histdata_form_metadata(
+        UrlPageData(
+            html=f"""
+            <html>
+              <input id="tk" value="outside">
+              {_form_html(token="inside")}
+            </html>
+            """,
+            encoding="gzip",
+            bytes_length="123",
+            headers={},
+        ),
+    )
+
+    assert metadata.data_tk == "inside"
+    assert metadata.data_date == "2022"
+    assert metadata.data_fxpair == "eurusd"
+
+
+def test_parse_histdata_form_metadata_requires_download_form() -> None:
+    """Missing download forms should keep the no-data behavior."""
+    with pytest.raises(
+        HistDataNoDataError,
+        match="download form",
+    ):
+        parse_histdata_form_metadata(
+            UrlPageData(
+                html='<form id="other"><input id="tk" value="token"></form>',
+                encoding="gzip",
+                bytes_length="123",
+                headers={},
+            ),
+        )
+
+
+def test_parse_histdata_form_metadata_reports_missing_required_fields() -> None:
+    """Required non-token fields should remain structured validation errors."""
+    with pytest.raises(UrlValidationError) as exc_info:
+        parse_histdata_form_metadata(
+            UrlPageData(
+                html="""
+                <form id="file_down">
+                  <input id="tk" value="token">
+                  <input id="date" value="2022">
+                  <input id="datemonth" value="2022">
+                  <input id="platform" value="ASCII">
+                  <input id="timeframe" value="M1">
+                </form>
+                """,
+                encoding="gzip",
+                bytes_length="123",
+                headers={},
+            ),
+        )
+
+    assert exc_info.value.code == "MALFORMED_FORM"
+    assert exc_info.value.detail == {"missing_fields": "fxpair"}
 
 
 def test_validate_url_work_item_missing_data_does_not_forward(

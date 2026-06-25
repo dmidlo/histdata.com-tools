@@ -43,7 +43,6 @@ classifiers = [
     "Topic :: Terminals",
 ]
 dependencies = [
-    "beautifulsoup4>=4.15.0",
     "certifi>=2026.6.17",
     "polars>=1.41.2",
     "pytz>=2026.2",
@@ -97,7 +96,6 @@ lint = [
     "pyroma==5.0.1",
     "ruff==0.15.18",
     "shellcheck-py==0.11.0.1",
-    "types-beautifulsoup4==4.12.0.20250516",
     "types-PyYAML==6.0.12.20260518",
 ]
 release = [
@@ -129,7 +127,6 @@ dev = [
     "shellcheck-py==0.11.0.1",
     "temporalio>=1.10,<2",
     "twine==6.2.0",
-    "types-beautifulsoup4==4.12.0.20250516",
     "types-PyYAML==6.0.12.20260518",
     "wheel==0.47.0",
 ]

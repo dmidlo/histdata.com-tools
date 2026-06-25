@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from html.parser import HTMLParser
 import json
 import os
 import shutil
@@ -25,7 +26,6 @@ from urllib.request import urlopen
 
 import certifi
 import requests
-from bs4 import BeautifulSoup
 
 from histdatacom.cancellation import deterministic_partial_path
 from histdatacom.exceptions import (
@@ -74,6 +74,14 @@ DEFAULT_REPOSITORY_URL = (
     "histdata.com-tools/main/data/.repo"
 )
 DEFAULT_HISTDATA_BASE_URL = "http://www.histdata.com/download-free-forex-data/"
+HISTDATA_FORM_FIELDS = (
+    "tk",
+    "date",
+    "datemonth",
+    "platform",
+    "timeframe",
+    "fxpair",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +250,44 @@ class UrlFormMetadata:
             "encoding": self.encoding,
             "bytes_length": self.bytes_length,
         }
+
+
+class _HistDataDownloadFormParser(HTMLParser):
+    """Collect input values from HistData's file download form."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.in_download_form = False
+        self.seen_download_form = False
+        self.values: dict[str, str] = {}
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        attributes = {key.lower(): value or "" for key, value in attrs}
+        normalized_tag = tag.lower()
+        if normalized_tag == "form" and attributes.get("id") == "file_down":
+            self.in_download_form = True
+            self.seen_download_form = True
+            return
+        if normalized_tag != "input" or not self.in_download_form:
+            return
+        field_id = attributes.get("id")
+        if field_id:
+            self.values[field_id] = attributes.get("value", "")
+
+    def handle_startendtag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "form" and self.in_download_form:
+            self.in_download_form = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -507,24 +553,15 @@ def parse_histdata_form_metadata(
         if isinstance(page_data, UrlPageData)
         else UrlPageData.from_mapping(page_data)
     )
-    soup = BeautifulSoup(page.html, "html.parser")
-    form = soup.find("form", id="file_down")
-    if form is None:
+    parser = _HistDataDownloadFormParser()
+    parser.feed(page.html)
+    parser.close()
+    if not parser.seen_download_form:
         raise HistDataNoDataError(
             "HistData page does not include a download form.",
         )
 
-    values = {
-        key: _form_value(form, key)
-        for key in (
-            "tk",
-            "date",
-            "datemonth",
-            "platform",
-            "timeframe",
-            "fxpair",
-        )
-    }
+    values = {key: parser.values.get(key, "") for key in HISTDATA_FORM_FIELDS}
     if not values["tk"]:
         raise HistDataNoDataError(
             "HistData page does not include a download token.",
@@ -2185,14 +2222,6 @@ def _response_html(response: Any) -> str:
         encoding = str(getattr(response, "encoding", "") or "utf-8")
         return content.decode(encoding, errors="replace")
     return str(content or "")
-
-
-def _form_value(form: Any, field_id: str) -> str:
-    element = form.find(id=field_id)
-    if element is None:
-        return ""
-    value = element.get("value")
-    return str(value or "")
 
 
 def _requests_timeout(args: Mapping[str, Any]) -> int:
