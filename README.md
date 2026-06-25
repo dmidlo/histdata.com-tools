@@ -1,13 +1,21 @@
 # histdata.com-tools
 
-A command-line utility and Python ETL package that downloads currency exchange
-rates from Histdata.com. The local Temporal orchestration runtime is the
-default execution engine; InfluxDB, Jupyter, and alternate dataframe return
-formats are available through extras.
-Works on MacOS, Linux & Windows Systems.
-**Requires Python3.10+**
+A command-line utility and Python ETL package for HistData.com currency exchange
+rate archives. The local Temporal orchestration runtime is the default execution
+engine for durable planning, downloads, extraction, cache builds, imports, job
+telemetry, and live Rich progress, while normal PyPI artifacts stay lean by
+provisioning the pinned Temporal executable through a verified first-run cache.
 
-**NEW:** Expanded API support!!!
+Data-quality checks cover ZIP/file inventory, CSV/XLSX ingestion, timestamp
+continuity, OHLC bars, tick and spread behavior, symbol/domain calendars,
+modeling readiness, and orchestration provenance with JSON reports and
+CI-friendly exit policies.
+
+InfluxDB imports, Jupyter tooling, and optional pandas/Arrow return formats are
+available through extras.
+
+Works on macOS, Linux, and Windows.
+**Requires Python 3.10+**
 
 [![Downloads](https://pepy.tech/badge/histdatacom)](https://pepy.tech/project/histdatacom) ![PyPI - License](https://img.shields.io/pypi/l/histdatacom) ![PyPI](https://img.shields.io/pypi/v/histdatacom) ![PyPI - Status](https://img.shields.io/pypi/status/histdatacom)
 
