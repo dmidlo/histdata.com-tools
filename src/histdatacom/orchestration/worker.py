@@ -12,6 +12,11 @@ from importlib import import_module
 from inspect import isawaitable
 from typing import Any, Mapping, Sequence, cast
 
+from histdatacom.cli_config import (
+    CliConfigError,
+    add_config_argument,
+    configured_worker_argv,
+)
 from histdatacom.orchestration.client import (
     TEMPORAL_EXTRA_HINT,
     TemporalDependencyError,
@@ -127,6 +132,7 @@ async def run_temporal_worker(
 def build_parser() -> argparse.ArgumentParser:
     """Build the orchestration worker argument parser."""
     parser = argparse.ArgumentParser(prog="histdatacom-orchestration-worker")
+    add_config_argument(parser)
     _add_common_args(parser, include_defaults=True)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -148,7 +154,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the orchestration worker command-line interface."""
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    try:
+        args = parser.parse_args(configured_worker_argv(raw_argv))
+    except CliConfigError as exc:
+        print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
+        return 1
 
     try:
         config = _config_from_args(args)

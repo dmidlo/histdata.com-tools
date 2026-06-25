@@ -141,6 +141,34 @@ def test_feed_regime_cli_writes_machine_readable_report(
     assert payload["summary"]["regime_count"] == 2
 
 
+def test_feed_regime_cli_reads_yaml_config(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """Issue #31: analytics commands should accept recurrent YAML defaults."""
+    _sampled_long_history_dataset(tmp_path)
+    config_path = tmp_path / "histdatacom.yaml"
+    report_path = tmp_path / "reports" / "feed-regimes.json"
+    config_path.write_text(
+        f"""
+histdatacom:
+  analytics:
+    command: feed-regimes
+    target: {tmp_path}
+    report: {report_path}
+    json: true
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = analytics_main(["--config", str(config_path)])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema_version"] == ANALYTICS_REPORT_SCHEMA_VERSION
+    assert report_path.exists()
+
+
 def test_top_level_main_dispatches_analytics_subcommand(
     tmp_path: Path,
     monkeypatch,

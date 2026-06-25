@@ -8,6 +8,12 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from histdatacom.cli_config import (
+    CliConfigError,
+    add_config_argument,
+    configured_jobs_argv,
+    configured_runtime_argv,
+)
 from histdatacom.runtime_contracts import RunRequest
 from histdatacom.orchestration.performance import (
     DEFAULT_INFLUX_WORKERS,
@@ -94,6 +100,7 @@ def _add_common_args(
 def build_parser() -> argparse.ArgumentParser:
     """Build the orchestration runtime lifecycle argument parser."""
     parser = argparse.ArgumentParser(prog="histdatacom runtime")
+    add_config_argument(parser)
     _add_common_args(parser, include_defaults=True)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -186,6 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
 def build_jobs_parser() -> argparse.ArgumentParser:
     """Build the first-class orchestration jobs argument parser."""
     parser = argparse.ArgumentParser(prog="histdatacom jobs")
+    add_config_argument(parser)
     _add_common_args(parser, include_defaults=True)
     _add_jobs_args(parser)
     return parser
@@ -652,7 +660,12 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run orchestration runtime lifecycle commands."""
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    try:
+        args = parser.parse_args(configured_runtime_argv(raw_argv))
+    except CliConfigError as exc:
+        print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
+        return 1
 
     try:
         supervisor = _supervisor(args)
@@ -738,7 +751,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 def jobs_main(argv: Sequence[str] | None = None) -> int:
     """Run first-class orchestration job telemetry commands."""
     parser = build_jobs_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    try:
+        args = parser.parse_args(configured_jobs_argv(raw_argv))
+    except CliConfigError as exc:
+        print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
+        return 1
 
     try:
         return _run_jobs_command(args)

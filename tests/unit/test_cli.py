@@ -156,6 +156,7 @@ def test_help_advertises_orchestration_jobs_not_orchestration() -> None:
     assert "analytics   Run offline data analytics operations" in help_text
     assert "histdatacom analytics --help" in help_text
     assert "histdatacom jobs --help" in help_text
+    assert "--config PATH" in help_text
     assert "--submit-only" in help_text
     assert "--orchestration-submit-only" not in help_text
 
@@ -196,6 +197,176 @@ def test_verbose_cli_count_is_normalized(
 
     assert options.verbosity == 2
     assert options.validate_urls
+
+
+def test_config_file_applies_recurrent_run_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Issue #31: YAML config should cover the top-level command surface."""
+    config_path = tmp_path / "histdatacom.yaml"
+    data_dir = tmp_path / "data"
+    config_path.write_text(
+        f"""
+histdatacom:
+  download_data_archives: true
+  pairs:
+    - eurusd
+    - gbpusd
+  formats:
+    - ascii
+  timeframes:
+    - tick-data-quotes
+  start_yearmonth: 2022-10
+  end_yearmonth: 2022-11
+  data_directory: {data_dir}
+  cpu_utilization: low
+  batch_size: 123
+  orchestration_start: false
+  orchestration_wait_result: false
+  verbosity: 2
+  analytics:
+    command: feed-regimes
+    target: data/
+  runtime:
+    command: status
+  jobs:
+    command: list
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.config_path == str(config_path)
+    assert options.pairs == ["eurusd", "gbpusd"]
+    assert options.formats == ["ascii"]
+    assert options.timeframes == ["T"]
+    assert options.start_yearmonth == "202210"
+    assert options.end_yearmonth == "202211"
+    assert options.data_directory == str(data_dir)
+    assert options.cpu_utilization == "low"
+    assert options.batch_size == 123
+    assert options.validate_urls
+    assert options.download_data_archives
+    assert not options.extract_csvs
+    assert not options.orchestration_start
+    assert not options.orchestration_wait_result
+    assert options.verbosity == 2
+
+
+def test_config_file_keeps_explicit_cli_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Explicit CLI flags should win over recurrent-run defaults."""
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        """
+histdatacom:
+  validate_urls: true
+  pairs: [eurusd]
+  formats: [ascii]
+  timeframes: [tick-data-quotes]
+  start_yearmonth: 2022-10
+  verbosity: 3
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--config",
+            str(config_path),
+            "-p",
+            "usdjpy",
+            "-t",
+            "1-minute-bar-quotes",
+            "-s",
+            "2022-12",
+            "-v",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.pairs == ["usdjpy"]
+    assert options.formats == ["ascii"]
+    assert options.timeframes == ["M1"]
+    assert options.start_yearmonth == "202212"
+    assert options.verbosity == 1
+    assert options.validate_urls
+
+
+def test_config_file_applies_quality_command_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """YAML config should support data-quality command options too."""
+    config_path = tmp_path / "quality.yaml"
+    report_path = tmp_path / "reports" / "quality.json"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality: true
+  data_directory: {tmp_path}
+  quality_checks: [inventory, ingestion]
+  quality_report: {report_path}
+  quality_fail_on: never
+  quality_max_errors: 2
+  quality_max_warnings: 5
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.data_quality
+    assert options.quality_paths == (str(tmp_path),)
+    assert options.quality_check_groups == ["inventory", "ingestion"]
+    assert options.quality_report_path == str(report_path)
+    assert options.quality_fail_on == "never"
+    assert options.quality_max_errors == 2
+    assert options.quality_max_warnings == 5
+    assert not options.validate_urls
+
+
+def test_config_file_rejects_unknown_options(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Config typos should fail instead of being silently ignored."""
+    config_path = tmp_path / "bad.yaml"
+    config_path.write_text(
+        """
+histdatacom:
+  pairs: [eurusd]
+  not_a_real_option: true
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        ArgParser(Options())()
+
+    assert err.value.code == 1
 
 
 def test_help_describes_end_yearmonth_as_end_period() -> None:

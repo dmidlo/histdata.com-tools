@@ -75,6 +75,11 @@ from typing import Any, Optional, Tuple
 from rich import print  # pylint: disable=redefined-builtin
 
 from histdatacom import Options
+from histdatacom.cli_config import (
+    CliConfigError,
+    config_path_from_cli_args,
+    load_cli_config_args,
+)
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.data_quality import QUALITY_CHECK_GROUPS, QUALITY_EXIT_TRIGGERS
 from histdatacom.data_quality.profiles import (
@@ -380,6 +385,15 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         if not self.arg_namespace.orchestration_wait_result:
             args.append("--submit-only")
         return args
+
+    def _config_args_from_cli(self, cli_args: list[str]) -> list[str]:
+        """Return config-file arguments to prepend to explicit CLI args."""
+        try:
+            config_path = config_path_from_cli_args(cli_args)
+            return load_cli_config_args(config_path, cli_args=cli_args)
+        except CliConfigError as exc:
+            print(f"config error: {exc}")  # noqa:T201
+            raise SystemExit(1) from exc
 
     def _check_for_ascii_if_influx(self) -> None:
         """Verify ascii csv_format type for influxdb import.
@@ -957,6 +971,16 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             ),
         )
         config_args.add_argument(
+            "--config",
+            dest="config_path",
+            type=str,
+            metavar="PATH",
+            help=(
+                "read recurrent-run defaults from a YAML file; explicit CLI "
+                "flags override configured values"
+            ),
+        )
+        config_args.add_argument(
             "-p",
             "--pairs",
             nargs="+",
@@ -1197,7 +1221,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             self.parse_args(args, namespace=self.arg_namespace)
         else:
             # Get the args from sys.argv
-            self.parse_args(namespace=self.arg_namespace)
+            cli_args = sys.argv[1:]
+            config_args = self._config_args_from_cli(cli_args)
+            self.parse_args(
+                [*config_args, *cli_args],
+                namespace=self.arg_namespace,
+            )
 
         self._adjust_for_repo_data_request()
         self._check_quality_mode()

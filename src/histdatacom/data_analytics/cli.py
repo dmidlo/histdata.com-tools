@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
+from histdatacom.cli_config import (
+    CliConfigError,
+    add_config_argument,
+    configured_analytics_argv,
+)
 from histdatacom.data_analytics.feed_regimes import (
     DEFAULT_QUIET_GAP_MS,
     analyze_feed_regimes,
@@ -17,6 +23,7 @@ from histdatacom.verbosity import configure_logging
 def build_parser() -> argparse.ArgumentParser:
     """Build the data analytics argument parser."""
     parser = argparse.ArgumentParser(prog="histdatacom analytics")
+    add_config_argument(parser)
     parser.add_argument(
         "-v",
         "--verbose",
@@ -69,7 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """Run the data analytics CLI."""
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    try:
+        args = parser.parse_args(configured_analytics_argv(raw_argv))
+    except CliConfigError as exc:
+        print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
+        return 1
     configure_logging(args.verbosity)
     if args.analytics_command != "feed-regimes":
         parser.error(f"unsupported analytics command: {args.analytics_command}")

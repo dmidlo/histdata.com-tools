@@ -277,6 +277,39 @@ def test_worker_config_cli_emits_queue_metadata(
     assert payload["concurrency"]["network_workers"] == 12
 
 
+def test_worker_config_cli_reads_yaml_config(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """Issue #31: worker commands should accept recurrent YAML defaults."""
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  worker:
+    command: config
+    workspace: {tmp_path / "workspace"}
+    runtime_home: {tmp_path / "runtime"}
+    json: true
+    namespace: histdatacom-test
+    task_queue_prefix: histdatacom-test
+    lane: network
+    cpu_utilization: medium
+    max_concurrent_activities: 12
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = worker.main(["--config", str(config_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["namespace"] == "histdatacom-test"
+    assert payload["lane"] == "network"
+    assert payload["task_queue"].startswith("histdatacom-test.")
+    assert payload["worker_options"] == {"max_concurrent_activities": 12}
+
+
 def test_worker_run_cli_reports_missing_temporal_dependency(
     monkeypatch,
     tmp_path: Path,

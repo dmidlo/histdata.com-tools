@@ -33,6 +33,10 @@ from typing import TYPE_CHECKING, Any, Mapping, TypeGuard
 import histdatacom
 from histdatacom import Options
 from histdatacom.cli import ArgParser
+from histdatacom.cli_config import (
+    remove_routed_command_from_cli_args,
+    routed_command_from_cli_args,
+)
 from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.repository_output import (
     print_repository_failure,
@@ -406,18 +410,27 @@ def main(
                                 ...
                             ]
     """
-    if not options and len(sys.argv) > 1 and sys.argv[1] == "jobs":
+    cli_args = sys.argv[1:] if not options else []
+    routed_command = routed_command_from_cli_args(
+        cli_args,
+        {"analytics", "jobs", "runtime"},
+    )
+    if not options and routed_command == "jobs":
         from histdatacom.orchestration.cli import jobs_main
 
-        return jobs_main(sys.argv[2:])
-    if not options and len(sys.argv) > 1 and sys.argv[1] == "runtime":
+        return jobs_main(remove_routed_command_from_cli_args(cli_args, "jobs"))
+    if not options and routed_command == "runtime":
         from histdatacom.orchestration.cli import main as runtime_main
 
-        return runtime_main(sys.argv[2:])
-    if not options and len(sys.argv) > 1 and sys.argv[1] == "analytics":
+        return runtime_main(
+            remove_routed_command_from_cli_args(cli_args, "runtime")
+        )
+    if not options and routed_command == "analytics":
         from histdatacom.data_analytics.cli import main as analytics_main
 
-        return analytics_main(sys.argv[2:])
+        return analytics_main(
+            remove_routed_command_from_cli_args(cli_args, "analytics")
+        )
 
     if not options:
         options = Options()

@@ -13,6 +13,7 @@ class Options:
         "available_remote_data",
         "batch_size",
         "by",
+        "config_path",
         "cpu_utilization",
         "data_directory",
         "data_quality",
@@ -70,6 +71,7 @@ class Options:
         self.data_directory: str = "data"
         self.from_api: bool = False
         self.api_return_type: str | None = None
+        self.config_path: str | None = None
         self.cpu_utilization: str = "medium"
         self.batch_size: str = "5000"
         self.delete_after_influx: bool = False

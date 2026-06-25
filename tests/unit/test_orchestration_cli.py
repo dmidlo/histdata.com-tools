@@ -299,6 +299,44 @@ def test_histdatacom_main_dispatches_jobs_command(
     assert captured["argv"] == ("list", "--json")
 
 
+def test_histdatacom_main_dispatches_jobs_command_after_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The router should allow --config before a routed command."""
+    import histdatacom.histdata_com as histdata_com
+    import histdatacom.orchestration.cli as orchestration_cli
+
+    config_path = tmp_path / "histdatacom.yaml"
+    captured: dict[str, tuple[str, ...]] = {}
+
+    def fake_jobs_main(argv: list[str]) -> int:
+        captured["argv"] = tuple(argv)
+        return 0
+
+    monkeypatch.setattr(orchestration_cli, "jobs_main", fake_jobs_main)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--config",
+            str(config_path),
+            "jobs",
+            "list",
+            "--json",
+        ],
+    )
+
+    assert histdata_com.main() == 0
+    assert captured["argv"] == (
+        "--config",
+        str(config_path),
+        "list",
+        "--json",
+    )
+
+
 def test_histdatacom_main_dispatches_runtime_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -438,6 +476,145 @@ def test_orchestration_jobs_list_accepts_json_before_or_after_subcommand(
 
     assert exit_code == 0
     assert payload["jobs"][0]["workflow_id"] == "histdatacom-run-cli"
+
+
+def test_orchestration_jobs_cli_reads_yaml_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Issue #31: jobs commands should accept recurrent YAML defaults."""
+    captured: dict[str, object] = {}
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        """
+histdatacom:
+  jobs:
+    command: list
+    json: true
+    offline: true
+    query: WorkflowType = "HistDataRunWorkflow"
+    limit: 7
+""",
+        encoding="utf-8",
+    )
+
+    def fake_list_jobs(**kwargs: object) -> OrchestrationJobList:
+        captured.update(kwargs)
+        return OrchestrationJobList(jobs=(_snapshot(),))
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(cli, "list_job_statuses_sync", fake_list_jobs)
+
+    exit_code = cli.jobs_main(["--config", str(config_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["jobs"][0]["workflow_id"] == "histdatacom-run-cli"
+    assert captured["offline"] is True
+    assert captured["limit"] == 7
+    assert captured["query"] == 'WorkflowType = "HistDataRunWorkflow"'
+
+
+def test_orchestration_runtime_cli_reads_yaml_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Issue #31: runtime commands should accept recurrent YAML defaults."""
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  runtime:
+    command: start
+    workspace: {tmp_path / "workspace"}
+    runtime_home: {tmp_path / "runtime"}
+    state_dir: {tmp_path / "state"}
+    json: true
+    executable: /tmp/temporal
+    startup_timeout: 1.5
+    namespace: histdatacom-test
+    task_queue_prefix: histdatacom-test
+    cpu_utilization: high
+    network_multiplier: 5
+    orchestration_workers: 2
+    influx_workers: 3
+""",
+        encoding="utf-8",
+    )
+    supervisor = _LifecycleSupervisor()
+    captured: dict[str, object] = {}
+
+    def fake_supervisor(args: object) -> _LifecycleSupervisor:
+        captured["args"] = args
+        return supervisor
+
+    monkeypatch.setattr(cli, "_supervisor", fake_supervisor)
+
+    exit_code = cli.main(["--config", str(config_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["state"] == "running"
+    assert supervisor.calls[0][0] == "start"
+    assert supervisor.calls[0][1]["executable"] == "/tmp/temporal"
+    assert supervisor.calls[0][1]["startup_timeout"] == 1.5
+    args = captured["args"]
+    assert getattr(args, "namespace") == "histdatacom-test"
+    assert getattr(args, "task_queue_prefix") == "histdatacom-test"
+    assert getattr(args, "cpu_utilization") == "high"
+    assert getattr(args, "network_multiplier") == 5
+    assert getattr(args, "orchestration_workers") == 2
+    assert getattr(args, "influx_workers") == 3
+
+
+def test_orchestration_runtime_jobs_cli_reads_nested_yaml_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Runtime jobs should support nested recurrent YAML defaults."""
+    captured: dict[str, object] = {}
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        """
+histdatacom:
+  runtime:
+    command: jobs
+    jobs:
+      command: list
+      json: true
+      offline: true
+      limit: 3
+""",
+        encoding="utf-8",
+    )
+
+    def fake_list_jobs(**kwargs: object) -> OrchestrationJobList:
+        captured.update(kwargs)
+        return OrchestrationJobList(jobs=(_snapshot(),))
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(cli, "list_job_statuses_sync", fake_list_jobs)
+
+    exit_code = cli.main(["--config", str(config_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["jobs"][0]["workflow_id"] == "histdatacom-run-cli"
+    assert captured["offline"] is True
+    assert captured["limit"] == 3
 
 
 @pytest.mark.parametrize(

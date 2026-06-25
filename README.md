@@ -18,6 +18,7 @@ Works on MacOS, Linux & Windows Systems.
 - [Usage](#usage)
   - [Show the Help and Options](#show-the-help-and-options)
   - [Basic Use](#basic-use)
+  - [Configuration Files](#configuration-files)
   - [Available Formats](#available-formats)
     - [CSV Dialect and Format Specifications](#csv-dialect-and-format-specifications)
   - [Date Ranges](#date-ranges)
@@ -86,7 +87,7 @@ histdatacom -h
 ```
 
 ```txt
-usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION] [-v]
+usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [--config PATH] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION] [-v]
                    [--data-directory DATA_DIRECTORY] [--orchestration-start] [--no-orchestration-start] [--submit-only] [--quality] [--repo-quality] [--repo-quality-columns] [--quality-target PATH [PATH ...]] [--quality-checks GROUP [GROUP ...]]
                    [--quality-report PATH] [--quality-profile PATH] [--quality-fail-on SEVERITY] [--quality-max-errors COUNT] [--quality-max-warnings COUNT]
 
@@ -103,6 +104,8 @@ Mode:
                         extract them.
 
 Config:
+  --config PATH         read recurrent-run defaults from a YAML file; explicit
+                        CLI flags override configured values
   -p, --pairs PAIR [PAIR ...]
                         space separated currency pairs. e.g. -p eurusd usdjpy
                         ...
@@ -214,6 +217,85 @@ histdatacom -p eurusd -f metatrader -s now
 ```sh
 histdatacom -D -p usdcad -f metastock -s now
 ```
+
+---
+
+### Configuration Files
+
+Use `--config PATH` to keep recurrent command options in a YAML file. The file
+may use a `histdatacom:` root section or a bare mapping. Keys match the public
+CLI option names without leading dashes. Explicit CLI flags are parsed after the
+file and override configured scalar and list values.
+
+```yaml
+histdatacom:
+  download_data_archives: true
+  extract_csvs: true
+  pairs:
+    - eurusd
+    - gbpusd
+  formats:
+    - ascii
+  timeframes:
+    - 1-minute-bar-quotes
+  start_yearmonth: 2022-01
+  end_yearmonth: 2022-03
+  data_directory: /data/histdata
+  cpu_utilization: medium
+  orchestration_start: true
+  orchestration_wait_result: false
+  verbosity: 1
+```
+
+Run it with:
+
+```sh
+histdatacom --config recurrent.yaml
+```
+
+Config files can also express offline data-quality runs:
+
+```yaml
+histdatacom:
+  quality: true
+  data_directory: data/
+  quality_checks:
+    - inventory
+    - ingestion
+  quality_report: reports/quality.json
+  quality_fail_on: error
+```
+
+The routed commands use scoped sections in the same file:
+
+```yaml
+histdatacom:
+  analytics:
+    command: feed-regimes
+    target: data/ASCII/T/eurusd
+    bucket: month
+    report: reports/eurusd-feed-regimes.json
+    json: true
+  jobs:
+    command: list
+    offline: true
+    json: true
+    limit: 20
+  runtime:
+    command: status
+    json: true
+```
+
+Run scoped commands with the same flag:
+
+```sh
+histdatacom --config recurrent.yaml analytics
+histdatacom jobs --config recurrent.yaml
+histdatacom runtime --config recurrent.yaml
+```
+
+Pair-list presets and shared instrument lists are tracked separately from this
+full command snapshot surface.
 
 ---
 
