@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -37,6 +38,9 @@ from histdatacom.orchestration.runtime import (
     default_orchestration_runtime_home,
     default_orchestration_workspace,
 )
+from histdatacom.verbosity import safe_log_extra
+
+LOGGER = logging.getLogger(__name__)
 
 
 def build_temporal_worker(
@@ -68,6 +72,19 @@ def build_temporal_worker(
         resolved_worker_options["activity_executor"] = _activity_executor(
             resolved_worker_options
         )
+    LOGGER.debug(
+        "Building Temporal worker lane=%s task_queue=%s workflows=%d "
+        "activities=%d",
+        resolved_config.lane.value,
+        resolved_config.task_queue,
+        len(workflow_classes),
+        len(activity_functions),
+        extra=_worker_log_context(
+            resolved_config,
+            workflow_count=len(workflow_classes),
+            activity_count=len(activity_functions),
+        ),
+    )
     return temporal_worker_class(
         client,
         task_queue=resolved_config.task_queue,
@@ -89,6 +106,13 @@ async def run_temporal_worker(
 ) -> Any:
     """Connect to Temporal, build the configured worker, and run it."""
     resolved_config = config or build_orchestration_worker_config()
+    LOGGER.info(
+        "Starting Temporal worker lane=%s task_queue=%s namespace=%s",
+        resolved_config.lane.value,
+        resolved_config.task_queue,
+        resolved_config.namespace,
+        extra=_worker_log_context(resolved_config),
+    )
     temporal_client = client or await connect_temporal_client(
         config=resolved_config,
         client_class=client_class,
@@ -110,22 +134,48 @@ async def run_temporal_worker(
         await asyncio.sleep(0)
         if run_task.done():
             await run_task
+            LOGGER.info(
+                "Temporal worker run loop completed lane=%s task_queue=%s",
+                resolved_config.lane.value,
+                resolved_config.task_queue,
+                extra=_worker_log_context(resolved_config),
+            )
             return worker
-        write_worker_readiness(
-            resolved_config,
-            pid=os.getpid(),
-            state="ready",
-            message="Worker connected and entering run loop.",
+        _write_worker_ready(resolved_config)
+        try:
+            await run_task
+        except Exception:
+            LOGGER.exception(
+                "Temporal worker failed lane=%s task_queue=%s",
+                resolved_config.lane.value,
+                resolved_config.task_queue,
+                extra=_worker_log_context(resolved_config),
+            )
+            raise
+        LOGGER.info(
+            "Temporal worker run loop completed lane=%s task_queue=%s",
+            resolved_config.lane.value,
+            resolved_config.task_queue,
+            extra=_worker_log_context(resolved_config),
         )
-        await run_task
         return worker
-    write_worker_readiness(
-        resolved_config,
-        pid=os.getpid(),
-        state="ready",
-        message="Worker connected and entering run loop.",
+    _write_worker_ready(resolved_config)
+    try:
+        await _maybe_await(run_result)
+    except Exception:
+        LOGGER.exception(
+            "Temporal worker failed lane=%s task_queue=%s",
+            resolved_config.lane.value,
+            resolved_config.task_queue,
+            extra=_worker_log_context(resolved_config),
+        )
+        raise
+    LOGGER.info(
+        "Temporal worker run loop completed lane=%s task_queue=%s",
+        resolved_config.lane.value,
+        resolved_config.task_queue,
+        extra=_worker_log_context(resolved_config),
     )
-    await _maybe_await(run_result)
     return worker
 
 
@@ -182,6 +232,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         message = str(err)
         if isinstance(err, TemporalDependencyError):
             message = TEMPORAL_EXTRA_HINT
+        LOGGER.error(
+            "Temporal worker command failed command=%s error=%s",
+            getattr(args, "command", ""),
+            message,
+            extra=safe_log_extra(
+                command=getattr(args, "command", ""),
+                error_type=type(err).__name__,
+            ),
+        )
         if args.json:
             print(  # noqa:T201
                 json.dumps(
@@ -196,6 +255,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print(f"error: {message}", file=sys.stderr)  # noqa:T201
         return 1
+
+
+def _write_worker_ready(config: OrchestrationWorkerConfig) -> None:
+    write_worker_readiness(
+        config,
+        pid=os.getpid(),
+        state="ready",
+        message="Worker connected and entering run loop.",
+    )
+    LOGGER.info(
+        "Temporal worker ready lane=%s task_queue=%s pid=%d",
+        config.lane.value,
+        config.task_queue,
+        os.getpid(),
+        extra=_worker_log_context(config, pid=os.getpid(), state="ready"),
+    )
+
+
+def _worker_log_context(
+    config: OrchestrationWorkerConfig,
+    **values: Any,
+) -> dict[str, object]:
+    return safe_log_extra(
+        namespace=config.namespace,
+        lane=config.lane.value,
+        task_queue=config.task_queue,
+        target_host=config.target_host,
+        **values,
+    )
 
 
 def _add_common_args(

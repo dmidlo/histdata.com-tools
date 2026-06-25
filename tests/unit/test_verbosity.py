@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 
 from histdatacom.verbosity import (
+    REDACTED_LOG_VALUE,
     TRACE_LEVEL,
     configure_logging,
+    safe_log_extra,
     verbosity_metadata,
     verbosity_to_log_level,
     verbosity_to_log_level_name,
@@ -33,3 +35,26 @@ def test_verbosity_metadata_is_json_ready() -> None:
         "verbosity": 3,
         "log_level": "TRACE",
     }
+
+
+def test_safe_log_extra_redacts_and_bounds_metadata() -> None:
+    """Structured log metadata should be safe for user bug reports."""
+    extra = safe_log_extra(
+        request_id="run-logs",
+        password="secret",
+        influx_config={
+            "INFLUX_TOKEN": "token-value",
+            "INFLUX_URL": "http://127.0.0.1:8086",
+        },
+        notes="x" * 300,
+        values=list(range(20)),
+    )
+
+    assert extra["request_id"] == "run-logs"
+    assert extra["password"] == REDACTED_LOG_VALUE
+    assert extra["influx_config"] == {
+        "INFLUX_TOKEN": REDACTED_LOG_VALUE,
+        "INFLUX_URL": "http://127.0.0.1:8086",
+    }
+    assert str(extra["notes"]).endswith("...")
+    assert len(extra["values"]) == 12

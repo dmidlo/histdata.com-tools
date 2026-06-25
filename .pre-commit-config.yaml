@@ -1,7 +1,7 @@
-# Keep source-quality hooks scoped to package and test code. Root helper/example
-# files snippets.py and test.py are intentionally outside that legacy lint
-# baseline, while .vulture.py remains a legacy Vulture whitelist and is not
-# linted as ordinary source code.
+# Keep source-quality hooks scoped to package, test, and maintained sample code.
+# Root helper/example files snippets.py and test.py are intentionally outside
+# that legacy lint baseline, while .vulture.py remains a legacy Vulture
+# whitelist and is not linted as ordinary source code.
 # Generic config/release hooks still inspect root files such as pyproject.toml,
 # GitHub workflows, pypi.sh, and pre-commit config. Generated architecture SVGs
 # and the example notebook are excluded globally because they are bulky outputs.
@@ -15,12 +15,12 @@ repos:
     - --target-version
     - py310
     id: black
-    files: ^(src|tests)/.*\.py$
+    files: ^(src|tests|samples)/.*\.py$
   repo: https://github.com/psf/black
   rev: 26.5.1
 - hooks:
   - id: ruff-check
-    files: ^(src|tests)/.*\.py$
+    files: ^(src|tests|samples)/.*\.py$
   repo: https://github.com/astral-sh/ruff-pre-commit
   rev: v0.15.18
 - hooks:

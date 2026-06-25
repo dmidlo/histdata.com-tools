@@ -11,6 +11,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
 from importlib import import_module
+import logging
 from typing import Any, Callable, Mapping, Protocol, TypeVar, cast
 
 from histdatacom.exceptions import (
@@ -43,6 +44,7 @@ from histdatacom.runtime_contracts import (
     WorkStatus,
     derive_work_id,
 )
+from histdatacom.verbosity import safe_log_extra
 from histdatacom.orchestration.client import (
     TEMPORAL_EXTRA_HINT,
     TemporalDependencyError,
@@ -57,6 +59,8 @@ from histdatacom.orchestration.workflow_metadata import (
 
 class _NoopWorkflowApi:
     """No-op decorator shim used when temporalio is not installed."""
+
+    logger = logging.getLogger(__name__)
 
     def defn(self, decorated: Any | None = None, **kwargs: Any) -> Any:
         """Return a class decorator compatible with temporalio.workflow.defn."""
@@ -91,6 +95,7 @@ def _load_workflow_api() -> Any:
 workflow = _load_workflow_api()
 _Decorated = TypeVar("_Decorated")
 _Callable = TypeVar("_Callable", bound=Callable[..., Any])
+_WORKFLOW_LOGGER = logging.getLogger(__name__)
 
 
 def workflow_defn(decorated: _Decorated) -> _Decorated:
@@ -818,6 +823,22 @@ async def execute_activity_workflow(
         request_id=request.request_id,
         planned_children=(activity_name,),
     )
+    partition = _coerce_mapping(payload.get("partition", {}))
+    _workflow_log(
+        logging.INFO,
+        "Workflow activity started request_id=%s workflow_name=%s "
+        "activity=%s task_queue=%s",
+        request.request_id,
+        workflow_name,
+        activity_name,
+        task_queue,
+        request_id=request.request_id,
+        workflow_name=workflow_name,
+        activity=activity_name,
+        task_queue=task_queue,
+        work_item_count=len(activity_work_items),
+        partition=partition,
+    )
     activity_payload = await activity_executor.execute_activity(
         activity_name,
         stage_payload,
@@ -832,12 +853,29 @@ async def execute_activity_workflow(
         output_work_items = activity_work_items
     progress.record_child(activity_name, result)
     progress.finish(result.status)
+    _workflow_log(
+        _result_log_level(result),
+        "Workflow activity finished request_id=%s workflow_name=%s "
+        "activity=%s status=%s",
+        request.request_id,
+        workflow_name,
+        activity_name,
+        result.status.value,
+        request_id=request.request_id,
+        workflow_name=workflow_name,
+        activity=activity_name,
+        task_queue=task_queue,
+        status=result.status.value,
+        failure_code=result.failure.code if result.failure else "",
+        output_work_item_count=len(output_work_items),
+        partition=partition,
+    )
     return _summary_payload(
         request=request,
         workflow_name=workflow_name,
         progress=progress,
         stage_results=(result,),
-        partition=_coerce_mapping(payload.get("partition", {})),
+        partition=partition,
         work_items=output_work_items,
         include_work_items=_has_work_item_payload(activity_payload)
         or bool(activity_work_items),
@@ -1154,6 +1192,19 @@ async def _execute_child_plan(
             invocation.workflow_name for invocation in invocations
         ),
     )
+    _workflow_log(
+        logging.INFO,
+        "Workflow child plan started request_id=%s workflow_name=%s "
+        "child_count=%d",
+        request.request_id,
+        workflow_name,
+        len(invocations),
+        request_id=request.request_id,
+        workflow_name=workflow_name,
+        child_count=len(invocations),
+        partition=dict(partition or {}),
+        input_work_item_count=len(work_items),
+    )
     results: list[StageResult] = []
     current_work_items = tuple(work_items)
     current_plan_ref = dict(plan_ref or {})
@@ -1173,6 +1224,17 @@ async def _execute_child_plan(
             )
             if expanded:
                 _refresh_progress_plan(progress, tuple(pending_invocations))
+                _workflow_log(
+                    logging.DEBUG,
+                    "Workflow child plan expanded request_id=%s "
+                    "workflow_name=%s child_count=%d",
+                    request.request_id,
+                    workflow_name,
+                    len(pending_invocations),
+                    request_id=request.request_id,
+                    workflow_name=workflow_name,
+                    child_count=len(pending_invocations),
+                )
             symbol_invocations, next_index = _contiguous_invocations(
                 pending_invocations,
                 start_index=index,
@@ -1201,15 +1263,48 @@ async def _execute_child_plan(
             result = prepared.skipped_result
             results.append(result)
             progress.record_child(invocation.workflow_name, result)
+            _workflow_log_child_result(
+                request,
+                parent_workflow=workflow_name,
+                invocation=invocation,
+                result=result,
+            )
             index += 1
             continue
 
-        result_payload = await executor.execute_child_workflow(
-            invocation.workflow_name,
-            prepared.payload or {},
-            workflow_id=invocation.workflow_id,
-            task_queue=invocation.task_queue,
+        _workflow_log_child_start(
+            request,
+            parent_workflow=workflow_name,
+            invocation=invocation,
+            work_item_count=len(
+                _work_items_from_payload(prepared.payload or {})
+            ),
         )
+        try:
+            result_payload = await executor.execute_child_workflow(
+                invocation.workflow_name,
+                prepared.payload or {},
+                workflow_id=invocation.workflow_id,
+                task_queue=invocation.task_queue,
+            )
+        except Exception as err:
+            _workflow_log(
+                logging.ERROR,
+                "Workflow child failed request_id=%s parent_workflow=%s "
+                "child_workflow=%s error=%s",
+                request.request_id,
+                workflow_name,
+                invocation.workflow_name,
+                str(err),
+                request_id=request.request_id,
+                parent_workflow=workflow_name,
+                child_workflow=invocation.workflow_name,
+                child_workflow_id=invocation.workflow_id,
+                task_queue=invocation.task_queue,
+                error_type=type(err).__name__,
+                error=str(err),
+            )
+            raise
         result = _stage_result_from_mapping(
             result_payload,
             fallback_stage=invocation.workflow_name,
@@ -1226,10 +1321,33 @@ async def _execute_child_plan(
                 current_work_items = forwarded_work_items
         results.append(result)
         progress.record_child(invocation.workflow_name, result)
+        _workflow_log_child_result(
+            request,
+            parent_workflow=workflow_name,
+            invocation=invocation,
+            result=result,
+        )
         index += 1
         if result.status == WorkStatus.CANCELLED:
             break
     progress.finish(_execute_status(tuple(results)))
+    _workflow_log(
+        _workflow_finish_log_level(progress.status),
+        "Workflow child plan finished request_id=%s workflow_name=%s "
+        "status=%s completed=%d total=%d",
+        request.request_id,
+        workflow_name,
+        progress.status.value,
+        progress.completed_children,
+        progress.total_children,
+        request_id=request.request_id,
+        workflow_name=workflow_name,
+        status=progress.status.value,
+        completed_children=progress.completed_children,
+        total_children=progress.total_children,
+        result_count=len(results),
+        partition=dict(partition or {}),
+    )
     return _summary_payload(
         request=request,
         workflow_name=workflow_name,
@@ -1336,6 +1454,18 @@ async def _execute_parallel_symbol_invocations(
     progress: WorkflowProgress,
 ) -> tuple[StageResult, ...]:
     max_parallel = max_parallel_child_workflows(request)
+    _workflow_log(
+        logging.DEBUG,
+        "Workflow parallel symbol fanout started request_id=%s "
+        "child_count=%d max_parallel=%d",
+        request.request_id,
+        len(invocations),
+        max_parallel,
+        request_id=request.request_id,
+        child_workflow=SYMBOL_TIMEFRAME_WORKFLOW,
+        child_count=len(invocations),
+        max_parallel=max_parallel,
+    )
     prepared = tuple(
         _prepare_child_invocation(
             invocation,
@@ -1358,9 +1488,26 @@ async def _execute_parallel_symbol_invocations(
                 prepared_child.invocation.workflow_name,
                 result,
             )
+            _workflow_log_child_result(
+                request,
+                parent_workflow=progress.workflow_name,
+                invocation=prepared_child.invocation,
+                result=result,
+            )
         index += max_parallel
         if any(_stops_symbol_fanout(result) for result in window_results):
             break
+    _workflow_log(
+        logging.DEBUG,
+        "Workflow parallel symbol fanout finished request_id=%s "
+        "completed=%d",
+        request.request_id,
+        len(results),
+        request_id=request.request_id,
+        child_workflow=SYMBOL_TIMEFRAME_WORKFLOW,
+        completed_children=len(results),
+        max_parallel=max_parallel,
+    )
     return tuple(results)
 
 
@@ -1478,6 +1625,109 @@ def _child_exception_result(
             "workflow_id": invocation.workflow_id,
         },
     )
+
+
+def _workflow_log_child_start(
+    request: RunRequest,
+    *,
+    parent_workflow: str,
+    invocation: WorkflowInvocation,
+    work_item_count: int,
+) -> None:
+    _workflow_log(
+        logging.DEBUG,
+        "Workflow child started request_id=%s parent_workflow=%s "
+        "child_workflow=%s workflow_id=%s",
+        request.request_id,
+        parent_workflow,
+        invocation.workflow_name,
+        invocation.workflow_id,
+        request_id=request.request_id,
+        parent_workflow=parent_workflow,
+        child_workflow=invocation.workflow_name,
+        child_workflow_id=invocation.workflow_id,
+        task_queue=invocation.task_queue,
+        task_queue_lane=invocation.task_queue_lane.value,
+        work_item_count=work_item_count,
+    )
+
+
+def _workflow_log_child_result(
+    request: RunRequest,
+    *,
+    parent_workflow: str,
+    invocation: WorkflowInvocation,
+    result: StageResult,
+) -> None:
+    _workflow_log(
+        _child_result_log_level(result),
+        "Workflow child finished request_id=%s parent_workflow=%s "
+        "child_workflow=%s status=%s",
+        request.request_id,
+        parent_workflow,
+        invocation.workflow_name,
+        result.status.value,
+        request_id=request.request_id,
+        parent_workflow=parent_workflow,
+        child_workflow=invocation.workflow_name,
+        child_workflow_id=invocation.workflow_id,
+        task_queue=invocation.task_queue,
+        task_queue_lane=invocation.task_queue_lane.value,
+        status=result.status.value,
+        stage=result.stage,
+        work_id=result.work_id,
+        artifact_count=len(result.artifacts),
+        failure_code=result.failure.code if result.failure else "",
+    )
+
+
+def _workflow_log(
+    level: int,
+    message: str,
+    *args: object,
+    **metadata: Any,
+) -> None:
+    logger = getattr(workflow, "logger", _WORKFLOW_LOGGER)
+    extra = safe_log_extra(**metadata)
+    try:
+        logger.log(level, message, *args, extra=extra)
+    except Exception as err:
+        if _outside_workflow_context(err):
+            _WORKFLOW_LOGGER.log(level, message, *args, extra=extra)
+            return
+        raise
+
+
+def _outside_workflow_context(err: Exception) -> bool:
+    return "not in workflow event loop" in str(err).lower()
+
+
+def _workflow_finish_log_level(status: WorkStatus) -> int:
+    if status == WorkStatus.FAILED:
+        return logging.ERROR
+    if status == WorkStatus.CANCELLED:
+        return logging.WARNING
+    return logging.INFO
+
+
+def _child_result_log_level(result: StageResult) -> int:
+    if result.status in {
+        WorkStatus.CANCELLED,
+        WorkStatus.RETRIED,
+        WorkStatus.SKIPPED,
+    }:
+        return logging.WARNING
+    if result.failure is not None or result.status == WorkStatus.FAILED:
+        return logging.ERROR
+    return logging.DEBUG
+
+
+def _result_log_level(result: StageResult) -> int:
+    if result.status in {WorkStatus.CANCELLED, WorkStatus.RETRIED}:
+        return logging.WARNING
+    if result.failure is not None or result.status == WorkStatus.FAILED:
+        return logging.ERROR
+    return logging.INFO
 
 
 def _stops_symbol_fanout(result: StageResult) -> bool:

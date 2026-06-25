@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any, Mapping
 
 import pytest
@@ -882,6 +883,35 @@ def test_parent_workflow_composes_symbol_timeframe_children() -> None:
     assert summary["progress"]["completed_children"] == 3
     assert workflow.status()["status"] == WorkStatus.COMPLETED.value
     assert len(summary["artifacts"]) == 3
+
+
+def test_parent_workflow_logs_child_plan_with_bounded_metadata(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Workflow logs should use bounded metadata and fallback outside Temporal."""
+    executor = _RecordingChildExecutor()
+    workflow = workflows.HistDataRunWorkflow(executor=executor)
+    request = _request(metadata={**_request().metadata, "api_token": "secret"})
+    caplog.set_level(
+        logging.INFO,
+        logger="histdatacom.orchestration.workflows",
+    )
+
+    summary = asyncio.run(workflow.run(request.to_dict()))
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "Workflow child plan started request_id=run-topology" in messages
+    assert "Workflow child plan finished request_id=run-topology" in messages
+    assert "secret" not in messages
+    start_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage().startswith("Workflow child plan started")
+    )
+    assert start_record.request_id == "run-topology"
+    assert start_record.workflow_name == "HistDataRunWorkflow"
+    assert start_record.child_count == 3
+    assert summary["status"] == WorkStatus.COMPLETED.value
 
 
 def test_period_batch_partitions_split_by_format_period_and_size() -> None:

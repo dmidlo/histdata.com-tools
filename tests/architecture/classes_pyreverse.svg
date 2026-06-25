@@ -5062,23 +5062,25 @@
 <!-- histdatacom.orchestration.activities._NoopActivityApi -->
 <g id="node240" class="node">
 <title>histdatacom.orchestration.activities._NoopActivityApi</title>
-<polygon fill="none" stroke="black" points="124241.88,-276.75 124241.88,-325.75 124443.12,-325.75 124443.12,-276.75 124241.88,-276.75"/>
-<text text-anchor="start" x="124291.88" y="-308.45" font-family="Times,serif" font-size="14.00">_NoopActivityApi</text>
-<polyline fill="none" stroke="black" points="124241.88,-301.25 124443.12,-301.25"/>
-<polyline fill="none" stroke="black" points="124241.88,-301.25 124443.12,-301.25"/>
-<text text-anchor="start" x="124249.88" y="-283.95" font-family="Times,serif" font-size="14.00">defn(decorated: Any | None): Any</text>
+<polygon fill="none" stroke="black" points="124241.88,-264.5 124241.88,-338 124443.12,-338 124443.12,-264.5 124241.88,-264.5"/>
+<text text-anchor="start" x="124291.88" y="-320.7" font-family="Times,serif" font-size="14.00">_NoopActivityApi</text>
+<polyline fill="none" stroke="black" points="124241.88,-313.5 124443.12,-313.5"/>
+<text text-anchor="start" x="124254.75" y="-296.2" font-family="Times,serif" font-size="14.00">logger : NoneType, RootLogger</text>
+<polyline fill="none" stroke="black" points="124241.88,-289 124443.12,-289"/>
+<text text-anchor="start" x="124249.88" y="-271.7" font-family="Times,serif" font-size="14.00">defn(decorated: Any | None): Any</text>
 </g>
 <!-- histdatacom.orchestration.workflows._NoopWorkflowApi -->
 <g id="node241" class="node">
 <title>histdatacom.orchestration.workflows._NoopWorkflowApi</title>
-<polygon fill="none" stroke="black" points="124460.88,-252 124460.88,-350.5 124662.12,-350.5 124662.12,-252 124460.88,-252"/>
-<text text-anchor="start" x="124505.25" y="-333.2" font-family="Times,serif" font-size="14.00">_NoopWorkflowApi</text>
-<polyline fill="none" stroke="black" points="124460.88,-326 124662.12,-326"/>
-<polyline fill="none" stroke="black" points="124460.88,-326 124662.12,-326"/>
-<text text-anchor="start" x="124468.88" y="-308.7" font-family="Times,serif" font-size="14.00">defn(decorated: Any | None): Any</text>
-<text text-anchor="start" x="124468.88" y="-292.2" font-family="Times,serif" font-size="14.00">execute_child_workflow(): Any</text>
-<text text-anchor="start" x="124468.88" y="-275.7" font-family="Times,serif" font-size="14.00">query(decorated: Any): Any</text>
-<text text-anchor="start" x="124468.88" y="-259.2" font-family="Times,serif" font-size="14.00">run(decorated: Any): Any</text>
+<polygon fill="none" stroke="black" points="124460.88,-239.75 124460.88,-362.75 124662.12,-362.75 124662.12,-239.75 124460.88,-239.75"/>
+<text text-anchor="start" x="124505.25" y="-345.45" font-family="Times,serif" font-size="14.00">_NoopWorkflowApi</text>
+<polyline fill="none" stroke="black" points="124460.88,-338.25 124662.12,-338.25"/>
+<text text-anchor="start" x="124473.75" y="-320.95" font-family="Times,serif" font-size="14.00">logger : NoneType, RootLogger</text>
+<polyline fill="none" stroke="black" points="124460.88,-313.75 124662.12,-313.75"/>
+<text text-anchor="start" x="124468.88" y="-296.45" font-family="Times,serif" font-size="14.00">defn(decorated: Any | None): Any</text>
+<text text-anchor="start" x="124468.88" y="-279.95" font-family="Times,serif" font-size="14.00">execute_child_workflow(): Any</text>
+<text text-anchor="start" x="124468.88" y="-263.45" font-family="Times,serif" font-size="14.00">query(decorated: Any): Any</text>
+<text text-anchor="start" x="124468.88" y="-246.95" font-family="Times,serif" font-size="14.00">run(decorated: Any): Any</text>
 </g>
 <!-- histdatacom.orchestration.workflows._PreparedChildInvocation -->
 <g id="node242" class="node">

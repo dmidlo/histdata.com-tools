@@ -42,7 +42,7 @@ Works on MacOS, Linux & Windows Systems.
     - [Job Telemetry and Automation](#job-telemetry-and-automation)
     - [Runtime User and Maintainer Docs](#runtime-user-and-maintainer-docs)
   - [API - Other Scripts, Modules, & Jupyter Support](#api-other-scripts-modules-jupyter-support)
-    - [CLI Automation](#cli-automation)
+    - [Script and Application Automation](#script-and-application-automation)
     - [Jupyter and External Scripts](#jupyter-and-external-scripts)
     - [Full Script Example](#full-script-example)
 - [Setup](#setup)
@@ -1008,6 +1008,12 @@ histdatacom jobs cancel histdatacom-<request-id> --reason "operator stop"
 - Waited orchestration `-A` / `-U` repository requests keep the output contract: API calls return the available-data dictionary, and CLI calls render the repository table.
 - API calls with `options.api_return_type` return the requested `polars`, `pandas`, or `arrow` object after a completed orchestration job by materializing cache artifacts on disk.
 - If orchestration is unavailable, CLI calls exit nonzero with a clear error and API calls raise `OrchestrationUnavailableError`.
+- `-v` emits high-level orchestration lifecycle logs; `-vv` adds worker,
+  workflow, and activity detail; `-vvv` enables trace-level package logging and
+  Temporal SDK/HTTP debug logging. Workflow and activity logs use Temporal's
+  logger adapters so workflow replay does not duplicate normal workflow log
+  lines. Log metadata is bounded to job/stage/status fields, and credential-like
+  keys such as tokens, passwords, and secrets are redacted.
 
 Orchestration-backed API calls use the same public `Options` object and runtime
 defaults:
@@ -1039,11 +1045,35 @@ for lane sizing and benchmark policy.
 
 ### API - Other Scripts, Modules, & Jupyter Support
 
-histdatacom also has an API to allow developers and to integrate the package into their own projects.  It can be used in one of two ways; The first being a simple interface to automate CLI interaction. The second is as an interface to work with the data directly in a notebook environment like Jupyter Notebooks.
+histdatacom exposes one Python API entry point for scripts, applications, and
+notebooks:
+
+```python
+import histdatacom
+from histdatacom.options import Options
+
+options = Options()
+result = histdatacom(options)
+```
+
+The same `Options` object supports two common API paths:
+
+- submit CLI-shaped ETL work from a script or application, usually for
+  validate/download/extract/import jobs that do not return a dataframe.
+- request dataframe/table results for interactive work in Jupyter or for larger
+  Python programs that need to consume the data directly.
+
+API calls use the orchestration runtime by default. A missing runtime is started
+when needed unless `options.orchestration_start = False` is set. The copyable
+examples live under `samples/`; pytest executes those samples in hermetic mode
+without contacting HistData.com or starting a Temporal runtime.
+
+- `samples/api_quickstart.py`
+- `samples/notebooks/api_quickstart.ipynb`
 
 ---
 
-#### CLI Automation
+#### Script and Application Automation
 
 ##### First import the required modules
 
@@ -1058,9 +1088,12 @@ from histdatacom.options import Options
 options = Options()
 ```
 
-##### Configure for CLI automation
+##### Configure automation options
 
-To automate the CLI, simply include one of the boolean behavior flags: `options.validate_urls`, `options.download_data_archives`, `options.extract_csvs`, and `options.import_to_influxdb`
+To submit the same ETL work a user would normally request from the CLI, set one
+of the boolean behavior flags: `options.validate_urls`,
+`options.download_data_archives`, `options.extract_csvs`, or
+`options.import_to_influxdb`.
 
 - Each behavior flag implies the use of the preceding flags.
   - histdatacom is an ETL pipeline (extract, transform, load) and each step depends on the preceding steps in the pipeline.
@@ -1079,8 +1112,8 @@ options.formats = {"ascii"}
 options.timeframes = {"tick-data-quotes"}
 options.pairs = {"eurusd"}
 options.start_yearmonth = "2021-04"
-options.end_yearmonth = "now"
-options.cpu_utilization = 100
+options.end_yearmonth = "2021-05"
+options.cpu_utilization = "medium"
 ```
 
 - Automation requests submit through orchestration by default and start a
@@ -1095,26 +1128,23 @@ options.cpu_utilization = 100
   methods warn because they bypass durable orchestration status, cancellation,
   retry/resume, and worker-lane routing.
 
-- when a behavior flag is included, `histdatacom` assumes it is being used for `CLI` automation **exclusively** and does **not** provide a return value.
+- When an ETL behavior flag is included without `api_return_type`, the call
+  submits work and does not return dataframe data.
 
-at present, calling from another script or module is limited to using the `__name__=="__main__"` idiom.
-
-```python
-if __name__=="__main__":
-   histdatacom(options)
-```
-
-***Jupyter may be used normally***
+Use the normal Python `__name__ == "__main__"` guard for executable scripts:
 
 ```python
-histdatacom(options)  # (Jupyter)
+if __name__ == "__main__":
+    histdatacom(options)
 ```
 
 ---
 
 #### Jupyter and External Scripts
 
-As opposed to the `CLI` interface, one may wish to load data from histdata.com and work with it interactively (e.g. in a Jupyter notebook), or as part of a larger pipeline.  To that end, histdatacom provides an option to specify a return type.
+For notebooks and data-consuming Python programs, set
+`options.api_return_type`. The completed orchestration job materializes cache
+artifacts and returns a dataframe or table.
 
 - return types can be:
 
@@ -1150,14 +1180,14 @@ options = Options()
 ```python
 options.api_return_type = "polars"  # "polars", "pandas", or "arrow"
 options.formats = {"ascii"}  # Must be {"ascii"}
-options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
+options.timeframes = {"1-minute-bar-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
 options.pairs = {"eurusd"}
 options.start_yearmonth = "2021-04"
-options.end_yearmonth = "now"
-options.cpu_utilization = "high"
+options.end_yearmonth = "2021-05"
+options.cpu_utilization = "medium"
 ```
 
-- This example uses just one pair/instrument/symbol `eurusd` and just one timeframe `tick-data-quotes`.  When the api is called with this 'one-one` specificity, the api will directly return the requested data.
+- This example uses just one pair/instrument/symbol `eurusd` and just one timeframe `1-minute-bar-quotes`. When the api is called with this 'one-one` specificity, the api will directly return the requested data.
 - Regardless of the specified start_yearmonth and end_yearmonth, the resultant data will be sorted and merged into a single dataset.
 
 ##### Pass the options to histdatacom and assign the return to a variable
@@ -1165,16 +1195,18 @@ options.cpu_utilization = "high"
 ```python
 data = histdatacom(options)  # (Jupyter)
 
-print(data.shape)
 print(type(data))
+print(data.shape)
 ```
 
 ```text
-(18648498, 4)
 <class 'polars.dataframe.frame.DataFrame'>
+(rows depend on the requested period, 6)
 ```
 
-- When specifying more than one pair/symbol/instrument or timeframe, the api will return an ***list of dictionaries*** with references to the timeframe, pair, records used to create the data, and the merged data itself.
+- When specifying more than one pair/symbol/instrument or timeframe, the API
+  returns a ***list of dictionaries*** with references to the timeframe, pair,
+  records used to create the data, and the merged data itself.
 
 ```python
 options.api_return_type = "pandas"
@@ -1182,8 +1214,8 @@ options.formats = {"ascii"}
 options.timeframes = {"1-minute-bar-quotes"}
 options.pairs = {"eurusd","usdcad"}
 options.start_yearmonth = "2021-01"
-options.end_yearmonth = "now"
-options.cpu_utilization = "75"
+options.end_yearmonth = "2021-02"
+options.cpu_utilization = "medium"
 ```
 
 ```python
@@ -1265,18 +1297,10 @@ M1 EURUSD
 <class 'pandas.core.frame.DataFrame'>
 ```
 
-at present, calling from another script or module is limited to using the `__name__=="__main__"` idiom.
-
-```python
-if __name__=="__main__":
-   histdatacom(options)
-```
-
-***Jupyter may be used normally***
-
-```python
-histdatacom(options)  # (Jupyter)
-```
+The notebook/API path is covered by pytest and pre-commit through the hermetic
+`samples/notebooks/api_quickstart.ipynb` execution test. The checked-in
+`snippets.ipynb` file remains an exploratory example and is not executed by
+default because it can request live HistData.com data.
 
 ##### Full Script Example
 
@@ -1413,8 +1437,9 @@ hooks; do not rely on user-local Python packages to satisfy `histdatacom`,
 
 The dependency surfaces are split by purpose:
 
-- `.[test]` installs pytest, coverage, pandas, pyarrow, InfluxDB support, and
-  test-only support around the base Temporal SDK dependency.
+- `.[test]` installs pytest, coverage, pandas, pyarrow, InfluxDB support,
+  notebook execution support, and test-only support around the base Temporal SDK
+  dependency.
 - `.[lint]` installs pre-commit and direct lint/type/doc hygiene tools.
 - `.[release]` installs build and publish tooling.
 - `.[dev]` is the aggregate local contributor environment with test, lint,

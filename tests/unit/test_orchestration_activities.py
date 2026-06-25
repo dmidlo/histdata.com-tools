@@ -6,6 +6,7 @@ import asyncio
 from importlib import import_module
 import io
 import json
+import logging
 import shutil
 import zipfile
 from pathlib import Path
@@ -888,6 +889,46 @@ def test_import_to_influx_activity_uses_request_influx_config(
     assert writer.args["INFLUX_URL"] == "http://127.0.0.1:8086"
     assert writer.args["INFLUX_TOKEN"] == "token"
     assert result["result"]["status"] == WorkStatus.INFLUX_UPLOAD.value
+
+
+def test_activity_logs_bounded_metadata_without_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Activity logs should report stage progress without payload secrets."""
+    FakeInfluxWriter.instances.clear()
+    FakeInfluxWriter.fail_with = None
+    monkeypatch.setattr(
+        "histdatacom.orchestration.activities._influx_batch_writer",
+        FakeInfluxWriter,
+    )
+    caplog.set_level(logging.DEBUG)
+
+    import_to_influx_activity(
+        _influx_payload(
+            tmp_path,
+            influx_config={
+                "INFLUX_ORG": "org",
+                "INFLUX_BUCKET": "bucket",
+                "INFLUX_URL": "http://127.0.0.1:8086",
+                "INFLUX_TOKEN": "super-secret-token",
+            },
+        )
+    )
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "Temporal activity work item updated" in messages
+    assert "super-secret-token" not in messages
+    record = next(
+        item
+        for item in caplog.records
+        if item.getMessage().startswith("Temporal activity work item updated")
+    )
+    assert record.request_id == "run-influx-M1"
+    assert record.stage == "import_to_influx"
+    assert record.status == WorkStatus.INFLUX_UPLOAD.value
+    assert record.per_work_item is True
 
 
 def test_import_to_influx_activity_writes_tick_batches(

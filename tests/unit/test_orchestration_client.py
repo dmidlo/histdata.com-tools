@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -606,6 +607,55 @@ def test_submit_and_observe_reuses_running_orchestration(
     assert supervisor.status_calls == 1
     assert supervisor.start_calls == 0
     assert temporal_client.started[0]["id"] == "histdatacom-run-test"
+
+
+def test_submit_and_observe_logs_bounded_lifecycle_metadata(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Lifecycle logs should identify the job without dumping request payloads."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient()
+    supervisor = _FakeSupervisor(current_state="running")
+    request = RunRequest(
+        request_id="run-logs",
+        pairs=("EURUSD",),
+        formats=("ascii",),
+        timeframes=("m1",),
+        validate_urls=True,
+        metadata={"influx_config": {"INFLUX_TOKEN": "super-secret-token"}},
+    )
+    caplog.set_level(logging.INFO, logger="histdatacom.orchestration.client")
+
+    result = asyncio.run(
+        client.submit_run_request_and_observe(
+            request,
+            config=config,
+            client=temporal_client,
+            supervisor=supervisor,  # type: ignore[arg-type]
+        )
+    )
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert result.status == "completed"
+    assert (
+        "Preparing HistData orchestration job request_id=run-logs" in messages
+    )
+    assert (
+        "Submitting HistData orchestration job request_id=run-logs" in messages
+    )
+    assert "Observed HistData orchestration job request_id=run-logs" in messages
+    assert "super-secret-token" not in messages
+    submit_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage().startswith(
+            "Submitting HistData orchestration job"
+        )
+    )
+    assert submit_record.request_id == "run-logs"
+    assert submit_record.workflow_id == "histdatacom-run-logs"
+    assert submit_record.operations == ["validate_urls"]
 
 
 @pytest.mark.parametrize(

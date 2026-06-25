@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from importlib import import_module
+import logging
 from pathlib import Path
 from typing import Any, Callable, Mapping, TypeVar, cast
 
@@ -72,12 +73,15 @@ from histdatacom.runtime_contracts import (
     WorkStatus,
     derive_work_id,
 )
+from histdatacom.verbosity import safe_log_extra
 from histdatacom.utils import set_working_data_dir
 from histdatacom.orchestration.workflow_metadata import TASK_QUEUE_METADATA_KEY
 
 
 class _NoopActivityApi:
     """No-op decorator shim used when temporalio is not installed."""
+
+    logger = logging.getLogger(__name__)
 
     def defn(self, decorated: Any | None = None, **kwargs: Any) -> Any:
         """Return a decorator compatible with temporalio.activity.defn."""
@@ -99,6 +103,7 @@ def _load_activity_api() -> Any:
 
 activity = _load_activity_api()
 _Callable = TypeVar("_Callable", bound=Callable[..., Any])
+_ACTIVITY_LOGGER = logging.getLogger(__name__)
 
 
 def activity_defn(**kwargs: Any) -> Callable[[_Callable], _Callable]:
@@ -1084,6 +1089,16 @@ def _observe_and_persist_activity_output(
         observed.result,
         work_item=observed.work_item,
     )
+    _log_activity_stage_update(
+        observed.result,
+        request=request,
+        total=total,
+        completed=completed,
+        unit="work_items",
+        work_item=observed.work_item,
+        increment=increment,
+        per_work_item=True,
+    )
     return observed
 
 
@@ -1139,6 +1154,15 @@ def _observe_and_persist_stage_result(
         increment=increment,
     )
     _persist_activity_stage_update(payload, request, observed)
+    _log_activity_stage_update(
+        observed,
+        request=request,
+        total=total,
+        completed=completed,
+        unit=unit,
+        increment=increment,
+        per_work_item=False,
+    )
     return observed
 
 
@@ -1205,6 +1229,82 @@ def _persist_activity_stage_update(
         task_queue=_activity_task_queue(request),
         metadata=_activity_status_metadata(payload),
     )
+
+
+def _log_activity_stage_update(
+    result: StageResult,
+    *,
+    request: RunRequest,
+    total: int,
+    completed: int,
+    unit: str,
+    increment: int,
+    per_work_item: bool,
+    work_item: WorkItem | None = None,
+) -> None:
+    level = _activity_result_log_level(result, per_work_item=per_work_item)
+    message = (
+        "Temporal activity work item updated request_id=%s stage=%s "
+        "status=%s completed=%s total=%s"
+        if per_work_item
+        else "Temporal activity stage updated request_id=%s stage=%s "
+        "status=%s completed=%s total=%s"
+    )
+    _activity_log(
+        level,
+        message,
+        request.request_id,
+        result.stage,
+        result.status.value,
+        completed,
+        total,
+        request_id=request.request_id,
+        stage=result.stage,
+        status=result.status.value,
+        work_id=result.work_id,
+        work_item_id=work_item.work_id if work_item else "",
+        total=total,
+        completed=completed,
+        unit=unit,
+        increment=increment,
+        artifact_count=len(result.artifacts),
+        failure_code=result.failure.code if result.failure else "",
+        retryable=result.failure.retryable if result.failure else False,
+        per_work_item=per_work_item,
+    )
+
+
+def _activity_log(
+    level: int,
+    message: str,
+    *args: object,
+    **metadata: Any,
+) -> None:
+    logger = getattr(activity, "logger", _ACTIVITY_LOGGER)
+    extra = safe_log_extra(**metadata)
+    try:
+        logger.log(level, message, *args, extra=extra)
+    except RuntimeError as err:
+        if _outside_activity_context(err):
+            _ACTIVITY_LOGGER.log(level, message, *args, extra=extra)
+            return
+        raise
+
+
+def _activity_result_log_level(
+    result: StageResult,
+    *,
+    per_work_item: bool,
+) -> int:
+    if result.status in {WorkStatus.CANCELLED, WorkStatus.RETRIED}:
+        return logging.WARNING
+    if result.failure is not None or result.status == WorkStatus.FAILED:
+        return (
+            logging.WARNING
+            if result.failure and result.failure.retryable
+            else logging.ERROR
+        )
+    return logging.DEBUG if per_work_item else logging.INFO
 
 
 def _activity_status_store(request: RunRequest) -> ManifestStatusStore | None:

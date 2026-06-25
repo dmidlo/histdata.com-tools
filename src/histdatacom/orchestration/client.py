@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import dataclass, replace
 from importlib import import_module
 from inspect import isawaitable
+import logging
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -25,6 +26,7 @@ from histdatacom.runtime_contracts import (
     RunRequest,
     WorkStatus,
 )
+from histdatacom.verbosity import safe_log_extra
 from histdatacom.orchestration.control import (
     JobLifecycle,
     JobLogEntry,
@@ -58,6 +60,7 @@ CONTROL_ATTEMPTS_METADATA_KEY = "control_attempts"
 CONTROL_EXECUTION_METADATA_KEY = "control_execution"
 TEMPORAL_EXECUTION_STATUS_PREFIX = "WORKFLOW_EXECUTION_STATUS_"
 TEMPORAL_EXECUTION_STATUS_METADATA_KEY = "temporal_execution_status"
+LOGGER = logging.getLogger(__name__)
 
 
 class OrchestrationUnavailableError(DependencyOperationError):
@@ -142,12 +145,34 @@ async def connect_temporal_client(
     connect = getattr(temporal_client_class, "connect", None)
     if connect is None:
         raise TypeError("Temporal client class must define connect()")
-    return await _maybe_await(
-        connect(
-            resolved_config.target_host,
-            namespace=resolved_config.namespace,
-        )
+    LOGGER.debug(
+        "Connecting Temporal client target_host=%s namespace=%s",
+        resolved_config.target_host,
+        resolved_config.namespace,
+        extra=_config_log_context(resolved_config),
     )
+    try:
+        connected = await _maybe_await(
+            connect(
+                resolved_config.target_host,
+                namespace=resolved_config.namespace,
+            )
+        )
+    except Exception:
+        LOGGER.exception(
+            "Temporal client connection failed target_host=%s namespace=%s",
+            resolved_config.target_host,
+            resolved_config.namespace,
+            extra=_config_log_context(resolved_config),
+        )
+        raise
+    LOGGER.debug(
+        "Connected Temporal client target_host=%s namespace=%s",
+        resolved_config.target_host,
+        resolved_config.namespace,
+        extra=_config_log_context(resolved_config),
+    )
+    return connected
 
 
 async def submit_run_request(
@@ -172,6 +197,18 @@ async def submit_run_request(
         client_class=client_class,
     )
     workflow_id = workflow_id_for_request(request)
+    LOGGER.info(
+        "Submitting HistData orchestration job request_id=%s workflow_id=%s",
+        request.request_id,
+        workflow_id,
+        extra=_request_log_context(
+            request,
+            workflow_id=workflow_id,
+            task_queue=resolved_config.task_queues.orchestration,
+            namespace=resolved_config.namespace,
+            wait_for_result=False,
+        ),
+    )
     handle = await _maybe_await(
         temporal_client.start_workflow(
             workflow,
@@ -195,6 +232,21 @@ async def submit_run_request(
         config=resolved_config,
         status_store=status_store,
     )
+    LOGGER.info(
+        "Submitted HistData orchestration job request_id=%s workflow_id=%s "
+        "run_id=%s",
+        request.request_id,
+        job_handle.workflow_id,
+        job_handle.run_id,
+        extra=_request_log_context(
+            request,
+            workflow_id=job_handle.workflow_id,
+            run_id=job_handle.run_id,
+            task_queue=job_handle.task_queue,
+            namespace=job_handle.namespace,
+            status="submitted",
+        ),
+    )
     return job_handle
 
 
@@ -214,6 +266,18 @@ async def submit_run_request_and_observe(
     resolved_supervisor = supervisor or OrchestrationSupervisor(
         runtime_policy=config.runtime_policy if config is not None else None
     )
+    LOGGER.info(
+        "Preparing HistData orchestration job request_id=%s "
+        "start_if_needed=%s wait_for_result=%s",
+        request.request_id,
+        start_if_needed,
+        wait_for_result,
+        extra=_request_log_context(
+            request,
+            start_if_needed=start_if_needed,
+            wait_for_result=wait_for_result,
+        ),
+    )
     orchestration_status = _ensure_orchestration_available(
         resolved_supervisor,
         start_if_needed=start_if_needed,
@@ -230,6 +294,18 @@ async def submit_run_request_and_observe(
         client_class=client_class,
     )
     workflow_id = workflow_id_for_request(request)
+    LOGGER.info(
+        "Submitting HistData orchestration job request_id=%s workflow_id=%s",
+        request.request_id,
+        workflow_id,
+        extra=_request_log_context(
+            request,
+            workflow_id=workflow_id,
+            task_queue=resolved_config.task_queues.orchestration,
+            namespace=resolved_config.namespace,
+            wait_for_result=wait_for_result,
+        ),
+    )
     raw_handle = await _start_workflow(
         temporal_client,
         workflow,
@@ -254,6 +330,21 @@ async def submit_run_request_and_observe(
         config=resolved_config,
         status_store=status_store,
     )
+    LOGGER.info(
+        "Submitted HistData orchestration job request_id=%s workflow_id=%s "
+        "run_id=%s",
+        request.request_id,
+        handle.workflow_id,
+        handle.run_id,
+        extra=_request_log_context(
+            request,
+            workflow_id=handle.workflow_id,
+            run_id=handle.run_id,
+            task_queue=handle.task_queue,
+            namespace=handle.namespace,
+            status="submitted",
+        ),
+    )
     if not wait_for_result:
         return OrchestrationJobResult(
             handle=handle,
@@ -262,19 +353,49 @@ async def submit_run_request_and_observe(
             snapshot=submitted_snapshot,
         )
 
+    LOGGER.info(
+        "Waiting for HistData orchestration job request_id=%s workflow_id=%s",
+        request.request_id,
+        handle.workflow_id,
+        extra=_request_log_context(
+            request,
+            workflow_id=handle.workflow_id,
+            run_id=handle.run_id,
+            task_queue=handle.task_queue,
+            namespace=handle.namespace,
+            wait_for_result=True,
+        ),
+    )
     result = await observe_workflow_result(raw_handle)
     snapshot = _persist_job_snapshot(
         submitted_snapshot.with_result(result),
         config=resolved_config,
         status_store=status_store,
     )
-    return OrchestrationJobResult(
+    observed = OrchestrationJobResult(
         handle=handle,
         status=_observed_job_result_status(result, snapshot),
         result=result,
         orchestration_status=orchestration_status,
         snapshot=snapshot,
     )
+    LOGGER.log(
+        _job_result_log_level(observed.status),
+        "Observed HistData orchestration job request_id=%s workflow_id=%s "
+        "status=%s",
+        request.request_id,
+        handle.workflow_id,
+        observed.status,
+        extra=_request_log_context(
+            request,
+            workflow_id=handle.workflow_id,
+            run_id=handle.run_id,
+            task_queue=handle.task_queue,
+            namespace=handle.namespace,
+            status=observed.status,
+        ),
+    )
+    return observed
 
 
 def submit_run_request_and_observe_sync(
@@ -305,6 +426,14 @@ def _observed_job_result_status(
     if snapshot.lifecycle == JobLifecycle.CANCELLED:
         return "cancelled"
     return "completed"
+
+
+def _job_result_log_level(status: str) -> int:
+    if status == "failed":
+        return logging.ERROR
+    if status == "cancelled":
+        return logging.WARNING
+    return logging.INFO
 
 
 async def submit_control_job(
@@ -1276,24 +1405,91 @@ def _ensure_orchestration_available(
     start_if_needed: bool,
 ) -> OrchestrationStatus:
     status = supervisor.status(repair=True)
+    LOGGER.debug(
+        "Checked Temporal orchestration availability state=%s running=%s",
+        status.state,
+        status.running,
+        extra=_status_log_context(status, start_if_needed=start_if_needed),
+    )
     if status.running:
         return status
     if not start_if_needed:
+        LOGGER.warning(
+            "Temporal orchestration unavailable state=%s start_if_needed=%s",
+            status.state,
+            start_if_needed,
+            extra=_status_log_context(
+                status,
+                start_if_needed=start_if_needed,
+            ),
+        )
         raise OrchestrationUnavailableError(
             "Temporal orchestration is not running. Rerun without "
             "--no-orchestration-start or start the runtime before submitting "
             "work."
         )
     try:
+        LOGGER.info(
+            "Starting Temporal orchestration runtime state=%s",
+            status.state,
+            extra=_status_log_context(
+                status,
+                start_if_needed=start_if_needed,
+            ),
+        )
         started = supervisor.start()
     except OrchestrationResourceError as err:
+        LOGGER.warning(
+            "Temporal orchestration startup unavailable error=%s",
+            str(err),
+            extra=_status_log_context(
+                status,
+                start_if_needed=start_if_needed,
+                error_type=type(err).__name__,
+            ),
+        )
         raise OrchestrationUnavailableError(str(err)) from err
     except RuntimeError as err:
         if _is_missing_temporal_dependency_error(err):
+            LOGGER.warning(
+                "Temporal orchestration startup dependency unavailable "
+                "error=%s",
+                str(err),
+                extra=_status_log_context(
+                    status,
+                    start_if_needed=start_if_needed,
+                    error_type=type(err).__name__,
+                ),
+            )
             raise OrchestrationUnavailableError(str(err)) from err
+        LOGGER.exception(
+            "Temporal orchestration startup failed error=%s",
+            str(err),
+            extra=_status_log_context(
+                status,
+                start_if_needed=start_if_needed,
+                error_type=type(err).__name__,
+            ),
+        )
         raise
     if started.running:
+        LOGGER.info(
+            "Temporal orchestration runtime started state=%s",
+            started.state,
+            extra=_status_log_context(
+                started,
+                start_if_needed=start_if_needed,
+            ),
+        )
         return started
+    LOGGER.warning(
+        "Temporal orchestration startup did not reach running state=%s",
+        started.state,
+        extra=_status_log_context(
+            started,
+            start_if_needed=start_if_needed,
+        ),
+    )
     raise OrchestrationUnavailableError(
         "Temporal orchestration could not be started: " f"{started.message}"
     )
@@ -1316,6 +1512,16 @@ async def _start_workflow(
     workflow_id: str,
     task_queue: str,
 ) -> Any:
+    LOGGER.debug(
+        "Starting Temporal workflow workflow_id=%s task_queue=%s",
+        workflow_id,
+        task_queue,
+        extra=safe_log_extra(
+            workflow=str(workflow),
+            workflow_id=workflow_id,
+            task_queue=task_queue,
+        ),
+    )
     return await _maybe_await(
         temporal_client.start_workflow(
             workflow,
@@ -1384,6 +1590,15 @@ async def _query_workflow_status(workflow_handle: Any) -> Mapping[str, Any]:
     query = getattr(workflow_handle, "query", None)
     if query is None:
         raise TypeError("Temporal workflow handle must define query()")
+    LOGGER.debug(
+        "Querying Temporal workflow status workflow_id=%s run_id=%s",
+        str(getattr(workflow_handle, "id", "") or ""),
+        str(getattr(workflow_handle, "run_id", "") or ""),
+        extra=safe_log_extra(
+            workflow_id=str(getattr(workflow_handle, "id", "") or ""),
+            run_id=str(getattr(workflow_handle, "run_id", "") or ""),
+        ),
+    )
     status_payload = await _maybe_await(query("status"))
     if not isinstance(status_payload, Mapping):
         raise TypeError("Workflow status query must return a mapping")
@@ -1507,6 +1722,76 @@ def _load_temporal_client_class() -> Any:
         if (err.name or "").split(".")[0] == "temporalio":
             raise TemporalDependencyError(TEMPORAL_EXTRA_HINT) from err
         raise
+
+
+def _config_log_context(
+    config: OrchestrationWorkerConfig,
+    **values: Any,
+) -> dict[str, object]:
+    return safe_log_extra(
+        namespace=config.namespace,
+        target_host=config.target_host,
+        task_queue=config.task_queue,
+        lane=config.lane.value,
+        **values,
+    )
+
+
+def _request_log_context(
+    request: RunRequest,
+    **values: Any,
+) -> dict[str, object]:
+    return safe_log_extra(
+        request_id=request.request_id,
+        operations=_request_operation_names(request),
+        pairs_count=len(request.pairs),
+        formats=list(request.formats),
+        timeframes=list(request.timeframes),
+        start_yearmonth=request.start_yearmonth,
+        end_yearmonth=request.end_yearmonth,
+        api_return_type=request.api_return_type,
+        data_quality=request.data_quality,
+        repo_quality_refresh=request.repo_quality_refresh,
+        metadata_key_count=len(request.metadata),
+        **values,
+    )
+
+
+def _request_operation_names(request: RunRequest) -> tuple[str, ...]:
+    operations: list[str] = []
+    if request.available_remote_data:
+        operations.append("available_remote_data")
+    if request.update_remote_data:
+        operations.append("update_remote_data")
+    if request.validate_urls:
+        operations.append("validate_urls")
+    if request.download_data_archives:
+        operations.append("download_archives")
+    if request.extract_csvs:
+        operations.append("extract_csv")
+    if request.api_return_type:
+        operations.append("api_return")
+    if request.import_to_influxdb:
+        operations.append("import_to_influx")
+    if request.data_quality:
+        operations.append("data_quality")
+    if request.repo_quality_refresh:
+        operations.append("repo_quality_refresh")
+    return tuple(operations)
+
+
+def _status_log_context(
+    status: OrchestrationStatus,
+    **values: Any,
+) -> dict[str, object]:
+    return safe_log_extra(
+        orchestration_state=status.state,
+        orchestration_running=status.running,
+        state_dir=status.state_dir,
+        pid_count=len(status.pids),
+        log_components=sorted(status.logs),
+        **values,
+    )
 
 
 async def _maybe_await(value: Any) -> Any:

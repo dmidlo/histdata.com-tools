@@ -84,7 +84,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Compile source and tests
-        run: python -m compileall -q src tests scripts test.py snippets.py
+        run: python -m compileall -q src tests scripts samples test.py snippets.py
 
       - name: Smoke editable install metadata
         run: |

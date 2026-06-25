@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
@@ -197,6 +198,37 @@ def test_run_temporal_worker_accepts_fake_temporal_classes(
         "merge_cache_activity",
         "import_to_influx_activity",
     }
+
+
+def test_run_temporal_worker_logs_start_and_readiness(
+    tmp_path: Path,
+    caplog,
+) -> None:
+    """Worker startup should leave operator-useful lifecycle logs."""
+    _FakeClient.connected.clear()
+    _FakeWorker.instances.clear()
+    config = _config(tmp_path)
+    caplog.set_level(logging.INFO, logger="histdatacom.orchestration.worker")
+
+    asyncio.run(
+        worker.run_temporal_worker(
+            config=config,
+            client_class=_FakeClient,
+            worker_class=_FakeWorker,
+        )
+    )
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert f"Starting Temporal worker lane={config.lane.value}" in messages
+    assert f"Temporal worker ready lane={config.lane.value}" in messages
+    ready_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage().startswith("Temporal worker ready")
+    )
+    assert ready_record.lane == config.lane.value
+    assert ready_record.task_queue == config.task_queue
+    assert ready_record.state == "ready"
 
 
 def test_default_workflows_include_topology_classes() -> None:
