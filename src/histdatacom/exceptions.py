@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Mapping
 
@@ -34,6 +35,92 @@ class RetryPolicyName(str, Enum):
     STANDARD = "standard"
     NETWORK = "network"
     IDEMPOTENT_WRITE = "idempotent_write"
+
+
+_SENSITIVE_DETAIL_KEYS = (
+    "api_key",
+    "apikey",
+    "authorization",
+    "password",
+    "secret",
+    "token",
+)
+
+_CATEGORY_ACTIONS = {
+    ErrorCategory.ARCHIVE: (
+        "Check the downloaded archive path and preserve the failing ZIP if "
+        "you report this."
+    ),
+    ErrorCategory.CACHE: (
+        "Rebuild the affected cache and include the source file, period, "
+        "symbol, and cache path if the failure repeats."
+    ),
+    ErrorCategory.CANCELLATION: (
+        "The operation was interrupted. Retry when you are ready to resume."
+    ),
+    ErrorCategory.CONFIGURATION: (
+        "Check the command options, YAML config, and required environment "
+        "values."
+    ),
+    ErrorCategory.DEPENDENCY: (
+        "Install or repair the required runtime dependency, then rerun the "
+        "command."
+    ),
+    ErrorCategory.FILESYSTEM: (
+        "Check that the referenced path exists and that the process has "
+        "permission and disk space."
+    ),
+    ErrorCategory.INFLUX: (
+        "Check the InfluxDB service and influxdb.yaml values, especially org, "
+        "bucket, URL, and token."
+    ),
+    ErrorCategory.NETWORK: (
+        "Retry the command. If it keeps failing, include the URL, status code, "
+        "and error code in the bug report."
+    ),
+    ErrorCategory.NO_DATA: (
+        "Verify the requested symbol, format, timeframe, and period with "
+        "-A/--available_remote_data."
+    ),
+    ErrorCategory.PARSE: (
+        "The vendor response or local file did not match the expected HistData "
+        "shape. Include the failing file or URL."
+    ),
+    ErrorCategory.REPOSITORY: (
+        "Refresh repository metadata with -U and include the repository path "
+        "if the problem repeats."
+    ),
+    ErrorCategory.UNKNOWN: (
+        "Rerun with -vvv and include this report block with the traceback or "
+        "GitHub issue."
+    ),
+    ErrorCategory.VALIDATION: (
+        "Fix the invalid command input or configuration value and rerun."
+    ),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ReportableError:
+    """End-user and bug-report friendly description of an operation failure."""
+
+    code: str
+    message: str
+    category: ErrorCategory
+    retryable: bool = False
+    action: str = ""
+    detail: dict[str, JSONValue] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return a JSON-compatible, redacted report payload."""
+        return {
+            "code": self.code,
+            "message": self.message,
+            "category": self.category.value,
+            "retryable": self.retryable,
+            "action": self.action,
+            "detail": _redact_report_detail(self.detail),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +228,20 @@ class HistDataOperationError(Exception):
             "detail": dict(self.detail),
             "exit_code": self.exit_code,
         }
+
+    def to_reportable_error(self) -> ReportableError:
+        """Return an end-user friendly error report for this failure."""
+        detail = dict(self.detail)
+        detail.setdefault("category", self.category.value)
+        detail.setdefault("exception_type", self.__class__.__name__)
+        return ReportableError(
+            code=self.code,
+            message=self.message,
+            category=self.category,
+            retryable=self.retryable,
+            action=_action_for_category(self.category, detail),
+            detail=_redact_report_detail(detail),
+        )
 
 
 class CliValidationError(HistDataOperationError, ValueError):
@@ -372,11 +473,112 @@ def failure_info_from_exception(
             detail=detail,
         )
         return cancellation_failure.to_failure_info()
+    failure_detail = dict(detail or {})
+    failure_detail.setdefault("category", ErrorCategory.UNKNOWN.value)
+    failure_detail.setdefault("exception_type", err.__class__.__name__)
     return FailureInfo(
         code=default_code,
         message=str(err),
         retryable=default_retryable,
-        detail=dict(detail or {}),
+        detail=failure_detail,
+    )
+
+
+def reportable_error_from_exception(
+    err: BaseException,
+    *,
+    default_code: str = "OPERATION_FAILED",
+    default_retryable: bool = False,
+    detail: Mapping[str, JSONValue] | None = None,
+) -> ReportableError:
+    """Return a bug-report friendly error object for any exception."""
+    if isinstance(err, HistDataOperationError):
+        if detail is None:
+            return err.to_reportable_error()
+        failure = err.to_failure_info(detail=detail)
+    else:
+        failure = failure_info_from_exception(
+            err,
+            default_code=default_code,
+            default_retryable=default_retryable,
+            detail=detail,
+        )
+    return reportable_error_from_failure_info(failure)
+
+
+def reportable_error_from_failure_info(
+    failure: FailureInfo,
+) -> ReportableError:
+    """Return product-grade failure reporting from workflow failure metadata."""
+    detail = dict(failure.detail)
+    category = _category_from_detail(detail)
+    detail.setdefault("category", category.value)
+    return ReportableError(
+        code=failure.code or "OPERATION_FAILED",
+        message=failure.message or "Operation failed without a message.",
+        category=category,
+        retryable=failure.retryable,
+        action=_action_for_category(category, detail),
+        detail=_redact_report_detail(detail),
+    )
+
+
+def format_reportable_error(
+    error: ReportableError,
+    *,
+    title: str = "HistData operation failed",
+    include_detail: bool = True,
+) -> str:
+    """Return a concise multiline CLI error report."""
+    retryable = "yes" if error.retryable else "no"
+    lines = [
+        title,
+        f"code: {error.code}",
+        f"category: {error.category.value}",
+        f"retryable: {retryable}",
+        f"message: {error.message}",
+        f"action: {error.action}",
+    ]
+    if include_detail and error.detail:
+        lines.append("details:")
+        for key in sorted(error.detail):
+            lines.append(f"  {key}: {_format_report_detail(error.detail[key])}")
+    return "\n".join(lines)
+
+
+def format_exception_for_cli(
+    err: BaseException,
+    *,
+    title: str = "HistData operation failed",
+    default_code: str = "OPERATION_FAILED",
+    default_retryable: bool = False,
+    detail: Mapping[str, JSONValue] | None = None,
+    include_detail: bool = True,
+) -> str:
+    """Return a CLI-ready report block for an exception."""
+    return format_reportable_error(
+        reportable_error_from_exception(
+            err,
+            default_code=default_code,
+            default_retryable=default_retryable,
+            detail=detail,
+        ),
+        title=title,
+        include_detail=include_detail,
+    )
+
+
+def format_failure_info_for_cli(
+    failure: FailureInfo,
+    *,
+    title: str = "HistData operation failed",
+    include_detail: bool = True,
+) -> str:
+    """Return a CLI-ready report block for workflow failure metadata."""
+    return format_reportable_error(
+        reportable_error_from_failure_info(failure),
+        title=title,
+        include_detail=include_detail,
     )
 
 
@@ -455,6 +657,66 @@ def _is_influx_dependency_error(err: BaseException, message: str) -> bool:
         or "histdatacom[influx]" in message
         or "InfluxDB import not installed" in message
     )
+
+
+def _category_from_detail(detail: Mapping[str, JSONValue]) -> ErrorCategory:
+    raw_category = detail.get("category")
+    if isinstance(raw_category, str):
+        try:
+            return ErrorCategory(raw_category)
+        except ValueError:
+            return ErrorCategory.UNKNOWN
+    return ErrorCategory.UNKNOWN
+
+
+def _action_for_category(
+    category: ErrorCategory,
+    detail: Mapping[str, JSONValue],
+) -> str:
+    for key in ("operator_action", "action", "hint", "remediation"):
+        value = detail.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return _CATEGORY_ACTIONS[category]
+
+
+def _redact_report_detail(
+    detail: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    return {
+        str(key): _redact_report_value(str(key), value)
+        for key, value in detail.items()
+    }
+
+
+def _redact_report_value(key: str, value: JSONValue) -> JSONValue:
+    if _is_sensitive_detail_key(key):
+        return "[redacted]"
+    if isinstance(value, Mapping):
+        return {
+            str(child_key): _redact_report_value(str(child_key), child_value)
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_report_value(key, item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _is_sensitive_detail_key(key: str) -> bool:
+    normalized = key.casefold()
+    return any(part in normalized for part in _SENSITIVE_DETAIL_KEYS)
+
+
+def _format_report_detail(value: JSONValue) -> str:
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, sort_keys=True)
+    else:
+        text = str(value)
+    if len(text) > 500:
+        return text[:497] + "..."
+    return text
 
 
 def _system_exit_message(err: SystemExit) -> str:

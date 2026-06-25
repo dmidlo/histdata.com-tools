@@ -1355,7 +1355,13 @@ def test_cli_waited_orchestration_terminal_failure_exits_nonzero(
     assert err.value.code == 1
     assert f'"status": "{expected}"' in captured.out
     assert f'"status": "{status.value}"' in captured.out
-    assert f"error: orchestration job {expected}" in captured.err
+    assert f"HistData orchestration job {expected}" in captured.err
+    assert f"code: {status.value}" in captured.err
+    message = (
+        "validation failed" if expected == "failed" else "cancelled by caller"
+    )
+    assert f"message: {message}" in captured.err
+    assert f"orchestration_status: {status.value}" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -1514,8 +1520,13 @@ def test_cli_orchestration_unavailable_exits_nonzero(
     with pytest.raises(SystemExit) as err:
         histdata_com.main()
 
+    captured = capsys.readouterr()
     assert err.value.code == 1
-    assert "not running" in capsys.readouterr().err
+    assert "HistData orchestration unavailable" in captured.err
+    assert "code: ORCHESTRATION_UNAVAILABLE" in captured.err
+    assert "category: dependency" in captured.err
+    assert "message: not running" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_api_temporal_dependency_error_is_orchestration_unavailable(
@@ -1574,7 +1585,9 @@ def test_cli_temporal_dependency_error_exits_nonzero_without_traceback(
 
     captured = capsys.readouterr()
     assert err.value.code == 1
-    assert "error: Temporal support requires temporalio." in captured.err
+    assert "HistData orchestration unavailable" in captured.err
+    assert "code: TEMPORAL_DEPENDENCY_UNAVAILABLE" in captured.err
+    assert "message: Temporal support requires temporalio." in captured.err
     assert "Traceback" not in captured.err
 
 

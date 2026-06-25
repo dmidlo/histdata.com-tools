@@ -37,14 +37,18 @@ from histdatacom.cli_config import (
     remove_routed_command_from_cli_args,
     routed_command_from_cli_args,
 )
-from histdatacom.exceptions import InfluxConfigurationError
+from histdatacom.exceptions import (
+    format_exception_for_cli,
+    format_failure_info_for_cli,
+    InfluxConfigurationError,
+)
 from histdatacom.repository_output import (
     print_repository_failure,
     print_repository_table,
 )
 from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.records import Record
-from histdatacom.runtime_contracts import RunRequest, WorkStatus
+from histdatacom.runtime_contracts import FailureInfo, RunRequest, WorkStatus
 from histdatacom.orchestration.client import (
     OrchestrationUnavailableError,
     submit_run_request_and_observe_sync,
@@ -163,7 +167,13 @@ class _HistDataCom:  # noqa:R701
         except OrchestrationUnavailableError as err:
             if self.context.from_api:
                 raise
-            print(f"error: {err}", file=sys.stderr)  # noqa:T201
+            print(  # noqa:T201
+                format_exception_for_cli(
+                    err,
+                    title="HistData orchestration unavailable",
+                ),
+                file=sys.stderr,
+            )
             raise SystemExit(1) from err
 
         payload = result.to_dict()
@@ -518,6 +528,16 @@ def _orchestration_failure_status(
 def _print_orchestration_payload_failure(payload: Mapping[str, Any]) -> None:
     """Print a concise CLI error for failed waited orchestration jobs."""
     status = _orchestration_failure_status(payload) or WorkStatus.FAILED
+    failure = _orchestration_failure_info(payload)
+    if failure is not None:
+        print(  # noqa:T201
+            format_failure_info_for_cli(
+                _failure_info_with_orchestration_status(failure, status),
+                title=f"HistData orchestration job {status.value.lower()}",
+            ),
+            file=sys.stderr,
+        )
+        return
     message = _orchestration_failure_message(payload)
     suffix = f": {message}" if message else ""
     print(
@@ -528,14 +548,40 @@ def _print_orchestration_payload_failure(payload: Mapping[str, Any]) -> None:
 
 def _orchestration_failure_message(payload: Mapping[str, Any]) -> str:
     """Return the first useful failure message from an orchestration payload."""
+    failure = _orchestration_failure_info(payload)
+    if failure is not None and failure.message:
+        return str(failure.message)
     for item in _iter_mapping_payloads(payload):
-        failure = item.get("failure")
-        if isinstance(failure, Mapping) and failure.get("message"):
-            return str(failure.get("message"))
         last_error = item.get("last_error")
         if last_error:
             return str(last_error)
     return ""
+
+
+def _orchestration_failure_info(
+    payload: Mapping[str, Any],
+) -> FailureInfo | None:
+    """Return the first structured failure in an orchestration payload."""
+    for item in _iter_mapping_payloads(payload):
+        failure = item.get("failure")
+        if isinstance(failure, Mapping):
+            return FailureInfo.from_dict(failure)
+    return None
+
+
+def _failure_info_with_orchestration_status(
+    failure: FailureInfo,
+    status: WorkStatus,
+) -> FailureInfo:
+    """Attach workflow terminal status without mutating the source payload."""
+    detail = dict(failure.detail)
+    detail.setdefault("orchestration_status", status.value)
+    return FailureInfo(
+        code=failure.code,
+        message=failure.message,
+        retryable=failure.retryable,
+        detail=detail,
+    )
 
 
 def _repository_failure_code_from_orchestration_payload(

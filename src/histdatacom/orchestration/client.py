@@ -14,6 +14,7 @@ from histdatacom.cancellation import (
     cleanup_partial_artifacts,
     operation_resume_policy,
 )
+from histdatacom.exceptions import DependencyOperationError, ErrorCategory
 from histdatacom.manifest_store import (
     STATUS_STORE_REF_KEY,
     ManifestStatusStore,
@@ -59,12 +60,19 @@ TEMPORAL_EXECUTION_STATUS_PREFIX = "WORKFLOW_EXECUTION_STATUS_"
 TEMPORAL_EXECUTION_STATUS_METADATA_KEY = "temporal_execution_status"
 
 
-class OrchestrationUnavailableError(RuntimeError):
+class OrchestrationUnavailableError(DependencyOperationError):
     """Raised when an orchestrated run is requested but unavailable."""
+
+    category = ErrorCategory.DEPENDENCY
+    code = "ORCHESTRATION_UNAVAILABLE"
+    retryable = False
+    exit_code = 1
 
 
 class TemporalDependencyError(OrchestrationUnavailableError):
     """Raised when Temporal SDK functionality is used without temporalio."""
+
+    code = "TEMPORAL_DEPENDENCY_UNAVAILABLE"
 
 
 @dataclass(frozen=True, slots=True)
