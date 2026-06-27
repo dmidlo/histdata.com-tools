@@ -202,6 +202,24 @@ def test_local_publishing_script_enforces_branch_contract() -> None:
     assert 'python -m twine upload -r "${repository}"' in script
 
 
+def test_local_pypi_install_smoke_stops_runtime_workspace() -> None:
+    """PyPI install smoke should stop the runtime started by its download test."""
+    script = _project_text("pypi.sh")
+
+    assert "stop_release_smoke_runtime()" in script
+    assert (
+        'stop_timeout="${HISTDATACOM_RELEASE_SMOKE_STOP_TIMEOUT:-90}"' in script
+    )
+    assert "histdatacom runtime stop \\" in script
+    assert '--workspace "${workspace}"' in script
+    assert '--stop-timeout "${stop_timeout}"' in script
+    assert "workspace=$(pwd -P)" in script
+    assert 'stop_release_smoke_runtime "${workspace}"' in script
+    assert "pypi_install()" in script
+    assert "destroyenv" in script
+    assert "pypi_install\n        ;;" in script
+
+
 def test_release_docs_mark_local_publishing_as_current_path() -> None:
     """Release docs should not imply Actions deployment is active today."""
     release_docs = _project_text("RELEASE.md")

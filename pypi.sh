@@ -339,27 +339,100 @@ destroyenv()
     source "${project_root}/venv/bin/activate"
 }
 
+stop_release_smoke_runtime()
+{
+    local workspace="$1"
+    local stop_timeout="${HISTDATACOM_RELEASE_SMOKE_STOP_TIMEOUT:-90}"
+
+    if [[ ! -d "${workspace}" ]]; then
+        return
+    fi
+
+    if ! command -v histdatacom >/dev/null 2>&1; then
+        echo "pypi.sh: unable to stop release smoke runtime because histdatacom is not on PATH." >&2
+        return 1
+    fi
+
+    echo "${bold}stopping release smoke runtime${normal}"
+    if ! histdatacom runtime stop \
+        --workspace "${workspace}" \
+        --json \
+        --stop-timeout "${stop_timeout}" \
+        >/dev/null; then
+        echo "pypi.sh: failed to stop release smoke runtime for workspace: ${workspace}" >&2
+        return 1
+    fi
+}
+
 histdatacom_test()
 {
     (
         local runtime_state
+        local stop_status=0
+        local test_status=0
+        local workspace
 
         runtime_state=$(mktemp -d)
+        workspace=$(pwd -P)
         trap 'rm -rf "${runtime_state}"' EXIT
 
+        set +e
         echo "${bold}testing histdatacom -h test pip environment${normal}"
         histdatacom -h
-        echo "${bold}testing histdatacom -D test pip environment${normal}"
-        histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
-        echo "${bold}testing histdatacom --version test pip environment${normal}"
-        histdatacom --version
-        echo "${bold}testing histdatacom runtime status test pip environment${normal}"
-        histdatacom runtime --state-dir "${runtime_state}" --json status >/dev/null
-        echo "${bold}testing histdatacom runtime doctor test pip environment${normal}"
-        histdatacom runtime --state-dir "${runtime_state}" --json doctor >/dev/null
-        echo "${bold}testing runtime worker help test pip environment${normal}"
-        python -m histdatacom.orchestration.worker --help >/dev/null
+        test_status=$?
+        if ((test_status == 0)); then
+            echo "${bold}testing histdatacom -D test pip environment${normal}"
+            histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
+            test_status=$?
+        fi
+        if ((test_status == 0)); then
+            echo "${bold}testing histdatacom --version test pip environment${normal}"
+            histdatacom --version
+            test_status=$?
+        fi
+        if ((test_status == 0)); then
+            echo "${bold}testing histdatacom runtime status test pip environment${normal}"
+            histdatacom runtime --state-dir "${runtime_state}" --json status >/dev/null
+            test_status=$?
+        fi
+        if ((test_status == 0)); then
+            echo "${bold}testing histdatacom runtime doctor test pip environment${normal}"
+            histdatacom runtime --state-dir "${runtime_state}" --json doctor >/dev/null
+            test_status=$?
+        fi
+        if ((test_status == 0)); then
+            echo "${bold}testing runtime worker help test pip environment${normal}"
+            python -m histdatacom.orchestration.worker --help >/dev/null
+            test_status=$?
+        fi
+
+        stop_release_smoke_runtime "${workspace}"
+        stop_status=$?
+        set -e
+
+        if ((test_status != 0)); then
+            return "${test_status}"
+        fi
+        return "${stop_status}"
     )
+}
+
+pypi_install()
+{
+    local status=0
+
+    buildenv
+    set +e
+    echo "${bold}installing histdatacom from pypi: https://pypi.org/${normal}"
+    python -m pip install histdatacom
+    status=$?
+    if ((status == 0)); then
+        histdatacom_test
+        status=$?
+    fi
+    set -e
+    destroyenv
+    return "${status}"
 }
 
 case "${1:-}" in
@@ -393,11 +466,7 @@ case "${1:-}" in
         verify_release_install "https://test.pypi.org/simple/"
         ;;
     pypi_install)
-        buildenv
-        echo "${bold}installing histdatacom from pypi: https://pypi.org/${normal}"
-        python -m pip install histdatacom
-        histdatacom_test
-        destroyenv
+        pypi_install
         ;;
     *)
         echo "Usage: $0 {dev|build|runtime_wheel|pypi|testpypi|testpypi_preflight|testpypi_install|pypi_install}" >&2
