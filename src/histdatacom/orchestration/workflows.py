@@ -96,6 +96,15 @@ workflow = _load_workflow_api()
 _Decorated = TypeVar("_Decorated")
 _Callable = TypeVar("_Callable", bound=Callable[..., Any])
 _WORKFLOW_LOGGER = logging.getLogger(__name__)
+WORKFLOW_PROGRESS_CHILD_LIMIT = 128
+WORKFLOW_PROGRESS_EVENT_LIMIT = 64
+WORKFLOW_PROGRESS_ARTIFACT_LIMIT = 64
+WORKFLOW_SUMMARY_STAGE_RESULT_LIMIT = 64
+WORKFLOW_SUMMARY_ARTIFACT_LIMIT = 64
+WORKFLOW_METRIC_MAPPING_LIMIT = 64
+WORKFLOW_METRIC_SEQUENCE_LIMIT = 16
+WORKFLOW_METRIC_MAX_DEPTH = 5
+_T = TypeVar("_T")
 
 
 def workflow_defn(decorated: _Decorated) -> _Decorated:
@@ -194,6 +203,8 @@ class WorkflowProgress:
     updated_at_utc: str = ""
     rate_per_second: float = 0.0
     last_error: str = ""
+    event_count: int = 0
+    artifact_count: int = 0
     planned_children: tuple[str, ...] = ()
     completed_stages: tuple[str, ...] = ()
     events: tuple[StatusEvent, ...] = ()
@@ -216,6 +227,8 @@ class WorkflowProgress:
         self.updated_at_utc = ""
         self.rate_per_second = 0.0
         self.last_error = ""
+        self.event_count = 0
+        self.artifact_count = 0
         self.planned_children = planned_children
         self.completed_stages = ()
         self.events = ()
@@ -247,7 +260,9 @@ class WorkflowProgress:
             *result.events,
             self._child_progress_event(stage, result),
         )
+        self.event_count += _stage_event_count(result) + 1
         self.artifacts = (*self.artifacts, *result.artifacts)
+        self.artifact_count += _stage_artifact_count(result)
         if result.status == WorkStatus.CANCELLED:
             self.status = WorkStatus.CANCELLED
         elif result.failure is not None:
@@ -276,10 +291,36 @@ class WorkflowProgress:
             "started_at_utc": self.started_at_utc,
             "updated_at_utc": self.updated_at_utc,
             "last_error": self.last_error,
-            "planned_children": list(self.planned_children),
-            "completed_stages": list(self.completed_stages),
-            "events": [event.to_dict() for event in self.events],
-            "artifacts": [artifact.to_dict() for artifact in self.artifacts],
+            "planned_child_count": len(self.planned_children),
+            "completed_stage_count": len(self.completed_stages),
+            "event_count": self.event_count or len(self.events),
+            "artifact_count": self.artifact_count or len(self.artifacts),
+            "planned_children": list(
+                _bounded_head_recent(
+                    self.planned_children,
+                    WORKFLOW_PROGRESS_CHILD_LIMIT,
+                )
+            ),
+            "completed_stages": list(
+                _bounded_head_recent(
+                    self.completed_stages,
+                    WORKFLOW_PROGRESS_CHILD_LIMIT,
+                )
+            ),
+            "events": [
+                event.to_dict()
+                for event in _bounded_recent(
+                    self.events,
+                    WORKFLOW_PROGRESS_EVENT_LIMIT,
+                )
+            ],
+            "artifacts": [
+                artifact.to_dict()
+                for artifact in _bounded_recent(
+                    self.artifacts,
+                    WORKFLOW_PROGRESS_ARTIFACT_LIMIT,
+                )
+            ],
         }
 
     def _child_progress_event(
@@ -308,7 +349,7 @@ class WorkflowProgress:
                 "updated_at_utc": self.updated_at_utc,
                 "last_error": self.last_error,
                 "child_stage": result.stage,
-                "artifact_count": len(result.artifacts),
+                "artifact_count": _stage_artifact_count(result),
             },
         )
 
@@ -1684,7 +1725,7 @@ def _workflow_log_child_result(
         status=result.status.value,
         stage=result.stage,
         work_id=result.work_id,
-        artifact_count=len(result.artifacts),
+        artifact_count=_stage_artifact_count(result),
         failure_code=result.failure.code if result.failure else "",
     )
 
@@ -1747,6 +1788,113 @@ def _stops_symbol_fanout(result: StageResult) -> bool:
     )
 
 
+def _stage_result_summary_payload(
+    result: StageResult,
+) -> dict[str, JSONValue]:
+    metrics = _bounded_metric_mapping(result.metrics)
+    metrics["artifact_count"] = _stage_artifact_count(result)
+    metrics["event_count"] = _stage_event_count(result)
+    return {
+        "work_id": result.work_id,
+        "stage": result.stage,
+        "status": result.status.value,
+        "failure": (
+            result.failure.to_dict() if result.failure is not None else None
+        ),
+        "artifact_count": _stage_artifact_count(result),
+        "event_count": _stage_event_count(result),
+        "metrics": cast(JSONValue, metrics),
+    }
+
+
+def _bounded_metric_mapping(
+    metrics: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    return {
+        str(key): _bounded_metric_value(value, depth=0)
+        for key, value in metrics.items()
+    }
+
+
+def _bounded_metric_value(value: Any, *, depth: int) -> JSONValue:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return cast(JSONValue, value)
+    if depth >= WORKFLOW_METRIC_MAX_DEPTH:
+        return {"truncated": True, "reason": "max_depth"}
+    if isinstance(value, Mapping):
+        items = list(value.items())
+        bounded = {
+            str(key): _bounded_metric_value(item, depth=depth + 1)
+            for key, item in items[:WORKFLOW_METRIC_MAPPING_LIMIT]
+        }
+        if len(items) > WORKFLOW_METRIC_MAPPING_LIMIT:
+            bounded["_truncated_count"] = (
+                len(items) - WORKFLOW_METRIC_MAPPING_LIMIT
+            )
+        return cast(JSONValue, bounded)
+    if isinstance(value, (list, tuple)):
+        values = [
+            _bounded_metric_value(item, depth=depth + 1)
+            for item in value[:WORKFLOW_METRIC_SEQUENCE_LIMIT]
+        ]
+        if len(value) > WORKFLOW_METRIC_SEQUENCE_LIMIT:
+            values.append(
+                {
+                    "truncated": True,
+                    "omitted_count": (
+                        len(value) - WORKFLOW_METRIC_SEQUENCE_LIMIT
+                    ),
+                }
+            )
+        return cast(JSONValue, values)
+    return str(value)
+
+
+def _stage_artifact_count(result: StageResult) -> int:
+    count = _non_negative_metric_int(result.metrics.get("artifact_count"))
+    if count is not None:
+        return count
+    return len(result.artifacts)
+
+
+def _stage_event_count(result: StageResult) -> int:
+    count = _non_negative_metric_int(result.metrics.get("event_count"))
+    if count is not None:
+        return count
+    return len(result.events)
+
+
+def _non_negative_metric_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return max(0, int(value))
+    if isinstance(value, str):
+        try:
+            return max(0, int(value))
+        except ValueError:
+            return None
+    return None
+
+
+def _bounded_recent(values: tuple[_T, ...], limit: int) -> tuple[_T, ...]:
+    if limit <= 0:
+        return ()
+    if len(values) <= limit:
+        return values
+    return values[-limit:]
+
+
+def _bounded_head_recent(values: tuple[_T, ...], limit: int) -> tuple[_T, ...]:
+    if limit <= 0:
+        return ()
+    if len(values) <= limit:
+        return values
+    if limit == 1:
+        return values[:1]
+    return (values[0], *values[-(limit - 1) :])
+
+
 def _summary_payload(
     *,
     request: RunRequest,
@@ -1759,20 +1907,34 @@ def _summary_payload(
     plan_ref: Mapping[str, JSONValue] | None = None,
     plan_batches: tuple[dict[str, str], ...] = (),
 ) -> dict[str, JSONValue]:
-    artifacts = [
-        cast(JSONValue, artifact.to_dict())
-        for result in stage_results
-        for artifact in result.artifacts
+    artifacts = tuple(
+        artifact for result in stage_results for artifact in result.artifacts
+    )
+    stage_result_payloads = [
+        cast(JSONValue, _stage_result_summary_payload(result))
+        for result in _bounded_head_recent(
+            stage_results,
+            WORKFLOW_SUMMARY_STAGE_RESULT_LIMIT,
+        )
     ]
     payload: dict[str, JSONValue] = {
         "request_id": request.request_id,
         "workflow_name": workflow_name,
         "status": progress.status.value,
         "progress": progress.to_dict(),
-        "stage_results": [
-            cast(JSONValue, result.to_dict()) for result in stage_results
+        "stage_result_count": len(stage_results),
+        "work_item_count": len(work_items),
+        "artifact_count": sum(
+            _stage_artifact_count(result) for result in stage_results
+        ),
+        "stage_results": stage_result_payloads,
+        "artifacts": [
+            cast(JSONValue, artifact.to_dict())
+            for artifact in _bounded_recent(
+                artifacts,
+                WORKFLOW_SUMMARY_ARTIFACT_LIMIT,
+            )
         ],
-        "artifacts": artifacts,
     }
     if partition:
         payload["partition"] = cast(JSONValue, dict(partition))
@@ -1912,13 +2074,13 @@ def _stage_result_from_mapping(
     if "result" in data:
         return StageResult.from_dict(_coerce_mapping(data.get("result")))
     if "stage_results" in data:
+        if "workflow_name" in data and "status" in data:
+            return _workflow_summary_stage_result(
+                data,
+                fallback_stage=fallback_stage,
+            )
         stage_results = data.get("stage_results") or []
         if isinstance(stage_results, list) and stage_results:
-            if "workflow_name" in data and "status" in data:
-                return _workflow_summary_stage_result(
-                    data,
-                    fallback_stage=fallback_stage,
-                )
             return StageResult.from_dict(_coerce_mapping(stage_results[-1]))
     if "stage" in data and "status" in data:
         return StageResult.from_dict(data)
@@ -1950,10 +2112,30 @@ def _workflow_summary_stage_result(
         if isinstance(artifact, Mapping)
     )
     metrics = _workflow_summary_metrics(stage_results)
+    progress = _coerce_mapping(data.get("progress"))
     metrics.update(
         {
-            "child_stage_count": len(stage_results),
-            "work_item_count": len(_work_items_from_payload(data)),
+            "child_stage_count": _payload_count(
+                data,
+                "stage_result_count",
+                len(stage_results),
+            ),
+            "sampled_child_stage_count": len(stage_results),
+            "work_item_count": _payload_count(
+                data,
+                "work_item_count",
+                len(_work_items_from_payload(data)),
+            ),
+            "artifact_count": _payload_count(
+                data,
+                "artifact_count",
+                len(artifacts),
+            ),
+            "event_count": _payload_count(
+                progress,
+                "event_count",
+                sum(_stage_event_count(result) for result in stage_results),
+            ),
         }
     )
     return StageResult(
@@ -1984,6 +2166,17 @@ def _workflow_summary_metrics(
         for key in ("available_data", "filter_pairs", "repo_file_exists")
         if key in metrics
     }
+
+
+def _payload_count(
+    data: Mapping[str, Any],
+    key: str,
+    fallback: int,
+) -> int:
+    count = _non_negative_metric_int(data.get(key))
+    if count is None:
+        return fallback
+    return count
 
 
 def _payload_with_work_items(

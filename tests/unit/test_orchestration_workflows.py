@@ -20,6 +20,7 @@ from histdatacom.runtime_contracts import (
     JSONValue,
     RunRequest,
     StageResult,
+    StatusEvent,
     WorkItem,
     WorkStatus,
 )
@@ -1194,6 +1195,97 @@ def test_parent_workflow_preserves_repository_available_data_metrics() -> None:
         "eurusd": {"start": "200005", "end": "202212"}
     }
     assert metrics["child_stage_count"] == 1
+
+
+def test_workflow_summary_payload_bounds_large_result_sets() -> None:
+    """Large workflow outputs should report counts without huge payload lists."""
+    stage_results = tuple(
+        StageResult(
+            work_id=f"work-{stage_index}",
+            stage="build_cache",
+            status=WorkStatus.COMPLETED,
+            artifacts=tuple(
+                ArtifactRef(
+                    kind="cache",
+                    path=(
+                        "/tmp/histdatacom/cache/"
+                        f"eurusd-m1-{stage_index:04d}-{artifact_index:04d}"
+                        ".data"
+                    ),
+                )
+                for artifact_index in range(40)
+            ),
+            events=(
+                StatusEvent(
+                    status=WorkStatus.COMPLETED,
+                    stage="build_cache",
+                    work_id=f"work-{stage_index}",
+                    message="Built cache shard.",
+                ),
+                StatusEvent(
+                    status=WorkStatus.COMPLETED,
+                    stage="build_cache",
+                    work_id=f"work-{stage_index}",
+                    message="Removed source artifacts.",
+                ),
+            ),
+            metrics={
+                "source_artifacts_deleted": [
+                    f"/tmp/histdatacom/source-{stage_index}-{item}.zip"
+                    for item in range(96)
+                ],
+            },
+        )
+        for stage_index in range(150)
+    )
+    progress = workflows.WorkflowProgress("HistDataRunWorkflow")
+    progress.start(
+        request_id="run-oversized",
+        planned_children=tuple(result.work_id for result in stage_results),
+    )
+    for result in stage_results:
+        progress.record_child("SymbolTimeframeWorkflow", result)
+    progress.finish(WorkStatus.COMPLETED)
+
+    summary = workflows._summary_payload(
+        request=_request(request_id="run-oversized"),
+        workflow_name="HistDataRunWorkflow",
+        progress=progress,
+        stage_results=stage_results,
+    )
+    rehydrated = workflows._stage_result_from_mapping(
+        summary,
+        fallback_stage="HistDataRunWorkflow",
+    )
+
+    assert summary["stage_result_count"] == 150
+    assert len(summary["stage_results"]) == (
+        workflows.WORKFLOW_SUMMARY_STAGE_RESULT_LIMIT
+    )
+    assert summary["stage_results"][0]["work_id"] == "work-0"
+    assert summary["stage_results"][-1]["work_id"] == "work-149"
+    assert summary["artifact_count"] == 6000
+    assert len(summary["artifacts"]) == (
+        workflows.WORKFLOW_SUMMARY_ARTIFACT_LIMIT
+    )
+    assert summary["progress"]["artifact_count"] == 6000
+    assert len(summary["progress"]["artifacts"]) == (
+        workflows.WORKFLOW_PROGRESS_ARTIFACT_LIMIT
+    )
+    assert summary["progress"]["event_count"] == 450
+    assert len(summary["progress"]["events"]) == (
+        workflows.WORKFLOW_PROGRESS_EVENT_LIMIT
+    )
+    metrics = summary["stage_results"][0]["metrics"]
+    deleted = metrics["source_artifacts_deleted"]
+    assert len(deleted) == workflows.WORKFLOW_METRIC_SEQUENCE_LIMIT + 1
+    assert deleted[-1]["omitted_count"] == 80
+    assert rehydrated.metrics["child_stage_count"] == 150
+    assert rehydrated.metrics["sampled_child_stage_count"] == (
+        workflows.WORKFLOW_SUMMARY_STAGE_RESULT_LIMIT
+    )
+    assert rehydrated.metrics["artifact_count"] == 6000
+    assert len(json.dumps(summary, sort_keys=True)) < 150000
 
 
 def test_parent_workflow_composes_symbol_timeframe_children() -> None:
