@@ -27,7 +27,7 @@ __all__ = [
 ]
 
 
-__version__ = "1.0.3"
+__version__ = "1.1.0"
 __author__ = "David Midlo"
 
 
