@@ -251,11 +251,15 @@ tick quote datasets, and it does not merge the caches into memory.
 ```sh
 histdatacom cleanup sources --data-directory data
 histdatacom cleanup sources --data-directory data --apply
+histdatacom cleanup status --data-directory data --pair-groups majors -f ascii -t T
 ```
 
 Cleanup mode is a dry run unless `--apply` is present. It removes downloaded
 ZIP, CSV, XLS, and XLSX source artifacts while preserving internal `.data`
-caches.
+caches. Use `cleanup status` to inspect cache counts, pending source cleanup,
+disk pressure, runtime state, and offline workflow snapshots for a symbol or
+instrument group without shelling out to `find`, `df`, `ps`, or raw Temporal
+commands. Add `--json` for the stable scriptable payload.
 
 ---
 
@@ -323,8 +327,10 @@ histdatacom:
     json: true
     limit: 20
   cleanup:
-    command: sources
+    command: status
     data_directory: data/
+    pair_groups:
+      - majors
     json: true
   runtime:
     command: status
@@ -588,7 +594,9 @@ reports.
 For interrupted cache builds or older local source artifacts, use
 `histdatacom cleanup sources` to inspect removable ZIP, CSV, XLS, and XLSX files,
 then repeat with `--apply` when the report is expected. The cleanup command
-preserves internal `.data` cache files.
+preserves internal `.data` cache files. Use `histdatacom cleanup status` first
+when an operator needs the cache count, pending cleanup count, disk pressure,
+runtime state, and durable workflow status in one report.
 
 ```sh
 histdatacom -D -X -p eurusd -f ascii -t M1 --data-directory /Volumes/histdata/data

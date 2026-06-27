@@ -132,22 +132,36 @@ _ANALYTICS_ALLOWED_KEYS = (
     | set(_ANALYTICS_SCALAR_ARGS)
     | set(_ANALYTICS_LIST_ARGS)
 )
-_CLEANUP_COMMANDS = {"sources", "transient-sources"}
+_CLEANUP_COMMANDS = {"sources", "status", "transient-sources"}
 _CLEANUP_ALIASES = {
     **_COMMAND_KEY_ALIASES,
     "cleanup_command": "command",
+    "instrument_group": "pair_groups",
+    "instrument_groups": "pair_groups",
+    "pair_group": "pair_groups",
+    "symbol_group": "pair_groups",
+    "symbol_groups": "pair_groups",
 }
 _CLEANUP_TRUE_FLAG_ARGS = {
     "apply": "--apply",
 }
 _CLEANUP_SCALAR_ARGS = {
+    **_COMMON_SCALAR_ARGS,
     "data_directory": "--data-directory",
+    "max_jobs": "--max-jobs",
+}
+_CLEANUP_LIST_ARGS = {
+    "formats": "--formats",
+    "pair_groups": "--pair-groups",
+    "pairs": "--pairs",
+    "timeframes": "--timeframes",
 }
 _CLEANUP_ALLOWED_KEYS = (
     {"command"}
     | set(_COMMON_TRUE_FLAG_ARGS)
     | set(_CLEANUP_TRUE_FLAG_ARGS)
     | set(_CLEANUP_SCALAR_ARGS)
+    | set(_CLEANUP_LIST_ARGS)
 )
 _RUNTIME_COMMANDS = {
     "cleanup",
@@ -408,7 +422,7 @@ def configured_cleanup_argv(args: Sequence[str]) -> list[str]:
         global_list_args={},
         command_true_flags=_CLEANUP_TRUE_FLAG_ARGS,
         command_scalar_args=_CLEANUP_SCALAR_ARGS,
-        command_list_args={},
+        command_list_args=_CLEANUP_LIST_ARGS,
     )
 
 
