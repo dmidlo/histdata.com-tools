@@ -614,6 +614,11 @@ cache merge, and Influx import. Payloads stay bounded to request metadata,
 partition IDs, status events, and artifact references. Rows, dataframes, ZIP
 bytes, and CSV contents stay on disk.
 
+Public cache-only requests (`--build-cache` / `Options.build_cache`) run
+validation, archive download, and `BuildCacheWorkflow` for supported ASCII `M1`
+or tick quote datasets. They deliberately skip `MergeCacheWorkflow` and remove
+ZIP/CSV source artifacts after each `.data` cache is ready.
+
 See `docs/temporal-workflow-topology.md` for the contributor-facing topology
 contract and `docs/temporal-orchestration-performance.md` for lane sizing and
 benchmark policy.
@@ -738,12 +743,11 @@ Data-quality checks:
 - Full-dataset campaign batches should run as bounded symbol/format/timeframe
   slices. For each slice, run download/extract, then `--repo-quality`; normal
   execution keeps cache artifacts. The `.repo` file and detailed quality reports
-  are the durable audit artifacts. When disk pressure requires cleanup, run it
-  only after `--repo-quality` succeeds and never remove `.repo` or reports. The
-  issue-240 cache cleanup removes canonical `.data` cache files with
-  `find <slice-target> -name .data -type f -delete`; more aggressive low-disk
-  runs may remove the entire slice working directory after `.repo` and reports
-  have been written. Source checkouts whose doctor output reports
+  are the durable audit artifacts. When disk pressure requires source cleanup,
+  use `--build-cache` for supported ASCII `M1` or tick quote datasets so the run
+  leaves only canonical `.data` caches. Perform any broader cleanup only after
+  `--repo-quality` succeeds and never remove `.repo` or reports. Source
+  checkouts whose doctor output reports
   `platform.executable_bundled=false` need an explicit Temporal executable, a
   verified cache entry, or network access for first-run provisioning.
 - Use `--quality-report PATH` to write the full JSON report. The report schema

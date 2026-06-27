@@ -12,6 +12,7 @@ class Options:
         "api_return_type",
         "available_remote_data",
         "batch_size",
+        "build_cache",
         "by",
         "config_path",
         "cpu_utilization",
@@ -27,6 +28,7 @@ class Options:
         "metadata",
         "orchestration_start",
         "orchestration_wait_result",
+        "pair_groups",
         "pairs",
         "quality_check_groups",
         "quality_fail_on",
@@ -62,7 +64,9 @@ class Options:
         self.validate_urls: bool = False
         self.download_data_archives: bool = False
         self.extract_csvs: bool = False
+        self.build_cache: bool = False
         self.import_to_influxdb: bool = False
+        self.pair_groups: set = set()
         self.pairs: set = Pairs.list_keys()
         self.formats: set = Format.list_values()
         self.timeframes: set = Timeframe.list_keys()

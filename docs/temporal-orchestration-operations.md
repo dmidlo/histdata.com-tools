@@ -103,7 +103,13 @@ submitted:
 - `-V` / `--validate_urls`
 - `-D` / `--download_data_archives`
 - `-X` / `--extract_csvs`
+- `-C` / `--build-cache`
 - `-I` / `--import_to_influxdb`
+
+Use `--build-cache` for low-disk cache-building runs. It validates and
+downloads supported ASCII `M1` or tick quote datasets, builds canonical Polars
+`.data` caches, removes transient ZIP/CSV sources after each cache is ready,
+and does not merge the caches into a dataframe result.
 
 Waited repository requests keep the documented output contract: CLI calls render
 the repository table, API calls return the available-data dictionary, and
@@ -127,6 +133,9 @@ options.start_yearmonth = "now"
 
 data = histdatacom(options)
 ```
+
+Set `options.build_cache = True` when automation should build reusable `.data`
+caches and remove source ZIP/CSV files without returning a dataframe.
 
 When `orchestration_wait_result` is `True`, API calls with `api_return_type`
 return the requested `polars`, `pandas`, or `arrow` object by materializing

@@ -879,6 +879,8 @@ async def execute_activity_workflow(
         work_items=output_work_items,
         include_work_items=_has_work_item_payload(activity_payload)
         or bool(activity_work_items),
+        plan_ref=_plan_ref_from_payload(activity_payload),
+        plan_batches=_plan_batches_from_payload(activity_payload),
     )
 
 
@@ -1164,7 +1166,10 @@ DEFAULT_WORKFLOWS = (
 def _execute_status(results: tuple[StageResult, ...]) -> WorkStatus:
     if any(result.status == WorkStatus.CANCELLED for result in results):
         return WorkStatus.CANCELLED
-    if any(result.failure is not None for result in results):
+    if any(
+        result.failure is not None or result.status == WorkStatus.FAILED
+        for result in results
+    ):
         return WorkStatus.FAILED
     if results and all(
         result.status == WorkStatus.COMPLETED for result in results
@@ -1319,6 +1324,7 @@ async def _execute_child_plan(
         elif _requires_work_items(invocation.workflow_name):
             if forwarded_work_items or _has_work_item_payload(result_payload):
                 current_work_items = forwarded_work_items
+                current_plan_ref = {}
         results.append(result)
         progress.record_child(invocation.workflow_name, result)
         _workflow_log_child_result(
@@ -1577,7 +1583,9 @@ def _prepare_child_invocation(
     work_items = _partition_work_items(current_work_items, partition)
     if _requires_work_items(invocation.workflow_name):
         if not work_items:
-            invocation_plan_ref = _plan_ref_from_payload(invocation.payload)
+            invocation_plan_ref = (
+                _plan_ref_from_payload(invocation.payload) if plan_ref else {}
+            )
             if invocation_plan_ref or plan_ref:
                 payload = dict(invocation.payload)
                 if DATASET_PLAN_REF_KEY not in payload:
@@ -1731,7 +1739,7 @@ def _result_log_level(result: StageResult) -> int:
 
 
 def _stops_symbol_fanout(result: StageResult) -> bool:
-    if result.status == WorkStatus.CANCELLED:
+    if result.status in {WorkStatus.CANCELLED, WorkStatus.FAILED}:
         return True
     return (
         result.failure is not None
@@ -1748,6 +1756,8 @@ def _summary_payload(
     partition: Mapping[str, str] | None = None,
     work_items: tuple[WorkItem, ...] = (),
     include_work_items: bool = False,
+    plan_ref: Mapping[str, JSONValue] | None = None,
+    plan_batches: tuple[dict[str, str], ...] = (),
 ) -> dict[str, JSONValue]:
     artifacts = [
         cast(JSONValue, artifact.to_dict())
@@ -1770,6 +1780,13 @@ def _summary_payload(
         payload["work_items"] = cast(
             JSONValue,
             [item.to_dict() for item in work_items],
+        )
+    if plan_ref:
+        payload[DATASET_PLAN_REF_KEY] = cast(JSONValue, dict(plan_ref))
+    if plan_batches:
+        payload[DATASET_PLAN_BATCHES_KEY] = cast(
+            JSONValue,
+            [dict(batch) for batch in plan_batches],
         )
     return payload
 
@@ -1821,6 +1838,7 @@ def _has_data_operations(request: RunRequest) -> bool:
             request.validate_urls,
             request.download_data_archives,
             request.extract_csvs,
+            request.build_cache,
             bool(request.api_return_type),
             request.import_to_influxdb,
         )
@@ -1829,14 +1847,15 @@ def _has_data_operations(request: RunRequest) -> bool:
 
 def _operation_workflow_names(request: RunRequest) -> tuple[str, ...]:
     workflows: list[str] = []
-    if request.validate_urls:
+    if request.validate_urls or request.build_cache:
         workflows.append("ValidateUrlsWorkflow")
-    if request.download_data_archives:
+    if request.download_data_archives or request.build_cache:
         workflows.append("DownloadArchivesWorkflow")
     if request.extract_csvs:
         workflows.append("ExtractCsvWorkflow")
-    if request.api_return_type:
+    if request.build_cache or request.api_return_type:
         workflows.append("BuildCacheWorkflow")
+    if request.api_return_type:
         workflows.append("MergeCacheWorkflow")
     if request.import_to_influxdb:
         workflows.append("ImportWorkflow")

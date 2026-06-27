@@ -36,7 +36,7 @@ from histdatacom.data_quality import (
     QualityRuleResult,
     QualitySeverity,
 )
-from histdatacom.runtime_contracts import RunRequest, WorkStatus
+from histdatacom.runtime_contracts import RunRequest, WorkItem, WorkStatus
 from histdatacom.orchestration.control import OrchestrationJobSnapshot
 from histdatacom.orchestration.activities import (
     build_cache_activity,
@@ -807,6 +807,90 @@ def test_build_cache_activity_builds_polars_cache(tmp_path) -> None:
     assert result["work_item"]["cache_filename"] == CACHE_FILENAME
     assert result["work_item"]["cache_line_count"] == "3"
     assert (tmp_path / CACHE_FILENAME).exists()
+
+
+def test_build_cache_activity_deletes_sources_for_cache_only_mode(
+    tmp_path,
+) -> None:
+    """Cache-only mode should leave the canonical .data artifact only."""
+    payload = _cache_payload(tmp_path)
+    payload["request"] = RunRequest(
+        request_id="run-cache-only",
+        data_directory=str(tmp_path),
+        build_cache=True,
+    ).to_dict()
+    csv_path = tmp_path / payload["work_item"]["csv_filename"]
+
+    result = build_cache_activity(payload)
+
+    assert result["result"]["status"] == WorkStatus.CACHE_READY.value
+    assert result["result"]["metrics"]["delete_after_cache"] is True
+    assert result["result"]["metrics"]["source_artifacts_deleted"] == [
+        csv_path.name
+    ]
+    assert (tmp_path / CACHE_FILENAME).exists()
+    assert not csv_path.exists()
+    assert result["work_item"]["cache_filename"] == CACHE_FILENAME
+    assert result["work_item"]["csv_filename"] == ""
+    assert result["work_item"]["zip_filename"] == ""
+
+
+def test_build_cache_activity_loads_cache_only_batch_from_plan_ref(
+    tmp_path: Path,
+) -> None:
+    """Cache-only builds should hydrate only the referenced plan batch."""
+    request = RunRequest(
+        request_id="run-plan-build-cache",
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("M1",),
+        start_yearmonth="201201",
+        end_yearmonth="201302",
+        data_directory=str(tmp_path),
+        build_cache=True,
+        metadata={
+            "temporal_plan_spill": {"inline_work_item_limit": 1},
+            "temporal_batching": {"max_work_items_per_batch": 1},
+        },
+    )
+    plan_payload = dataset_plan_activity({"request": request.to_dict()})
+    partition = plan_payload[DATASET_PLAN_BATCHES_KEY][0]
+    store = ManifestStatusStore(str(tmp_path))
+    planned_item = store.get_dataset_plan_work_items(
+        str(plan_payload[DATASET_PLAN_REF_KEY]["plan_id"]),
+        work_ids=(str(partition["work_ids"]),),
+    )[0]
+    csv_filename = "DAT_ASCII_EURUSD_M1_201202.csv"
+    data_dir = Path(planned_item.data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(FIXTURES / csv_filename, data_dir / csv_filename)
+    stored_item = WorkItem.from_dict(
+        {
+            **planned_item.to_dict(),
+            "status": WorkStatus.CSV_FILE.value,
+            "csv_filename": csv_filename,
+            "zip_filename": "DAT_ASCII_EURUSD_M1_2012.zip",
+        }
+    )
+    store.write_work_item(stored_item, source="test_downloaded_source")
+
+    result = build_cache_activity(
+        {
+            "request": request.to_dict(),
+            "partition": partition,
+            DATASET_PLAN_REF_KEY: plan_payload[DATASET_PLAN_REF_KEY],
+            "workflow_id": "build-cache-from-plan-ref",
+        }
+    )
+
+    assert result["work_item"]["work_id"] == planned_item.work_id
+    assert result["work_item"]["status"] == WorkStatus.CACHE_READY.value
+    assert result["work_item"]["cache_filename"] == CACHE_FILENAME
+    assert result["work_item"]["csv_filename"] == ""
+    assert result["work_item"]["zip_filename"] == ""
+    assert (data_dir / CACHE_FILENAME).exists()
+    assert not (data_dir / csv_filename).exists()
+    assert result["result"]["metrics"]["delete_after_cache"] is True
 
 
 def test_merge_cache_activity_returns_bounded_merge_metadata(tmp_path) -> None:

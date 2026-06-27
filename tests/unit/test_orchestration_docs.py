@@ -70,3 +70,14 @@ def test_readme_links_user_and_maintainer_orchestration_docs() -> None:
     assert "docs/temporal-orchestration-runtime-runbook.md" in readme
     assert "for submit, observe, cancel, retry, resume" in readme
     assert "for maintainer lifecycle commands" in readme
+
+
+def test_cache_only_mode_is_documented() -> None:
+    """Public docs should advertise source-cleaning cache builds."""
+    readme = _read_doc("README.md")
+    guide = _read_doc("docs/temporal-orchestration-operations.md")
+    runbook = _read_doc("docs/temporal-orchestration-runtime-runbook.md")
+
+    for document in (readme, guide, runbook):
+        assert "--build-cache" in document
+        assert ".data" in document

@@ -91,6 +91,9 @@ from histdatacom.fx_enums import (
     Format,
     Pairs,
     Timeframe,
+    expand_pair_selection,
+    normalize_pair_group,
+    pair_group_names,
     get_valid_format_timeframes,
 )
 from histdatacom.verbosity import normalize_verbosity
@@ -136,9 +139,11 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             epilog=(
                 "Commands:\n"
                 "  analytics   Run offline data analytics operations\n"
+                "  cleanup     Remove transient source artifacts\n"
                 "  jobs        Inspect and control orchestrated work\n"
                 "  runtime     Inspect and manage the orchestration runtime\n\n"
                 "Run `histdatacom analytics --help` for analytics commands.\n"
+                "Run `histdatacom cleanup --help` for cleanup commands.\n"
                 "Run `histdatacom jobs --help` for job telemetry commands."
             ),
         )
@@ -178,9 +183,25 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             self.arg_namespace.validate_urls = False
             self.arg_namespace.download_data_archives = False
             self.arg_namespace.extract_csvs = False
+            self.arg_namespace.build_cache = False
             self.arg_namespace.import_to_influxdb = False
             self.arg_namespace.formats = {"ascii"}
             self.arg_namespace.timeframes = {"T"}
+
+    def _expand_pair_groups(self) -> None:
+        """Expand named instrument groups into normal pair selections."""
+        pair_groups: set[str] = set(
+            getattr(self.arg_namespace, "pair_groups", ()) or ()
+        )
+        if not pair_groups:
+            return
+        try:
+            self.arg_namespace.pairs = set(
+                expand_pair_selection(self.arg_namespace.pairs, pair_groups)
+            )
+        except ValueError as exc:
+            print(str(exc))  # noqa:T201
+            raise SystemExit(1) from exc
 
     def _check_quality_mode(self) -> None:
         """Validate offline data quality mode inputs."""
@@ -250,6 +271,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 self.arg_namespace.download_data_archives
             ),
             "-X/--extract_csvs": self.arg_namespace.extract_csvs,
+            "-C/--build-cache": self.arg_namespace.build_cache,
             "-I/--import_to_influxdb": self.arg_namespace.import_to_influxdb,
         }
         conflicts = [flag for flag, enabled in legacy_flags.items() if enabled]
@@ -347,14 +369,24 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             self.arg_namespace.timeframes
         )
 
+        pair_groups = tuple(
+            getattr(self.arg_namespace, "pair_groups", ()) or ()
+        )
+        pairs = tuple(self.arg_namespace.pairs or ())
+        explicit_pairs = set(pairs) != Pairs.list_keys()
         args = [
             *["--data-directory", self.arg_namespace.data_directory],
-            *["-p", *self.arg_namespace.pairs],
             *["-f", *self.arg_namespace.formats],
             *["-t", *self.arg_namespace.timeframes],
             *["-c", self.arg_namespace.cpu_utilization],
             *["-b", self.arg_namespace.batch_size],
         ]
+        if pair_groups:
+            args.extend(["--pair-groups", *pair_groups])
+            if explicit_pairs:
+                args.extend(["-p", *pairs])
+        else:
+            args.extend(["-p", *pairs])
         if self.arg_namespace.verbosity:
             args.append("-" + "v" * self.arg_namespace.verbosity)
 
@@ -374,6 +406,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args.append("-D")
         if self.arg_namespace.extract_csvs:
             args.append("-X")
+        if self.arg_namespace.build_cache:
+            args.append("--build-cache")
         if self.arg_namespace.import_to_influxdb:
             args.append("-I")
         if self.arg_namespace.delete_after_influx:
@@ -390,7 +424,10 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         """Return config-file arguments to prepend to explicit CLI args."""
         try:
             config_path = config_path_from_cli_args(cli_args)
-            return load_cli_config_args(config_path, cli_args=cli_args)
+            return [
+                str(arg)
+                for arg in load_cli_config_args(config_path, cli_args=cli_args)
+            ]
         except CliConfigError as exc:
             print(f"config error: {exc}")  # noqa:T201
             raise SystemExit(1) from exc
@@ -434,6 +471,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 or self.arg_namespace.validate_urls
                 or self.arg_namespace.download_data_archives
                 or self.arg_namespace.extract_csvs
+                or self.arg_namespace.build_cache
                 or self.arg_namespace.import_to_influxdb
             ):
                 err_text_api_must_be_ascii = f"""
@@ -486,6 +524,32 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             "ERROR: no supported format/timeframe combinations requested.\n"
             f"Requested: {requested}\n"
             f"Supported: {supported}"
+        )
+        raise SystemExit(1)
+
+    def _check_for_supported_cache_dimensions(self) -> None:
+        """Constrain cache-only mode to dimensions that can produce .data."""
+        if not self.arg_namespace.build_cache:
+            return
+
+        formats = {str(item).lower() for item in self.arg_namespace.formats}
+        timeframes = {str(item) for item in self.arg_namespace.timeframes}
+        cache_timeframes = {"M1", "T"}
+        selected_cache_timeframes = timeframes & cache_timeframes
+        if "ascii" in formats and selected_cache_timeframes:
+            self.arg_namespace.formats = {"ascii"}
+            self.arg_namespace.timeframes = selected_cache_timeframes
+            return
+
+        requested = ", ".join(
+            f"{csv_format}/{timeframe}"
+            for csv_format in sorted(formats)
+            for timeframe in sorted(timeframes)
+        )
+        print(  # noqa:T201
+            "ERROR: --build-cache can only build canonical Polars caches "
+            "for ascii/M1 or ascii/T datasets.\n"
+            f"Requested: {requested}"
         )
         raise SystemExit(1)
 
@@ -548,6 +612,10 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             self.arg_namespace.validate_urls = True
             self.arg_namespace.download_data_archives = True
 
+        if self.arg_namespace.build_cache:
+            self.arg_namespace.validate_urls = True
+            self.arg_namespace.download_data_archives = True
+
         if self.arg_namespace.import_to_influxdb:
             self.arg_namespace.validate_urls = True
             self.arg_namespace.download_data_archives = True
@@ -556,6 +624,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         if (
             not self.arg_namespace.download_data_archives
             and not self.arg_namespace.extract_csvs
+            and not self.arg_namespace.build_cache
             and not self.arg_namespace.import_to_influxdb
         ):
             self.arg_namespace.validate_urls = True
@@ -970,6 +1039,18 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 " Use the -X flag to extract them."
             ),
         )
+        mode_args.add_argument(
+            "-C",
+            "--build-cache",
+            "--cache-only",
+            "--build_cache",
+            dest="build_cache",
+            action="store_true",
+            help=(
+                "build canonical Polars .data caches and remove transient "
+                "ZIP/CSV sources after each cache is ready"
+            ),
+        )
         config_args.add_argument(
             "--config",
             dest="config_path",
@@ -988,6 +1069,21 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             choices=Pairs.list_keys(),
             help="space separated currency pairs. e.g. -p eurusd usdjpy ...",
             metavar="PAIR",
+        )
+        config_args.add_argument(
+            "--pair-groups",
+            "--instrument-groups",
+            "--symbol-groups",
+            dest="pair_groups",
+            nargs="+",
+            type=normalize_pair_group,
+            choices=pair_group_names(),
+            help=(
+                "named instrument groups to union with --pairs. "
+                "Common groups: majors, minors, crosses, exotics, "
+                "metals, commodities, indices"
+            ),
+            metavar="GROUP",
         )
         config_args.add_argument(
             "-f",
@@ -1228,12 +1324,14 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 namespace=self.arg_namespace,
             )
 
+        self._expand_pair_groups()
         self._adjust_for_repo_data_request()
         self._check_quality_mode()
         self._check_datetime_input()
         self._check_for_ascii_if_influx()
         self._check_for_ascii_if_api()
         self._check_for_supported_format_timeframe_combination()
+        self._check_for_supported_cache_dimensions()
         self.arg_namespace.verbosity = normalize_verbosity(
             self.arg_namespace.verbosity
         )

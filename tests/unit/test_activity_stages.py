@@ -1163,6 +1163,29 @@ def test_dataset_plan_stage_is_deterministic_for_sets_and_generators() -> None:
     ]
 
 
+def test_dataset_plan_stage_cache_only_keeps_ascii_cache_dimensions() -> None:
+    """Cache-only planning should exclude non-cacheable formats upfront."""
+    output = dataset_plan_stage(
+        start_yearmonth="202201",
+        end_yearmonth="202201",
+        formats={"ascii", "metatrader"},
+        pairs={"eurusd"},
+        timeframes={"M1", "T"},
+        current_yearmonth="202606",
+        cache_only=True,
+    )
+
+    assert {
+        (item.data_format, item.data_timeframe) for item in output.work_items
+    } == {
+        ("ASCII", "M1"),
+        ("ASCII", "T"),
+    }
+    assert output.result.metrics["formats"] == ["ascii"]
+    assert output.result.metrics["timeframes"] == ["M1", "T"]
+    assert output.result.metrics["cache_only"] is True
+
+
 def test_repository_refresh_stage_writes_artifact_and_available_data(
     tmp_path: Path,
 ) -> None:

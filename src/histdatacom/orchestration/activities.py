@@ -195,6 +195,7 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
         timeframes=request.timeframes,
         default_download_dir=data_root,
         zip_persist=request.zip_persist,
+        cache_only=request.build_cache,
     )
     plan_id = derive_work_id(
         request.request_id,
@@ -212,6 +213,7 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
             "formats": list(request.formats),
             "pairs": list(request.pairs),
             "timeframes": list(request.timeframes),
+            "build_cache": request.build_cache,
         },
     )
     plan_batches = _dataset_plan_batches(request, output.work_items)
@@ -574,6 +576,7 @@ def build_cache_activity(
 
     args = {
         "default_download_dir": set_working_data_dir(request.data_directory),
+        "delete_after_cache": request.build_cache,
     }
     outputs = _cancellable_outputs(
         "build_cache",
@@ -778,11 +781,11 @@ def _portable_repo_artifact_path(value: str, *, repo_path: Path) -> str:
     if not value:
         return ""
     if not path.is_absolute():
-        return publish_safe_path(value)
+        return str(publish_safe_path(value))
     try:
         return path.resolve().relative_to(repo_path.parent.resolve()).as_posix()
     except ValueError:
-        return publish_safe_path(value)
+        return str(publish_safe_path(value))
 
 
 def _quality_expected_dimensions(

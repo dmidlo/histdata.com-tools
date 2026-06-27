@@ -342,6 +342,50 @@ def test_api_options_can_submit_orchestration_job_and_return_result(
     }
 
 
+def test_api_build_cache_submits_cache_only_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Options.build_cache should submit a cache-only orchestration request."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> JobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _job_result()
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    options = Options()
+    options.build_cache = True
+    options.pairs = {"eurusd"}
+    options.formats = {"ascii"}
+    options.timeframes = {"tick-data-quotes"}
+    options.start_yearmonth = "2022-12"
+    options.data_directory = str(tmp_path)
+
+    result = histdata_com.main(options)
+
+    request = captured["request"]
+    assert result["status"] == "completed"
+    assert request.build_cache
+    assert request.validate_urls
+    assert request.download_data_archives
+    assert not request.extract_csvs
+    assert request.api_return_type == ""
+    assert request.formats == ("ascii",)
+    assert request.timeframes == ("T",)
+    assert captured["kwargs"] == {
+        "start_if_needed": True,
+        "wait_for_result": True,
+    }
+
+
 @pytest.mark.parametrize(
     ("target_kind", "expected_count"),
     (
@@ -789,6 +833,44 @@ def test_api_default_runtime_uses_orchestration(
         "start_if_needed": True,
         "wait_for_result": True,
     }
+
+
+def test_api_pair_groups_submit_expanded_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API callers should be able to submit named instrument groups."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> JobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _job_result()
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    options = Options()
+    options.pair_groups = {"majors"}
+    options.formats = {"ascii"}
+    options.timeframes = {"M1"}
+    options.start_yearmonth = "2022-12"
+
+    result = histdata_com.main(options)
+
+    assert result["status"] == "completed"
+    assert captured["request"].pairs == (
+        "audusd",
+        "eurusd",
+        "gbpusd",
+        "nzdusd",
+        "usdcad",
+        "usdchf",
+        "usdjpy",
+    )
 
 
 def test_cli_default_runtime_uses_orchestration(

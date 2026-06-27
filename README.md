@@ -95,8 +95,8 @@ histdatacom -h
 ```
 
 ```txt
-usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [--config PATH] [-p PAIR [PAIR ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION] [-v]
-                   [--data-directory DATA_DIRECTORY] [--orchestration-start] [--no-orchestration-start] [--submit-only] [--quality] [--repo-quality] [--repo-quality-columns] [--quality-target PATH [PATH ...]] [--quality-checks GROUP [GROUP ...]]
+usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C] [--config PATH] [-p PAIR [PAIR ...]] [--pair-groups GROUP [GROUP ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION]
+                   [--data-directory DATA_DIRECTORY] [-v] [--orchestration-start] [--no-orchestration-start] [--submit-only] [--quality] [--repo-quality] [--repo-quality-columns] [--quality-target PATH [PATH ...]] [--quality-checks GROUP [GROUP ...]]
                    [--quality-report PATH] [--quality-profile PATH] [--quality-fail-on SEVERITY] [--quality-max-errors COUNT] [--quality-max-warnings COUNT]
 
 options:
@@ -110,6 +110,9 @@ Mode:
                         data files
   -X, --extract_csvs    histdata.com delivers zip files. Use the -X flag to
                         extract them.
+  -C, --build-cache, --cache-only, --build_cache
+                        build canonical Polars .data caches and remove
+                        transient ZIP/CSV sources after each cache is ready
 
 Config:
   --config PATH         read recurrent-run defaults from a YAML file; explicit
@@ -117,6 +120,10 @@ Config:
   -p, --pairs PAIR [PAIR ...]
                         space separated currency pairs. e.g. -p eurusd usdjpy
                         ...
+  --pair-groups, --instrument-groups, --symbol-groups GROUP [GROUP ...]
+                        named instrument groups to union with --pairs.
+                        Common groups: majors, minors, crosses, exotics,
+                        metals, commodities, indices
   -f, --formats FORMAT [FORMAT ...]
                         space separated formats. -f metatrader ascii
                         ninjatrader metastock
@@ -203,10 +210,12 @@ Info:
 
 Commands:
   analytics   Run offline data analytics operations
+  cleanup     Remove transient source artifacts
   jobs        Inspect and control orchestrated work
   runtime     Inspect and manage the orchestration runtime
 
 Run `histdatacom analytics --help` for analytics commands.
+Run `histdatacom cleanup --help` for cleanup commands.
 Run `histdatacom jobs --help` for job telemetry commands.
 ```
 
@@ -226,6 +235,28 @@ histdatacom -p eurusd -f metatrader -s now
 histdatacom -D -p usdcad -f metastock -s now
 ```
 
+#### include the `-C` flag to build internal Polars caches and discard ZIP/CSV sources
+
+```sh
+histdatacom -C -p eurusd -f ascii -t tick-data-quotes -s 2024-01 -e 2024-03
+```
+
+Cache-only mode validates and downloads the selected HistData archives, builds
+canonical `.data` cache files, and removes transient ZIP/CSV sources after each
+cache is ready. It is intentionally limited to cache-capable ASCII `M1` and
+tick quote datasets, and it does not merge the caches into memory.
+
+#### clean up transient source artifacts without removing internal caches
+
+```sh
+histdatacom cleanup sources --data-directory data
+histdatacom cleanup sources --data-directory data --apply
+```
+
+Cleanup mode is a dry run unless `--apply` is present. It removes downloaded
+ZIP, CSV, XLS, and XLSX source artifacts while preserving internal `.data`
+caches.
+
 ---
 
 ### Configuration Files
@@ -242,6 +273,8 @@ histdatacom:
   pairs:
     - eurusd
     - gbpusd
+  # Or use named groups instead of listing every symbol:
+  # instrument_groups: [majors, metals]
   formats:
     - ascii
   timeframes:
@@ -289,6 +322,10 @@ histdatacom:
     offline: true
     json: true
     limit: 20
+  cleanup:
+    command: sources
+    data_directory: data/
+    json: true
   runtime:
     command: status
     json: true
@@ -298,12 +335,18 @@ Run scoped commands with the same flag:
 
 ```sh
 histdatacom --config recurrent.yaml analytics
+histdatacom cleanup --config recurrent.yaml
 histdatacom jobs --config recurrent.yaml
 histdatacom runtime --config recurrent.yaml
 ```
 
 Pair-list presets and shared instrument lists are tracked separately from this
 full command snapshot surface.
+
+For recurrent low-disk cache-building jobs, set `build_cache: true` instead of
+`download_data_archives` / `extract_csvs`. The option accepts the same dataset
+selectors as the CLI and leaves only the internal `.data` cache artifacts for
+supported ASCII `M1` and tick quote datasets.
 
 ---
 
@@ -360,6 +403,12 @@ date ranges are for year and month and can be specified in the following ways:
 
 ```txt
 histdatacom -p udxusd -f ascii -t tick-data-quotes -s 2011
+```
+
+Use named instrument groups for common baskets:
+
+```txt
+histdatacom --pair-groups majors exotics -f ascii -t tick-data-quotes -s 2022
 ```
 
 ##### to fetch a single month's data, include a month, but do not use the `-e, --end_yearmonth` flag
@@ -530,11 +579,16 @@ not run the full repository surface as one accumulating local scrape.
 
 For each slice, run download/extract first, then run `--repo-quality` so `.repo`
 keeps bounded findings and the detailed JSON report path. Normal campaign
-execution keeps the generated cache artifacts. For low-disk campaign runs, only
-clean after the repo-quality command succeeds; the issue-240 batch cleanup mode
-removes canonical `.data` cache files, and a more aggressive low-disk mode may
-remove the slice working directory after `.repo` and the quality report have
-been written.
+execution keeps the generated cache artifacts. For low-disk cache-building
+campaigns, use `--build-cache`; it builds canonical `.data` files and removes
+the transient ZIP/CSV sources as each cache completes. Run cleanup only after
+`--repo-quality` succeeds, and never remove `.repo` or published quality
+reports.
+
+For interrupted cache builds or older local source artifacts, use
+`histdatacom cleanup sources` to inspect removable ZIP, CSV, XLS, and XLSX files,
+then repeat with `--apply` when the report is expected. The cleanup command
+preserves internal `.data` cache files.
 
 ```sh
 histdatacom -D -X -p eurusd -f ascii -t M1 --data-directory /Volumes/histdata/data
@@ -542,7 +596,7 @@ histdatacom --repo-quality \
   --quality-target /Volumes/histdata/data/ASCII/M1/eurusd \
   --quality-report /Volumes/histdata/reports/eurusd-ascii-m1-quality.json \
   --data-directory /Volumes/histdata/data
-find /Volumes/histdata/data/ASCII/M1/eurusd -name .data -type f -delete
+histdatacom --build-cache -p eurusd -f ascii -t M1 --data-directory /Volumes/histdata/data
 ```
 
 #### Quality Targets and Check Groups
@@ -1015,13 +1069,14 @@ Omit `--json` on `jobs progress` for the Rich terminal progress view; add
 `--watch` to live-refresh it until the job reaches a terminal state.
 
 - `histdatacom --version` stays local and does not require orchestration.
-- `-A`, `-U`, `-V`, `-D`, `-X`, and `-I` keep their existing option semantics before an orchestration request is submitted.
+- `-A`, `-U`, `-V`, `-D`, `-X`, `-C`, and `-I` keep their existing option semantics before an orchestration request is submitted.
 - `--foreground` has been removed and is rejected by the CLI.
 - `--orchestration-start` starts the server and worker lane fleet only when no healthy runtime is running.
 - `--no-orchestration-start` requires an already-running healthy runtime and fails
   clearly instead of starting one.
 - `--submit-only` submits a job and returns job metadata instead of waiting for cache artifacts or workflow results.
 - Waited orchestration `-A` / `-U` repository requests keep the output contract: API calls return the available-data dictionary, and CLI calls render the repository table.
+- `--build-cache` / `options.build_cache` builds canonical `.data` cache files for cache-capable ASCII datasets, removes transient ZIP/CSV sources after each cache is ready, and does not merge caches into memory.
 - API calls with `options.api_return_type` return the requested `polars`, `pandas`, or `arrow` object after a completed orchestration job by materializing cache artifacts on disk.
 - If orchestration is unavailable, CLI calls exit nonzero with a clear error and API calls raise `OrchestrationUnavailableError`.
 - `-v` emits high-level orchestration lifecycle logs; `-vv` adds worker,
@@ -1108,7 +1163,8 @@ options = Options()
 
 To submit the same ETL work a user would normally request from the CLI, set one
 of the boolean behavior flags: `options.validate_urls`,
-`options.download_data_archives`, `options.extract_csvs`, or
+`options.download_data_archives`, `options.extract_csvs`,
+`options.build_cache`, or
 `options.import_to_influxdb`.
 
 - Each behavior flag implies the use of the preceding flags.
@@ -1123,6 +1179,7 @@ of the boolean behavior flags: `options.validate_urls`,
 # options.validate_urls = True
 # options.download_data_archives = True  # implies validate
 options.extract_csvs = True  # implies validate and download
+# options.build_cache = True  # implies validate/download; leaves only .data caches
 # options.import_to_influxdb = True  # implies validate, download, and extract
 options.formats = {"ascii"}
 options.timeframes = {"tick-data-quotes"}
@@ -1198,6 +1255,7 @@ options.api_return_type = "polars"  # "polars", "pandas", or "arrow"
 options.formats = {"ascii"}  # Must be {"ascii"}
 options.timeframes = {"1-minute-bar-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
 options.pairs = {"eurusd"}
+# Or choose named baskets with options.pair_groups = {"majors", "metals"}
 options.start_yearmonth = "2021-04"
 options.end_yearmonth = "2021-05"
 options.cpu_utilization = "medium"

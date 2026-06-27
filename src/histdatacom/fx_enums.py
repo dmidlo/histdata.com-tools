@@ -1,6 +1,7 @@
 """Configure Enums used by histdatacom."""
 
 # pylint: disable=invalid-name
+from collections.abc import Iterable
 from enum import Enum
 
 # Majors 7
@@ -122,6 +123,163 @@ class Pairs(Enum):  # noqa:H601
             Pairs (set): set of str(values)
         """
         return {member.value for _, member in cls.__members__.items()}
+
+
+PAIR_GROUPS: dict[str, tuple[str, ...]] = {
+    "majors": (
+        "eurusd",
+        "usdjpy",
+        "gbpusd",
+        "usdcad",
+        "usdchf",
+        "audusd",
+        "nzdusd",
+    ),
+    "minors": (
+        "eurgbp",
+        "euraud",
+        "eurchf",
+        "eurcad",
+        "eurnzd",
+        "eurjpy",
+        "gbpchf",
+        "gbpjpy",
+        "gbpaud",
+        "gbpcad",
+        "gbpnzd",
+        "audjpy",
+        "audcad",
+        "audchf",
+        "audnzd",
+        "nzdjpy",
+        "nzdcad",
+        "nzdchf",
+        "cadjpy",
+        "cadchf",
+        "chfjpy",
+    ),
+    "crosses": (
+        "eurchf",
+        "eurcad",
+        "eurnzd",
+        "eurjpy",
+        "gbpjpy",
+        "gbpcad",
+        "gbpnzd",
+        "audjpy",
+        "audcad",
+        "audchf",
+        "audnzd",
+        "nzdjpy",
+        "nzdcad",
+        "nzdchf",
+        "cadjpy",
+        "cadchf",
+        "chfjpy",
+        "sgdjpy",
+    ),
+    "exotics": (
+        "eurtry",
+        "usdtry",
+        "usdsek",
+        "usdnok",
+        "usddkk",
+        "usdzar",
+        "usdhkd",
+        "usdsgd",
+        "eurpln",
+        "eurhuf",
+        "usdhuf",
+        "usdpln",
+        "eurczk",
+        "eursek",
+        "usdczk",
+        "zarjpy",
+        "eurdkk",
+        "eurnok",
+        "usdmxn",
+    ),
+    "metals": (
+        "xauusd",
+        "xauaud",
+        "xauchf",
+        "xaueur",
+        "xagusd",
+        "xaugbp",
+    ),
+    "commodities": (
+        "bcousd",
+        "wtiusd",
+    ),
+    "indices": (
+        "grxeur",
+        "auxaud",
+        "frxeur",
+        "hkxhkd",
+        "spxusd",
+        "jpxjpy",
+        "udxusd",
+        "nsxusd",
+        "ukxgbp",
+        "etxeur",
+    ),
+}
+PAIR_GROUP_ALIASES: dict[str, str] = {
+    "major": "majors",
+    "minor": "minors",
+    "cross": "crosses",
+    "exotic": "exotics",
+    "metal": "metals",
+    "commodity": "commodities",
+    "commods": "commodities",
+    "index": "indices",
+    "indexes": "indices",
+}
+
+
+def pair_group_names(*, include_aliases: bool = False) -> tuple[str, ...]:
+    """Return supported instrument group names."""
+    names = set(PAIR_GROUPS)
+    if include_aliases:
+        names.update(PAIR_GROUP_ALIASES)
+    return tuple(sorted(names))
+
+
+def normalize_pair_group(group: object) -> str:
+    """Return the canonical instrument group name."""
+    normalized = str(group).strip().lower().replace("_", "-")
+    normalized = normalized.replace("-", "")
+    canonical = PAIR_GROUP_ALIASES.get(normalized, normalized)
+    if canonical not in PAIR_GROUPS:
+        supported = ", ".join(pair_group_names(include_aliases=True))
+        raise ValueError(
+            f"unsupported pair group '{group}'. Supported groups: {supported}"
+        )
+    return canonical
+
+
+def expand_pair_groups(groups: Iterable[object]) -> tuple[str, ...]:
+    """Expand instrument groups into sorted HistData pair keys."""
+    expanded: set[str] = set()
+    for group in groups or ():
+        expanded.update(PAIR_GROUPS[normalize_pair_group(group)])
+    return tuple(sorted(expanded))
+
+
+def expand_pair_selection(
+    pairs: Iterable[object] | None,
+    groups: Iterable[object] | None,
+) -> tuple[str, ...]:
+    """Return explicit pairs unioned with selected instrument groups."""
+    normalized_pairs = {str(pair).lower() for pair in pairs or ()}
+    normalized_groups = tuple(groups or ())
+    if not normalized_groups:
+        return tuple(sorted(normalized_pairs))
+
+    grouped_pairs = set(expand_pair_groups(normalized_groups))
+    if not normalized_pairs or normalized_pairs == Pairs.list_keys():
+        return tuple(sorted(grouped_pairs))
+    return tuple(sorted(normalized_pairs | grouped_pairs))
 
 
 class Format(Enum):  # noqa:H601

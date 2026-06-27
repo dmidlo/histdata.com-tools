@@ -17,7 +17,7 @@ class CliConfigError(ValueError):
 _ROOT_KEY = "histdatacom"
 _CONFIG_KEYS = {"config", "config_path"}
 _SECTION_ALIASES = {"orchestration_worker": "worker"}
-_COMMAND_SECTION_KEYS = {"analytics", "jobs", "runtime", "worker"}
+_COMMAND_SECTION_KEYS = {"analytics", "cleanup", "jobs", "runtime", "worker"}
 _KEY_ALIASES = {
     "data_dir": "data_directory",
     "quality": "data_quality",
@@ -29,6 +29,11 @@ _KEY_ALIASES = {
     "quality_targets": "quality_paths",
     "quality_check_groups": "quality_check_groups",
     "quality_checks": "quality_check_groups",
+    "instrument_group": "pair_groups",
+    "instrument_groups": "pair_groups",
+    "pair_group": "pair_groups",
+    "symbol_group": "pair_groups",
+    "symbol_groups": "pair_groups",
     "repo_quality": "repo_quality_refresh",
     "verbose": "verbosity",
 }
@@ -63,6 +68,7 @@ _TRUE_FLAG_ARGS = {
     "validate_urls": "--validate_urls",
     "download_data_archives": "--download_data_archives",
     "extract_csvs": "--extract_csvs",
+    "build_cache": "--build-cache",
     "import_to_influxdb": "--import_to_influxdb",
     "delete_after_influx": "--delete_after_influx",
     "data_quality": "--quality",
@@ -83,6 +89,7 @@ _SCALAR_ARGS = {
     "quality_max_warnings": "--quality-max-warnings",
 }
 _LIST_ARGS = {
+    "pair_groups": "--pair-groups",
     "pairs": "--pairs",
     "formats": "--formats",
     "timeframes": "--timeframes",
@@ -124,6 +131,23 @@ _ANALYTICS_ALLOWED_KEYS = (
     | set(_ANALYTICS_TRUE_FLAG_ARGS)
     | set(_ANALYTICS_SCALAR_ARGS)
     | set(_ANALYTICS_LIST_ARGS)
+)
+_CLEANUP_COMMANDS = {"sources", "transient-sources"}
+_CLEANUP_ALIASES = {
+    **_COMMAND_KEY_ALIASES,
+    "cleanup_command": "command",
+}
+_CLEANUP_TRUE_FLAG_ARGS = {
+    "apply": "--apply",
+}
+_CLEANUP_SCALAR_ARGS = {
+    "data_directory": "--data-directory",
+}
+_CLEANUP_ALLOWED_KEYS = (
+    {"command"}
+    | set(_COMMON_TRUE_FLAG_ARGS)
+    | set(_CLEANUP_TRUE_FLAG_ARGS)
+    | set(_CLEANUP_SCALAR_ARGS)
 )
 _RUNTIME_COMMANDS = {
     "cleanup",
@@ -368,6 +392,23 @@ def configured_analytics_argv(args: Sequence[str]) -> list[str]:
         command_true_flags=_ANALYTICS_TRUE_FLAG_ARGS,
         command_scalar_args=_ANALYTICS_SCALAR_ARGS,
         command_list_args=_ANALYTICS_LIST_ARGS,
+    )
+
+
+def configured_cleanup_argv(args: Sequence[str]) -> list[str]:
+    """Return cleanup argv with YAML defaults injected."""
+    return _configured_subcommand_argv(
+        args,
+        section_name="cleanup",
+        commands=_CLEANUP_COMMANDS,
+        allowed_keys=_CLEANUP_ALLOWED_KEYS,
+        aliases=_CLEANUP_ALIASES,
+        global_true_flags=_COMMON_TRUE_FLAG_ARGS,
+        global_scalar_args={},
+        global_list_args={},
+        command_true_flags=_CLEANUP_TRUE_FLAG_ARGS,
+        command_scalar_args=_CLEANUP_SCALAR_ARGS,
+        command_list_args={},
     )
 
 

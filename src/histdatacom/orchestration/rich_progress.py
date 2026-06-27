@@ -23,6 +23,31 @@ from histdatacom.orchestration.control import (
 RECENT_EVENT_LIMIT = 6
 STAGE_LIMIT = 8
 ARTIFACT_LIMIT = 5
+STAGE_LABELS = {
+    "RepositoryRefreshWorkflow": "Repository refresh",
+    "DataQualityWorkflow": "Data quality",
+    "DatasetPlanWorkflow": "Plan datasets",
+    "SymbolTimeframeWorkflow": "Run dataset batches",
+    "ValidateUrlsWorkflow": "Validate URLs",
+    "DownloadArchivesWorkflow": "Download archives",
+    "ExtractCsvWorkflow": "Extract files",
+    "BuildCacheWorkflow": "Build Polars caches",
+    "MergeCacheWorkflow": "Merge caches",
+    "ImportWorkflow": "Import to InfluxDB",
+    "repository_refresh": "Repository refresh",
+    "data_quality": "Data quality",
+    "dataset_plan": "Plan datasets",
+    "validate_urls": "Validate URLs",
+    "validate_url": "Validate URL",
+    "download_archives": "Download archives",
+    "download_archive": "Download archive",
+    "extract_csv": "Extract files",
+    "build_cache": "Build Polars cache",
+    "merge_cache": "Merge caches",
+    "import_to_influx": "Import to InfluxDB",
+    "started": "Started",
+    "finished": "Finished",
+}
 
 
 def render_job_progress(
@@ -148,8 +173,9 @@ def _summary_table(snapshot: OrchestrationJobSnapshot) -> Table:
     progress = snapshot.progress
     status = progress.status if progress is not None else snapshot.status
     current_stage = (
-        progress.current_stage if progress is not None else ""
-    ) or "waiting for first progress event"
+        _stage_label(progress.current_stage if progress is not None else "")
+        or "waiting for first progress event"
+    )
     table = Table.grid(expand=True, padding=(0, 1))
     table.add_column(style="bold dim", no_wrap=True)
     table.add_column(ratio=1)
@@ -185,7 +211,7 @@ def _progress_bar(snapshot: OrchestrationJobSnapshot) -> Progress:
     percent = progress.percent_complete if progress is not None else 0.0
     status = progress.status if progress is not None else snapshot.status
     current_stage = progress.current_stage if progress is not None else ""
-    description = current_stage or status.value.lower()
+    description = _stage_label(current_stage) or status.value.lower()
     progress_bar = Progress(
         TextColumn("[bold]{task.description}"),
         BarColumn(bar_width=None),
@@ -225,7 +251,7 @@ def _stage_table(progress: JobProgressSnapshot) -> Table:
             state = Text("active", style="cyan")
         else:
             state = Text("queued", style="dim")
-        table.add_row(stage, state)
+        table.add_row(_stage_label(stage), state)
     remaining = len(progress.planned_children) - len(rows)
     if remaining > 0:
         table.add_row(f"... {remaining} more", Text("queued", style="dim"))
@@ -246,9 +272,9 @@ def _events_table(events: tuple[StatusEvent, ...]) -> Table:
     for event in events[-RECENT_EVENT_LIMIT:]:
         table.add_row(
             _clock_time(event.timestamp_utc),
-            event.stage or "-",
+            _stage_label(event.stage) or "-",
             Text(event.status.value, style=_status_style(event.status)),
-            event.message or "-",
+            _event_message(event),
         )
     return table
 
@@ -284,6 +310,16 @@ def _subtitle(snapshot: OrchestrationJobSnapshot) -> str:
     if snapshot.namespace:
         return f"namespace {snapshot.namespace}"
     return "Temporal orchestration"
+
+
+def _stage_label(stage: str) -> str:
+    return STAGE_LABELS.get(stage, stage)
+
+
+def _event_message(event: StatusEvent) -> str:
+    if event.message == f"{event.stage} completed.":
+        return f"{_stage_label(event.stage)} completed."
+    return event.message or "-"
 
 
 def _updated_at(snapshot: OrchestrationJobSnapshot) -> str:

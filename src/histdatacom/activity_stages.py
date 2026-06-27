@@ -1183,6 +1183,7 @@ def build_cache_work_item(
             created = True
             cache_result = cache_build_result_for_record(record)
 
+        deleted_sources = _delete_cache_source_artifacts(record, args)
         record.status = WorkStatus.CACHE_READY
         record.write_manifest_status(base_dir=_default_download_dir(args))
         updated = _work_item_from_record(record, work_item)
@@ -1190,6 +1191,10 @@ def build_cache_work_item(
             "forward": True,
             "decision": "built" if created else "reuse_existing",
             "cache_created": created,
+            "delete_after_cache": _truthy_config_value(
+                args.get("delete_after_cache")
+            ),
+            "source_artifacts_deleted": list(deleted_sources),
             "cache_line_count": cache_result.line_count,
             "cache_start": cache_result.start,
             "cache_end": cache_result.end,
@@ -1552,6 +1557,7 @@ def dataset_plan_stage(
     base_url: str = DEFAULT_HISTDATA_BASE_URL,
     current_yearmonth: str | None = None,
     zip_persist: bool = False,
+    cache_only: bool = False,
 ) -> DatasetPlanOutput:
     """Plan explicit dataset work items without queues or side effects."""
     formats_input = tuple(formats or ())
@@ -1567,9 +1573,15 @@ def dataset_plan_stage(
         base_url=base_url,
         current_yearmonth=current_yearmonth,
         zip_persist=zip_persist,
+        cache_only=cache_only,
     )
-    normalized_formats = normalize_dataset_formats(formats_input)
-    normalized_timeframes = normalize_dataset_timeframes(timeframes_input)
+    dimensions = valid_dataset_dimensions(
+        formats_input,
+        timeframes_input,
+        cache_only=cache_only,
+    )
+    normalized_formats = tuple(sorted({item[0] for item in dimensions}))
+    normalized_timeframes = tuple(sorted({item[1] for item in dimensions}))
     normalized_pairs = normalize_dataset_pairs(pairs_input)
     resolved_current = current_yearmonth or get_current_datemonth_gmt_minus5()
     result = StageResult(
@@ -1599,6 +1611,7 @@ def dataset_plan_stage(
             "start_yearmonth": _coerce_yearmonth(start_yearmonth) or "",
             "end_yearmonth": _coerce_yearmonth(end_yearmonth) or "",
             "current_yearmonth": resolved_current,
+            "cache_only": cache_only,
         },
     )
     return DatasetPlanOutput(work_items=work_items, result=result)
@@ -1615,6 +1628,7 @@ def plan_dataset_work_items(
     base_url: str = DEFAULT_HISTDATA_BASE_URL,
     current_yearmonth: str | None = None,
     zip_persist: bool = False,
+    cache_only: bool = False,
 ) -> tuple[WorkItem, ...]:
     """Return deterministic URL work items for a HistData request."""
     formats_input = tuple(formats or ())
@@ -1632,6 +1646,7 @@ def plan_dataset_work_items(
     for csv_format, timeframe in valid_dataset_dimensions(
         formats_input,
         timeframes_input,
+        cache_only=cache_only,
     ):
         for pair in normalized_pairs:
             for period in iter_dataset_periods(
@@ -1663,6 +1678,7 @@ def plan_dataset_urls(
     timeframes: Iterable[Any],
     base_url: str = DEFAULT_HISTDATA_BASE_URL,
     current_yearmonth: str | None = None,
+    cache_only: bool = False,
 ) -> tuple[str, ...]:
     """Return deterministic HistData URLs for a request."""
     return tuple(
@@ -1675,6 +1691,7 @@ def plan_dataset_urls(
             timeframes=timeframes,
             base_url=base_url,
             current_yearmonth=current_yearmonth,
+            cache_only=cache_only,
         )
     )
 
@@ -1682,6 +1699,8 @@ def plan_dataset_urls(
 def valid_dataset_dimensions(
     formats: Iterable[Any],
     timeframes: Iterable[Any],
+    *,
+    cache_only: bool = False,
 ) -> tuple[tuple[str, str], ...]:
     """Return supported format/timeframe pairs in deterministic order."""
     normalized_formats = normalize_dataset_formats(formats)
@@ -1691,6 +1710,13 @@ def valid_dataset_dimensions(
         for csv_format in normalized_formats
         for timeframe in normalized_timeframes
         if timeframe in get_valid_format_timeframes(csv_format)
+        and (
+            not cache_only
+            or (
+                csv_format == Format.ASCII.value
+                and timeframe in {Timeframe.M1.name, Timeframe.T.name}
+            )
+        )
     )
 
 
@@ -2486,6 +2512,37 @@ def _delete_zip_after_extraction(
             detail={"path": str(zip_path), "url": record.url},
         ) from err
     return True
+
+
+def _delete_cache_source_artifacts(
+    record: Record,
+    args: Mapping[str, Any],
+) -> tuple[str, ...]:
+    if not _truthy_config_value(args.get("delete_after_cache")):
+        return ()
+
+    deleted: list[str] = []
+    for field_name in ("zip_filename", "csv_filename"):
+        filename = str(getattr(record, field_name, "") or "")
+        if filename:
+            path = Path(record.data_dir, filename)
+            if path.exists():
+                try:
+                    path.unlink()
+                except OSError as err:
+                    raise CacheBuildError(
+                        "CACHE_SOURCE_CLEANUP_FAILED",
+                        str(err),
+                        retryable=False,
+                        detail={
+                            "path": str(path),
+                            "data_dir": record.data_dir,
+                            "cache_filename": record.cache_filename,
+                        },
+                    ) from err
+                deleted.append(filename)
+        setattr(record, field_name, "")
+    return tuple(deleted)
 
 
 def _zip_persist_enabled(args: Mapping[str, Any], record: Record) -> bool:

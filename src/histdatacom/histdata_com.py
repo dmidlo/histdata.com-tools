@@ -42,6 +42,7 @@ from histdatacom.exceptions import (
     format_failure_info_for_cli,
     InfluxConfigurationError,
 )
+from histdatacom.fx_enums import expand_pair_selection
 from histdatacom.repository_output import (
     print_repository_failure,
     print_repository_table,
@@ -305,6 +306,14 @@ class _HistDataCom:  # noqa:R701
 def _resolve_runtime_context(options: Options) -> RuntimeContext:
     """Resolve launch values without touching process-global config."""
     args = ArgParser.arg_list_to_set(options.to_dict()).copy()
+    expanded_pairs = set(
+        expand_pair_selection(
+            args.get("pairs") or (),
+            args.get("pair_groups") or (),
+        )
+    )
+    args["pairs"] = expanded_pairs
+    options.pairs = expanded_pairs
     args["default_download_dir"] = set_working_data_dir(args["data_directory"])
     args["api_return_type"] = normalize_api_return_type(args["api_return_type"])
     options.api_return_type = args["api_return_type"]
@@ -443,8 +452,14 @@ def main(
     cli_args = sys.argv[1:] if not options else []
     routed_command = routed_command_from_cli_args(
         cli_args,
-        {"analytics", "jobs", "runtime"},
+        {"analytics", "cleanup", "jobs", "runtime"},
     )
+    if not options and routed_command == "cleanup":
+        from histdatacom.cleanup_cli import main as cleanup_main
+
+        return cleanup_main(
+            remove_routed_command_from_cli_args(cli_args, "cleanup")
+        )
     if not options and routed_command == "jobs":
         from histdatacom.orchestration.cli import jobs_main
 

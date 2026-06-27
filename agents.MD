@@ -1,0 +1,7 @@
+- Always create a GitHub issue before any actionable work, including cleanup or maintenance tasks.
+- GitHub issues and versioned changes always follow SemVer.
+- Work from `dev`; production release work goes through `main`.
+- Always run the full battery of pre-commit hooks and test suites before release work is considered complete.
+- Always run the TestPyPI preflight with the local simple registry before publishing.
+- Publish to TestPyPI from `dev` first; publish to PyPI from `main` only after the TestPyPI path passes.
+- Use Commitizen `cz` for commit/version workflows and `gh` for GitHub workflows.

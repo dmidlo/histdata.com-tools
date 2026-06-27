@@ -127,6 +127,7 @@ def test_run_request_round_trips_options_payload() -> None:
     options.validate_urls = True
     options.download_data_archives = True
     options.extract_csvs = True
+    options.build_cache = True
     options.data_quality = True
     options.quality_paths = ("data/DAT_ASCII_EURUSD_M1_202001.csv",)
     options.quality_check_groups = {"inventory", "time"}
@@ -159,6 +160,7 @@ def test_run_request_round_trips_options_payload() -> None:
     assert restored.validate_urls
     assert restored.download_data_archives
     assert restored.extract_csvs
+    assert restored.build_cache
     assert restored.data_quality
     assert restored.quality_paths == ("data/DAT_ASCII_EURUSD_M1_202001.csv",)
     assert restored.quality_check_groups == ("inventory", "time")
@@ -185,6 +187,27 @@ def test_run_request_carries_verbosity() -> None:
 
     assert request.verbosity == 3
     assert restored.verbosity == 3
+
+
+def test_run_request_expands_pair_groups_from_options() -> None:
+    """Direct API callers should be able to select named instrument groups."""
+    options = Options()
+    options.pair_groups = {"majors"}
+    options.formats = {"ascii"}
+    options.timeframes = {"T"}
+
+    request = RunRequest.from_options(options, request_id="run-pair-groups")
+
+    assert request.pairs == (
+        "audusd",
+        "eurusd",
+        "gbpusd",
+        "nzdusd",
+        "usdcad",
+        "usdchf",
+        "usdjpy",
+    )
+    assert request.metadata["pair_groups"] == ["majors"]
 
 
 def test_stage_result_round_trips_artifacts_events_and_failure() -> None:

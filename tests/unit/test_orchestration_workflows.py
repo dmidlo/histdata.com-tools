@@ -141,6 +141,86 @@ class _PlanReferenceChildExecutor:
         ).to_dict()
 
 
+class _PlanReferenceActivityExecutor:
+    """Fake dataset-plan activity executor that returns compact plan metadata."""
+
+    def __init__(self, work_items: tuple[WorkItem, ...]) -> None:
+        self.work_items = work_items
+
+    async def execute_activity(
+        self,
+        activity_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Return the same compact fields as a spilled dataset-plan activity."""
+        request = RunRequest.from_dict(dict(payload["request"]))
+        plan_batches = workflows.period_batch_partitions(
+            request,
+            self.work_items,
+        )
+        return {
+            "result": StageResult(
+                work_id=str(payload.get("workflow_id", "")),
+                stage=activity_name,
+                status=WorkStatus.COMPLETED,
+                metrics={
+                    "work_item_count": len(self.work_items),
+                    "work_items_spilled": True,
+                },
+            ).to_dict(),
+            DATASET_PLAN_REF_KEY: {
+                "kind": "dataset_plan",
+                "plan_id": "plan-spilled",
+                "store_root": "/tmp/histdatacom-plan",
+                "store_path": "/tmp/histdatacom-plan/.histdatacom/db",
+                "work_item_count": len(self.work_items),
+            },
+            DATASET_PLAN_BATCHES_KEY: [
+                dict(partition) for partition in plan_batches
+            ],
+        }
+
+
+class _WrappedPlanReferenceChildExecutor:
+    """Fake parent executor using the real dataset-plan workflow wrapper."""
+
+    def __init__(self, work_items: tuple[WorkItem, ...]) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.work_items = work_items
+
+    async def execute_child_workflow(
+        self,
+        workflow_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        workflow_id: str,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Record child calls and wrap dataset-plan activity output."""
+        self.calls.append(
+            {
+                "workflow_name": workflow_name,
+                "payload": dict(payload),
+                "workflow_id": workflow_id,
+                "task_queue": task_queue,
+            }
+        )
+        if workflow_name == "DatasetPlanWorkflow":
+            workflow = workflows.DatasetPlanWorkflow(
+                activity_executor=_PlanReferenceActivityExecutor(
+                    self.work_items
+                )
+            )
+            return await workflow.run(dict(payload))
+        return StageResult(
+            work_id=workflow_id,
+            stage=workflow_name,
+            status=WorkStatus.COMPLETED,
+        ).to_dict()
+
+
 class _BoundedFanoutChildExecutor:
     """Fake child executor that tracks concurrent symbol batch execution."""
 
@@ -149,11 +229,13 @@ class _BoundedFanoutChildExecutor:
         work_items: tuple[WorkItem, ...],
         *,
         cancel_at_symbol_call: int | None = None,
+        fail_at_symbol_call: int | None = None,
         raise_at_symbol_call: int | None = None,
     ) -> None:
         self.calls: list[dict[str, object]] = []
         self.work_items = work_items
         self.cancel_at_symbol_call = cancel_at_symbol_call
+        self.fail_at_symbol_call = fail_at_symbol_call
         self.raise_at_symbol_call = raise_at_symbol_call
         self.active_symbol_children = 0
         self.max_active_symbol_children = 0
@@ -209,6 +291,17 @@ class _BoundedFanoutChildExecutor:
                 failure=FailureInfo(
                     code="OPERATION_CANCELLED",
                     message="operator cancelled",
+                    retryable=False,
+                ),
+            ).to_dict()
+        if call_number == self.fail_at_symbol_call:
+            return StageResult(
+                work_id=workflow_id,
+                stage=workflow_name,
+                status=WorkStatus.FAILED,
+                failure=FailureInfo(
+                    code="CACHE_SOURCE_NOT_FOUND",
+                    message="cache source missing",
                     retryable=False,
                 ),
             ).to_dict()
@@ -333,6 +426,46 @@ class _NoForwardChildExecutor:
         }
 
 
+class _NoForwardPlanRefChildExecutor:
+    """Fake executor that returns an explicit empty handoff from plan-ref work."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def execute_child_workflow(
+        self,
+        workflow_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        workflow_id: str,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Record child calls and return no forwardable compact-plan rows."""
+        self.calls.append(
+            {
+                "workflow_name": workflow_name,
+                "payload": dict(payload),
+                "workflow_id": workflow_id,
+                "task_queue": task_queue,
+            }
+        )
+        return {
+            "workflow_name": workflow_name,
+            "request_id": "run-topology",
+            "status": WorkStatus.COMPLETED.value,
+            "stage_results": [
+                StageResult(
+                    work_id="",
+                    stage="validate_urls",
+                    status=WorkStatus.COMPLETED,
+                    metrics={"forward_count": 0},
+                ).to_dict()
+            ],
+            "work_items": [],
+            "artifacts": [],
+        }
+
+
 class _FailingChildExecutor:
     """Fake child executor that fails the first operation stage."""
 
@@ -416,6 +549,178 @@ class _RecordingActivityExecutor:
                 ),
             ),
         ).to_dict()
+
+
+class _CacheOnlyPipelineActivityExecutor:
+    """Fake activity executor for cache-only compact-plan handoff tests."""
+
+    def __init__(
+        self,
+        plan_work_items: tuple[WorkItem, ...],
+        *,
+        validate_forwards: bool = True,
+    ) -> None:
+        self.plan_work_items = plan_work_items
+        self.validate_forwards = validate_forwards
+        self.calls: list[dict[str, object]] = []
+        self.build_inputs: list[WorkItem] = []
+
+    async def execute_activity(
+        self,
+        activity_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Run a deterministic in-memory cache-only activity chain."""
+        self.calls.append(
+            {
+                "activity_name": activity_name,
+                "payload": dict(payload),
+                "task_queue": task_queue,
+            }
+        )
+        work_items = self._work_items_for_payload(payload)
+        if activity_name == "validate_urls":
+            if not self.validate_forwards:
+                return self._batch_payload((), "validate_urls")
+            return self._batch_payload(
+                tuple(
+                    item.with_status(WorkStatus.URL_VALID)
+                    for item in work_items
+                ),
+                "validate_urls",
+            )
+        if activity_name == "download_archives":
+            downloaded = tuple(_with_zip_filename(item) for item in work_items)
+            return self._batch_payload(downloaded, "download_archives")
+        if activity_name == "build_cache":
+            self.build_inputs.extend(work_items)
+            if any(not item.zip_filename for item in work_items):
+                failure = FailureInfo(
+                    code="CACHE_SOURCE_NOT_FOUND",
+                    message="cache source missing",
+                    retryable=False,
+                )
+                return {
+                    "work_items": [],
+                    "stage_results": [
+                        StageResult(
+                            work_id=item.work_id,
+                            stage="build_cache",
+                            status=WorkStatus.FAILED,
+                            failure=failure,
+                            metrics={"forward": False},
+                        ).to_dict()
+                        for item in work_items
+                    ],
+                    "result": StageResult(
+                        work_id="",
+                        stage="build_cache",
+                        status=WorkStatus.FAILED,
+                        failure=failure,
+                        metrics={
+                            "forward_count": 0,
+                            "work_item_count": len(work_items),
+                        },
+                    ).to_dict(),
+                }
+            cached = tuple(
+                WorkItem.from_dict(
+                    {
+                        **item.to_dict(),
+                        "status": WorkStatus.CACHE_READY.value,
+                        "cache_filename": ".data",
+                    }
+                )
+                for item in work_items
+            )
+            return self._batch_payload(cached, "build_cache")
+        raise AssertionError(f"unexpected activity: {activity_name}")
+
+    def _work_items_for_payload(
+        self,
+        payload: Mapping[str, JSONValue],
+    ) -> tuple[WorkItem, ...]:
+        inline = _optional_work_items_from_payload(payload)
+        if inline:
+            return inline
+        partition = payload.get("partition", {})
+        if not isinstance(partition, Mapping):
+            return self.plan_work_items
+        work_ids = {
+            work_id.strip()
+            for work_id in str(partition.get("work_ids", "") or "").split(",")
+            if work_id.strip()
+        }
+        if not work_ids:
+            return self.plan_work_items
+        return tuple(
+            item for item in self.plan_work_items if item.work_id in work_ids
+        )
+
+    def _batch_payload(
+        self,
+        work_items: tuple[WorkItem, ...],
+        stage: str,
+    ) -> Mapping[str, object]:
+        return {
+            "work_items": [item.to_dict() for item in work_items],
+            "stage_results": [
+                StageResult(
+                    work_id=item.work_id,
+                    stage=stage,
+                    status=item.status,
+                    metrics={"forward": True},
+                ).to_dict()
+                for item in work_items
+            ],
+            "result": StageResult(
+                work_id="",
+                stage=stage,
+                status=WorkStatus.COMPLETED,
+                metrics={
+                    "forward_count": len(work_items),
+                    "work_item_count": len(work_items),
+                },
+            ).to_dict(),
+        }
+
+
+class _CacheOnlyWrappedChildExecutor:
+    """Fake child executor that runs real leaf workflow wrappers."""
+
+    def __init__(
+        self, activity_executor: _CacheOnlyPipelineActivityExecutor
+    ) -> None:
+        self.activity_executor = activity_executor
+        self.calls: list[dict[str, object]] = []
+
+    async def execute_child_workflow(
+        self,
+        workflow_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        workflow_id: str,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Route operation children through the real workflow wrappers."""
+        self.calls.append(
+            {
+                "workflow_name": workflow_name,
+                "payload": dict(payload),
+                "workflow_id": workflow_id,
+                "task_queue": task_queue,
+            }
+        )
+        workflow_by_name = {
+            "ValidateUrlsWorkflow": workflows.ValidateUrlsWorkflow,
+            "DownloadArchivesWorkflow": workflows.DownloadArchivesWorkflow,
+            "BuildCacheWorkflow": workflows.BuildCacheWorkflow,
+        }
+        workflow_class = workflow_by_name[workflow_name]
+        workflow = workflow_class(activity_executor=self.activity_executor)
+        return await workflow.run(dict(payload))
 
 
 class _ThreadingChildExecutor:
@@ -586,12 +891,39 @@ def _with_stage_metadata(item: WorkItem, status: WorkStatus) -> WorkItem:
     return item.with_status(status)
 
 
+def _with_zip_filename(item: WorkItem) -> WorkItem:
+    return WorkItem.from_dict(
+        {
+            **item.to_dict(),
+            "status": WorkStatus.CSV_ZIP.value,
+            "zip_filename": (
+                "HISTDATA_COM_ASCII_"
+                f"{item.data_fxpair}_{item.data_timeframe}"
+                f"{item.data_datemonth.replace('-', '')}.zip"
+            ),
+        }
+    )
+
+
 def _payload_work_items(call: Mapping[str, object]) -> list[Mapping[str, str]]:
     payload = call["payload"]
     assert isinstance(payload, Mapping)
     raw_items = payload.get("work_items", [])
     assert isinstance(raw_items, list)
     return [item for item in raw_items if isinstance(item, Mapping)]
+
+
+def _optional_work_items_from_payload(
+    payload: Mapping[str, JSONValue],
+) -> tuple[WorkItem, ...]:
+    raw_items = payload.get("work_items", [])
+    if not isinstance(raw_items, list):
+        return ()
+    return tuple(
+        WorkItem.from_dict(item)
+        for item in raw_items
+        if isinstance(item, Mapping)
+    )
 
 
 def _work_items_from_payload(
@@ -1051,6 +1383,80 @@ def test_parent_workflow_expands_large_plan_from_compact_reference() -> None:
     )
 
 
+def test_dataset_plan_workflow_preserves_compact_plan_reference() -> None:
+    """Wrapped dataset-plan output should still expose spill metadata."""
+    request = _request(
+        pairs=("EURUSD",),
+        timeframes=("T",),
+        metadata={
+            **_request().metadata,
+            workflows.BATCHING_METADATA_KEY: {
+                workflows.MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY: 1
+            },
+        },
+    )
+    workflow = workflows.DatasetPlanWorkflow(
+        activity_executor=_PlanReferenceActivityExecutor(
+            _multi_period_work_items(timeframe="T", count=3)
+        )
+    )
+    payload = {
+        "request": request.to_dict(),
+        "workflow_name": "DatasetPlanWorkflow",
+        "workflow_id": "dataset-plan-wrapper",
+        "stage": "dataset_plan",
+    }
+
+    summary = asyncio.run(workflow.run(payload))
+
+    assert "work_items" not in summary
+    assert summary[DATASET_PLAN_REF_KEY]["plan_id"] == "plan-spilled"
+    assert len(summary[DATASET_PLAN_BATCHES_KEY]) == 3
+
+
+def test_parent_workflow_expands_wrapped_plan_reference() -> None:
+    """Real dataset-plan workflow summaries should drive batch fan-out."""
+    request = _request(
+        pairs=("EURUSD",),
+        timeframes=("T",),
+        metadata={
+            **_request().metadata,
+            workflows.BATCHING_METADATA_KEY: {
+                workflows.MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY: 1
+            },
+            workflows.FANOUT_METADATA_KEY: {
+                workflows.MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY: 4
+            },
+        },
+    )
+    executor = _WrappedPlanReferenceChildExecutor(
+        work_items=_multi_period_work_items(timeframe="T", count=5)
+    )
+    workflow = workflows.HistDataRunWorkflow(executor=executor)
+
+    summary = asyncio.run(workflow.run(request.to_dict()))
+
+    symbol_calls = [
+        call
+        for call in executor.calls
+        if call["workflow_name"] == "SymbolTimeframeWorkflow"
+    ]
+    symbol_payloads = [
+        call["payload"]
+        for call in symbol_calls
+        if isinstance(call["payload"], Mapping)
+    ]
+
+    assert len(symbol_calls) == 5
+    assert "work_items" not in summary
+    assert all(DATASET_PLAN_REF_KEY in payload for payload in symbol_payloads)
+    assert all(
+        payload["partition"]["batch_key"]
+        for payload in symbol_payloads
+        if isinstance(payload["partition"], Mapping)
+    )
+
+
 def test_parent_workflow_runs_symbol_batches_with_bounded_fanout() -> None:
     """Independent symbol batches should run in bounded parallel windows."""
     request = _request(
@@ -1136,6 +1542,41 @@ def test_parent_workflow_stops_fanout_after_cancelled_window() -> None:
     assert summary["progress"]["total_children"] == 6
     assert summary["progress"]["completed_children"] == 3
     assert summary["progress"]["last_error"] == "operator cancelled"
+
+
+def test_parent_workflow_stops_fanout_after_failed_symbol_payload() -> None:
+    """A failed symbol batch payload should prevent later windows starting."""
+    request = _request(
+        pairs=("EURUSD",),
+        metadata={
+            **_request().metadata,
+            workflows.BATCHING_METADATA_KEY: {
+                workflows.MAX_WORK_ITEMS_PER_BATCH_METADATA_KEY: 1
+            },
+            workflows.FANOUT_METADATA_KEY: {
+                workflows.MAX_PARALLEL_CHILD_WORKFLOWS_METADATA_KEY: 2
+            },
+        },
+    )
+    executor = _BoundedFanoutChildExecutor(
+        work_items=_multi_period_work_items(count=5),
+        fail_at_symbol_call=1,
+    )
+    workflow = workflows.HistDataRunWorkflow(executor=executor)
+
+    summary = asyncio.run(workflow.run(request.to_dict()))
+
+    symbol_calls = [
+        call
+        for call in executor.calls
+        if call["workflow_name"] == "SymbolTimeframeWorkflow"
+    ]
+
+    assert executor.max_active_symbol_children == 2
+    assert len(symbol_calls) == 2
+    assert summary["status"] == WorkStatus.FAILED.value
+    assert summary["progress"]["completed_children"] == 3
+    assert summary["progress"]["last_error"] == "cache source missing"
 
 
 def test_parent_workflow_stops_fanout_after_child_exception() -> None:
@@ -1265,6 +1706,133 @@ def test_symbol_timeframe_workflow_composes_operation_children() -> None:
     ]
 
 
+def test_cache_only_request_builds_cache_without_merge() -> None:
+    """Cache-only jobs should avoid dataframe materialization stages."""
+    request = _request(
+        validate_urls=False,
+        download_data_archives=False,
+        extract_csvs=False,
+        build_cache=True,
+        api_return_type="",
+        import_to_influxdb=False,
+    )
+
+    invocations = workflows.build_symbol_child_invocations(
+        request,
+        {"pair": "EURUSD", "timeframe": "M1"},
+    )
+
+    assert [item.workflow_name for item in invocations] == [
+        "ValidateUrlsWorkflow",
+        "DownloadArchivesWorkflow",
+        "BuildCacheWorkflow",
+    ]
+
+
+def test_cache_only_compact_plan_empty_validation_does_not_rehydrate() -> None:
+    """Compact plans must not reload original rows after empty validation."""
+    work_items = _multi_period_work_items(timeframe="T", count=2)
+    request = _request(
+        pairs=("EURUSD",),
+        timeframes=("T",),
+        build_cache=True,
+        extract_csvs=False,
+        api_return_type="",
+        import_to_influxdb=False,
+    )
+    partition = workflows.period_batch_partitions(request, work_items)[0]
+    activity_executor = _CacheOnlyPipelineActivityExecutor(
+        work_items,
+        validate_forwards=False,
+    )
+    child_executor = _CacheOnlyWrappedChildExecutor(activity_executor)
+    workflow = workflows.SymbolTimeframeWorkflow(executor=child_executor)
+
+    summary = asyncio.run(
+        workflow.run(
+            {
+                "request": request.to_dict(),
+                "partition": partition,
+                DATASET_PLAN_REF_KEY: {
+                    "kind": "dataset_plan",
+                    "plan_id": "plan-spilled",
+                    "store_root": "/tmp/histdatacom-plan",
+                    "store_path": "/tmp/histdatacom-plan/.histdatacom/db",
+                    "work_item_count": len(work_items),
+                },
+            }
+        )
+    )
+
+    assert [call["workflow_name"] for call in child_executor.calls] == [
+        "ValidateUrlsWorkflow"
+    ]
+    assert [call["activity_name"] for call in activity_executor.calls] == [
+        "validate_urls"
+    ]
+    assert not activity_executor.build_inputs
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert [result["status"] for result in summary["stage_results"][1:]] == [
+        WorkStatus.SKIPPED.value,
+        WorkStatus.SKIPPED.value,
+    ]
+
+
+def test_cache_only_compact_plan_threads_downloaded_sources_to_build() -> None:
+    """Build cache must receive downloaded ZIP names from compact plans."""
+    work_items = _multi_period_work_items(timeframe="T", count=2)
+    request = _request(
+        pairs=("EURUSD",),
+        timeframes=("T",),
+        build_cache=True,
+        extract_csvs=False,
+        api_return_type="",
+        import_to_influxdb=False,
+    )
+    partition = workflows.period_batch_partitions(request, work_items)[0]
+    activity_executor = _CacheOnlyPipelineActivityExecutor(work_items)
+    child_executor = _CacheOnlyWrappedChildExecutor(activity_executor)
+    workflow = workflows.SymbolTimeframeWorkflow(executor=child_executor)
+
+    summary = asyncio.run(
+        workflow.run(
+            {
+                "request": request.to_dict(),
+                "partition": partition,
+                DATASET_PLAN_REF_KEY: {
+                    "kind": "dataset_plan",
+                    "plan_id": "plan-spilled",
+                    "store_root": "/tmp/histdatacom-plan",
+                    "store_path": "/tmp/histdatacom-plan/.histdatacom/db",
+                    "work_item_count": len(work_items),
+                },
+            }
+        )
+    )
+
+    assert [call["workflow_name"] for call in child_executor.calls] == [
+        "ValidateUrlsWorkflow",
+        "DownloadArchivesWorkflow",
+        "BuildCacheWorkflow",
+    ]
+    assert [call["activity_name"] for call in activity_executor.calls] == [
+        "validate_urls",
+        "download_archives",
+        "build_cache",
+    ]
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert activity_executor.build_inputs
+    assert {item.status for item in activity_executor.build_inputs} == {
+        WorkStatus.CSV_ZIP
+    }
+    assert all(item.zip_filename for item in activity_executor.build_inputs)
+    assert {
+        item["status"]
+        for item in summary["work_items"]
+        if isinstance(item, Mapping)
+    } == {WorkStatus.CACHE_READY.value}
+
+
 def test_symbol_timeframe_workflow_stops_after_cancelled_child() -> None:
     """A cancellation result should prevent later child workflows starting."""
     executor = _CancellingChildExecutor()
@@ -1312,6 +1880,45 @@ def test_symbol_timeframe_workflow_skips_after_no_forwardable_items() -> None:
     assert [result["status"] for result in summary["stage_results"][1:]] == [
         WorkStatus.SKIPPED.value
     ] * 5
+
+
+def test_symbol_timeframe_workflow_does_not_rehydrate_after_empty_plan_ref_handoff() -> (
+    None
+):
+    """An explicit empty handoff should not reload original plan-ref rows."""
+    executor = _NoForwardPlanRefChildExecutor()
+    workflow = workflows.SymbolTimeframeWorkflow(executor=executor)
+    request = _request(
+        build_cache=True,
+        extract_csvs=False,
+        api_return_type="",
+        import_to_influxdb=False,
+    )
+
+    summary = asyncio.run(
+        workflow.run(
+            {
+                "request": request.to_dict(),
+                "partition": {"pair": "EURUSD", "timeframe": "M1"},
+                DATASET_PLAN_REF_KEY: {
+                    "kind": "dataset_plan",
+                    "plan_id": "plan-spilled",
+                    "store_root": "/tmp/histdatacom-plan",
+                    "store_path": "/tmp/histdatacom-plan/.histdatacom/db",
+                    "work_item_count": 1,
+                },
+            }
+        )
+    )
+
+    assert [call["workflow_name"] for call in executor.calls] == [
+        "ValidateUrlsWorkflow"
+    ]
+    assert summary["status"] == WorkStatus.COMPLETED.value
+    assert [result["status"] for result in summary["stage_results"][1:]] == [
+        WorkStatus.SKIPPED.value,
+        WorkStatus.SKIPPED.value,
+    ]
 
 
 def test_symbol_timeframe_workflow_fails_without_empty_downstream() -> None:

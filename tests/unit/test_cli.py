@@ -171,6 +171,28 @@ def test_help_advertises_verbosity_flags() -> None:
     assert "-vvv for trace" in help_text
 
 
+def test_help_advertises_build_cache_mode() -> None:
+    """Cache-only mode should be visible from the main command help."""
+    parser = ArgParser(Options())
+    parser._set_args()
+    help_text = parser.format_help()
+
+    assert "-C, --build-cache" in help_text
+    assert "--cache-only" in help_text
+    assert "Polars .data caches" in help_text
+
+
+def test_help_advertises_pair_groups() -> None:
+    """Named instrument groups should be visible from the main help."""
+    parser = ArgParser(Options())
+    parser._set_args()
+    help_text = parser.format_help()
+
+    assert "--pair-groups" in help_text
+    assert "--instrument-groups" in help_text
+    assert "majors, minors, crosses, exotics" in help_text
+
+
 def test_verbose_cli_count_is_normalized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -197,6 +219,159 @@ def test_verbose_cli_count_is_normalized(
 
     assert options.verbosity == 2
     assert options.validate_urls
+
+
+def test_build_cache_cli_implies_download_without_extracting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cache-only mode should plan direct ZIP-to-.data cache builds."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--build-cache",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.build_cache
+    assert options.validate_urls
+    assert options.download_data_archives
+    assert not options.extract_csvs
+    assert not options.import_to_influxdb
+    assert options.formats == {"ascii"}
+    assert options.timeframes == {"T"}
+
+
+def test_build_cache_cli_filters_default_dimensions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Broad cache requests should not download non-cacheable formats."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--cache-only",
+            "-p",
+            "eurusd",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.build_cache
+    assert options.formats == {"ascii"}
+    assert options.timeframes == {"M1", "T"}
+
+
+def test_build_cache_cli_rejects_non_cacheable_dimensions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cache-only mode should fail clearly when nothing can produce .data."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--build-cache",
+            "-p",
+            "eurusd",
+            "-f",
+            "metatrader",
+            "-t",
+            "1-minute-bar-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        ArgParser(Options())()
+
+    assert err.value.code == 1
+
+
+def test_pair_groups_cli_expands_without_defaulting_to_all_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Group-only requests should replace the default all-pair selection."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "--pair-groups",
+            "Major",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert set(options.pairs) == {
+        "audusd",
+        "eurusd",
+        "gbpusd",
+        "nzdusd",
+        "usdcad",
+        "usdchf",
+        "usdjpy",
+    }
+
+
+def test_pair_groups_cli_unions_with_explicit_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit symbols should union with named groups."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "-p",
+            "eurusd",
+            "--instrument-groups",
+            "metals",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert set(options.pairs) == {
+        "eurusd",
+        "xagusd",
+        "xauaud",
+        "xauchf",
+        "xaueur",
+        "xaugbp",
+        "xauusd",
+    }
 
 
 def test_config_file_applies_recurrent_run_defaults(
@@ -303,6 +478,43 @@ histdatacom:
     assert options.start_yearmonth == "202212"
     assert options.verbosity == 1
     assert options.validate_urls
+
+
+def test_config_file_applies_pair_groups(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """YAML defaults should support named instrument groups."""
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        """
+histdatacom:
+  validate_urls: true
+  instrument_groups: [majors]
+  formats: [ascii]
+  timeframes: [tick-data-quotes]
+  start_yearmonth: 2022-10
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    options = ArgParser(Options())()
+
+    assert set(options.pairs) == {
+        "audusd",
+        "eurusd",
+        "gbpusd",
+        "nzdusd",
+        "usdcad",
+        "usdchf",
+        "usdjpy",
+    }
+    assert options.pair_groups == ["majors"]
 
 
 def test_config_file_applies_quality_command_defaults(

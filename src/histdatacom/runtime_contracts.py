@@ -7,6 +7,8 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Mapping
 
+from histdatacom.fx_enums import expand_pair_selection
+
 JSONScalar = str | int | float | bool | None
 JSONValue = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 
@@ -413,6 +415,7 @@ class RunRequest:
     validate_urls: bool = False
     download_data_archives: bool = False
     extract_csvs: bool = False
+    build_cache: bool = False
     import_to_influxdb: bool = False
     delete_after_influx: bool = False
     zip_persist: bool = False
@@ -437,10 +440,21 @@ class RunRequest:
         repo_sort = str(getattr(options, "by", "") or "")
         if repo_sort:
             metadata["repo_sort"] = repo_sort
+        pair_groups = tuple(
+            sorted(
+                str(group)
+                for group in getattr(options, "pair_groups", ()) or ()
+            )
+        )
+        if pair_groups:
+            metadata["pair_groups"] = list(pair_groups)
         verbosity = max(0, int(getattr(options, "verbosity", 0) or 0))
         return cls(
             request_id=request_id or new_request_id(),
-            pairs=tuple(sorted(getattr(options, "pairs", ()) or ())),
+            pairs=expand_pair_selection(
+                getattr(options, "pairs", ()) or (),
+                pair_groups,
+            ),
             formats=tuple(sorted(getattr(options, "formats", ()) or ())),
             timeframes=tuple(sorted(getattr(options, "timeframes", ()) or ())),
             start_yearmonth=str(getattr(options, "start_yearmonth", "") or ""),
@@ -464,6 +478,7 @@ class RunRequest:
                 getattr(options, "download_data_archives", False)
             ),
             extract_csvs=bool(getattr(options, "extract_csvs", False)),
+            build_cache=bool(getattr(options, "build_cache", False)),
             import_to_influxdb=bool(
                 getattr(options, "import_to_influxdb", False)
             ),
@@ -528,6 +543,7 @@ class RunRequest:
             "validate_urls": self.validate_urls,
             "download_data_archives": self.download_data_archives,
             "extract_csvs": self.extract_csvs,
+            "build_cache": self.build_cache,
             "import_to_influxdb": self.import_to_influxdb,
             "delete_after_influx": self.delete_after_influx,
             "zip_persist": self.zip_persist,
@@ -571,6 +587,7 @@ class RunRequest:
                 data.get("download_data_archives", False)
             ),
             extract_csvs=bool(data.get("extract_csvs", False)),
+            build_cache=bool(data.get("build_cache", False)),
             import_to_influxdb=bool(data.get("import_to_influxdb", False)),
             delete_after_influx=bool(data.get("delete_after_influx", False)),
             zip_persist=bool(data.get("zip_persist", False)),
