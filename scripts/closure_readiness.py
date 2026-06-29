@@ -103,14 +103,14 @@ def build_readiness_report(
     command_runner = runner or _run_command
     root = repo_root.expanduser().resolve(strict=False)
     generated_at = now or datetime.now(timezone.utc)
-    git_state = collect_git_state(root, runner=command_runner)
+    git_state_before_gates = collect_git_state(root, runner=command_runner)
     issue_state = collect_issue_state(root, issue, runner=command_runner)
-    process_summary = collect_process_summary(
+    processes_before_gates = collect_process_summary(
         root,
         rows=process_rows,
         runner=command_runner,
     )
-    artifact_summary = collect_artifact_summary(
+    source_artifacts_before_gates = collect_artifact_summary(
         artifact_roots if artifact_roots is not None else (root / "data",),
     )
     gates = collect_gate_summary(
@@ -122,6 +122,15 @@ def build_readiness_report(
         root,
         run=release_preflight,
         runner=command_runner,
+    )
+    git_state = collect_git_state(root, runner=command_runner)
+    process_summary = collect_process_summary(
+        root,
+        rows=process_rows,
+        runner=command_runner,
+    )
+    artifact_summary = collect_artifact_summary(
+        artifact_roots if artifact_roots is not None else (root / "data",),
     )
     readiness = determine_readiness(
         git_state=git_state,
@@ -141,11 +150,15 @@ def build_readiness_report(
         },
         "issue": issue_state,
         "processes": process_summary,
+        "processes_before_gates": processes_before_gates,
         "source_artifacts": artifact_summary,
+        "source_artifacts_before_gates": source_artifacts_before_gates,
         "gates": gates,
         "release_preflight": release,
         "readiness": readiness,
     }
+    if git_state_before_gates != git_state:
+        report["repo_before_gates"] = git_state_before_gates
     report["close_comment"] = render_close_comment(report)
     safe = publish_safe_json_value(report)
     if not isinstance(safe, dict):

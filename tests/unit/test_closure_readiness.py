@@ -37,12 +37,15 @@ class FakeRunner:
         precommit_returncode: int = 0,
         precommit_changes: str = "",
         release_returncode: int = 0,
+        ps_outputs: Sequence[str] = ("",),
     ) -> None:
         self.precommit_returncode = precommit_returncode
         self.precommit_changes = precommit_changes
         self.release_returncode = release_returncode
+        self.ps_outputs = tuple(ps_outputs)
         self.calls: list[tuple[str, ...]] = []
         self.status_calls = 0
+        self.ps_calls = 0
 
     def __call__(
         self,
@@ -124,7 +127,9 @@ class FakeRunner:
                 stdout="local simple index passed\n",
             )
         if args == ("ps", "-axo", "pid=,comm=,args="):
-            return _completed(args)
+            index = min(self.ps_calls, len(self.ps_outputs) - 1)
+            self.ps_calls += 1
+            return _completed(args, stdout=self.ps_outputs[index])
         return _completed(args)
 
 
@@ -194,6 +199,30 @@ def test_gate_run_reports_precommit_generated_artifact_changes(
     assert precommit["changed_paths_after"] == [
         "tests/architecture/packages_pyreverse.svg"
     ]
+
+
+def test_gate_run_uses_final_lingering_process_check(tmp_path: Path) -> None:
+    """A process spawned by a gate should block closure readiness."""
+    module = _module()
+    runner = FakeRunner(
+        ps_outputs=(
+            "",
+            "303 python python -m histdatacom.orchestration.worker",
+        )
+    )
+
+    report = module.build_readiness_report(
+        repo_root=tmp_path,
+        issue=274,
+        run_gates=True,
+        artifact_roots=(tmp_path / "data",),
+        runner=runner,
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert report["processes_before_gates"]["state"] == "clean"
+    assert report["processes"]["state"] == "dirty"
+    assert "lingering-processes" in report["readiness"]["blocking_checks"]
 
 
 def test_release_preflight_is_explicit_and_can_be_included(
