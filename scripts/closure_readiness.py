@@ -140,6 +140,13 @@ def build_readiness_report(
         gates=gates,
         release_preflight=release,
     )
+    precheck = determine_precheck(
+        git_state=git_state,
+        issue_state=issue_state,
+        process_summary=process_summary,
+        artifact_summary=artifact_summary,
+        issue=issue,
+    )
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "operation": "closure-readiness",
@@ -155,6 +162,7 @@ def build_readiness_report(
         "source_artifacts_before_gates": source_artifacts_before_gates,
         "gates": gates,
         "release_preflight": release,
+        "precheck": precheck,
         "readiness": readiness,
     }
     if git_state_before_gates != git_state:
@@ -423,15 +431,131 @@ def determine_readiness(
     }
 
 
+def determine_precheck(
+    *,
+    git_state: Mapping[str, Any],
+    issue_state: Mapping[str, Any],
+    process_summary: Mapping[str, Any],
+    artifact_summary: Mapping[str, Any],
+    issue: int | None,
+) -> dict[str, Any]:
+    """Return cheap pre-gate readiness for running closure gates."""
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if git_state.get("dirty"):
+        blockers.append("dirty-worktree")
+    if git_state.get("upstream_state") != "aligned":
+        blockers.append("upstream-not-aligned")
+    if issue_state.get("state") == "unavailable":
+        warnings.append("issue-state-unavailable")
+    if process_summary.get("state") == "dirty":
+        blockers.append("lingering-processes")
+    if artifact_summary.get("state") == "dirty":
+        blockers.append("transient-source-artifacts")
+    state = "ready" if not blockers else "blocked"
+    next_command = "python scripts/closure_readiness.py --run-gates"
+    if issue is not None:
+        next_command = (
+            "python scripts/closure_readiness.py "
+            f"--issue {issue} --run-gates"
+        )
+    return {
+        "state": state,
+        "ready_to_run_gates": state == "ready",
+        "blocking_checks": blockers,
+        "warnings": warnings,
+        "next_command": next_command,
+    }
+
+
+def close_issue_if_ready(
+    report: Mapping[str, Any],
+    *,
+    repo_root: Path = PROJECT_ROOT,
+    runner: CommandRunner | None = None,
+) -> dict[str, Any]:
+    """Close the linked issue only when full closure readiness is ready."""
+    command_runner = runner or _run_command
+    root = repo_root.expanduser().resolve(strict=False)
+    readiness = _mapping(report.get("readiness"))
+    issue = _mapping(report.get("issue"))
+    number = _int(issue.get("number"))
+    if readiness.get("state") != "ready":
+        return {
+            "state": "refused",
+            "reason": "closure readiness is not ready",
+            "blocking_checks": list(readiness.get("blocking_checks", []) or []),
+        }
+    if number <= 0:
+        return {
+            "state": "refused",
+            "reason": "--issue is required to close a GitHub issue",
+        }
+    if _issue_is_closed(issue):
+        return {
+            "state": "already-closed",
+            "issue_after": collect_issue_state(
+                root,
+                number,
+                runner=command_runner,
+            ),
+        }
+    result = command_runner(
+        (
+            "gh",
+            "issue",
+            "close",
+            str(number),
+            "--comment",
+            str(report.get("close_comment", "")),
+        ),
+        root,
+    )
+    issue_after = collect_issue_state(root, number, runner=command_runner)
+    return {
+        "state": (
+            "closed"
+            if result.returncode == 0 and _issue_is_closed(issue_after)
+            else "failed"
+        ),
+        "command": f"gh issue close {number} --comment <generated close comment>",
+        "returncode": result.returncode,
+        "stdout_tail": _tail_text(result.stdout),
+        "stderr_tail": _tail_text(result.stderr),
+        "issue_after": issue_after,
+    }
+
+
+def attach_issue_close_action(
+    report: Mapping[str, Any],
+    *,
+    repo_root: Path = PROJECT_ROOT,
+    runner: CommandRunner | None = None,
+) -> dict[str, Any]:
+    """Return report with an issue-close action and final readback attached."""
+    updated: dict[str, Any] = dict(report)
+    updated["issue_close"] = close_issue_if_ready(
+        report,
+        repo_root=repo_root,
+        runner=runner,
+    )
+    safe = publish_safe_json_value(updated)
+    if not isinstance(safe, dict):
+        raise TypeError("closure readiness report must be a JSON object")
+    return dict(safe)
+
+
 def render_markdown(report: Mapping[str, Any]) -> str:
     """Render a publish-safe Markdown readiness report."""
     repo = _mapping(report.get("repo"))
     issue = _mapping(report.get("issue"))
     readiness = _mapping(report.get("readiness"))
+    precheck = _mapping(report.get("precheck"))
     processes = _mapping(report.get("processes"))
     artifacts = _mapping(report.get("source_artifacts"))
     gates = _mapping(report.get("gates"))
     release = _mapping(report.get("release_preflight"))
+    issue_close = _mapping(report.get("issue_close"))
     lines = [
         "# Closure Readiness Report",
         "",
@@ -476,6 +600,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             "",
             "## Local State",
             "",
+            f"- Precheck: {precheck.get('state', 'unknown')}",
             f"- Worktree dirty: {_yes_no(repo.get('dirty'))}",
             f"- Lingering processes: {processes.get('state', 'unknown')} "
             f"({processes.get('total_count', 0)})",
@@ -483,6 +608,20 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             f"({artifacts.get('source_artifact_count', 0)})",
             f"- Release preflight: {release.get('state', 'unknown')}",
             "",
+        ]
+    )
+    if issue_close:
+        lines.extend(
+            [
+                "## GitHub Close Action",
+                "",
+                f"- State: {issue_close.get('state', 'unknown')}",
+                f"- Final issue: {_issue_label(_mapping(issue_close.get('issue_after')))}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
             "## GitHub Close Comment",
             "",
             "```text",
@@ -494,15 +633,39 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_precheck_human(report: Mapping[str, Any]) -> str:
+    """Render a compact pre-gate console summary."""
+    repo = _mapping(report.get("repo"))
+    issue = _mapping(report.get("issue"))
+    precheck = _mapping(report.get("precheck"))
+    lines = [
+        "Closure precheck",
+        f"state: {precheck.get('state', 'unknown')}",
+        f"issue: {_issue_label(issue)}",
+        f"branch: {repo.get('branch', 'unknown')}",
+        f"upstream: {repo.get('upstream', '')} "
+        f"ahead={repo.get('ahead', 0)} behind={repo.get('behind', 0)}",
+        f"worktree dirty: {_yes_no(repo.get('dirty'))}",
+        f"next: {precheck.get('next_command', '')}",
+    ]
+    blockers = list(precheck.get("blocking_checks", []) or [])
+    if blockers:
+        lines.append("blocking: " + ", ".join(str(item) for item in blockers))
+    return "\n".join(lines)
+
+
 def render_human(report: Mapping[str, Any]) -> str:
     """Render a compact console summary."""
     repo = _mapping(report.get("repo"))
     readiness = _mapping(report.get("readiness"))
+    precheck = _mapping(report.get("precheck"))
     gates = _mapping(report.get("gates"))
     issue = _mapping(report.get("issue"))
+    issue_close = _mapping(report.get("issue_close"))
     lines = [
         "Closure readiness",
         f"state: {readiness.get('state', 'unknown')}",
+        f"precheck: {precheck.get('state', 'unknown')}",
         f"issue: {_issue_label(issue)}",
         f"branch: {repo.get('branch', 'unknown')}",
         f"upstream: {repo.get('upstream', '')} "
@@ -514,6 +677,11 @@ def render_human(report: Mapping[str, Any]) -> str:
     blockers = list(readiness.get("blocking_checks", []) or [])
     if blockers:
         lines.append("blocking: " + ", ".join(str(item) for item in blockers))
+    if issue_close:
+        lines.append(f"issue close: {issue_close.get('state', 'unknown')}")
+        issue_after = _mapping(issue_close.get("issue_after"))
+        if issue_after:
+            lines.append(f"issue final: {_issue_label(issue_after)}")
     return "\n".join(lines)
 
 
@@ -555,6 +723,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--issue", type=int, help="GitHub issue number to read")
     parser.add_argument(
+        "--precheck",
+        action="store_true",
+        help="run cheap local checks and report readiness to run closure gates",
+    )
+    parser.add_argument(
         "--run-gates",
         action="store_true",
         help="run pytest, pre-commit, help sync, diff check, and help smoke",
@@ -583,18 +756,53 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="print Markdown instead of the compact summary",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--print-close-comment",
+        action="store_true",
+        help="print only the generated publish-safe close comment",
+    )
+    parser.add_argument(
+        "--close-issue",
+        action="store_true",
+        help="close --issue with the generated comment when readiness is ready",
+    )
+    args = parser.parse_args(argv)
+    if args.precheck and args.run_gates:
+        parser.error("--precheck cannot be combined with --run-gates")
+    if args.precheck and args.release_preflight:
+        parser.error("--precheck cannot be combined with --release-preflight")
+    if args.close_issue and args.issue is None:
+        parser.error("--close-issue requires --issue")
+    output_modes = (args.json, args.markdown, args.print_close_comment)
+    if sum(1 for enabled in output_modes if enabled) > 1:
+        parser.error(
+            "choose only one of --json, --markdown, or --print-close-comment"
+        )
+    return args
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    repo_root: Path = PROJECT_ROOT,
+    runner: CommandRunner | None = None,
+) -> int:
     """Run the closure-readiness helper."""
     args = parse_args(argv)
     report = build_readiness_report(
+        repo_root=repo_root,
         issue=args.issue,
-        run_gates=args.run_gates,
-        release_preflight=args.release_preflight,
+        run_gates=False if args.precheck else args.run_gates,
+        release_preflight=False if args.precheck else args.release_preflight,
         artifact_roots=args.artifact_roots,
+        runner=runner,
     )
+    if args.close_issue:
+        report = attach_issue_close_action(
+            report,
+            repo_root=repo_root,
+            runner=runner,
+        )
     if args.report_json:
         _write_text(args.report_json, json.dumps(report, indent=2) + "\n")
     if args.report_markdown:
@@ -603,8 +811,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
     elif args.markdown:
         print(render_markdown(report))  # noqa: T201
+    elif args.print_close_comment:
+        print(str(report.get("close_comment", "")))  # noqa: T201
+    elif args.precheck:
+        print(render_precheck_human(report))  # noqa: T201
     else:
         print(render_human(report))  # noqa: T201
+    if args.precheck:
+        return (
+            0 if _mapping(report.get("precheck")).get("state") == "ready" else 1
+        )
+    if args.close_issue:
+        issue_close = _mapping(report.get("issue_close"))
+        return (
+            0 if issue_close.get("state") in {"closed", "already-closed"} else 1
+        )
     return 0 if _mapping(report.get("readiness")).get("state") == "ready" else 1
 
 
@@ -772,6 +993,10 @@ def _issue_label(issue: Mapping[str, Any]) -> str:
     if issue.get("requested") and issue.get("number"):
         return f"#{issue.get('number')} {issue.get('state', 'unknown')}"
     return str(issue.get("state", "not-requested"))
+
+
+def _issue_is_closed(issue: Mapping[str, Any]) -> bool:
+    return str(issue.get("state", "")).upper() == "CLOSED"
 
 
 def _tail_text(value: str, *, line_limit: int = 12) -> str:

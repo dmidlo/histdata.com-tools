@@ -269,9 +269,11 @@ For repeatable issue closure evidence, run the local readiness helper from
 `dev` after implementation work is complete:
 
 ```sh
+python scripts/closure_readiness.py --issue 274 --precheck
 python scripts/closure_readiness.py --issue 274 --run-gates \
   --report-json .histdatacom/closure-readiness/closure-274.json \
   --report-markdown .histdatacom/closure-readiness/closure-274.md
+python scripts/closure_readiness.py --issue 274 --run-gates --print-close-comment
 ```
 
 The helper checks branch/upstream alignment, dirty and untracked files, linked
@@ -279,7 +281,9 @@ GitHub issue state, lingering pytest/pre-commit/Temporal/histdatacom tool
 processes before and after gates, transient ZIP/CSV/XLS/XLSX source artifacts
 under `data/`, README help synchronization, `git diff --check`, main help smoke
 output, pytest, and pre-commit. Reports are publish-safe JSON and Markdown with
-a GitHub-ready close comment block. Add `--release-preflight` only during
+a GitHub-ready close comment block. Use `--close-issue` only after `dev` is
+committed and pushed; it refuses to close when readiness is blocked and reads
+back the final issue state after closing. Add `--release-preflight` only during
 publishing work; normal issue closure records the TestPyPI local simple-registry
 preflight as not-applicable.
 
