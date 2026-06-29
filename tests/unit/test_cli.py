@@ -194,6 +194,8 @@ def test_help_advertises_quality_preflight_mode() -> None:
     assert "--quality-preflight" in help_text
     assert "--quality-preflight-report" in help_text
     assert "--quality-preflight-evidence" in help_text
+    assert "--quality-preflight-evidence-max-age-seconds" in help_text
+    assert "--quality-preflight-evidence-stale-ok" in help_text
     assert "--quality-preflight-sample-size" in help_text
 
 
@@ -637,6 +639,8 @@ histdatacom:
   quality_checks: [inventory, ingestion]
   quality_report: {report_path}
   quality_preflight_evidence: {tmp_path / "preflight.json"}
+  quality_preflight_evidence_max_age: 120
+  quality_preflight_evidence_stale_ok: true
   quality_fail_on: never
   quality_max_errors: 2
   quality_max_warnings: 5
@@ -658,6 +662,8 @@ histdatacom:
     assert options.quality_preflight_evidence_path == str(
         tmp_path / "preflight.json"
     )
+    assert options.quality_preflight_evidence_max_age_seconds == 120
+    assert options.quality_preflight_evidence_allow_stale
     assert options.quality_fail_on == "never"
     assert options.quality_max_errors == 2
     assert options.quality_max_warnings == 5
@@ -829,6 +835,9 @@ def test_data_quality_cli_mode_bypasses_legacy_prerequisites(
             str(tmp_path / "quality.json"),
             "--quality-preflight-evidence",
             str(tmp_path / "preflight.json"),
+            "--quality-preflight-evidence-max-age-seconds",
+            "120",
+            "--quality-preflight-evidence-stale-ok",
             "--quality-fail-on",
             "warning",
             "--quality-max-errors",
@@ -847,6 +856,8 @@ def test_data_quality_cli_mode_bypasses_legacy_prerequisites(
     assert options.quality_preflight_evidence_path == str(
         tmp_path / "preflight.json"
     )
+    assert options.quality_preflight_evidence_max_age_seconds == 120
+    assert options.quality_preflight_evidence_allow_stale
     assert options.quality_fail_on == "warning"
     assert options.quality_max_errors == 2
     assert options.quality_max_warnings == 5
@@ -974,6 +985,9 @@ def test_repo_quality_columns_are_display_only_for_repo_table(
         ["histdatacom", "--quality-max-warnings", "1"],
         ["histdatacom", "--quality-profile", "quality-profile.json"],
         ["histdatacom", "--quality-preflight-evidence", "preflight.json"],
+        ["histdatacom", "--quality-preflight-evidence-max-age-seconds", "60"],
+        ["histdatacom", "--quality-preflight-evidence-stale-ok"],
+        ["histdatacom", "--quality", "--quality-preflight-evidence-stale-ok"],
         ["histdatacom", "--quality", "-D"],
         ["histdatacom", "--repo-quality", "-A"],
         ["histdatacom", "--repo-quality-columns"],
@@ -1042,6 +1056,9 @@ def test_api_quality_options_accept_inline_profile(
     options.from_api = True
     options.data_quality = True
     options.quality_paths = (str(tmp_path),)
+    options.quality_preflight_evidence_path = str(tmp_path / "preflight.json")
+    options.quality_preflight_evidence_max_age_seconds = 120
+    options.quality_preflight_evidence_allow_stale = True
     options.quality_profile = {
         "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
         "name": "api-profile",
@@ -1051,6 +1068,11 @@ def test_api_quality_options_accept_inline_profile(
     parsed = ArgParser(options)()
 
     assert parsed.data_quality is True
+    assert parsed.quality_preflight_evidence_path == str(
+        tmp_path / "preflight.json"
+    )
+    assert parsed.quality_preflight_evidence_max_age_seconds == 120
+    assert parsed.quality_preflight_evidence_allow_stale
     assert parsed.quality_profile["name"] == "api-profile"
     assert parsed.quality_profile["source"] == "api-options"
     assert parsed.quality_profile["modeling_assumptions"] == {

@@ -33,7 +33,19 @@ _KEY_ALIASES = {
     "quality_check_groups": "quality_check_groups",
     "quality_checks": "quality_check_groups",
     "quality_preflight_evidence": "quality_preflight_evidence_path",
+    "quality_preflight_evidence_allow_stale": (
+        "quality_preflight_evidence_allow_stale"
+    ),
+    "quality_preflight_evidence_max_age": (
+        "quality_preflight_evidence_max_age_seconds"
+    ),
+    "quality_preflight_evidence_max_age_seconds": (
+        "quality_preflight_evidence_max_age_seconds"
+    ),
     "quality_preflight_evidence_path": "quality_preflight_evidence_path",
+    "quality_preflight_evidence_stale_ok": (
+        "quality_preflight_evidence_allow_stale"
+    ),
     "instrument_group": "pair_groups",
     "instrument_groups": "pair_groups",
     "pair_group": "pair_groups",
@@ -80,6 +92,9 @@ _TRUE_FLAG_ARGS = {
     "data_quality": "--quality",
     "repo_quality_refresh": "--repo-quality",
     "quality_preflight": "--quality-preflight",
+    "quality_preflight_evidence_allow_stale": (
+        "--quality-preflight-evidence-stale-ok"
+    ),
     "repo_quality_columns": "--repo-quality-columns",
 }
 _SCALAR_ARGS = {
@@ -97,6 +112,9 @@ _SCALAR_ARGS = {
     "quality_fail_on": "--quality-fail-on",
     "quality_max_errors": "--quality-max-errors",
     "quality_max_warnings": "--quality-max-warnings",
+    "quality_preflight_evidence_max_age_seconds": (
+        "--quality-preflight-evidence-max-age-seconds"
+    ),
 }
 _LIST_ARGS = {
     "pair_groups": "--pair-groups",

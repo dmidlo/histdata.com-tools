@@ -742,8 +742,12 @@ Data-quality checks:
   diagnostics, and the next `histdatacom --quality ...` command for safe or
   warned scopes. Pass the saved report to the full run with
   `--quality-preflight-evidence PATH`; if it is missing or does not match a
-  large cache-backed `--quality` scope, the CLI warns and continues without
-  prompting.
+  large cache-backed `--quality` scope, current package version, freshness
+  window, Temporal `data_quality` budget, or cache inventory, the CLI warns and
+  continues without prompting. Use
+  `--quality-preflight-evidence-max-age-seconds SECONDS` to tune the freshness
+  window, or `--quality-preflight-evidence-stale-ok` to bypass only the age
+  check explicitly.
 - The `provenance` group is optional and offline. It checks local quality
   targets against `.histdatacom/manifest-status.sqlite3` when present; explicit
   provenance runs without a store record a clean info result instead of failing

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import shlex
 from time import perf_counter
 from typing import Any, cast
 
+from histdatacom import __version__ as HISTDATACOM_VERSION
 from histdatacom.data_quality.contracts import (
     QualityReport,
     QualityTarget,
@@ -44,6 +47,7 @@ from histdatacom.runtime_contracts import JSONValue
 
 QUALITY_PREFLIGHT_SCHEMA_VERSION = "histdatacom.quality-preflight.v1"
 DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE = 4
+DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS = 24 * 60 * 60
 QUALITY_PREFLIGHT_WARN_FRACTION = 0.80
 QUALITY_PREFLIGHT_LARGE_CACHE_TARGET_COUNT = 32
 
@@ -55,6 +59,11 @@ class _CacheTarget:
     target: QualityTarget
     path: Path
     size_bytes: int
+
+
+def _utc_now() -> datetime:
+    """Return the current UTC timestamp for evidence metadata."""
+    return datetime.now(timezone.utc)
 
 
 def run_cache_quality_preflight(
@@ -69,6 +78,7 @@ def run_cache_quality_preflight(
     sample_size: int = DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE,
     activity_budget_seconds: int | None = None,
     clock: Callable[[], float] = perf_counter,
+    utc_now: Callable[[], datetime] = _utc_now,
 ) -> dict[str, JSONValue]:
     """Benchmark a bounded cache sample and estimate full quality runtime."""
     if sample_size < 1:
@@ -116,6 +126,7 @@ def run_cache_quality_preflight(
         cache_targets=cache_targets,
         samples=samples,
         sample_size=sample_size,
+        generated_at_utc=_utc_timestamp(utc_now()),
         benchmark=benchmark,
         budget_seconds=budget_seconds,
         quality_profile=quality_profile,
@@ -167,6 +178,12 @@ def quality_run_preflight_warning(
     timeframes: Iterable[object] | None = None,
     quality_check_groups: Iterable[str] | None = None,
     evidence_path: str | Path | None = None,
+    evidence_max_age_seconds: int = (
+        DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS
+    ),
+    allow_stale_evidence: bool = False,
+    activity_budget_seconds: int | None = None,
+    utc_now: Callable[[], datetime] = _utc_now,
     large_target_count: int = QUALITY_PREFLIGHT_LARGE_CACHE_TARGET_COUNT,
 ) -> dict[str, JSONValue] | None:
     """Return a non-blocking warning for large cache quality runs."""
@@ -178,6 +195,23 @@ def quality_run_preflight_warning(
     selected_pairs = _selected_pairs(pairs, selected_groups)
     selected_formats = _normalize_formats(formats)
     selected_timeframes = _normalize_timeframes(timeframes)
+    budget_seconds = (
+        activity_budget_seconds
+        if activity_budget_seconds is not None
+        else activity_execution_policy(
+            "data_quality"
+        ).start_to_close_timeout_seconds
+    )
+    try:
+        discovery = discover_quality_targets(root_paths)
+    except QualityDiscoveryError:
+        return None
+    cache_targets = _filtered_cache_targets(
+        discovery.targets,
+        pairs=selected_pairs,
+        formats=selected_formats,
+        timeframes=selected_timeframes,
+    )
     if evidence_path and len(root_paths) != 1:
         evidence: dict[str, JSONValue] = {
             "status": "mismatch",
@@ -192,17 +226,16 @@ def quality_run_preflight_warning(
             selected_pairs=selected_pairs,
             selected_formats=selected_formats,
             selected_timeframes=selected_timeframes,
+            expected_target_count=len(cache_targets),
+            expected_cache_byte_count=sum(
+                target.size_bytes for target in cache_targets
+            ),
+            expected_cache_inventory=_cache_inventory_payload(cache_targets),
+            activity_budget_seconds=budget_seconds,
+            max_age_seconds=evidence_max_age_seconds,
+            allow_stale=allow_stale_evidence,
+            now_utc=utc_now(),
         )
-    try:
-        discovery = discover_quality_targets(root_paths)
-    except QualityDiscoveryError:
-        return None
-    cache_targets = _filtered_cache_targets(
-        discovery.targets,
-        pairs=selected_pairs,
-        formats=selected_formats,
-        timeframes=selected_timeframes,
-    )
     if (
         evidence.get("status") == "matched"
         or len(cache_targets) < large_target_count
@@ -236,7 +269,8 @@ def quality_run_preflight_warning(
         "evidence": cast(JSONValue, evidence),
         "suggested_preflight_command": preflight_command,
     }
-    return cast(dict[str, JSONValue], publish_safe_json_mapping(warning))
+    safe_warning: dict[str, JSONValue] = publish_safe_json_mapping(warning)
+    return safe_warning
 
 
 def format_quality_run_preflight_warning(
@@ -485,6 +519,33 @@ def _sample_quality_payload(report: QualityReport) -> dict[str, JSONValue]:
     return payload
 
 
+def _cache_inventory_payload(
+    targets: Iterable[_CacheTarget],
+) -> dict[str, JSONValue]:
+    rows: list[str] = []
+    target_items = tuple(targets)
+    for item in target_items:
+        rows.append(
+            "\t".join(
+                (
+                    item.target.symbol.lower(),
+                    item.target.data_format.lower(),
+                    item.target.timeframe.upper(),
+                    item.target.period,
+                    str(item.size_bytes),
+                    str(publish_safe_path(str(item.path))),
+                )
+            )
+        )
+    material = "\n".join(sorted(rows)).encode("utf-8")
+    return {
+        "target_count": len(target_items),
+        "cache_byte_count": sum(item.size_bytes for item in target_items),
+        "fingerprint_algorithm": "sha256",
+        "fingerprint": hashlib.sha256(material).hexdigest(),
+    }
+
+
 def _payload(
     *,
     root_path: Path,
@@ -496,6 +557,7 @@ def _payload(
     cache_targets: tuple[_CacheTarget, ...],
     samples: tuple[_CacheTarget, ...],
     sample_size: int,
+    generated_at_utc: str,
     benchmark: Mapping[str, JSONValue],
     budget_seconds: int,
     quality_profile: Mapping[str, Any] | None,
@@ -530,6 +592,11 @@ def _payload(
     payload: dict[str, JSONValue] = {
         "schema_version": QUALITY_PREFLIGHT_SCHEMA_VERSION,
         "operation": "data-quality-cache-preflight",
+        "generated_at_utc": generated_at_utc,
+        "package": {
+            "name": "histdatacom",
+            "version": HISTDATACOM_VERSION,
+        },
         "status": budget["status"],
         "root": str(publish_safe_path(str(root_path.resolve(strict=False)))),
         "filters": {
@@ -541,6 +608,7 @@ def _payload(
         },
         "target_count": len(cache_targets),
         "cache_byte_count": target_bytes,
+        "cache_inventory": _cache_inventory_payload(cache_targets),
         "estimated_row_count": estimated_total_rows,
         "sample": {
             "strategy": "size-quantiles",
@@ -560,6 +628,10 @@ def _payload(
         },
         "estimate": estimate,
         "temporal_budget": budget,
+        "preflight_policy": _preflight_policy_payload(
+            sample_size=sample_size,
+            budget_seconds=budget_seconds,
+        ),
         "sample_quality": benchmark["quality_report"],
         "quality_profile": quality_profile_report_metadata(quality_profile)[
             "quality_profile"
@@ -729,6 +801,13 @@ def _quality_preflight_evidence_state(
     selected_pairs: tuple[str, ...],
     selected_formats: tuple[str, ...],
     selected_timeframes: tuple[str, ...],
+    expected_target_count: int,
+    expected_cache_byte_count: int,
+    expected_cache_inventory: Mapping[str, JSONValue],
+    activity_budget_seconds: int,
+    max_age_seconds: int,
+    allow_stale: bool,
+    now_utc: datetime,
 ) -> dict[str, JSONValue]:
     if not evidence_path:
         return {"status": "not-provided", "reason": "no evidence path supplied"}
@@ -760,6 +839,46 @@ def _quality_preflight_evidence_state(
         return {
             "status": "not-actionable",
             "reason": "evidence decision is not safe or warn",
+        }
+    package = _mapping(payload.get("package"))
+    if package.get("version") != HISTDATACOM_VERSION:
+        return {
+            "status": "version-mismatch",
+            "reason": "package version differs",
+            "expected_version": HISTDATACOM_VERSION,
+            "observed_version": str(package.get("version", "") or ""),
+        }
+    if not allow_stale:
+        freshness = _freshness_mismatch(
+            payload,
+            max_age_seconds=max_age_seconds,
+            now_utc=now_utc,
+        )
+        if freshness is not None:
+            return freshness
+    policy_reason = _policy_mismatch_reason(
+        payload,
+        activity_budget_seconds=activity_budget_seconds,
+    )
+    if policy_reason:
+        return {"status": "policy-mismatch", "reason": policy_reason}
+    if _int_value(payload.get("target_count")) != expected_target_count:
+        return {
+            "status": "mismatch",
+            "reason": "cache target count differs",
+        }
+    if _int_value(payload.get("cache_byte_count")) != expected_cache_byte_count:
+        return {
+            "status": "mismatch",
+            "reason": "cache inventory bytes differ",
+        }
+    observed_inventory = _mapping(payload.get("cache_inventory"))
+    if observed_inventory.get("fingerprint") != expected_cache_inventory.get(
+        "fingerprint"
+    ):
+        return {
+            "status": "mismatch",
+            "reason": "cache inventory fingerprint differs",
         }
     return {"status": "matched", "reason": "evidence matches target scope"}
 
@@ -927,6 +1046,110 @@ def _budget_payload(
         "status": status,
         "reason": reason,
     }
+
+
+def _preflight_policy_payload(
+    *,
+    sample_size: int,
+    budget_seconds: int,
+) -> dict[str, JSONValue]:
+    return {
+        "sample_size": sample_size,
+        "temporal_budget": {
+            "activity": "data_quality",
+            "activity_budget_seconds": budget_seconds,
+            "warn_fraction": QUALITY_PREFLIGHT_WARN_FRACTION,
+        },
+        "freshness": {
+            "default_max_age_seconds": (
+                DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS
+            )
+        },
+    }
+
+
+def _policy_mismatch_reason(
+    payload: Mapping[str, JSONValue],
+    *,
+    activity_budget_seconds: int,
+) -> str:
+    policy = _mapping(payload.get("preflight_policy"))
+    if not policy:
+        return "preflight policy metadata is missing"
+    sample = _mapping(payload.get("sample"))
+    policy_sample_size = _int_value(policy.get("sample_size"))
+    if policy_sample_size < 1:
+        return "preflight sample size policy is invalid"
+    if policy_sample_size != _int_value(sample.get("requested_count")):
+        return "preflight sample size policy differs from report sample"
+    budget = _mapping(policy.get("temporal_budget"))
+    if budget.get("activity") != "data_quality":
+        return "Temporal budget activity differs"
+    if _int_value(budget.get("activity_budget_seconds")) != (
+        activity_budget_seconds
+    ):
+        return "Temporal data_quality budget differs"
+    if _float_value(budget.get("warn_fraction")) != (
+        QUALITY_PREFLIGHT_WARN_FRACTION
+    ):
+        return "Temporal budget warning policy differs"
+    return ""
+
+
+def _freshness_mismatch(
+    payload: Mapping[str, JSONValue],
+    *,
+    max_age_seconds: int,
+    now_utc: datetime,
+) -> dict[str, JSONValue] | None:
+    generated_at = _parse_utc_timestamp(payload.get("generated_at_utc"))
+    if generated_at is None:
+        return {
+            "status": "stale",
+            "reason": "generated_at_utc is missing or invalid",
+        }
+    normalized_now = _normalize_utc(now_utc)
+    age_seconds = (normalized_now - generated_at).total_seconds()
+    if age_seconds < -60:
+        return {
+            "status": "stale",
+            "reason": "generated_at_utc is in the future",
+        }
+    max_age = max(int(max_age_seconds), 0)
+    if age_seconds > max_age:
+        return {
+            "status": "stale",
+            "reason": f"evidence is older than {max_age} seconds",
+            "age_seconds": round(age_seconds, 3),
+            "max_age_seconds": max_age,
+        }
+    return None
+
+
+def _utc_timestamp(value: datetime) -> str:
+    return (
+        _normalize_utc(value)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _parse_utc_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return _normalize_utc(parsed)
+
+
+def _normalize_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _selected_pairs(

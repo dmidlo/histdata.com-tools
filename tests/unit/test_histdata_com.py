@@ -587,6 +587,9 @@ def test_data_quality_cli_warns_before_large_cache_run_without_preflight(
             str(tmp_path),
             "--quality-preflight-evidence",
             str(evidence_path),
+            "--quality-preflight-evidence-max-age-seconds",
+            "120",
+            "--quality-preflight-evidence-stale-ok",
         ],
     )
 
@@ -597,6 +600,8 @@ def test_data_quality_cli_warns_before_large_cache_run_without_preflight(
     assert "continuing without prompting" in output.err
     assert captured["roots"] == (str(tmp_path),)
     assert captured["warning_kwargs"]["evidence_path"] == str(evidence_path)
+    assert captured["warning_kwargs"]["evidence_max_age_seconds"] == 120
+    assert captured["warning_kwargs"]["allow_stale_evidence"] is True
     assert captured["request"].data_quality
 
 

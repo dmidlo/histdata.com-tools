@@ -101,6 +101,8 @@ class RuntimeContext:
     quality_max_errors: int
     quality_max_warnings: int
     quality_preflight: bool
+    quality_preflight_evidence_allow_stale: bool
+    quality_preflight_evidence_max_age_seconds: int
     quality_preflight_evidence_path: str | None
     quality_preflight_report_path: str | None
     quality_preflight_sample_size: int
@@ -315,6 +317,12 @@ class _HistDataCom:  # noqa:R701
             timeframes=self.context.request.timeframes,
             quality_check_groups=self.context.quality_check_groups,
             evidence_path=self.context.quality_preflight_evidence_path,
+            evidence_max_age_seconds=(
+                self.context.quality_preflight_evidence_max_age_seconds
+            ),
+            allow_stale_evidence=(
+                self.context.quality_preflight_evidence_allow_stale
+            ),
         )
         if warning is None:
             return
@@ -432,6 +440,12 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         quality_max_errors=int(args["quality_max_errors"]),
         quality_max_warnings=int(args["quality_max_warnings"]),
         quality_preflight=bool(args["quality_preflight"]),
+        quality_preflight_evidence_allow_stale=bool(
+            args["quality_preflight_evidence_allow_stale"]
+        ),
+        quality_preflight_evidence_max_age_seconds=int(
+            args["quality_preflight_evidence_max_age_seconds"]
+        ),
         quality_preflight_evidence_path=(
             None
             if args.get("quality_preflight_evidence_path") is None

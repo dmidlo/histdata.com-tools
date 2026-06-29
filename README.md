@@ -97,7 +97,8 @@ histdatacom -h
 ```txt
 usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C] [--config PATH] [-p PAIR [PAIR ...]] [--pair-groups GROUP [GROUP ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION]
                    [--data-directory DATA_DIRECTORY] [-v] [--orchestration-start] [--no-orchestration-start] [--submit-only] [--quality] [--repo-quality] [--quality-preflight] [--repo-quality-columns] [--quality-target PATH [PATH ...]]
-                   [--quality-checks GROUP [GROUP ...]] [--quality-report PATH] [--quality-preflight-report PATH] [--quality-preflight-evidence PATH] [--quality-preflight-sample-size COUNT] [--quality-profile PATH] [--quality-fail-on SEVERITY]
+                   [--quality-checks GROUP [GROUP ...]] [--quality-report PATH] [--quality-preflight-report PATH] [--quality-preflight-evidence PATH] [--quality-preflight-evidence-max-age-seconds SECONDS]
+                   [--quality-preflight-evidence-stale-ok] [--quality-preflight-sample-size COUNT] [--quality-profile PATH] [--quality-fail-on SEVERITY]
                    [--quality-max-errors COUNT] [--quality-max-warnings COUNT]
 
 options:
@@ -191,6 +192,12 @@ Data quality:
   --quality-preflight-evidence PATH
                         use a saved quality preflight JSON report as evidence
                         before a large cache-backed --quality run
+  --quality-preflight-evidence-max-age-seconds SECONDS
+                        maximum age for saved quality preflight evidence;
+                        defaults to 86400
+  --quality-preflight-evidence-stale-ok
+                        allow matching quality preflight evidence even when its
+                        generated_at_utc timestamp is stale
   --quality-preflight-sample-size COUNT
                         number of cache-size quantile targets to benchmark
   --quality-profile PATH
@@ -620,16 +627,22 @@ histdatacom --quality-preflight \
 The console output is human-readable. The optional
 `--quality-preflight-report PATH` file is publish-safe JSON with target counts,
 cache bytes, sampled paths, row counts, throughput, ETA range, sample quality
-summary, no-target diagnostics, and a decision section that says whether the
-full battery is safe, warned, failed, or has no matching targets. Safe and
-warned decisions include the next `histdatacom --quality ...` command for the
-same target scope. Use `--quality-preflight-sample-size COUNT` to tune the
-bounded sample.
+summary, generated timestamp, package version, preflight policy inputs,
+no-target diagnostics, and a decision section that says whether the full battery
+is safe, warned, failed, or has no matching targets. Safe and warned decisions
+include the next `histdatacom --quality ...` command for the same target scope.
+Use `--quality-preflight-sample-size COUNT` to tune the bounded sample.
 
 When launching a large cache-backed `--quality` run, pass the saved report with
 `--quality-preflight-evidence PATH`. If no matching evidence is available, the
 CLI prints a warning and suggested preflight command before continuing without
-prompting.
+prompting. Evidence must match the target root, filters, current package version,
+Temporal `data_quality` budget, cache target count, and cache byte inventory.
+Evidence also has to be fresh by default; use
+`--quality-preflight-evidence-max-age-seconds SECONDS` to change the 86400-second
+window, or pass `--quality-preflight-evidence-stale-ok` to explicitly bypass the
+age check while still enforcing scope, version, policy, and cache-inventory
+matches.
 
 #### Full-Dataset Quality Campaigns
 

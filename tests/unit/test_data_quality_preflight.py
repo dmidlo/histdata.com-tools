@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 
+import histdatacom
 import pytest
 
 from histdatacom import Options
@@ -52,8 +54,12 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
 
     assert payload["schema_version"] == QUALITY_PREFLIGHT_SCHEMA_VERSION
     assert payload["operation"] == "data-quality-cache-preflight"
+    assert str(payload["generated_at_utc"]).endswith("Z")
+    assert payload["package"]["version"] == histdatacom.__version__
     assert payload["status"] == "pass"
     assert payload["target_count"] == 5
+    assert payload["cache_inventory"]["fingerprint_algorithm"] == "sha256"
+    assert len(str(payload["cache_inventory"]["fingerprint"])) == 64
     assert payload["sample"]["strategy"] == "size-quantiles"
     assert payload["sample"]["requested_count"] == 3
     assert payload["sample"]["selected_count"] == 3
@@ -63,6 +69,13 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
     assert payload["benchmark"]["bytes_per_second"] > 0
     assert payload["temporal_budget"]["activity"] == "data_quality"
     assert payload["temporal_budget"]["status"] == "pass"
+    assert payload["preflight_policy"]["sample_size"] == 3
+    assert (
+        payload["preflight_policy"]["temporal_budget"][
+            "activity_budget_seconds"
+        ]
+        == 1000
+    )
     assert payload["decision"]["state"] == "safe"
     assert payload["decision"]["next_command"].startswith(
         "histdatacom --quality"
@@ -233,10 +246,205 @@ def test_quality_run_warning_requires_matching_preflight_evidence(
             timeframes=("T",),
             quality_check_groups=("inventory",),
             evidence_path=report_path,
+            activity_budget_seconds=100,
             large_target_count=1,
         )
         is None
     )
+
+
+def test_quality_run_warning_rejects_stale_preflight_evidence(
+    tmp_path: Path,
+) -> None:
+    """Matching evidence should still warn when generated outside max age."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    generated_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    evidence = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+        utc_now=lambda: generated_at,
+    )
+    report_path = write_quality_preflight_report(
+        evidence,
+        tmp_path / "preflight.json",
+    )
+
+    warning = quality_run_preflight_warning(
+        (data_dir,),
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        evidence_path=report_path,
+        evidence_max_age_seconds=60,
+        activity_budget_seconds=100,
+        utc_now=lambda: generated_at + timedelta(minutes=2),
+        large_target_count=1,
+    )
+
+    assert warning is not None
+    assert warning["evidence"]["status"] == "stale"
+    assert "older than 60 seconds" in str(warning["evidence"]["reason"])
+
+
+def test_quality_run_warning_rejects_version_mismatched_evidence(
+    tmp_path: Path,
+) -> None:
+    """Evidence from another package version should not suppress warnings."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    evidence = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+        utc_now=lambda: now,
+    )
+    evidence["package"]["version"] = "0.0.0"
+    report_path = tmp_path / "preflight.json"
+    report_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+    warning = quality_run_preflight_warning(
+        (data_dir,),
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        evidence_path=report_path,
+        activity_budget_seconds=100,
+        utc_now=lambda: now,
+        large_target_count=1,
+    )
+
+    assert warning is not None
+    assert warning["evidence"]["status"] == "version-mismatch"
+    assert warning["evidence"]["expected_version"] == histdatacom.__version__
+
+
+def test_quality_run_warning_rejects_policy_mismatched_evidence(
+    tmp_path: Path,
+) -> None:
+    """Evidence from a different Temporal budget should not suppress warnings."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    evidence = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+        utc_now=lambda: now,
+    )
+    report_path = write_quality_preflight_report(
+        evidence,
+        tmp_path / "preflight.json",
+    )
+
+    warning = quality_run_preflight_warning(
+        (data_dir,),
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        evidence_path=report_path,
+        activity_budget_seconds=200,
+        utc_now=lambda: now,
+        large_target_count=1,
+    )
+
+    assert warning is not None
+    assert warning["evidence"]["status"] == "policy-mismatch"
+    assert "budget differs" in str(warning["evidence"]["reason"])
+
+
+def test_quality_run_warning_rejects_cache_inventory_mismatch(
+    tmp_path: Path,
+) -> None:
+    """Evidence should not match after the local cache inventory changes."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    evidence = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+        utc_now=lambda: now,
+    )
+    evidence["cache_inventory"]["fingerprint"] = "stale"
+    report_path = tmp_path / "preflight.json"
+    report_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+    warning = quality_run_preflight_warning(
+        (data_dir,),
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        evidence_path=report_path,
+        activity_budget_seconds=100,
+        utc_now=lambda: now,
+        large_target_count=1,
+    )
+
+    assert warning is not None
+    assert warning["evidence"]["status"] == "mismatch"
+    assert "fingerprint differs" in str(warning["evidence"]["reason"])
+
+
+def test_quality_run_warning_allows_explicit_stale_bypass(
+    tmp_path: Path,
+) -> None:
+    """Operators can explicitly bypass age checks without bypassing scope."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    generated_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    evidence = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+        utc_now=lambda: generated_at,
+    )
+    report_path = write_quality_preflight_report(
+        evidence,
+        tmp_path / "preflight.json",
+    )
+
+    warning = quality_run_preflight_warning(
+        (data_dir,),
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        evidence_path=report_path,
+        evidence_max_age_seconds=60,
+        allow_stale_evidence=True,
+        activity_budget_seconds=100,
+        utc_now=lambda: generated_at + timedelta(days=30),
+        large_target_count=1,
+    )
+
+    assert warning is None
 
 
 def test_cli_accepts_quality_preflight_without_temporal_mode(

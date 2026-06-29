@@ -277,7 +277,11 @@ a bounded `.data` sample locally, writes optional publish-safe JSON evidence
 with `--quality-preflight-report PATH`, and reports a direct decision: safe,
 warned, failed, or no matching targets. When launching the full run, pass that
 saved report with `--quality-preflight-evidence PATH`; if the evidence does not
-match the target scope, the CLI warns and continues without prompting.
+match the target scope, current package version, freshness window, Temporal
+`data_quality` budget, or cache inventory, the CLI warns and continues without
+prompting. Use `--quality-preflight-evidence-max-age-seconds SECONDS` to tune the
+freshness window, or `--quality-preflight-evidence-stale-ok` to bypass only the
+age check explicitly.
 
 Warnings are advisory by default. Errors make a target failed and make the
 process exit nonzero under the default `--quality-fail-on error` policy. CI jobs

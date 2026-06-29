@@ -83,6 +83,7 @@ from histdatacom.cli_config import (
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.data_quality import QUALITY_CHECK_GROUPS, QUALITY_EXIT_TRIGGERS
 from histdatacom.data_quality.preflight import (
+    DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS,
     DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE,
 )
 from histdatacom.data_quality.profiles import (
@@ -221,6 +222,11 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             or self.arg_namespace.repo_quality_refresh
             or self.arg_namespace.quality_preflight
         )
+        evidence_policy_configured = bool(
+            self.arg_namespace.quality_preflight_evidence_allow_stale
+            or self.arg_namespace.quality_preflight_evidence_max_age_seconds
+            != DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS
+        )
         if (
             self.arg_namespace.repo_quality_columns
             and not self.arg_namespace.available_remote_data
@@ -272,8 +278,14 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 )
                 raise SystemExit(1)
             if self.arg_namespace.quality_preflight_evidence_path:
-                print(  # noqa:T201
+                print(
                     "--quality-preflight-evidence requires --quality"
+                )  # noqa:T201
+                raise SystemExit(1)
+            if evidence_policy_configured:
+                print(  # noqa:T201
+                    "quality preflight evidence policy options require "
+                    "--quality-preflight-evidence"
                 )
                 raise SystemExit(1)
             if self.arg_namespace.quality_preflight_report_path:
@@ -356,8 +368,17 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             self.arg_namespace.quality_preflight_evidence_path
             and not self.arg_namespace.data_quality
         ):
-            print(  # noqa:T201
+            print(
                 "--quality-preflight-evidence requires --quality"
+            )  # noqa:T201
+            raise SystemExit(1)
+        if (
+            evidence_policy_configured
+            and not self.arg_namespace.quality_preflight_evidence_path
+        ):
+            print(  # noqa:T201
+                "quality preflight evidence policy options require "
+                "--quality-preflight-evidence"
             )
             raise SystemExit(1)
 
@@ -437,6 +458,22 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                         self.arg_namespace.quality_preflight_evidence_path,
                     ]
                 )
+                if self.arg_namespace.quality_preflight_evidence_allow_stale:
+                    args.append("--quality-preflight-evidence-stale-ok")
+                if (
+                    self.arg_namespace.quality_preflight_evidence_max_age_seconds
+                    != DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS
+                ):
+                    max_age = getattr(
+                        self.arg_namespace,
+                        "quality_preflight_evidence_max_age_seconds",
+                    )
+                    args.extend(
+                        [
+                            "--quality-preflight-evidence-max-age-seconds",
+                            str(max_age),
+                        ]
+                    )
             if self.arg_namespace.quality_preflight:
                 if self.arg_namespace.quality_preflight_report_path:
                     args.extend(
@@ -1432,6 +1469,25 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "use a saved quality preflight JSON report as evidence before "
                 "a large cache-backed --quality run"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-evidence-max-age-seconds",
+            dest="quality_preflight_evidence_max_age_seconds",
+            type=_non_negative_int,
+            metavar="SECONDS",
+            help=(
+                "maximum age for saved quality preflight evidence; defaults to "
+                f"{DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS}"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-evidence-stale-ok",
+            dest="quality_preflight_evidence_allow_stale",
+            action="store_true",
+            help=(
+                "allow matching quality preflight evidence even when its "
+                "generated_at_utc timestamp is stale"
             ),
         )
         quality_args.add_argument(
