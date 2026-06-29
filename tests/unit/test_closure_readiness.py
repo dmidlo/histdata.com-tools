@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 from types import ModuleType
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 
 def _module() -> ModuleType:
@@ -45,6 +45,7 @@ class FakeRunner:
         precommit_returncode: int = 0,
         precommit_stdout: str = "all hooks passed\n",
         precommit_changes: str = "",
+        precommit_file_mutations: Mapping[str, str] | None = None,
         release_returncode: int = 0,
         ps_outputs: Sequence[str] = ("",),
         issue_state: str = "OPEN",
@@ -61,6 +62,7 @@ class FakeRunner:
         self.precommit_returncode = precommit_returncode
         self.precommit_stdout = precommit_stdout
         self.precommit_changes = precommit_changes
+        self.precommit_file_mutations = dict(precommit_file_mutations or {})
         self.release_returncode = release_returncode
         self.ps_outputs = tuple(ps_outputs)
         self.issue_state = issue_state
@@ -75,7 +77,6 @@ class FakeRunner:
         command: Sequence[str],
         cwd: Path,
     ) -> subprocess.CompletedProcess[str]:
-        del cwd
         args = tuple(command)
         self.calls.append(args)
         if args == ("git", "rev-parse", "--abbrev-ref", "HEAD"):
@@ -185,6 +186,10 @@ class FakeRunner:
         if args[:3] == (sys.executable, "-m", "pytest"):
             return _completed(args, stdout="983 passed\n")
         if args[:3] == (sys.executable, "-m", "pre_commit"):
+            for path, text in self.precommit_file_mutations.items():
+                target = cwd / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8")
             return _completed(
                 args,
                 returncode=self.precommit_returncode,
@@ -633,6 +638,155 @@ def test_execute_workflow_runs_ready_sequence_and_closes_issue(
         call[:3] == (sys.executable, "-m", "pytest") for call in runner.calls
     )
     assert any(call[:3] == ("gh", "issue", "close") for call in runner.calls)
+
+
+def test_execute_workflow_pre_mutation_gates_run_before_git_mutation(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Opt-in pre-mutation gates should pass before staging begins."""
+    module = _module()
+    runner = FakeRunner(status_stdout=" M scripts/closure_readiness.py\n")
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "285",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--commit-message",
+            "feat(workflow): add pre-mutation gates",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    first_pytest = next(
+        index
+        for index, call in enumerate(runner.calls)
+        if call[:3] == (sys.executable, "-m", "pytest")
+    )
+    first_precommit = next(
+        index
+        for index, call in enumerate(runner.calls)
+        if call[:3] == (sys.executable, "-m", "pre_commit")
+    )
+    first_add = next(
+        index
+        for index, call in enumerate(runner.calls)
+        if call[:3] == ("git", "add", "--")
+    )
+    markdown = module.render_issue_workflow_markdown(payload)
+
+    assert exit_code == 0
+    assert payload["readiness"]["state"] == "ready"
+    assert payload["pre_mutation_gates"]["enabled"] is True
+    assert payload["pre_mutation_gates"]["state"] == "pass"
+    assert payload["pre_mutation_gates"]["gates"]["state"] == "pass"
+    assert first_pytest < first_add
+    assert first_precommit < first_add
+    assert "## Pre-Mutation Gates" in markdown
+    assert "- State: pass" in markdown
+    assert any(call[:2] == ("git", "push") for call in runner.calls)
+    assert payload["final_readback"]["issue"]["state"] == "CLOSED"
+
+
+def test_execute_workflow_pre_mutation_gate_failure_blocks_mutation(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Failing pre-mutation gates should stop before git add."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        precommit_returncode=1,
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "285",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--commit-message",
+            "feat(workflow): add pre-mutation gates",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["readiness"]["state"] == "blocked"
+    assert payload["pre_mutation_gates"]["state"] == "blocked"
+    assert (
+        "pre-mutation-gates-failed" in payload["readiness"]["blocking_checks"]
+    )
+    assert "pre-mutation-gate:pre-commit" in (
+        payload["pre_mutation_gates"]["blocking_checks"]
+    )
+    assert any(
+        call[:3] == (sys.executable, "-m", "pre_commit")
+        for call in runner.calls
+    )
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+    assert not any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
+    assert not any(call[:2] == ("git", "push") for call in runner.calls)
+
+
+def test_execute_workflow_pre_mutation_file_change_blocks_mutation(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Pre-mutation gates should catch rewrites of already-dirty files."""
+    module = _module()
+    path = tmp_path / "scripts" / "closure_readiness.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("before\n", encoding="utf-8")
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        precommit_file_mutations={
+            "scripts/closure_readiness.py": "after\n",
+        },
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "285",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--commit-message",
+            "feat(workflow): add pre-mutation gates",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["readiness"]["state"] == "blocked"
+    assert "pre-mutation-gates-changed-files" in (
+        payload["readiness"]["blocking_checks"]
+    )
+    assert payload["pre_mutation_gates"]["changed_paths_after"] == [
+        "scripts/closure_readiness.py"
+    ]
+    assert payload["pre_mutation_gates"]["fingerprint_changed_paths"] == [
+        "scripts/closure_readiness.py"
+    ]
+    assert path.read_text(encoding="utf-8") == "after\n"
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+    assert not any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
 
 
 def test_execute_workflow_blocks_clean_tree_without_mutation(

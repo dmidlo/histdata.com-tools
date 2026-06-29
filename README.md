@@ -283,6 +283,7 @@ python scripts/closure_readiness.py --issue 274 --workflow --close-issue
 python scripts/closure_readiness.py \
   --issue 274 \
   --execute-workflow \
+  --pre-mutation-gates \
   --commit-message "feat(scope): describe the change" \
   --commit-path path/to/changed-file.py
 ```
@@ -309,7 +310,10 @@ after closing. `--execute-workflow` is the explicit mutating mode: it validates
 the declared paths and Commitizen message, runs targeted `git add`, commits,
 checks push readiness, pushes to the expected upstream, runs closure gates,
 closes the issue, and writes bounded execution evidence plus full ignored logs.
-Default behavior remains report-only unless this flag is present. Add
+Add `--pre-mutation-gates` to run the same closure gate battery before the first
+`git add`; the workflow blocks staging, commit, and push if those gates fail or
+rewrite files, and records the result separately from the post-push closure
+gates. Default behavior remains report-only unless this flag is present. Add
 `--release-preflight` only during publishing work; normal issue closure records
 the TestPyPI local simple-registry preflight as not-applicable.
 
