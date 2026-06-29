@@ -95,10 +95,23 @@ histdatacom -h
 ```
 
 ```txt
-usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C] [--config PATH] [-p PAIR [PAIR ...]] [--pair-groups GROUP [GROUP ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION]
-                   [--data-directory DATA_DIRECTORY] [-v] [--orchestration-start] [--no-orchestration-start] [--submit-only] [--quality] [--repo-quality] [--quality-preflight] [--repo-quality-columns] [--quality-target PATH [PATH ...]]
-                   [--quality-checks GROUP [GROUP ...]] [--quality-report PATH] [--quality-preflight-report PATH] [--quality-preflight-evidence PATH] [--quality-preflight-evidence-max-age-seconds SECONDS]
-                   [--quality-preflight-evidence-stale-ok] [--quality-preflight-sample-size COUNT] [--quality-profile PATH] [--quality-fail-on SEVERITY]
+usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
+                   [--config PATH] [-p PAIR [PAIR ...]]
+                   [--pair-groups GROUP [GROUP ...]] [-f FORMAT [FORMAT ...]]
+                   [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH]
+                   [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE]
+                   [-c CPU_UTILIZATION] [--data-directory DATA_DIRECTORY] [-v]
+                   [--orchestration-start] [--no-orchestration-start]
+                   [--submit-only] [--keep-runtime] [--no-keep-runtime]
+                   [--quality] [--repo-quality] [--quality-preflight]
+                   [--repo-quality-columns] [--quality-target PATH [PATH ...]]
+                   [--quality-checks GROUP [GROUP ...]]
+                   [--quality-report PATH] [--quality-preflight-report PATH]
+                   [--quality-preflight-evidence PATH]
+                   [--quality-preflight-evidence-max-age-seconds SECONDS]
+                   [--quality-preflight-evidence-stale-ok]
+                   [--quality-preflight-sample-size COUNT]
+                   [--quality-profile PATH] [--quality-fail-on SEVERITY]
                    [--quality-max-errors COUNT] [--quality-max-warnings COUNT]
 
 options:
@@ -123,9 +136,9 @@ Config:
                         space separated currency pairs. e.g. -p eurusd usdjpy
                         ...
   --pair-groups, --instrument-groups, --symbol-groups GROUP [GROUP ...]
-                        named instrument groups to union with --pairs.
-                        Common groups: majors, minors, crosses, exotics,
-                        major-triangles, metals, commodities, indices
+                        named instrument groups to union with --pairs. Common
+                        groups: majors, minors, crosses, exotics, major-
+                        triangles, metals, commodities, indices
   -f, --formats FORMAT [FORMAT ...]
                         space separated formats. -f metatrader ascii
                         ninjatrader metastock
@@ -136,8 +149,8 @@ Config:
                         set a start year and month for data. e.g. -s 2000-04
                         or -s 2015-00
   -e, --end_yearmonth END_YEARMONTH
-                        set an end year and month for data. e.g. -e 2020-00
-                        or -e 2022-04
+                        set an end year and month for data. e.g. -e 2020-00 or
+                        -e 2022-04
 
 Influxdb:
   -I, --import_to_influxdb
@@ -155,8 +168,8 @@ System:
                         OR integer percent 1-200
   --data-directory DATA_DIRECTORY
                         Directory Used to save data. default is "./data/"
-  -v, --verbose         increase logging verbosity; repeat as -vv for debug and
-                        -vvv for trace
+  -v, --verbose         increase logging verbosity; repeat as -vv for debug
+                        and -vvv for trace
 
 Orchestration:
   --orchestration-start
@@ -167,6 +180,10 @@ Orchestration:
                         already running
   --submit-only         submit the orchestration job without waiting for its
                         result
+  --keep-runtime        leave a runtime started by this command running after
+                        the job completes
+  --no-keep-runtime     stop a runtime started by this command after waited
+                        jobs complete
 
 Data quality:
   --quality             run offline data-quality assessment against local
@@ -187,8 +204,8 @@ Data quality:
                         write the full machine-readable JSON quality report to
                         PATH
   --quality-preflight-report PATH
-                        write the publish-safe JSON quality preflight report to
-                        PATH
+                        write the publish-safe JSON quality preflight report
+                        to PATH
   --quality-preflight-evidence PATH
                         use a saved quality preflight JSON report as evidence
                         before a large cache-backed --quality run
@@ -196,10 +213,11 @@ Data quality:
                         maximum age for saved quality preflight evidence;
                         defaults to 86400
   --quality-preflight-evidence-stale-ok
-                        allow matching quality preflight evidence even when its
-                        generated_at_utc timestamp is stale
+                        allow matching quality preflight evidence even when
+                        its generated_at_utc timestamp is stale
   --quality-preflight-sample-size COUNT
-                        number of cache-size quantile targets to benchmark
+                        number of cache-size quantile targets to benchmark;
+                        defaults to 4
   --quality-profile PATH
                         read a JSON quality profile with rule thresholds,
                         severities, and modeling assumptions
@@ -235,6 +253,14 @@ Commands:
 Run `histdatacom analytics --help` for analytics commands.
 Run `histdatacom cleanup --help` for cleanup commands.
 Run `histdatacom jobs --help` for job telemetry commands.
+```
+
+Maintainers: this help excerpt is generated from `ArgParser.format_help()` at a
+fixed width. After changing public CLI flags, run:
+
+```sh
+python scripts/sync_readme_cli_help.py
+python -m pytest tests/unit/test_readme_help_sync.py
 ```
 
 ---
