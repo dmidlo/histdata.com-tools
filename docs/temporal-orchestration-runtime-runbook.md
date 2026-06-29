@@ -316,10 +316,10 @@ Default retention policy:
 | Active log file size | Rotate after 10 MiB |
 | Rotated logs per log file | Keep 5 |
 | Temporal SQLite history | Preserve by default, warn after 512 MiB |
-| Durable job snapshots | Keep 500 newest jobs |
-| Status events | Keep 1,000 newest rows per job or work item |
-| Stage results | Keep 500 newest rows per work item |
-| Artifact references | Keep 500 newest rows per job or work item |
+| Durable job snapshots | Keep 100 newest jobs |
+| Status events | Keep 200 newest rows per job or work item |
+| Stage results | Keep 25 newest rows per work item |
+| Artifact references | Keep 200 newest rows per job or work item |
 | Spilled dataset plans | Keep 50 newest plans per request |
 
 Each limit can be overridden on the maintenance command:
@@ -328,10 +328,10 @@ Each limit can be overridden on the maintenance command:
 histdatacom runtime maintenance \
   --max-log-bytes 10485760 \
   --max-rotated-logs 5 \
-  --max-job-snapshots 500 \
-  --max-status-events-per-owner 1000 \
-  --max-stage-results-per-work-item 500 \
-  --max-artifacts-per-owner 500 \
+  --max-job-snapshots 100 \
+  --max-status-events-per-owner 200 \
+  --max-stage-results-per-work-item 25 \
+  --max-artifacts-per-owner 200 \
   --max-dataset-plans-per-request 50 \
   --json
 ```
