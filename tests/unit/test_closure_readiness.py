@@ -49,6 +49,7 @@ class FakeRunner:
         release_returncode: int = 0,
         ps_outputs: Sequence[str] = ("",),
         issue_state: str = "OPEN",
+        issue_body: str = "",
         close_returncode: int = 0,
     ) -> None:
         self.branch = branch
@@ -66,6 +67,7 @@ class FakeRunner:
         self.release_returncode = release_returncode
         self.ps_outputs = tuple(ps_outputs)
         self.issue_state = issue_state
+        self.issue_body = issue_body
         self.close_returncode = close_returncode
         self.calls: list[tuple[str, ...]] = []
         self.status_calls = 0
@@ -154,17 +156,25 @@ class FakeRunner:
         if (
             len(args) == 6
             and args[:3] == ("gh", "issue", "view")
-            and args[4:] == ("--json", "number,state,title,url")
+            and args[4] == "--json"
         ):
             number = int(args[3])
+            fields = set(args[5].split(","))
+            payload = {
+                "number": number,
+                "state": self.issue_state,
+                "title": "chore(v1.4.0): helper",
+                "url": f"https://github.com/example/repo/issues/{number}",
+            }
+            if "body" in fields:
+                payload["body"] = self.issue_body
             return _completed(
                 args,
                 stdout=json.dumps(
                     {
-                        "number": number,
-                        "state": self.issue_state,
-                        "title": "chore(v1.4.0): helper",
-                        "url": f"https://github.com/example/repo/issues/{number}",
+                        key: value
+                        for key, value in payload.items()
+                        if key in fields
                     }
                 ),
             )
@@ -395,6 +405,228 @@ def test_issue_audit_mode_reads_issue_without_running_gates(
         call[:3] == (sys.executable, "-m", "pre_commit")
         for call in runner.calls
     )
+
+
+def test_acceptance_criteria_parser_reads_checklists_and_section_bullets() -> (
+    None
+):
+    """Issue bodies should produce stable acceptance evidence items."""
+    module = _module()
+
+    criteria = module.parse_acceptance_criteria("""
+## Problem
+
+Context text.
+
+## Acceptance criteria
+
+- [x] Parse issue body checklists.
+- Emit Markdown evidence.
+- Distinguish missing criteria.
+
+## Context
+
+- This bullet is outside the acceptance section.
+""")
+    checklist = module.parse_acceptance_criteria("""
+Implementation notes.
+
+- [ ] Global checklist item.
+""")
+
+    assert [item["id"] for item in criteria] == [
+        "ac-001",
+        "ac-002",
+        "ac-003",
+    ]
+    assert criteria[0]["source"] == "checklist"
+    assert criteria[0]["issue_checked"] is True
+    assert criteria[1]["source"] == "bullet"
+    assert criteria[2]["slug"] == "distinguish-missing-criteria"
+    assert [item["text"] for item in checklist] == ["Global checklist item."]
+
+
+def test_acceptance_coverage_renders_publish_safe_markdown(
+    tmp_path: Path,
+) -> None:
+    """Explicit evidence should render without leaking local machine paths."""
+    module = _module()
+    issue_body = """
+## Acceptance criteria
+
+- Parse issue body checklist or acceptance-criteria bullets.
+- Emit Markdown and JSON coverage evidence.
+- Clearly distinguish not applicable criteria.
+"""
+    report = module.build_readiness_report(
+        repo_root=tmp_path,
+        issue=286,
+        run_gates=True,
+        artifact_roots=(tmp_path / "data",),
+        process_rows=(),
+        runner=FakeRunner(issue_body=issue_body),
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        acceptance_files={
+            "ac-001": ("/Users/example/project/scripts/closure_readiness.py",),
+        },
+        acceptance_tests={
+            "ac-001": ("tests/unit/test_closure_readiness.py",),
+        },
+        acceptance_reports={
+            "*": (
+                "/Users/example/project/.histdatacom/closure-readiness/"
+                "closure-286.json",
+            ),
+        },
+        acceptance_statuses={
+            "ac-002": "manual",
+            "ac-003": "not-applicable",
+        },
+        acceptance_notes={
+            "ac-002": ("manual audit from /Users/example/private.txt",),
+        },
+    )
+
+    markdown = module.render_markdown(report)
+    coverage = report["acceptance_coverage"]
+
+    assert coverage["state"] == "ready"
+    assert coverage["counts"]["verified"] == 1
+    assert coverage["counts"]["manual"] == 1
+    assert coverage["counts"]["not-applicable"] == 1
+    assert "## Acceptance Coverage" in markdown
+    assert "| `ac-001` | verified |" in markdown
+    assert ".histdatacom/closure-readiness/closure-286.json" in markdown
+    assert "/Users/example" not in markdown
+    assert "/Users/example" not in json.dumps(report, sort_keys=True)
+
+
+def test_close_issue_refuses_missing_acceptance_criteria(
+    tmp_path: Path,
+) -> None:
+    """Automatic close should block when required criteria lack evidence."""
+    module = _module()
+    runner = FakeRunner(issue_body="""
+## Acceptance criteria
+
+- Parse issue body checklists.
+""")
+    report = module.build_readiness_report(
+        repo_root=tmp_path,
+        issue=286,
+        run_gates=True,
+        artifact_roots=(tmp_path / "data",),
+        process_rows=(),
+        runner=runner,
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    updated = module.attach_issue_close_action(
+        report,
+        repo_root=tmp_path,
+        runner=runner,
+    )
+
+    assert report["readiness"]["state"] == "ready"
+    assert report["acceptance_coverage"]["state"] == "blocked"
+    assert updated["issue_close"]["state"] == "refused"
+    assert "acceptance-criteria-missing" in (
+        updated["issue_close"]["blocking_checks"]
+    )
+    assert not any(
+        call[:3] == ("gh", "issue", "close") for call in runner.calls
+    )
+
+
+def test_close_issue_records_explicit_acceptance_override(
+    tmp_path: Path,
+) -> None:
+    """Missing criteria may be overridden only with explicit recorded evidence."""
+    module = _module()
+    runner = FakeRunner(issue_body="""
+## Acceptance criteria
+
+- This criterion is intentionally deferred.
+""")
+
+    report = module.build_readiness_report(
+        repo_root=tmp_path,
+        issue=286,
+        run_gates=True,
+        artifact_roots=(tmp_path / "data",),
+        process_rows=(),
+        runner=runner,
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        acceptance_missing_ok=True,
+        acceptance_override_reason="deferred by maintainer",
+    )
+    updated = module.attach_issue_close_action(
+        report,
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    close_call = [
+        call for call in runner.calls if call[:3] == ("gh", "issue", "close")
+    ][0]
+
+    assert report["acceptance_coverage"]["state"] == "override"
+    assert updated["issue_close"]["state"] == "closed"
+    assert "Acceptance override: deferred by maintainer" in close_call[-1]
+
+
+def test_execute_workflow_infers_acceptance_evidence(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Executable workflow should infer files, tests, and report paths."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=(
+            " M scripts/closure_readiness.py\n"
+            " M tests/unit/test_closure_readiness.py\n"
+        ),
+        issue_body="""
+## Acceptance criteria
+
+- Parse issue body checklist or acceptance-criteria bullets.
+- Emit Markdown and JSON coverage evidence.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "286",
+            "--execute-workflow",
+            "--commit-message",
+            "feat(workflow): add acceptance coverage evidence",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--commit-path",
+            "tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    coverage = payload["acceptance_coverage"]
+
+    assert exit_code == 0
+    assert payload["readiness"]["state"] == "ready"
+    assert coverage["state"] == "ready"
+    assert coverage["counts"]["verified"] == 2
+    assert coverage["items"][0]["files"] == [
+        "scripts/closure_readiness.py",
+        "tests/unit/test_closure_readiness.py",
+    ]
+    assert coverage["items"][0]["tests"] == [
+        "tests/unit/test_closure_readiness.py"
+    ]
+    assert ".histdatacom/closure-readiness/issue-workflow-286.json" in (
+        coverage["items"][0]["reports"]
+    )
+    assert payload["final_readback"]["issue"]["state"] == "CLOSED"
 
 
 def test_commit_readiness_blocks_clean_tree_without_changes(

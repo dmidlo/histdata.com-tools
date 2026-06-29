@@ -34,11 +34,19 @@ SCHEMA_VERSION = "histdatacom.closure-readiness.v1"
 SUMMARY_SCHEMA_VERSION = "histdatacom.closure-report-summary.v1"
 COMMIT_READINESS_SCHEMA_VERSION = "histdatacom.commit-readiness.v1"
 ISSUE_WORKFLOW_SCHEMA_VERSION = "histdatacom.issue-workflow-execution.v1"
+ACCEPTANCE_COVERAGE_SCHEMA_VERSION = "histdatacom.acceptance-coverage.v1"
 DEFAULT_REPORT_DIR = Path(".histdatacom") / "closure-readiness"
 DEFAULT_REQUIRED_BRANCH = "dev"
 DEFAULT_EXPECTED_UPSTREAM = "origin/dev"
 DEFAULT_TAIL_LINE_LIMIT = 12
 DEFAULT_TAIL_CHAR_LIMIT = 4_000
+ACCEPTANCE_STATUSES = {
+    "verified",
+    "manual",
+    "not-applicable",
+    "missing",
+}
+ACCEPTANCE_MISSING_BLOCKER = "acceptance-criteria-missing"
 CommandRunner = Callable[
     [Sequence[str], Path],
     subprocess.CompletedProcess[str],
@@ -184,13 +192,35 @@ def build_readiness_report(
     process_rows: Sequence[str] | None = None,
     runner: CommandRunner | None = None,
     now: datetime | None = None,
+    acceptance_statuses: Mapping[str, str] | None = None,
+    acceptance_files: Mapping[str, Sequence[str]] | None = None,
+    acceptance_tests: Mapping[str, Sequence[str]] | None = None,
+    acceptance_reports: Mapping[str, Sequence[str]] | None = None,
+    acceptance_notes: Mapping[str, Sequence[str]] | None = None,
+    acceptance_missing_ok: bool = False,
+    acceptance_override_reason: str = "",
 ) -> dict[str, Any]:
     """Return a publish-safe closure-readiness report."""
     command_runner = runner or _run_command
     root = repo_root.expanduser().resolve(strict=False)
     generated_at = now or datetime.now(timezone.utc)
     git_state_before_gates = collect_git_state(root, runner=command_runner)
-    issue_state = collect_issue_state(root, issue, runner=command_runner)
+    issue_state = collect_issue_state(
+        root,
+        issue,
+        runner=command_runner,
+        include_body=True,
+    )
+    acceptance_coverage = build_acceptance_coverage(
+        issue_state,
+        statuses=acceptance_statuses,
+        files=acceptance_files,
+        tests=acceptance_tests,
+        reports=acceptance_reports,
+        notes=acceptance_notes,
+        missing_ok=acceptance_missing_ok,
+        override_reason=acceptance_override_reason,
+    )
     processes_before_gates = collect_process_summary(
         root,
         rows=process_rows,
@@ -241,7 +271,8 @@ def build_readiness_report(
             "root": str(publish_safe_path(str(root))),
             **git_state,
         },
-        "issue": issue_state,
+        "issue": _issue_report_payload(issue_state),
+        "acceptance_coverage": acceptance_coverage,
         "processes": process_summary,
         "processes_before_gates": processes_before_gates,
         "source_artifacts": artifact_summary,
@@ -443,6 +474,7 @@ def collect_issue_state(
     issue: int | None,
     *,
     runner: CommandRunner,
+    include_body: bool = False,
 ) -> dict[str, Any]:
     """Return linked GitHub issue metadata when requested."""
     if issue is None:
@@ -451,6 +483,9 @@ def collect_issue_state(
             "state": "not-requested",
             "reason": "no issue number supplied",
         }
+    json_fields = "number,state,title,url"
+    if include_body:
+        json_fields = f"{json_fields},body"
     result = runner(
         (
             "gh",
@@ -458,7 +493,7 @@ def collect_issue_state(
             "view",
             str(issue),
             "--json",
-            "number,state,title,url",
+            json_fields,
         ),
         repo_root,
     )
@@ -478,13 +513,349 @@ def collect_issue_state(
             "state": "unavailable",
             "reason": f"invalid gh issue JSON: {exc}",
         }
-    return {
+    payload_out = {
         "requested": True,
         "number": int(payload.get("number", issue)),
         "state": str(payload.get("state", "unknown")),
         "title": str(payload.get("title", "")),
         "url": str(payload.get("url", "")),
     }
+    if include_body:
+        payload_out["body"] = str(payload.get("body", "") or "")
+    return payload_out
+
+
+def build_acceptance_coverage(
+    issue_state: Mapping[str, Any],
+    *,
+    statuses: Mapping[str, str] | None = None,
+    files: Mapping[str, Sequence[str]] | None = None,
+    tests: Mapping[str, Sequence[str]] | None = None,
+    reports: Mapping[str, Sequence[str]] | None = None,
+    notes: Mapping[str, Sequence[str]] | None = None,
+    missing_ok: bool = False,
+    override_reason: str = "",
+) -> dict[str, Any]:
+    """Return publish-safe issue acceptance coverage evidence."""
+    if issue_state.get("requested") is False:
+        return _empty_acceptance_coverage(
+            "not-requested",
+            "no issue number supplied",
+            missing_ok=missing_ok,
+            override_reason=override_reason,
+        )
+    if issue_state.get("state") == "unavailable":
+        return _empty_acceptance_coverage(
+            "unavailable",
+            str(issue_state.get("reason", "issue body unavailable")),
+            missing_ok=missing_ok,
+            override_reason=override_reason,
+        )
+    criteria = parse_acceptance_criteria(str(issue_state.get("body", "") or ""))
+    if not criteria:
+        return _empty_acceptance_coverage(
+            "not-applicable",
+            "no acceptance criteria found in issue body",
+            missing_ok=missing_ok,
+            override_reason=override_reason,
+        )
+
+    status_map = dict(statuses or {})
+    file_map = _normalize_acceptance_value_map(files)
+    test_map = _normalize_acceptance_value_map(tests)
+    report_map = _normalize_acceptance_value_map(reports)
+    note_map = _normalize_acceptance_value_map(notes)
+    items: list[dict[str, Any]] = []
+    missing_ids: list[str] = []
+    counts = {status: 0 for status in ACCEPTANCE_STATUSES}
+
+    for criterion in criteria:
+        criterion_files = _acceptance_values_for(criterion, file_map)
+        criterion_tests = _acceptance_values_for(criterion, test_map)
+        criterion_reports = _acceptance_values_for(criterion, report_map)
+        criterion_notes = _acceptance_values_for(criterion, note_map)
+        status = _acceptance_status_for(
+            criterion,
+            status_map,
+            files=criterion_files,
+            tests=criterion_tests,
+            reports=criterion_reports,
+        )
+        counts[status] += 1
+        if status == "missing":
+            missing_ids.append(str(criterion["id"]))
+        items.append(
+            {
+                **criterion,
+                "required": status != "not-applicable",
+                "status": status,
+                "files": _safe_path_list(criterion_files),
+                "tests": _safe_text_list(criterion_tests),
+                "reports": _safe_path_list(criterion_reports),
+                "notes": _safe_text_list(criterion_notes),
+            }
+        )
+
+    state = "ready"
+    reason = "all required acceptance criteria have evidence"
+    if missing_ids:
+        state = "override" if missing_ok else "blocked"
+        reason = (
+            "missing acceptance criteria explicitly overridden"
+            if missing_ok
+            else "required acceptance criteria are missing evidence"
+        )
+    payload = {
+        "schema_version": ACCEPTANCE_COVERAGE_SCHEMA_VERSION,
+        "state": state,
+        "reason": reason,
+        "criteria_count": len(items),
+        "required_count": sum(1 for item in items if item["required"]),
+        "covered_count": len(items) - len(missing_ids),
+        "missing_count": len(missing_ids),
+        "counts": {key: counts[key] for key in sorted(counts)},
+        "missing_ids": missing_ids,
+        "override": {
+            "missing_ok": bool(missing_ok),
+            "reason": (
+                override_reason
+                if override_reason
+                else (
+                    "operator override supplied"
+                    if missing_ok
+                    else ""
+                )
+            ),
+        },
+        "items": items,
+    }
+    safe = publish_safe_json_value(payload)
+    if not isinstance(safe, dict):
+        raise TypeError("acceptance coverage report must be a JSON object")
+    return dict(safe)
+
+
+def parse_acceptance_criteria(issue_body: str) -> list[dict[str, Any]]:
+    """Parse issue acceptance criteria from a checklist or criteria section."""
+    lines = issue_body.splitlines()
+    section = _acceptance_section(lines)
+    candidates = section if section else lines
+    allow_plain_bullets = bool(section)
+    parsed: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+
+    for raw_line in candidates:
+        bullet = _acceptance_bullet(raw_line, allow_plain=allow_plain_bullets)
+        if bullet is not None:
+            if current is not None:
+                parsed.append(current)
+            current = bullet
+            continue
+        if current is None:
+            continue
+        if raw_line.startswith((" ", "\t")) and raw_line.strip():
+            current["text"] = f"{current['text']} {raw_line.strip()}"
+    if current is not None:
+        parsed.append(current)
+
+    items: list[dict[str, Any]] = []
+    for index, item in enumerate(parsed, start=1):
+        text = _normalize_acceptance_text(str(item["text"]))
+        if not text:
+            continue
+        text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        items.append(
+            {
+                "id": f"ac-{index:03d}",
+                "index": index,
+                "slug": _slug(text),
+                "text": text,
+                "text_sha256": text_hash,
+                "text_hash": text_hash[:12],
+                "source": item["source"],
+                "issue_checked": item["issue_checked"],
+            }
+        )
+    return items
+
+
+def _empty_acceptance_coverage(
+    state: str,
+    reason: str,
+    *,
+    missing_ok: bool,
+    override_reason: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": ACCEPTANCE_COVERAGE_SCHEMA_VERSION,
+        "state": state,
+        "reason": reason,
+        "criteria_count": 0,
+        "required_count": 0,
+        "covered_count": 0,
+        "missing_count": 0,
+        "counts": {key: 0 for key in sorted(ACCEPTANCE_STATUSES)},
+        "missing_ids": [],
+        "override": {
+            "missing_ok": bool(missing_ok),
+            "reason": override_reason if missing_ok else "",
+        },
+        "items": [],
+    }
+
+
+def _acceptance_section(lines: Sequence[str]) -> list[str]:
+    start_index: int | None = None
+    start_level = 0
+    for index, line in enumerate(lines):
+        heading = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$", line)
+        if not heading:
+            continue
+        title = heading.group(2).strip().rstrip(":").lower()
+        if title in {"acceptance criteria", "acceptance checklist"}:
+            start_index = index + 1
+            start_level = len(heading.group(1))
+            break
+    if start_index is None:
+        return []
+    section: list[str] = []
+    for line in lines[start_index:]:
+        heading = re.match(r"^\s{0,3}(#{1,6})\s+", line)
+        if heading and len(heading.group(1)) <= start_level:
+            break
+        section.append(line)
+    return section
+
+
+def _acceptance_bullet(
+    line: str,
+    *,
+    allow_plain: bool,
+) -> dict[str, Any] | None:
+    match = re.match(r"^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$", line)
+    if not match:
+        return None
+    body = match.group(1).strip()
+    checkbox = re.match(r"^\[(?P<mark>[ xX])\]\s+(.+?)\s*$", body)
+    if checkbox:
+        return {
+            "text": checkbox.group(2).strip(),
+            "source": "checklist",
+            "issue_checked": checkbox.group("mark").lower() == "x",
+        }
+    if not allow_plain:
+        return None
+    return {
+        "text": body,
+        "source": "bullet",
+        "issue_checked": False,
+    }
+
+
+def _normalize_acceptance_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalize_acceptance_value_map(
+    value_map: Mapping[str, Sequence[str]] | None,
+) -> dict[str, tuple[str, ...]]:
+    normalized: dict[str, tuple[str, ...]] = {}
+    for key, values in dict(value_map or {}).items():
+        normalized[_normalize_acceptance_key(key)] = tuple(
+            str(value) for value in values if str(value)
+        )
+    return normalized
+
+
+def _acceptance_values_for(
+    criterion: Mapping[str, Any],
+    value_map: Mapping[str, Sequence[str]],
+) -> tuple[str, ...]:
+    values: list[str] = []
+    for key in _acceptance_lookup_keys(criterion):
+        values.extend(value_map.get(key, ()))
+    return tuple(dict.fromkeys(values))
+
+
+def _acceptance_status_for(
+    criterion: Mapping[str, Any],
+    status_map: Mapping[str, str],
+    *,
+    files: Sequence[str],
+    tests: Sequence[str],
+    reports: Sequence[str],
+) -> str:
+    for key in _acceptance_lookup_keys(criterion):
+        if key in status_map:
+            return _normalize_acceptance_status(status_map[key])
+    if criterion.get("issue_checked") is True:
+        return "manual"
+    if tests or reports:
+        return "verified"
+    if files:
+        return "manual"
+    return "missing"
+
+
+def _acceptance_lookup_keys(criterion: Mapping[str, Any]) -> tuple[str, ...]:
+    return (
+        _normalize_acceptance_key(str(criterion.get("id", ""))),
+        _normalize_acceptance_key(str(criterion.get("index", ""))),
+        _normalize_acceptance_key(
+            f"criterion-{criterion.get('index', '')}",
+        ),
+        _normalize_acceptance_key(str(criterion.get("slug", ""))),
+        _normalize_acceptance_key(str(criterion.get("text_hash", ""))),
+        _normalize_acceptance_key(str(criterion.get("text_sha256", ""))),
+        "*",
+        "all",
+    )
+
+
+def _normalize_acceptance_key(value: object) -> str:
+    return str(value).strip().lower().replace("_", "-")
+
+
+def _normalize_acceptance_status(value: object) -> str:
+    normalized = _normalize_acceptance_key(value)
+    aliases = {
+        "n/a": "not-applicable",
+        "n-a": "not-applicable",
+        "na": "not-applicable",
+        "not-applicable": "not-applicable",
+        "notapplicable": "not-applicable",
+        "manual": "manual",
+        "manually-asserted": "manual",
+        "asserted": "manual",
+        "verified": "verified",
+        "verify": "verified",
+        "pass": "verified",
+        "passed": "verified",
+        "missing": "missing",
+    }
+    status = aliases.get(normalized)
+    if status not in ACCEPTANCE_STATUSES:
+        raise ValueError(f"unsupported acceptance status: {value}")
+    return status
+
+
+def _safe_path_list(values: Sequence[str]) -> list[str]:
+    return list(
+        dict.fromkeys(publish_safe_path(str(value)) for value in values)
+    )
+
+
+def _safe_text_list(values: Sequence[str]) -> list[str]:
+    safe_values = [
+        publish_safe_json_value(str(value)) for value in values if str(value)
+    ]
+    return [str(value) for value in dict.fromkeys(safe_values)]
+
+
+def _issue_report_payload(issue_state: Mapping[str, Any]) -> dict[str, Any]:
+    payload = dict(issue_state)
+    payload.pop("body", None)
+    return payload
 
 
 def collect_process_summary(
@@ -807,6 +1178,7 @@ def close_issue_if_ready(
     root = repo_root.expanduser().resolve(strict=False)
     readiness = _mapping(report.get("readiness"))
     workflow = _mapping(report.get("workflow"))
+    acceptance = _mapping(report.get("acceptance_coverage"))
     issue = _mapping(report.get("issue"))
     number = _int(issue.get("number"))
     if workflow and workflow.get("state") != "ready":
@@ -820,6 +1192,14 @@ def close_issue_if_ready(
             "state": "refused",
             "reason": "closure readiness is not ready",
             "blocking_checks": list(readiness.get("blocking_checks", []) or []),
+        }
+    acceptance_blockers = _acceptance_close_blockers(acceptance)
+    if acceptance_blockers:
+        return {
+            "state": "refused",
+            "reason": "acceptance coverage is missing required criteria",
+            "blocking_checks": acceptance_blockers,
+            "acceptance_coverage": dict(acceptance),
         }
     if number <= 0:
         return {
@@ -944,16 +1324,18 @@ def summarize_readiness_report(
     issue_close = _mapping(report.get("issue_close"))
     issue_after = _mapping(issue_close.get("issue_after"))
     report_paths = _mapping(report.get("report_paths"))
+    acceptance = _mapping(report.get("acceptance_coverage"))
     close_state = str(issue_close.get("state", "not-run"))
     ready = readiness.get("state") == "ready"
     close_ok = close_state in {"not-run", "closed", "already-closed"}
     workflow_state = str(workflow.get("state", "not-run"))
     workflow_ok = not workflow or workflow_state == "ready"
+    acceptance_ok = _acceptance_close_ready(acceptance)
     payload: dict[str, Any] = {
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "source_schema_version": report.get("schema_version", ""),
         "generated_at_utc": report.get("generated_at_utc", ""),
-        "accepted": bool(ready and close_ok and workflow_ok),
+        "accepted": bool(ready and close_ok and workflow_ok and acceptance_ok),
         "readiness": {
             "state": readiness.get("state", "unknown"),
             "blocking_checks": list(readiness.get("blocking_checks", []) or []),
@@ -991,6 +1373,7 @@ def summarize_readiness_report(
             "state": close_state,
             "final_issue": _issue_label(issue_after) if issue_after else "",
         },
+        "acceptance_coverage": _acceptance_summary(acceptance),
         "report_paths": _report_paths_summary(report_paths),
     }
     safe = publish_safe_json_value(payload)
@@ -1012,6 +1395,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     issue_close = _mapping(report.get("issue_close"))
     workflow = _mapping(report.get("workflow"))
     report_paths = _mapping(report.get("report_paths"))
+    acceptance = _mapping(report.get("acceptance_coverage"))
     lines = [
         "# Closure Readiness Report",
         "",
@@ -1031,6 +1415,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         lines.extend(f"- `{blocker}`" for blocker in blockers)
     else:
         lines.append("- None")
+    lines.extend(_render_acceptance_markdown(acceptance))
     lines.extend(
         [
             "",
@@ -1129,6 +1514,7 @@ def render_issue_audit_human(report: Mapping[str, Any]) -> str:
     repo = _mapping(report.get("repo"))
     issue = _mapping(report.get("issue"))
     precheck = _mapping(report.get("precheck"))
+    acceptance = _mapping(report.get("acceptance_coverage"))
     lines = [
         "Closure issue audit",
         f"issue: {_issue_label(issue)}",
@@ -1140,6 +1526,7 @@ def render_issue_audit_human(report: Mapping[str, Any]) -> str:
         f"commit: {repo.get('head_short', '')}",
         f"worktree dirty: {_yes_no(repo.get('dirty'))}",
         f"precheck: {precheck.get('state', 'unknown')}",
+        _acceptance_human_line(acceptance),
     ]
     blockers = list(precheck.get("blocking_checks", []) or [])
     if blockers:
@@ -1227,6 +1614,7 @@ def render_human(report: Mapping[str, Any]) -> str:
     issue_close = _mapping(report.get("issue_close"))
     workflow = _mapping(report.get("workflow"))
     report_paths = _mapping(report.get("report_paths"))
+    acceptance = _mapping(report.get("acceptance_coverage"))
     lines = [
         "Closure readiness",
         f"state: {readiness.get('state', 'unknown')}",
@@ -1238,6 +1626,7 @@ def render_human(report: Mapping[str, Any]) -> str:
         f"commit: {repo.get('head_short', '')}",
         f"worktree dirty: {_yes_no(repo.get('dirty'))}",
         f"gates: {gates.get('state', 'unknown')}",
+        _acceptance_human_line(acceptance),
     ]
     blockers = list(readiness.get("blocking_checks", []) or [])
     if blockers:
@@ -1281,6 +1670,7 @@ def render_report_summary_human(summary: Mapping[str, Any]) -> str:
     workflow = _mapping(summary.get("workflow"))
     issue_close = _mapping(summary.get("issue_close"))
     report_paths = _mapping(summary.get("report_paths"))
+    acceptance = _mapping(summary.get("acceptance_coverage"))
     lines = [
         "Closure report summary",
         f"accepted: {_yes_no(summary.get('accepted'))}",
@@ -1295,6 +1685,7 @@ def render_report_summary_human(summary: Mapping[str, Any]) -> str:
         f"worktree dirty: {_yes_no(repo.get('dirty'))}",
         f"release preflight: {release.get('state', 'unknown')}",
         f"workflow: {workflow.get('state', 'not-run')}",
+        _acceptance_summary_human_line(acceptance),
         f"report paths: {report_paths.get('state', 'not-recorded')}",
         f"issue close: {issue_close.get('state', 'not-run')}",
     ]
@@ -1323,6 +1714,7 @@ def render_close_comment(report: Mapping[str, Any]) -> str:
     processes = _mapping(report.get("processes"))
     artifacts = _mapping(report.get("source_artifacts"))
     release = _mapping(report.get("release_preflight"))
+    acceptance = _mapping(report.get("acceptance_coverage"))
     gate_labels = _gate_labels(gates)
     lines = [
         f"Closure readiness: {readiness.get('state', 'unknown')}",
@@ -1338,13 +1730,271 @@ def render_close_comment(report: Mapping[str, Any]) -> str:
         f"Transient source artifacts: {artifacts.get('state', 'unknown')} "
         f"({artifacts.get('source_artifact_count', 0)})",
         f"Release preflight: {release.get('state', 'unknown')}",
+        _acceptance_close_comment_line(acceptance),
     ]
+    missing_ids = list(acceptance.get("missing_ids", []) or [])
+    if missing_ids:
+        lines.append("Missing acceptance criteria: " + ", ".join(missing_ids))
+    override = _mapping(acceptance.get("override"))
+    if override.get("missing_ok"):
+        lines.append(
+            "Acceptance override: "
+            + str(override.get("reason", "operator override supplied"))
+        )
     if readiness.get("blocking_checks"):
         lines.append(
             "Blocking checks: "
             + ", ".join(str(item) for item in readiness["blocking_checks"])
         )
     return "\n".join(lines)
+
+
+def _acceptance_close_blockers(
+    acceptance: Mapping[str, Any],
+) -> list[str]:
+    if not acceptance:
+        return []
+    if acceptance.get("state") != "blocked":
+        return []
+    blockers = [ACCEPTANCE_MISSING_BLOCKER]
+    blockers.extend(
+        f"acceptance:{item}"
+        for item in list(acceptance.get("missing_ids", []) or [])
+    )
+    return blockers
+
+
+def _acceptance_close_ready(acceptance: Mapping[str, Any]) -> bool:
+    if not acceptance:
+        return True
+    return str(acceptance.get("state", "")) in {
+        "ready",
+        "not-applicable",
+        "not-requested",
+        "override",
+    }
+
+
+def _acceptance_summary(acceptance: Mapping[str, Any]) -> dict[str, Any]:
+    if not acceptance:
+        return {
+            "state": "not-recorded",
+            "criteria_count": 0,
+            "covered_count": 0,
+            "missing_count": 0,
+            "missing_ids": [],
+            "override": {"missing_ok": False, "reason": ""},
+        }
+    override = _mapping(acceptance.get("override"))
+    return {
+        "state": acceptance.get("state", "unknown"),
+        "criteria_count": acceptance.get("criteria_count", 0),
+        "covered_count": acceptance.get("covered_count", 0),
+        "missing_count": acceptance.get("missing_count", 0),
+        "missing_ids": list(acceptance.get("missing_ids", []) or []),
+        "override": {
+            "missing_ok": bool(override.get("missing_ok")),
+            "reason": str(override.get("reason", "")),
+        },
+    }
+
+
+def _acceptance_human_line(acceptance: Mapping[str, Any]) -> str:
+    summary = _acceptance_summary(acceptance)
+    return (
+        "acceptance: "
+        f"{summary.get('state', 'unknown')} "
+        f"({summary.get('covered_count', 0)}/"
+        f"{summary.get('criteria_count', 0)} covered, "
+        f"{summary.get('missing_count', 0)} missing)"
+    )
+
+
+def _acceptance_summary_human_line(acceptance: Mapping[str, Any]) -> str:
+    return _acceptance_human_line(acceptance)
+
+
+def _acceptance_close_comment_line(acceptance: Mapping[str, Any]) -> str:
+    summary = _acceptance_summary(acceptance)
+    return (
+        "Acceptance coverage: "
+        f"{summary.get('state', 'unknown')} "
+        f"({summary.get('covered_count', 0)}/"
+        f"{summary.get('criteria_count', 0)} covered, "
+        f"{summary.get('missing_count', 0)} missing)"
+    )
+
+
+def _render_acceptance_markdown(
+    acceptance: Mapping[str, Any],
+) -> list[str]:
+    if not acceptance:
+        return [
+            "",
+            "## Acceptance Coverage",
+            "",
+            "- State: not-recorded",
+        ]
+    lines = [
+        "",
+        "## Acceptance Coverage",
+        "",
+        f"- State: {acceptance.get('state', 'unknown')}",
+        f"- Criteria: {acceptance.get('covered_count', 0)}/"
+        f"{acceptance.get('criteria_count', 0)} covered",
+        f"- Missing: {acceptance.get('missing_count', 0)}",
+    ]
+    override = _mapping(acceptance.get("override"))
+    if override.get("missing_ok"):
+        lines.append(f"- Override: {override.get('reason', '')}")
+    items = list(acceptance.get("items", []) or [])
+    if not items:
+        lines.append("")
+        lines.append("_No acceptance criteria found._")
+        return lines
+    lines.extend(
+        [
+            "",
+            "| ID | Status | Criterion | Evidence |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for item in items:
+        item_map = _mapping(item)
+        evidence = _acceptance_evidence_cell(item_map)
+        lines.append(
+            f"| `{item_map.get('id', '')}` | "
+            f"{item_map.get('status', '')} | "
+            f"{_markdown_cell(str(item_map.get('text', '')))} | "
+            f"{_markdown_cell(evidence)} |"
+        )
+    return lines
+
+
+def _acceptance_evidence_cell(item: Mapping[str, Any]) -> str:
+    parts: list[str] = []
+    for label, field in (
+        ("files", "files"),
+        ("tests", "tests"),
+        ("reports", "reports"),
+        ("notes", "notes"),
+    ):
+        values = [str(value) for value in list(item.get(field, []) or [])]
+        if values:
+            rendered = ", ".join(f"`{value}`" for value in values)
+            parts.append(f"{label}: {rendered}")
+    return "; ".join(parts) if parts else "-"
+
+
+def _markdown_cell(value: str) -> str:
+    return value.replace("\n", " ").replace("|", "\\|")
+
+
+def _split_acceptance_spec(
+    spec: str,
+    *,
+    parser: argparse.ArgumentParser,
+    option: str,
+) -> tuple[str, str]:
+    if "=" not in spec:
+        parser.error(f"{option} expects KEY=VALUE")
+    key, value = spec.split("=", 1)
+    key = _normalize_acceptance_key(key)
+    value = value.strip()
+    if not key or not value:
+        parser.error(f"{option} expects non-empty KEY=VALUE")
+    return key, value
+
+
+def _parse_acceptance_status_specs(
+    specs: Sequence[str],
+    *,
+    parser: argparse.ArgumentParser,
+) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for spec in specs:
+        key, value = _split_acceptance_spec(
+            spec,
+            parser=parser,
+            option="--acceptance-status",
+        )
+        try:
+            parsed[key] = _normalize_acceptance_status(value)
+        except ValueError as exc:
+            parser.error(str(exc))
+    return parsed
+
+
+def _parse_acceptance_value_specs(
+    specs: Sequence[str],
+    *,
+    parser: argparse.ArgumentParser,
+    option: str,
+) -> dict[str, tuple[str, ...]]:
+    parsed: dict[str, list[str]] = defaultdict(list)
+    for spec in specs:
+        key, value = _split_acceptance_spec(
+            spec,
+            parser=parser,
+            option=option,
+        )
+        parsed[key].append(value)
+    return {key: tuple(values) for key, values in parsed.items()}
+
+
+def _acceptance_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "acceptance_statuses": args.acceptance_statuses,
+        "acceptance_files": args.acceptance_files,
+        "acceptance_tests": args.acceptance_tests,
+        "acceptance_reports": args.acceptance_reports,
+        "acceptance_notes": args.acceptance_notes,
+        "acceptance_missing_ok": bool(args.acceptance_missing_ok),
+        "acceptance_override_reason": str(
+            args.acceptance_override_reason or "",
+        ),
+    }
+
+
+def _all_acceptance_map(values: Sequence[str]) -> dict[str, tuple[str, ...]]:
+    cleaned = tuple(str(value) for value in values if str(value))
+    return {"*": cleaned} if cleaned else {}
+
+
+def _merge_acceptance_value_maps(
+    left: Mapping[str, Sequence[str]] | None,
+    right: Mapping[str, Sequence[str]] | None,
+) -> dict[str, tuple[str, ...]]:
+    merged: dict[str, list[str]] = defaultdict(list)
+    for mapping in (left or {}, right or {}):
+        for key, values in mapping.items():
+            normalized = _normalize_acceptance_key(key)
+            for value in values:
+                text = str(value)
+                if text and text not in merged[normalized]:
+                    merged[normalized].append(text)
+    return {key: tuple(values) for key, values in merged.items()}
+
+
+def _acceptance_tests_from_paths(paths: Sequence[str]) -> tuple[str, ...]:
+    tests = []
+    for path in paths:
+        normalized = str(path).replace("\\", "/")
+        if normalized.startswith("tests/"):
+            tests.append(normalized)
+    return tuple(dict.fromkeys(tests))
+
+
+def _acceptance_report_paths(
+    report_paths: Mapping[str, Any],
+) -> tuple[str, ...]:
+    paths: list[str] = []
+    for payload in report_paths.values():
+        payload_map = _mapping(payload)
+        path = str(payload_map.get("path", ""))
+        if path and payload_map.get("write_allowed", True):
+            paths.append(path)
+    return tuple(dict.fromkeys(paths))
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -1401,6 +2051,62 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         action="append",
         help="intended changed path; repeat to declare the safe commit scope",
+    )
+    parser.add_argument(
+        "--acceptance-status",
+        dest="acceptance_status_specs",
+        action="append",
+        default=[],
+        metavar="KEY=STATUS",
+        help=(
+            "set acceptance criterion status; KEY may be ac-001, 1, slug, "
+            "hash, or *; STATUS is verified, manual, not-applicable, or missing"
+        ),
+    )
+    parser.add_argument(
+        "--acceptance-file",
+        dest="acceptance_file_specs",
+        action="append",
+        default=[],
+        metavar="KEY=PATH",
+        help="attach a publish-safe touched file to an acceptance criterion",
+    )
+    parser.add_argument(
+        "--acceptance-test",
+        dest="acceptance_test_specs",
+        action="append",
+        default=[],
+        metavar="KEY=TEST",
+        help="attach a focused test or test command to an acceptance criterion",
+    )
+    parser.add_argument(
+        "--acceptance-report",
+        dest="acceptance_report_specs",
+        action="append",
+        default=[],
+        metavar="KEY=PATH",
+        help="attach a relevant report path to an acceptance criterion",
+    )
+    parser.add_argument(
+        "--acceptance-note",
+        dest="acceptance_note_specs",
+        action="append",
+        default=[],
+        metavar="KEY=TEXT",
+        help="attach a bounded manual note to an acceptance criterion",
+    )
+    parser.add_argument(
+        "--acceptance-missing-ok",
+        action="store_true",
+        help=(
+            "allow automatic issue close with missing acceptance criteria and "
+            "record an explicit override"
+        ),
+    )
+    parser.add_argument(
+        "--acceptance-override-reason",
+        default="",
+        help="reason recorded when --acceptance-missing-ok is used",
     )
     parser.add_argument(
         "--required-branch",
@@ -1477,6 +2183,30 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     args = parser.parse_args(argv)
+    args.acceptance_statuses = _parse_acceptance_status_specs(
+        args.acceptance_status_specs,
+        parser=parser,
+    )
+    args.acceptance_files = _parse_acceptance_value_specs(
+        args.acceptance_file_specs,
+        parser=parser,
+        option="--acceptance-file",
+    )
+    args.acceptance_tests = _parse_acceptance_value_specs(
+        args.acceptance_test_specs,
+        parser=parser,
+        option="--acceptance-test",
+    )
+    args.acceptance_reports = _parse_acceptance_value_specs(
+        args.acceptance_report_specs,
+        parser=parser,
+        option="--acceptance-report",
+    )
+    args.acceptance_notes = _parse_acceptance_value_specs(
+        args.acceptance_note_specs,
+        parser=parser,
+        option="--acceptance-note",
+    )
     if args.commit_readiness and args.push_readiness:
         parser.error(
             "--commit-readiness cannot be combined with --push-readiness"
@@ -1508,6 +2238,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         or args.print_close_comment
         or args.close_issue
         or args.workflow
+        or args.acceptance_status_specs
+        or args.acceptance_file_specs
+        or args.acceptance_test_specs
+        or args.acceptance_report_specs
+        or args.acceptance_note_specs
+        or args.acceptance_missing_ok
+        or args.acceptance_override_reason
     ):
         parser.error(
             "--commit-readiness/--push-readiness can only be combined with "
@@ -1578,6 +2315,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         or args.write_reports
         or args.close_issue
         or args.workflow
+        or args.acceptance_status_specs
+        or args.acceptance_file_specs
+        or args.acceptance_test_specs
+        or args.acceptance_report_specs
+        or args.acceptance_note_specs
+        or args.acceptance_missing_ok
+        or args.acceptance_override_reason
     ):
         parser.error("--summarize-report cannot be combined with live checks")
     output_modes = (args.json, args.markdown, args.print_close_comment)
@@ -1626,6 +2370,7 @@ def main(
             report_json=args.report_json,
             report_markdown=args.report_markdown,
             runner=runner,
+            **_acceptance_kwargs(args),
         )
         if args.json:
             print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
@@ -1670,6 +2415,7 @@ def main(
         release_preflight=False if args.precheck else args.release_preflight,
         artifact_roots=args.artifact_roots,
         runner=runner,
+        **_acceptance_kwargs(args),
     )
     json_path, markdown_path, default_json, default_markdown = (
         _selected_report_paths(args, root)
@@ -1735,6 +2481,7 @@ def _run_guided_workflow(
         report_markdown=args.report_markdown,
         write_reports=True,
         runner=runner,
+        **_acceptance_kwargs(args),
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
@@ -1764,6 +2511,13 @@ def build_guided_workflow_report(
     report_markdown: Path | None = None,
     write_reports: bool = True,
     runner: CommandRunner | None = None,
+    acceptance_statuses: Mapping[str, str] | None = None,
+    acceptance_files: Mapping[str, Sequence[str]] | None = None,
+    acceptance_tests: Mapping[str, Sequence[str]] | None = None,
+    acceptance_reports: Mapping[str, Sequence[str]] | None = None,
+    acceptance_notes: Mapping[str, Sequence[str]] | None = None,
+    acceptance_missing_ok: bool = False,
+    acceptance_override_reason: str = "",
 ) -> tuple[dict[str, Any], Path | None, Path | None]:
     """Build and optionally close one precheck-first closure workflow report."""
     json_path, markdown_path, default_json, default_markdown = (
@@ -1782,6 +2536,13 @@ def build_guided_workflow_report(
         release_preflight=False,
         artifact_roots=artifact_roots,
         runner=runner,
+        acceptance_statuses=acceptance_statuses,
+        acceptance_files=acceptance_files,
+        acceptance_tests=acceptance_tests,
+        acceptance_reports=acceptance_reports,
+        acceptance_notes=acceptance_notes,
+        acceptance_missing_ok=acceptance_missing_ok,
+        acceptance_override_reason=acceptance_override_reason,
     )
     report = attach_report_paths(
         report,
@@ -1802,6 +2563,13 @@ def build_guided_workflow_report(
             release_preflight=release_preflight,
             artifact_roots=artifact_roots,
             runner=runner,
+            acceptance_statuses=acceptance_statuses,
+            acceptance_files=acceptance_files,
+            acceptance_tests=acceptance_tests,
+            acceptance_reports=acceptance_reports,
+            acceptance_notes=acceptance_notes,
+            acceptance_missing_ok=acceptance_missing_ok,
+            acceptance_override_reason=acceptance_override_reason,
         )
         report = attach_report_paths(
             report,
@@ -1839,6 +2607,13 @@ def run_issue_workflow_execution(
     report_markdown: Path | None = None,
     runner: CommandRunner | None = None,
     now: datetime | None = None,
+    acceptance_statuses: Mapping[str, str] | None = None,
+    acceptance_files: Mapping[str, Sequence[str]] | None = None,
+    acceptance_tests: Mapping[str, Sequence[str]] | None = None,
+    acceptance_reports: Mapping[str, Sequence[str]] | None = None,
+    acceptance_notes: Mapping[str, Sequence[str]] | None = None,
+    acceptance_missing_ok: bool = False,
+    acceptance_override_reason: str = "",
 ) -> dict[str, Any]:
     """Execute the audited issue workflow after report-only readiness passes."""
     command_runner = runner or _run_command
@@ -1937,6 +2712,19 @@ def run_issue_workflow_execution(
     pre_mutation_gate_report = _pre_mutation_gates_not_run(
         enabled=pre_mutation_gates,
     )
+    stage_paths = _execution_stage_paths(commit_report)
+    execution_acceptance_files = _merge_acceptance_value_maps(
+        acceptance_files,
+        _all_acceptance_map(stage_paths),
+    )
+    execution_acceptance_tests = _merge_acceptance_value_maps(
+        acceptance_tests,
+        _all_acceptance_map(_acceptance_tests_from_paths(stage_paths)),
+    )
+    execution_acceptance_reports = _merge_acceptance_value_maps(
+        acceptance_reports,
+        _all_acceptance_map(_acceptance_report_paths(report_paths)),
+    )
     state = "blocked" if blockers else "running"
 
     if state == "running" and pre_mutation_gates:
@@ -1967,7 +2755,6 @@ def run_issue_workflow_execution(
             state = "blocked"
 
     if state == "running":
-        stage_paths = _execution_stage_paths(commit_report)
         stage_result = logger.run(
             ("git", "add", "--", *stage_paths),
             root,
@@ -2018,6 +2805,13 @@ def run_issue_workflow_execution(
             close_issue=True,
             write_reports=True,
             runner=logger,
+            acceptance_statuses=acceptance_statuses,
+            acceptance_files=execution_acceptance_files,
+            acceptance_tests=execution_acceptance_tests,
+            acceptance_reports=execution_acceptance_reports,
+            acceptance_notes=acceptance_notes,
+            acceptance_missing_ok=acceptance_missing_ok,
+            acceptance_override_reason=acceptance_override_reason,
         )
         closure_summary = summarize_readiness_report(closure_report)
         if closure_summary.get("accepted") is not True:
@@ -2118,6 +2912,9 @@ def _issue_workflow_execution_report(
         "pre_mutation_gates": dict(pre_mutation_gate_report),
         "push_readiness": dict(push_readiness),
         "commands": [dict(command) for command in commands],
+        "acceptance_coverage": dict(
+            _mapping(closure_report.get("acceptance_coverage"))
+        ),
         "closure_summary": dict(closure_summary),
         "closure_report": dict(closure_report),
         "final_readback": dict(final_readback),
@@ -2326,6 +3123,7 @@ def render_issue_workflow_human(report: Mapping[str, Any]) -> str:
     closure_summary = _mapping(report.get("closure_summary"))
     issue_close = _mapping(closure_summary.get("issue_close"))
     logs = _mapping(report.get("logs"))
+    acceptance = _mapping(report.get("acceptance_coverage"))
     lines = [
         "Issue workflow execution",
         f"state: {readiness.get('state', 'unknown')}",
@@ -2339,6 +3137,7 @@ def render_issue_workflow_human(report: Mapping[str, Any]) -> str:
         f"push readiness: {_readiness_state(push_report)}",
         f"closure: {closure_summary.get('accepted', 'not-run')}",
         f"issue close: {issue_close.get('state', 'not-run')}",
+        _acceptance_human_line(acceptance),
         f"commands: {logs.get('command_count', len(report.get('commands', []) or []))}",
         f"logs: {logs.get('directory', '')}",
     ]
@@ -2382,6 +3181,7 @@ def render_issue_workflow_markdown(report: Mapping[str, Any]) -> str:
     )
     pre_mutation = _mapping(report.get("pre_mutation_gates"))
     pre_mutation_gates = _mapping(pre_mutation.get("gates"))
+    acceptance = _mapping(report.get("acceptance_coverage"))
     lines = [
         "# Issue Workflow Execution",
         "",
@@ -2402,6 +3202,7 @@ def render_issue_workflow_markdown(report: Mapping[str, Any]) -> str:
         lines.extend(f"- `{blocker}`" for blocker in blockers)
     else:
         lines.append("- None")
+    lines.extend(_render_acceptance_markdown(acceptance))
     lines.extend(
         [
             "",

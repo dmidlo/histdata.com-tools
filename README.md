@@ -285,7 +285,8 @@ python scripts/closure_readiness.py \
   --execute-workflow \
   --pre-mutation-gates \
   --commit-message "feat(scope): describe the change" \
-  --commit-path path/to/changed-file.py
+  --commit-path path/to/changed-file.py \
+  --acceptance-test '*=tests/unit/test_changed_behavior.py'
 ```
 
 The helper checks branch/upstream alignment, dirty and untracked files, linked
@@ -313,9 +314,17 @@ closes the issue, and writes bounded execution evidence plus full ignored logs.
 Add `--pre-mutation-gates` to run the same closure gate battery before the first
 `git add`; the workflow blocks staging, commit, and push if those gates fail or
 rewrite files, and records the result separately from the post-push closure
-gates. Default behavior remains report-only unless this flag is present. Add
-`--release-preflight` only during publishing work; normal issue closure records
-the TestPyPI local simple-registry preflight as not-applicable.
+gates. Issue closure reports parse issue checklists or `Acceptance criteria`
+bullets into acceptance coverage evidence. Attach criterion-specific or shared
+evidence with `--acceptance-status`, `--acceptance-file`, `--acceptance-test`,
+`--acceptance-report`, or `--acceptance-note` using `KEY=VALUE`; `KEY` can be
+`ac-001`, a criterion number, slug, hash, or `*` for all criteria. Automatic
+issue close refuses missing required criteria unless `--acceptance-missing-ok`
+is supplied, and the override reason is recorded with
+`--acceptance-override-reason`. Default behavior remains report-only unless this
+flag is present. Add `--release-preflight` only during publishing work; normal
+issue closure records the TestPyPI local simple-registry preflight as
+not-applicable.
 
 ---
 
