@@ -265,6 +265,24 @@ python scripts/sync_readme_cli_help.py
 python -m pytest tests/unit/test_readme_help_sync.py
 ```
 
+For repeatable issue closure evidence, run the local readiness helper from
+`dev` after implementation work is complete:
+
+```sh
+python scripts/closure_readiness.py --issue 274 --run-gates \
+  --report-json .histdatacom/closure-readiness/closure-274.json \
+  --report-markdown .histdatacom/closure-readiness/closure-274.md
+```
+
+The helper checks branch/upstream alignment, dirty and untracked files, linked
+GitHub issue state, lingering pytest/pre-commit/Temporal/histdatacom tool
+processes, transient ZIP/CSV/XLS/XLSX source artifacts under `data/`, README
+help synchronization, `git diff --check`, main help smoke output, pytest, and
+pre-commit. Reports are publish-safe JSON and Markdown with a GitHub-ready close
+comment block. Add `--release-preflight` only during publishing work; normal
+issue closure records the TestPyPI local simple-registry preflight as
+not-applicable.
+
 ---
 
 ### Basic Use
