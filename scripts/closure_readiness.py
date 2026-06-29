@@ -29,6 +29,8 @@ from histdatacom.source_cleanup import (  # noqa: E402
 )
 
 SCHEMA_VERSION = "histdatacom.closure-readiness.v1"
+SUMMARY_SCHEMA_VERSION = "histdatacom.closure-report-summary.v1"
+DEFAULT_REPORT_DIR = Path(".histdatacom") / "closure-readiness"
 CommandRunner = Callable[
     [Sequence[str], Path],
     subprocess.CompletedProcess[str],
@@ -468,6 +470,70 @@ def determine_precheck(
     }
 
 
+def determine_workflow(
+    report: Mapping[str, Any],
+    *,
+    required_branch: str = "dev",
+) -> dict[str, Any]:
+    """Return guided closure workflow state for one report."""
+    repo = _mapping(report.get("repo"))
+    issue = _mapping(report.get("issue"))
+    precheck = _mapping(report.get("precheck"))
+    readiness = _mapping(report.get("readiness"))
+    gates = _mapping(report.get("gates"))
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if repo.get("branch") != required_branch:
+        blockers.append("not-dev-branch")
+    for blocker in list(precheck.get("blocking_checks", []) or []):
+        if str(blocker) not in blockers:
+            blockers.append(str(blocker))
+    for warning in list(precheck.get("warnings", []) or []):
+        if str(warning) not in warnings:
+            warnings.append(str(warning))
+    if gates.get("state") == "not-run":
+        state = "blocked" if blockers else "ready-to-run-gates"
+    else:
+        for blocker in list(readiness.get("blocking_checks", []) or []):
+            if str(blocker) not in blockers:
+                blockers.append(str(blocker))
+        for warning in list(readiness.get("warnings", []) or []):
+            if str(warning) not in warnings:
+                warnings.append(str(warning))
+        state = "ready" if not blockers else "blocked"
+    issue_number = _int(issue.get("number"))
+    next_command = "python scripts/closure_readiness.py --workflow"
+    if issue_number:
+        next_command = (
+            "python scripts/closure_readiness.py "
+            f"--issue {issue_number} --workflow"
+        )
+    return {
+        "state": state,
+        "required_branch": required_branch,
+        "blocking_checks": blockers,
+        "warnings": warnings,
+        "next_command": next_command,
+    }
+
+
+def attach_workflow(
+    report: Mapping[str, Any],
+    *,
+    required_branch: str = "dev",
+) -> dict[str, Any]:
+    """Return report with guided workflow state attached."""
+    updated: dict[str, Any] = dict(report)
+    updated["workflow"] = determine_workflow(
+        report,
+        required_branch=required_branch,
+    )
+    safe = publish_safe_json_value(updated)
+    if not isinstance(safe, dict):
+        raise TypeError("closure readiness report must be a JSON object")
+    return dict(safe)
+
+
 def close_issue_if_ready(
     report: Mapping[str, Any],
     *,
@@ -478,8 +544,15 @@ def close_issue_if_ready(
     command_runner = runner or _run_command
     root = repo_root.expanduser().resolve(strict=False)
     readiness = _mapping(report.get("readiness"))
+    workflow = _mapping(report.get("workflow"))
     issue = _mapping(report.get("issue"))
     number = _int(issue.get("number"))
+    if workflow and workflow.get("state") != "ready":
+        return {
+            "state": "refused",
+            "reason": "guided closure workflow is not ready",
+            "blocking_checks": list(workflow.get("blocking_checks", []) or []),
+        }
     if readiness.get("state") != "ready":
         return {
             "state": "refused",
@@ -545,6 +618,117 @@ def attach_issue_close_action(
     return dict(safe)
 
 
+def attach_report_paths(
+    report: Mapping[str, Any],
+    *,
+    json_path: Path | None = None,
+    markdown_path: Path | None = None,
+    repo_root: Path = PROJECT_ROOT,
+    default_json: bool = False,
+    default_markdown: bool = False,
+) -> dict[str, Any]:
+    """Return report with publish-safe report-output metadata attached."""
+    outputs: dict[str, Any] = {}
+    if json_path is not None:
+        outputs["json"] = _report_path_payload(
+            json_path,
+            repo_root=repo_root,
+            default=default_json,
+        )
+    if markdown_path is not None:
+        outputs["markdown"] = _report_path_payload(
+            markdown_path,
+            repo_root=repo_root,
+            default=default_markdown,
+        )
+    if not outputs:
+        return dict(report)
+    updated = dict(report)
+    updated["report_paths"] = outputs
+    safe = publish_safe_json_value(updated)
+    if not isinstance(safe, dict):
+        raise TypeError("closure readiness report must be a JSON object")
+    return dict(safe)
+
+
+def load_readiness_report(path: Path) -> dict[str, Any]:
+    """Load a publish-safe readiness report from disk."""
+    payload = json.loads(path.expanduser().read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise TypeError("closure readiness report must be a JSON object")
+    safe = publish_safe_json_value(payload)
+    if not isinstance(safe, dict):
+        raise TypeError("closure readiness report must be a JSON object")
+    return dict(safe)
+
+
+def summarize_readiness_report(
+    report: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return key report fields for quick operator readback."""
+    repo = _mapping(report.get("repo"))
+    issue = _mapping(report.get("issue"))
+    readiness = _mapping(report.get("readiness"))
+    precheck = _mapping(report.get("precheck"))
+    gates = _mapping(report.get("gates"))
+    release = _mapping(report.get("release_preflight"))
+    workflow = _mapping(report.get("workflow"))
+    issue_close = _mapping(report.get("issue_close"))
+    issue_after = _mapping(issue_close.get("issue_after"))
+    close_state = str(issue_close.get("state", "not-run"))
+    ready = readiness.get("state") == "ready"
+    close_ok = close_state in {"not-run", "closed", "already-closed"}
+    workflow_state = str(workflow.get("state", "not-run"))
+    workflow_ok = not workflow or workflow_state == "ready"
+    payload: dict[str, Any] = {
+        "schema_version": SUMMARY_SCHEMA_VERSION,
+        "source_schema_version": report.get("schema_version", ""),
+        "generated_at_utc": report.get("generated_at_utc", ""),
+        "accepted": bool(ready and close_ok and workflow_ok),
+        "readiness": {
+            "state": readiness.get("state", "unknown"),
+            "blocking_checks": list(readiness.get("blocking_checks", []) or []),
+        },
+        "precheck": {
+            "state": precheck.get("state", "unknown"),
+            "blocking_checks": list(precheck.get("blocking_checks", []) or []),
+        },
+        "gates": {
+            "state": gates.get("state", "unknown"),
+            "labels": _gate_labels(gates),
+        },
+        "release_preflight": {
+            "state": release.get("state", "unknown"),
+        },
+        "workflow": {
+            "state": workflow_state,
+            "blocking_checks": list(workflow.get("blocking_checks", []) or []),
+        },
+        "repo": {
+            "branch": repo.get("branch", "unknown"),
+            "upstream": repo.get("upstream", ""),
+            "ahead": repo.get("ahead", 0),
+            "behind": repo.get("behind", 0),
+            "dirty": bool(repo.get("dirty")),
+            "head_short": repo.get("head_short", ""),
+        },
+        "issue": {
+            "label": _issue_label(issue),
+            "state": issue.get("state", "unknown"),
+            "title": issue.get("title", ""),
+            "url": issue.get("url", ""),
+        },
+        "issue_close": {
+            "state": close_state,
+            "final_issue": _issue_label(issue_after) if issue_after else "",
+        },
+    }
+    safe = publish_safe_json_value(payload)
+    if not isinstance(safe, dict):
+        raise TypeError("closure readiness summary must be a JSON object")
+    return dict(safe)
+
+
 def render_markdown(report: Mapping[str, Any]) -> str:
     """Render a publish-safe Markdown readiness report."""
     repo = _mapping(report.get("repo"))
@@ -556,6 +740,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     gates = _mapping(report.get("gates"))
     release = _mapping(report.get("release_preflight"))
     issue_close = _mapping(report.get("issue_close"))
+    workflow = _mapping(report.get("workflow"))
+    report_paths = _mapping(report.get("report_paths"))
     lines = [
         "# Closure Readiness Report",
         "",
@@ -620,6 +806,26 @@ def render_markdown(report: Mapping[str, Any]) -> str:
                 "",
             ]
         )
+    if workflow:
+        lines.extend(
+            [
+                "## Guided Workflow",
+                "",
+                f"- State: {workflow.get('state', 'unknown')}",
+                f"- Required branch: `{workflow.get('required_branch', '')}`",
+                f"- Next: `{workflow.get('next_command', '')}`",
+                "",
+            ]
+        )
+    if report_paths:
+        lines.extend(["## Report Paths", ""])
+        for kind, payload in report_paths.items():
+            payload_map = _mapping(payload)
+            default_text = "default" if payload_map.get("default") else "custom"
+            lines.append(
+                f"- {kind}: `{payload_map.get('path', '')}` ({default_text})"
+            )
+        lines.append("")
     lines.extend(
         [
             "## GitHub Close Comment",
@@ -630,6 +836,32 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             "",
         ]
     )
+    return "\n".join(lines)
+
+
+def render_issue_audit_human(report: Mapping[str, Any]) -> str:
+    """Render a compact issue/local readback without closure gates."""
+    repo = _mapping(report.get("repo"))
+    issue = _mapping(report.get("issue"))
+    precheck = _mapping(report.get("precheck"))
+    lines = [
+        "Closure issue audit",
+        f"issue: {_issue_label(issue)}",
+        f"title: {issue.get('title', '')}",
+        f"url: {issue.get('url', '')}",
+        f"branch: {repo.get('branch', 'unknown')}",
+        f"upstream: {repo.get('upstream', '')} "
+        f"ahead={repo.get('ahead', 0)} behind={repo.get('behind', 0)}",
+        f"commit: {repo.get('head_short', '')}",
+        f"worktree dirty: {_yes_no(repo.get('dirty'))}",
+        f"precheck: {precheck.get('state', 'unknown')}",
+    ]
+    blockers = list(precheck.get("blocking_checks", []) or [])
+    if blockers:
+        lines.append("blocking: " + ", ".join(str(item) for item in blockers))
+    next_command = precheck.get("next_command", "")
+    if next_command:
+        lines.append(f"next: {next_command}")
     return "\n".join(lines)
 
 
@@ -662,6 +894,8 @@ def render_human(report: Mapping[str, Any]) -> str:
     gates = _mapping(report.get("gates"))
     issue = _mapping(report.get("issue"))
     issue_close = _mapping(report.get("issue_close"))
+    workflow = _mapping(report.get("workflow"))
+    report_paths = _mapping(report.get("report_paths"))
     lines = [
         "Closure readiness",
         f"state: {readiness.get('state', 'unknown')}",
@@ -682,6 +916,61 @@ def render_human(report: Mapping[str, Any]) -> str:
         issue_after = _mapping(issue_close.get("issue_after"))
         if issue_after:
             lines.append(f"issue final: {_issue_label(issue_after)}")
+    if workflow:
+        lines.append(f"workflow: {workflow.get('state', 'unknown')}")
+        workflow_blockers = list(workflow.get("blocking_checks", []) or [])
+        if workflow_blockers:
+            lines.append(
+                "workflow blocking: "
+                + ", ".join(str(item) for item in workflow_blockers)
+            )
+    if report_paths:
+        lines.append("reports:")
+        for kind, payload in report_paths.items():
+            payload_map = _mapping(payload)
+            lines.append(f"  {kind}: {payload_map.get('path', '')}")
+    return "\n".join(lines)
+
+
+def render_report_summary_human(summary: Mapping[str, Any]) -> str:
+    """Render a compact summary for a saved closure report."""
+    repo = _mapping(summary.get("repo"))
+    issue = _mapping(summary.get("issue"))
+    readiness = _mapping(summary.get("readiness"))
+    precheck = _mapping(summary.get("precheck"))
+    gates = _mapping(summary.get("gates"))
+    release = _mapping(summary.get("release_preflight"))
+    workflow = _mapping(summary.get("workflow"))
+    issue_close = _mapping(summary.get("issue_close"))
+    lines = [
+        "Closure report summary",
+        f"accepted: {_yes_no(summary.get('accepted'))}",
+        f"state: {readiness.get('state', 'unknown')}",
+        f"precheck: {precheck.get('state', 'unknown')}",
+        f"gates: {gates.get('state', 'unknown')}",
+        f"issue: {issue.get('label', '')}",
+        f"branch: {repo.get('branch', 'unknown')} -> "
+        f"{repo.get('upstream', '')} "
+        f"ahead={repo.get('ahead', 0)} behind={repo.get('behind', 0)}",
+        f"commit: {repo.get('head_short', '')}",
+        f"worktree dirty: {_yes_no(repo.get('dirty'))}",
+        f"release preflight: {release.get('state', 'unknown')}",
+        f"workflow: {workflow.get('state', 'not-run')}",
+        f"issue close: {issue_close.get('state', 'not-run')}",
+    ]
+    if issue_close.get("final_issue"):
+        lines.append(f"issue final: {issue_close.get('final_issue')}")
+    if summary.get("generated_at_utc"):
+        lines.append(f"generated: {summary.get('generated_at_utc')}")
+    blockers = list(readiness.get("blocking_checks", []) or [])
+    if blockers:
+        lines.append("blocking: " + ", ".join(str(item) for item in blockers))
+    workflow_blockers = list(workflow.get("blocking_checks", []) or [])
+    if workflow_blockers:
+        lines.append(
+            "workflow blocking: "
+            + ", ".join(str(item) for item in workflow_blockers)
+        )
     return "\n".join(lines)
 
 
@@ -723,6 +1012,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--issue", type=int, help="GitHub issue number to read")
     parser.add_argument(
+        "--issue-audit",
+        action="store_true",
+        help="read back the linked issue and cheap local closure state",
+    )
+    parser.add_argument(
         "--precheck",
         action="store_true",
         help="run cheap local checks and report readiness to run closure gates",
@@ -750,6 +1044,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         help="write Markdown report",
     )
+    parser.add_argument(
+        "--write-reports",
+        action="store_true",
+        help="write issue-derived default JSON and Markdown reports",
+    )
+    parser.add_argument(
+        "--summarize-report",
+        "--read-report",
+        type=Path,
+        dest="summarize_report",
+        help="summarize an existing closure JSON report without live commands",
+    )
     parser.add_argument("--json", action="store_true", help="print JSON")
     parser.add_argument(
         "--markdown",
@@ -766,13 +1072,52 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="close --issue with the generated comment when readiness is ready",
     )
+    parser.add_argument(
+        "--workflow",
+        action="store_true",
+        help=(
+            "run guided closure workflow with precheck, gates, default reports, "
+            "and optional explicit close"
+        ),
+    )
     args = parser.parse_args(argv)
     if args.precheck and args.run_gates:
         parser.error("--precheck cannot be combined with --run-gates")
     if args.precheck and args.release_preflight:
         parser.error("--precheck cannot be combined with --release-preflight")
+    if args.issue_audit and args.issue is None:
+        parser.error("--issue-audit requires --issue")
+    if args.issue_audit and (
+        args.run_gates or args.release_preflight or args.close_issue
+    ):
+        parser.error(
+            "--issue-audit cannot be combined with gates, release preflight, "
+            "or issue close"
+        )
+    if args.workflow and args.issue is None:
+        parser.error("--workflow requires --issue")
+    if args.workflow and (args.precheck or args.issue_audit):
+        parser.error(
+            "--workflow cannot be combined with --precheck or --issue-audit"
+        )
     if args.close_issue and args.issue is None:
         parser.error("--close-issue requires --issue")
+    if args.write_reports and args.issue is None:
+        parser.error("--write-reports requires --issue")
+    if args.summarize_report and (
+        args.issue is not None
+        or args.issue_audit
+        or args.precheck
+        or args.run_gates
+        or args.release_preflight
+        or args.artifact_roots
+        or args.report_json
+        or args.report_markdown
+        or args.write_reports
+        or args.close_issue
+        or args.workflow
+    ):
+        parser.error("--summarize-report cannot be combined with live checks")
     output_modes = (args.json, args.markdown, args.print_close_comment)
     if sum(1 for enabled in output_modes if enabled) > 1:
         parser.error(
@@ -789,8 +1134,25 @@ def main(
 ) -> int:
     """Run the closure-readiness helper."""
     args = parse_args(argv)
+    root = repo_root.expanduser().resolve(strict=False)
+    if args.summarize_report:
+        report_path = _output_path(args.summarize_report, root)
+        report = load_readiness_report(report_path or args.summarize_report)
+        summary = summarize_readiness_report(report)
+        if args.json:
+            print(json.dumps(summary, indent=2, sort_keys=True))  # noqa: T201
+        elif args.markdown:
+            print(render_markdown(report))  # noqa: T201
+        elif args.print_close_comment:
+            print(str(report.get("close_comment", "")))  # noqa: T201
+        else:
+            print(render_report_summary_human(summary))  # noqa: T201
+        return 0 if summary.get("accepted") is True else 1
+    if args.workflow:
+        return _run_guided_workflow(args, repo_root=root, runner=runner)
+
     report = build_readiness_report(
-        repo_root=repo_root,
+        repo_root=root,
         issue=args.issue,
         run_gates=False if args.precheck else args.run_gates,
         release_preflight=False if args.precheck else args.release_preflight,
@@ -800,23 +1162,36 @@ def main(
     if args.close_issue:
         report = attach_issue_close_action(
             report,
-            repo_root=repo_root,
+            repo_root=root,
             runner=runner,
         )
-    if args.report_json:
-        _write_text(args.report_json, json.dumps(report, indent=2) + "\n")
-    if args.report_markdown:
-        _write_text(args.report_markdown, render_markdown(report))
+    json_path, markdown_path, default_json, default_markdown = (
+        _selected_report_paths(args, root)
+    )
+    report = attach_report_paths(
+        report,
+        json_path=json_path,
+        markdown_path=markdown_path,
+        repo_root=root,
+        default_json=default_json,
+        default_markdown=default_markdown,
+    )
+    _write_reports(report, json_path=json_path, markdown_path=markdown_path)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
     elif args.markdown:
         print(render_markdown(report))  # noqa: T201
     elif args.print_close_comment:
         print(str(report.get("close_comment", "")))  # noqa: T201
+    elif args.issue_audit:
+        print(render_issue_audit_human(report))  # noqa: T201
     elif args.precheck:
         print(render_precheck_human(report))  # noqa: T201
     else:
         print(render_human(report))  # noqa: T201
+    if args.issue_audit:
+        issue = _mapping(report.get("issue"))
+        return 0 if issue.get("state") != "unavailable" else 1
     if args.precheck:
         return (
             0 if _mapping(report.get("precheck")).get("state") == "ready" else 1
@@ -827,6 +1202,67 @@ def main(
             0 if issue_close.get("state") in {"closed", "already-closed"} else 1
         )
     return 0 if _mapping(report.get("readiness")).get("state") == "ready" else 1
+
+
+def _run_guided_workflow(
+    args: argparse.Namespace,
+    *,
+    repo_root: Path,
+    runner: CommandRunner | None,
+) -> int:
+    """Run precheck-first guided issue closure workflow."""
+    report = build_readiness_report(
+        repo_root=repo_root,
+        issue=args.issue,
+        run_gates=False,
+        release_preflight=False,
+        artifact_roots=args.artifact_roots,
+        runner=runner,
+    )
+    report = attach_workflow(report)
+    workflow = _mapping(report.get("workflow"))
+    if workflow.get("state") == "ready-to-run-gates":
+        report = build_readiness_report(
+            repo_root=repo_root,
+            issue=args.issue,
+            run_gates=True,
+            release_preflight=args.release_preflight,
+            artifact_roots=args.artifact_roots,
+            runner=runner,
+        )
+        report = attach_workflow(report)
+    if args.close_issue:
+        report = attach_issue_close_action(
+            report,
+            repo_root=repo_root,
+            runner=runner,
+        )
+    json_path, markdown_path, default_json, default_markdown = (
+        _selected_report_paths(args, repo_root)
+    )
+    report = attach_report_paths(
+        report,
+        json_path=json_path,
+        markdown_path=markdown_path,
+        repo_root=repo_root,
+        default_json=default_json,
+        default_markdown=default_markdown,
+    )
+    _write_reports(report, json_path=json_path, markdown_path=markdown_path)
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
+    elif args.markdown:
+        print(render_markdown(report))  # noqa: T201
+    elif args.print_close_comment:
+        print(str(report.get("close_comment", "")))  # noqa: T201
+    else:
+        print(render_human(report))  # noqa: T201
+    if args.close_issue:
+        issue_close = _mapping(report.get("issue_close"))
+        return (
+            0 if issue_close.get("state") in {"closed", "already-closed"} else 1
+        )
+    return 0 if _mapping(report.get("workflow")).get("state") == "ready" else 1
 
 
 def _run_gate(
@@ -1019,6 +1455,74 @@ def _int(value: object) -> int:
 
 def _yes_no(value: object) -> str:
     return "yes" if bool(value) else "no"
+
+
+def _selected_report_paths(
+    args: argparse.Namespace,
+    repo_root: Path,
+) -> tuple[Path | None, Path | None, bool, bool]:
+    default_paths = _default_report_paths(repo_root, args.issue)
+    json_path = _output_path(args.report_json, repo_root)
+    markdown_path = _output_path(args.report_markdown, repo_root)
+    default_json = False
+    default_markdown = False
+    if args.workflow or args.write_reports:
+        if json_path is None:
+            json_path = default_paths["json"]
+            default_json = True
+        if markdown_path is None:
+            markdown_path = default_paths["markdown"]
+            default_markdown = True
+    return json_path, markdown_path, default_json, default_markdown
+
+
+def _default_report_paths(
+    repo_root: Path, issue: int | None
+) -> dict[str, Path]:
+    issue_part = str(issue) if issue is not None else "no-issue"
+    base = repo_root / DEFAULT_REPORT_DIR / f"closure-{issue_part}"
+    return {
+        "json": base.with_suffix(".json"),
+        "markdown": base.with_suffix(".md"),
+    }
+
+
+def _output_path(path: Path | None, repo_root: Path) -> Path | None:
+    if path is None:
+        return None
+    expanded = path.expanduser()
+    if expanded.is_absolute():
+        return expanded
+    return repo_root / expanded
+
+
+def _report_path_payload(
+    path: Path,
+    *,
+    repo_root: Path,
+    default: bool,
+) -> dict[str, Any]:
+    resolved = path.expanduser().resolve(strict=False)
+    try:
+        display = resolved.relative_to(repo_root)
+    except ValueError:
+        display = publish_safe_path(str(resolved))
+    return {
+        "path": str(publish_safe_path(str(display))),
+        "default": default,
+    }
+
+
+def _write_reports(
+    report: Mapping[str, Any],
+    *,
+    json_path: Path | None,
+    markdown_path: Path | None,
+) -> None:
+    if json_path:
+        _write_text(json_path, json.dumps(report, indent=2) + "\n")
+    if markdown_path:
+        _write_text(markdown_path, render_markdown(report))
 
 
 def _write_text(path: Path, text: str) -> None:

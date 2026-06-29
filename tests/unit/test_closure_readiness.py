@@ -34,6 +34,9 @@ class FakeRunner:
     def __init__(
         self,
         *,
+        branch: str = "dev",
+        status_stdout: str = "",
+        upstream_counts: str = "0\t0\n",
         precommit_returncode: int = 0,
         precommit_changes: str = "",
         release_returncode: int = 0,
@@ -41,6 +44,9 @@ class FakeRunner:
         issue_state: str = "OPEN",
         close_returncode: int = 0,
     ) -> None:
+        self.branch = branch
+        self.status_stdout = status_stdout
+        self.upstream_counts = upstream_counts
         self.precommit_returncode = precommit_returncode
         self.precommit_changes = precommit_changes
         self.release_returncode = release_returncode
@@ -60,7 +66,7 @@ class FakeRunner:
         args = tuple(command)
         self.calls.append(args)
         if args == ("git", "rev-parse", "--abbrev-ref", "HEAD"):
-            return _completed(args, stdout="dev\n")
+            return _completed(args, stdout=f"{self.branch}\n")
         if args == ("git", "rev-parse", "HEAD"):
             return _completed(
                 args,
@@ -81,12 +87,12 @@ class FakeRunner:
             "--count",
             "HEAD...@{u}",
         ):
-            return _completed(args, stdout="0\t0\n")
+            return _completed(args, stdout=self.upstream_counts)
         if args == ("git", "status", "--porcelain=v1", "--untracked-files=all"):
             self.status_calls += 1
             if self.precommit_changes and self.status_calls >= 11:
                 return _completed(args, stdout=self.precommit_changes)
-            return _completed(args)
+            return _completed(args, stdout=self.status_stdout)
         if (
             len(args) == 6
             and args[:3] == ("gh", "issue", "view")
@@ -286,6 +292,34 @@ def test_precheck_mode_reports_ready_without_running_gates(
     )
 
 
+def test_issue_audit_mode_reads_issue_without_running_gates(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Issue audit should replace manual gh issue view readbacks."""
+    module = _module()
+    runner = FakeRunner()
+
+    exit_code = module.main(
+        ["--issue", "279", "--issue-audit"],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Closure issue audit" in output
+    assert "issue: #279 OPEN" in output
+    assert "title: chore(v1.4.0): helper" in output
+    assert not any(
+        call[:3] == (sys.executable, "-m", "pytest") for call in runner.calls
+    )
+    assert not any(
+        call[:3] == (sys.executable, "-m", "pre_commit")
+        for call in runner.calls
+    )
+
+
 def test_print_close_comment_outputs_only_comment(
     tmp_path: Path,
     capsys: Any,
@@ -304,6 +338,73 @@ def test_print_close_comment_outputs_only_comment(
     assert output.startswith("Closure readiness: ready\n")
     assert "Issue: #278 OPEN" in output
     assert "Closure readiness\n" not in output
+
+
+def test_write_reports_uses_issue_default_paths(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Operators should not have to hand-assemble issue report paths."""
+    module = _module()
+
+    exit_code = module.main(
+        ["--issue", "279", "--run-gates", "--write-reports"],
+        repo_root=tmp_path,
+        runner=FakeRunner(),
+    )
+    output = capsys.readouterr().out
+    json_path = (
+        tmp_path / ".histdatacom" / "closure-readiness" / "closure-279.json"
+    )
+    markdown_path = (
+        tmp_path / ".histdatacom" / "closure-readiness" / "closure-279.md"
+    )
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert json_path.exists()
+    assert markdown_path.exists()
+    assert "reports:" in output
+    assert payload["report_paths"]["json"]["path"] == (
+        ".histdatacom/closure-readiness/closure-279.json"
+    )
+    assert payload["report_paths"]["json"]["default"] is True
+    assert payload["report_paths"]["markdown"]["default"] is True
+
+
+def test_explicit_report_path_overrides_default_json_path(
+    tmp_path: Path,
+) -> None:
+    """Default report writing should preserve explicit path overrides."""
+    module = _module()
+    custom_json = tmp_path / "custom" / "closure.json"
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "279",
+            "--run-gates",
+            "--write-reports",
+            "--report-json",
+            str(custom_json),
+        ],
+        repo_root=tmp_path,
+        runner=FakeRunner(),
+    )
+    default_json = (
+        tmp_path / ".histdatacom" / "closure-readiness" / "closure-279.json"
+    )
+    default_markdown = (
+        tmp_path / ".histdatacom" / "closure-readiness" / "closure-279.md"
+    )
+    payload = json.loads(custom_json.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert custom_json.exists()
+    assert not default_json.exists()
+    assert default_markdown.exists()
+    assert payload["report_paths"]["json"]["default"] is False
+    assert payload["report_paths"]["markdown"]["default"] is True
 
 
 def test_close_issue_refuses_when_readiness_is_blocked(tmp_path: Path) -> None:
@@ -357,6 +458,166 @@ def test_close_issue_posts_comment_and_reads_back_final_state(
     assert "Closure readiness: ready" in close_calls[0][-1]
     assert "issue close: closed" in output
     assert "issue final: #278 CLOSED" in output
+
+
+def test_guided_workflow_runs_gates_writes_reports_and_closes(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Guided workflow should replace manual precheck/gates/report/close order."""
+    module = _module()
+    runner = FakeRunner()
+
+    exit_code = module.main(
+        ["--issue", "279", "--workflow", "--close-issue"],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+    close_calls = [
+        call for call in runner.calls if call[:3] == ("gh", "issue", "close")
+    ]
+
+    assert exit_code == 0
+    assert "workflow: ready" in output
+    assert "issue close: closed" in output
+    assert (
+        tmp_path / ".histdatacom" / "closure-readiness" / "closure-279.json"
+    ).exists()
+    assert (
+        tmp_path / ".histdatacom" / "closure-readiness" / "closure-279.md"
+    ).exists()
+    assert len(close_calls) == 1
+    assert any(
+        call[:3] == (sys.executable, "-m", "pytest") for call in runner.calls
+    )
+    assert any(
+        call[:3] == (sys.executable, "-m", "pre_commit")
+        for call in runner.calls
+    )
+
+
+def test_guided_workflow_stops_before_gates_when_precheck_is_blocked(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Guided workflow should avoid expensive gates when local state is blocked."""
+    module = _module()
+    runner = FakeRunner(status_stdout=" M README.md\n")
+
+    exit_code = module.main(
+        ["--issue", "279", "--workflow"],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "workflow: blocked" in output
+    assert "dirty-worktree" in output
+    assert not any(
+        call[:3] == (sys.executable, "-m", "pytest") for call in runner.calls
+    )
+    assert not any(
+        call[:3] == (sys.executable, "-m", "pre_commit")
+        for call in runner.calls
+    )
+
+
+def test_guided_workflow_refuses_close_from_non_dev_branch(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Guided close should enforce the dev workflow branch."""
+    module = _module()
+    runner = FakeRunner(branch="feature")
+
+    exit_code = module.main(
+        ["--issue", "279", "--workflow", "--close-issue"],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "workflow: blocked" in output
+    assert "not-dev-branch" in output
+    assert not any(
+        call[:3] == ("gh", "issue", "close") for call in runner.calls
+    )
+
+
+def test_summarize_report_outputs_key_fields_without_live_commands(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Saved reports should not require ad hoc Python snippets to inspect."""
+    module = _module()
+    runner = FakeRunner()
+    report = module.build_readiness_report(
+        repo_root=tmp_path,
+        issue=279,
+        run_gates=True,
+        artifact_roots=(tmp_path / "data",),
+        process_rows=(),
+        runner=runner,
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    report = module.attach_issue_close_action(
+        report,
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    report_path = tmp_path / "closure.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    runner.calls.clear()
+
+    exit_code = module.main(
+        ["--summarize-report", str(report_path)],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Closure report summary" in output
+    assert "state: ready" in output
+    assert "gates: pass" in output
+    assert "issue close: closed" in output
+    assert "issue final: #279 CLOSED" in output
+    assert runner.calls == []
+
+
+def test_summarize_report_json_returns_summary_payload(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Report summary JSON should expose stable key status fields."""
+    module = _module()
+    report = module.build_readiness_report(
+        repo_root=tmp_path,
+        issue=279,
+        run_gates=True,
+        artifact_roots=(tmp_path / "data",),
+        process_rows=(),
+        runner=FakeRunner(),
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    report_path = tmp_path / "closure.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    exit_code = module.main(
+        ["--summarize-report", str(report_path), "--json"],
+        repo_root=tmp_path,
+        runner=FakeRunner(),
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == module.SUMMARY_SCHEMA_VERSION
+    assert payload["readiness"]["state"] == "ready"
+    assert payload["gates"]["state"] == "pass"
+    assert payload["issue"]["label"] == "#279 OPEN"
 
 
 def test_markdown_contains_pasteable_close_comment(tmp_path: Path) -> None:
