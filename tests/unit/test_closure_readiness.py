@@ -1011,6 +1011,211 @@ def test_execute_workflow_json_prints_compact_closeout_payload(
     assert full_report["commands"]
 
 
+def test_execute_workflow_streams_progress_and_records_phase_evidence(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Executable workflow progress should be live and saved in evidence."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=(
+            " M scripts/closure_readiness.py\n"
+            " M tests/unit/test_closure_readiness.py\n"
+        ),
+        issue_body="""
+## Acceptance criteria
+
+- Stream phase progress.
+- Record progress evidence.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "289",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--commit-message",
+            "feat(workflow): stream executable progress",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--commit-path",
+            "tests/unit/test_closure_readiness.py",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    captured = capsys.readouterr()
+    report_path = (
+        tmp_path
+        / ".histdatacom"
+        / "closure-readiness"
+        / "issue-workflow-289.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    progress = report["workflow_progress"]
+    phases = {phase["phase"]: phase for phase in progress["phases"]}
+
+    assert exit_code == 0
+    assert "Issue workflow report summary" in captured.out
+    assert "progress: completed" in captured.out
+    assert "issue-workflow progress:" in captured.err
+    assert "phase=initial-readiness status=started" in captured.err
+    assert "phase=pre-mutation-gates status=started" in captured.err
+    assert "phase=staging status=started" in captured.err
+    assert "phase=commit status=completed" in captured.err
+    assert "phase=push-readiness status=completed" in captured.err
+    assert "phase=push status=completed" in captured.err
+    assert "phase=closure-gates status=completed" in captured.err
+    assert "phase=issue-close status=completed" in captured.err
+    assert "phase=final-readback status=completed" in captured.err
+    assert "phase=report-writing status=completed" in captured.err
+    assert "command=git commit" in captured.err
+    assert "log=.histdatacom/closure-readiness/issue-workflow-289-logs/" in (
+        captured.err
+    )
+    assert progress["state"] == "completed"
+    assert progress["stream"] == "stderr-line"
+    assert progress["event_count"] >= 20
+    assert progress["elapsed_seconds"] >= 0
+    assert {
+        "report-paths",
+        "initial-readiness",
+        "pre-mutation-gates",
+        "staging",
+        "commit",
+        "push-readiness",
+        "push",
+        "closure-gates",
+        "issue-close",
+        "final-readback",
+        "report-writing",
+    }.issubset(phases)
+    assert phases["commit"]["status"] == "completed"
+    assert phases["commit"]["duration_seconds"] >= 0
+    assert phases["commit"]["command_label"] == "git commit"
+
+
+def test_execute_workflow_blocked_progress_is_streamed_and_recorded(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Blocked workflow progress should identify the blocking phase."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        precommit_returncode=1,
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "289",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--commit-message",
+            "feat(workflow): stream executable progress",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--full-json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    progress = payload["workflow_progress"]
+    phases = {phase["phase"]: phase for phase in progress["phases"]}
+
+    assert exit_code == 1
+    assert payload["readiness"]["state"] == "blocked"
+    assert "phase=pre-mutation-gates status=blocked" in captured.err
+    assert "phase=closure-gates status=skipped" in captured.err
+    assert "phase=issue-close status=skipped" in captured.err
+    assert "phase=staging status=started" not in captured.err
+    assert progress["state"] == "blocked"
+    assert phases["pre-mutation-gates"]["status"] == "blocked"
+    assert phases["closure-gates"]["status"] == "skipped"
+    assert phases["issue-close"]["status"] == "skipped"
+
+
+def test_execute_workflow_json_stdout_stays_parseable_with_progress(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Live progress should not pollute compact JSON stdout."""
+    module = _module()
+    runner = FakeRunner(status_stdout=" M scripts/closure_readiness.py\n")
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "289",
+            "--execute-workflow",
+            "--commit-message",
+            "feat(workflow): stream executable progress",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    captured = capsys.readouterr()
+    summary = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert summary["schema_version"] == (
+        module.ISSUE_WORKFLOW_SUMMARY_SCHEMA_VERSION
+    )
+    assert summary["workflow_progress"]["state"] == "completed"
+    assert summary["workflow_progress"]["stream"] == "stderr-line"
+    assert "commands" not in summary
+    assert captured.err.startswith("issue-workflow progress:")
+
+
+def test_execute_workflow_quiet_progress_suppresses_stderr_but_records(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Quiet progress should keep automation quiet without dropping evidence."""
+    module = _module()
+    runner = FakeRunner(status_stdout=" M scripts/closure_readiness.py\n")
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "289",
+            "--execute-workflow",
+            "--quiet-progress",
+            "--commit-message",
+            "feat(workflow): stream executable progress",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    captured = capsys.readouterr()
+    summary = json.loads(captured.out)
+    report_path = (
+        tmp_path
+        / ".histdatacom"
+        / "closure-readiness"
+        / "issue-workflow-289.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert captured.err == ""
+    assert summary["workflow_progress"]["state"] == "completed"
+    assert summary["workflow_progress"]["stream"] == "quiet"
+    assert report["workflow_progress"]["state"] == "completed"
+    assert report["workflow_progress"]["stream"] == "quiet"
+
+
 def test_execute_workflow_pre_mutation_gates_run_before_git_mutation(
     tmp_path: Path,
     capsys: Any,

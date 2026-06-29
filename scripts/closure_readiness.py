@@ -15,7 +15,8 @@ import re
 import shlex
 import subprocess
 import sys
-from typing import Any
+from time import perf_counter
+from typing import Any, TextIO
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
@@ -146,6 +147,188 @@ class WorkflowExecutionLogger:
         ]
         _write_text(path, "\n".join(body))
         return path
+
+
+class WorkflowProgressReporter:
+    """Record and optionally stream executable workflow phase progress."""
+
+    def __init__(
+        self,
+        *,
+        stream: TextIO | None,
+    ) -> None:
+        self.stream = stream
+        self._started_at = perf_counter()
+        self._last_completed_phase = ""
+        self._phase_started: dict[str, float] = {}
+        self._phases: dict[str, dict[str, Any]] = {}
+        self.events: list[dict[str, Any]] = []
+
+    def start(
+        self,
+        phase: str,
+        *,
+        message: str = "",
+        command_label: str = "",
+        log_path: str = "",
+        report_path: str = "",
+    ) -> None:
+        """Record a phase start event."""
+        now = perf_counter()
+        self._phase_started[phase] = now
+        self._phases[phase] = {
+            "phase": phase,
+            "status": "started",
+            "started_elapsed_seconds": self._elapsed(now),
+            "finished_elapsed_seconds": None,
+            "duration_seconds": None,
+            "message": message,
+            "command_label": command_label,
+            "log_path": log_path,
+            "report_path": report_path,
+        }
+        self._emit(
+            phase,
+            "started",
+            message=message,
+            command_label=command_label,
+            log_path=log_path,
+            report_path=report_path,
+            now=now,
+        )
+
+    def finish(
+        self,
+        phase: str,
+        *,
+        status: str = "completed",
+        message: str = "",
+        command_label: str = "",
+        log_path: str = "",
+        report_path: str = "",
+    ) -> None:
+        """Record a terminal phase event."""
+        now = perf_counter()
+        started_at = self._phase_started.get(phase)
+        duration = (
+            round(now - started_at, 3) if started_at is not None else None
+        )
+        if status == "completed":
+            self._last_completed_phase = phase
+        phase_payload = self._phases.get(
+            phase,
+            {
+                "phase": phase,
+                "started_elapsed_seconds": None,
+            },
+        )
+        phase_payload.update(
+            {
+                "status": status,
+                "finished_elapsed_seconds": self._elapsed(now),
+                "duration_seconds": duration,
+                "message": message,
+                "command_label": command_label,
+                "log_path": log_path,
+                "report_path": report_path,
+            }
+        )
+        self._phases[phase] = phase_payload
+        self._emit(
+            phase,
+            status,
+            message=message,
+            command_label=command_label,
+            log_path=log_path,
+            report_path=report_path,
+            now=now,
+            duration_seconds=duration,
+        )
+
+    def skip(self, phase: str, *, message: str = "") -> None:
+        """Record a skipped phase without separate start and finish events."""
+        self.finish(phase, status="skipped", message=message)
+
+    def payload(self) -> dict[str, Any]:
+        """Return publish-safe progress evidence for the workflow report."""
+        statuses = {str(event.get("status", "")) for event in self.events}
+        if "failed" in statuses:
+            state = "failed"
+        elif "blocked" in statuses:
+            state = "blocked"
+        elif self._phases:
+            state = "completed"
+        else:
+            state = "not-started"
+        payload = {
+            "state": state,
+            "stream": "stderr-line" if self.stream is not None else "quiet",
+            "event_count": len(self.events),
+            "phase_count": len(self._phases),
+            "elapsed_seconds": self._elapsed(perf_counter()),
+            "last_completed_phase": self._last_completed_phase,
+            "phases": list(self._phases.values()),
+            "events": self.events,
+        }
+        safe = publish_safe_json_value(payload)
+        if not isinstance(safe, dict):
+            raise TypeError("workflow progress payload must be a JSON object")
+        return dict(safe)
+
+    def _emit(
+        self,
+        phase: str,
+        status: str,
+        *,
+        message: str,
+        command_label: str,
+        log_path: str,
+        report_path: str,
+        now: float,
+        duration_seconds: float | None = None,
+    ) -> None:
+        elapsed = self._elapsed(now)
+        event: dict[str, Any] = {
+            "phase": phase,
+            "status": status,
+            "current_phase": phase,
+            "last_completed_phase": self._last_completed_phase,
+            "elapsed_seconds": elapsed,
+            "message": message,
+        }
+        if duration_seconds is not None:
+            event["duration_seconds"] = duration_seconds
+        if command_label:
+            event["command_label"] = command_label
+        if log_path:
+            event["log_path"] = str(publish_safe_path(log_path))
+        if report_path:
+            event["report_path"] = str(publish_safe_path(report_path))
+        self.events.append(event)
+        if self.stream is None:
+            return
+        parts = [
+            "issue-workflow progress:",
+            f"phase={phase}",
+            f"status={status}",
+            f"current={phase}",
+            f"last={self._last_completed_phase or '-'}",
+            f"elapsed={elapsed:.3f}s",
+        ]
+        if duration_seconds is not None:
+            parts.append(f"duration={duration_seconds:.3f}s")
+        if command_label:
+            parts.append(f"command={command_label}")
+        if log_path:
+            parts.append(f"log={publish_safe_path(log_path)}")
+        if report_path:
+            parts.append(f"report={publish_safe_path(report_path)}")
+        if message:
+            parts.append(f"message={message}")
+        print(" ".join(parts), file=self.stream, flush=True)  # noqa: T201
+
+    def _elapsed(self, now: float) -> float:
+        return round(now - self._started_at, 3)
 
 
 GATE_SPECS = (
@@ -1407,6 +1590,9 @@ def summarize_issue_workflow_report(
     report_paths = _report_paths_summary(_mapping(report.get("report_paths")))
     process_before = _process_summary(_mapping(report.get("processes_before")))
     process_after = _process_summary(_mapping(report.get("processes_after")))
+    workflow_progress = _workflow_progress_summary(
+        _mapping(report.get("workflow_progress"))
+    )
     logs = _mapping(report.get("logs"))
     pre_mutation_state = str(pre_mutation.get("state", "not-run"))
     pre_mutation_enabled = bool(pre_mutation.get("enabled"))
@@ -1497,6 +1683,7 @@ def summarize_issue_workflow_report(
             "before": process_before,
             "after": process_after,
         },
+        "workflow_progress": workflow_progress,
         "logs": {
             "directory": logs.get("directory", ""),
             "command_count": logs.get(
@@ -1543,6 +1730,28 @@ def _process_summary(processes: Mapping[str, Any]) -> dict[str, Any]:
         "state": processes.get("state", "unknown"),
         "total_count": processes.get("total_count", 0),
         "categories": dict(_mapping(processes.get("categories"))),
+    }
+
+
+def _workflow_progress_summary(
+    progress: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not progress:
+        return {
+            "state": "not-recorded",
+            "stream": "not-recorded",
+            "phase_count": 0,
+            "event_count": 0,
+            "elapsed_seconds": 0.0,
+            "last_completed_phase": "",
+        }
+    return {
+        "state": progress.get("state", "unknown"),
+        "stream": progress.get("stream", "unknown"),
+        "phase_count": progress.get("phase_count", 0),
+        "event_count": progress.get("event_count", 0),
+        "elapsed_seconds": progress.get("elapsed_seconds", 0.0),
+        "last_completed_phase": progress.get("last_completed_phase", ""),
     }
 
 
@@ -1881,6 +2090,7 @@ def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
     acceptance = _mapping(summary.get("acceptance_coverage"))
     process_health = _mapping(summary.get("process_health"))
     process_after = _mapping(process_health.get("after"))
+    workflow_progress = _mapping(summary.get("workflow_progress"))
     logs = _mapping(summary.get("logs"))
     lines = [
         "Issue workflow report summary",
@@ -1902,6 +2112,12 @@ def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
             "runtime/process health: "
             f"{process_after.get('state', 'not-recorded')} "
             f"({process_after.get('total_count', 0)})"
+        ),
+        (
+            "progress: "
+            f"{workflow_progress.get('state', 'not-recorded')} "
+            f"({workflow_progress.get('phase_count', 0)} phases, "
+            f"{workflow_progress.get('elapsed_seconds', 0.0)}s)"
         ),
         (
             "logs: "
@@ -2277,6 +2493,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--quiet-progress",
+        "--no-progress",
+        action="store_true",
+        help=(
+            "with --execute-workflow, suppress live stderr progress lines while "
+            "still recording phase timing in the saved report"
+        ),
+    )
+    parser.add_argument(
         "--commit-message",
         "--message",
         dest="commit_message",
@@ -2531,6 +2756,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--pre-mutation-gates requires --execute-workflow")
     if args.full_json and not args.execute_workflow:
         parser.error("--full-json requires --execute-workflow")
+    if args.quiet_progress and not args.execute_workflow:
+        parser.error("--quiet-progress requires --execute-workflow")
     if args.precheck and args.run_gates:
         parser.error("--precheck cannot be combined with --run-gates")
     if args.precheck and args.release_preflight:
@@ -2631,6 +2858,7 @@ def main(
             report_json=args.report_json,
             report_markdown=args.report_markdown,
             runner=runner,
+            progress_stream=None if args.quiet_progress else sys.stderr,
             **_acceptance_kwargs(args),
         )
         summary = summarize_issue_workflow_report(report)
@@ -2775,6 +3003,7 @@ def build_guided_workflow_report(
     report_markdown: Path | None = None,
     write_reports: bool = True,
     runner: CommandRunner | None = None,
+    progress: WorkflowProgressReporter | None = None,
     acceptance_statuses: Mapping[str, str] | None = None,
     acceptance_files: Mapping[str, Sequence[str]] | None = None,
     acceptance_tests: Mapping[str, Sequence[str]] | None = None,
@@ -2820,6 +3049,12 @@ def build_guided_workflow_report(
     report = attach_workflow(report, required_branch=required_branch)
     workflow = _mapping(report.get("workflow"))
     if workflow.get("state") == "ready-to-run-gates":
+        if progress is not None:
+            progress.start(
+                "closure-gates",
+                message="Running closure readiness gates",
+                command_label="closure gates",
+            )
         report = build_readiness_report(
             repo_root=repo_root,
             issue=issue,
@@ -2845,12 +3080,49 @@ def build_guided_workflow_report(
             runner=runner,
         )
         report = attach_workflow(report, required_branch=required_branch)
+        if progress is not None:
+            readiness_state = str(
+                _mapping(report.get("readiness")).get("state", "unknown")
+            )
+            progress.finish(
+                "closure-gates",
+                status=(
+                    "completed" if readiness_state == "ready" else "blocked"
+                ),
+                message=f"Closure gates {readiness_state}",
+                command_label="closure gates",
+            )
+    elif progress is not None:
+        progress.skip(
+            "closure-gates",
+            message=f"Workflow state is {workflow.get('state', 'unknown')}",
+        )
     if close_issue:
+        if progress is not None:
+            progress.start(
+                "issue-close",
+                message="Closing GitHub issue",
+                command_label=f"gh issue close {issue}",
+            )
         report = attach_issue_close_action(
             report,
             repo_root=repo_root,
             runner=runner,
         )
+        if progress is not None:
+            issue_close_state = str(
+                _mapping(report.get("issue_close")).get("state", "unknown")
+            )
+            progress.finish(
+                "issue-close",
+                status=(
+                    "completed"
+                    if issue_close_state in {"closed", "already-closed"}
+                    else "failed"
+                ),
+                message=f"Issue close {issue_close_state}",
+                command_label=f"gh issue close {issue}",
+            )
     _write_reports(report, json_path=json_path, markdown_path=markdown_path)
     return report, json_path, markdown_path
 
@@ -2870,6 +3142,7 @@ def run_issue_workflow_execution(
     report_json: Path | None = None,
     report_markdown: Path | None = None,
     runner: CommandRunner | None = None,
+    progress_stream: TextIO | None = None,
     now: datetime | None = None,
     acceptance_statuses: Mapping[str, str] | None = None,
     acceptance_files: Mapping[str, Sequence[str]] | None = None,
@@ -2883,6 +3156,11 @@ def run_issue_workflow_execution(
     command_runner = runner or _run_command
     root = repo_root.expanduser().resolve(strict=False)
     generated_at = now or datetime.now(timezone.utc)
+    progress = WorkflowProgressReporter(stream=progress_stream)
+    progress.start(
+        "report-paths",
+        message="Checking execution report paths",
+    )
     json_path, markdown_path, default_json, default_markdown = (
         _selected_execution_report_paths(
             repo_root=root,
@@ -2911,7 +3189,29 @@ def run_issue_workflow_execution(
             else "execution report paths must be ignored before logs are written"
         ),
     }
+    report_path_message = (
+        "Execution report paths are ready"
+        if not blockers
+        else "Execution report paths are blocked"
+    )
+    progress.finish(
+        "report-paths",
+        status="completed" if not blockers else "blocked",
+        message=report_path_message,
+        report_path=str(publish_safe_path(str(json_path))),
+    )
     if blockers:
+        progress.start(
+            "report-writing",
+            message="Writing blocked workflow evidence",
+            report_path=str(publish_safe_path(str(json_path))),
+        )
+        progress.finish(
+            "report-writing",
+            status="completed",
+            message="Blocked workflow evidence written",
+            report_path=str(publish_safe_path(str(json_path))),
+        )
         report = _issue_workflow_execution_report(
             generated_at=generated_at,
             issue=issue,
@@ -2934,6 +3234,7 @@ def run_issue_workflow_execution(
             state="blocked",
             blockers=blockers,
             warnings=warnings,
+            workflow_progress=progress.payload(),
         )
         _write_execution_reports(
             report,
@@ -2946,6 +3247,10 @@ def run_issue_workflow_execution(
         repo_root=root,
         log_dir=log_dir,
         runner=command_runner,
+    )
+    progress.start(
+        "initial-readiness",
+        message="Checking process state and commit readiness",
     )
     process_before = collect_process_summary(root, runner=logger)
     if process_before.get("state") == "dirty":
@@ -2968,6 +3273,15 @@ def run_issue_workflow_execution(
         blockers,
         warnings,
         _mapping(commit_report.get("readiness")),
+    )
+    progress.finish(
+        "initial-readiness",
+        status="completed" if not blockers else "blocked",
+        message=(
+            "Initial readiness is ready"
+            if not blockers
+            else "Initial readiness is blocked"
+        ),
     )
 
     push_report: dict[str, Any] = {}
@@ -2992,6 +3306,11 @@ def run_issue_workflow_execution(
     state = "blocked" if blockers else "running"
 
     if state == "running" and pre_mutation_gates:
+        progress.start(
+            "pre-mutation-gates",
+            message="Running gates before git mutation",
+            command_label="closure gates",
+        )
         pre_mutation_gate_report = run_pre_mutation_gates(
             root,
             changed_paths=tuple(
@@ -3009,6 +3328,12 @@ def run_issue_workflow_execution(
         pre_mutation_state = str(
             pre_mutation_gate_report.get("state", "unknown")
         )
+        progress.finish(
+            "pre-mutation-gates",
+            status="completed" if pre_mutation_state == "pass" else "blocked",
+            message=f"Pre-mutation gates {pre_mutation_state}",
+            command_label="closure gates",
+        )
         if pre_mutation_state != "pass":
             for blocker in list(
                 pre_mutation_gate_report.get("blocking_checks", []) or []
@@ -3017,26 +3342,63 @@ def run_issue_workflow_execution(
                 if text not in blockers:
                     blockers.append(text)
             state = "blocked"
+    elif state == "running":
+        progress.skip(
+            "pre-mutation-gates",
+            message="Pre-mutation gates were not requested",
+        )
 
     if state == "running":
+        progress.start(
+            "staging",
+            message="Staging declared workflow paths",
+            command_label="git add",
+        )
         stage_result = logger.run(
             ("git", "add", "--", *stage_paths),
             root,
             name="git-add",
         )
+        progress.finish(
+            "staging",
+            status="completed" if stage_result.returncode == 0 else "failed",
+            message="Staging completed"
+            if stage_result.returncode == 0
+            else "Staging failed",
+            command_label="git add",
+            log_path=str(logger.records[-1].get("log_path", "")),
+        )
         if stage_result.returncode != 0:
             blockers.append("command:git-add")
             state = "failed"
     if state == "running":
+        progress.start(
+            "commit",
+            message="Creating workflow commit",
+            command_label="git commit",
+        )
         commit_result = logger.run(
             ("git", "commit", "-m", commit_message),
             root,
             name="git-commit",
         )
+        progress.finish(
+            "commit",
+            status="completed" if commit_result.returncode == 0 else "failed",
+            message="Commit completed"
+            if commit_result.returncode == 0
+            else "Commit failed",
+            command_label="git commit",
+            log_path=str(logger.records[-1].get("log_path", "")),
+        )
         if commit_result.returncode != 0:
             blockers.append("command:git-commit")
             state = "failed"
     if state == "running":
+        progress.start(
+            "push-readiness",
+            message="Checking push readiness",
+        )
         push_report = build_commit_readiness_report(
             repo_root=root,
             issue=issue,
@@ -3047,14 +3409,37 @@ def run_issue_workflow_execution(
             now=generated_at,
         )
         push_readiness = _mapping(push_report.get("readiness"))
+        progress.finish(
+            "push-readiness",
+            status=(
+                "completed"
+                if push_readiness.get("state") == "ready"
+                else "blocked"
+            ),
+            message=f"Push readiness {push_readiness.get('state', 'unknown')}",
+        )
         if push_readiness.get("state") != "ready":
             _merge_readiness_findings(blockers, warnings, push_readiness)
             state = "blocked"
     if state == "running":
+        progress.start(
+            "push",
+            message="Pushing workflow commit",
+            command_label="git push",
+        )
         push_result = logger.run(
             _push_command(expected_upstream, required_branch),
             root,
             name="git-push",
+        )
+        progress.finish(
+            "push",
+            status="completed" if push_result.returncode == 0 else "failed",
+            message="Push completed"
+            if push_result.returncode == 0
+            else "Push failed",
+            command_label="git push",
+            log_path=str(logger.records[-1].get("log_path", "")),
         )
         if push_result.returncode != 0:
             blockers.append("command:git-push")
@@ -3069,6 +3454,7 @@ def run_issue_workflow_execution(
             close_issue=True,
             write_reports=True,
             runner=logger,
+            progress=progress,
             acceptance_statuses=acceptance_statuses,
             acceptance_files=execution_acceptance_files,
             acceptance_tests=execution_acceptance_tests,
@@ -3081,11 +3467,29 @@ def run_issue_workflow_execution(
         if closure_summary.get("accepted") is not True:
             blockers.append("closure-workflow")
             state = "failed"
+    elif state in {"blocked", "failed"}:
+        progress.skip(
+            "closure-gates",
+            message=f"Skipped because workflow state is {state}",
+        )
+        progress.skip(
+            "issue-close",
+            message=f"Skipped because workflow state is {state}",
+        )
+    progress.start(
+        "final-readback",
+        message="Reading final repository, issue, and commit state",
+    )
     final_readback = {
         "repo": collect_git_state(root, runner=logger),
         "issue": collect_issue_state(root, issue, runner=logger),
         "commit": _last_commit_payload(root, runner=logger),
     }
+    progress.finish(
+        "final-readback",
+        status="completed",
+        message="Final readback completed",
+    )
     process_after = collect_process_summary(root, runner=logger)
     if process_after.get("state") == "dirty":
         blockers.append("lingering-processes-after")
@@ -3094,6 +3498,17 @@ def run_issue_workflow_execution(
         state = "ready"
 
     log_payload["command_count"] = len(logger.records)
+    progress.start(
+        "report-writing",
+        message="Writing workflow evidence reports",
+        report_path=str(publish_safe_path(str(json_path))),
+    )
+    progress.finish(
+        "report-writing",
+        status="completed",
+        message="Workflow evidence reports written",
+        report_path=str(publish_safe_path(str(json_path))),
+    )
     report = _issue_workflow_execution_report(
         generated_at=generated_at,
         issue=issue,
@@ -3114,6 +3529,7 @@ def run_issue_workflow_execution(
         state=state,
         blockers=blockers,
         warnings=warnings,
+        workflow_progress=progress.payload(),
     )
     _write_execution_reports(
         report,
@@ -3144,6 +3560,7 @@ def _issue_workflow_execution_report(
     state: str,
     blockers: Sequence[str],
     warnings: Sequence[str],
+    workflow_progress: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return the publish-safe executable workflow evidence payload."""
     report: dict[str, Any] = {
@@ -3182,6 +3599,7 @@ def _issue_workflow_execution_report(
         "closure_summary": dict(closure_summary),
         "closure_report": dict(closure_report),
         "final_readback": dict(final_readback),
+        "workflow_progress": dict(workflow_progress or {}),
     }
     safe = publish_safe_json_value(report)
     if not isinstance(safe, dict):
