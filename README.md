@@ -556,20 +556,21 @@ curl "https://raw.githubusercontent.com/dmidlo/histdata.com-tools/main/influxdb.
 
 `histdatacom --quality` runs offline checks against datasets that are already on
 disk. It does not contact HistData.com or InfluxDB; it submits a local Temporal
-orchestration `DataQualityWorkflow` that runs CPU/file activities and writes detailed
-JSON reports as disk artifacts. Use it after downloading or extracting data,
-before trusting local ZIP, CSV, or cache artifacts for import, modeling, or
-backtesting.
+orchestration `DataQualityWorkflow` that runs CPU/file activities. Successful
+default runs use a scratch report and delete it after validation; pass
+`--quality-report PATH` when a durable detailed JSON report is needed. Use it
+after downloading or extracting data, before trusting local ZIP, CSV, or cache
+artifacts for import, modeling, or backtesting.
 
 ```sh
 histdatacom --quality --quality-target data/ --quality-report reports/quality.json
 ```
 
-The command prints a human summary and can also write a full JSON report. If no
-`--quality-target` is passed, quality mode uses the configured data directory.
-Targets can be plain HistData CSV files, extracted Excel `.xlsx` payloads,
-HistData ZIP archives, directories containing those files, or the canonical
-`.data` cache file.
+The command prints a human summary, source-artifact cleanliness, and scratch
+report cleanup status. If no `--quality-target` is passed, quality mode uses
+the configured data directory. Targets can be plain HistData CSV files,
+extracted Excel `.xlsx` payloads, HistData ZIP archives, directories containing
+those files, or the canonical `.data` cache file.
 
 Use `--repo-quality` when the same quality run should also update the local
 repo helper file with bounded per-instrument quality summaries:

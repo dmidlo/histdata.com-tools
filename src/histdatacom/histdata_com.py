@@ -699,6 +699,27 @@ def _format_orchestration_quality_console_summary(
     artifact = _mapping_from_payload(quality_payload.get("report_artifact"))
     if artifact.get("path"):
         lines.append(f"report: {artifact['path']}")
+    report_disposition = _mapping_from_payload(
+        quality_payload.get("quality_report")
+    )
+    if report_disposition.get("deleted"):
+        lines.append("quality report: scratch report deleted after validation")
+    elif report_disposition.get("delete_error"):
+        lines.append(
+            "quality report cleanup: " f"{report_disposition['delete_error']}"
+        )
+    source_cleanliness = _mapping_from_payload(
+        quality_payload.get("source_cleanliness")
+    )
+    if source_cleanliness:
+        source_count = int(
+            source_cleanliness.get("source_artifact_count", 0) or 0
+        )
+        source_state = source_cleanliness.get("state", "unknown")
+        lines.append(
+            "source artifacts: "
+            f"{source_state} ({source_count} transient ZIP/CSV/XLS/XLSX)"
+        )
     repo_quality = _mapping_from_payload(quality_payload.get("repo_quality"))
     repo_artifact = _mapping_from_payload(repo_quality.get("repo_artifact"))
     if repo_quality.get("refreshed") and repo_artifact.get("path"):

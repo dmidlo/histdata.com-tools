@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+from histdatacom.publication_safety import publish_safe_path
+
 TRANSIENT_SOURCE_SUFFIXES = (".zip", ".csv", ".xls", ".xlsx")
+DEFAULT_SOURCE_ARTIFACT_PATH_LIMIT = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +128,61 @@ def cleanup_transient_source_artifacts(
         by_suffix=by_suffix,
         errors=tuple(errors),
     )
+
+
+def source_artifact_cleanliness_payload(
+    root: str | Path,
+    *,
+    suffixes: Iterable[str] = TRANSIENT_SOURCE_SUFFIXES,
+    path_limit: int = DEFAULT_SOURCE_ARTIFACT_PATH_LIMIT,
+) -> dict[str, Any]:
+    """Return a publish-safe source-artifact cleanliness summary."""
+    root_path = Path(root).expanduser()
+    normalized_suffixes = _normalized_suffixes(suffixes)
+    by_suffix = _empty_suffix_counts(normalized_suffixes)
+    artifacts = find_transient_source_artifacts(
+        root_path,
+        suffixes=normalized_suffixes,
+    )
+    errors: list[dict[str, str]] = []
+    total_size = 0
+
+    for path in artifacts:
+        suffix = path.suffix.lower()
+        by_suffix[suffix]["matched_count"] += 1
+        try:
+            size_bytes = path.stat().st_size
+        except OSError as exc:
+            size_bytes = 0
+            errors.append(
+                {
+                    "path": str(publish_safe_path(str(path))),
+                    "operation": "stat",
+                    "message": str(exc),
+                }
+            )
+        total_size += size_bytes
+        by_suffix[suffix]["matched_size_bytes"] += size_bytes
+
+    bounded_paths = tuple(artifacts[: max(path_limit, 0)])
+    omitted_count = max(len(artifacts) - len(bounded_paths), 0)
+    return {
+        "state": "clean" if not artifacts else "dirty",
+        "root": str(publish_safe_path(str(root_path.resolve(strict=False)))),
+        "source_artifact_count": len(artifacts),
+        "source_artifact_size_bytes": total_size,
+        "transient_suffixes": list(normalized_suffixes),
+        "by_suffix": by_suffix,
+        "paths": [str(publish_safe_path(str(path))) for path in bounded_paths],
+        "path_limit": {
+            "limit": max(path_limit, 0),
+            "total_count": len(artifacts),
+            "included_count": len(bounded_paths),
+            "omitted_count": omitted_count,
+            "truncated": bool(omitted_count),
+        },
+        "errors": errors,
+    }
 
 
 def _normalized_suffixes(suffixes: Iterable[str]) -> tuple[str, ...]:

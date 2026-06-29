@@ -12,7 +12,10 @@ from histdatacom import histdata_com
 from histdatacom.cache_status import collect_cache_run_status
 from histdatacom.fx_enums import MAJOR_TRIANGLE_SYMBOLS, PAIR_GROUPS
 from histdatacom.cleanup_cli import main as cleanup_main
-from histdatacom.source_cleanup import cleanup_transient_source_artifacts
+from histdatacom.source_cleanup import (
+    cleanup_transient_source_artifacts,
+    source_artifact_cleanliness_payload,
+)
 
 
 def test_source_cleanup_dry_run_preserves_sources_and_caches(
@@ -53,6 +56,29 @@ def test_source_cleanup_apply_deletes_only_transient_sources(
     assert not (artifact_dir / "notes.xls").exists()
     assert (artifact_dir / ".data").exists()
     assert (artifact_dir / "README.txt").exists()
+
+
+def test_source_artifact_cleanliness_payload_is_publish_safe(
+    tmp_path: Path,
+) -> None:
+    """Cleanliness payloads should be suitable for GitHub issue evidence."""
+    data_dir = _write_cleanup_case(tmp_path)
+
+    payload = source_artifact_cleanliness_payload(data_dir, path_limit=2)
+    encoded = json.dumps(payload, sort_keys=True)
+
+    assert payload["state"] == "dirty"
+    assert payload["source_artifact_count"] == 4
+    assert payload["path_limit"] == {
+        "limit": 2,
+        "total_count": 4,
+        "included_count": 2,
+        "omitted_count": 2,
+        "truncated": True,
+    }
+    assert all(str(path).startswith("data/") for path in payload["paths"])
+    assert str(tmp_path) not in encoded
+    assert "/Users/" not in encoded
 
 
 def test_cleanup_cli_dry_run_json_reports_matches(

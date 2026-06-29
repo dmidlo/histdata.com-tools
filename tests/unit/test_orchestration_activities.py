@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import shutil
+from tempfile import gettempdir
 import zipfile
 from pathlib import Path
 from typing import Any, get_type_hints
@@ -1154,6 +1155,10 @@ def test_data_quality_activity_writes_report_and_bounded_metrics(
     assert str(tmp_path) not in json.dumps(quality, sort_keys=True)
     assert quality["quality_profile"]["name"] == "activity-profile"
     assert quality["quality_profile"]["source"] == "operator-config"
+    assert quality["quality_report"]["mode"] == "explicit"
+    assert quality["quality_report"]["kept"] is True
+    assert quality["quality_report"]["deleted"] is False
+    assert quality["source_cleanliness"]["source_artifact_count"] == 1
     assert quality["target_summaries"][0]["target"]["kind"] == "csv"
     assert "targets" not in quality
     assert "rule_results" not in quality
@@ -1166,6 +1171,53 @@ def test_data_quality_activity_writes_report_and_bounded_metrics(
     assert detailed_report["metadata"]["quality_profile"]["name"] == (
         "activity-profile"
     )
+
+
+def test_data_quality_activity_deletes_default_scratch_report_on_success(
+    tmp_path: Path,
+) -> None:
+    """Successful default quality runs should not leave report artifacts."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    target_dir = tmp_path / "targets"
+    target_dir.mkdir()
+    csv_path = write_ascii_case(target_dir, CLEAN_M1_CASE)
+    source_zip = data_dir / "HISTDATA_COM_ASCII_EURUSD_T202001.zip"
+    source_zip.write_bytes(b"zip")
+    request_id = f"run-quality-scratch-{tmp_path.name}"
+    scratch_path = (
+        Path(gettempdir())
+        / "histdatacom-quality-reports"
+        / f"{request_id}.json"
+    )
+    scratch_path.unlink(missing_ok=True)
+    request = RunRequest(
+        request_id=request_id,
+        data_directory=str(data_dir),
+        data_quality=True,
+        quality_paths=(str(csv_path),),
+        quality_check_groups=("inventory",),
+        quality_fail_on="never",
+    )
+
+    payload = data_quality_activity({"request": request.to_dict()})
+
+    result = payload["result"]
+    quality = payload["quality"]
+    encoded_quality = json.dumps(quality, sort_keys=True)
+    assert result["status"] == WorkStatus.COMPLETED.value
+    assert result["artifacts"] == []
+    assert not scratch_path.exists()
+    assert quality["report_artifact"] is None
+    assert quality["quality_report"]["mode"] == "scratch"
+    assert quality["quality_report"]["deleted"] is True
+    assert quality["quality_report"]["kept"] is False
+    assert quality["source_cleanliness"]["state"] == "dirty"
+    assert quality["source_cleanliness"]["source_artifact_count"] == 1
+    assert quality["source_cleanliness"]["paths"] == [f"data/{source_zip.name}"]
+    assert result["metrics"]["source_artifact_count"] == 1
+    assert "scratch report deleted" in result["events"][-1]["message"]
+    assert str(tmp_path) not in encoded_quality
 
 
 def test_data_quality_activity_heartbeats_during_assessment(

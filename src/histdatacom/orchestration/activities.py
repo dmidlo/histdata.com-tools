@@ -6,6 +6,7 @@ from dataclasses import replace
 from importlib import import_module
 import logging
 from pathlib import Path
+from tempfile import gettempdir
 from typing import Any, Callable, Mapping, TypeVar, cast
 
 from histdatacom.activity_stages import (
@@ -74,6 +75,7 @@ from histdatacom.runtime_contracts import (
     WorkStatus,
     derive_work_id,
 )
+from histdatacom.source_cleanup import source_artifact_cleanliness_payload
 from histdatacom.verbosity import safe_log_extra
 from histdatacom.utils import set_working_data_dir
 from histdatacom.orchestration.workflow_metadata import TASK_QUEUE_METADATA_KEY
@@ -348,16 +350,28 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
             metadata=quality_metadata,
             progress_callback=emit_quality_progress,
         )
-        artifact = write_quality_report(report, _quality_report_path(request))
         decision = exit_policy.evaluate(report.summary())
+        artifact = write_quality_report(report, _quality_report_path(request))
+        report_disposition = _quality_report_disposition(
+            request,
+            artifact,
+            success=not bool(int(decision.exit_code)),
+        )
+        report_artifact = _quality_report_artifact(
+            artifact,
+            report_disposition=report_disposition,
+        )
+        source_cleanliness = _quality_source_cleanliness(request)
         quality_payload = bounded_quality_payload(
             operation="data-quality",
             check_groups=check_groups,
             discovery=discovery.to_dict(),
             report=report,
             decision=decision,
-            artifact=artifact,
+            artifact=report_artifact,
         )
+        quality_payload["quality_report"] = report_disposition
+        quality_payload["source_cleanliness"] = source_cleanliness
         repo_artifact = _refresh_repo_quality_metadata(
             request,
             quality_payload,
@@ -367,23 +381,29 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
                 "refreshed": True,
                 "repo_artifact": repo_artifact.to_dict(),
             }
-        artifacts = (
-            (artifact,)
-            if repo_artifact is None
-            else (
-                artifact,
-                repo_artifact,
-            )
+        artifacts = tuple(
+            item
+            for item in (report_artifact, repo_artifact)
+            if item is not None
+        )
+        stage_status = (
+            WorkStatus.FAILED
+            if int(decision.exit_code)
+            else WorkStatus.COMPLETED
         )
         result = StageResult(
             work_id=request.request_id,
             stage="data_quality",
-            status=(
-                WorkStatus.FAILED
-                if int(decision.exit_code)
-                else WorkStatus.COMPLETED
-            ),
+            status=stage_status,
             artifacts=artifacts,
+            events=(
+                _quality_status_event(
+                    request,
+                    status=stage_status,
+                    report_disposition=report_disposition,
+                    source_cleanliness=source_cleanliness,
+                ),
+            ),
             failure=(
                 FailureInfo(
                     code="DATA_QUALITY_FAILED",
@@ -397,6 +417,11 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
                 "quality": quality_payload,
                 "quality_report_path": artifact.path,
                 "quality_report_sha256": artifact.sha256,
+                "quality_report": report_disposition,
+                "source_cleanliness": source_cleanliness,
+                "source_artifact_count": int(
+                    source_cleanliness.get("source_artifact_count", 0) or 0
+                ),
                 "repo_quality_refreshed": repo_artifact is not None,
                 "repo_quality_path": (
                     "" if repo_artifact is None else repo_artifact.path
@@ -407,15 +432,27 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
         total_targets = report.summary().target_count
         completed_targets = total_targets
     except (QualityDiscoveryError, ValueError, OSError) as err:
+        source_cleanliness = _quality_source_cleanliness(request)
+        report_disposition = _unwritten_quality_report_disposition(request)
         quality_payload = {
             "operation": "data-quality",
             "report_schema_version": QUALITY_REPORT_SCHEMA_VERSION,
             "error": str(err),
+            "quality_report": report_disposition,
+            "source_cleanliness": source_cleanliness,
         }
         result = StageResult(
             work_id=request.request_id,
             stage="data_quality",
             status=WorkStatus.FAILED,
+            events=(
+                _quality_status_event(
+                    request,
+                    status=WorkStatus.FAILED,
+                    report_disposition=report_disposition,
+                    source_cleanliness=source_cleanliness,
+                ),
+            ),
             failure=FailureInfo(
                 code="DATA_QUALITY_ERROR",
                 message=str(err),
@@ -423,6 +460,11 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
             ),
             metrics={
                 "quality": quality_payload,
+                "quality_report": report_disposition,
+                "source_cleanliness": source_cleanliness,
+                "source_artifact_count": int(
+                    source_cleanliness.get("source_artifact_count", 0) or 0
+                ),
                 "heartbeat_count": quality_heartbeat_count,
             },
         )
@@ -757,9 +799,123 @@ def _repo_local_path(request: RunRequest) -> Path:
 def _quality_report_path(request: RunRequest) -> Path:
     if request.quality_report_path:
         return Path(request.quality_report_path)
-    data_dir = Path(set_working_data_dir(request.data_directory))
     request_id = request.request_id.strip() or "request"
-    return data_dir / ".quality" / "reports" / f"{request_id}.json"
+    return (
+        Path(gettempdir())
+        / "histdatacom-quality-reports"
+        / f"{request_id}.json"
+    )
+
+
+def _quality_source_cleanliness(request: RunRequest) -> dict[str, Any]:
+    """Return publish-safe source-artifact cleanliness for this data root."""
+    data_dir = Path(set_working_data_dir(request.data_directory))
+    return source_artifact_cleanliness_payload(data_dir)
+
+
+def _quality_report_disposition(
+    request: RunRequest,
+    artifact: ArtifactRef,
+    *,
+    success: bool,
+) -> dict[str, JSONValue]:
+    """Return scratch-report lifecycle metadata, deleting successful defaults."""
+    explicit = bool(request.quality_report_path)
+    disposition: dict[str, JSONValue] = {
+        "mode": "explicit" if explicit else "scratch",
+        "explicit": explicit,
+        "path": str(publish_safe_path(artifact.path)),
+        "size_bytes": artifact.size_bytes,
+        "sha256": artifact.sha256,
+        "written": True,
+        "kept": True,
+        "deleted": False,
+        "delete_error": "",
+    }
+    if explicit or not success:
+        return disposition
+    try:
+        Path(artifact.path).unlink()
+    except FileNotFoundError:
+        disposition["kept"] = False
+        disposition["deleted"] = True
+        return disposition
+    except OSError as exc:
+        disposition["delete_error"] = str(exc)
+        return disposition
+    disposition["kept"] = False
+    disposition["deleted"] = True
+    return disposition
+
+
+def _unwritten_quality_report_disposition(
+    request: RunRequest,
+) -> dict[str, JSONValue]:
+    """Return report lifecycle metadata for failed pre-write quality runs."""
+    explicit = bool(request.quality_report_path)
+    return {
+        "mode": "explicit" if explicit else "scratch",
+        "explicit": explicit,
+        "path": str(publish_safe_path(str(_quality_report_path(request)))),
+        "size_bytes": None,
+        "sha256": "",
+        "written": False,
+        "kept": False,
+        "deleted": False,
+        "delete_error": "",
+    }
+
+
+def _quality_report_artifact(
+    artifact: ArtifactRef,
+    *,
+    report_disposition: Mapping[str, JSONValue],
+) -> ArtifactRef | None:
+    """Return a kept report artifact decorated with lifecycle metadata."""
+    if not bool(report_disposition.get("kept")):
+        return None
+    metadata = dict(artifact.metadata)
+    metadata["report_disposition"] = dict(report_disposition)
+    return replace(artifact, metadata=metadata)
+
+
+def _quality_status_event(
+    request: RunRequest,
+    *,
+    status: WorkStatus,
+    report_disposition: Mapping[str, JSONValue],
+    source_cleanliness: Mapping[str, Any],
+) -> StatusEvent:
+    """Return a TUI-visible data-quality lifecycle event."""
+    source_count = int(source_cleanliness.get("source_artifact_count", 0) or 0)
+    source_state = str(source_cleanliness.get("state", "unknown") or "unknown")
+    if bool(report_disposition.get("deleted")):
+        report_state = "scratch report deleted"
+    elif bool(report_disposition.get("kept")):
+        report_state = (
+            f"{report_disposition.get('mode', 'quality')} report kept"
+        )
+    else:
+        report_state = "quality report not written"
+    return StatusEvent(
+        status=status,
+        stage="data_quality",
+        message=(
+            f"data quality {status.value.lower()}; "
+            f"source artifacts {source_state} ({source_count}); "
+            f"{report_state}."
+        ),
+        work_id=request.request_id,
+        metadata={
+            "source_artifact_count": source_count,
+            "source_cleanliness_state": source_state,
+            "quality_report_mode": str(
+                report_disposition.get("mode", "") or ""
+            ),
+            "quality_report_kept": bool(report_disposition.get("kept")),
+            "quality_report_deleted": bool(report_disposition.get("deleted")),
+        },
+    )
 
 
 def _refresh_repo_quality_metadata(

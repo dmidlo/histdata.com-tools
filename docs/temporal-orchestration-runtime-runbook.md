@@ -723,9 +723,11 @@ Data-quality checks:
   for assessing ZIP archives, extracted CSV files, extracted Excel `.xlsx`
   payloads, and `.data` cache files that already exist on disk; the workflow
   does not contact HistData.com or InfluxDB.
-- The activity writes the detailed `quality-report` JSON artifact on disk and
-  keeps workflow history limited to counters, policy decisions, progress,
-  failures, and artifact references.
+- The activity uses a scratch detailed `quality-report` JSON file for
+  successful default runs and deletes it after validation. Pass
+  `--quality-report PATH` when the detailed JSON report should be kept as a
+  durable artifact. Workflow history stays limited to counters, policy
+  decisions, progress, failures, cleanup status, and artifact references.
 - Quality mode supports focused groups with `--quality-checks`: `inventory`,
   `ingestion`, `time`, `bars`, `ticks`, `domain`, `modeling`, and
   `provenance`. The default is `all`.
@@ -752,7 +754,8 @@ Data-quality checks:
   verified cache entry, or network access for first-run provisioning.
 - Use `--quality-report PATH` to write the full JSON report. The report schema
   is `histdatacom.quality-report.v1`; console output remains a bounded human
-  summary with clean, warning, and failed file sections.
+  summary with clean, warning, and failed file sections, source-artifact
+  cleanliness, and scratch-report cleanup status.
 - Use `--quality-profile PATH` to embed a validated
   `histdatacom.quality-profile.v1` JSON profile into the `DataQualityWorkflow`
   request. Profiles tune rule thresholds, severities, precision/tick-size

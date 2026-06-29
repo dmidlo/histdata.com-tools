@@ -740,6 +740,45 @@ def test_data_quality_cli_writes_json_report_artifact(
     assert f"report: {report_path.resolve()}" in output
 
 
+def test_data_quality_console_summary_reports_scratch_and_sources() -> None:
+    """Quality console output should surface scratch cleanup and sources."""
+    import histdatacom.histdata_com as histdata_com
+
+    output = histdata_com._format_orchestration_quality_console_summary(
+        {
+            "operation": "data-quality",
+            "check_groups": ["inventory"],
+            "summary": {
+                "target_count": 1,
+                "finding_count": 0,
+                "info_count": 0,
+                "warning_count": 0,
+                "error_count": 0,
+                "status": "clean",
+            },
+            "target_status_counts": {
+                "clean": 1,
+                "warning": 0,
+                "failed": 0,
+            },
+            "target_summaries": [],
+            "quality_report": {
+                "mode": "scratch",
+                "deleted": True,
+                "kept": False,
+            },
+            "source_cleanliness": {
+                "state": "dirty",
+                "source_artifact_count": 2,
+            },
+            "exit_decision": {"exit_code": 0, "reason": "ok"},
+        }
+    )
+
+    assert "quality report: scratch report deleted after validation" in output
+    assert "source artifacts: dirty (2 transient ZIP/CSV/XLS/XLSX)" in output
+
+
 def test_data_quality_cli_exit_policy_fails_on_errors(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
