@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 from typing import Any
@@ -30,6 +31,7 @@ from histdatacom.source_cleanup import (  # noqa: E402
 
 SCHEMA_VERSION = "histdatacom.closure-readiness.v1"
 SUMMARY_SCHEMA_VERSION = "histdatacom.closure-report-summary.v1"
+COMMIT_READINESS_SCHEMA_VERSION = "histdatacom.commit-readiness.v1"
 DEFAULT_REPORT_DIR = Path(".histdatacom") / "closure-readiness"
 CommandRunner = Callable[
     [Sequence[str], Path],
@@ -229,6 +231,125 @@ def collect_git_state(
         ),
         "changed_paths": changed_paths,
         "changed_path_count": len(changed_paths),
+    }
+
+
+def build_commit_readiness_report(
+    *,
+    repo_root: Path = PROJECT_ROOT,
+    issue: int | None = None,
+    mode: str = "commit",
+    commit_message: str = "",
+    commit_message_source: str = "argument",
+    expected_paths: Sequence[Path] | None = None,
+    required_branch: str = "dev",
+    runner: CommandRunner | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Return publish-safe commit or push readiness without mutating git."""
+    command_runner = runner or _run_command
+    root = repo_root.expanduser().resolve(strict=False)
+    generated_at = now or datetime.now(timezone.utc)
+    git_state = collect_git_state(root, runner=command_runner)
+    issue_state = collect_issue_state(root, issue, runner=command_runner)
+    changes = collect_change_summary(root, runner=command_runner)
+    scope = _commit_scope_payload(
+        changes,
+        repo_root=root,
+        expected_paths=expected_paths or (),
+    )
+    commit_validation = _commit_message_payload(
+        root,
+        commit_message=commit_message,
+        source=commit_message_source,
+        mode=mode,
+        runner=command_runner,
+    )
+    readiness = determine_commit_readiness(
+        mode=mode,
+        git_state=git_state,
+        issue_state=issue_state,
+        changes=changes,
+        scope=scope,
+        commit_message=commit_validation,
+        required_branch=required_branch,
+    )
+    report: dict[str, Any] = {
+        "schema_version": COMMIT_READINESS_SCHEMA_VERSION,
+        "operation": f"{mode}-readiness",
+        "generated_at_utc": generated_at.astimezone(timezone.utc).isoformat(),
+        "mode": mode,
+        "required_branch": required_branch,
+        "repo": {
+            "root": str(publish_safe_path(str(root))),
+            **git_state,
+        },
+        "issue": issue_state,
+        "changes": changes,
+        "scope": scope,
+        "commit_message": commit_validation,
+        "readiness": readiness,
+    }
+    report["command_plan"] = _commit_command_plan(report)
+    safe = publish_safe_json_value(report)
+    if not isinstance(safe, dict):
+        raise TypeError("commit readiness report must be a JSON object")
+    return dict(safe)
+
+
+def collect_change_summary(
+    repo_root: Path,
+    *,
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    """Return staged, unstaged, and untracked paths from porcelain status."""
+    result = _run_git(
+        repo_root,
+        ("status", "--porcelain=v1", "--untracked-files=all"),
+        runner,
+    )
+    if result.returncode != 0:
+        return {
+            "state": "unavailable",
+            "reason": _tail_text(result.stderr or result.stdout),
+            "entries": [],
+            "staged_paths": [],
+            "unstaged_paths": [],
+            "untracked_paths": [],
+            "changed_paths": [],
+            "staged_count": 0,
+            "unstaged_count": 0,
+            "untracked_count": 0,
+            "changed_path_count": 0,
+        }
+    entries = [
+        entry
+        for entry in (
+            _status_entry(line) for line in result.stdout.splitlines()
+        )
+        if entry
+    ]
+    staged = _unique_sorted(
+        str(entry["path"]) for entry in entries if entry["staged"]
+    )
+    unstaged = _unique_sorted(
+        str(entry["path"]) for entry in entries if entry["unstaged"]
+    )
+    untracked = _unique_sorted(
+        str(entry["path"]) for entry in entries if entry["untracked"]
+    )
+    changed = _unique_sorted(str(entry["path"]) for entry in entries)
+    return {
+        "state": "dirty" if entries else "clean",
+        "entries": entries,
+        "staged_paths": list(staged),
+        "unstaged_paths": list(unstaged),
+        "untracked_paths": list(untracked),
+        "changed_paths": list(changed),
+        "staged_count": len(staged),
+        "unstaged_count": len(unstaged),
+        "untracked_count": len(untracked),
+        "changed_path_count": len(changed),
     }
 
 
@@ -514,6 +635,59 @@ def determine_workflow(
         "blocking_checks": blockers,
         "warnings": warnings,
         "next_command": next_command,
+    }
+
+
+def determine_commit_readiness(
+    *,
+    mode: str,
+    git_state: Mapping[str, Any],
+    issue_state: Mapping[str, Any],
+    changes: Mapping[str, Any],
+    scope: Mapping[str, Any],
+    commit_message: Mapping[str, Any],
+    required_branch: str = "dev",
+) -> dict[str, Any]:
+    """Return report-only readiness for committing or pushing."""
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if git_state.get("branch") != required_branch:
+        blockers.append("not-dev-branch")
+    if not git_state.get("upstream"):
+        blockers.append("upstream-missing")
+    if _int(git_state.get("behind")) > 0:
+        blockers.append("upstream-behind")
+    if issue_state.get("state") == "unavailable":
+        warnings.append("issue-state-unavailable")
+    if changes.get("state") == "unavailable":
+        blockers.append("git-status-unavailable")
+
+    if mode == "push":
+        if changes.get("state") == "dirty":
+            blockers.append("dirty-worktree")
+        if _int(git_state.get("ahead")) <= 0:
+            blockers.append("no-commits-to-push")
+    else:
+        if _int(git_state.get("ahead")) > 0:
+            blockers.append("upstream-ahead")
+        if _int(changes.get("changed_path_count")) <= 0:
+            blockers.append("no-changes")
+        if commit_message.get("state") == "missing":
+            blockers.append("commit-message-missing")
+        elif commit_message.get("state") != "valid":
+            blockers.append("commit-message-invalid")
+        if scope.get("state") == "dirty-unrelated":
+            blockers.append("unrelated-changes")
+        if (
+            scope.get("state") == "not-declared"
+            and changes.get("state") == "dirty"
+        ):
+            warnings.append("scope-not-declared")
+
+    return {
+        "state": "ready" if not blockers else "blocked",
+        "blocking_checks": blockers,
+        "warnings": warnings,
     }
 
 
@@ -909,6 +1083,52 @@ def render_precheck_human(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_commit_readiness_human(report: Mapping[str, Any]) -> str:
+    """Render a compact commit/push readiness console summary."""
+    repo = _mapping(report.get("repo"))
+    issue = _mapping(report.get("issue"))
+    changes = _mapping(report.get("changes"))
+    scope = _mapping(report.get("scope"))
+    message = _mapping(report.get("commit_message"))
+    readiness = _mapping(report.get("readiness"))
+    plan = list(report.get("command_plan", []) or [])
+    mode = str(report.get("mode", "commit"))
+    lines = [
+        f"{mode.title()} readiness",
+        f"state: {readiness.get('state', 'unknown')}",
+        f"issue: {_issue_label(issue)}",
+        f"branch: {repo.get('branch', 'unknown')}",
+        f"upstream: {repo.get('upstream', '')} "
+        f"ahead={repo.get('ahead', 0)} behind={repo.get('behind', 0)}",
+        f"commit: {repo.get('head_short', '')}",
+        f"worktree: {changes.get('state', 'unknown')}",
+        (
+            "changes: "
+            f"{changes.get('changed_path_count', 0)} total, "
+            f"{changes.get('staged_count', 0)} staged, "
+            f"{changes.get('unstaged_count', 0)} unstaged, "
+            f"{changes.get('untracked_count', 0)} untracked"
+        ),
+        f"scope: {scope.get('state', 'not-declared')}",
+    ]
+    if mode == "commit":
+        lines.append(f"message: {message.get('state', 'not-checked')}")
+    blockers = list(readiness.get("blocking_checks", []) or [])
+    if blockers:
+        lines.append("blocking: " + ", ".join(str(item) for item in blockers))
+    warnings = list(readiness.get("warnings", []) or [])
+    if warnings:
+        lines.append("warnings: " + ", ".join(str(item) for item in warnings))
+    unrelated = list(scope.get("unrelated_paths", []) or [])
+    if unrelated:
+        lines.append("unrelated: " + ", ".join(str(item) for item in unrelated))
+    if plan:
+        lines.append("next:")
+        for command in plan:
+            lines.append(f"  {command}")
+    return "\n".join(lines)
+
+
 def render_human(report: Mapping[str, Any]) -> str:
     """Render a compact console summary."""
     repo = _mapping(report.get("repo"))
@@ -1049,6 +1269,40 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="read back the linked issue and cheap local closure state",
     )
     parser.add_argument(
+        "--commit-readiness",
+        action="store_true",
+        help="report whether current changes are ready to stage and commit",
+    )
+    parser.add_argument(
+        "--push-readiness",
+        action="store_true",
+        help="report whether committed local changes are ready to push",
+    )
+    parser.add_argument(
+        "--commit-message",
+        "--message",
+        dest="commit_message",
+        help="candidate Commitizen commit message to validate",
+    )
+    parser.add_argument(
+        "--commit-message-file",
+        type=Path,
+        help="file containing the candidate Commitizen commit message",
+    )
+    parser.add_argument(
+        "--commit-path",
+        "--changed-path",
+        dest="commit_paths",
+        type=Path,
+        action="append",
+        help="intended changed path; repeat to declare the safe commit scope",
+    )
+    parser.add_argument(
+        "--required-branch",
+        default="dev",
+        help="branch required by guided maintainer workflows; default dev",
+    )
+    parser.add_argument(
         "--precheck",
         action="store_true",
         help="run cheap local checks and report readiness to run closure gates",
@@ -1113,6 +1367,40 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     args = parser.parse_args(argv)
+    if args.commit_readiness and args.push_readiness:
+        parser.error(
+            "--commit-readiness cannot be combined with --push-readiness"
+        )
+    if args.commit_message and args.commit_message_file:
+        parser.error(
+            "--commit-message cannot be combined with --commit-message-file"
+        )
+    if args.push_readiness and (
+        args.commit_message or args.commit_message_file or args.commit_paths
+    ):
+        parser.error(
+            "--push-readiness cannot be combined with commit message or path options"
+        )
+    change_readiness = args.commit_readiness or args.push_readiness
+    if change_readiness and (
+        args.issue_audit
+        or args.precheck
+        or args.run_gates
+        or args.release_preflight
+        or args.artifact_roots
+        or args.report_json
+        or args.report_markdown
+        or args.write_reports
+        or args.summarize_report
+        or args.markdown
+        or args.print_close_comment
+        or args.close_issue
+        or args.workflow
+    ):
+        parser.error(
+            "--commit-readiness/--push-readiness can only be combined with "
+            "--issue, --json, --required-branch, and commit-readiness options"
+        )
     if args.precheck and args.run_gates:
         parser.error("--precheck cannot be combined with --run-gates")
     if args.precheck and args.release_preflight:
@@ -1139,6 +1427,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     if args.summarize_report and (
         args.issue is not None
         or args.issue_audit
+        or args.commit_readiness
+        or args.push_readiness
         or args.precheck
         or args.run_gates
         or args.release_preflight
@@ -1182,6 +1472,27 @@ def main(
         return 0 if summary.get("accepted") is True else 1
     if args.workflow:
         return _run_guided_workflow(args, repo_root=root, runner=runner)
+    if args.commit_readiness or args.push_readiness:
+        commit_message, commit_source = _selected_commit_message(args, root)
+        report = build_commit_readiness_report(
+            repo_root=root,
+            issue=args.issue,
+            mode="push" if args.push_readiness else "commit",
+            commit_message=commit_message,
+            commit_message_source=commit_source,
+            expected_paths=args.commit_paths,
+            required_branch=args.required_branch,
+            runner=runner,
+        )
+        if args.json:
+            print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
+        else:
+            print(render_commit_readiness_human(report))  # noqa: T201
+        return (
+            0
+            if _mapping(report.get("readiness")).get("state") == "ready"
+            else 1
+        )
 
     report = build_readiness_report(
         repo_root=root,
@@ -1498,6 +1809,202 @@ def _int(value: object) -> int:
 
 def _yes_no(value: object) -> str:
     return "yes" if bool(value) else "no"
+
+
+def _selected_commit_message(
+    args: argparse.Namespace,
+    repo_root: Path,
+) -> tuple[str, str]:
+    if args.commit_message_file is None:
+        return str(args.commit_message or ""), "argument"
+    path = _output_path(args.commit_message_file, repo_root)
+    if path is None:
+        return "", "file"
+    try:
+        return path.read_text(encoding="utf-8").strip(), "file"
+    except OSError as exc:
+        return "", f"file-unavailable:{exc.__class__.__name__}"
+
+
+def _commit_message_payload(
+    repo_root: Path,
+    *,
+    commit_message: str,
+    source: str,
+    mode: str,
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    if mode == "push":
+        return {
+            "state": "not-applicable",
+            "provided": False,
+            "source": source,
+        }
+    if not commit_message.strip():
+        return {
+            "state": "missing",
+            "provided": False,
+            "source": source,
+        }
+    result = runner(
+        (
+            sys.executable,
+            "-m",
+            "commitizen",
+            "check",
+            "--message",
+            commit_message,
+        ),
+        repo_root,
+    )
+    return {
+        "state": "valid" if result.returncode == 0 else "invalid",
+        "provided": True,
+        "source": source,
+        "message": commit_message,
+        "validator": "python -m commitizen check --message <message>",
+        "returncode": result.returncode,
+        "stdout_tail": _tail_text(result.stdout),
+        "stderr_tail": _tail_text(result.stderr),
+    }
+
+
+def _commit_scope_payload(
+    changes: Mapping[str, Any],
+    *,
+    repo_root: Path,
+    expected_paths: Sequence[Path],
+) -> dict[str, Any]:
+    declared = _declared_scope_paths(expected_paths, repo_root=repo_root)
+    changed = [
+        str(item) for item in list(changes.get("changed_paths", []) or [])
+    ]
+    if not declared:
+        return {
+            "state": "not-declared",
+            "declared_paths": [],
+            "unrelated_paths": [],
+            "covered_paths": changed,
+        }
+    unrelated = [
+        path
+        for path in changed
+        if not any(_path_in_scope(path, scope) for scope in declared)
+    ]
+    covered = [path for path in changed if path not in unrelated]
+    return {
+        "state": "clean" if not unrelated else "dirty-unrelated",
+        "declared_paths": list(declared),
+        "unrelated_paths": unrelated,
+        "covered_paths": covered,
+    }
+
+
+def _declared_scope_paths(
+    paths: Sequence[Path],
+    *,
+    repo_root: Path,
+) -> tuple[str, ...]:
+    normalized: list[str] = []
+    for path in paths:
+        expanded = path.expanduser()
+        if expanded.is_absolute():
+            resolved = expanded.resolve(strict=False)
+            try:
+                normalized.append(resolved.relative_to(repo_root).as_posix())
+            except ValueError:
+                normalized.append(str(publish_safe_path(str(resolved))))
+        else:
+            normalized.append(expanded.as_posix())
+    return _unique_sorted(item.rstrip("/") for item in normalized if item)
+
+
+def _path_in_scope(path: str, scope: str) -> bool:
+    scope_value = scope.rstrip("/")
+    return path == scope_value or path.startswith(f"{scope_value}/")
+
+
+def _commit_command_plan(report: Mapping[str, Any]) -> list[str]:
+    mode = str(report.get("mode", "commit"))
+    repo = _mapping(report.get("repo"))
+    issue = _mapping(report.get("issue"))
+    branch = str(repo.get("branch", "dev") or "dev")
+    commands: list[str] = []
+    if mode == "push":
+        commands.append(_shell_command(("git", "push", "origin", branch)))
+        closure = _closure_command(issue)
+        if closure:
+            commands.append(closure)
+        return commands
+
+    changes = _mapping(report.get("changes"))
+    message = _mapping(report.get("commit_message"))
+    scope = _mapping(report.get("scope"))
+    staged_count = _int(changes.get("staged_count"))
+    needs_stage = (
+        _int(changes.get("unstaged_count")) > 0
+        or _int(changes.get("untracked_count")) > 0
+    )
+    stage_paths = list(scope.get("declared_paths", []) or [])
+    if not stage_paths:
+        stage_paths = list(changes.get("changed_paths", []) or [])
+    if needs_stage and stage_paths:
+        commands.append(_shell_command(("git", "add", "--", *stage_paths)))
+    if staged_count > 0 or needs_stage:
+        commit_text = str(message.get("message", "") or "<message>")
+        commands.append(_shell_command(("git", "commit", "-m", commit_text)))
+        commands.append(_shell_command(("git", "push", "origin", branch)))
+    closure = _closure_command(issue)
+    if closure:
+        commands.append(closure)
+    return commands
+
+
+def _closure_command(issue: Mapping[str, Any]) -> str:
+    number = _int(issue.get("number"))
+    if number <= 0:
+        return ""
+    return _shell_command(
+        (
+            sys.executable,
+            "scripts/closure_readiness.py",
+            "--issue",
+            str(number),
+            "--workflow",
+            "--close-issue",
+        )
+    )
+
+
+def _shell_command(parts: Sequence[str]) -> str:
+    return " ".join(shlex.quote(str(part)) for part in parts)
+
+
+def _status_entry(line: str) -> dict[str, Any] | None:
+    if not line.strip():
+        return None
+    if len(line) < 3:
+        return None
+    x_status = line[0]
+    y_status = line[1]
+    path = line[3:].strip()
+    if " -> " in path:
+        path = path.split(" -> ", 1)[1]
+    path = str(publish_safe_path(path))
+    untracked = line.startswith("??")
+    staged = (not untracked) and x_status not in {" ", "?"}
+    unstaged = (not untracked) and y_status != " "
+    return {
+        "status": line[:2],
+        "path": path,
+        "staged": staged,
+        "unstaged": unstaged,
+        "untracked": untracked,
+    }
+
+
+def _unique_sorted(values: Iterable[str]) -> tuple[str, ...]:
+    return tuple(sorted(dict.fromkeys(value for value in values if value)))
 
 
 def _apply_report_path_readiness(report: Mapping[str, Any]) -> dict[str, Any]:

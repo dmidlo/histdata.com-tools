@@ -38,6 +38,7 @@ class FakeRunner:
         status_stdout: str = "",
         upstream_counts: str = "0\t0\n",
         check_ignore_returncode: int = 0,
+        commitizen_returncode: int = 0,
         precommit_returncode: int = 0,
         precommit_changes: str = "",
         release_returncode: int = 0,
@@ -49,6 +50,7 @@ class FakeRunner:
         self.status_stdout = status_stdout
         self.upstream_counts = upstream_counts
         self.check_ignore_returncode = check_ignore_returncode
+        self.commitizen_returncode = commitizen_returncode
         self.precommit_returncode = precommit_returncode
         self.precommit_changes = precommit_changes
         self.release_returncode = release_returncode
@@ -146,6 +148,21 @@ class FakeRunner:
                     "architecture-diagrams failed\n"
                     if self.precommit_returncode
                     else "all hooks passed\n"
+                ),
+            )
+        if args[:4] == (sys.executable, "-m", "commitizen", "check"):
+            return _completed(
+                args,
+                returncode=self.commitizen_returncode,
+                stdout=(
+                    "Commit validation: successful!\n"
+                    if self.commitizen_returncode == 0
+                    else ""
+                ),
+                stderr=(
+                    ""
+                    if self.commitizen_returncode == 0
+                    else "commit validation failed\n"
                 ),
             )
         if args == ("bash", "pypi.sh", "testpypi_preflight"):
@@ -327,6 +344,193 @@ def test_issue_audit_mode_reads_issue_without_running_gates(
     )
     assert not any(
         call[:3] == (sys.executable, "-m", "pre_commit")
+        for call in runner.calls
+    )
+
+
+def test_commit_readiness_blocks_clean_tree_without_changes(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Commit readiness should not claim work exists on a clean tree."""
+    module = _module()
+    runner = FakeRunner()
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "281",
+            "--commit-readiness",
+            "--commit-message",
+            "feat(workflow): add commit readiness",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "Commit readiness" in output
+    assert "state: blocked" in output
+    assert "no-changes" in output
+    assert any(
+        call[:4] == (sys.executable, "-m", "commitizen", "check")
+        for call in runner.calls
+    )
+
+
+def test_commit_readiness_accepts_intended_dirty_files(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Declared dirty paths plus a valid message should be ready to commit."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M README.md\n?? scripts/new_helper.py\n"
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "281",
+            "--commit-readiness",
+            "--commit-message",
+            "feat(workflow): add commit readiness",
+            "--commit-path",
+            "README.md",
+            "--commit-path",
+            "scripts/new_helper.py",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "state: ready" in output
+    assert "changes: 2 total, 0 staged, 1 unstaged, 1 untracked" in output
+    assert "scope: clean" in output
+    assert "git add -- README.md scripts/new_helper.py" in output
+    assert "git commit -m 'feat(workflow): add commit readiness'" in output
+    assert (
+        "scripts/closure_readiness.py --issue 281 --workflow --close-issue"
+        in (output)
+    )
+
+
+def test_commit_readiness_blocks_unrelated_dirty_files(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Declared scope should catch unrelated worktree changes."""
+    module = _module()
+    runner = FakeRunner(status_stdout=" M README.md\n M pyproject.toml\n")
+
+    exit_code = module.main(
+        [
+            "--commit-readiness",
+            "--commit-message",
+            "feat(workflow): add commit readiness",
+            "--commit-path",
+            "README.md",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "state: blocked" in output
+    assert "unrelated-changes" in output
+    assert "unrelated: pyproject.toml" in output
+
+
+def test_commit_readiness_blocks_invalid_commit_message(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Commitizen validation should be part of the readiness report."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M README.md\n",
+        commitizen_returncode=1,
+    )
+
+    exit_code = module.main(
+        [
+            "--commit-readiness",
+            "--commit-message",
+            "bad message",
+            "--commit-path",
+            "README.md",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["schema_version"] == module.COMMIT_READINESS_SCHEMA_VERSION
+    assert payload["commit_message"]["state"] == "invalid"
+    assert "commit-message-invalid" in payload["readiness"]["blocking_checks"]
+
+
+def test_commit_readiness_blocks_upstream_behind(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Operators should not prepare commits while dev is behind upstream."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M README.md\n",
+        upstream_counts="0\t1\n",
+    )
+
+    exit_code = module.main(
+        [
+            "--commit-readiness",
+            "--commit-message",
+            "feat(workflow): add commit readiness",
+            "--commit-path",
+            "README.md",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "upstream: origin/dev ahead=0 behind=1" in output
+    assert "upstream-behind" in output
+
+
+def test_push_readiness_reports_ready_to_push_state(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Push readiness should be ready when dev is clean and ahead."""
+    module = _module()
+    runner = FakeRunner(upstream_counts="1\t0\n")
+
+    exit_code = module.main(
+        ["--issue", "281", "--push-readiness"],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Push readiness" in output
+    assert "state: ready" in output
+    assert "upstream: origin/dev ahead=1 behind=0" in output
+    assert "git push origin dev" in output
+    assert (
+        "scripts/closure_readiness.py --issue 281 --workflow --close-issue"
+        in (output)
+    )
+    assert not any(
+        call[:4] == (sys.executable, "-m", "commitizen", "check")
         for call in runner.calls
     )
 
