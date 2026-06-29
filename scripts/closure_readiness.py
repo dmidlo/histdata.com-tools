@@ -626,25 +626,31 @@ def attach_report_paths(
     repo_root: Path = PROJECT_ROOT,
     default_json: bool = False,
     default_markdown: bool = False,
+    runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     """Return report with publish-safe report-output metadata attached."""
+    command_runner = runner or _run_command
     outputs: dict[str, Any] = {}
     if json_path is not None:
         outputs["json"] = _report_path_payload(
             json_path,
             repo_root=repo_root,
             default=default_json,
+            runner=command_runner,
         )
     if markdown_path is not None:
         outputs["markdown"] = _report_path_payload(
             markdown_path,
             repo_root=repo_root,
             default=default_markdown,
+            runner=command_runner,
         )
     if not outputs:
         return dict(report)
     updated = dict(report)
     updated["report_paths"] = outputs
+    updated = _apply_report_path_readiness(updated)
+    updated["close_comment"] = render_close_comment(updated)
     safe = publish_safe_json_value(updated)
     if not isinstance(safe, dict):
         raise TypeError("closure readiness report must be a JSON object")
@@ -675,6 +681,7 @@ def summarize_readiness_report(
     workflow = _mapping(report.get("workflow"))
     issue_close = _mapping(report.get("issue_close"))
     issue_after = _mapping(issue_close.get("issue_after"))
+    report_paths = _mapping(report.get("report_paths"))
     close_state = str(issue_close.get("state", "not-run"))
     ready = readiness.get("state") == "ready"
     close_ok = close_state in {"not-run", "closed", "already-closed"}
@@ -722,6 +729,7 @@ def summarize_readiness_report(
             "state": close_state,
             "final_issue": _issue_label(issue_after) if issue_after else "",
         },
+        "report_paths": _report_paths_summary(report_paths),
     }
     safe = publish_safe_json_value(payload)
     if not isinstance(safe, dict):
@@ -819,11 +827,26 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         )
     if report_paths:
         lines.extend(["## Report Paths", ""])
+        lines.extend(
+            [
+                "| Output | Path | Kind | Git ignore | Effect | Write |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
         for kind, payload in report_paths.items():
             payload_map = _mapping(payload)
             default_text = "default" if payload_map.get("default") else "custom"
+            write_text = (
+                "will write"
+                if payload_map.get("write_allowed", True)
+                else "skipped"
+            )
             lines.append(
-                f"- {kind}: `{payload_map.get('path', '')}` ({default_text})"
+                f"| {kind} | `{payload_map.get('path', '')}` | "
+                f"{default_text} | "
+                f"{payload_map.get('gitignore_state', 'unknown')} | "
+                f"{payload_map.get('workspace_effect', 'unknown')} | "
+                f"{write_text} |"
             )
         lines.append("")
     lines.extend(
@@ -928,7 +951,14 @@ def render_human(report: Mapping[str, Any]) -> str:
         lines.append("reports:")
         for kind, payload in report_paths.items():
             payload_map = _mapping(payload)
-            lines.append(f"  {kind}: {payload_map.get('path', '')}")
+            write_state = (
+                "write" if payload_map.get("write_allowed", True) else "skip"
+            )
+            lines.append(
+                f"  {kind}: {payload_map.get('path', '')} "
+                f"[{payload_map.get('gitignore_state', 'unknown')}; "
+                f"{write_state}]"
+            )
     return "\n".join(lines)
 
 
@@ -942,6 +972,7 @@ def render_report_summary_human(summary: Mapping[str, Any]) -> str:
     release = _mapping(summary.get("release_preflight"))
     workflow = _mapping(summary.get("workflow"))
     issue_close = _mapping(summary.get("issue_close"))
+    report_paths = _mapping(summary.get("report_paths"))
     lines = [
         "Closure report summary",
         f"accepted: {_yes_no(summary.get('accepted'))}",
@@ -956,6 +987,7 @@ def render_report_summary_human(summary: Mapping[str, Any]) -> str:
         f"worktree dirty: {_yes_no(repo.get('dirty'))}",
         f"release preflight: {release.get('state', 'unknown')}",
         f"workflow: {workflow.get('state', 'not-run')}",
+        f"report paths: {report_paths.get('state', 'not-recorded')}",
         f"issue close: {issue_close.get('state', 'not-run')}",
     ]
     if issue_close.get("final_issue"):
@@ -1159,12 +1191,6 @@ def main(
         artifact_roots=args.artifact_roots,
         runner=runner,
     )
-    if args.close_issue:
-        report = attach_issue_close_action(
-            report,
-            repo_root=root,
-            runner=runner,
-        )
     json_path, markdown_path, default_json, default_markdown = (
         _selected_report_paths(args, root)
     )
@@ -1175,7 +1201,14 @@ def main(
         repo_root=root,
         default_json=default_json,
         default_markdown=default_markdown,
+        runner=runner,
     )
+    if args.close_issue:
+        report = attach_issue_close_action(
+            report,
+            repo_root=root,
+            runner=runner,
+        )
     _write_reports(report, json_path=json_path, markdown_path=markdown_path)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
@@ -1211,12 +1244,24 @@ def _run_guided_workflow(
     runner: CommandRunner | None,
 ) -> int:
     """Run precheck-first guided issue closure workflow."""
+    json_path, markdown_path, default_json, default_markdown = (
+        _selected_report_paths(args, repo_root)
+    )
     report = build_readiness_report(
         repo_root=repo_root,
         issue=args.issue,
         run_gates=False,
         release_preflight=False,
         artifact_roots=args.artifact_roots,
+        runner=runner,
+    )
+    report = attach_report_paths(
+        report,
+        json_path=json_path,
+        markdown_path=markdown_path,
+        repo_root=repo_root,
+        default_json=default_json,
+        default_markdown=default_markdown,
         runner=runner,
     )
     report = attach_workflow(report)
@@ -1230,6 +1275,15 @@ def _run_guided_workflow(
             artifact_roots=args.artifact_roots,
             runner=runner,
         )
+        report = attach_report_paths(
+            report,
+            json_path=json_path,
+            markdown_path=markdown_path,
+            repo_root=repo_root,
+            default_json=default_json,
+            default_markdown=default_markdown,
+            runner=runner,
+        )
         report = attach_workflow(report)
     if args.close_issue:
         report = attach_issue_close_action(
@@ -1237,17 +1291,6 @@ def _run_guided_workflow(
             repo_root=repo_root,
             runner=runner,
         )
-    json_path, markdown_path, default_json, default_markdown = (
-        _selected_report_paths(args, repo_root)
-    )
-    report = attach_report_paths(
-        report,
-        json_path=json_path,
-        markdown_path=markdown_path,
-        repo_root=repo_root,
-        default_json=default_json,
-        default_markdown=default_markdown,
-    )
     _write_reports(report, json_path=json_path, markdown_path=markdown_path)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
@@ -1457,6 +1500,139 @@ def _yes_no(value: object) -> str:
     return "yes" if bool(value) else "no"
 
 
+def _apply_report_path_readiness(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Return report with report path blockers applied to readiness fields."""
+    report_paths = _mapping(report.get("report_paths"))
+    blockers = _report_path_blockers(report_paths)
+    warnings = _report_path_warnings(report_paths)
+    if not blockers and not warnings:
+        return dict(report)
+    updated: dict[str, Any] = dict(report)
+    for field in ("precheck", "readiness"):
+        section = dict(_mapping(updated.get(field)))
+        blocking_checks = [
+            str(item) for item in list(section.get("blocking_checks", []) or [])
+        ]
+        section_warnings = [
+            str(item) for item in list(section.get("warnings", []) or [])
+        ]
+        for blocker in blockers:
+            if blocker not in blocking_checks:
+                blocking_checks.append(blocker)
+        for warning in warnings:
+            if warning not in section_warnings:
+                section_warnings.append(warning)
+        section["blocking_checks"] = blocking_checks
+        section["warnings"] = section_warnings
+        section["state"] = "ready" if not blocking_checks else "blocked"
+        if field == "precheck":
+            section["ready_to_run_gates"] = section["state"] == "ready"
+        updated[field] = section
+    return updated
+
+
+def _report_path_blockers(report_paths: Mapping[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    for kind, payload in report_paths.items():
+        payload_map = _mapping(payload)
+        if not payload_map.get("closure_blocking"):
+            continue
+        state = str(payload_map.get("gitignore_state", "unknown"))
+        if state == "not-ignored":
+            blockers.append(f"report-path-not-ignored:{kind}")
+        else:
+            blockers.append(f"report-path-ignore-unverified:{kind}")
+    return blockers
+
+
+def _report_path_warnings(report_paths: Mapping[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for kind, payload in report_paths.items():
+        payload_map = _mapping(payload)
+        if payload_map.get("closure_blocking"):
+            continue
+        if payload_map.get("repository_scope") != "inside-repo":
+            continue
+        if payload_map.get("gitignored") is True:
+            continue
+        warnings.append(f"report-path-may-dirty-worktree:{kind}")
+    return warnings
+
+
+def _report_paths_summary(report_paths: Mapping[str, Any]) -> dict[str, Any]:
+    if not report_paths:
+        return {
+            "state": "not-recorded",
+            "blocking_checks": [],
+            "warnings": [],
+            "outputs": {},
+        }
+    blockers = _report_path_blockers(report_paths)
+    warnings = _report_path_warnings(report_paths)
+    outputs = {}
+    for kind, payload in report_paths.items():
+        payload_map = _mapping(payload)
+        outputs[str(kind)] = {
+            "path": payload_map.get("path", ""),
+            "default": bool(payload_map.get("default")),
+            "gitignore_state": payload_map.get("gitignore_state", "unknown"),
+            "workspace_effect": payload_map.get(
+                "workspace_effect",
+                "unknown",
+            ),
+            "write_allowed": bool(payload_map.get("write_allowed", True)),
+            "closure_blocking": bool(
+                payload_map.get("closure_blocking", False)
+            ),
+        }
+    state = "ready"
+    if blockers:
+        state = "blocked"
+    elif warnings:
+        state = "warning"
+    return {
+        "state": state,
+        "blocking_checks": blockers,
+        "warnings": warnings,
+        "outputs": outputs,
+    }
+
+
+def _git_ignore_status(
+    repo_root: Path,
+    relative_path: str,
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    result = _run_git(
+        repo_root,
+        ("check-ignore", "-q", "--", relative_path),
+        runner,
+    )
+    if result.returncode == 0:
+        return {
+            "gitignore_state": "ignored",
+            "gitignored": True,
+        }
+    if result.returncode == 1:
+        return {
+            "gitignore_state": "not-ignored",
+            "gitignored": False,
+        }
+    return {
+        "gitignore_state": "unavailable",
+        "gitignored": None,
+        "gitignore_reason": _tail_text(result.stderr or result.stdout),
+    }
+
+
+def _report_write_allowed(
+    report_paths: Mapping[str, Any],
+    kind: str,
+) -> bool:
+    payload = _mapping(report_paths.get(kind))
+    return bool(payload.get("write_allowed", True))
+
+
 def _selected_report_paths(
     args: argparse.Namespace,
     repo_root: Path,
@@ -1501,15 +1677,40 @@ def _report_path_payload(
     *,
     repo_root: Path,
     default: bool,
+    runner: CommandRunner,
 ) -> dict[str, Any]:
     resolved = path.expanduser().resolve(strict=False)
     try:
-        display = resolved.relative_to(repo_root)
+        relative = resolved.relative_to(repo_root)
     except ValueError:
         display = publish_safe_path(str(resolved))
+        return {
+            "path": str(display),
+            "default": default,
+            "repository_scope": "outside-repo",
+            "gitignore_state": "outside-repo",
+            "gitignored": None,
+            "workspace_effect": "outside-repo",
+            "closure_blocking": False,
+            "write_allowed": True,
+        }
+    display = relative
+    ignore = _git_ignore_status(repo_root, str(relative), runner)
+    gitignored = ignore["gitignored"]
+    blocking = default and gitignored is not True
+    workspace_effect = "ignored"
+    if gitignored is False:
+        workspace_effect = "may-dirty-worktree"
+    elif gitignored is None:
+        workspace_effect = "unknown"
     return {
         "path": str(publish_safe_path(str(display))),
         "default": default,
+        "repository_scope": "inside-repo",
+        **ignore,
+        "workspace_effect": workspace_effect,
+        "closure_blocking": blocking,
+        "write_allowed": not blocking,
     }
 
 
@@ -1519,9 +1720,10 @@ def _write_reports(
     json_path: Path | None,
     markdown_path: Path | None,
 ) -> None:
-    if json_path:
+    report_paths = _mapping(report.get("report_paths"))
+    if json_path and _report_write_allowed(report_paths, "json"):
         _write_text(json_path, json.dumps(report, indent=2) + "\n")
-    if markdown_path:
+    if markdown_path and _report_write_allowed(report_paths, "markdown"):
         _write_text(markdown_path, render_markdown(report))
 
 

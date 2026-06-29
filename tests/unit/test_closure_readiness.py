@@ -37,6 +37,7 @@ class FakeRunner:
         branch: str = "dev",
         status_stdout: str = "",
         upstream_counts: str = "0\t0\n",
+        check_ignore_returncode: int = 0,
         precommit_returncode: int = 0,
         precommit_changes: str = "",
         release_returncode: int = 0,
@@ -47,6 +48,7 @@ class FakeRunner:
         self.branch = branch
         self.status_stdout = status_stdout
         self.upstream_counts = upstream_counts
+        self.check_ignore_returncode = check_ignore_returncode
         self.precommit_returncode = precommit_returncode
         self.precommit_changes = precommit_changes
         self.release_returncode = release_returncode
@@ -88,6 +90,15 @@ class FakeRunner:
             "HEAD...@{u}",
         ):
             return _completed(args, stdout=self.upstream_counts)
+        if args[:4] == ("git", "check-ignore", "-q", "--"):
+            stderr = ""
+            if self.check_ignore_returncode not in {0, 1}:
+                stderr = "fatal: not a git repository\n"
+            return _completed(
+                args,
+                returncode=self.check_ignore_returncode,
+                stderr=stderr,
+            )
         if args == ("git", "status", "--porcelain=v1", "--untracked-files=all"):
             self.status_calls += 1
             if self.precommit_changes and self.status_calls >= 11:
@@ -369,7 +380,82 @@ def test_write_reports_uses_issue_default_paths(
         ".histdatacom/closure-readiness/closure-279.json"
     )
     assert payload["report_paths"]["json"]["default"] is True
+    assert payload["report_paths"]["json"]["gitignore_state"] == "ignored"
+    assert payload["report_paths"]["json"]["write_allowed"] is True
     assert payload["report_paths"]["markdown"]["default"] is True
+    assert payload["report_paths"]["markdown"]["gitignore_state"] == "ignored"
+    assert payload["readiness"]["state"] == "ready"
+
+
+def test_write_reports_blocks_unignored_default_paths(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Default reports should not dirty the repo when ignore rules drift."""
+    module = _module()
+    runner = FakeRunner(check_ignore_returncode=1)
+
+    exit_code = module.main(
+        ["--issue", "279", "--run-gates", "--write-reports", "--json"],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    json_path = (
+        tmp_path / ".histdatacom" / "closure-readiness" / "closure-279.json"
+    )
+    markdown_path = (
+        tmp_path / ".histdatacom" / "closure-readiness" / "closure-279.md"
+    )
+
+    assert exit_code == 1
+    assert payload["readiness"]["state"] == "blocked"
+    assert (
+        "report-path-not-ignored:json"
+        in payload["readiness"]["blocking_checks"]
+    )
+    assert (
+        "report-path-not-ignored:markdown"
+        in payload["precheck"]["blocking_checks"]
+    )
+    assert payload["report_paths"]["json"]["gitignore_state"] == "not-ignored"
+    assert payload["report_paths"]["json"]["write_allowed"] is False
+    assert not json_path.exists()
+    assert not markdown_path.exists()
+
+
+def test_explicit_unignored_report_path_is_marked_but_allowed(
+    tmp_path: Path,
+) -> None:
+    """Explicit report paths keep working but disclose dirty-worktree risk."""
+    module = _module()
+    custom_json = tmp_path / "custom" / "closure.json"
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "279",
+            "--run-gates",
+            "--report-json",
+            str(custom_json),
+        ],
+        repo_root=tmp_path,
+        runner=FakeRunner(check_ignore_returncode=1),
+    )
+    payload = json.loads(custom_json.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert payload["readiness"]["state"] == "ready"
+    assert payload["report_paths"]["json"]["default"] is False
+    assert payload["report_paths"]["json"]["gitignore_state"] == "not-ignored"
+    assert payload["report_paths"]["json"]["workspace_effect"] == (
+        "may-dirty-worktree"
+    )
+    assert payload["report_paths"]["json"]["write_allowed"] is True
+    assert (
+        "report-path-may-dirty-worktree:json"
+        in payload["readiness"]["warnings"]
+    )
 
 
 def test_explicit_report_path_overrides_default_json_path(
@@ -405,6 +491,8 @@ def test_explicit_report_path_overrides_default_json_path(
     assert default_markdown.exists()
     assert payload["report_paths"]["json"]["default"] is False
     assert payload["report_paths"]["markdown"]["default"] is True
+    assert payload["report_paths"]["json"]["gitignore_state"] == "ignored"
+    assert payload["report_paths"]["markdown"]["write_allowed"] is True
 
 
 def test_close_issue_refuses_when_readiness_is_blocked(tmp_path: Path) -> None:
@@ -481,6 +569,7 @@ def test_guided_workflow_runs_gates_writes_reports_and_closes(
     assert exit_code == 0
     assert "workflow: ready" in output
     assert "issue close: closed" in output
+    assert "[ignored; write]" in output
     assert (
         tmp_path / ".histdatacom" / "closure-readiness" / "closure-279.json"
     ).exists()
@@ -542,6 +631,37 @@ def test_guided_workflow_refuses_close_from_non_dev_branch(
     assert exit_code == 1
     assert "workflow: blocked" in output
     assert "not-dev-branch" in output
+    assert not any(
+        call[:3] == ("gh", "issue", "close") for call in runner.calls
+    )
+
+
+def test_guided_workflow_blocks_unignored_default_report_paths(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Guided workflow should catch report ignore drift before gates/close."""
+    module = _module()
+    runner = FakeRunner(check_ignore_returncode=1)
+
+    exit_code = module.main(
+        ["--issue", "279", "--workflow", "--close-issue"],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "workflow: blocked" in output
+    assert "report-path-not-ignored:json" in output
+    assert "json: .histdatacom/closure-readiness/closure-279.json" in output
+    assert "[not-ignored; skip]" in output
+    assert not (
+        tmp_path / ".histdatacom" / "closure-readiness" / "closure-279.json"
+    ).exists()
+    assert not any(
+        call[:3] == (sys.executable, "-m", "pytest") for call in runner.calls
+    )
     assert not any(
         call[:3] == ("gh", "issue", "close") for call in runner.calls
     )
@@ -618,6 +738,59 @@ def test_summarize_report_json_returns_summary_payload(
     assert payload["readiness"]["state"] == "ready"
     assert payload["gates"]["state"] == "pass"
     assert payload["issue"]["label"] == "#279 OPEN"
+
+
+def test_report_summary_and_markdown_expose_report_path_ignore_status(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Report reuse should show whether saved outputs were gitignored."""
+    module = _module()
+    report = module.build_readiness_report(
+        repo_root=tmp_path,
+        issue=279,
+        run_gates=True,
+        artifact_roots=(tmp_path / "data",),
+        process_rows=(),
+        runner=FakeRunner(),
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    report = module.attach_report_paths(
+        report,
+        json_path=(
+            tmp_path / ".histdatacom" / "closure-readiness" / "closure-279.json"
+        ),
+        markdown_path=(
+            tmp_path / ".histdatacom" / "closure-readiness" / "closure-279.md"
+        ),
+        repo_root=tmp_path,
+        default_json=True,
+        default_markdown=True,
+        runner=FakeRunner(),
+    )
+    report_path = tmp_path / "closure.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    exit_code = module.main(
+        ["--summarize-report", str(report_path), "--json"],
+        repo_root=tmp_path,
+        runner=FakeRunner(),
+    )
+    summary = json.loads(capsys.readouterr().out)
+    markdown = module.render_markdown(report)
+
+    assert exit_code == 0
+    assert summary["report_paths"]["state"] == "ready"
+    assert summary["report_paths"]["outputs"]["json"]["gitignore_state"] == (
+        "ignored"
+    )
+    assert "| json | `.histdatacom/closure-readiness/closure-279.json`" in (
+        markdown
+    )
+    assert "| markdown | `.histdatacom/closure-readiness/closure-279.md`" in (
+        markdown
+    )
+    assert "ignored | ignored | will write" in markdown
 
 
 def test_markdown_contains_pasteable_close_comment(tmp_path: Path) -> None:

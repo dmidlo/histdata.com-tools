@@ -281,13 +281,17 @@ GitHub issue state, lingering pytest/pre-commit/Temporal/histdatacom tool
 processes before and after gates, transient ZIP/CSV/XLS/XLSX source artifacts
 under `data/`, README help synchronization, `git diff --check`, main help smoke
 output, pytest, and pre-commit. Reports are publish-safe JSON and Markdown with
-a GitHub-ready close comment block. `--workflow` performs the cheap precheck
-first, stops before expensive gates when local state is blocked, writes default
-issue-scoped reports under `.histdatacom/closure-readiness/`, and enforces the
-`dev` branch workflow. Use `--close-issue` only when ready to close; it remains
-an explicit opt-in action and reads back the final issue state after closing.
-Add `--release-preflight` only during publishing work; normal issue closure
-records the TestPyPI local simple-registry preflight as not-applicable.
+a GitHub-ready close comment block. Default issue-scoped reports are local
+outputs under `.histdatacom/closure-readiness/`; the helper verifies those paths
+are gitignored before writing them and blocks closure if that safety check
+drifts. Explicit report paths still work, but the report marks whether they may
+dirty the current worktree. `--workflow` performs the cheap precheck first,
+stops before expensive gates when local state is blocked, writes safe default
+reports, and enforces the `dev` branch workflow. Use `--close-issue` only when
+ready to close; it remains an explicit opt-in action and reads back the final
+issue state after closing. Add `--release-preflight` only during publishing
+work; normal issue closure records the TestPyPI local simple-registry preflight
+as not-applicable.
 
 ---
 
