@@ -193,6 +193,7 @@ def test_help_advertises_quality_preflight_mode() -> None:
 
     assert "--quality-preflight" in help_text
     assert "--quality-preflight-report" in help_text
+    assert "--quality-preflight-evidence" in help_text
     assert "--quality-preflight-sample-size" in help_text
 
 
@@ -635,6 +636,7 @@ histdatacom:
   data_directory: {tmp_path}
   quality_checks: [inventory, ingestion]
   quality_report: {report_path}
+  quality_preflight_evidence: {tmp_path / "preflight.json"}
   quality_fail_on: never
   quality_max_errors: 2
   quality_max_warnings: 5
@@ -653,6 +655,9 @@ histdatacom:
     assert options.quality_paths == (str(tmp_path),)
     assert options.quality_check_groups == ["inventory", "ingestion"]
     assert options.quality_report_path == str(report_path)
+    assert options.quality_preflight_evidence_path == str(
+        tmp_path / "preflight.json"
+    )
     assert options.quality_fail_on == "never"
     assert options.quality_max_errors == 2
     assert options.quality_max_warnings == 5
@@ -822,6 +827,8 @@ def test_data_quality_cli_mode_bypasses_legacy_prerequisites(
             "ingestion",
             "--quality-report",
             str(tmp_path / "quality.json"),
+            "--quality-preflight-evidence",
+            str(tmp_path / "preflight.json"),
             "--quality-fail-on",
             "warning",
             "--quality-max-errors",
@@ -837,6 +844,9 @@ def test_data_quality_cli_mode_bypasses_legacy_prerequisites(
     assert options.quality_paths == [str(tmp_path)]
     assert options.quality_check_groups == ["inventory", "ingestion"]
     assert options.quality_report_path == str(tmp_path / "quality.json")
+    assert options.quality_preflight_evidence_path == str(
+        tmp_path / "preflight.json"
+    )
     assert options.quality_fail_on == "warning"
     assert options.quality_max_errors == 2
     assert options.quality_max_warnings == 5
@@ -963,6 +973,7 @@ def test_repo_quality_columns_are_display_only_for_repo_table(
         ["histdatacom", "--quality-max-errors", "1"],
         ["histdatacom", "--quality-max-warnings", "1"],
         ["histdatacom", "--quality-profile", "quality-profile.json"],
+        ["histdatacom", "--quality-preflight-evidence", "preflight.json"],
         ["histdatacom", "--quality", "-D"],
         ["histdatacom", "--repo-quality", "-A"],
         ["histdatacom", "--repo-quality-columns"],

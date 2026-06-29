@@ -738,6 +738,12 @@ Data-quality checks:
   bytes/sec, ETA range, and compare the extrapolated runtime with the
   configured `data_quality` activity start-to-close budget. Use
   `--quality-preflight-report PATH` to write the publish-safe JSON evidence.
+  The report includes a direct safe/warn/fail/no-targets decision, no-target
+  diagnostics, and the next `histdatacom --quality ...` command for safe or
+  warned scopes. Pass the saved report to the full run with
+  `--quality-preflight-evidence PATH`; if it is missing or does not match a
+  large cache-backed `--quality` scope, the CLI warns and continues without
+  prompting.
 - The `provenance` group is optional and offline. It checks local quality
   targets against `.histdatacom/manifest-status.sqlite3` when present; explicit
   provenance runs without a store record a clean info result instead of failing

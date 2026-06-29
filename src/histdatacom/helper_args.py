@@ -34,6 +34,7 @@ DEFAULT_HELPER_ARGS: dict[str, Any] = {
     "quality_fail_on": "error",
     "quality_max_errors": 0,
     "quality_max_warnings": 0,
+    "quality_preflight_evidence_path": "",
     "repo_quality_refresh": False,
     "repo_quality_columns": False,
 }

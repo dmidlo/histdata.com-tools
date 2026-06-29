@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import shlex
 from time import perf_counter
 from typing import Any, cast
 
@@ -29,6 +30,7 @@ from histdatacom.data_quality.rules import (
 )
 from histdatacom.fx_enums import (
     Format,
+    PAIR_GROUPS,
     Timeframe,
     expand_pair_selection,
     normalize_pair_group,
@@ -43,6 +45,7 @@ from histdatacom.runtime_contracts import JSONValue
 QUALITY_PREFLIGHT_SCHEMA_VERSION = "histdatacom.quality-preflight.v1"
 DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE = 4
 QUALITY_PREFLIGHT_WARN_FRACTION = 0.80
+QUALITY_PREFLIGHT_LARGE_CACHE_TARGET_COUNT = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +88,11 @@ def run_cache_quality_preflight(
         ).start_to_close_timeout_seconds
     )
     discovery = discover_quality_targets((root_path,))
+    all_cache_targets = tuple(
+        target
+        for target in discovery.targets
+        if target.kind is QualityTargetKind.CACHE
+    )
     cache_targets = _filtered_cache_targets(
         discovery.targets,
         pairs=selected_pairs,
@@ -111,6 +119,7 @@ def run_cache_quality_preflight(
         benchmark=benchmark,
         budget_seconds=budget_seconds,
         quality_profile=quality_profile,
+        all_cache_targets=all_cache_targets,
     )
 
 
@@ -130,6 +139,135 @@ def write_quality_preflight_report(
     return output.resolve(strict=False)
 
 
+def load_quality_preflight_evidence(
+    path: str | Path,
+) -> dict[str, JSONValue]:
+    """Load a publish-safe quality preflight evidence report."""
+    source = Path(path).expanduser()
+    with source.open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, Mapping):
+        raise QualityDiscoveryError(
+            "quality preflight evidence must be a JSON object"
+        )
+    payload = cast(dict[str, JSONValue], dict(data))
+    if payload.get("schema_version") != QUALITY_PREFLIGHT_SCHEMA_VERSION:
+        raise QualityDiscoveryError(
+            "quality preflight evidence schema is not supported"
+        )
+    return payload
+
+
+def quality_run_preflight_warning(
+    roots: Iterable[str | Path],
+    *,
+    pairs: Iterable[object] | None = None,
+    pair_groups: Iterable[object] | None = None,
+    formats: Iterable[object] | None = None,
+    timeframes: Iterable[object] | None = None,
+    quality_check_groups: Iterable[str] | None = None,
+    evidence_path: str | Path | None = None,
+    large_target_count: int = QUALITY_PREFLIGHT_LARGE_CACHE_TARGET_COUNT,
+) -> dict[str, JSONValue] | None:
+    """Return a non-blocking warning for large cache quality runs."""
+    root_paths = tuple(Path(root).expanduser() for root in roots)
+    if not root_paths:
+        return None
+    check_groups = normalize_quality_check_groups(quality_check_groups)
+    selected_groups = _normalize_groups(pair_groups)
+    selected_pairs = _selected_pairs(pairs, selected_groups)
+    selected_formats = _normalize_formats(formats)
+    selected_timeframes = _normalize_timeframes(timeframes)
+    if evidence_path and len(root_paths) != 1:
+        evidence: dict[str, JSONValue] = {
+            "status": "mismatch",
+            "reason": "multiple quality roots cannot match one preflight report",
+        }
+    else:
+        evidence = _quality_preflight_evidence_state(
+            evidence_path,
+            root_path=root_paths[0],
+            check_groups=check_groups,
+            selected_groups=selected_groups,
+            selected_pairs=selected_pairs,
+            selected_formats=selected_formats,
+            selected_timeframes=selected_timeframes,
+        )
+    try:
+        discovery = discover_quality_targets(root_paths)
+    except QualityDiscoveryError:
+        return None
+    cache_targets = _filtered_cache_targets(
+        discovery.targets,
+        pairs=selected_pairs,
+        formats=selected_formats,
+        timeframes=selected_timeframes,
+    )
+    if (
+        evidence.get("status") == "matched"
+        or len(cache_targets) < large_target_count
+    ):
+        return None
+
+    root_payload: JSONValue
+    if len(root_paths) == 1:
+        root_payload = str(
+            publish_safe_path(str(root_paths[0].resolve(strict=False)))
+        )
+    else:
+        root_payload = [
+            str(publish_safe_path(str(root.resolve(strict=False))))
+            for root in root_paths
+        ]
+    preflight_command = _quality_preflight_command(
+        root=root_paths[0],
+        check_groups=check_groups,
+        selected_groups=selected_groups,
+        selected_pairs=selected_pairs,
+        selected_formats=selected_formats,
+        selected_timeframes=selected_timeframes,
+    )
+    warning: dict[str, JSONValue] = {
+        "status": "warn",
+        "reason": "large cache-backed quality run has no matching preflight evidence",
+        "root": root_payload,
+        "target_count": len(cache_targets),
+        "large_target_count": large_target_count,
+        "evidence": cast(JSONValue, evidence),
+        "suggested_preflight_command": preflight_command,
+    }
+    return cast(dict[str, JSONValue], publish_safe_json_mapping(warning))
+
+
+def format_quality_run_preflight_warning(
+    warning: Mapping[str, JSONValue],
+) -> str:
+    """Return a compact warning before large cache quality runs."""
+    evidence = _mapping(warning.get("evidence"))
+    lines = [
+        "Data quality preflight warning",
+        f"status: {warning.get('status', 'warn')}",
+        f"reason: {warning.get('reason', '')}",
+        (
+            "targets: "
+            f"{warning.get('target_count', 0)} canonical .data caches "
+            f"(large-run threshold "
+            f"{warning.get('large_target_count', 0)})"
+        ),
+    ]
+    if evidence.get("status") and evidence.get("status") != "not-provided":
+        lines.append(
+            "evidence: "
+            f"{evidence.get('status')} "
+            f"({evidence.get('reason', 'no detail')})"
+        )
+    command = warning.get("suggested_preflight_command")
+    if command:
+        lines.append(f"preflight first: {command}")
+    lines.append("continuing without prompting")
+    return "\n".join(lines)
+
+
 def format_quality_preflight_console_summary(
     payload: Mapping[str, JSONValue],
 ) -> str:
@@ -141,10 +279,13 @@ def format_quality_preflight_console_summary(
     budget = _mapping(payload.get("temporal_budget"))
     quality = _mapping(payload.get("sample_quality"))
     quality_summary = _mapping(quality.get("summary"))
+    decision = _mapping(payload.get("decision"))
+    diagnostics = _mapping(payload.get("diagnostics"))
     lines = [
         "Data quality cache preflight",
         "status: " + str(payload.get("status", "unknown")),
-        "checks: " + ", ".join(str(item) for item in filters["checks"]),
+        "decision: " + str(decision.get("label", "unknown")),
+        "checks: " + ", ".join(str(item) for item in filters.get("checks", [])),
         (
             "targets: "
             f"{payload.get('target_count', 0)} cache files, "
@@ -183,10 +324,15 @@ def format_quality_preflight_console_summary(
             f"warnings={quality_summary.get('warning_count', 0)} "
             f"errors={quality_summary.get('error_count', 0)}"
         )
+    if decision.get("reason"):
+        lines.append(f"reason: {decision['reason']}")
+    if decision.get("next_command"):
+        lines.append(f"next: {decision['next_command']}")
     if payload.get("report_path"):
         lines.append(f"report: {payload['report_path']}")
     if _int_value(payload.get("target_count")) == 0:
         lines.append("No .data cache targets matched the requested scope.")
+        lines.extend(_format_no_target_diagnostics(diagnostics))
     return "\n".join(lines)
 
 
@@ -353,6 +499,7 @@ def _payload(
     benchmark: Mapping[str, JSONValue],
     budget_seconds: int,
     quality_profile: Mapping[str, Any] | None,
+    all_cache_targets: tuple[QualityTarget, ...],
 ) -> dict[str, JSONValue]:
     target_bytes = sum(item.size_bytes for item in cache_targets)
     sample_bytes = _int_value(benchmark.get("sample_cache_bytes"))
@@ -370,6 +517,16 @@ def _payload(
         bytes_per_second=_float_value(benchmark.get("bytes_per_second")),
     )
     budget = _budget_payload(estimate, budget_seconds)
+    diagnostics = _diagnostics_payload(
+        root_path=root_path,
+        all_cache_targets=all_cache_targets,
+        check_groups=check_groups,
+        selected_groups=selected_groups,
+        selected_pairs=selected_pairs,
+        selected_formats=selected_formats,
+        selected_timeframes=selected_timeframes,
+        matched_cache_count=len(cache_targets),
+    )
     payload: dict[str, JSONValue] = {
         "schema_version": QUALITY_PREFLIGHT_SCHEMA_VERSION,
         "operation": "data-quality-cache-preflight",
@@ -407,6 +564,7 @@ def _payload(
         "quality_profile": quality_profile_report_metadata(quality_profile)[
             "quality_profile"
         ],
+        "diagnostics": diagnostics,
     }
     if not cache_targets:
         payload["status"] = "fail"
@@ -415,8 +573,303 @@ def _payload(
             "status": "fail",
             "reason": "no cache targets matched the requested scope",
         }
+    payload["decision"] = _decision_payload(
+        payload,
+        root_path=root_path,
+        check_groups=check_groups,
+        selected_groups=selected_groups,
+        selected_pairs=selected_pairs,
+        selected_formats=selected_formats,
+        selected_timeframes=selected_timeframes,
+    )
     safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
     return safe_payload
+
+
+def _diagnostics_payload(
+    *,
+    root_path: Path,
+    all_cache_targets: tuple[QualityTarget, ...],
+    check_groups: tuple[str, ...],
+    selected_groups: tuple[str, ...],
+    selected_pairs: tuple[str, ...],
+    selected_formats: tuple[str, ...],
+    selected_timeframes: tuple[str, ...],
+    matched_cache_count: int,
+) -> dict[str, JSONValue]:
+    dimensions = _cache_dimensions(all_cache_targets)
+    return {
+        "target_root": str(
+            publish_safe_path(str(root_path.resolve(strict=False)))
+        ),
+        "requested_filters": {
+            "checks": list(check_groups),
+            "pair_groups": list(selected_groups),
+            "pairs": list(selected_pairs),
+            "formats": list(selected_formats),
+            "timeframes": list(selected_timeframes),
+        },
+        "discovered_cache_dimensions": {
+            **dimensions,
+            "matching_cache_count": matched_cache_count,
+        },
+    }
+
+
+def _cache_dimensions(
+    targets: Iterable[QualityTarget],
+) -> dict[str, JSONValue]:
+    target_items = tuple(targets)
+    pairs = sorted(
+        {
+            target.symbol.lower()
+            for target in target_items
+            if target.symbol.strip()
+        }
+    )
+    formats = sorted(
+        {
+            target.data_format.lower()
+            for target in target_items
+            if target.data_format.strip()
+        }
+    )
+    timeframes = sorted(
+        {
+            target.timeframe.upper()
+            for target in target_items
+            if target.timeframe.strip()
+        }
+    )
+    pair_set = set(pairs)
+    groups = sorted(
+        group
+        for group, group_pairs in PAIR_GROUPS.items()
+        if pair_set.intersection(group_pairs)
+    )
+    return cast(
+        dict[str, JSONValue],
+        {
+            "canonical_data_cache_count": len(target_items),
+            "pair_groups": groups,
+            "pairs": pairs,
+            "formats": formats,
+            "timeframes": timeframes,
+        },
+    )
+
+
+def _decision_payload(
+    payload: Mapping[str, JSONValue],
+    *,
+    root_path: Path,
+    check_groups: tuple[str, ...],
+    selected_groups: tuple[str, ...],
+    selected_pairs: tuple[str, ...],
+    selected_formats: tuple[str, ...],
+    selected_timeframes: tuple[str, ...],
+) -> dict[str, JSONValue]:
+    target_count = _int_value(payload.get("target_count"))
+    budget = _mapping(payload.get("temporal_budget"))
+    status = str(budget.get("status", payload.get("status", "unknown")))
+    reason = str(budget.get("reason", "") or "")
+    if target_count == 0:
+        return {
+            "state": "no-targets",
+            "label": "no matching targets",
+            "action": "adjust target scope",
+            "reason": reason or "no cache targets matched the requested scope",
+            "next_command": "",
+        }
+    if status == "pass":
+        return {
+            "state": "safe",
+            "label": "safe to run full quality battery",
+            "action": "run full quality battery",
+            "reason": reason,
+            "next_command": _quality_command(
+                root=root_path,
+                check_groups=check_groups,
+                selected_groups=selected_groups,
+                selected_pairs=selected_pairs,
+                selected_formats=selected_formats,
+                selected_timeframes=selected_timeframes,
+            ),
+        }
+    if status == "warn":
+        return {
+            "state": "warn",
+            "label": "warning; rerun recommended before full battery",
+            "action": "review estimate or rerun preflight with larger sample",
+            "reason": reason,
+            "next_command": _quality_command(
+                root=root_path,
+                check_groups=check_groups,
+                selected_groups=selected_groups,
+                selected_pairs=selected_pairs,
+                selected_formats=selected_formats,
+                selected_timeframes=selected_timeframes,
+            ),
+        }
+    return {
+        "state": "fail",
+        "label": "do not run full quality battery",
+        "action": "reduce scope or adjust runtime budget",
+        "reason": reason,
+        "next_command": "",
+    }
+
+
+def _quality_preflight_evidence_state(
+    evidence_path: str | Path | None,
+    *,
+    root_path: Path,
+    check_groups: tuple[str, ...],
+    selected_groups: tuple[str, ...],
+    selected_pairs: tuple[str, ...],
+    selected_formats: tuple[str, ...],
+    selected_timeframes: tuple[str, ...],
+) -> dict[str, JSONValue]:
+    if not evidence_path:
+        return {"status": "not-provided", "reason": "no evidence path supplied"}
+    try:
+        payload = load_quality_preflight_evidence(evidence_path)
+    except (OSError, json.JSONDecodeError, QualityDiscoveryError) as exc:
+        return {"status": "unavailable", "reason": str(exc)}
+
+    expected_root = str(publish_safe_path(str(root_path.resolve(strict=False))))
+    if payload.get("root") != expected_root:
+        return {"status": "mismatch", "reason": "target root differs"}
+    filters = _mapping(payload.get("filters"))
+    expected_filters = {
+        "checks": list(check_groups),
+        "pairs": list(selected_pairs),
+        "pair_groups": list(selected_groups),
+        "formats": list(selected_formats),
+        "timeframes": list(selected_timeframes),
+    }
+    for key, expected in expected_filters.items():
+        observed = filters.get(key)
+        if observed != expected:
+            return {
+                "status": "mismatch",
+                "reason": f"{key} filter differs",
+            }
+    decision = _mapping(payload.get("decision"))
+    if decision.get("state") not in {"safe", "warn"}:
+        return {
+            "status": "not-actionable",
+            "reason": "evidence decision is not safe or warn",
+        }
+    return {"status": "matched", "reason": "evidence matches target scope"}
+
+
+def _quality_command(
+    *,
+    root: Path,
+    check_groups: tuple[str, ...],
+    selected_groups: tuple[str, ...],
+    selected_pairs: tuple[str, ...],
+    selected_formats: tuple[str, ...],
+    selected_timeframes: tuple[str, ...],
+) -> str:
+    return _command(
+        "histdatacom",
+        "--quality",
+        "--quality-target",
+        str(publish_safe_path(str(root.resolve(strict=False)))),
+        *_selector_args(
+            check_groups=check_groups,
+            selected_groups=selected_groups,
+            selected_pairs=selected_pairs,
+            selected_formats=selected_formats,
+            selected_timeframes=selected_timeframes,
+        ),
+    )
+
+
+def _quality_preflight_command(
+    *,
+    root: Path,
+    check_groups: tuple[str, ...],
+    selected_groups: tuple[str, ...],
+    selected_pairs: tuple[str, ...],
+    selected_formats: tuple[str, ...],
+    selected_timeframes: tuple[str, ...],
+) -> str:
+    return _command(
+        "histdatacom",
+        "--quality-preflight",
+        "--quality-target",
+        str(publish_safe_path(str(root.resolve(strict=False)))),
+        *_selector_args(
+            check_groups=check_groups,
+            selected_groups=selected_groups,
+            selected_pairs=selected_pairs,
+            selected_formats=selected_formats,
+            selected_timeframes=selected_timeframes,
+        ),
+    )
+
+
+def _selector_args(
+    *,
+    check_groups: tuple[str, ...],
+    selected_groups: tuple[str, ...],
+    selected_pairs: tuple[str, ...],
+    selected_formats: tuple[str, ...],
+    selected_timeframes: tuple[str, ...],
+) -> tuple[str, ...]:
+    args: list[str] = []
+    if check_groups and check_groups != ("all",):
+        args.extend(["--quality-checks", *check_groups])
+    if selected_groups:
+        args.extend(["--pair-groups", *selected_groups])
+    elif selected_pairs:
+        args.extend(["-p", *selected_pairs])
+    if selected_formats:
+        args.extend(["-f", *selected_formats])
+    if selected_timeframes:
+        args.extend(
+            [
+                "-t",
+                *(_timeframe_cli_value(item) for item in selected_timeframes),
+            ]
+        )
+    return tuple(args)
+
+
+def _timeframe_cli_value(value: str) -> str:
+    key = value.upper()
+    if key in Timeframe.__members__:
+        return str(Timeframe[key].value)
+    return value
+
+
+def _command(*parts: str) -> str:
+    return " ".join(shlex.quote(part) for part in parts if part)
+
+
+def _format_no_target_diagnostics(
+    diagnostics: Mapping[str, JSONValue],
+) -> list[str]:
+    requested = _mapping(diagnostics.get("requested_filters"))
+    dimensions = _mapping(diagnostics.get("discovered_cache_dimensions"))
+    if not requested and not dimensions:
+        return []
+    return [
+        "requested filters: "
+        f"groups={_join_or_all(requested.get('pair_groups'))}; "
+        f"pairs={_join_or_all(requested.get('pairs'))}; "
+        f"formats={_join_or_all(requested.get('formats'))}; "
+        f"timeframes={_join_or_all(requested.get('timeframes'))}",
+        "discovered caches: "
+        f"{dimensions.get('canonical_data_cache_count', 0)} canonical .data; "
+        f"groups={_join_or_none(dimensions.get('pair_groups'))}; "
+        f"pairs={_join_or_none(dimensions.get('pairs'))}; "
+        f"formats={_join_or_none(dimensions.get('formats'))}; "
+        f"timeframes={_join_or_none(dimensions.get('timeframes'))}",
+    ]
 
 
 def _estimate(
@@ -563,6 +1016,16 @@ def _list_value(value: object) -> list[JSONValue]:
     return list(value) if isinstance(value, list) else []
 
 
+def _join_or_all(value: object) -> str:
+    items = [str(item) for item in value] if isinstance(value, list) else []
+    return ", ".join(items) if items else "all"
+
+
+def _join_or_none(value: object) -> str:
+    items = [str(item) for item in value] if isinstance(value, list) else []
+    return ", ".join(items) if items else "none"
+
+
 def _int_value(value: object, default: int = 0) -> int:
     if isinstance(value, bool):
         return int(value)
@@ -621,10 +1084,14 @@ def _format_duration(value: object) -> str:
 
 __all__ = [
     "DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE",
+    "QUALITY_PREFLIGHT_LARGE_CACHE_TARGET_COUNT",
     "QUALITY_PREFLIGHT_SCHEMA_VERSION",
     "QualityDiscoveryError",
     "format_quality_preflight_console_summary",
+    "format_quality_run_preflight_warning",
+    "load_quality_preflight_evidence",
     "quality_preflight_to_json",
+    "quality_run_preflight_warning",
     "run_cache_quality_preflight",
     "write_quality_preflight_report",
 ]

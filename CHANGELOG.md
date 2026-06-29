@@ -1,5 +1,11 @@
 ## Unreleased
 
+### Added
+
+- **data-quality**: add cache-scale preflight decisions, no-target diagnostics,
+  saved evidence checks, and non-blocking warnings before large cache-backed
+  quality runs.
+
 ## 0.79.0 (2026-06-24)
 
 ### Changed

@@ -537,6 +537,69 @@ def test_data_quality_cli_missing_path_reports_orchestration_failure(
     assert "orchestration job failed" in output.err
 
 
+def test_data_quality_cli_warns_before_large_cache_run_without_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Large cache-backed quality runs should warn before Temporal submit."""
+    import histdatacom.histdata_com as histdata_com
+
+    evidence_path = tmp_path / "preflight.json"
+    captured: dict[str, object] = {}
+
+    def fake_warning(roots: object, **kwargs: object) -> dict[str, object]:
+        captured["roots"] = roots
+        captured["warning_kwargs"] = kwargs
+        return {
+            "status": "warn",
+            "reason": "large cache-backed quality run has no evidence",
+            "target_count": 33,
+            "large_target_count": 32,
+            "evidence": {"status": "not-provided"},
+            "suggested_preflight_command": (
+                "histdatacom --quality-preflight --quality-target data"
+            ),
+        }
+
+    def fake_submit(request, **kwargs: object) -> JobResult:
+        captured["request"] = request
+        captured["submit_kwargs"] = kwargs
+        return _orchestration_quality_result(target_count=33)
+
+    monkeypatch.setattr(
+        histdata_com,
+        "quality_run_preflight_warning",
+        fake_warning,
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-preflight-evidence",
+            str(evidence_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr()
+    assert "Data quality preflight warning" in output.err
+    assert "continuing without prompting" in output.err
+    assert captured["roots"] == (str(tmp_path),)
+    assert captured["warning_kwargs"]["evidence_path"] == str(evidence_path)
+    assert captured["request"].data_quality
+
+
 def test_data_quality_api_returns_orchestration_quality_payload(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

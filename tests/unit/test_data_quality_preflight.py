@@ -12,6 +12,8 @@ from histdatacom.cli import ArgParser
 from histdatacom.data_quality.preflight import (
     QUALITY_PREFLIGHT_SCHEMA_VERSION,
     format_quality_preflight_console_summary,
+    format_quality_run_preflight_warning,
+    quality_run_preflight_warning,
     run_cache_quality_preflight,
     write_quality_preflight_report,
 )
@@ -61,6 +63,11 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
     assert payload["benchmark"]["bytes_per_second"] > 0
     assert payload["temporal_budget"]["activity"] == "data_quality"
     assert payload["temporal_budget"]["status"] == "pass"
+    assert payload["decision"]["state"] == "safe"
+    assert payload["decision"]["next_command"].startswith(
+        "histdatacom --quality"
+    )
+    assert "--pair-groups majors" in payload["decision"]["next_command"]
     assert payload["sample_quality"]["summary"]["target_count"] == 3
     encoded = json.dumps(payload, sort_keys=True)
     assert str(tmp_path) not in encoded
@@ -88,7 +95,66 @@ def test_quality_preflight_flags_budget_failures(tmp_path: Path) -> None:
 
     assert payload["status"] == "fail"
     assert payload["temporal_budget"]["status"] == "fail"
+    assert payload["decision"]["state"] == "fail"
+    assert payload["decision"]["next_command"] == ""
     assert "exceeds" in str(payload["temporal_budget"]["reason"])
+
+
+def test_quality_preflight_decision_warns_near_temporal_budget(
+    tmp_path: Path,
+) -> None:
+    """Near-budget estimates should recommend review before a full run."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    ticks = iter((0.0, 9.0))
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=10,
+        clock=lambda: next(ticks),
+    )
+
+    assert payload["status"] == "warn"
+    assert payload["decision"]["state"] == "warn"
+    assert payload["decision"]["next_command"].startswith(
+        "histdatacom --quality"
+    )
+    assert "larger sample" in payload["decision"]["action"]
+
+
+def test_quality_preflight_no_target_diagnostics_report_cache_dimensions(
+    tmp_path: Path,
+) -> None:
+    """No-target decisions should show requested and discovered dimensions."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("gbpusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+    diagnostics = payload["diagnostics"]
+    dimensions = diagnostics["discovered_cache_dimensions"]
+    summary = format_quality_preflight_console_summary(payload)
+
+    assert payload["status"] == "fail"
+    assert payload["decision"]["state"] == "no-targets"
+    assert diagnostics["requested_filters"]["pairs"] == ["gbpusd"]
+    assert dimensions["canonical_data_cache_count"] == 1
+    assert dimensions["matching_cache_count"] == 0
+    assert dimensions["pairs"] == ["eurusd"]
+    assert "requested filters: groups=all; pairs=gbpusd" in summary
+    assert "discovered caches: 1 canonical .data" in summary
 
 
 def test_quality_preflight_report_and_summary_are_publish_safe(
@@ -117,6 +183,60 @@ def test_quality_preflight_report_and_summary_are_publish_safe(
     assert "Data quality cache preflight" in summary
     assert "report: reports/preflight.json" in summary
     assert str(tmp_path) not in json.dumps(loaded, sort_keys=True)
+
+
+def test_quality_run_warning_requires_matching_preflight_evidence(
+    tmp_path: Path,
+) -> None:
+    """Large cache quality runs should warn unless evidence matches scope."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    warning = quality_run_preflight_warning(
+        (data_dir,),
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        large_target_count=1,
+    )
+
+    assert warning is not None
+    assert warning["status"] == "warn"
+    assert warning["target_count"] == 1
+    assert "histdatacom --quality-preflight" in str(
+        warning["suggested_preflight_command"]
+    )
+    assert "continuing without prompting" in (
+        format_quality_run_preflight_warning(warning)
+    )
+
+    evidence = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+    report_path = write_quality_preflight_report(
+        evidence,
+        tmp_path / "preflight.json",
+    )
+
+    assert (
+        quality_run_preflight_warning(
+            (data_dir,),
+            pairs=("eurusd",),
+            formats=("ascii",),
+            timeframes=("T",),
+            quality_check_groups=("inventory",),
+            evidence_path=report_path,
+            large_target_count=1,
+        )
+        is None
+    )
 
 
 def test_cli_accepts_quality_preflight_without_temporal_mode(

@@ -96,8 +96,9 @@ histdatacom -h
 
 ```txt
 usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C] [--config PATH] [-p PAIR [PAIR ...]] [--pair-groups GROUP [GROUP ...]] [-f FORMAT [FORMAT ...]] [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH] [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE] [-c CPU_UTILIZATION]
-                   [--data-directory DATA_DIRECTORY] [-v] [--orchestration-start] [--no-orchestration-start] [--submit-only] [--quality] [--repo-quality] [--repo-quality-columns] [--quality-target PATH [PATH ...]] [--quality-checks GROUP [GROUP ...]]
-                   [--quality-report PATH] [--quality-profile PATH] [--quality-fail-on SEVERITY] [--quality-max-errors COUNT] [--quality-max-warnings COUNT]
+                   [--data-directory DATA_DIRECTORY] [-v] [--orchestration-start] [--no-orchestration-start] [--submit-only] [--quality] [--repo-quality] [--quality-preflight] [--repo-quality-columns] [--quality-target PATH [PATH ...]]
+                   [--quality-checks GROUP [GROUP ...]] [--quality-report PATH] [--quality-preflight-report PATH] [--quality-preflight-evidence PATH] [--quality-preflight-sample-size COUNT] [--quality-profile PATH] [--quality-fail-on SEVERITY]
+                   [--quality-max-errors COUNT] [--quality-max-warnings COUNT]
 
 options:
   -h, --help            show this help message and exit
@@ -171,6 +172,8 @@ Data quality:
                         datasets without contacting HistData.com
   --repo-quality        run offline data-quality assessment and write bounded
                         quality summary metadata back to the local .repo file
+  --quality-preflight   benchmark a deterministic sample of existing .data
+                        caches before running a cache-scale quality battery
   --quality-target, --quality-path PATH [PATH ...]
                         local file or directory to assess; supports
                         directories, HistData ZIP archives, CSV files, XLSX
@@ -182,6 +185,14 @@ Data quality:
   --quality-report PATH
                         write the full machine-readable JSON quality report to
                         PATH
+  --quality-preflight-report PATH
+                        write the publish-safe JSON quality preflight report to
+                        PATH
+  --quality-preflight-evidence PATH
+                        use a saved quality preflight JSON report as evidence
+                        before a large cache-backed --quality run
+  --quality-preflight-sample-size COUNT
+                        number of cache-size quantile targets to benchmark
   --quality-profile PATH
                         read a JSON quality profile with rule thresholds,
                         severities, and modeling assumptions
@@ -609,8 +620,16 @@ histdatacom --quality-preflight \
 The console output is human-readable. The optional
 `--quality-preflight-report PATH` file is publish-safe JSON with target counts,
 cache bytes, sampled paths, row counts, throughput, ETA range, sample quality
-summary, and pass/warn/fail budget status. Use
-`--quality-preflight-sample-size COUNT` to tune the bounded sample.
+summary, no-target diagnostics, and a decision section that says whether the
+full battery is safe, warned, failed, or has no matching targets. Safe and
+warned decisions include the next `histdatacom --quality ...` command for the
+same target scope. Use `--quality-preflight-sample-size COUNT` to tune the
+bounded sample.
+
+When launching a large cache-backed `--quality` run, pass the saved report with
+`--quality-preflight-evidence PATH`. If no matching evidence is available, the
+CLI prints a warning and suggested preflight command before continuing without
+prompting.
 
 #### Full-Dataset Quality Campaigns
 

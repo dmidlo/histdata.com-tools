@@ -44,6 +44,8 @@ from histdatacom.exceptions import (
 )
 from histdatacom.data_quality.preflight import (
     format_quality_preflight_console_summary,
+    format_quality_run_preflight_warning,
+    quality_run_preflight_warning,
     run_cache_quality_preflight,
     write_quality_preflight_report,
 )
@@ -99,6 +101,7 @@ class RuntimeContext:
     quality_max_errors: int
     quality_max_warnings: int
     quality_preflight: bool
+    quality_preflight_evidence_path: str | None
     quality_preflight_report_path: str | None
     quality_preflight_sample_size: int
     quality_profile_path: str
@@ -211,6 +214,7 @@ class _HistDataCom:  # noqa:R701
         self,
     ) -> list | dict | PolarsDataFrame | DataFrame | Table:
         """Submit this run to the Temporal orchestration client boundary."""
+        self._warn_before_large_quality_run_without_preflight()
         try:
             result = self._submit_orchestration_job()
         except OrchestrationUnavailableError as err:
@@ -295,6 +299,29 @@ class _HistDataCom:  # noqa:R701
         if not self.context.from_api:
             print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
         return payload
+
+    def _warn_before_large_quality_run_without_preflight(self) -> None:
+        """Warn before a large cache-backed quality run without evidence."""
+        if not self.context.data_quality or self.context.from_api:
+            return
+        pair_groups = _tuple_from_sequence_payload(
+            self.context.request.metadata.get("pair_groups")
+        )
+        warning = quality_run_preflight_warning(
+            self.context.quality_paths,
+            pairs=self.context.request.pairs,
+            pair_groups=pair_groups,
+            formats=self.context.request.formats,
+            timeframes=self.context.request.timeframes,
+            quality_check_groups=self.context.quality_check_groups,
+            evidence_path=self.context.quality_preflight_evidence_path,
+        )
+        if warning is None:
+            return
+        print(  # noqa:T201
+            format_quality_run_preflight_warning(warning),
+            file=sys.stderr,
+        )
 
     def _submit_orchestration_job(self) -> JobResult:
         """Submit an orchestration job with foreground progress when useful."""
@@ -405,6 +432,11 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         quality_max_errors=int(args["quality_max_errors"]),
         quality_max_warnings=int(args["quality_max_warnings"]),
         quality_preflight=bool(args["quality_preflight"]),
+        quality_preflight_evidence_path=(
+            None
+            if args.get("quality_preflight_evidence_path") is None
+            else str(args["quality_preflight_evidence_path"])
+        ),
         quality_preflight_report_path=(
             None
             if args.get("quality_preflight_report_path") is None

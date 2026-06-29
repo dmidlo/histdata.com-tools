@@ -271,6 +271,11 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     "quality_profile requires --quality or --repo-quality"
                 )
                 raise SystemExit(1)
+            if self.arg_namespace.quality_preflight_evidence_path:
+                print(  # noqa:T201
+                    "--quality-preflight-evidence requires --quality"
+                )
+                raise SystemExit(1)
             if self.arg_namespace.quality_preflight_report_path:
                 print(  # noqa:T201
                     "--quality-preflight-report requires --quality-preflight"
@@ -347,6 +352,15 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 )
                 raise SystemExit(1)
 
+        if (
+            self.arg_namespace.quality_preflight_evidence_path
+            and not self.arg_namespace.data_quality
+        ):
+            print(  # noqa:T201
+                "--quality-preflight-evidence requires --quality"
+            )
+            raise SystemExit(1)
+
         if not self.arg_namespace.quality_paths:
             self.arg_namespace.quality_paths = (
                 self.arg_namespace.data_directory,
@@ -414,6 +428,13 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     [
                         "--quality-profile",
                         self.arg_namespace.quality_profile_path,
+                    ]
+                )
+            if self.arg_namespace.quality_preflight_evidence_path:
+                args.extend(
+                    [
+                        "--quality-preflight-evidence",
+                        self.arg_namespace.quality_preflight_evidence_path,
                     ]
                 )
             if self.arg_namespace.quality_preflight:
@@ -1401,6 +1422,16 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             metavar="PATH",
             help=(
                 "write the publish-safe JSON quality preflight report to PATH"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-evidence",
+            dest="quality_preflight_evidence_path",
+            type=str,
+            metavar="PATH",
+            help=(
+                "use a saved quality preflight JSON report as evidence before "
+                "a large cache-backed --quality run"
             ),
         )
         quality_args.add_argument(

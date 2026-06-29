@@ -272,6 +272,13 @@ Quality mode supports focused groups with `--quality-checks`: `inventory`,
 `ingestion`, `time`, `bars`, `ticks`, `domain`, `modeling`, and `provenance`.
 The default is `all`.
 
+Use `--quality-preflight` before large cache-backed quality batteries. It runs
+a bounded `.data` sample locally, writes optional publish-safe JSON evidence
+with `--quality-preflight-report PATH`, and reports a direct decision: safe,
+warned, failed, or no matching targets. When launching the full run, pass that
+saved report with `--quality-preflight-evidence PATH`; if the evidence does not
+match the target scope, the CLI warns and continues without prompting.
+
 Warnings are advisory by default. Errors make a target failed and make the
 process exit nonzero under the default `--quality-fail-on error` policy. CI jobs
 that want warnings to fail should pass
