@@ -34,6 +34,7 @@ SCHEMA_VERSION = "histdatacom.closure-readiness.v1"
 SUMMARY_SCHEMA_VERSION = "histdatacom.closure-report-summary.v1"
 COMMIT_READINESS_SCHEMA_VERSION = "histdatacom.commit-readiness.v1"
 ISSUE_WORKFLOW_SCHEMA_VERSION = "histdatacom.issue-workflow-execution.v1"
+ISSUE_WORKFLOW_SUMMARY_SCHEMA_VERSION = "histdatacom.issue-workflow-summary.v1"
 ACCEPTANCE_COVERAGE_SCHEMA_VERSION = "histdatacom.acceptance-coverage.v1"
 DEFAULT_REPORT_DIR = Path(".histdatacom") / "closure-readiness"
 DEFAULT_REQUIRED_BRANCH = "dev"
@@ -1382,6 +1383,163 @@ def summarize_readiness_report(
     return dict(safe)
 
 
+def summarize_issue_workflow_report(
+    report: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return key fields from an executable issue workflow report."""
+    readiness = _mapping(report.get("readiness"))
+    final = _mapping(report.get("final_readback"))
+    final_repo = _mapping(final.get("repo"))
+    final_issue = _mapping(final.get("issue"))
+    final_commit = _mapping(final.get("commit"))
+    pre_mutation = _mapping(report.get("pre_mutation_gates"))
+    closure = _mapping(report.get("closure_summary"))
+    closure_readiness = _mapping(closure.get("readiness"))
+    closure_gates = _mapping(closure.get("gates"))
+    issue_close = _mapping(closure.get("issue_close"))
+    acceptance = _mapping(report.get("acceptance_coverage"))
+    report_paths = _report_paths_summary(_mapping(report.get("report_paths")))
+    process_before = _process_summary(_mapping(report.get("processes_before")))
+    process_after = _process_summary(_mapping(report.get("processes_after")))
+    logs = _mapping(report.get("logs"))
+    pre_mutation_state = str(pre_mutation.get("state", "not-run"))
+    pre_mutation_enabled = bool(pre_mutation.get("enabled"))
+    pre_mutation_ok = pre_mutation_state == "pass" or (
+        pre_mutation_state == "not-run" and not pre_mutation_enabled
+    )
+    final_issue_ok = (
+        not final_issue
+        or str(final_issue.get("state", "")).upper() == "CLOSED"
+    )
+    repo_ok = (
+        not bool(final_repo.get("dirty"))
+        and _int(final_repo.get("ahead")) == 0
+        and _int(final_repo.get("behind")) == 0
+    )
+    closure_ok = closure.get("accepted") is True
+    issue_close_ok = str(issue_close.get("state", "not-run")) in {
+        "closed",
+        "already-closed",
+    }
+    process_ok = process_after.get("state") in {"clean", "not-recorded"}
+    report_paths_ok = report_paths.get("state") != "blocked"
+    accepted = bool(
+        readiness.get("state") == "ready"
+        and final_issue_ok
+        and repo_ok
+        and pre_mutation_ok
+        and closure_ok
+        and issue_close_ok
+        and _acceptance_close_ready(acceptance)
+        and process_ok
+        and report_paths_ok
+    )
+    payload: dict[str, Any] = {
+        "schema_version": ISSUE_WORKFLOW_SUMMARY_SCHEMA_VERSION,
+        "source_schema_version": report.get("schema_version", ""),
+        "generated_at_utc": report.get("generated_at_utc", ""),
+        "accepted": accepted,
+        "readiness": {
+            "state": readiness.get("state", "unknown"),
+            "blocking_checks": list(readiness.get("blocking_checks", []) or []),
+            "warnings": list(readiness.get("warnings", []) or []),
+        },
+        "issue": {
+            "label": _issue_label(final_issue)
+            if final_issue
+            else f"#{report.get('issue_number', '')}",
+            "number": final_issue.get("number", report.get("issue_number", 0)),
+            "state": final_issue.get("state", "unknown"),
+            "title": final_issue.get("title", ""),
+            "url": final_issue.get("url", ""),
+        },
+        "repo": {
+            "branch": final_repo.get("branch", "unknown"),
+            "upstream": final_repo.get("upstream", ""),
+            "upstream_state": final_repo.get("upstream_state", "unknown"),
+            "ahead": final_repo.get("ahead", 0),
+            "behind": final_repo.get("behind", 0),
+            "dirty": bool(final_repo.get("dirty")),
+            "head_short": final_repo.get("head_short", ""),
+        },
+        "commit": {
+            "state": final_commit.get("state", "unknown"),
+            "summary": final_commit.get("summary", ""),
+            "head_short": final_repo.get("head_short", ""),
+        },
+        "pre_mutation_gates": {
+            "enabled": pre_mutation_enabled,
+            "state": pre_mutation_state,
+            "blocking_checks": list(
+                pre_mutation.get("blocking_checks", []) or []
+            ),
+            "changed_paths_after": list(
+                pre_mutation.get("changed_paths_after", []) or []
+            ),
+        },
+        "acceptance_coverage": _acceptance_summary(acceptance),
+        "closure": {
+            "accepted": bool(closure.get("accepted")),
+            "readiness_state": closure_readiness.get("state", "unknown"),
+            "gates_state": closure_gates.get("state", "unknown"),
+            "gate_labels": closure_gates.get("labels", ""),
+            "issue_close_state": issue_close.get("state", "not-run"),
+            "final_issue": issue_close.get("final_issue", ""),
+        },
+        "report_paths": report_paths,
+        "process_health": {
+            "before": process_before,
+            "after": process_after,
+        },
+        "logs": {
+            "directory": logs.get("directory", ""),
+            "command_count": logs.get(
+                "command_count",
+                len(report.get("commands", []) or []),
+            ),
+        },
+    }
+    safe = publish_safe_json_value(payload)
+    if not isinstance(safe, dict):
+        raise TypeError("issue workflow summary must be a JSON object")
+    return dict(safe)
+
+
+def summarize_report(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the matching saved-report summary for the source schema."""
+    if report.get("schema_version") == ISSUE_WORKFLOW_SCHEMA_VERSION:
+        return summarize_issue_workflow_report(report)
+    return summarize_readiness_report(report)
+
+
+def render_saved_report_markdown(report: Mapping[str, Any]) -> str:
+    """Render Markdown for a saved report using its source schema."""
+    if report.get("schema_version") == ISSUE_WORKFLOW_SCHEMA_VERSION:
+        return render_issue_workflow_markdown(report)
+    return render_markdown(report)
+
+
+def saved_report_close_comment(report: Mapping[str, Any]) -> str:
+    """Return the publish-safe close comment embedded in a saved report."""
+    if report.get("schema_version") == ISSUE_WORKFLOW_SCHEMA_VERSION:
+        return str(_mapping(report.get("closure_report")).get("close_comment", ""))
+    return str(report.get("close_comment", ""))
+
+
+def _process_summary(processes: Mapping[str, Any]) -> dict[str, Any]:
+    if not processes:
+        return {
+            "state": "not-recorded",
+            "total_count": 0,
+            "categories": {},
+        }
+    return {
+        "state": processes.get("state", "unknown"),
+        "total_count": processes.get("total_count", 0),
+        "categories": dict(_mapping(processes.get("categories"))),
+    }
+
+
 def render_markdown(report: Mapping[str, Any]) -> str:
     """Render a publish-safe Markdown readiness report."""
     repo = _mapping(report.get("repo"))
@@ -1703,6 +1861,72 @@ def render_report_summary_human(summary: Mapping[str, Any]) -> str:
             + ", ".join(str(item) for item in workflow_blockers)
         )
     return "\n".join(lines)
+
+
+def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
+    """Render a compact summary for a saved executable issue workflow."""
+    repo = _mapping(summary.get("repo"))
+    issue = _mapping(summary.get("issue"))
+    readiness = _mapping(summary.get("readiness"))
+    commit = _mapping(summary.get("commit"))
+    pre_mutation = _mapping(summary.get("pre_mutation_gates"))
+    closure = _mapping(summary.get("closure"))
+    report_paths = _mapping(summary.get("report_paths"))
+    acceptance = _mapping(summary.get("acceptance_coverage"))
+    process_health = _mapping(summary.get("process_health"))
+    process_after = _mapping(process_health.get("after"))
+    logs = _mapping(summary.get("logs"))
+    lines = [
+        "Issue workflow report summary",
+        f"accepted: {_yes_no(summary.get('accepted'))}",
+        f"state: {readiness.get('state', 'unknown')}",
+        f"issue: {issue.get('label', '')}",
+        f"branch: {repo.get('branch', 'unknown')} -> "
+        f"{repo.get('upstream', '')} "
+        f"({repo.get('upstream_state', 'unknown')}) "
+        f"ahead={repo.get('ahead', 0)} behind={repo.get('behind', 0)}",
+        f"commit: {commit.get('summary') or repo.get('head_short', '')}",
+        f"worktree dirty: {_yes_no(repo.get('dirty'))}",
+        f"pre-mutation gates: {pre_mutation.get('state', 'not-run')}",
+        f"closure: {'accepted' if closure.get('accepted') else 'blocked'}",
+        f"issue close: {closure.get('issue_close_state', 'not-run')}",
+        _acceptance_summary_human_line(acceptance),
+        f"report paths: {report_paths.get('state', 'not-recorded')}",
+        (
+            "process health: "
+            f"{process_after.get('state', 'not-recorded')} "
+            f"({process_after.get('total_count', 0)})"
+        ),
+        (
+            "logs: "
+            f"{logs.get('directory', '')} "
+            f"({logs.get('command_count', 0)} commands)"
+        ),
+    ]
+    if summary.get("generated_at_utc"):
+        lines.append(f"generated: {summary.get('generated_at_utc')}")
+    blockers = list(readiness.get("blocking_checks", []) or [])
+    if blockers:
+        lines.append("blocking: " + ", ".join(str(item) for item in blockers))
+    warnings = list(readiness.get("warnings", []) or [])
+    if warnings:
+        lines.append("warnings: " + ", ".join(str(item) for item in warnings))
+    changed_paths = list(pre_mutation.get("changed_paths_after", []) or [])
+    if changed_paths:
+        lines.append(
+            "pre-mutation changed: "
+            + ", ".join(str(item) for item in changed_paths)
+        )
+    if closure.get("final_issue"):
+        lines.append(f"issue final: {closure.get('final_issue')}")
+    return "\n".join(lines)
+
+
+def render_summary_human(summary: Mapping[str, Any]) -> str:
+    """Render a saved-report summary with the matching human format."""
+    if summary.get("schema_version") == ISSUE_WORKFLOW_SUMMARY_SCHEMA_VERSION:
+        return render_issue_workflow_summary_human(summary)
+    return render_report_summary_human(summary)
 
 
 def render_close_comment(report: Mapping[str, Any]) -> str:
@@ -2344,15 +2568,15 @@ def main(
     if args.summarize_report:
         report_path = _output_path(args.summarize_report, root)
         report = load_readiness_report(report_path or args.summarize_report)
-        summary = summarize_readiness_report(report)
+        summary = summarize_report(report)
         if args.json:
             print(json.dumps(summary, indent=2, sort_keys=True))  # noqa: T201
         elif args.markdown:
-            print(render_markdown(report))  # noqa: T201
+            print(render_saved_report_markdown(report))  # noqa: T201
         elif args.print_close_comment:
-            print(str(report.get("close_comment", "")))  # noqa: T201
+            print(saved_report_close_comment(report))  # noqa: T201
         else:
-            print(render_report_summary_human(summary))  # noqa: T201
+            print(render_summary_human(summary))  # noqa: T201
         return 0 if summary.get("accepted") is True else 1
     if args.execute_workflow:
         commit_message, commit_source = _selected_commit_message(args, root)

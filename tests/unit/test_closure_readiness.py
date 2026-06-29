@@ -1675,6 +1675,215 @@ def test_summarize_report_json_returns_summary_payload(
     assert payload["issue"]["label"] == "#279 OPEN"
 
 
+def test_summarize_issue_workflow_report_outputs_final_readback(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Execution reports should summarize final readback, not closure defaults."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=(
+            " M scripts/closure_readiness.py\n"
+            " M tests/unit/test_closure_readiness.py\n"
+        ),
+        issue_body="""
+## Acceptance criteria
+
+- Detect executable issue workflow reports.
+- Include final issue, repo, gate, report, and process state.
+""",
+    )
+    exit_code = module.main(
+        [
+            "--issue",
+            "287",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--commit-message",
+            "fix(workflow): summarize issue workflow reports",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--commit-path",
+            "tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    generated = json.loads(capsys.readouterr().out)
+    report_path = (
+        tmp_path
+        / ".histdatacom"
+        / "closure-readiness"
+        / "issue-workflow-287.json"
+    )
+    runner.calls.clear()
+
+    summary_exit = module.main(
+        ["--summarize-report", str(report_path)],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert generated["schema_version"] == module.ISSUE_WORKFLOW_SCHEMA_VERSION
+    assert summary_exit == 0
+    assert "Issue workflow report summary" in output
+    assert "Closure report summary" not in output
+    assert "issue: #287 CLOSED" in output
+    assert "branch: dev -> origin/dev (aligned) ahead=0 behind=0" in output
+    assert "commit: fedcba9 (HEAD -> dev) test commit" in output
+    assert "pre-mutation gates: pass" in output
+    assert "closure: accepted" in output
+    assert "issue close: closed" in output
+    assert "acceptance: ready (2/2 covered, 0 missing)" in output
+    assert "report paths: ready" in output
+    assert "process health: clean (0)" in output
+    assert "issue: not-requested" not in output
+    assert "precheck:" not in output
+    assert "gates: unknown" not in output
+    assert runner.calls == []
+
+
+def test_summarize_issue_workflow_report_json_returns_stable_payload(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Execution report summary JSON should expose stable final states."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=(
+            " M scripts/closure_readiness.py\n"
+            " M tests/unit/test_closure_readiness.py\n"
+        ),
+        issue_body="""
+## Acceptance criteria
+
+- Detect executable issue workflow reports.
+- Emit a stable JSON summary.
+""",
+    )
+    exit_code = module.main(
+        [
+            "--issue",
+            "287",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--commit-message",
+            "fix(workflow): summarize issue workflow reports",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--commit-path",
+            "tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    capsys.readouterr()
+    report_path = (
+        tmp_path
+        / ".histdatacom"
+        / "closure-readiness"
+        / "issue-workflow-287.json"
+    )
+    runner.calls.clear()
+
+    summary_exit = module.main(
+        ["--summarize-report", str(report_path), "--json"],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    summary = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert summary_exit == 0
+    assert summary["schema_version"] == (
+        module.ISSUE_WORKFLOW_SUMMARY_SCHEMA_VERSION
+    )
+    assert summary["source_schema_version"] == (
+        module.ISSUE_WORKFLOW_SCHEMA_VERSION
+    )
+    assert summary["accepted"] is True
+    assert summary["readiness"]["state"] == "ready"
+    assert summary["issue"]["label"] == "#287 CLOSED"
+    assert summary["repo"]["branch"] == "dev"
+    assert summary["repo"]["upstream"] == "origin/dev"
+    assert summary["repo"]["upstream_state"] == "aligned"
+    assert summary["repo"]["dirty"] is False
+    assert summary["commit"]["summary"].startswith("fedcba9 ")
+    assert summary["pre_mutation_gates"]["state"] == "pass"
+    assert summary["acceptance_coverage"]["state"] == "ready"
+    assert summary["closure"]["accepted"] is True
+    assert summary["closure"]["issue_close_state"] == "closed"
+    assert summary["report_paths"]["state"] == "ready"
+    assert summary["process_health"]["after"]["state"] == "clean"
+    assert "precheck" not in summary
+    assert "gates" not in summary
+    assert runner.calls == []
+
+
+def test_summarize_issue_workflow_report_routes_markdown_and_close_comment(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Saved execution reports should reuse execution markdown and comments."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        issue_body="""
+## Acceptance criteria
+
+- Route execution report output modes by schema.
+""",
+    )
+    exit_code = module.main(
+        [
+            "--issue",
+            "287",
+            "--execute-workflow",
+            "--commit-message",
+            "fix(workflow): summarize issue workflow reports",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    capsys.readouterr()
+    report_path = (
+        tmp_path
+        / ".histdatacom"
+        / "closure-readiness"
+        / "issue-workflow-287.json"
+    )
+    runner.calls.clear()
+
+    markdown_exit = module.main(
+        ["--summarize-report", str(report_path), "--markdown"],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    markdown = capsys.readouterr().out
+    close_exit = module.main(
+        ["--summarize-report", str(report_path), "--print-close-comment"],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    close_comment = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert markdown_exit == 0
+    assert close_exit == 0
+    assert "# Issue Workflow Execution" in markdown
+    assert "# Closure Readiness Report" not in markdown
+    assert "Closure readiness: ready" in close_comment
+    assert "Issue: #287 OPEN" in close_comment
+    assert runner.calls == []
+
+
 def test_report_summary_and_markdown_expose_report_path_ignore_status(
     tmp_path: Path,
     capsys: Any,
