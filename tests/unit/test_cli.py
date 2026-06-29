@@ -185,6 +185,17 @@ def test_help_advertises_build_cache_mode() -> None:
     assert "Polars .data caches" in help_text
 
 
+def test_help_advertises_quality_preflight_mode() -> None:
+    """Cache-scale quality preflight should be visible from main help."""
+    parser = ArgParser(Options())
+    parser._set_args()
+    help_text = parser.format_help()
+
+    assert "--quality-preflight" in help_text
+    assert "--quality-preflight-report" in help_text
+    assert "--quality-preflight-sample-size" in help_text
+
+
 def test_help_advertises_pair_groups() -> None:
     """Named instrument groups should be visible from the main help."""
     parser = ArgParser(Options())
@@ -645,6 +656,44 @@ histdatacom:
     assert options.quality_fail_on == "never"
     assert options.quality_max_errors == 2
     assert options.quality_max_warnings == 5
+    assert not options.validate_urls
+
+
+def test_config_file_applies_quality_preflight_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """YAML config should support cache-scale quality preflight options."""
+    config_path = tmp_path / "quality-preflight.yaml"
+    report_path = tmp_path / "reports" / "preflight.json"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality_preflight: true
+  data_directory: {tmp_path}
+  quality_checks: [ticks]
+  quality_preflight_report: {report_path}
+  quality_preflight_sample_size: 2
+  pair_groups: [majors]
+  formats: [ascii]
+  timeframes: [tick-data-quotes]
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.quality_preflight
+    assert options.quality_paths == (str(tmp_path),)
+    assert options.quality_check_groups == ["ticks"]
+    assert options.quality_preflight_report_path == str(report_path)
+    assert options.quality_preflight_sample_size == 2
+    assert options.pair_groups == ["majors"]
     assert not options.validate_urls
 
 

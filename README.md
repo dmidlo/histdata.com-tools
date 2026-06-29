@@ -589,6 +589,29 @@ columns in repository output, use:
 histdatacom -A --repo-quality-columns
 ```
 
+#### Cache-Scale Quality Preflight
+
+Use `--quality-preflight` before a large cache-backed quality battery. It scans
+existing canonical `.data` caches, selects a deterministic cache-size quantile
+sample, runs the selected quality checks against that bounded sample, measures
+rows/sec and bytes/sec, and compares the extrapolated runtime with the Temporal
+`data_quality` activity budget.
+
+```sh
+histdatacom --quality-preflight \
+  --quality-target data \
+  --pair-groups major-triangles \
+  -f ascii -t tick-data-quotes \
+  --quality-checks ticks \
+  --quality-preflight-report reports/major-triangles-tick-preflight.json
+```
+
+The console output is human-readable. The optional
+`--quality-preflight-report PATH` file is publish-safe JSON with target counts,
+cache bytes, sampled paths, row counts, throughput, ETA range, sample quality
+summary, and pass/warn/fail budget status. Use
+`--quality-preflight-sample-size COUNT` to tune the bounded sample.
+
 #### Full-Dataset Quality Campaigns
 
 Full HistData.com quality campaigns should run in bounded

@@ -25,6 +25,9 @@ _KEY_ALIASES = {
     "quality_path": "quality_paths",
     "quality_paths": "quality_paths",
     "quality_report": "quality_report_path",
+    "quality_preflight_report": "quality_preflight_report_path",
+    "quality_preflight_sample": "quality_preflight_sample_size",
+    "quality_preflight_samples": "quality_preflight_sample_size",
     "quality_target": "quality_paths",
     "quality_targets": "quality_paths",
     "quality_check_groups": "quality_check_groups",
@@ -74,6 +77,7 @@ _TRUE_FLAG_ARGS = {
     "delete_after_influx": "--delete_after_influx",
     "data_quality": "--quality",
     "repo_quality_refresh": "--repo-quality",
+    "quality_preflight": "--quality-preflight",
     "repo_quality_columns": "--repo-quality-columns",
 }
 _SCALAR_ARGS = {
@@ -84,6 +88,8 @@ _SCALAR_ARGS = {
     "cpu_utilization": "--cpu_utilization",
     "data_directory": "--data-directory",
     "quality_report_path": "--quality-report",
+    "quality_preflight_report_path": "--quality-preflight-report",
+    "quality_preflight_sample_size": "--quality-preflight-sample-size",
     "quality_profile_path": "--quality-profile",
     "quality_fail_on": "--quality-fail-on",
     "quality_max_errors": "--quality-max-errors",

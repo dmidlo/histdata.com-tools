@@ -731,6 +731,13 @@ Data-quality checks:
 - Quality mode supports focused groups with `--quality-checks`: `inventory`,
   `ingestion`, `time`, `bars`, `ticks`, `domain`, `modeling`, and
   `provenance`. The default is `all`.
+- `histdatacom --quality-preflight` is the cache-scale readiness check for
+  large `.data` quality batteries. It runs locally before Temporal submission:
+  scan existing cache targets, select deterministic cache-size quantiles, run
+  the requested quality checks against the bounded sample, report rows/sec,
+  bytes/sec, ETA range, and compare the extrapolated runtime with the
+  configured `data_quality` activity start-to-close budget. Use
+  `--quality-preflight-report PATH` to write the publish-safe JSON evidence.
 - The `provenance` group is optional and offline. It checks local quality
   targets against `.histdatacom/manifest-status.sqlite3` when present; explicit
   provenance runs without a store record a clean info result instead of failing

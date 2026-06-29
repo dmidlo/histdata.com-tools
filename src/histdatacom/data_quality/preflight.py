@@ -1,0 +1,630 @@
+"""Cache-scale preflight benchmarks for data-quality runs."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
+import json
+from pathlib import Path
+from time import perf_counter
+from typing import Any, cast
+
+from histdatacom.data_quality.contracts import (
+    QualityReport,
+    QualityTarget,
+    QualityTargetKind,
+    QualityStatus,
+)
+from histdatacom.data_quality.discovery import (
+    QualityDiscoveryError,
+    discover_quality_targets,
+    normalize_quality_check_groups,
+)
+from histdatacom.data_quality.engine import run_quality_assessment
+from histdatacom.data_quality.polars_cache import read_quality_polars_cache
+from histdatacom.data_quality.rules import (
+    quality_profile_report_metadata,
+    quality_rules_for_groups,
+    quality_run_rules_for_groups,
+)
+from histdatacom.fx_enums import (
+    Format,
+    Timeframe,
+    expand_pair_selection,
+    normalize_pair_group,
+)
+from histdatacom.orchestration.workflows import activity_execution_policy
+from histdatacom.publication_safety import (
+    publish_safe_json_mapping,
+    publish_safe_path,
+)
+from histdatacom.runtime_contracts import JSONValue
+
+QUALITY_PREFLIGHT_SCHEMA_VERSION = "histdatacom.quality-preflight.v1"
+DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE = 4
+QUALITY_PREFLIGHT_WARN_FRACTION = 0.80
+
+
+@dataclass(frozen=True, slots=True)
+class _CacheTarget:
+    """One discovered cache target with filesystem metadata."""
+
+    target: QualityTarget
+    path: Path
+    size_bytes: int
+
+
+def run_cache_quality_preflight(
+    root: str | Path,
+    *,
+    pairs: Iterable[object] | None = None,
+    pair_groups: Iterable[object] | None = None,
+    formats: Iterable[object] | None = None,
+    timeframes: Iterable[object] | None = None,
+    quality_check_groups: Iterable[str] | None = None,
+    quality_profile: Mapping[str, Any] | None = None,
+    sample_size: int = DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE,
+    activity_budget_seconds: int | None = None,
+    clock: Callable[[], float] = perf_counter,
+) -> dict[str, JSONValue]:
+    """Benchmark a bounded cache sample and estimate full quality runtime."""
+    if sample_size < 1:
+        raise ValueError("quality preflight sample size must be positive")
+
+    root_path = Path(root).expanduser()
+    check_groups = normalize_quality_check_groups(quality_check_groups)
+    selected_groups = _normalize_groups(pair_groups)
+    selected_pairs = _selected_pairs(pairs, selected_groups)
+    selected_formats = _normalize_formats(formats)
+    selected_timeframes = _normalize_timeframes(timeframes)
+    budget_seconds = (
+        activity_budget_seconds
+        if activity_budget_seconds is not None
+        else activity_execution_policy(
+            "data_quality"
+        ).start_to_close_timeout_seconds
+    )
+    discovery = discover_quality_targets((root_path,))
+    cache_targets = _filtered_cache_targets(
+        discovery.targets,
+        pairs=selected_pairs,
+        formats=selected_formats,
+        timeframes=selected_timeframes,
+    )
+    samples = _select_sample(cache_targets, sample_size)
+    benchmark = _benchmark_samples(
+        samples,
+        check_groups=check_groups,
+        quality_profile=quality_profile,
+        clock=clock,
+    )
+    return _payload(
+        root_path=root_path,
+        check_groups=check_groups,
+        selected_groups=selected_groups,
+        selected_pairs=selected_pairs,
+        selected_formats=selected_formats,
+        selected_timeframes=selected_timeframes,
+        cache_targets=cache_targets,
+        samples=samples,
+        sample_size=sample_size,
+        benchmark=benchmark,
+        budget_seconds=budget_seconds,
+        quality_profile=quality_profile,
+    )
+
+
+def quality_preflight_to_json(payload: Mapping[str, JSONValue]) -> str:
+    """Return deterministic JSON for a quality preflight payload."""
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def write_quality_preflight_report(
+    payload: Mapping[str, JSONValue],
+    path: str | Path,
+) -> Path:
+    """Write a publish-safe quality preflight report."""
+    output = Path(path).expanduser()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(quality_preflight_to_json(payload), encoding="utf-8")
+    return output.resolve(strict=False)
+
+
+def format_quality_preflight_console_summary(
+    payload: Mapping[str, JSONValue],
+) -> str:
+    """Return a compact operator summary for cache quality preflight."""
+    filters = _mapping(payload.get("filters"))
+    sample = _mapping(payload.get("sample"))
+    benchmark = _mapping(payload.get("benchmark"))
+    estimate = _mapping(payload.get("estimate"))
+    budget = _mapping(payload.get("temporal_budget"))
+    quality = _mapping(payload.get("sample_quality"))
+    quality_summary = _mapping(quality.get("summary"))
+    lines = [
+        "Data quality cache preflight",
+        "status: " + str(payload.get("status", "unknown")),
+        "checks: " + ", ".join(str(item) for item in filters["checks"]),
+        (
+            "targets: "
+            f"{payload.get('target_count', 0)} cache files, "
+            f"{_format_bytes(_int_value(payload.get('cache_byte_count')))}"
+        ),
+        (
+            "sample: "
+            f"{sample.get('selected_count', 0)}/"
+            f"{sample.get('requested_count', 0)} "
+            f"{sample.get('strategy', 'unknown')}"
+        ),
+        (
+            "elapsed: "
+            f"{float(benchmark.get('elapsed_seconds', 0.0) or 0.0):.3f}s; "
+            f"rows/sec: "
+            f"{float(benchmark.get('rows_per_second', 0.0) or 0.0):.1f}; "
+            f"bytes/sec: "
+            f"{float(benchmark.get('bytes_per_second', 0.0) or 0.0):.1f}"
+        ),
+        (
+            "eta: "
+            f"{_format_duration(estimate.get('estimated_seconds_min'))} to "
+            f"{_format_duration(estimate.get('estimated_seconds_max'))}"
+        ),
+        (
+            "Temporal budget: "
+            f"{_format_duration(budget.get('activity_budget_seconds'))} "
+            f"({budget.get('status', 'unknown')})"
+        ),
+    ]
+    if quality_summary:
+        lines.append(
+            "sample quality: "
+            f"{quality_summary.get('status', 'unknown')} "
+            f"findings={quality_summary.get('finding_count', 0)} "
+            f"warnings={quality_summary.get('warning_count', 0)} "
+            f"errors={quality_summary.get('error_count', 0)}"
+        )
+    if payload.get("report_path"):
+        lines.append(f"report: {payload['report_path']}")
+    if _int_value(payload.get("target_count")) == 0:
+        lines.append("No .data cache targets matched the requested scope.")
+    return "\n".join(lines)
+
+
+def _filtered_cache_targets(
+    targets: Iterable[QualityTarget],
+    *,
+    pairs: tuple[str, ...],
+    formats: tuple[str, ...],
+    timeframes: tuple[str, ...],
+) -> tuple[_CacheTarget, ...]:
+    pair_filter = set(pairs)
+    format_filter = set(formats)
+    timeframe_filter = set(timeframes)
+    selected: list[_CacheTarget] = []
+    for target in targets:
+        if target.kind is not QualityTargetKind.CACHE:
+            continue
+        if pair_filter and target.symbol.lower() not in pair_filter:
+            continue
+        if format_filter and target.data_format.lower() not in format_filter:
+            continue
+        if (
+            timeframe_filter
+            and target.timeframe.upper() not in timeframe_filter
+        ):
+            continue
+        path = Path(target.path)
+        selected.append(
+            _CacheTarget(
+                target=target,
+                path=path,
+                size_bytes=_file_size(path),
+            )
+        )
+    return tuple(sorted(selected, key=lambda item: (item.path.as_posix())))
+
+
+def _select_sample(
+    targets: tuple[_CacheTarget, ...],
+    sample_size: int,
+) -> tuple[_CacheTarget, ...]:
+    if len(targets) <= sample_size:
+        return tuple(sorted(targets, key=lambda item: item.path.as_posix()))
+    ordered = sorted(
+        targets, key=lambda item: (item.size_bytes, item.path.as_posix())
+    )
+    positions = _sample_positions(len(ordered), sample_size)
+    return tuple(ordered[position] for position in positions)
+
+
+def _sample_positions(total_count: int, sample_size: int) -> tuple[int, ...]:
+    if total_count <= 0:
+        return ()
+    if sample_size <= 1:
+        return (total_count - 1,)
+    return tuple(
+        dict.fromkeys(
+            round(index * (total_count - 1) / (sample_size - 1))
+            for index in range(sample_size)
+        )
+    )
+
+
+def _benchmark_samples(
+    samples: tuple[_CacheTarget, ...],
+    *,
+    check_groups: tuple[str, ...],
+    quality_profile: Mapping[str, Any] | None,
+    clock: Callable[[], float],
+) -> dict[str, JSONValue]:
+    started = clock()
+    sample_payloads = [_sample_payload(sample) for sample in samples]
+    report = run_quality_assessment(
+        [sample.target for sample in samples],
+        quality_rules_for_groups(check_groups, profile=quality_profile),
+        run_rules=quality_run_rules_for_groups(
+            check_groups,
+            profile=quality_profile,
+        ),
+        metadata={
+            "operation": "data-quality-preflight",
+            **quality_profile_report_metadata(quality_profile),
+        },
+    )
+    elapsed = max(clock() - started, 0.0)
+    sample_bytes = sum(sample.size_bytes for sample in samples)
+    sample_rows = sum(
+        _int_value(item.get("row_count")) for item in sample_payloads
+    )
+    return {
+        "elapsed_seconds": round(elapsed, 6),
+        "sample_cache_bytes": sample_bytes,
+        "sample_row_count": sample_rows,
+        "rows_per_second": _rate(sample_rows, elapsed),
+        "bytes_per_second": _rate(sample_bytes, elapsed),
+        "targets": cast(JSONValue, sample_payloads),
+        "quality_report": _sample_quality_payload(report),
+    }
+
+
+def _sample_payload(sample: _CacheTarget) -> dict[str, JSONValue]:
+    row_count = 0
+    error = ""
+    cache = read_quality_polars_cache(
+        sample.target,
+        required_columns=(),
+    )
+    if cache is None:
+        error = "cache could not be read"
+    else:
+        row_count = int(getattr(cache.frame, "height", 0) or 0)
+    payload: dict[str, JSONValue] = {
+        "path": str(publish_safe_path(str(sample.path))),
+        "size_bytes": sample.size_bytes,
+        "row_count": row_count,
+        "symbol": sample.target.symbol.lower(),
+        "timeframe": sample.target.timeframe,
+        "data_format": sample.target.data_format,
+        "period": sample.target.period,
+    }
+    if error:
+        payload["error"] = error
+    return payload
+
+
+def _sample_quality_payload(report: QualityReport) -> dict[str, JSONValue]:
+    summaries = report.target_summaries
+    payload: dict[str, JSONValue] = publish_safe_json_mapping(
+        {
+            "summary": report.summary().to_dict(),
+            "target_status_counts": {
+                QualityStatus.CLEAN.value: sum(
+                    1
+                    for item in summaries
+                    if item.status is QualityStatus.CLEAN
+                ),
+                QualityStatus.WARNING.value: sum(
+                    1
+                    for item in summaries
+                    if item.status is QualityStatus.WARNING
+                ),
+                QualityStatus.FAILED.value: sum(
+                    1
+                    for item in summaries
+                    if item.status is QualityStatus.FAILED
+                ),
+            },
+        }
+    )
+    return payload
+
+
+def _payload(
+    *,
+    root_path: Path,
+    check_groups: tuple[str, ...],
+    selected_groups: tuple[str, ...],
+    selected_pairs: tuple[str, ...],
+    selected_formats: tuple[str, ...],
+    selected_timeframes: tuple[str, ...],
+    cache_targets: tuple[_CacheTarget, ...],
+    samples: tuple[_CacheTarget, ...],
+    sample_size: int,
+    benchmark: Mapping[str, JSONValue],
+    budget_seconds: int,
+    quality_profile: Mapping[str, Any] | None,
+) -> dict[str, JSONValue]:
+    target_bytes = sum(item.size_bytes for item in cache_targets)
+    sample_bytes = _int_value(benchmark.get("sample_cache_bytes"))
+    sample_rows = _int_value(benchmark.get("sample_row_count"))
+    estimated_total_rows = _estimated_total_rows(
+        target_bytes=target_bytes,
+        sample_bytes=sample_bytes,
+        sample_rows=sample_rows,
+    )
+    estimate = _estimate(
+        target_bytes=target_bytes,
+        sample_bytes=sample_bytes,
+        estimated_total_rows=estimated_total_rows,
+        rows_per_second=_float_value(benchmark.get("rows_per_second")),
+        bytes_per_second=_float_value(benchmark.get("bytes_per_second")),
+    )
+    budget = _budget_payload(estimate, budget_seconds)
+    payload: dict[str, JSONValue] = {
+        "schema_version": QUALITY_PREFLIGHT_SCHEMA_VERSION,
+        "operation": "data-quality-cache-preflight",
+        "status": budget["status"],
+        "root": str(publish_safe_path(str(root_path.resolve(strict=False)))),
+        "filters": {
+            "checks": list(check_groups),
+            "pairs": list(selected_pairs),
+            "pair_groups": list(selected_groups),
+            "formats": list(selected_formats),
+            "timeframes": list(selected_timeframes),
+        },
+        "target_count": len(cache_targets),
+        "cache_byte_count": target_bytes,
+        "estimated_row_count": estimated_total_rows,
+        "sample": {
+            "strategy": "size-quantiles",
+            "requested_count": sample_size,
+            "selected_count": len(samples),
+            "selection_positions": list(
+                _sample_positions(len(cache_targets), sample_size)
+            ),
+            "targets": _list_value(benchmark.get("targets")),
+        },
+        "benchmark": {
+            "elapsed_seconds": benchmark["elapsed_seconds"],
+            "sample_cache_bytes": sample_bytes,
+            "sample_row_count": sample_rows,
+            "rows_per_second": benchmark["rows_per_second"],
+            "bytes_per_second": benchmark["bytes_per_second"],
+        },
+        "estimate": estimate,
+        "temporal_budget": budget,
+        "sample_quality": benchmark["quality_report"],
+        "quality_profile": quality_profile_report_metadata(quality_profile)[
+            "quality_profile"
+        ],
+    }
+    if not cache_targets:
+        payload["status"] = "fail"
+        payload["temporal_budget"] = {
+            **budget,
+            "status": "fail",
+            "reason": "no cache targets matched the requested scope",
+        }
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
+    return safe_payload
+
+
+def _estimate(
+    *,
+    target_bytes: int,
+    sample_bytes: int,
+    estimated_total_rows: int,
+    rows_per_second: float,
+    bytes_per_second: float,
+) -> dict[str, JSONValue]:
+    by_rows = (
+        estimated_total_rows / rows_per_second if rows_per_second > 0 else None
+    )
+    by_bytes = target_bytes / bytes_per_second if bytes_per_second > 0 else None
+    values = [value for value in (by_rows, by_bytes) if value is not None]
+    if not values:
+        min_seconds: float | None = None
+        max_seconds: float | None = None
+    else:
+        min_seconds = min(values)
+        max_seconds = max(values)
+    return {
+        "basis": "sample-throughput",
+        "sample_coverage_fraction": (
+            round(sample_bytes / target_bytes, 6) if target_bytes else 0.0
+        ),
+        "estimated_seconds_by_rows": _rounded_optional(by_rows),
+        "estimated_seconds_by_bytes": _rounded_optional(by_bytes),
+        "estimated_seconds_min": _rounded_optional(min_seconds),
+        "estimated_seconds_max": _rounded_optional(max_seconds),
+    }
+
+
+def _budget_payload(
+    estimate: Mapping[str, JSONValue],
+    budget_seconds: int,
+) -> dict[str, JSONValue]:
+    max_seconds = estimate.get("estimated_seconds_max")
+    if not isinstance(max_seconds, (int, float)):
+        status = "fail"
+        reason = "estimate unavailable"
+    elif max_seconds > budget_seconds:
+        status = "fail"
+        reason = "estimated runtime exceeds Temporal data-quality budget"
+    elif max_seconds > budget_seconds * QUALITY_PREFLIGHT_WARN_FRACTION:
+        status = "warn"
+        reason = "estimated runtime is close to Temporal data-quality budget"
+    else:
+        status = "pass"
+        reason = "estimated runtime is within Temporal data-quality budget"
+    return {
+        "activity": "data_quality",
+        "activity_budget_seconds": budget_seconds,
+        "warn_fraction": QUALITY_PREFLIGHT_WARN_FRACTION,
+        "status": status,
+        "reason": reason,
+    }
+
+
+def _selected_pairs(
+    pairs: Iterable[object] | None,
+    groups: tuple[str, ...],
+) -> tuple[str, ...]:
+    if not pairs and not groups:
+        return ()
+    return tuple(
+        str(pair).lower() for pair in expand_pair_selection(pairs or (), groups)
+    )
+
+
+def _normalize_groups(groups: Iterable[object] | None) -> tuple[str, ...]:
+    return tuple(
+        sorted({normalize_pair_group(group) for group in groups or ()})
+    )
+
+
+def _normalize_formats(values: Iterable[object] | None) -> tuple[str, ...]:
+    normalized: set[str] = set()
+    for value in values or ():
+        text = str(value).strip()
+        if not text:
+            continue
+        upper = text.upper()
+        if upper in Format.__members__:
+            normalized.add(Format[upper].value.lower())
+            continue
+        normalized.add(text.lower())
+    return tuple(sorted(normalized))
+
+
+def _normalize_timeframes(values: Iterable[object] | None) -> tuple[str, ...]:
+    normalized: set[str] = set()
+    for value in values or ():
+        text = str(value).strip()
+        if not text:
+            continue
+        upper = text.upper()
+        if upper in Timeframe.__members__:
+            normalized.add(upper)
+            continue
+        lower = text.lower()
+        for member in Timeframe:
+            if member.value.lower() == lower:
+                normalized.add(member.name)
+                break
+        else:
+            normalized.add(upper)
+    return tuple(sorted(normalized))
+
+
+def _estimated_total_rows(
+    *,
+    target_bytes: int,
+    sample_bytes: int,
+    sample_rows: int,
+) -> int:
+    if not target_bytes or not sample_bytes or not sample_rows:
+        return 0
+    return round(target_bytes * (sample_rows / sample_bytes))
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def _rate(numerator: int, elapsed_seconds: float) -> float:
+    if elapsed_seconds <= 0:
+        return 0.0
+    return round(numerator / elapsed_seconds, 6)
+
+
+def _rounded_optional(value: float | None) -> float | None:
+    return None if value is None else round(value, 6)
+
+
+def _mapping(value: object) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _list_value(value: object) -> list[JSONValue]:
+    return list(value) if isinstance(value, list) else []
+
+
+def _int_value(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            return int(float(value))
+        except ValueError:
+            return default
+    return default
+
+
+def _float_value(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _format_bytes(value: int) -> str:
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    size = float(value)
+    unit = units[0]
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            break
+        size /= 1024
+    if unit == "B":
+        return f"{int(size)} {unit}"
+    return f"{size:.2f} {unit}"
+
+
+def _format_duration(value: object) -> str:
+    if not isinstance(value, (int, float)):
+        return "unknown"
+    seconds = float(value)
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{minutes:.1f}m"
+    hours = minutes / 60
+    if hours < 48:
+        return f"{hours:.1f}h"
+    return f"{hours / 24:.1f}d"
+
+
+__all__ = [
+    "DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE",
+    "QUALITY_PREFLIGHT_SCHEMA_VERSION",
+    "QualityDiscoveryError",
+    "format_quality_preflight_console_summary",
+    "quality_preflight_to_json",
+    "run_cache_quality_preflight",
+    "write_quality_preflight_report",
+]

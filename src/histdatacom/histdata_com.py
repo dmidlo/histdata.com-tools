@@ -42,12 +42,18 @@ from histdatacom.exceptions import (
     format_failure_info_for_cli,
     InfluxConfigurationError,
 )
+from histdatacom.data_quality.preflight import (
+    format_quality_preflight_console_summary,
+    run_cache_quality_preflight,
+    write_quality_preflight_report,
+)
 from histdatacom.fx_enums import expand_pair_selection
 from histdatacom.repository_output import (
     print_repository_failure,
     print_repository_table,
 )
 from histdatacom.histdata_ascii import CACHE_FILENAME
+from histdatacom.publication_safety import publish_safe_path
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import FailureInfo, RunRequest, WorkStatus
 from histdatacom.orchestration.client import (
@@ -92,6 +98,9 @@ class RuntimeContext:
     quality_fail_on: str
     quality_max_errors: int
     quality_max_warnings: int
+    quality_preflight: bool
+    quality_preflight_report_path: str | None
+    quality_preflight_sample_size: int
     quality_profile_path: str
     quality_profile: Mapping[str, Any]
     repo_quality_refresh: bool
@@ -156,7 +165,47 @@ class _HistDataCom:  # noqa:R701
                 print(histdatacom.__version__)  # noqa:T201
             return histdatacom.__version__
 
+        if self.context.quality_preflight:
+            return self._run_quality_preflight()
+
         return self._run_orchestration_job()
+
+    def _run_quality_preflight(self) -> dict[str, Any]:
+        """Run local cache-scale quality preflight without Temporal submit."""
+        target_root = (
+            self.context.quality_paths[0]
+            if self.context.quality_paths
+            else self.context.args["data_directory"]
+        )
+        pair_groups = _tuple_from_sequence_payload(
+            self.context.request.metadata.get("pair_groups")
+        )
+        payload: dict[str, Any] = dict(
+            run_cache_quality_preflight(
+                target_root,
+                pairs=self.context.request.pairs,
+                pair_groups=pair_groups,
+                formats=self.context.request.formats,
+                timeframes=self.context.request.timeframes,
+                quality_check_groups=self.context.quality_check_groups,
+                quality_profile=self.context.quality_profile,
+                sample_size=self.context.quality_preflight_sample_size,
+            )
+        )
+        if self.context.quality_preflight_report_path:
+            report_path = Path(
+                self.context.quality_preflight_report_path
+            ).expanduser()
+            payload["report_path"] = str(
+                publish_safe_path(str(report_path.resolve(strict=False)))
+            )
+            write_quality_preflight_report(payload, report_path)
+        if self.context.from_api:
+            return payload
+        print(format_quality_preflight_console_summary(payload))  # noqa:T201
+        if payload.get("status") == "fail":
+            raise SystemExit(1)
+        return payload
 
     def _run_orchestration_job(
         self,
@@ -355,6 +404,15 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         quality_fail_on=str(args["quality_fail_on"]),
         quality_max_errors=int(args["quality_max_errors"]),
         quality_max_warnings=int(args["quality_max_warnings"]),
+        quality_preflight=bool(args["quality_preflight"]),
+        quality_preflight_report_path=(
+            None
+            if args.get("quality_preflight_report_path") is None
+            else str(args["quality_preflight_report_path"])
+        ),
+        quality_preflight_sample_size=int(
+            args["quality_preflight_sample_size"]
+        ),
         quality_profile_path=str(args.get("quality_profile_path") or ""),
         quality_profile=dict(args.get("quality_profile") or {}),
         repo_quality_refresh=bool(args["repo_quality_refresh"]),
@@ -745,6 +803,12 @@ def _mapping_from_payload(value: object) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
     return {}
+
+
+def _tuple_from_sequence_payload(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return ()
+    return tuple(str(item) for item in value)
 
 
 def _format_quality_target_counts(

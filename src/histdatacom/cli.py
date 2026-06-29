@@ -82,6 +82,9 @@ from histdatacom.cli_config import (
 )
 from histdatacom.concurrency import get_pool_cpu_count
 from histdatacom.data_quality import QUALITY_CHECK_GROUPS, QUALITY_EXIT_TRIGGERS
+from histdatacom.data_quality.preflight import (
+    DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE,
+)
 from histdatacom.data_quality.profiles import (
     QualityProfileError,
     load_quality_profile_file,
@@ -115,6 +118,14 @@ def _non_negative_int(value: str) -> int:
         ) from exc
     if parsed < 0:
         raise argparse.ArgumentTypeError("value must be non-negative")
+    return parsed
+
+
+def _positive_int(value: str) -> int:
+    """Return a positive integer for argparse counts."""
+    parsed = _non_negative_int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("value must be positive")
     return parsed
 
 
@@ -208,6 +219,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         quality_requested = bool(
             self.arg_namespace.data_quality
             or self.arg_namespace.repo_quality_refresh
+            or self.arg_namespace.quality_preflight
         )
         if (
             self.arg_namespace.repo_quality_columns
@@ -259,7 +271,31 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     "quality_profile requires --quality or --repo-quality"
                 )
                 raise SystemExit(1)
+            if self.arg_namespace.quality_preflight_report_path:
+                print(  # noqa:T201
+                    "--quality-preflight-report requires --quality-preflight"
+                )
+                raise SystemExit(1)
+            if (
+                self.arg_namespace.quality_preflight_sample_size
+                != DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE
+            ):
+                print(  # noqa:T201
+                    "--quality-preflight-sample-size requires "
+                    "--quality-preflight"
+                )
+                raise SystemExit(1)
             return
+
+        if self.arg_namespace.quality_preflight and (
+            self.arg_namespace.data_quality
+            or self.arg_namespace.repo_quality_refresh
+        ):
+            print(  # noqa:T201
+                "--quality-preflight cannot be combined with --quality or "
+                "--repo-quality"
+            )
+            raise SystemExit(1)
 
         legacy_flags = {
             "-A/--available_remote_data": (
@@ -277,10 +313,39 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         conflicts = [flag for flag, enabled in legacy_flags.items() if enabled]
         if conflicts:
             print(  # noqa:T201
-                "quality refresh is an offline operation and cannot be combined "
+                "quality mode is an offline operation and cannot be combined "
                 f"with {', '.join(conflicts)}"
             )
             raise SystemExit(1)
+
+        if self.arg_namespace.quality_preflight:
+            if len(tuple(self.arg_namespace.quality_paths or ())) > 1:
+                print(  # noqa:T201
+                    "--quality-preflight accepts one --quality-target "
+                    "directory"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_report_path:
+                print(  # noqa:T201
+                    "--quality-report requires --quality or --repo-quality"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_fail_on != "error":
+                print(  # noqa:T201
+                    "--quality-fail-on requires --quality or --repo-quality"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_max_errors != 0:
+                print(  # noqa:T201
+                    "--quality-max-errors requires --quality or --repo-quality"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_max_warnings != 0:
+                print(  # noqa:T201
+                    "--quality-max-warnings requires --quality or "
+                    "--repo-quality"
+                )
+                raise SystemExit(1)
 
         if not self.arg_namespace.quality_paths:
             self.arg_namespace.quality_paths = (
@@ -316,6 +381,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         if (
             self.arg_namespace.data_quality
             or self.arg_namespace.repo_quality_refresh
+            or self.arg_namespace.quality_preflight
         ):
             args = [
                 *["--data-directory", self.arg_namespace.data_directory],
@@ -326,6 +392,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 args.append("--quality")
             if self.arg_namespace.repo_quality_refresh:
                 args.append("--repo-quality")
+            if self.arg_namespace.quality_preflight:
+                args.append("--quality-preflight")
             if self.arg_namespace.quality_paths:
                 args.extend(
                     ["--quality-target", *self.arg_namespace.quality_paths]
@@ -348,6 +416,42 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                         self.arg_namespace.quality_profile_path,
                     ]
                 )
+            if self.arg_namespace.quality_preflight:
+                if self.arg_namespace.quality_preflight_report_path:
+                    args.extend(
+                        [
+                            "--quality-preflight-report",
+                            self.arg_namespace.quality_preflight_report_path,
+                        ]
+                    )
+                args.extend(
+                    [
+                        "--quality-preflight-sample-size",
+                        str(self.arg_namespace.quality_preflight_sample_size),
+                    ]
+                )
+                pair_groups = tuple(
+                    getattr(self.arg_namespace, "pair_groups", ()) or ()
+                )
+                pairs = tuple(self.arg_namespace.pairs or ())
+                explicit_pairs = set(pairs) != Pairs.list_keys()
+                if pair_groups:
+                    args.extend(["--pair-groups", *pair_groups])
+                    if explicit_pairs:
+                        args.extend(["-p", *pairs])
+                elif explicit_pairs:
+                    args.extend(["-p", *pairs])
+                if self.arg_namespace.formats:
+                    args.extend(["-f", *self.arg_namespace.formats])
+                if self.arg_namespace.timeframes:
+                    args.extend(
+                        [
+                            "-t",
+                            *Timeframe.convert_to_values(
+                                set(self.arg_namespace.timeframes)
+                            ),
+                        ]
+                    )
             args.extend(
                 ["--quality-fail-on", self.arg_namespace.quality_fail_on]
             )
@@ -470,6 +574,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             if self.arg_namespace.from_api and not (
                 self.arg_namespace.data_quality
                 or self.arg_namespace.repo_quality_refresh
+                or self.arg_namespace.quality_preflight
                 or self.arg_namespace.validate_urls
                 or self.arg_namespace.download_data_archives
                 or self.arg_namespace.extract_csvs
@@ -498,6 +603,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         if (
             self.arg_namespace.data_quality
             or self.arg_namespace.repo_quality_refresh
+            or self.arg_namespace.quality_preflight
         ):
             return
 
@@ -595,6 +701,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         if (
             self.arg_namespace.data_quality
             or self.arg_namespace.repo_quality_refresh
+            or self.arg_namespace.quality_preflight
         ):
             return
 
@@ -1237,6 +1344,15 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 "quality summary metadata back to the local .repo file"
             ),
         )
+        quality_args.add_argument(
+            "--quality-preflight",
+            dest="quality_preflight",
+            action="store_true",
+            help=(
+                "benchmark a deterministic sample of existing .data caches "
+                "before running a cache-scale quality battery"
+            ),
+        )
         info_args.add_argument(
             "--repo-quality-columns",
             dest="repo_quality_columns",
@@ -1277,6 +1393,25 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             type=str,
             metavar="PATH",
             help="write the full machine-readable JSON quality report to PATH",
+        )
+        quality_args.add_argument(
+            "--quality-preflight-report",
+            dest="quality_preflight_report_path",
+            type=str,
+            metavar="PATH",
+            help=(
+                "write the publish-safe JSON quality preflight report to PATH"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-sample-size",
+            dest="quality_preflight_sample_size",
+            type=_positive_int,
+            metavar="COUNT",
+            help=(
+                "number of cache-size quantile targets to benchmark; "
+                f"defaults to {DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE}"
+            ),
         )
         quality_args.add_argument(
             "--quality-profile",
