@@ -237,6 +237,14 @@ def _add_jobs_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="return after submission instead of waiting for the result",
     )
+    submit.add_argument(
+        "--keep-runtime",
+        action="store_true",
+        help=(
+            "leave a runtime started by this command running after the job "
+            "completes"
+        ),
+    )
     _add_job_command_common_args(submit, include_offline=False)
 
     list_jobs = job_subparsers.add_parser(
@@ -575,12 +583,17 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
         else _worker_config(args)
     )
     if args.jobs_command == "submit":
+        submit_kwargs = {
+            "config": config,
+            "supervisor": supervisor,
+            "start_if_needed": args.start,
+            "wait_for_result": not args.submit_only,
+        }
+        if args.keep_runtime:
+            submit_kwargs["keep_runtime"] = True
         snapshot = submit_control_job_sync(
             _load_run_request(args.request_json),
-            config=config,
-            supervisor=supervisor,
-            start_if_needed=args.start,
-            wait_for_result=not args.submit_only,
+            **submit_kwargs,
         )
         _write_control_payload(snapshot.to_dict(), as_json=args.json)
         return 0

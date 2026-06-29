@@ -416,6 +416,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args.append("--orchestration-start")
         else:
             args.append("--no-orchestration-start")
+        if self.arg_namespace.orchestration_keep_runtime:
+            args.append("--keep-runtime")
         if not self.arg_namespace.orchestration_wait_result:
             args.append("--submit-only")
         return args
@@ -1198,6 +1200,24 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             dest="orchestration_wait_result",
             action="store_false",
             help="submit the orchestration job without waiting for its result",
+        )
+        orchestration_args.add_argument(
+            "--keep-runtime",
+            dest="orchestration_keep_runtime",
+            action="store_true",
+            help=(
+                "leave a runtime started by this command running after the "
+                "job completes"
+            ),
+        )
+        orchestration_args.add_argument(
+            "--no-keep-runtime",
+            dest="orchestration_keep_runtime",
+            action="store_false",
+            help=(
+                "stop a runtime started by this command after waited jobs "
+                "complete"
+            ),
         )
         quality_args.add_argument(
             "--quality",

@@ -962,6 +962,7 @@ def test_orchestration_jobs_submit_cli_loads_run_request_json(
             "submit",
             "--request-json",
             str(request_path),
+            "--keep-runtime",
             "--submit-only",
         ]
     )
@@ -969,6 +970,7 @@ def test_orchestration_jobs_submit_cli_loads_run_request_json(
 
     assert exit_code == 0
     assert captured["request"].request_id == "run-cli"
+    assert captured["kwargs"]["keep_runtime"] is True
     assert captured["kwargs"]["wait_for_result"] is False
     assert payload["lifecycle"] == JobLifecycle.SUBMITTED.value
 

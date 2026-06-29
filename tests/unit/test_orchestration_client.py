@@ -45,12 +45,14 @@ class _FakeTemporalClient:
         self,
         status_payload: dict[str, object] | None = None,
         result_payload: dict[str, object] | None = None,
+        result_error: BaseException | None = None,
     ) -> None:
         self.started: list[dict[str, object]] = []
         self.list_query = ""
         self.handles: dict[str, _FakeWorkflowHandle] = {}
         self.status_payload = status_payload
         self.result_payload = result_payload
+        self.result_error = result_error
 
     @classmethod
     async def connect(cls, target_host: str, *, namespace: str):
@@ -82,6 +84,7 @@ class _FakeTemporalClient:
             run_id="run-fake",
             status_payload=self.status_payload,
             result_payload=self.result_payload,
+            result_error=self.result_error,
         )
         self.handles[id] = handle
         return handle
@@ -100,6 +103,7 @@ class _FakeTemporalClient:
                 run_id=run_id or "run-fake",
                 status_payload=self.status_payload,
                 result_payload=self.result_payload,
+                result_error=self.result_error,
             ),
         )
 
@@ -127,15 +131,19 @@ class _FakeWorkflowHandle:
         run_id: str,
         status_payload: dict[str, object] | None = None,
         result_payload: dict[str, object] | None = None,
+        result_error: BaseException | None = None,
     ) -> None:
         self.id = id
         self.run_id = run_id
         self.cancel_calls = 0
         self.status_payload = status_payload
         self.result_payload = result_payload
+        self.result_error = result_error
 
     async def result(self) -> dict[str, object]:
         """Return a fake workflow result payload."""
+        if self.result_error is not None:
+            raise self.result_error
         if self.result_payload is not None:
             return self.result_payload
         return _workflow_result_payload()
@@ -246,11 +254,14 @@ class _FakeSupervisor:
         *,
         current_state: str = "running",
         started_state: str = "running",
+        stopped_state: str = "stopped",
     ) -> None:
         self.current_state = current_state
         self.started_state = started_state
+        self.stopped_state = stopped_state
         self.status_calls = 0
         self.start_calls = 0
+        self.stop_calls = 0
 
     def status(self, *, repair: bool = False) -> OrchestrationStatus:
         """Return the configured current status."""
@@ -261,6 +272,11 @@ class _FakeSupervisor:
         """Record a start attempt and return the configured status."""
         self.start_calls += 1
         return _status(self.started_state)
+
+    def stop(self, *, stop_timeout: float = 10.0) -> OrchestrationStatus:
+        """Record a stop attempt and return the configured status."""
+        self.stop_calls += 1
+        return _status(self.stopped_state)
 
 
 class _ResourceFailingSupervisor(_FakeSupervisor):
@@ -606,6 +622,9 @@ def test_submit_and_observe_reuses_running_orchestration(
     assert "stage_results" not in stored["result"]
     assert supervisor.status_calls == 1
     assert supervisor.start_calls == 0
+    assert supervisor.stop_calls == 0
+    assert result.runtime_cleanup is not None
+    assert result.runtime_cleanup["action"] == "preserved"
     assert temporal_client.started[0]["id"] == "histdatacom-run-test"
 
 
@@ -756,6 +775,117 @@ def test_submit_and_observe_can_start_unavailable_orchestration(
     assert stored is not None
     assert stored["lifecycle"] == JobLifecycle.SUBMITTED.value
     assert supervisor.start_calls == 1
+    assert supervisor.stop_calls == 0
+    assert result.runtime_cleanup is not None
+    assert result.runtime_cleanup["action"] == "deferred"
+
+
+def test_submit_and_observe_stops_owned_runtime_after_waited_success(
+    tmp_path: Path,
+) -> None:
+    """Waited foreground jobs should stop a runtime they started."""
+    config = _config(tmp_path)
+    supervisor = _FakeSupervisor(current_state="stopped")
+
+    result = asyncio.run(
+        client.submit_run_request_and_observe(
+            RunRequest(request_id="run-owned"),
+            config=config,
+            client=_FakeTemporalClient(),
+            supervisor=supervisor,  # type: ignore[arg-type]
+            start_if_needed=True,
+        )
+    )
+
+    assert result.status == "completed"
+    assert supervisor.start_calls == 1
+    assert supervisor.stop_calls == 1
+    assert result.runtime_cleanup is not None
+    assert result.runtime_cleanup["action"] == "stopped"
+    assert result.runtime_cleanup["stopped"] is True
+    assert result.snapshot is not None
+    assert result.snapshot.metadata["runtime_cleanup"]["action"] == "stopped"
+    assert result.to_dict()["runtime_cleanup"]["action"] == "stopped"
+    stored = client.orchestration_job_store(config).get_job_snapshot(
+        "histdatacom-run-owned"
+    )
+    assert stored is not None
+    assert stored["metadata"]["runtime_cleanup"]["action"] == "stopped"
+
+
+def test_submit_and_observe_stops_owned_runtime_after_failed_result(
+    tmp_path: Path,
+) -> None:
+    """Domain-failed waited jobs should still clean up owned runtimes."""
+    config = _config(tmp_path)
+    supervisor = _FakeSupervisor(current_state="stopped")
+    temporal_client = _FakeTemporalClient(
+        result_payload=_workflow_result_payload(WorkStatus.FAILED)
+    )
+
+    result = asyncio.run(
+        client.submit_run_request_and_observe(
+            RunRequest(request_id="run-owned-failed"),
+            config=config,
+            client=temporal_client,
+            supervisor=supervisor,  # type: ignore[arg-type]
+            start_if_needed=True,
+        )
+    )
+
+    assert result.status == "failed"
+    assert supervisor.start_calls == 1
+    assert supervisor.stop_calls == 1
+    assert result.runtime_cleanup is not None
+    assert result.runtime_cleanup["action"] == "stopped"
+
+
+def test_submit_and_observe_stops_owned_runtime_after_cancelled_wait(
+    tmp_path: Path,
+) -> None:
+    """Interrupted waited jobs should clean up owned runtimes before reraising."""
+    config = _config(tmp_path)
+    supervisor = _FakeSupervisor(current_state="stopped")
+    temporal_client = _FakeTemporalClient(result_error=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            client.submit_run_request_and_observe(
+                RunRequest(request_id="run-owned-cancelled"),
+                config=config,
+                client=temporal_client,
+                supervisor=supervisor,  # type: ignore[arg-type]
+                start_if_needed=True,
+            )
+        )
+
+    assert supervisor.start_calls == 1
+    assert supervisor.stop_calls == 1
+
+
+def test_submit_and_observe_keep_runtime_preserves_owned_runtime(
+    tmp_path: Path,
+) -> None:
+    """Operators can keep a runtime started by the current invocation."""
+    config = _config(tmp_path)
+    supervisor = _FakeSupervisor(current_state="stopped")
+
+    result = asyncio.run(
+        client.submit_run_request_and_observe(
+            RunRequest(request_id="run-owned-kept"),
+            config=config,
+            client=_FakeTemporalClient(),
+            supervisor=supervisor,  # type: ignore[arg-type]
+            start_if_needed=True,
+            keep_runtime=True,
+        )
+    )
+
+    assert result.status == "completed"
+    assert supervisor.start_calls == 1
+    assert supervisor.stop_calls == 0
+    assert result.runtime_cleanup is not None
+    assert result.runtime_cleanup["action"] == "kept"
 
 
 def test_submit_and_observe_without_config_uses_running_orchestration_state(

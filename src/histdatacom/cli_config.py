@@ -34,6 +34,7 @@ _KEY_ALIASES = {
     "pair_group": "pair_groups",
     "symbol_group": "pair_groups",
     "symbol_groups": "pair_groups",
+    "keep_runtime": "orchestration_keep_runtime",
     "repo_quality": "repo_quality_refresh",
     "verbose": "verbosity",
 }
@@ -97,6 +98,7 @@ _LIST_ARGS = {
     "quality_check_groups": "--quality-checks",
 }
 _CONTROL_BOOL_KEYS = {
+    "orchestration_keep_runtime",
     "orchestration_start",
     "orchestration_wait_result",
     "submit_only",
@@ -219,6 +221,7 @@ _JOBS_ALIASES = {
     "request": "request_json",
 }
 _JOBS_TRUE_FLAG_ARGS = {
+    "keep_runtime": "--keep-runtime",
     "offline": "--offline",
     "recompute_complete": "--recompute-complete",
     "start": "--start",
@@ -1028,6 +1031,8 @@ def _control_bool_arg(key: str, value: Any) -> list[str]:
         return [
             "--orchestration-start" if enabled else "--no-orchestration-start"
         ]
+    if key == "orchestration_keep_runtime":
+        return ["--keep-runtime" if enabled else "--no-keep-runtime"]
     if key == "orchestration_wait_result":
         return [] if enabled else ["--submit-only"]
     if key == "submit_only":

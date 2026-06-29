@@ -82,6 +82,7 @@ class RuntimeContext:
     version: bool
     from_api: bool
     orchestration_start: bool
+    orchestration_keep_runtime: bool
     orchestration_wait_result: bool
     api_return_type: str | None
     data_quality: bool
@@ -252,6 +253,8 @@ class _HistDataCom:  # noqa:R701
             "start_if_needed": self.context.orchestration_start,
             "wait_for_result": self.context.orchestration_wait_result,
         }
+        if self.context.orchestration_keep_runtime:
+            kwargs["keep_runtime"] = True
         if (
             self.context.from_api
             or not self.context.orchestration_wait_result
@@ -332,6 +335,7 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         version=bool(args["version"]),
         from_api=bool(args["from_api"]),
         orchestration_start=bool(args["orchestration_start"]),
+        orchestration_keep_runtime=bool(args["orchestration_keep_runtime"]),
         orchestration_wait_result=bool(args["orchestration_wait_result"]),
         api_return_type=args["api_return_type"],
         data_quality=bool(args["data_quality"]),

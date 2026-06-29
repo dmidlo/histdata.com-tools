@@ -98,6 +98,7 @@ def test_orchestration_cli_flags_preserve_default_runtime_controls(
         [
             "histdatacom",
             "--orchestration-start",
+            "--keep-runtime",
             "--submit-only",
             "-V",
             "-p",
@@ -115,6 +116,7 @@ def test_orchestration_cli_flags_preserve_default_runtime_controls(
 
     assert options.use_orchestration
     assert options.orchestration_start
+    assert options.orchestration_keep_runtime
     assert not options.orchestration_wait_result
     assert options.validate_urls
 
@@ -457,6 +459,7 @@ histdatacom:
   data_directory: {data_dir}
   cpu_utilization: low
   batch_size: 123
+  keep_runtime: true
   orchestration_start: false
   orchestration_wait_result: false
   verbosity: 2
@@ -491,6 +494,7 @@ histdatacom:
     assert options.download_data_archives
     assert not options.extract_csvs
     assert not options.orchestration_start
+    assert options.orchestration_keep_runtime
     assert not options.orchestration_wait_result
     assert options.verbosity == 2
 
@@ -742,10 +746,12 @@ def test_options_expose_orchestration_named_runtime_controls() -> None:
     options = Options()
 
     options.orchestration_start = False
+    options.orchestration_keep_runtime = True
     options.orchestration_wait_result = False
 
     assert options.use_orchestration
     assert not options.orchestration_start
+    assert options.orchestration_keep_runtime
     assert not options.orchestration_wait_result
 
 

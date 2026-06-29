@@ -41,6 +41,7 @@ from histdatacom.orchestration.queues import (
 )
 from histdatacom.orchestration.resources import OrchestrationResourceError
 from histdatacom.orchestration.supervisor import (
+    DEFAULT_STOP_TIMEOUT_SECONDS,
     OrchestrationStatus,
     OrchestrationSupervisor,
 )
@@ -110,6 +111,7 @@ class OrchestrationJobResult:
     result: Any = None
     orchestration_status: OrchestrationStatus | None = None
     snapshot: OrchestrationJobSnapshot | None = None
+    runtime_cleanup: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return JSON-compatible orchestration job metadata and result payload."""
@@ -124,12 +126,22 @@ class OrchestrationJobResult:
             )
         if self.snapshot is not None:
             payload["snapshot"] = self.snapshot.to_dict()
+        if self.runtime_cleanup is not None:
+            payload["runtime_cleanup"] = dict(self.runtime_cleanup)
         return payload
 
 
 JobHandle = OrchestrationJobHandle
 JobResult = OrchestrationJobResult
 RuntimeDependencyError = TemporalDependencyError
+
+
+@dataclass(frozen=True, slots=True)
+class _OrchestrationAvailability:
+    """Runtime availability plus ownership for this invocation."""
+
+    status: OrchestrationStatus
+    started_by_invocation: bool
 
 
 async def connect_temporal_client(
@@ -265,6 +277,8 @@ async def submit_run_request_and_observe(
     workflow: Any = DEFAULT_RUN_WORKFLOW_NAME,
     progress_observer: ProgressObserver | None = None,
     progress_interval_seconds: float = 1.0,
+    keep_runtime: bool = False,
+    runtime_stop_timeout: float = DEFAULT_STOP_TIMEOUT_SECONDS,
 ) -> OrchestrationJobResult:
     """Submit a run through a healthy orchestration and optionally await its result."""
     resolved_supervisor = supervisor or OrchestrationSupervisor(
@@ -282,137 +296,183 @@ async def submit_run_request_and_observe(
             wait_for_result=wait_for_result,
         ),
     )
-    orchestration_status = _ensure_orchestration_available(
+    availability = _ensure_orchestration_available(
         resolved_supervisor,
         start_if_needed=start_if_needed,
     )
-    resolved_config = resolve_orchestration_worker_config(
-        config=config,
-        supervisor=resolved_supervisor,
-        status=orchestration_status,
-        require_running=True,
-    )
-    temporal_client = client or await connect_temporal_client(
-        config=resolved_config,
-        supervisor=resolved_supervisor,
-        client_class=client_class,
-    )
-    workflow_id = workflow_id_for_request(request)
-    LOGGER.info(
-        "Submitting HistData orchestration job request_id=%s workflow_id=%s",
-        request.request_id,
-        workflow_id,
-        extra=_request_log_context(
-            request,
+    orchestration_status = availability.status
+    runtime_cleanup: dict[str, Any] | None = None
+    try:
+        resolved_config = resolve_orchestration_worker_config(
+            config=config,
+            supervisor=resolved_supervisor,
+            status=orchestration_status,
+            require_running=True,
+        )
+        temporal_client = client or await connect_temporal_client(
+            config=resolved_config,
+            supervisor=resolved_supervisor,
+            client_class=client_class,
+        )
+        workflow_id = workflow_id_for_request(request)
+        LOGGER.info(
+            "Submitting HistData orchestration job request_id=%s "
+            "workflow_id=%s",
+            request.request_id,
+            workflow_id,
+            extra=_request_log_context(
+                request,
+                workflow_id=workflow_id,
+                task_queue=resolved_config.task_queues.orchestration,
+                namespace=resolved_config.namespace,
+                wait_for_result=wait_for_result,
+            ),
+        )
+        raw_handle = await _start_workflow(
+            temporal_client,
+            workflow,
+            run_request_payload(request, resolved_config),
             workflow_id=workflow_id,
             task_queue=resolved_config.task_queues.orchestration,
-            namespace=resolved_config.namespace,
-            wait_for_result=wait_for_result,
-        ),
-    )
-    raw_handle = await _start_workflow(
-        temporal_client,
-        workflow,
-        run_request_payload(request, resolved_config),
-        workflow_id=workflow_id,
-        task_queue=resolved_config.task_queues.orchestration,
-    )
-    handle = _job_handle_from_workflow_handle(
-        request,
-        raw_handle,
-        workflow_id=workflow_id,
-        config=resolved_config,
-    )
-    submitted_snapshot = _persist_job_snapshot(
-        _snapshot_with_run_request(
-            OrchestrationJobSnapshot.from_handle(
-                handle,
-                orchestration_status=orchestration_status,
-            ),
-            request,
-        ),
-        config=resolved_config,
-        status_store=status_store,
-    )
-    LOGGER.info(
-        "Submitted HistData orchestration job request_id=%s workflow_id=%s "
-        "run_id=%s",
-        request.request_id,
-        handle.workflow_id,
-        handle.run_id,
-        extra=_request_log_context(
-            request,
-            workflow_id=handle.workflow_id,
-            run_id=handle.run_id,
-            task_queue=handle.task_queue,
-            namespace=handle.namespace,
-            status="submitted",
-        ),
-    )
-    if not wait_for_result:
-        return OrchestrationJobResult(
-            handle=handle,
-            status="submitted",
-            orchestration_status=orchestration_status,
-            snapshot=submitted_snapshot,
         )
-
-    _notify_progress_observer(progress_observer, submitted_snapshot)
-    LOGGER.info(
-        "Waiting for HistData orchestration job request_id=%s workflow_id=%s",
-        request.request_id,
-        handle.workflow_id,
-        extra=_request_log_context(
+        handle = _job_handle_from_workflow_handle(
             request,
-            workflow_id=handle.workflow_id,
-            run_id=handle.run_id,
-            task_queue=handle.task_queue,
-            namespace=handle.namespace,
-            wait_for_result=True,
-        ),
-    )
-    if progress_observer is not None:
-        result = await _observe_workflow_result_with_progress(
             raw_handle,
-            handle=handle,
-            orchestration_status=orchestration_status,
+            workflow_id=workflow_id,
+            config=resolved_config,
+        )
+        submitted_snapshot = _persist_job_snapshot(
+            _snapshot_with_run_request(
+                OrchestrationJobSnapshot.from_handle(
+                    handle,
+                    orchestration_status=orchestration_status,
+                ),
+                request,
+            ),
             config=resolved_config,
             status_store=status_store,
-            progress_observer=progress_observer,
-            progress_interval_seconds=progress_interval_seconds,
         )
-    else:
-        result = await observe_workflow_result(raw_handle)
-    snapshot = _persist_job_snapshot(
-        submitted_snapshot.with_result(result),
-        config=resolved_config,
-        status_store=status_store,
-    )
-    _notify_progress_observer(progress_observer, snapshot)
-    observed = OrchestrationJobResult(
-        handle=handle,
-        status=_observed_job_result_status(result, snapshot),
-        result=result,
-        orchestration_status=orchestration_status,
-        snapshot=snapshot,
-    )
-    LOGGER.log(
-        _job_result_log_level(observed.status),
-        "Observed HistData orchestration job request_id=%s workflow_id=%s "
-        "status=%s",
-        request.request_id,
-        handle.workflow_id,
-        observed.status,
-        extra=_request_log_context(
-            request,
-            workflow_id=handle.workflow_id,
-            run_id=handle.run_id,
-            task_queue=handle.task_queue,
-            namespace=handle.namespace,
-            status=observed.status,
-        ),
-    )
-    return observed
+        LOGGER.info(
+            "Submitted HistData orchestration job request_id=%s "
+            "workflow_id=%s run_id=%s",
+            request.request_id,
+            handle.workflow_id,
+            handle.run_id,
+            extra=_request_log_context(
+                request,
+                workflow_id=handle.workflow_id,
+                run_id=handle.run_id,
+                task_queue=handle.task_queue,
+                namespace=handle.namespace,
+                status="submitted",
+            ),
+        )
+        if not wait_for_result:
+            runtime_cleanup = _runtime_cleanup_result(
+                resolved_supervisor,
+                availability=availability,
+                wait_for_result=wait_for_result,
+                keep_runtime=keep_runtime,
+                stop_timeout=runtime_stop_timeout,
+            )
+            submitted_snapshot = _persist_job_snapshot(
+                _snapshot_with_runtime_cleanup(
+                    submitted_snapshot,
+                    runtime_cleanup,
+                ),
+                config=resolved_config,
+                status_store=status_store,
+            )
+            return OrchestrationJobResult(
+                handle=handle,
+                status="submitted",
+                orchestration_status=orchestration_status,
+                snapshot=submitted_snapshot,
+                runtime_cleanup=runtime_cleanup,
+            )
+
+        _notify_progress_observer(progress_observer, submitted_snapshot)
+        LOGGER.info(
+            "Waiting for HistData orchestration job request_id=%s "
+            "workflow_id=%s",
+            request.request_id,
+            handle.workflow_id,
+            extra=_request_log_context(
+                request,
+                workflow_id=handle.workflow_id,
+                run_id=handle.run_id,
+                task_queue=handle.task_queue,
+                namespace=handle.namespace,
+                wait_for_result=True,
+            ),
+        )
+        if progress_observer is not None:
+            result = await _observe_workflow_result_with_progress(
+                raw_handle,
+                handle=handle,
+                orchestration_status=orchestration_status,
+                config=resolved_config,
+                status_store=status_store,
+                progress_observer=progress_observer,
+                progress_interval_seconds=progress_interval_seconds,
+            )
+        else:
+            result = await observe_workflow_result(raw_handle)
+        snapshot = _persist_job_snapshot(
+            submitted_snapshot.with_result(result),
+            config=resolved_config,
+            status_store=status_store,
+        )
+        _notify_progress_observer(progress_observer, snapshot)
+        observed = OrchestrationJobResult(
+            handle=handle,
+            status=_observed_job_result_status(result, snapshot),
+            result=result,
+            orchestration_status=orchestration_status,
+            snapshot=snapshot,
+        )
+        LOGGER.log(
+            _job_result_log_level(observed.status),
+            "Observed HistData orchestration job request_id=%s "
+            "workflow_id=%s status=%s",
+            request.request_id,
+            handle.workflow_id,
+            observed.status,
+            extra=_request_log_context(
+                request,
+                workflow_id=handle.workflow_id,
+                run_id=handle.run_id,
+                task_queue=handle.task_queue,
+                namespace=handle.namespace,
+                status=observed.status,
+            ),
+        )
+        runtime_cleanup = _runtime_cleanup_result(
+            resolved_supervisor,
+            availability=availability,
+            wait_for_result=wait_for_result,
+            keep_runtime=keep_runtime,
+            stop_timeout=runtime_stop_timeout,
+        )
+        snapshot = _persist_job_snapshot(
+            _snapshot_with_runtime_cleanup(snapshot, runtime_cleanup),
+            config=resolved_config,
+            status_store=status_store,
+        )
+        return replace(
+            observed,
+            snapshot=snapshot,
+            runtime_cleanup=runtime_cleanup,
+        )
+    except BaseException:
+        if runtime_cleanup is None:
+            _runtime_cleanup_after_exception(
+                resolved_supervisor,
+                availability=availability,
+                keep_runtime=keep_runtime,
+                stop_timeout=runtime_stop_timeout,
+            )
+        raise
 
 
 def submit_run_request_and_observe_sync(
@@ -453,6 +513,136 @@ def _job_result_log_level(status: str) -> int:
     return logging.INFO
 
 
+def _runtime_cleanup_result(
+    supervisor: OrchestrationSupervisor,
+    *,
+    availability: _OrchestrationAvailability,
+    wait_for_result: bool,
+    keep_runtime: bool,
+    stop_timeout: float,
+) -> dict[str, Any]:
+    """Return an explicit runtime cleanup decision and stop when required."""
+    payload: dict[str, Any] = {
+        "policy": "auto_stop_owned_runtime",
+        "started_by_invocation": availability.started_by_invocation,
+        "wait_for_result": wait_for_result,
+        "keep_runtime": keep_runtime,
+        "stopped": False,
+    }
+    if not availability.started_by_invocation:
+        payload.update(
+            {
+                "action": "preserved",
+                "message": (
+                    "Pre-existing orchestration runtime was left running."
+                ),
+            }
+        )
+        _log_runtime_cleanup(payload)
+        return payload
+    if keep_runtime:
+        payload.update(
+            {
+                "action": "kept",
+                "message": (
+                    "Runtime started by this invocation was kept by policy."
+                ),
+            }
+        )
+        _log_runtime_cleanup(payload)
+        return payload
+    if not wait_for_result:
+        payload.update(
+            {
+                "action": "deferred",
+                "message": (
+                    "Runtime left running for submitted job because the "
+                    "caller did not wait for the result."
+                ),
+            }
+        )
+        _log_runtime_cleanup(payload)
+        return payload
+
+    try:
+        status = supervisor.stop(stop_timeout=stop_timeout)
+    except Exception as err:
+        payload.update(
+            {
+                "action": "failed",
+                "error": str(err),
+                "error_type": type(err).__name__,
+                "message": (
+                    "Runtime stop failed; inspect runtime status before "
+                    "starting more jobs."
+                ),
+            }
+        )
+        _log_runtime_cleanup(payload)
+        return payload
+
+    stopped = status.state == "stopped"
+    payload.update(
+        {
+            "action": "stopped" if stopped else "stop_pending",
+            "message": status.message,
+            "status": status.to_dict(),
+            "stopped": stopped,
+        }
+    )
+    _log_runtime_cleanup(payload)
+    return payload
+
+
+def _runtime_cleanup_after_exception(
+    supervisor: OrchestrationSupervisor,
+    *,
+    availability: _OrchestrationAvailability,
+    keep_runtime: bool,
+    stop_timeout: float,
+) -> None:
+    """Stop an owned runtime during exceptional exits without masking errors."""
+    if not availability.started_by_invocation or keep_runtime:
+        return
+    _runtime_cleanup_result(
+        supervisor,
+        availability=availability,
+        wait_for_result=True,
+        keep_runtime=False,
+        stop_timeout=stop_timeout,
+    )
+
+
+def _snapshot_with_runtime_cleanup(
+    snapshot: OrchestrationJobSnapshot,
+    runtime_cleanup: Mapping[str, Any] | None,
+) -> OrchestrationJobSnapshot:
+    """Return a snapshot copy with runtime cleanup metadata attached."""
+    if runtime_cleanup is None:
+        return snapshot
+    metadata = dict(snapshot.metadata)
+    metadata["runtime_cleanup"] = dict(runtime_cleanup)
+    return replace(snapshot, metadata=metadata)
+
+
+def _log_runtime_cleanup(payload: Mapping[str, Any]) -> None:
+    """Log the runtime cleanup decision without dumping job payloads."""
+    action = str(payload.get("action", ""))
+    level = (
+        logging.WARNING
+        if action in {"failed", "stop_pending"}
+        else logging.INFO
+    )
+    LOGGER.log(
+        level,
+        "Temporal orchestration runtime cleanup action=%s "
+        "started_by_invocation=%s stopped=%s",
+        action,
+        payload.get("started_by_invocation"),
+        payload.get("stopped"),
+    )
+
+
 async def submit_control_job(
     request: RunRequest,
     **kwargs: Any,
@@ -460,11 +650,15 @@ async def submit_control_job(
     """Submit a job and return the GUI-ready control snapshot."""
     result = await submit_run_request_and_observe(request, **kwargs)
     if result.snapshot is not None:
-        return result.snapshot
-    return OrchestrationJobSnapshot.from_handle(
+        return _snapshot_with_runtime_cleanup(
+            result.snapshot,
+            result.runtime_cleanup,
+        )
+    snapshot = OrchestrationJobSnapshot.from_handle(
         result.handle,
         orchestration_status=result.orchestration_status,
     ).with_result(result.result)
+    return _snapshot_with_runtime_cleanup(snapshot, result.runtime_cleanup)
 
 
 def submit_control_job_sync(
@@ -1485,7 +1679,7 @@ def _ensure_orchestration_available(
     supervisor: OrchestrationSupervisor,
     *,
     start_if_needed: bool,
-) -> OrchestrationStatus:
+) -> _OrchestrationAvailability:
     status = supervisor.status(repair=True)
     LOGGER.debug(
         "Checked Temporal orchestration availability state=%s running=%s",
@@ -1494,7 +1688,10 @@ def _ensure_orchestration_available(
         extra=_status_log_context(status, start_if_needed=start_if_needed),
     )
     if status.running:
-        return status
+        return _OrchestrationAvailability(
+            status=status,
+            started_by_invocation=False,
+        )
     if not start_if_needed:
         LOGGER.warning(
             "Temporal orchestration unavailable state=%s start_if_needed=%s",
@@ -1563,7 +1760,10 @@ def _ensure_orchestration_available(
                 start_if_needed=start_if_needed,
             ),
         )
-        return started
+        return _OrchestrationAvailability(
+            status=started,
+            started_by_invocation=True,
+        )
     LOGGER.warning(
         "Temporal orchestration startup did not reach running state=%s",
         started.state,

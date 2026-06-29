@@ -343,6 +343,38 @@ def test_api_options_can_submit_orchestration_job_and_return_result(
     }
 
 
+def test_api_options_can_keep_owned_orchestration_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API callers can request that an auto-started runtime stays running."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> JobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _job_result()
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    options = _orchestration_options()
+    options.orchestration_keep_runtime = True
+
+    result = histdata_com.main(options)
+
+    assert result["status"] == "completed"
+    assert captured["request"].pairs == ("eurusd",)
+    assert captured["kwargs"] == {
+        "start_if_needed": True,
+        "wait_for_result": True,
+        "keep_runtime": True,
+    }
+
+
 def test_api_build_cache_submits_cache_only_request(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -14,6 +14,7 @@ def test_orchestration_options_default_to_production_runtime() -> None:
 
     assert options.use_orchestration
     assert options.orchestration_start
+    assert not options.orchestration_keep_runtime
     assert options.orchestration_wait_result
 
 

@@ -27,6 +27,7 @@ class Options:
         "import_to_influxdb",
         "metadata",
         "orchestration_start",
+        "orchestration_keep_runtime",
         "orchestration_wait_result",
         "pair_groups",
         "pairs",
@@ -93,6 +94,7 @@ class Options:
         self.repo_quality_columns: bool = False
         self.use_orchestration: bool = True
         self.orchestration_start: bool = True
+        self.orchestration_keep_runtime: bool = False
         self.orchestration_wait_result: bool = True
         self.verbosity: int = 0
         self.metadata: dict = {}
