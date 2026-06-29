@@ -10,7 +10,7 @@ import pytest
 
 from histdatacom import histdata_com
 from histdatacom.cache_status import collect_cache_run_status
-from histdatacom.fx_enums import PAIR_GROUPS
+from histdatacom.fx_enums import MAJOR_TRIANGLE_SYMBOLS, PAIR_GROUPS
 from histdatacom.cleanup_cli import main as cleanup_main
 from histdatacom.source_cleanup import cleanup_transient_source_artifacts
 
@@ -109,6 +109,30 @@ def test_cache_status_reports_group_cleanup_and_missing_symbols(
     assert any(
         "histdatacom cleanup sources" in step for step in payload["next_steps"]
     )
+
+
+def test_cache_status_reports_major_triangle_group_scope(
+    tmp_path: Path,
+) -> None:
+    """Cache status should summarize the full major-triangle basket."""
+    data_dir = _write_cleanup_case(tmp_path)
+
+    result = collect_cache_run_status(
+        data_dir,
+        pair_groups=("major-triangles",),
+        timeframes=("tick-data-quotes",),
+        formats=("ascii",),
+        runtime={"state": "stopped", "message": "runtime is stopped"},
+        job_snapshots=(),
+    )
+    payload = result.to_dict()
+
+    assert payload["groups"][0]["group"] == "major-triangles"
+    assert payload["groups"][0]["expected_symbol_count"] == len(
+        MAJOR_TRIANGLE_SYMBOLS
+    )
+    assert "eurusd" not in payload["groups"][0]["missing_symbols"]
+    assert "eurjpy" in payload["groups"][0]["missing_symbols"]
 
 
 def test_cache_status_reports_drained_stuck_workflow(

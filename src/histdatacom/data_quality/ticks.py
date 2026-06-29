@@ -4,27 +4,32 @@ from __future__ import annotations
 
 import csv
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar, cast
 import zipfile
 
 from histdatacom.data_quality.contracts import (
     QualityFinding,
     QualityLocation,
     QualityRule,
+    QualityRuleResult,
     QualitySeverity,
     QualityTarget,
     QualityTargetKind,
 )
 from histdatacom.data_quality.calendar import (
-    HistDataCalendarClassification,
+    SESSION_ASIA,
+    SESSION_LONDON,
     SESSION_MARKET_CLOSED,
+    SESSION_NEW_YORK,
     SESSION_NO_ACTIVE_WINDOW,
+    SESSION_STATE_FRIDAY_CLOSE,
     SESSION_STATE_MARKET_OPEN,
-    classify_histdata_timestamp,
+    SESSION_STATE_SUNDAY_OPEN,
+    SESSION_STATE_WEEKEND_CLOSURE,
 )
 from histdatacom.data_quality.polars_cache import read_quality_polars_cache
 from histdatacom.data_quality.symbols import (
@@ -55,6 +60,13 @@ DEFAULT_SESSION_PROFILE = "default"
 DUPLICATE_TICK_OWNER_RULE_ID = "time.ascii.timestamp_sequence"
 DUPLICATE_TICK_OWNER_FINDING_CODE = "ASCII_TICK_DUPLICATE_ROW"
 SPECIAL_SPREAD_REGIMES = ("daily_rollover", "sunday_open", "friday_close")
+FX_FRIDAY_CLOSE_WEEKDAY = 4
+FX_SUNDAY_OPEN_WEEKDAY = 6
+FX_CLOSE_OPEN_MINUTE = 17 * 60
+DAILY_ROLLOVER_SOURCE_MINUTES = (16 * 60 + 55, 17 * 60 + 5)
+FRIDAY_CLOSE_SOURCE_MINUTES = (16 * 60, 17 * 60)
+SUNDAY_OPEN_SOURCE_MINUTES = (17 * 60, 18 * 60)
+LONDON_FIX_UTC_MINUTES = (15 * 60 + 55, 16 * 60 + 5)
 _ThresholdT = TypeVar("_ThresholdT")
 
 
@@ -282,6 +294,12 @@ class _TickMicrostructureThresholdSelection:
 @dataclass(frozen=True, slots=True)
 class _TextPayload:
     data: bytes
+    source_member: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class _TickLineSource:
+    iter_lines: Callable[[], Iterable[str]]
     source_member: str = ""
 
 
@@ -529,9 +547,9 @@ class _SpreadRegimeProfile:
             None if self.max_sample is None else self.max_sample.spread
         )
         if current_max is None or sample.spread > current_max:
-            self.max_sample = sample
+            self.max_sample = _materialize_spread_regime_sample(sample)
         if len(self.samples) < MAX_TICK_SAMPLES:
-            self.samples.append(sample)
+            self.samples.append(_materialize_spread_regime_sample(sample))
 
     def to_metadata(self) -> dict[str, JSONValue]:
         """Return robust spread summary metadata."""
@@ -613,9 +631,22 @@ class _TickSpreadRegimeScan:
     wide_spread_count: int = 0
     spread_jump_count: int = 0
     regime_shift_count: int = 0
+    spread_jump_values: list[float] = field(default_factory=list)
+    wide_candidates: list[_TickSpreadRegimeSample] = field(default_factory=list)
+    spread_jump_candidates: list[_TickSpreadRegimeSample] = field(
+        default_factory=list
+    )
     wide_spreads: list[_TickSpreadRegimeSample] = field(default_factory=list)
     spread_jumps: list[_TickSpreadRegimeSample] = field(default_factory=list)
     regime_shifts: list[_TickSpreadRegimeSample] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _TickQualityScans:
+    spread: _TickSpreadScan
+    microstructure: _TickMicrostructureScan
+    spread_regime: _TickSpreadRegimeScan
+    source_member: str = ""
 
 
 @dataclass(slots=True)
@@ -644,12 +675,13 @@ class HistDataAsciiTickSpreadRule:
         """Return tick spread findings for one target."""
         if not _is_tick_ascii_text_target(target):
             return ()
+        if target.kind is QualityTargetKind.CACHE:
+            return _cache_tick_spread_findings(target, self)
 
         try:
             delimiter = delimiter_for_timeframe(TICK)
             columns = columns_for_timeframe(TICK)
-            payload = _read_text_payload(target)
-            text = payload.data.decode("utf-8")
+            line_source = _read_tick_line_source(target, columns=columns)
         except ValueError as exc:
             return (
                 _finding(
@@ -672,7 +704,7 @@ class HistDataAsciiTickSpreadRule:
                         "error": str(exc),
                         "byte_start": exc.start,
                         "byte_end": exc.end,
-                        "source_member": payload.source_member,
+                        "source_member": "",
                     },
                 ),
             )
@@ -691,18 +723,28 @@ class HistDataAsciiTickSpreadRule:
             thresholds=self.thresholds,
             thresholds_by_asset_class=self.thresholds_by_asset_class,
         )
-        scan = _scan_tick_spread_rows(
-            text,
-            target=target,
-            delimiter=delimiter,
-            columns=columns,
-            source_member=payload.source_member,
-            thresholds=threshold_selection.thresholds,
-        )
+        try:
+            scan = _scan_tick_spread_rows(
+                line_source.iter_lines(),
+                target=target,
+                delimiter=delimiter,
+                columns=columns,
+                source_member=line_source.source_member,
+                thresholds=threshold_selection.thresholds,
+            )
+        except _SourceReadError as exc:
+            return (
+                _finding(
+                    target,
+                    code=exc.code,
+                    message=exc.message,
+                    metadata=exc.metadata,
+                ),
+            )
         return _spread_findings(
             target=target,
             scan=scan,
-            source_member=payload.source_member,
+            source_member=line_source.source_member,
             threshold_selection=threshold_selection,
             zero_spread_severity=self.zero_spread_severity,
             negative_spread_severity=self.negative_spread_severity,
@@ -751,12 +793,13 @@ class HistDataAsciiTickMicrostructureRule:
         """Return tick microstructure findings for one target."""
         if not _is_tick_ascii_text_target(target):
             return ()
+        if target.kind is QualityTargetKind.CACHE:
+            return _cache_tick_microstructure_findings(target, self)
 
         try:
             delimiter = delimiter_for_timeframe(TICK)
             columns = columns_for_timeframe(TICK)
-            payload = _read_text_payload(target)
-            text = payload.data.decode("utf-8")
+            line_source = _read_tick_line_source(target, columns=columns)
         except ValueError as exc:
             return (
                 _finding(
@@ -781,7 +824,7 @@ class HistDataAsciiTickMicrostructureRule:
                         "error": str(exc),
                         "byte_start": exc.start,
                         "byte_end": exc.end,
-                        "source_member": payload.source_member,
+                        "source_member": "",
                     },
                 ),
             )
@@ -808,17 +851,31 @@ class HistDataAsciiTickMicrostructureRule:
             thresholds_by_symbol_session=self.thresholds_by_symbol_session,
             session_name=self.session_name,
         )
-        scan = _scan_tick_microstructure_rows(
-            text,
-            delimiter=delimiter,
-            columns=columns,
-            source_member=payload.source_member,
-            thresholds=threshold_selection.thresholds,
-        )
+        try:
+            scan = _scan_tick_microstructure_rows(
+                line_source.iter_lines(),
+                delimiter=delimiter,
+                columns=columns,
+                source_member=line_source.source_member,
+                thresholds=threshold_selection.thresholds,
+            )
+        except _SourceReadError as exc:
+            return (
+                _finding(
+                    target,
+                    code=exc.code.replace("SPREAD", "MICROSTRUCTURE"),
+                    message=exc.message.replace(
+                        "spread checks",
+                        "microstructure checks",
+                    ),
+                    rule_id=self.rule_id,
+                    metadata=exc.metadata,
+                ),
+            )
         return _microstructure_findings(
             target=target,
             scan=scan,
-            source_member=payload.source_member,
+            source_member=line_source.source_member,
             threshold_selection=threshold_selection,
             severity=self.warning_severity,
             rule_id=self.rule_id,
@@ -852,12 +909,13 @@ class HistDataAsciiTickSpreadRegimeRule:
         """Return tick spread-regime findings for one target."""
         if not _is_tick_ascii_text_target(target):
             return ()
+        if target.kind is QualityTargetKind.CACHE:
+            return _cache_tick_spread_regime_findings(target, self)
 
         try:
             delimiter = delimiter_for_timeframe(TICK)
             columns = columns_for_timeframe(TICK)
-            payload = _read_text_payload(target)
-            text = payload.data.decode("utf-8")
+            line_source = _read_tick_line_source(target, columns=columns)
         except ValueError as exc:
             return (
                 _finding(
@@ -884,7 +942,7 @@ class HistDataAsciiTickSpreadRegimeRule:
                         "error": str(exc),
                         "byte_start": exc.start,
                         "byte_end": exc.end,
-                        "source_member": payload.source_member,
+                        "source_member": "",
                     },
                 ),
             )
@@ -908,18 +966,33 @@ class HistDataAsciiTickSpreadRegimeRule:
             thresholds=self.thresholds,
             thresholds_by_asset_class=self.thresholds_by_asset_class,
         )
-        scan = _scan_tick_spread_regime_rows(
-            text,
-            target=target,
-            delimiter=delimiter,
-            columns=columns,
-            source_member=payload.source_member,
-            thresholds=threshold_selection.thresholds,
-        )
+        try:
+            scan = _scan_tick_spread_regime_rows(
+                line_source.iter_lines,
+                target=target,
+                delimiter=delimiter,
+                columns=columns,
+                source_member=line_source.source_member,
+                thresholds=threshold_selection.thresholds,
+            )
+        except _SourceReadError as exc:
+            return (
+                _finding(
+                    target,
+                    code=exc.code.replace("SPREAD", "SPREAD_REGIME"),
+                    message=exc.message.replace(
+                        "spread checks",
+                        "spread-regime checks",
+                    ),
+                    severity=self.schema_severity,
+                    rule_id=self.rule_id,
+                    metadata=exc.metadata,
+                ),
+            )
         return _spread_regime_findings(
             target=target,
             scan=scan,
-            source_member=payload.source_member,
+            source_member=line_source.source_member,
             threshold_selection=threshold_selection,
             severity=self.warning_severity,
             rule_id=self.rule_id,
@@ -932,6 +1005,375 @@ def ticks_quality_rules() -> tuple[QualityRule, ...]:
     microstructure_rule: QualityRule = HistDataAsciiTickMicrostructureRule()
     regime_rule: QualityRule = HistDataAsciiTickSpreadRegimeRule()
     return (spread_rule, microstructure_rule, regime_rule)
+
+
+def _cache_tick_spread_findings(
+    target: QualityTarget,
+    rule: HistDataAsciiTickSpreadRule,
+) -> tuple[QualityFinding, ...]:
+    threshold_selection = _spread_threshold_selection(
+        target,
+        thresholds=rule.thresholds,
+        thresholds_by_asset_class=rule.thresholds_by_asset_class,
+    )
+    try:
+        scans = _cache_tick_quality_scans(
+            target,
+            spread_thresholds=threshold_selection.thresholds,
+            microstructure_thresholds=DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS,
+            regime_thresholds=DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS,
+        )
+    except _SourceReadError as exc:
+        return (
+            _finding(
+                target,
+                code=exc.code,
+                message=exc.message,
+                rule_id=rule.rule_id,
+                metadata=exc.metadata,
+            ),
+        )
+    return _spread_findings(
+        target=target,
+        scan=scans.spread,
+        source_member=scans.source_member,
+        threshold_selection=threshold_selection,
+        zero_spread_severity=rule.zero_spread_severity,
+        negative_spread_severity=rule.negative_spread_severity,
+        schema_severity=rule.schema_severity,
+        rule_id=rule.rule_id,
+    )
+
+
+def _cache_tick_microstructure_findings(
+    target: QualityTarget,
+    rule: HistDataAsciiTickMicrostructureRule,
+) -> tuple[QualityFinding, ...]:
+    threshold_selection = _microstructure_threshold_selection(
+        target,
+        thresholds=rule.thresholds,
+        thresholds_by_symbol=rule.thresholds_by_symbol,
+        thresholds_by_session=rule.thresholds_by_session,
+        thresholds_by_asset_class=rule.thresholds_by_asset_class,
+        thresholds_by_symbol_session=rule.thresholds_by_symbol_session,
+        session_name=rule.session_name,
+    )
+    try:
+        scans = _cache_tick_quality_scans(
+            target,
+            spread_thresholds=DEFAULT_TICK_SPREAD_THRESHOLDS,
+            microstructure_thresholds=threshold_selection.thresholds,
+            regime_thresholds=DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS,
+        )
+    except _SourceReadError as exc:
+        return (
+            _finding(
+                target,
+                code=exc.code.replace("SPREAD", "MICROSTRUCTURE"),
+                message=exc.message.replace(
+                    "spread checks",
+                    "microstructure checks",
+                ),
+                rule_id=rule.rule_id,
+                metadata=exc.metadata,
+            ),
+        )
+    return _microstructure_findings(
+        target=target,
+        scan=scans.microstructure,
+        source_member=scans.source_member,
+        threshold_selection=threshold_selection,
+        severity=rule.warning_severity,
+        rule_id=rule.rule_id,
+    )
+
+
+def _cache_tick_spread_regime_findings(
+    target: QualityTarget,
+    rule: HistDataAsciiTickSpreadRegimeRule,
+) -> tuple[QualityFinding, ...]:
+    threshold_selection = _spread_regime_threshold_selection(
+        target,
+        thresholds=rule.thresholds,
+        thresholds_by_asset_class=rule.thresholds_by_asset_class,
+    )
+    try:
+        scans = _cache_tick_quality_scans(
+            target,
+            spread_thresholds=DEFAULT_TICK_SPREAD_THRESHOLDS,
+            microstructure_thresholds=DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS,
+            regime_thresholds=threshold_selection.thresholds,
+        )
+    except _SourceReadError as exc:
+        return (
+            _finding(
+                target,
+                code=exc.code.replace("SPREAD", "SPREAD_REGIME"),
+                message=exc.message.replace(
+                    "spread checks",
+                    "spread-regime checks",
+                ),
+                severity=rule.schema_severity,
+                rule_id=rule.rule_id,
+                metadata=exc.metadata,
+            ),
+        )
+    return _spread_regime_findings(
+        target=target,
+        scan=scans.spread_regime,
+        source_member=scans.source_member,
+        threshold_selection=threshold_selection,
+        severity=rule.warning_severity,
+        rule_id=rule.rule_id,
+    )
+
+
+def can_evaluate_tick_quality_bundle(
+    target: QualityTarget,
+    rules: Sequence[QualityRule],
+) -> bool:
+    """Return whether cache-backed TICK rules can share one scan."""
+    return (
+        target.kind is QualityTargetKind.CACHE
+        and _is_tick_ascii_text_target(target)
+        and len(rules) == 3
+        and isinstance(rules[0], HistDataAsciiTickSpreadRule)
+        and isinstance(rules[1], HistDataAsciiTickMicrostructureRule)
+        and isinstance(rules[2], HistDataAsciiTickSpreadRegimeRule)
+    )
+
+
+def evaluate_tick_quality_bundle(
+    target: QualityTarget,
+    rules: Sequence[QualityRule],
+) -> tuple[QualityRuleResult, ...]:
+    """Evaluate the cache-backed TICK rule trio through shared scans."""
+    if not can_evaluate_tick_quality_bundle(target, rules):
+        msg = "target and rules do not describe a cache-backed TICK bundle"
+        raise ValueError(msg)
+
+    spread_rule = rules[0]
+    microstructure_rule = rules[1]
+    regime_rule = rules[2]
+    assert isinstance(spread_rule, HistDataAsciiTickSpreadRule)
+    assert isinstance(microstructure_rule, HistDataAsciiTickMicrostructureRule)
+    assert isinstance(regime_rule, HistDataAsciiTickSpreadRegimeRule)
+
+    try:
+        columns = columns_for_timeframe(TICK)
+        frame = _read_tick_cache_frame(target, columns=columns)
+    except ValueError as exc:
+        return (
+            QualityRuleResult(
+                rule_id=spread_rule.rule_id,
+                target=target,
+                findings=(
+                    _finding(
+                        target,
+                        code="ASCII_TICK_SPREAD_METADATA_UNSUPPORTED",
+                        message="Target metadata does not describe supported "
+                        "HistData tick ASCII data.",
+                        rule_id=spread_rule.rule_id,
+                        metadata={
+                            "timeframe": target.timeframe,
+                            "error": str(exc),
+                        },
+                    ),
+                ),
+            ),
+            QualityRuleResult(
+                rule_id=microstructure_rule.rule_id,
+                target=target,
+                findings=(
+                    _finding(
+                        target,
+                        code="ASCII_TICK_MICROSTRUCTURE_METADATA_UNSUPPORTED",
+                        message="Target metadata does not describe supported "
+                        "HistData tick ASCII data.",
+                        rule_id=microstructure_rule.rule_id,
+                        metadata={
+                            "timeframe": target.timeframe,
+                            "error": str(exc),
+                        },
+                    ),
+                ),
+            ),
+            QualityRuleResult(
+                rule_id=regime_rule.rule_id,
+                target=target,
+                findings=(
+                    _finding(
+                        target,
+                        code="ASCII_TICK_SPREAD_REGIME_METADATA_UNSUPPORTED",
+                        message="Target metadata does not describe supported "
+                        "HistData tick ASCII data.",
+                        severity=regime_rule.schema_severity,
+                        rule_id=regime_rule.rule_id,
+                        metadata={
+                            "timeframe": target.timeframe,
+                            "error": str(exc),
+                        },
+                    ),
+                ),
+            ),
+        )
+    except _SourceReadError as exc:
+        return _tick_bundle_source_error_results(
+            target,
+            spread_rule=spread_rule,
+            microstructure_rule=microstructure_rule,
+            regime_rule=regime_rule,
+            source_error=exc,
+        )
+
+    spread_threshold_selection = _spread_threshold_selection(
+        target,
+        thresholds=spread_rule.thresholds,
+        thresholds_by_asset_class=spread_rule.thresholds_by_asset_class,
+    )
+    microstructure_threshold_selection = _microstructure_threshold_selection(
+        target,
+        thresholds=microstructure_rule.thresholds,
+        thresholds_by_symbol=microstructure_rule.thresholds_by_symbol,
+        thresholds_by_session=microstructure_rule.thresholds_by_session,
+        thresholds_by_asset_class=(
+            microstructure_rule.thresholds_by_asset_class
+        ),
+        thresholds_by_symbol_session=(
+            microstructure_rule.thresholds_by_symbol_session
+        ),
+        session_name=microstructure_rule.session_name,
+    )
+    regime_threshold_selection = _spread_regime_threshold_selection(
+        target,
+        thresholds=regime_rule.thresholds,
+        thresholds_by_asset_class=regime_rule.thresholds_by_asset_class,
+    )
+
+    try:
+        scans = _scan_tick_cache_quality_rows(
+            frame,
+            target=target,
+            source_member="",
+            spread_thresholds=spread_threshold_selection.thresholds,
+            microstructure_thresholds=(
+                microstructure_threshold_selection.thresholds
+            ),
+            regime_thresholds=regime_threshold_selection.thresholds,
+        )
+    except _SourceReadError as exc:
+        return _tick_bundle_source_error_results(
+            target,
+            spread_rule=spread_rule,
+            microstructure_rule=microstructure_rule,
+            regime_rule=regime_rule,
+            source_error=exc,
+        )
+
+    return (
+        QualityRuleResult(
+            rule_id=spread_rule.rule_id,
+            target=target,
+            findings=_spread_findings(
+                target=target,
+                scan=scans.spread,
+                source_member=scans.source_member,
+                threshold_selection=spread_threshold_selection,
+                zero_spread_severity=spread_rule.zero_spread_severity,
+                negative_spread_severity=spread_rule.negative_spread_severity,
+                schema_severity=spread_rule.schema_severity,
+                rule_id=spread_rule.rule_id,
+            ),
+        ),
+        QualityRuleResult(
+            rule_id=microstructure_rule.rule_id,
+            target=target,
+            findings=_microstructure_findings(
+                target=target,
+                scan=scans.microstructure,
+                source_member=scans.source_member,
+                threshold_selection=microstructure_threshold_selection,
+                severity=microstructure_rule.warning_severity,
+                rule_id=microstructure_rule.rule_id,
+            ),
+        ),
+        QualityRuleResult(
+            rule_id=regime_rule.rule_id,
+            target=target,
+            findings=_spread_regime_findings(
+                target=target,
+                scan=scans.spread_regime,
+                source_member=scans.source_member,
+                threshold_selection=regime_threshold_selection,
+                severity=regime_rule.warning_severity,
+                rule_id=regime_rule.rule_id,
+            ),
+        ),
+    )
+
+
+def _tick_bundle_source_error_results(
+    target: QualityTarget,
+    *,
+    spread_rule: HistDataAsciiTickSpreadRule,
+    microstructure_rule: HistDataAsciiTickMicrostructureRule,
+    regime_rule: HistDataAsciiTickSpreadRegimeRule,
+    source_error: _SourceReadError,
+) -> tuple[QualityRuleResult, ...]:
+    return (
+        QualityRuleResult(
+            rule_id=spread_rule.rule_id,
+            target=target,
+            findings=(
+                _finding(
+                    target,
+                    code=source_error.code,
+                    message=source_error.message,
+                    rule_id=spread_rule.rule_id,
+                    metadata=source_error.metadata,
+                ),
+            ),
+        ),
+        QualityRuleResult(
+            rule_id=microstructure_rule.rule_id,
+            target=target,
+            findings=(
+                _finding(
+                    target,
+                    code=source_error.code.replace(
+                        "SPREAD",
+                        "MICROSTRUCTURE",
+                    ),
+                    message=source_error.message.replace(
+                        "spread checks",
+                        "microstructure checks",
+                    ),
+                    rule_id=microstructure_rule.rule_id,
+                    metadata=source_error.metadata,
+                ),
+            ),
+        ),
+        QualityRuleResult(
+            rule_id=regime_rule.rule_id,
+            target=target,
+            findings=(
+                _finding(
+                    target,
+                    code=source_error.code.replace(
+                        "SPREAD",
+                        "SPREAD_REGIME",
+                    ),
+                    message=source_error.message.replace(
+                        "spread checks",
+                        "spread-regime checks",
+                    ),
+                    severity=regime_rule.schema_severity,
+                    rule_id=regime_rule.rule_id,
+                    metadata=source_error.metadata,
+                ),
+            ),
+        ),
+    )
 
 
 def _is_tick_ascii_text_target(target: QualityTarget) -> bool:
@@ -949,8 +1391,6 @@ def _is_tick_ascii_text_target(target: QualityTarget) -> bool:
 
 def _read_text_payload(target: QualityTarget) -> _TextPayload:
     path = Path(target.path)
-    if target.kind is QualityTargetKind.CACHE:
-        return _TextPayload(_tick_cache_text(target).encode("utf-8"))
     if target.kind is QualityTargetKind.CSV:
         try:
             return _TextPayload(path.read_bytes())
@@ -997,6 +1437,22 @@ def _read_text_payload(target: QualityTarget) -> _TextPayload:
         ) from exc
 
 
+def _read_tick_line_source(
+    target: QualityTarget,
+    *,
+    columns: tuple[str, ...],
+) -> _TickLineSource:
+    payload = _read_text_payload(target)
+    try:
+        text = payload.data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise
+    return _TickLineSource(
+        iter_lines=text.splitlines,
+        source_member=payload.source_member,
+    )
+
+
 def _source_error(
     code: str,
     message: str,
@@ -1009,8 +1465,30 @@ def _source_error(
     )
 
 
-def _tick_cache_text(target: QualityTarget) -> str:
+def _cache_tick_quality_scans(
+    target: QualityTarget,
+    *,
+    spread_thresholds: HistDataTickSpreadThresholds,
+    microstructure_thresholds: HistDataTickMicrostructureThresholds,
+    regime_thresholds: HistDataTickSpreadRegimeThresholds,
+) -> _TickQualityScans:
     columns = columns_for_timeframe(TICK)
+    frame = _read_tick_cache_frame(target, columns=columns)
+    return _scan_tick_cache_quality_rows(
+        frame,
+        target=target,
+        source_member="",
+        spread_thresholds=spread_thresholds,
+        microstructure_thresholds=microstructure_thresholds,
+        regime_thresholds=regime_thresholds,
+    )
+
+
+def _read_tick_cache_frame(
+    target: QualityTarget,
+    *,
+    columns: tuple[str, ...],
+) -> Any:
     cache = read_quality_polars_cache(
         target,
         required_columns=columns,
@@ -1023,20 +1501,8 @@ def _tick_cache_text(target: QualityTarget) -> str:
             metadata={"required_columns": list(columns)},
         )
 
-    lines: list[str] = []
     try:
-        for row in cache.frame.select(list(columns)).iter_rows(named=False):
-            timestamp_source = _cache_tick_timestamp_source(row[0])
-            lines.append(
-                ",".join(
-                    (
-                        timestamp_source,
-                        _cache_cell(row[1]),
-                        _cache_cell(row[2]),
-                        _cache_cell(row[3]),
-                    )
-                )
-            )
+        return cache.frame.select(list(columns))
     except Exception as exc:
         raise _SourceReadError(
             code="ASCII_TICK_SPREAD_CACHE_SCHEMA_UNSUPPORTED",
@@ -1048,7 +1514,6 @@ def _tick_cache_text(target: QualityTarget) -> str:
                 "error": str(exc),
             },
         ) from exc
-    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def _cache_tick_timestamp_source(value: object) -> str:
@@ -1068,8 +1533,922 @@ def _cache_cell(value: object) -> str:
     return "" if value is None else str(value)
 
 
+def _scan_tick_cache_quality_rows(
+    frame: Any,
+    *,
+    target: QualityTarget,
+    source_member: str,
+    spread_thresholds: HistDataTickSpreadThresholds,
+    microstructure_thresholds: HistDataTickMicrostructureThresholds,
+    regime_thresholds: HistDataTickSpreadRegimeThresholds,
+) -> _TickQualityScans:
+    spread_scan = _TickSpreadScan()
+    microstructure_scan = _TickMicrostructureScan()
+    regime_scan = _TickSpreadRegimeScan()
+    try:
+        duplicate_count, duplicate_rows = _cache_duplicate_summary(
+            frame,
+            source_member=source_member,
+        )
+        rows = frame.iter_rows(named=False)
+    except Exception as exc:
+        raise _SourceReadError(
+            code="ASCII_TICK_SPREAD_CACHE_SCHEMA_UNSUPPORTED",
+            message="Polars cache could not be projected for tick spread "
+            "checks.",
+            metadata={
+                "required_columns": list(columns_for_timeframe(TICK)),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        ) from exc
+
+    microstructure_scan.duplicate_row_count = duplicate_count
+    microstructure_scan.duplicate_rows.extend(duplicate_rows)
+    zero_run_start: _TickSpreadSample | None = None
+    zero_run_end: _TickSpreadSample | None = None
+    zero_run_length = 0
+
+    previous: _TickSpreadSample | None = None
+    stale_start: _TickSpreadSample | None = None
+    stale_end: _TickSpreadSample | None = None
+    stale_length = 0
+    burst_start: _TickSpreadSample | None = None
+    burst_end: _TickSpreadSample | None = None
+    burst_length = 0
+    one_sided_start: _TickSpreadSample | None = None
+    one_sided_end: _TickSpreadSample | None = None
+    one_sided_previous: _TickSpreadSample | None = None
+    one_sided_length = 0
+    one_sided_direction = ""
+
+    symbol_key = normalize_histdata_symbol(target.symbol)
+    previous_regime_sample: _TickSpreadRegimeSample | None = None
+
+    for row_number, row in enumerate(rows, start=1):
+        datetime_value, bid_value, ask_value, volume_value = row
+        spread_scan.row_count += 1
+        microstructure_scan.row_count += 1
+        regime_scan.row_count += 1
+
+        missing_column = _cache_missing_bid_ask_column(
+            bid_value,
+            ask_value,
+        )
+        if missing_column:
+            _finalize_zero_spread_run(
+                spread_scan,
+                zero_run_start,
+                zero_run_end,
+                zero_run_length,
+                spread_thresholds,
+            )
+            zero_run_start = None
+            zero_run_end = None
+            zero_run_length = 0
+            spread_scan.missing_bid_ask_count += 1
+            microstructure_scan.invalid_tick_count += 1
+            _append_spread_sample(
+                spread_scan.missing_bid_ask,
+                _cache_sample_from_row(
+                    datetime_value,
+                    bid_value,
+                    ask_value,
+                    volume_value,
+                    row_number=row_number,
+                    column=missing_column,
+                    source_member=source_member,
+                    metadata={
+                        "expected_field_count": len(
+                            columns_for_timeframe(TICK)
+                        ),
+                        "field_count": len(columns_for_timeframe(TICK)),
+                        "required_columns": list(TICK_PRICE_COLUMNS),
+                    },
+                ),
+            )
+            (
+                stale_start,
+                stale_end,
+                stale_length,
+                burst_start,
+                burst_end,
+                burst_length,
+                one_sided_start,
+                one_sided_end,
+                one_sided_previous,
+                one_sided_length,
+                one_sided_direction,
+            ) = _finalize_microstructure_runs(
+                microstructure_scan,
+                stale_start,
+                stale_end,
+                stale_length,
+                burst_start,
+                burst_end,
+                burst_length,
+                one_sided_start,
+                one_sided_end,
+                one_sided_previous,
+                one_sided_length,
+                one_sided_direction,
+                microstructure_thresholds,
+            )
+            previous = None
+            regime_scan.invalid_tick_count += 1
+            continue
+
+        parsed = _cache_parsed_tick_spread_sample(
+            datetime_value,
+            bid_value,
+            ask_value,
+            volume_value,
+            row_number=row_number,
+            source_member=source_member,
+        )
+        if parsed is None:
+            _finalize_zero_spread_run(
+                spread_scan,
+                zero_run_start,
+                zero_run_end,
+                zero_run_length,
+                spread_thresholds,
+            )
+            zero_run_start = None
+            zero_run_end = None
+            zero_run_length = 0
+            spread_scan.invalid_bid_ask_count += 1
+            microstructure_scan.invalid_tick_count += 1
+            regime_scan.invalid_tick_count += 1
+            _append_spread_sample(
+                spread_scan.invalid_bid_ask,
+                _cache_invalid_bid_ask_sample(
+                    datetime_value,
+                    bid_value,
+                    ask_value,
+                    volume_value,
+                    row_number=row_number,
+                    source_member=source_member,
+                ),
+            )
+            (
+                stale_start,
+                stale_end,
+                stale_length,
+                burst_start,
+                burst_end,
+                burst_length,
+                one_sided_start,
+                one_sided_end,
+                one_sided_previous,
+                one_sided_length,
+                one_sided_direction,
+            ) = _finalize_microstructure_runs(
+                microstructure_scan,
+                stale_start,
+                stale_end,
+                stale_length,
+                burst_start,
+                burst_end,
+                burst_length,
+                one_sided_start,
+                one_sided_end,
+                one_sided_previous,
+                one_sided_length,
+                one_sided_direction,
+                microstructure_thresholds,
+            )
+            previous = None
+            continue
+
+        _record_cache_spread_row(
+            spread_scan,
+            parsed,
+        )
+        (
+            zero_run_start,
+            zero_run_end,
+            zero_run_length,
+        ) = _next_zero_spread_run_state(
+            spread_scan,
+            parsed,
+            thresholds=spread_thresholds,
+            zero_run_start=zero_run_start,
+            zero_run_end=zero_run_end,
+            zero_run_length=zero_run_length,
+        )
+        (
+            previous,
+            stale_start,
+            stale_end,
+            stale_length,
+            burst_start,
+            burst_end,
+            burst_length,
+            one_sided_start,
+            one_sided_end,
+            one_sided_previous,
+            one_sided_length,
+            one_sided_direction,
+        ) = _next_microstructure_state(
+            microstructure_scan,
+            parsed,
+            previous=previous,
+            stale_start=stale_start,
+            stale_end=stale_end,
+            stale_length=stale_length,
+            burst_start=burst_start,
+            burst_end=burst_end,
+            burst_length=burst_length,
+            one_sided_start=one_sided_start,
+            one_sided_end=one_sided_end,
+            one_sided_previous=one_sided_previous,
+            one_sided_length=one_sided_length,
+            one_sided_direction=one_sided_direction,
+            thresholds=microstructure_thresholds,
+        )
+        previous_regime_sample = _record_cache_spread_regime_row(
+            regime_scan,
+            target=target,
+            parsed=parsed,
+            previous=previous_regime_sample,
+            symbol_key=symbol_key,
+        )
+
+    _finalize_zero_spread_run(
+        spread_scan,
+        zero_run_start,
+        zero_run_end,
+        zero_run_length,
+        spread_thresholds,
+    )
+    _finalize_microstructure_runs(
+        microstructure_scan,
+        stale_start,
+        stale_end,
+        stale_length,
+        burst_start,
+        burst_end,
+        burst_length,
+        one_sided_start,
+        one_sided_end,
+        one_sided_previous,
+        one_sided_length,
+        one_sided_direction,
+        microstructure_thresholds,
+    )
+    _record_cache_spread_regime_warnings(
+        regime_scan,
+        thresholds=regime_thresholds,
+    )
+    return _TickQualityScans(
+        spread=spread_scan,
+        microstructure=microstructure_scan,
+        spread_regime=regime_scan,
+        source_member=source_member,
+    )
+
+
+def _record_cache_spread_row(
+    scan: _TickSpreadScan,
+    parsed: _TickSpreadSample,
+) -> None:
+    scan.parsed_row_count += 1
+    spread = parsed.spread
+    if spread is None:
+        return
+    scan.min_spread = (
+        spread if scan.min_spread is None else min(scan.min_spread, spread)
+    )
+    scan.max_spread = (
+        spread if scan.max_spread is None else max(scan.max_spread, spread)
+    )
+
+
+def _next_zero_spread_run_state(
+    scan: _TickSpreadScan,
+    parsed: _TickSpreadSample,
+    *,
+    thresholds: HistDataTickSpreadThresholds,
+    zero_run_start: _TickSpreadSample | None,
+    zero_run_end: _TickSpreadSample | None,
+    zero_run_length: int,
+) -> tuple[_TickSpreadSample | None, _TickSpreadSample | None, int]:
+    spread = parsed.spread
+    if spread is not None and spread < 0.0:
+        _finalize_zero_spread_run(
+            scan,
+            zero_run_start,
+            zero_run_end,
+            zero_run_length,
+            thresholds,
+        )
+        scan.negative_spread_count += 1
+        _append_spread_sample(scan.negative_spreads, parsed)
+        return None, None, 0
+    if spread == 0.0:
+        scan.zero_spread_count += 1
+        return (
+            parsed if zero_run_start is None else zero_run_start,
+            parsed,
+            zero_run_length + 1,
+        )
+
+    _finalize_zero_spread_run(
+        scan,
+        zero_run_start,
+        zero_run_end,
+        zero_run_length,
+        thresholds,
+    )
+    return None, None, 0
+
+
+def _next_microstructure_state(
+    scan: _TickMicrostructureScan,
+    parsed: _TickSpreadSample,
+    *,
+    previous: _TickSpreadSample | None,
+    stale_start: _TickSpreadSample | None,
+    stale_end: _TickSpreadSample | None,
+    stale_length: int,
+    burst_start: _TickSpreadSample | None,
+    burst_end: _TickSpreadSample | None,
+    burst_length: int,
+    one_sided_start: _TickSpreadSample | None,
+    one_sided_end: _TickSpreadSample | None,
+    one_sided_previous: _TickSpreadSample | None,
+    one_sided_length: int,
+    one_sided_direction: str,
+    thresholds: HistDataTickMicrostructureThresholds,
+) -> tuple[
+    _TickSpreadSample,
+    _TickSpreadSample | None,
+    _TickSpreadSample | None,
+    int,
+    _TickSpreadSample | None,
+    _TickSpreadSample | None,
+    int,
+    _TickSpreadSample | None,
+    _TickSpreadSample | None,
+    _TickSpreadSample | None,
+    int,
+    str,
+]:
+    scan.parsed_row_count += 1
+    if previous is None:
+        return (
+            parsed,
+            stale_start,
+            stale_end,
+            stale_length,
+            burst_start,
+            burst_end,
+            burst_length,
+            one_sided_start,
+            one_sided_end,
+            one_sided_previous,
+            one_sided_length,
+            one_sided_direction,
+        )
+
+    interval_ms = _tick_interval_ms(previous, parsed)
+    if _is_stale_quote_pair(previous, parsed, interval_ms, thresholds):
+        scan.stale_quote_repeat_count += 1
+        if stale_start is None:
+            stale_start = previous
+            stale_length = 2
+        else:
+            stale_length += 1
+        stale_end = parsed
+    else:
+        _finalize_stale_quote_run(
+            scan,
+            stale_start,
+            stale_end,
+            stale_length,
+            thresholds,
+        )
+        stale_start = None
+        stale_end = None
+        stale_length = 0
+
+    if _is_burst_interval(interval_ms, thresholds):
+        scan.burst_interval_count += 1
+        if burst_start is None:
+            burst_start = previous
+            burst_length = 2
+        else:
+            burst_length += 1
+        burst_end = parsed
+    else:
+        _finalize_burst_run(
+            scan,
+            burst_start,
+            burst_end,
+            burst_length,
+            thresholds,
+        )
+        burst_start = None
+        burst_end = None
+        burst_length = 0
+
+    direction = _one_sided_quote_direction(previous, parsed)
+    if direction:
+        scan.one_sided_movement_count += 1
+        if direction == "bid_only":
+            scan.bid_only_movement_count += 1
+        else:
+            scan.ask_only_movement_count += 1
+
+        if one_sided_start is not None and (one_sided_direction == direction):
+            one_sided_length += 1
+            one_sided_end = parsed
+        else:
+            _finalize_one_sided_run(
+                scan,
+                one_sided_start,
+                one_sided_end,
+                one_sided_previous,
+                one_sided_length,
+                one_sided_direction,
+                thresholds,
+            )
+            one_sided_start = parsed
+            one_sided_end = parsed
+            one_sided_previous = previous
+            one_sided_length = 1
+            one_sided_direction = direction
+    else:
+        _finalize_one_sided_run(
+            scan,
+            one_sided_start,
+            one_sided_end,
+            one_sided_previous,
+            one_sided_length,
+            one_sided_direction,
+            thresholds,
+        )
+        one_sided_start = None
+        one_sided_end = None
+        one_sided_previous = None
+        one_sided_length = 0
+        one_sided_direction = ""
+
+    return (
+        parsed,
+        stale_start,
+        stale_end,
+        stale_length,
+        burst_start,
+        burst_end,
+        burst_length,
+        one_sided_start,
+        one_sided_end,
+        one_sided_previous,
+        one_sided_length,
+        one_sided_direction,
+    )
+
+
+def _record_cache_spread_regime_row(
+    scan: _TickSpreadRegimeScan,
+    *,
+    target: QualityTarget,
+    parsed: _TickSpreadSample,
+    previous: _TickSpreadRegimeSample | None,
+    symbol_key: str,
+) -> _TickSpreadRegimeSample | None:
+    if parsed.spread is None:
+        scan.invalid_tick_count += 1
+        return previous
+    scan.parsed_row_count += 1
+    if parsed.timestamp_utc_ms is None:
+        scan.invalid_timestamp_count += 1
+        return previous
+    if parsed.spread < 0.0:
+        scan.negative_spread_count += 1
+        return previous
+
+    sample = _tick_spread_regime_sample(
+        target,
+        parsed,
+        symbol_key=symbol_key,
+    )
+    scan.profiled_row_count += 1
+    _record_spread_regime_sample(scan, sample)
+    _record_spread_regime_warning_candidates(scan, sample, previous)
+    return sample
+
+
+def _record_spread_regime_warning_candidates(
+    scan: _TickSpreadRegimeScan,
+    sample: _TickSpreadRegimeSample,
+    previous: _TickSpreadRegimeSample | None,
+) -> None:
+    if sample.spread is not None:
+        _record_top_regime_candidate(
+            scan.wide_candidates,
+            sample,
+            score=sample.spread,
+        )
+    if previous is None or previous.spread is None or sample.spread is None:
+        return
+    spread_delta = sample.spread - previous.spread
+    scan.spread_jump_values.append(abs(spread_delta))
+    _record_top_regime_candidate(
+        scan.spread_jump_candidates,
+        _TickSpreadRegimeSample(
+            sample=sample.sample,
+            symbol_key=sample.symbol_key,
+            source_hour=sample.source_hour,
+            utc_hour=sample.utc_hour,
+            session_state=sample.session_state,
+            session_keys=sample.session_keys,
+            special_regime_keys=sample.special_regime_keys,
+            previous=previous.sample,
+            spread_delta=spread_delta,
+        ),
+        score=abs(spread_delta),
+    )
+
+
+def _record_top_regime_candidate(
+    candidates: list[_TickSpreadRegimeSample],
+    sample: _TickSpreadRegimeSample,
+    *,
+    score: float,
+) -> None:
+    if len(candidates) < MAX_TICK_SAMPLES:
+        candidates.append(sample)
+        return
+    min_index, min_score = min(
+        enumerate(
+            _regime_candidate_score(candidate) for candidate in candidates
+        ),
+        key=lambda item: item[1],
+    )
+    if score > min_score:
+        candidates[min_index] = sample
+
+
+def _regime_candidate_score(sample: _TickSpreadRegimeSample) -> float:
+    if sample.spread_delta is not None:
+        return abs(sample.spread_delta)
+    return sample.spread or 0.0
+
+
+def _record_cache_spread_regime_warnings(
+    scan: _TickSpreadRegimeScan,
+    *,
+    thresholds: HistDataTickSpreadRegimeThresholds,
+) -> None:
+    baseline_profile, _baseline_source = _spread_regime_baseline(scan)
+    baseline_median = _median_or_none(baseline_profile.values) or 0.0
+    wide_threshold = _wide_spread_threshold(
+        baseline_median,
+        thresholds,
+    )
+    jump_threshold = _spread_jump_threshold(
+        baseline_median,
+        thresholds,
+    )
+
+    if wide_threshold is not None:
+        scan.wide_spread_count = sum(
+            1
+            for spread in scan.global_profile.values
+            if spread > wide_threshold
+        )
+        for sample in scan.wide_candidates:
+            if sample.spread is not None and sample.spread > wide_threshold:
+                _append_spread_regime_sample(
+                    scan.wide_spreads,
+                    _regime_warning_sample(
+                        sample,
+                        threshold=wide_threshold,
+                        profile_key="wide_spread",
+                    ),
+                )
+
+    if jump_threshold is not None:
+        scan.spread_jump_count = sum(
+            1 for value in scan.spread_jump_values if value > jump_threshold
+        )
+        for sample in scan.spread_jump_candidates:
+            if (
+                sample.spread_delta is not None
+                and abs(sample.spread_delta) > jump_threshold
+            ):
+                _append_spread_regime_sample(
+                    scan.spread_jumps,
+                    _regime_warning_sample(
+                        sample,
+                        previous=sample.previous,
+                        spread_delta=sample.spread_delta,
+                        threshold=jump_threshold,
+                        profile_key="spread_jump",
+                    ),
+                )
+
+    regime_threshold = _regime_median_threshold(
+        baseline_median,
+        thresholds,
+    )
+    if regime_threshold is None:
+        return
+    for regime in SPECIAL_SPREAD_REGIMES:
+        profile = scan.special_regime_profiles.get(regime)
+        if profile is None or not profile.values:
+            continue
+        regime_median = _median_or_none(profile.values)
+        if regime_median is None or regime_median <= regime_threshold:
+            continue
+        scan.regime_shift_count += 1
+        if profile.max_sample is not None:
+            _append_spread_regime_sample(
+                scan.regime_shifts,
+                _regime_warning_sample(
+                    profile.max_sample,
+                    threshold=regime_threshold,
+                    profile_key=regime,
+                ),
+            )
+
+
+def _cache_duplicate_summary(
+    frame: Any,
+    *,
+    source_member: str,
+) -> tuple[int, list[_TickSpreadSample]]:
+    import polars as pl
+
+    valid_frame = frame.filter(
+        pl.col("bid").is_not_null()
+        & pl.col("ask").is_not_null()
+        & pl.col("bid").is_finite()
+        & pl.col("ask").is_finite()
+    )
+    duplicate_count = max(valid_frame.height - valid_frame.unique().height, 0)
+    if not duplicate_count:
+        return 0, []
+
+    samples: list[_TickSpreadSample] = []
+    seen_rows: dict[tuple[object, ...], _TickSpreadSample] = {}
+    for row_number, row in enumerate(frame.iter_rows(named=False), start=1):
+        datetime_value, bid_value, ask_value, volume_value = row
+        if _cache_missing_bid_ask_column(bid_value, ask_value):
+            continue
+        parsed = _cache_parsed_tick_spread_sample(
+            datetime_value,
+            bid_value,
+            ask_value,
+            volume_value,
+            row_number=row_number,
+            source_member=source_member,
+        )
+        if parsed is None:
+            continue
+        key = (datetime_value, bid_value, ask_value, volume_value)
+        duplicate = seen_rows.get(key)
+        if duplicate is not None:
+            _append_spread_sample(
+                samples,
+                _duplicate_microstructure_sample(parsed, duplicate),
+            )
+            if len(samples) >= MAX_TICK_SAMPLES:
+                break
+        else:
+            seen_rows[key] = parsed
+    return duplicate_count, samples
+
+
+def _cache_missing_bid_ask_column(bid: object, ask: object) -> str:
+    if bid is None:
+        return "bid"
+    if ask is None:
+        return "ask"
+    return ""
+
+
+def _cache_parsed_tick_spread_sample(
+    datetime_value: object,
+    bid_value: object,
+    ask_value: object,
+    volume_value: object,
+    *,
+    row_number: int,
+    source_member: str,
+    materialize_timestamp: bool = False,
+) -> _TickSpreadSample | None:
+    bid = _cache_float_or_none(bid_value)
+    ask = _cache_float_or_none(ask_value)
+    if bid is None or ask is None:
+        return None
+
+    timestamp_utc_ms = _cache_timestamp_utc_ms_or_none(datetime_value)
+    timestamp_source = (
+        _cache_tick_timestamp_source(datetime_value)
+        if materialize_timestamp
+        else ""
+    )
+    spread = ask - bid
+    return _TickSpreadSample(
+        row_number=row_number,
+        timestamp_source=timestamp_source,
+        timestamp_utc_ms=timestamp_utc_ms,
+        column="ask" if spread < 0.0 else "spread",
+        bid=bid,
+        ask=ask,
+        spread=spread,
+        raw_values=(
+            _cache_raw_values(
+                timestamp_source,
+                bid_value,
+                ask_value,
+                volume_value,
+            )
+            if materialize_timestamp
+            else ()
+        ),
+        source_member=source_member,
+    )
+
+
+def _cache_sample_from_row(
+    datetime_value: object,
+    bid_value: object,
+    ask_value: object,
+    volume_value: object,
+    *,
+    row_number: int,
+    column: str,
+    source_member: str,
+    metadata: dict[str, JSONValue] | None = None,
+) -> _TickSpreadSample:
+    timestamp_source = _cache_tick_timestamp_source(datetime_value)
+    bid = _cache_float_or_none(bid_value)
+    ask = _cache_float_or_none(ask_value)
+    return _TickSpreadSample(
+        row_number=row_number,
+        timestamp_source=timestamp_source,
+        timestamp_utc_ms=_cache_timestamp_utc_ms_or_none(datetime_value),
+        column=column,
+        bid=bid,
+        ask=ask,
+        spread=ask - bid if bid is not None and ask is not None else None,
+        raw_values=_cache_raw_values(
+            timestamp_source,
+            bid_value,
+            ask_value,
+            volume_value,
+        ),
+        source_member=source_member,
+        metadata=dict(metadata or {}),
+    )
+
+
+def _cache_invalid_bid_ask_sample(
+    datetime_value: object,
+    bid_value: object,
+    ask_value: object,
+    volume_value: object,
+    *,
+    row_number: int,
+    source_member: str,
+) -> _TickSpreadSample:
+    bid_raw = _cache_cell(bid_value)
+    ask_raw = _cache_cell(ask_value)
+    column = "bid" if _cache_float_or_none(bid_value) is None else "ask"
+    return _cache_sample_from_row(
+        datetime_value,
+        bid_value,
+        ask_value,
+        volume_value,
+        row_number=row_number,
+        column=column,
+        source_member=source_member,
+        metadata={
+            "raw_bid": bid_raw,
+            "raw_ask": ask_raw,
+            "error": "bid and ask must parse as finite decimal numbers",
+        },
+    )
+
+
+def _cache_timestamp_utc_ms_or_none(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _cache_float_or_none(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(cast(Any, value))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def _cache_raw_values(
+    timestamp_source: str,
+    bid_value: object,
+    ask_value: object,
+    volume_value: object,
+) -> tuple[str, ...]:
+    return (
+        timestamp_source,
+        _cache_cell(bid_value),
+        _cache_cell(ask_value),
+        _cache_cell(volume_value),
+    )
+
+
+def _materialize_tick_sample(
+    sample: _TickSpreadSample,
+) -> _TickSpreadSample:
+    if sample.timestamp_source and (
+        not sample.raw_values or sample.raw_values[0]
+    ):
+        return sample
+    timestamp_source = sample.timestamp_source
+    if not timestamp_source and sample.timestamp_utc_ms is not None:
+        timestamp_source = _cache_tick_timestamp_source(sample.timestamp_utc_ms)
+    raw_values = sample.raw_values
+    if raw_values and not raw_values[0] and timestamp_source:
+        raw_values = (timestamp_source, *raw_values[1:])
+    elif not raw_values:
+        raw_values = (
+            timestamp_source,
+            _cache_cell(sample.bid),
+            _cache_cell(sample.ask),
+            "",
+        )
+    return _TickSpreadSample(
+        row_number=sample.row_number,
+        timestamp_source=timestamp_source,
+        timestamp_utc_ms=sample.timestamp_utc_ms,
+        column=sample.column,
+        bid=sample.bid,
+        ask=sample.ask,
+        spread=sample.spread,
+        raw_values=raw_values,
+        source_member=sample.source_member,
+        metadata=dict(sample.metadata),
+    )
+
+
+def _materialize_zero_spread_run(
+    sample: _ZeroSpreadRunSample,
+) -> _ZeroSpreadRunSample:
+    return _ZeroSpreadRunSample(
+        start=_materialize_tick_sample(sample.start),
+        end=_materialize_tick_sample(sample.end),
+        run_length=sample.run_length,
+    )
+
+
+def _materialize_microstructure_run(
+    sample: _TickMicrostructureRunSample,
+) -> _TickMicrostructureRunSample:
+    return _TickMicrostructureRunSample(
+        start=_materialize_tick_sample(sample.start),
+        end=_materialize_tick_sample(sample.end),
+        run_length=sample.run_length,
+        metric=sample.metric,
+        direction=sample.direction,
+        metadata=dict(sample.metadata),
+    )
+
+
+def _materialize_spread_regime_sample(
+    sample: _TickSpreadRegimeSample,
+) -> _TickSpreadRegimeSample:
+    return _TickSpreadRegimeSample(
+        sample=_materialize_tick_sample(sample.sample),
+        symbol_key=sample.symbol_key,
+        source_hour=sample.source_hour,
+        utc_hour=sample.utc_hour,
+        session_state=sample.session_state,
+        session_keys=sample.session_keys,
+        special_regime_keys=sample.special_regime_keys,
+        previous=(
+            None
+            if sample.previous is None
+            else _materialize_tick_sample(sample.previous)
+        ),
+        spread_delta=sample.spread_delta,
+        threshold=sample.threshold,
+        profile_key=sample.profile_key,
+    )
+
+
 def _scan_tick_spread_rows(
-    text: str,
+    lines: Iterable[str],
     *,
     target: QualityTarget,
     delimiter: str,
@@ -1083,7 +2462,7 @@ def _scan_tick_spread_rows(
     zero_run_end: _TickSpreadSample | None = None
     zero_run_length = 0
 
-    for row_number, raw in enumerate(text.splitlines(), start=1):
+    for row_number, raw in enumerate(lines, start=1):
         if not raw.strip():
             continue
         scan.row_count += 1
@@ -1203,7 +2582,7 @@ def _scan_tick_spread_rows(
 
 
 def _scan_tick_microstructure_rows(
-    text: str,
+    lines: Iterable[str],
     *,
     delimiter: str,
     columns: tuple[str, ...],
@@ -1229,7 +2608,7 @@ def _scan_tick_microstructure_rows(
     one_sided_length = 0
     one_sided_direction = ""
 
-    for row_number, raw in enumerate(text.splitlines(), start=1):
+    for row_number, raw in enumerate(lines, start=1):
         if not raw.strip():
             continue
         scan.row_count += 1
@@ -1399,7 +2778,7 @@ def _scan_tick_microstructure_rows(
 
 
 def _scan_tick_spread_regime_rows(
-    text: str,
+    lines_factory: Callable[[], Iterable[str]],
     *,
     target: QualityTarget,
     delimiter: str,
@@ -1409,8 +2788,9 @@ def _scan_tick_spread_regime_rows(
 ) -> _TickSpreadRegimeScan:
     scan = _TickSpreadRegimeScan()
     expected_count = len(columns)
+    symbol_key = normalize_histdata_symbol(target.symbol)
 
-    for row_number, raw in enumerate(text.splitlines(), start=1):
+    for row_number, raw in enumerate(lines_factory(), start=1):
         if not raw.strip():
             continue
         scan.row_count += 1
@@ -1439,31 +2819,37 @@ def _scan_tick_spread_regime_rows(
             scan.negative_spread_count += 1
             continue
 
-        sample = _tick_spread_regime_sample(target, parsed)
+        sample = _tick_spread_regime_sample(
+            target,
+            parsed,
+            symbol_key=symbol_key,
+        )
         scan.profiled_row_count += 1
         _record_spread_regime_sample(scan, sample)
 
     _record_spread_regime_warnings(
         scan,
-        text,
+        lines_factory,
         target=target,
         delimiter=delimiter,
         columns=columns,
         source_member=source_member,
         thresholds=thresholds,
+        symbol_key=symbol_key,
     )
     return scan
 
 
 def _record_spread_regime_warnings(
     scan: _TickSpreadRegimeScan,
-    text: str,
+    lines_factory: Callable[[], Iterable[str]],
     *,
     target: QualityTarget,
     delimiter: str,
     columns: tuple[str, ...],
     source_member: str,
     thresholds: HistDataTickSpreadRegimeThresholds,
+    symbol_key: str = "",
 ) -> None:
     baseline_profile, _baseline_source = _spread_regime_baseline(scan)
     baseline_median = _median_or_none(baseline_profile.values) or 0.0
@@ -1478,11 +2864,12 @@ def _record_spread_regime_warnings(
 
     previous: _TickSpreadRegimeSample | None = None
     for sample in _iter_tick_spread_regime_samples(
-        text,
+        lines_factory(),
         target=target,
         delimiter=delimiter,
         columns=columns,
         source_member=source_member,
+        symbol_key=symbol_key,
     ):
         if sample.spread is None:
             continue
@@ -1542,15 +2929,16 @@ def _record_spread_regime_warnings(
 
 
 def _iter_tick_spread_regime_samples(
-    text: str,
+    lines: Iterable[str],
     *,
     target: QualityTarget,
     delimiter: str,
     columns: tuple[str, ...],
     source_member: str,
+    symbol_key: str = "",
 ) -> Iterable[_TickSpreadRegimeSample]:
     expected_count = len(columns)
-    for row_number, raw in enumerate(text.splitlines(), start=1):
+    for row_number, raw in enumerate(lines, start=1):
         if not raw.strip():
             continue
         row = _parse_row(raw, delimiter)
@@ -1570,40 +2958,179 @@ def _iter_tick_spread_regime_samples(
             or parsed.spread < 0.0
         ):
             continue
-        yield _tick_spread_regime_sample(target, parsed)
+        yield _tick_spread_regime_sample(
+            target,
+            parsed,
+            symbol_key=symbol_key,
+        )
 
 
 def _tick_spread_regime_sample(
     target: QualityTarget,
     parsed: _TickSpreadSample,
+    *,
+    symbol_key: str = "",
 ) -> _TickSpreadRegimeSample:
     if parsed.timestamp_utc_ms is None:
         msg = "spread-regime samples require normalized timestamps"
         raise ValueError(msg)
-    classification = classify_histdata_timestamp(
-        parsed.timestamp_utc_ms,
-        source_timestamp=parsed.timestamp_source,
+    projection = _tick_spread_regime_projection(parsed.timestamp_utc_ms)
+    session_keys = _spread_regime_session_keys(
+        projection.session_state,
+        projection.active_sessions,
     )
-    session_keys = _spread_regime_session_keys(classification)
     return _TickSpreadRegimeSample(
         sample=parsed,
-        symbol_key=normalize_histdata_symbol(target.symbol),
-        source_hour=f"{classification.source_datetime.hour:02d}",
-        utc_hour=f"{classification.utc_datetime.hour:02d}",
-        session_state=classification.session_state,
+        symbol_key=symbol_key or normalize_histdata_symbol(target.symbol),
+        source_hour=f"{projection.source_hour:02d}",
+        utc_hour=f"{projection.utc_hour:02d}",
+        session_state=projection.session_state,
         session_keys=session_keys,
-        special_regime_keys=classification.special_tags,
+        special_regime_keys=projection.special_tags,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _TickSpreadRegimeProjection:
+    source_hour: int
+    utc_hour: int
+    session_state: str
+    active_sessions: tuple[str, ...]
+    special_tags: tuple[str, ...]
+
+
+def _tick_spread_regime_projection(
+    timestamp_utc_ms: int,
+) -> _TickSpreadRegimeProjection:
+    utc = _datetime_from_utc_ms(timestamp_utc_ms)
+    source = _datetime_from_utc_ms(timestamp_utc_ms - EST_NO_DST_OFFSET_MS)
+    utc_minute = utc.hour * 60 + utc.minute
+    source_minute = source.hour * 60 + source.minute
+    session_state = _tick_session_state(
+        source_weekday=source.weekday(),
+        source_minute=source_minute,
+    )
+    clock_sessions = _tick_clock_sessions(utc_minute)
+    active_sessions = (
+        () if session_state == SESSION_STATE_WEEKEND_CLOSURE else clock_sessions
+    )
+    return _TickSpreadRegimeProjection(
+        source_hour=source.hour,
+        utc_hour=utc.hour,
+        session_state=session_state,
+        active_sessions=active_sessions,
+        special_tags=_tick_special_tags(
+            source=source,
+            source_minute=source_minute,
+            utc_minute=utc_minute,
+            session_state=session_state,
+        ),
     )
 
 
 def _spread_regime_session_keys(
-    classification: HistDataCalendarClassification,
+    session_state: str,
+    active_sessions: tuple[str, ...],
 ) -> tuple[str, ...]:
-    if classification.active_sessions:
-        return tuple(str(session) for session in classification.active_sessions)
-    if classification.session_state == SESSION_STATE_MARKET_OPEN:
+    if active_sessions:
+        return active_sessions
+    if session_state == SESSION_STATE_MARKET_OPEN:
         return (SESSION_NO_ACTIVE_WINDOW,)
     return (SESSION_MARKET_CLOSED,)
+
+
+def _datetime_from_utc_ms(timestamp_utc_ms: int) -> datetime:
+    seconds, milliseconds = divmod(timestamp_utc_ms, 1000)
+    return datetime.fromtimestamp(seconds, tz=timezone.utc).replace(
+        microsecond=milliseconds * 1000
+    )
+
+
+def _tick_session_state(
+    *,
+    source_weekday: int,
+    source_minute: int,
+) -> str:
+    if source_weekday == 5:
+        return str(SESSION_STATE_WEEKEND_CLOSURE)
+    if source_weekday == FX_FRIDAY_CLOSE_WEEKDAY:
+        if _minute_in_window(source_minute, *FRIDAY_CLOSE_SOURCE_MINUTES):
+            return str(SESSION_STATE_FRIDAY_CLOSE)
+        if source_minute >= FX_CLOSE_OPEN_MINUTE:
+            return str(SESSION_STATE_WEEKEND_CLOSURE)
+    if source_weekday == FX_SUNDAY_OPEN_WEEKDAY:
+        if source_minute < FX_CLOSE_OPEN_MINUTE:
+            return str(SESSION_STATE_WEEKEND_CLOSURE)
+        if _minute_in_window(source_minute, *SUNDAY_OPEN_SOURCE_MINUTES):
+            return str(SESSION_STATE_SUNDAY_OPEN)
+    return str(SESSION_STATE_MARKET_OPEN)
+
+
+def _tick_clock_sessions(utc_minute: int) -> tuple[str, ...]:
+    sessions: list[str] = []
+    if 0 <= utc_minute < 9 * 60:
+        sessions.append(SESSION_ASIA)
+    if 7 * 60 <= utc_minute < 16 * 60:
+        sessions.append(SESSION_LONDON)
+    if 12 * 60 <= utc_minute < 21 * 60:
+        sessions.append(SESSION_NEW_YORK)
+    return tuple(sessions)
+
+
+def _tick_special_tags(
+    *,
+    source: datetime,
+    source_minute: int,
+    utc_minute: int,
+    session_state: str,
+) -> tuple[str, ...]:
+    tags: list[str] = []
+    month_end = source.day == _month_length(source.year, source.month)
+    quarter_end = source.month in {3, 6, 9, 12} and month_end
+    year_end = source.month == 12 and source.day == 31
+    if session_state in {
+        SESSION_STATE_WEEKEND_CLOSURE,
+        SESSION_STATE_SUNDAY_OPEN,
+        SESSION_STATE_FRIDAY_CLOSE,
+    }:
+        tags.append(session_state)
+    if _minute_in_window(source_minute, *DAILY_ROLLOVER_SOURCE_MINUTES):
+        tags.append("daily_rollover")
+    if _minute_in_window(utc_minute, *LONDON_FIX_UTC_MINUTES):
+        tags.append("london_4pm_fix_window")
+        if month_end:
+            tags.append("month_end_fix_window")
+        if quarter_end:
+            tags.append("quarter_end_fix_window")
+        if year_end:
+            tags.append("year_end_fix_window")
+    if month_end:
+        tags.append("month_end")
+    if quarter_end:
+        tags.append("quarter_end")
+    if year_end:
+        tags.append("year_end")
+    return tuple(dict.fromkeys(tags))
+
+
+def _minute_in_window(
+    minute: int,
+    start_minute: int,
+    end_minute: int,
+) -> bool:
+    if start_minute <= end_minute:
+        return start_minute <= minute < end_minute
+    return minute >= start_minute or minute < end_minute
+
+
+def _month_length(year: int, month: int) -> int:
+    if month == 2:
+        if year % 400 == 0 or (year % 4 == 0 and year % 100 != 0):
+            return 29
+        return 28
+    if month in {4, 6, 9, 11}:
+        return 30
+    return 31
 
 
 def _record_spread_regime_sample(
@@ -1878,6 +3405,7 @@ def _finalize_one_sided_run(
         return
     if run_length < thresholds.one_sided_run_length:
         return
+    previous = _materialize_tick_sample(previous)
     scan.one_sided_run_count += 1
     _append_microstructure_run(
         scan.one_sided_runs,
@@ -2410,6 +3938,7 @@ def _regime_warning_sample(
     spread_delta: float | None = None,
     profile_key: str,
 ) -> _TickSpreadRegimeSample:
+    sample = _materialize_spread_regime_sample(sample)
     return _TickSpreadRegimeSample(
         sample=sample.sample,
         symbol_key=sample.symbol_key,
@@ -2826,7 +4355,7 @@ def _append_spread_sample(
     sample: _TickSpreadSample,
 ) -> None:
     if len(samples) < MAX_TICK_SAMPLES:
-        samples.append(sample)
+        samples.append(_materialize_tick_sample(sample))
 
 
 def _append_zero_spread_run(
@@ -2834,7 +4363,7 @@ def _append_zero_spread_run(
     sample: _ZeroSpreadRunSample,
 ) -> None:
     if len(samples) < MAX_TICK_SAMPLES:
-        samples.append(sample)
+        samples.append(_materialize_zero_spread_run(sample))
 
 
 def _append_microstructure_run(
@@ -2842,7 +4371,7 @@ def _append_microstructure_run(
     sample: _TickMicrostructureRunSample,
 ) -> None:
     if len(samples) < MAX_TICK_SAMPLES:
-        samples.append(sample)
+        samples.append(_materialize_microstructure_run(sample))
 
 
 def _append_spread_regime_sample(
@@ -2850,7 +4379,7 @@ def _append_spread_regime_sample(
     sample: _TickSpreadRegimeSample,
 ) -> None:
     if len(samples) < MAX_TICK_SAMPLES:
-        samples.append(sample)
+        samples.append(_materialize_spread_regime_sample(sample))
 
 
 def _spread_samples(samples: Iterable[_TickSpreadSample]) -> list[JSONValue]:

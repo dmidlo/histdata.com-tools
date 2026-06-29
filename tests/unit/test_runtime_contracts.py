@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from histdatacom.fx_enums import MAJOR_TRIANGLE_SYMBOLS
 from histdatacom.options import Options
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import (
@@ -208,6 +209,22 @@ def test_run_request_expands_pair_groups_from_options() -> None:
         "usdjpy",
     )
     assert request.metadata["pair_groups"] == ["majors"]
+
+
+def test_run_request_expands_major_triangle_group_from_options() -> None:
+    """Direct API callers should be able to select major triangle baskets."""
+    options = Options()
+    options.pair_groups = {"major-triangles"}
+    options.formats = {"ascii"}
+    options.timeframes = {"T"}
+
+    request = RunRequest.from_options(
+        options,
+        request_id="run-major-triangles",
+    )
+
+    assert request.pairs == MAJOR_TRIANGLE_SYMBOLS
+    assert request.metadata["pair_groups"] == ["major-triangles"]
 
 
 def test_stage_result_round_trips_artifacts_events_and_failure() -> None:

@@ -122,21 +122,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     if args.cleanup_command == "status":
         try:
-            result = _collect_status(args)
+            status_result = _collect_status(args)
         except ValueError as exc:
             parser.error(str(exc))
-        _write_status(result, as_json=args.json)
-        return 1 if result.errors else 0
+        _write_status(status_result, as_json=args.json)
+        return 1 if status_result.errors else 0
 
     if args.cleanup_command not in {"sources", "transient-sources"}:
         parser.error(f"unsupported cleanup command: {args.cleanup_command}")
 
-    result = cleanup_transient_source_artifacts(
+    cleanup_result = cleanup_transient_source_artifacts(
         args.data_directory,
         apply=args.apply,
     )
-    _write_result(result, as_json=args.json)
-    return 1 if result.errors else 0
+    _write_result(cleanup_result, as_json=args.json)
+    return 1 if cleanup_result.errors else 0
 
 
 def _collect_status(args: argparse.Namespace) -> CacheRunStatusResult:

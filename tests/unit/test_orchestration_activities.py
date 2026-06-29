@@ -30,11 +30,14 @@ from histdatacom.manifest_store import (
 )
 from histdatacom.data_quality import (
     PROVENANCE_METADATA_KEY,
+    QualityDiscoveryResult,
     QualityFinding,
     QualityLocation,
     QualityReport,
     QualityRuleResult,
     QualitySeverity,
+    QualityTarget,
+    QualityTargetKind,
 )
 from histdatacom.runtime_contracts import RunRequest, WorkItem, WorkStatus
 from histdatacom.orchestration.control import OrchestrationJobSnapshot
@@ -1165,6 +1168,175 @@ def test_data_quality_activity_writes_report_and_bounded_metrics(
     )
 
 
+def test_data_quality_activity_heartbeats_during_assessment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Cache-scale quality runs should heartbeat inside the rule loop."""
+    import histdatacom.orchestration.activities as activities
+
+    class _NoopQualityRule:
+        def __init__(self, rule_id: str) -> None:
+            self.rule_id = rule_id
+            self.description = "test rule"
+
+        def evaluate(
+            self, _target: QualityTarget
+        ) -> tuple[QualityFinding, ...]:
+            return ()
+
+    heartbeats: list[dict] = []
+    targets = tuple(
+        QualityTarget(
+            path=str(
+                tmp_path
+                / "data"
+                / "ASCII"
+                / "T"
+                / "eurusd"
+                / str(index)
+                / ".data"
+            ),
+            kind=QualityTargetKind.CACHE,
+            data_format="ascii",
+            timeframe="T",
+            symbol="EURUSD",
+            period=f"2020{index:02d}",
+        )
+        for index in range(3)
+    )
+    request = RunRequest(
+        request_id="run-quality-heartbeats",
+        data_directory=str(tmp_path),
+        data_quality=True,
+        quality_paths=(str(tmp_path / "data" / "ASCII" / "T"),),
+        quality_check_groups=("ticks",),
+        quality_report_path=str(tmp_path / "reports" / "quality.json"),
+        quality_fail_on="never",
+    )
+
+    monkeypatch.setattr(
+        activities.activity,
+        "heartbeat",
+        lambda metadata: heartbeats.append(dict(metadata)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        activities,
+        "discover_quality_targets",
+        lambda _paths: QualityDiscoveryResult(
+            roots=(str(tmp_path / "data" / "ASCII" / "T"),),
+            targets=targets,
+        ),
+    )
+    monkeypatch.setattr(
+        activities,
+        "quality_rules_for_groups",
+        lambda _groups, **_kwargs: (
+            _NoopQualityRule("ticks.spread.non_negative"),
+            _NoopQualityRule("ticks.spread.regime"),
+        ),
+    )
+    monkeypatch.setattr(
+        activities,
+        "quality_run_rules_for_groups",
+        lambda _groups, **_kwargs: (),
+    )
+
+    payload = data_quality_activity({"request": request.to_dict()})
+
+    progress = [
+        heartbeat
+        for heartbeat in heartbeats
+        if heartbeat.get("stage") == "data_quality" and heartbeat.get("phase")
+    ]
+    completed = [
+        heartbeat
+        for heartbeat in progress
+        if heartbeat.get("phase") == "rule_complete"
+    ]
+    encoded_progress = json.dumps(progress, sort_keys=True)
+    assert payload["result"]["metrics"]["heartbeat_count"] == len(progress)
+    assert len(completed) == 6
+    assert progress[-1]["phase"] == "complete"
+    assert progress[-1]["completed"] == 6
+    assert progress[-1]["total"] == 6
+    assert completed[-1]["target_symbol"] == "EURUSD"
+    assert str(tmp_path) not in encoded_progress
+    assert "path" not in encoded_progress
+
+
+def test_data_quality_activity_bounds_many_cache_targets(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Quality activity should not return one summary per cache target."""
+    targets = tuple(
+        QualityTarget(
+            path=str(
+                tmp_path
+                / "data"
+                / "ASCII"
+                / "T"
+                / "eurusd"
+                / str(index)
+                / ".data"
+            ),
+            kind=QualityTargetKind.CACHE,
+            data_format="ascii",
+            timeframe="T",
+            symbol="EURUSD",
+            period=f"2020{index:02d}",
+        )
+        for index in range(200)
+    )
+    report_path = tmp_path / "reports" / "quality.json"
+    request = RunRequest(
+        request_id="run-quality-many-cache",
+        data_directory=str(tmp_path),
+        data_quality=True,
+        quality_paths=(str(tmp_path / "data" / "ASCII"),),
+        quality_check_groups=("inventory",),
+        quality_report_path=str(report_path),
+        quality_fail_on="never",
+    )
+
+    monkeypatch.setattr(
+        "histdatacom.orchestration.activities.discover_quality_targets",
+        lambda _paths: QualityDiscoveryResult(
+            roots=(str(tmp_path / "data" / "ASCII"),),
+            targets=targets,
+        ),
+    )
+    monkeypatch.setattr(
+        "histdatacom.orchestration.activities.run_quality_assessment",
+        lambda discovered, _rules, **_kwargs: QualityReport(
+            targets=tuple(discovered),
+            rule_results=(
+                QualityRuleResult(rule_id="inventory.format", target=target)
+                for target in discovered
+            ),
+        ),
+    )
+
+    payload = data_quality_activity({"request": request.to_dict()})
+
+    quality = payload["quality"]
+    assert payload["result"]["status"] == WorkStatus.COMPLETED.value
+    assert quality["summary"]["target_count"] == 200
+    assert len(quality["target_summaries"]) == 128
+    assert len(quality["discovery"]["targets"]) == 128
+    assert quality["target_status_counts"]["clean"] == 200
+    assert quality["payload_limits"]["target_summaries"] == {
+        "limit": 128,
+        "total_count": 200,
+        "included_count": 128,
+        "omitted_count": 72,
+        "truncated": True,
+    }
+    assert len(json.dumps(payload, sort_keys=True)) < 2_097_152
+
+
 def test_data_quality_activity_refreshes_repo_quality_metadata(
     tmp_path: Path,
 ) -> None:
@@ -1332,6 +1504,7 @@ def test_data_quality_activity_returns_failed_stage_for_policy_failure(
         *,
         run_rules=(),
         metadata=None,
+        progress_callback=None,
     ):
         target = tuple(targets)[0]
         finding = QualityFinding(

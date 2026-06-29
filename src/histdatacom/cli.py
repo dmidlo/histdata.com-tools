@@ -1081,7 +1081,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "named instrument groups to union with --pairs. "
                 "Common groups: majors, minors, crosses, exotics, "
-                "metals, commodities, indices"
+                "major-triangles, metals, commodities, indices"
             ),
             metavar="GROUP",
         )

@@ -125,6 +125,72 @@ class Pairs(Enum):  # noqa:H601
         return {member.value for _, member in cls.__members__.items()}
 
 
+MAJOR_TRIANGLE_CURRENCIES: tuple[str, ...] = (
+    "USD",
+    "EUR",
+    "JPY",
+    "GBP",
+    "CAD",
+    "CHF",
+    "AUD",
+    "NZD",
+)
+
+
+def _major_fx_pair_components() -> tuple[tuple[str, str, str], ...]:
+    """Return major-currency FX pair keys with base/quote orientation."""
+    components: list[tuple[str, str, str]] = []
+    for pair in Pairs:
+        base, quote = pair.value.split("_", maxsplit=1)
+        if (
+            base in MAJOR_TRIANGLE_CURRENCIES
+            and quote in MAJOR_TRIANGLE_CURRENCIES
+        ):
+            components.append((pair.name, base, quote))
+    return tuple(components)
+
+
+def _major_triangle_relationships() -> tuple[tuple[str, str, str], ...]:
+    """Return major FX triangles in data-quality comparison order.
+
+    Relationship tuples use ``(direct, numerator, denominator)`` to mirror the
+    cross-instrument rule: ``numerator / denominator ~= direct``.
+    """
+    major_pairs = _major_fx_pair_components()
+    by_pair = {(base, quote): symbol for symbol, base, quote in major_pairs}
+    relationships: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for numerator, numerator_base, numerator_quote in major_pairs:
+        for denominator, denominator_base, denominator_quote in major_pairs:
+            if numerator == denominator:
+                continue
+            if numerator_quote != denominator_quote:
+                continue
+            direct = by_pair.get((numerator_base, denominator_base))
+            if direct is None:
+                continue
+            candidate = (direct, numerator, denominator)
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            relationships.append(candidate)
+    return tuple(sorted(relationships))
+
+
+MAJOR_TRIANGLE_RELATIONSHIPS: tuple[tuple[str, str, str], ...] = (
+    _major_triangle_relationships()
+)
+MAJOR_TRIANGLE_SYMBOLS: tuple[str, ...] = tuple(
+    sorted(
+        {
+            symbol
+            for relationship in MAJOR_TRIANGLE_RELATIONSHIPS
+            for symbol in relationship
+        }
+    )
+)
+
+
 PAIR_GROUPS: dict[str, tuple[str, ...]] = {
     "majors": (
         "eurusd",
@@ -135,6 +201,7 @@ PAIR_GROUPS: dict[str, tuple[str, ...]] = {
         "audusd",
         "nzdusd",
     ),
+    "major-triangles": MAJOR_TRIANGLE_SYMBOLS,
     "minors": (
         "eurgbp",
         "euraud",
@@ -226,6 +293,11 @@ PAIR_GROUPS: dict[str, tuple[str, ...]] = {
 }
 PAIR_GROUP_ALIASES: dict[str, str] = {
     "major": "majors",
+    "major-triangle": "major-triangles",
+    "majortriangle": "major-triangles",
+    "majortriangles": "major-triangles",
+    "triangle": "major-triangles",
+    "triangles": "major-triangles",
     "minor": "minors",
     "cross": "crosses",
     "exotic": "exotics",
@@ -247,9 +319,16 @@ def pair_group_names(*, include_aliases: bool = False) -> tuple[str, ...]:
 
 def normalize_pair_group(group: object) -> str:
     """Return the canonical instrument group name."""
-    normalized = str(group).strip().lower().replace("_", "-")
-    normalized = normalized.replace("-", "")
-    canonical = PAIR_GROUP_ALIASES.get(normalized, normalized)
+    normalized = "-".join(str(group).strip().lower().replace("_", "-").split())
+    compact = normalized.replace("-", "")
+    canonical = (
+        PAIR_GROUP_ALIASES.get(normalized)
+        or PAIR_GROUP_ALIASES.get(compact)
+        or normalized
+    )
+    if canonical not in PAIR_GROUPS:
+        compact_groups = {name.replace("-", ""): name for name in PAIR_GROUPS}
+        canonical = compact_groups.get(compact, canonical)
     if canonical not in PAIR_GROUPS:
         supported = ", ".join(pair_group_names(include_aliases=True))
         raise ValueError(

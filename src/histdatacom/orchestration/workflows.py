@@ -544,7 +544,7 @@ ACTIVITY_EXECUTION_POLICIES = {
     ),
     "data_quality": ActivityExecutionPolicy(
         activity_name="data_quality",
-        start_to_close_timeout_seconds=1800,
+        start_to_close_timeout_seconds=129600,
         heartbeat_timeout_seconds=300,
         retry_policy=NO_RETRY_POLICY,
     ),
@@ -2163,7 +2163,12 @@ def _workflow_summary_metrics(
     metrics = stage_results[0].metrics
     return {
         key: metrics[key]
-        for key in ("available_data", "filter_pairs", "repo_file_exists")
+        for key in (
+            "available_data",
+            "filter_pairs",
+            "quality",
+            "repo_file_exists",
+        )
         if key in metrics
     }
 

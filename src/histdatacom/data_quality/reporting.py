@@ -24,6 +24,9 @@ from histdatacom.publication_safety import (
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 
 QUALITY_REPORT_SCHEMA_VERSION = "histdatacom.quality-report.v1"
+QUALITY_PAYLOAD_DISCOVERY_TARGET_LIMIT = 128
+QUALITY_PAYLOAD_TARGET_SUMMARY_LIMIT = 128
+QUALITY_PAYLOAD_CROSS_TARGET_SUMMARY_LIMIT = 128
 
 
 class QualityExitTrigger(str, Enum):
@@ -273,25 +276,149 @@ def bounded_quality_payload(
     decision: QualityExitDecision,
     artifact: ArtifactRef | None,
     publish_safe: bool = True,
+    discovery_target_limit: int = QUALITY_PAYLOAD_DISCOVERY_TARGET_LIMIT,
+    target_summary_limit: int = QUALITY_PAYLOAD_TARGET_SUMMARY_LIMIT,
+    cross_target_summary_limit: int = QUALITY_PAYLOAD_CROSS_TARGET_SUMMARY_LIMIT,
 ) -> dict[str, JSONValue]:
     """Return a bounded result payload without detailed findings."""
+    target_summaries = report.target_summaries
+    cross_target_summaries = _cross_target_summaries(report)
     payload: dict[str, JSONValue] = {
         "operation": operation,
         "check_groups": list(check_groups),
-        "discovery": dict(discovery),
+        "discovery": _bounded_discovery_payload(
+            discovery,
+            target_limit=discovery_target_limit,
+        ),
         "summary": report.summary().to_dict(),
-        "target_summaries": [
-            summary.to_dict() for summary in report.target_summaries
-        ],
-        "cross_target_summaries": _cross_target_summaries(report),
+        "target_status_counts": _target_status_counts(target_summaries),
+        "target_summaries": _bounded_target_summaries(
+            target_summaries,
+            limit=target_summary_limit,
+        ),
+        "cross_target_summaries": _bounded_json_list(
+            cross_target_summaries,
+            limit=cross_target_summary_limit,
+        ),
         "quality_profile": _quality_profile_metadata(report),
         "report_schema_version": QUALITY_REPORT_SCHEMA_VERSION,
         "report_artifact": None if artifact is None else artifact.to_dict(),
         "exit_decision": decision.to_dict(),
+        "payload_limits": {
+            "discovery_targets": _payload_limit_metadata(
+                _sequence_count(discovery.get("targets")),
+                discovery_target_limit,
+            ),
+            "target_summaries": _payload_limit_metadata(
+                len(target_summaries),
+                target_summary_limit,
+            ),
+            "cross_target_summaries": _payload_limit_metadata(
+                len(cross_target_summaries),
+                cross_target_summary_limit,
+            ),
+        },
     }
     if not publish_safe:
         return payload
     return _publish_safe_mapping(payload)
+
+
+def _bounded_discovery_payload(
+    discovery: Mapping[str, JSONValue],
+    *,
+    target_limit: int,
+) -> dict[str, JSONValue]:
+    """Return discovery metadata with the target list capped."""
+    payload = dict(discovery)
+    targets = discovery.get("targets")
+    if isinstance(targets, list):
+        bounded_targets = _bounded_json_list(targets, limit=target_limit)
+        target_count = discovery.get("target_count")
+        payload["targets"] = bounded_targets
+        payload["target_count"] = (
+            int(target_count)
+            if isinstance(target_count, (int, float, str)) and target_count
+            else len(targets)
+        )
+        payload["target_included_count"] = len(bounded_targets)
+        payload["target_omitted_count"] = max(
+            0,
+            len(targets) - len(bounded_targets),
+        )
+    return payload
+
+
+def _bounded_target_summaries(
+    summaries: tuple[QualityTargetSummary, ...],
+    *,
+    limit: int,
+) -> list[JSONValue]:
+    """Return capped target summaries with warning/error examples first."""
+    ordered = sorted(
+        summaries,
+        key=lambda summary: (
+            _target_summary_status_priority(summary),
+            summary.target.path,
+        ),
+    )
+    return _bounded_json_list(
+        [summary.to_dict() for summary in ordered],
+        limit=limit,
+    )
+
+
+def _target_summary_status_priority(summary: QualityTargetSummary) -> int:
+    if summary.status is QualityStatus.FAILED:
+        return 0
+    if summary.status is QualityStatus.WARNING:
+        return 1
+    return 2
+
+
+def _bounded_json_list(
+    values: list[JSONValue],
+    *,
+    limit: int,
+) -> list[JSONValue]:
+    if limit < 0:
+        return list(values)
+    return list(values[:limit])
+
+
+def _payload_limit_metadata(
+    total_count: int, limit: int
+) -> dict[str, JSONValue]:
+    included_count = total_count if limit < 0 else min(total_count, limit)
+    return {
+        "limit": limit,
+        "total_count": total_count,
+        "included_count": included_count,
+        "omitted_count": max(0, total_count - included_count),
+        "truncated": total_count > included_count,
+    }
+
+
+def _sequence_count(value: object) -> int:
+    return len(value) if isinstance(value, list) else 0
+
+
+def _target_status_counts(
+    summaries: tuple[QualityTargetSummary, ...],
+) -> dict[str, JSONValue]:
+    return {
+        QualityStatus.CLEAN.value: sum(
+            1 for summary in summaries if summary.status is QualityStatus.CLEAN
+        ),
+        QualityStatus.WARNING.value: sum(
+            1
+            for summary in summaries
+            if summary.status is QualityStatus.WARNING
+        ),
+        QualityStatus.FAILED.value: sum(
+            1 for summary in summaries if summary.status is QualityStatus.FAILED
+        ),
+    }
 
 
 def _cross_target_summaries(
@@ -442,4 +569,5 @@ def _format_target_summary(
 def _publish_safe_mapping(
     payload: Mapping[str, JSONValue],
 ) -> dict[str, JSONValue]:
-    return publish_safe_json_mapping(payload)
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
+    return safe_payload

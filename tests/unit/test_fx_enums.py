@@ -1,6 +1,8 @@
 """Pytest unit tests for histdatacom.fx_enums.py."""
 
 from histdatacom.fx_enums import (
+    MAJOR_TRIANGLE_RELATIONSHIPS,
+    MAJOR_TRIANGLE_SYMBOLS,
     PAIR_GROUPS,
     Pairs,
     TimePrecision,
@@ -47,6 +49,23 @@ def test_pair_group_expansion_is_deterministic_and_supports_aliases() -> None:
         "usdchf",
         "usdjpy",
     )
+    assert expand_pair_groups(("major-triangles",)) == MAJOR_TRIANGLE_SYMBOLS
+    assert expand_pair_groups(("major_triangles",)) == MAJOR_TRIANGLE_SYMBOLS
+    assert expand_pair_groups(("majortriangles",)) == MAJOR_TRIANGLE_SYMBOLS
+    assert expand_pair_groups(("major triangles",)) == MAJOR_TRIANGLE_SYMBOLS
+    assert expand_pair_groups(("triangle",)) == MAJOR_TRIANGLE_SYMBOLS
+    assert expand_pair_groups(("triangles",)) == MAJOR_TRIANGLE_SYMBOLS
+
+
+def test_major_triangle_group_covers_complete_major_fx_triangle_set() -> None:
+    """Major triangles should cover data-quality-oriented major FX triangles."""
+    assert len(MAJOR_TRIANGLE_RELATIONSHIPS) == 56
+    assert len(MAJOR_TRIANGLE_SYMBOLS) == 28
+    assert PAIR_GROUPS["major-triangles"] == MAJOR_TRIANGLE_SYMBOLS
+    assert ("eurgbp", "eurusd", "gbpusd") in MAJOR_TRIANGLE_RELATIONSHIPS
+    assert ("eurusd", "eurjpy", "usdjpy") in MAJOR_TRIANGLE_RELATIONSHIPS
+    assert ("cadchf", "cadjpy", "chfjpy") in MAJOR_TRIANGLE_RELATIONSHIPS
+    assert ("audcad", "audchf", "cadchf") in MAJOR_TRIANGLE_RELATIONSHIPS
 
 
 def test_pair_group_selection_replaces_default_all_pair_selection() -> None:

@@ -17,10 +17,10 @@ MAINTENANCE_SCHEMA_VERSION = 1
 DEFAULT_MAX_LOG_BYTES = 10 * 1024 * 1024
 DEFAULT_MAX_ROTATED_LOGS = 5
 DEFAULT_MAX_TEMPORAL_SQLITE_BYTES = 512 * 1024 * 1024
-DEFAULT_MAX_JOB_SNAPSHOTS = 500
-DEFAULT_MAX_STATUS_EVENTS_PER_OWNER = 1_000
-DEFAULT_MAX_STAGE_RESULTS_PER_WORK_ITEM = 500
-DEFAULT_MAX_ARTIFACTS_PER_OWNER = 500
+DEFAULT_MAX_JOB_SNAPSHOTS = 100
+DEFAULT_MAX_STATUS_EVENTS_PER_OWNER = 200
+DEFAULT_MAX_STAGE_RESULTS_PER_WORK_ITEM = 25
+DEFAULT_MAX_ARTIFACTS_PER_OWNER = 200
 DEFAULT_MAX_DATASET_PLANS_PER_REQUEST = 50
 
 
@@ -105,6 +105,10 @@ class StatusStoreMaintenanceResult:
     schema_version: int = 0
     expected_schema_version: int = MANIFEST_SCHEMA_VERSION
     schema_state: str = "missing"
+    size_before_bytes: int = 0
+    size_after_bytes: int = 0
+    bytes_recovered: int = 0
+    compacted: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible result."""
@@ -118,6 +122,10 @@ class StatusStoreMaintenanceResult:
             "schema_version": self.schema_version,
             "expected_schema_version": self.expected_schema_version,
             "schema_state": self.schema_state,
+            "size_before_bytes": self.size_before_bytes,
+            "size_after_bytes": self.size_after_bytes,
+            "bytes_recovered": self.bytes_recovered,
+            "compacted": self.compacted,
         }
 
 
@@ -369,6 +377,7 @@ def _status_store_result(
 ) -> StatusStoreMaintenanceResult:
     store_root = runtime_policy.paths.manifests_dir
     store_path = ManifestStatusStore.path_for_root(store_root)
+    size_before = _sqlite_file_size(store_path)
     schema = ManifestStatusStore.inspect_schema(store_root)
     schema_fields = _status_store_schema_fields(schema)
     if not store_path.exists():
@@ -378,6 +387,8 @@ def _status_store_result(
             action="missing",
             rows_deleted=_zero_row_counts(),
             reason="Manifest/status store does not exist.",
+            size_before_bytes=size_before,
+            size_after_bytes=size_before,
             **schema_fields,
         )
     if skip_reason:
@@ -387,6 +398,8 @@ def _status_store_result(
             action="skipped",
             rows_deleted=_zero_row_counts(),
             reason=skip_reason,
+            size_before_bytes=size_before,
+            size_after_bytes=size_before,
             **schema_fields,
         )
     if schema["state"] in {"unsupported", "error"}:
@@ -396,6 +409,8 @@ def _status_store_result(
             action="error",
             rows_deleted=_zero_row_counts(),
             error=str(schema.get("error", "")),
+            size_before_bytes=size_before,
+            size_after_bytes=size_before,
             **schema_fields,
         )
     try:
@@ -411,7 +426,12 @@ def _status_store_result(
                 policy.max_dataset_plans_per_request
             ),
         )
+        compacted = False
+        if sum(rows_deleted.values()) > 0:
+            _compact_sqlite_store(store.db_path)
+            compacted = True
         schema_fields = _status_store_schema_fields(store.schema_status())
+        size_after = _sqlite_file_size(store_path)
     except (OSError, sqlite3.DatabaseError, ValueError) as err:
         return StatusStoreMaintenanceResult(
             path=str(store_path),
@@ -419,6 +439,8 @@ def _status_store_result(
             action="error",
             rows_deleted=_zero_row_counts(),
             error=str(err),
+            size_before_bytes=size_before,
+            size_after_bytes=_sqlite_file_size(store_path),
             **schema_fields,
         )
     return StatusStoreMaintenanceResult(
@@ -427,6 +449,10 @@ def _status_store_result(
         action="pruned",
         rows_deleted=rows_deleted,
         reason="Manifest/status rows were pruned to retention limits.",
+        size_before_bytes=size_before,
+        size_after_bytes=size_after,
+        bytes_recovered=max(0, size_before - size_after),
+        compacted=compacted,
         **schema_fields,
     )
 
@@ -450,6 +476,30 @@ def _status_store_schema_fields(schema: dict[str, Any]) -> dict[str, Any]:
         ),
         "schema_state": str(schema.get("state", "") or "missing"),
     }
+
+
+def _sqlite_file_size(path: Path) -> int:
+    """Return bytes held by a SQLite database and its sidecar files."""
+    paths = (
+        path,
+        path.with_name(f"{path.name}-wal"),
+        path.with_name(f"{path.name}-shm"),
+    )
+    total = 0
+    for candidate in paths:
+        try:
+            total += candidate.stat().st_size
+        except FileNotFoundError:
+            continue
+    return total
+
+
+def _compact_sqlite_store(path: Path) -> None:
+    """Checkpoint and vacuum a stopped local SQLite store after row pruning."""
+    with sqlite3.connect(path) as conn:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.execute("VACUUM")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
 
 def _temporal_sqlite_result(

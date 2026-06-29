@@ -348,6 +348,72 @@ class _RepositoryMetricsChildExecutor:
         }
 
 
+class _QualityMetricsChildExecutor:
+    """Fake child executor that returns bounded quality stage metrics."""
+
+    async def execute_child_workflow(
+        self,
+        workflow_name: str,
+        payload: Mapping[str, JSONValue],
+        *,
+        workflow_id: str,
+        task_queue: str,
+    ) -> Mapping[str, object]:
+        """Return a child workflow summary with quality metadata."""
+        quality = {
+            "operation": "data-quality",
+            "check_groups": ["inventory"],
+            "summary": {
+                "target_count": 5683,
+                "rule_count": 2,
+                "finding_count": 0,
+                "info_count": 0,
+                "warning_count": 0,
+                "error_count": 0,
+                "status": "clean",
+                "max_severity": "info",
+            },
+            "target_status_counts": {
+                "clean": 5683,
+                "warning": 0,
+                "failed": 0,
+            },
+            "target_summaries": [],
+            "cross_target_summaries": [],
+            "report_schema_version": "histdatacom.quality-report.v1",
+            "report_artifact": {
+                "kind": "quality-report",
+                "path": "data/.quality/current-cache.json",
+                "size_bytes": 1024,
+                "sha256": "quality-sha",
+                "metadata": {},
+            },
+            "exit_decision": {
+                "exit_code": 0,
+                "reason": "quality report is within configured exit policy",
+                "policy": {
+                    "fail_on": "never",
+                    "max_errors": 0,
+                    "max_warnings": 0,
+                },
+            },
+        }
+        return {
+            "workflow_name": workflow_name,
+            "request_id": "run-quality",
+            "status": WorkStatus.COMPLETED.value,
+            "stage_results": [
+                StageResult(
+                    work_id=workflow_id,
+                    stage="data_quality",
+                    status=WorkStatus.COMPLETED,
+                    metrics={"quality": quality},
+                ).to_dict()
+            ],
+            "artifacts": [quality["report_artifact"]],
+        }
+
+
 class _CancellingChildExecutor:
     """Fake child workflow executor that cancels the first child."""
 
@@ -1041,6 +1107,10 @@ def test_workflow_topology_documents_expected_hierarchy() -> None:
         activity_policies["data_quality"]["retry_policy"]["name"]
         == RetryPolicyName.NONE.value
     )
+    assert (
+        activity_policies["data_quality"]["start_to_close_timeout_seconds"]
+        == 129600
+    )
     assert activity_policies["data_quality"]["heartbeat_timeout_seconds"] == 300
     assert (
         activity_policies["download_archives"]["heartbeat_timeout_seconds"]
@@ -1194,6 +1264,28 @@ def test_parent_workflow_preserves_repository_available_data_metrics() -> None:
     assert metrics["available_data"] == {
         "eurusd": {"start": "200005", "end": "202212"}
     }
+    assert metrics["child_stage_count"] == 1
+
+
+def test_parent_workflow_preserves_quality_metrics() -> None:
+    """Parent results should retain bounded quality data for CLI summaries."""
+    request = _request(
+        data_quality=True,
+        quality_paths=("data/ASCII",),
+        quality_check_groups=("inventory",),
+    )
+    workflow = workflows.HistDataRunWorkflow(
+        executor=_QualityMetricsChildExecutor()
+    )
+
+    summary = asyncio.run(workflow.run(request.to_dict()))
+
+    stage_result = summary["stage_results"][0]
+    metrics = stage_result["metrics"]
+    quality = stage_result["metrics"]["quality"]
+    assert quality["operation"] == "data-quality"
+    assert quality["summary"]["target_count"] == 5683
+    assert quality["target_status_counts"]["clean"] == 5683
     assert metrics["child_stage_count"] == 1
 
 

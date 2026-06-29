@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from histdatacom.manifest_store import (
+    LIVE_ARTIFACT_RETENTION_LIMIT,
+    LIVE_STATUS_EVENT_RETENTION_LIMIT,
     MANIFEST_DB_FILENAME,
     MANIFEST_DIRECTORY,
     MANIFEST_SCHEMA_VERSION,
@@ -343,3 +345,89 @@ def test_manifest_store_persists_orchestration_job_snapshots(
     assert history[-1]["stage"] == "build_cache"
     assert artifact["kind"] == "cache"
     assert artifact["metadata"]["line_count"] == 3
+
+
+def test_manifest_store_coalesces_repeated_job_artifacts(
+    tmp_path: Path,
+) -> None:
+    """Repeated live snapshots should update artifact rows instead of appending."""
+    store = ManifestStatusStore(tmp_path)
+    artifact_path = str(tmp_path / ".data")
+
+    for line_count in (1, 2):
+        store.write_job_snapshot(
+            {
+                "job_id": "histdatacom-run-1",
+                "request_id": "run-1",
+                "workflow_id": "histdatacom-run-1",
+                "run_id": "temporal-run-1",
+                "lifecycle": JobLifecycle.RUNNING.value,
+                "status": WorkStatus.CACHE_READY.value,
+                "task_queue": "histdatacom-orchestration",
+                "progress": {
+                    "current_stage": "build_cache",
+                    "artifacts": [
+                        ArtifactRef(
+                            kind="cache",
+                            path=artifact_path,
+                            metadata={"line_count": line_count},
+                        ).to_dict()
+                    ],
+                },
+            }
+        )
+
+    [artifact] = store.list_artifacts("histdatacom-run-1", owner_kind="job")
+    assert artifact["metadata"]["line_count"] == 2
+    assert _manifest_table_count(store.db_path, "artifacts") == 1
+
+
+def test_manifest_store_bounds_high_churn_job_status_rows(
+    tmp_path: Path,
+) -> None:
+    """Live job snapshots should cap append-only status and artifact rows."""
+    store = ManifestStatusStore(tmp_path)
+    artifact_path = str(tmp_path / ".data")
+
+    for index in range(LIVE_STATUS_EVENT_RETENTION_LIMIT + 25):
+        store.write_job_snapshot(
+            {
+                "job_id": "histdatacom-run-1",
+                "request_id": "run-1",
+                "workflow_id": "histdatacom-run-1",
+                "run_id": "temporal-run-1",
+                "lifecycle": JobLifecycle.RUNNING.value,
+                "status": WorkStatus.CACHE_READY.value,
+                "task_queue": "histdatacom-orchestration",
+                "progress": {
+                    "current_stage": "build_cache",
+                    "events": [
+                        StatusEvent(
+                            status=WorkStatus.CACHE_READY,
+                            stage="build_cache",
+                            message=f"progress {index}",
+                            work_id="histdatacom-run-1",
+                        ).to_dict()
+                    ],
+                    "artifacts": [
+                        ArtifactRef(
+                            kind="cache",
+                            path=f"{artifact_path}-{index}",
+                        ).to_dict()
+                    ],
+                },
+            }
+        )
+
+    history = store.status_history("histdatacom-run-1", owner_kind="job")
+    artifacts = store.list_artifacts("histdatacom-run-1", owner_kind="job")
+    assert len(history) == LIVE_STATUS_EVENT_RETENTION_LIMIT
+    assert len(artifacts) == LIVE_ARTIFACT_RETENTION_LIMIT
+    assert history[-1]["message"] == (
+        f"progress {LIVE_STATUS_EVENT_RETENTION_LIMIT + 24}"
+    )
+
+
+def _manifest_table_count(db_path: Path, table: str) -> int:
+    with sqlite3.connect(db_path) as conn:
+        return int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])

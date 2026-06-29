@@ -726,6 +726,17 @@ def _format_quality_target_counts(
     quality_payload: Mapping[str, Any],
     summary: Mapping[str, Any],
 ) -> str:
+    status_counts = _mapping_from_payload(
+        quality_payload.get("target_status_counts")
+    )
+    if status_counts:
+        return (
+            "targets: "
+            f"{summary.get('target_count', 0)} "
+            f"clean: {status_counts.get('clean', 0)} "
+            f"warning: {status_counts.get('warning', 0)} "
+            f"failed: {status_counts.get('failed', 0)}"
+        )
     target_summaries = _quality_target_summaries(quality_payload)
     if not target_summaries:
         return "targets: " f"{summary.get('target_count', 0)}"

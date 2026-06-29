@@ -90,6 +90,29 @@
     "reason": "quality error threshold exceeded: 1 > 0"
   },
   "operation": "data-quality",
+  "payload_limits": {
+    "cross_target_summaries": {
+      "included_count": 3,
+      "limit": 128,
+      "omitted_count": 0,
+      "total_count": 3,
+      "truncated": false
+    },
+    "discovery_targets": {
+      "included_count": 0,
+      "limit": 128,
+      "omitted_count": 0,
+      "total_count": 0,
+      "truncated": false
+    },
+    "target_summaries": {
+      "included_count": 1,
+      "limit": 128,
+      "omitted_count": 0,
+      "total_count": 1,
+      "truncated": false
+    }
+  },
   "quality_profile": {},
   "report_artifact": {
     "kind": "quality-report",
@@ -116,6 +139,11 @@
     "status": "failed",
     "target_count": 1,
     "warning_count": 0
+  },
+  "target_status_counts": {
+    "clean": 0,
+    "failed": 1,
+    "warning": 0
   },
   "target_summaries": [
     {

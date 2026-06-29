@@ -9,6 +9,7 @@ import pytest
 from histdatacom import Options
 from histdatacom.data_quality import QUALITY_PROFILE_SCHEMA_VERSION
 from histdatacom.cli import ArgParser
+from histdatacom.fx_enums import MAJOR_TRIANGLE_SYMBOLS
 
 
 def test_cli() -> None:
@@ -186,11 +187,15 @@ def test_help_advertises_pair_groups() -> None:
     """Named instrument groups should be visible from the main help."""
     parser = ArgParser(Options())
     parser._set_args()
-    help_text = parser.format_help()
+    help_text = parser.format_help().replace(
+        "major-\n                        triangles",
+        "major-triangles",
+    )
 
     assert "--pair-groups" in help_text
     assert "--instrument-groups" in help_text
     assert "majors, minors, crosses, exotics" in help_text
+    assert "major-triangles" in help_text
 
 
 def test_verbose_cli_count_is_normalized(
@@ -336,6 +341,61 @@ def test_pair_groups_cli_expands_without_defaulting_to_all_pairs(
         "usdchf",
         "usdjpy",
     }
+
+
+def test_pair_groups_cli_accepts_major_triangles_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Major triangle requests should expand to every major triangle symbol."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "--pair-groups",
+            "major_triangles",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert tuple(sorted(options.pairs)) == MAJOR_TRIANGLE_SYMBOLS
+    assert options.pair_groups == ["major-triangles"]
+
+
+def test_pair_groups_cli_accepts_unquoted_major_triangles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unquoted major triangles should resolve to the major-triangle basket."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "--pair-groups",
+            "major",
+            "triangles",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert tuple(sorted(options.pairs)) == MAJOR_TRIANGLE_SYMBOLS
+    assert options.pair_groups == ["majors", "major-triangles"]
 
 
 def test_pair_groups_cli_unions_with_explicit_pairs(
@@ -515,6 +575,35 @@ histdatacom:
         "usdjpy",
     }
     assert options.pair_groups == ["majors"]
+
+
+def test_config_file_applies_major_triangle_pair_group(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """YAML defaults should accept quoted human-readable group names."""
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        """
+histdatacom:
+  instrument_groups:
+    - major triangles
+  formats: [ascii]
+  timeframes: [tick-data-quotes]
+  start_yearmonth: 2022-10
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    options = ArgParser(Options())()
+
+    assert tuple(sorted(options.pairs)) == MAJOR_TRIANGLE_SYMBOLS
+    assert options.pair_groups == ["major-triangles"]
 
 
 def test_config_file_applies_quality_command_defaults(

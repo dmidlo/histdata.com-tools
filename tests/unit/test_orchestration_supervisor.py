@@ -720,6 +720,19 @@ def test_status_reports_stale_state_without_repair(tmp_path: Path) -> None:
     assert paths.pid_file.exists()
 
 
+def test_status_reports_posix_disk_headroom(tmp_path: Path) -> None:
+    """Runtime status should expose actual filesystem write headroom."""
+    supervisor = _supervisor(runtime_policy=_policy(tmp_path))
+
+    payload = supervisor.status().to_dict()
+
+    disk = payload["disk"]
+    assert disk["semantics"] == "posix_write_available"
+    assert disk["free_bytes"] >= 0
+    assert disk["total_bytes"] >= disk["free_bytes"]
+    assert "purgeable" in disk["note"]
+
+
 def test_status_reports_stale_state_when_worker_lane_missing(
     tmp_path: Path,
 ) -> None:

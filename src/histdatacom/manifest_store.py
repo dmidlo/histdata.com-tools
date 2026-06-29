@@ -31,6 +31,9 @@ PLAN_SPILL_METADATA_KEY = "temporal_plan_spill"
 INLINE_WORK_ITEM_LIMIT_METADATA_KEY = "inline_work_item_limit"
 LIVE_SNAPSHOT_EVENT_LIMIT = 200
 LIVE_SNAPSHOT_ARTIFACT_LIMIT = 200
+LIVE_STATUS_EVENT_RETENTION_LIMIT = 200
+LIVE_STAGE_RESULT_RETENTION_LIMIT = 25
+LIVE_ARTIFACT_RETENTION_LIMIT = 200
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +197,14 @@ class ManifestStatusStore:
                     work_id=work_item.work_id,
                     timestamp_utc=now,
                 ),
+            )
+            _delete_owner_overflow_rows(
+                conn,
+                table="status_events",
+                id_column="id",
+                owner_kind="work_item",
+                owner_id=work_item.work_id,
+                keep=LIVE_STATUS_EVENT_RETENTION_LIMIT,
             )
 
     def write_dataset_plan(
@@ -534,6 +545,29 @@ class ManifestStatusStore:
                     artifact=artifact,
                     created_at_utc=now,
                 )
+            _delete_work_item_overflow_rows(
+                conn,
+                table="stage_results",
+                id_column="id",
+                work_id=result.work_id,
+                keep=LIVE_STAGE_RESULT_RETENTION_LIMIT,
+            )
+            _delete_owner_overflow_rows(
+                conn,
+                table="status_events",
+                id_column="id",
+                owner_kind="work_item",
+                owner_id=result.work_id,
+                keep=LIVE_STATUS_EVENT_RETENTION_LIMIT,
+            )
+            _delete_owner_overflow_rows(
+                conn,
+                table="artifacts",
+                id_column="id",
+                owner_kind="work_item",
+                owner_id=result.work_id,
+                keep=LIVE_ARTIFACT_RETENTION_LIMIT,
+            )
 
     def write_live_stage_update(
         self,
@@ -668,6 +702,22 @@ class ManifestStatusStore:
                     artifact=artifact,
                     created_at_utc=now,
                 )
+            _delete_owner_overflow_rows(
+                conn,
+                table="status_events",
+                id_column="id",
+                owner_kind="job",
+                owner_id=job_id,
+                keep=LIVE_STATUS_EVENT_RETENTION_LIMIT,
+            )
+            _delete_owner_overflow_rows(
+                conn,
+                table="artifacts",
+                id_column="id",
+                owner_kind="job",
+                owner_id=job_id,
+                keep=LIVE_ARTIFACT_RETENTION_LIMIT,
+            )
 
     def get_job_snapshot(self, job_id: str) -> dict[str, Any] | None:
         """Return one stored orchestration job snapshot payload."""
@@ -809,12 +859,10 @@ class ManifestStatusStore:
             "dataset_plans": 0,
         }
         with self._connect() as conn:
-            deleted_job_ids = _older_key_values(
+            deleted["artifacts"] += _dedupe_artifact_rows(conn)
+            deleted_job_ids = _older_terminal_job_ids(
                 conn,
-                table="jobs",
-                key_column="job_id",
                 keep=max_job_snapshots,
-                order_by="updated_at_utc DESC, job_id ASC",
             )
             deleted["jobs"] += _delete_text_values(
                 conn,
@@ -927,6 +975,8 @@ class ManifestStatusStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_artifacts_owner
                     ON artifacts(owner_kind, owner_id);
+                CREATE INDEX IF NOT EXISTS idx_artifacts_owner_kind_path
+                    ON artifacts(owner_kind, owner_id, kind, path);
                 CREATE TABLE IF NOT EXISTS stage_results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     work_id TEXT NOT NULL,
@@ -1021,6 +1071,58 @@ class ManifestStatusStore:
         artifact: ArtifactRef,
         created_at_utc: str,
     ) -> None:
+        existing = conn.execute(
+            """
+            SELECT id
+            FROM artifacts
+            WHERE owner_kind = ?
+                AND owner_id = ?
+                AND kind = ?
+                AND path = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (owner_kind, owner_id, artifact.kind, artifact.path),
+        ).fetchone()
+        values = (
+            work_id,
+            artifact.size_bytes,
+            artifact.sha256,
+            _json_dumps(artifact.metadata),
+            created_at_utc,
+        )
+        if existing is not None:
+            retained_id = int(existing["id"])
+            conn.execute(
+                """
+                UPDATE artifacts
+                SET work_id = ?,
+                    size_bytes = ?,
+                    sha256 = ?,
+                    metadata_json = ?,
+                    created_at_utc = ?
+                WHERE id = ?
+                """,
+                (*values, retained_id),
+            )
+            conn.execute(
+                """
+                DELETE FROM artifacts
+                WHERE owner_kind = ?
+                    AND owner_id = ?
+                    AND kind = ?
+                    AND path = ?
+                    AND id <> ?
+                """,
+                (
+                    owner_kind,
+                    owner_id,
+                    artifact.kind,
+                    artifact.path,
+                    retained_id,
+                ),
+            )
+            return
         conn.execute(
             """
             INSERT INTO artifacts (
@@ -1167,6 +1269,34 @@ def _older_key_values(
     return tuple(str(row[key_column]) for row in rows[keep:])
 
 
+def _older_terminal_job_ids(
+    conn: sqlite3.Connection,
+    *,
+    keep: int,
+) -> tuple[str, ...]:
+    rows = conn.execute("""
+        SELECT job_id
+        FROM jobs
+        WHERE lifecycle IN (
+            'cancelled',
+            'completed',
+            'failed',
+            'succeeded',
+            'terminated',
+            'timed_out'
+        )
+        OR status IN (
+            'CANCELLED',
+            'COMPLETED',
+            'FAILED',
+            'INFLUX_UPLOAD',
+            'URL_NO_REPO_DATA'
+        )
+        ORDER BY updated_at_utc DESC, job_id ASC
+        """).fetchall()
+    return tuple(str(row["job_id"]) for row in rows[keep:])
+
+
 def _delete_text_values(
     conn: sqlite3.Connection,
     *,
@@ -1204,6 +1334,58 @@ def _delete_owner_rows(
     return _rowcount(cursor)
 
 
+def _delete_owner_overflow_rows(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    id_column: str,
+    owner_kind: str,
+    owner_id: str,
+    keep: int,
+) -> int:
+    cursor = conn.execute(
+        f"""
+        DELETE FROM {table}
+        WHERE owner_kind = ?
+            AND owner_id = ?
+            AND {id_column} IN (
+                SELECT {id_column}
+                FROM {table}
+                WHERE owner_kind = ? AND owner_id = ?
+                ORDER BY {id_column} DESC
+                LIMIT -1 OFFSET ?
+            )
+        """,
+        (owner_kind, owner_id, owner_kind, owner_id, keep),
+    )
+    return _rowcount(cursor)
+
+
+def _delete_work_item_overflow_rows(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    id_column: str,
+    work_id: str,
+    keep: int,
+) -> int:
+    cursor = conn.execute(
+        f"""
+        DELETE FROM {table}
+        WHERE work_id = ?
+            AND {id_column} IN (
+                SELECT {id_column}
+                FROM {table}
+                WHERE work_id = ?
+                ORDER BY {id_column} DESC
+                LIMIT -1 OFFSET ?
+            )
+        """,
+        (work_id, work_id, keep),
+    )
+    return _rowcount(cursor)
+
+
 def _delete_group_overflow_rows(
     conn: sqlite3.Connection,
     *,
@@ -1213,20 +1395,28 @@ def _delete_group_overflow_rows(
     keep: int,
     order_by: str | None = None,
 ) -> int:
-    overflow_ids = _group_overflow_ids(
-        conn,
-        table=table,
-        id_column=id_column,
-        group_columns=group_columns,
-        keep=keep,
-        order_by=order_by or f"{id_column} DESC",
+    partition_by = ", ".join(group_columns)
+    order = order_by or f"{id_column} DESC"
+    cursor = conn.execute(
+        f"""
+        DELETE FROM {table}
+        WHERE {id_column} IN (
+            SELECT {id_column}
+            FROM (
+                SELECT
+                    {id_column},
+                    ROW_NUMBER() OVER (
+                        PARTITION BY {partition_by}
+                        ORDER BY {order}
+                    ) AS retention_rank
+                FROM {table}
+            )
+            WHERE retention_rank > ?
+        )
+        """,
+        (keep,),
     )
-    return _delete_text_values(
-        conn,
-        table=table,
-        column=id_column,
-        values=overflow_ids,
-    )
+    return _rowcount(cursor)
 
 
 def _group_overflow_ids(
@@ -1261,6 +1451,26 @@ def _group_overflow_ids(
 
 def _rowcount(cursor: sqlite3.Cursor) -> int:
     return max(0, int(cursor.rowcount))
+
+
+def _dedupe_artifact_rows(conn: sqlite3.Connection) -> int:
+    cursor = conn.execute("""
+        DELETE FROM artifacts
+        WHERE id IN (
+            SELECT id
+            FROM (
+                SELECT
+                    id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY owner_kind, owner_id, kind, path
+                        ORDER BY id DESC
+                    ) AS duplicate_rank
+                FROM artifacts
+            )
+            WHERE duplicate_rank > 1
+        )
+        """)
+    return _rowcount(cursor)
 
 
 def _live_snapshot_payload(

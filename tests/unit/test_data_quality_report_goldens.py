@@ -496,10 +496,12 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "discovery",
         "exit_decision",
         "operation",
+        "payload_limits",
         "quality_profile",
         "report_artifact",
         "report_schema_version",
         "summary",
+        "target_status_counts",
         "target_summaries",
     }
     assert payload["operation"] == "data-quality"

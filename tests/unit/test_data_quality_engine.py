@@ -245,6 +245,49 @@ def test_quality_engine_skips_duplicate_archive_semantic_scans() -> None:
     }
 
 
+def test_quality_engine_reports_bounded_progress(tmp_path: Path) -> None:
+    """Long quality runs should expose progress without local file paths."""
+    clean = _target_for_case(tmp_path, CLEAN_M1_CASE)
+    duplicate = _target_for_case(
+        tmp_path,
+        case_by_name("m1_duplicate_timestamp"),
+    )
+    events: list[dict] = []
+
+    report = run_quality_assessment(
+        targets=(clean, duplicate),
+        rules=(
+            _StaticRule(
+                rule_id="manifest.case-observed",
+                description="records that each case was checked",
+                severity_by_case={
+                    "clean_m1": QualitySeverity.INFO,
+                    "m1_duplicate_timestamp": QualitySeverity.INFO,
+                },
+            ),
+            _StaticRule(
+                rule_id="m1.timestamp.unique",
+                description="flags duplicate timestamps",
+                severity_by_case={
+                    "m1_duplicate_timestamp": QualitySeverity.WARNING,
+                },
+            ),
+        ),
+        progress_callback=events.append,
+    )
+
+    assert report.summary().target_count == 2
+    assert [event["phase"] for event in events].count("rule_start") == 4
+    assert [event["phase"] for event in events].count("rule_complete") == 4
+    assert events[0]["phase"] == "start"
+    assert events[-1]["phase"] == "complete"
+    assert events[-1]["completed"] == 4
+    assert events[-1]["total"] == 4
+    assert events[1]["target_symbol"] == "EURUSD"
+    assert str(tmp_path) not in str(events)
+    assert "path" not in str(events)
+
+
 def test_quality_report_round_trip_recomputes_summary_state(
     tmp_path: Path,
 ) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import shutil
 import socket
 import subprocess
 import sys
@@ -86,6 +87,7 @@ class OrchestrationStatus:
     ports: dict[str, int | str | list[int]] = field(default_factory=dict)
     components: dict[str, str] = field(default_factory=dict)
     worker_readiness: dict[str, dict[str, Any]] = field(default_factory=dict)
+    disk: dict[str, Any] = field(default_factory=dict)
 
     @property
     def running(self) -> bool:
@@ -105,6 +107,7 @@ class OrchestrationStatus:
             "command": list(self.command),
             "ports": dict(self.ports),
             "components": dict(self.components),
+            "disk": dict(self.disk),
             "worker_readiness": {
                 lane: dict(readiness)
                 for lane, readiness in self.worker_readiness.items()
@@ -1591,11 +1594,31 @@ class OrchestrationSupervisor:
                 components or self._component_states(pids, readiness)
             ),
             worker_readiness=readiness,
+            disk=_posix_disk_headroom(self.paths.runtime_dir),
         )
 
     def _path_dict(self) -> dict[str, str]:
         """Return path diagnostics."""
         return dict(self.paths.to_dict())
+
+
+def _posix_disk_headroom(path: Path) -> dict[str, Any]:
+    """Return POSIX write headroom for runtime state paths."""
+    probe = path
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    usage = shutil.disk_usage(probe)
+    return {
+        "path": str(probe),
+        "semantics": "posix_write_available",
+        "total_bytes": usage.total,
+        "used_bytes": usage.used,
+        "free_bytes": usage.free,
+        "note": (
+            "This is filesystem space available to normal writes; desktop "
+            "Finder availability may include purgeable space."
+        ),
+    }
 
 
 RuntimeStatus = OrchestrationStatus

@@ -204,6 +204,54 @@ def test_bounded_payload_sanitizes_discovery_and_artifact_paths(
     assert payload["report_artifact"]["path"] == "reports/quality.json"
 
 
+def test_bounded_payload_caps_cache_scale_target_lists(
+    tmp_path: Path,
+) -> None:
+    """Large quality runs should return counts plus bounded target samples."""
+    report = _many_target_report(tmp_path, clean_count=5)
+    discovery_targets = [
+        _target(tmp_path / f"discovered-{index}.csv").to_dict()
+        for index in range(6)
+    ]
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("inventory",),
+        discovery={
+            "roots": [str(tmp_path / "data")],
+            "target_count": len(discovery_targets),
+            "targets": discovery_targets,
+        },
+        report=report,
+        decision=QualityExitPolicy.from_values(fail_on="never").evaluate(
+            report.summary()
+        ),
+        artifact=None,
+        discovery_target_limit=2,
+        target_summary_limit=3,
+        cross_target_summary_limit=1,
+    )
+
+    target_summaries = payload["target_summaries"]
+    limits = payload["payload_limits"]
+
+    assert payload["summary"]["target_count"] == 7
+    assert payload["target_status_counts"] == {
+        "clean": 5,
+        "warning": 1,
+        "failed": 1,
+    }
+    assert [summary["status"] for summary in target_summaries] == [
+        "failed",
+        "warning",
+        "clean",
+    ]
+    assert payload["discovery"]["target_count"] == 6
+    assert len(payload["discovery"]["targets"]) == 2
+    assert payload["discovery"]["target_omitted_count"] == 4
+    assert limits["target_summaries"]["omitted_count"] == 4
+    assert limits["target_summaries"]["truncated"] is True
+
+
 def test_quality_console_summary_separates_target_statuses(
     tmp_path: Path,
 ) -> None:
@@ -281,6 +329,49 @@ def _mixed_report(tmp_path: Path) -> QualityReport:
         targets=(clean, warning, failed),
         rule_results=(
             QualityRuleResult(rule_id="file.exists", target=clean),
+            QualityRuleResult(
+                rule_id="m1.timestamp.unique",
+                target=warning,
+                findings=(warning_finding,),
+            ),
+            QualityRuleResult(
+                rule_id="file.exists",
+                target=failed,
+                findings=(error_finding,),
+            ),
+        ),
+    )
+
+
+def _many_target_report(tmp_path: Path, *, clean_count: int) -> QualityReport:
+    clean_targets = tuple(
+        _target(tmp_path / f"clean-{index}.csv") for index in range(clean_count)
+    )
+    warning = _target(tmp_path / "warning.csv")
+    failed = _target(tmp_path / "failed.csv")
+    warning_finding = QualityFinding(
+        severity=QualitySeverity.WARNING,
+        code="M1_DUPLICATE_TIMESTAMP",
+        message="duplicate minute bar timestamp",
+        rule_id="m1.timestamp.unique",
+        target=warning,
+        location=QualityLocation(path=warning.path),
+    )
+    error_finding = QualityFinding(
+        severity=QualitySeverity.ERROR,
+        code="FILE_MISSING",
+        message="expected local file is missing",
+        rule_id="file.exists",
+        target=failed,
+        location=QualityLocation(path=failed.path),
+    )
+    return QualityReport(
+        targets=(*clean_targets, warning, failed),
+        rule_results=(
+            *(
+                QualityRuleResult(rule_id="file.exists", target=target)
+                for target in clean_targets
+            ),
             QualityRuleResult(
                 rule_id="m1.timestamp.unique",
                 target=warning,

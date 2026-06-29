@@ -18,11 +18,19 @@ from histdatacom.data_quality import (
     HistDataTickSpreadThresholds,
     QualitySeverity,
     QualityStatus,
+    QualityTarget,
+    QualityTargetKind,
     discover_quality_targets,
     quality_rules_for_groups,
     run_quality_assessment,
 )
-from histdatacom.histdata_ascii import TICK
+from histdatacom.histdata_ascii import (
+    TICK,
+    parse_ascii_lines,
+    to_polars_frame,
+    write_polars_cache,
+)
+import histdatacom.data_quality.ticks as tick_rules
 from tests.fixtures.histdata_ascii.quality_cases import (
     CLEAN_M1_CASE,
     CLEAN_TICK_CASE,
@@ -88,6 +96,137 @@ def test_clean_tick_file_reports_spread_summary(
     assert regimes.metadata["wide_spread_count"] == 0
     assert regimes.metadata["spread_jump_count"] == 0
     assert regimes.metadata["regime_shift_count"] == 0
+
+
+def test_tick_cache_group_uses_one_typed_cache_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cache-backed TICK group checks should not round-trip rows through CSV."""
+    cache_path = tmp_path / ".data"
+    write_polars_cache(
+        to_polars_frame(parse_ascii_lines(TICK, CLEAN_TICK_CASE.rows)),
+        cache_path,
+    )
+    target = QualityTarget(
+        path=str(cache_path),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe=TICK,
+        symbol="EURUSD",
+        period="201202",
+    )
+    read_count = 0
+    real_read_quality_polars_cache = tick_rules.read_quality_polars_cache
+
+    def counted_read_quality_polars_cache(*args, **kwargs):
+        nonlocal read_count
+        read_count += 1
+        return real_read_quality_polars_cache(*args, **kwargs)
+
+    def fail_if_text_payload_is_read(*args, **kwargs):
+        raise AssertionError("cache-backed TICK bundles should stay typed")
+
+    monkeypatch.setattr(
+        tick_rules,
+        "read_quality_polars_cache",
+        counted_read_quality_polars_cache,
+    )
+    monkeypatch.setattr(
+        tick_rules,
+        "_read_text_payload",
+        fail_if_text_payload_is_read,
+    )
+    progress: list[dict] = []
+
+    report = run_quality_assessment(
+        (target,),
+        quality_rules_for_groups(("ticks",)),
+        progress_callback=progress.append,
+    )
+
+    assert read_count == 1
+    assert report.status is QualityStatus.CLEAN
+    assert [finding.code for finding in report.findings] == [
+        "ASCII_TICK_SPREAD_SUMMARY",
+        "ASCII_TICK_MICROSTRUCTURE_SUMMARY",
+        "ASCII_TICK_SPREAD_REGIME_SUMMARY",
+    ]
+    assert [
+        event["rule_id"]
+        for event in progress
+        if event["phase"] == "rule_complete"
+    ] == [
+        ASCII_TICK_SPREAD_RULE_ID,
+        ASCII_TICK_MICROSTRUCTURE_RULE_ID,
+        ASCII_TICK_SPREAD_REGIME_RULE_ID,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("rule_factory", "expected_code"),
+    (
+        (HistDataAsciiTickSpreadRule, "ASCII_TICK_SPREAD_SUMMARY"),
+        (
+            HistDataAsciiTickMicrostructureRule,
+            "ASCII_TICK_MICROSTRUCTURE_SUMMARY",
+        ),
+        (
+            HistDataAsciiTickSpreadRegimeRule,
+            "ASCII_TICK_SPREAD_REGIME_SUMMARY",
+        ),
+    ),
+)
+def test_tick_cache_individual_rules_use_typed_cache_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rule_factory: (
+        type[HistDataAsciiTickSpreadRule]
+        | type[HistDataAsciiTickMicrostructureRule]
+        | type[HistDataAsciiTickSpreadRegimeRule]
+    ),
+    expected_code: str,
+) -> None:
+    """Single cache-backed TICK checks should also avoid CSV row rebuilding."""
+    cache_path = tmp_path / ".data"
+    write_polars_cache(
+        to_polars_frame(parse_ascii_lines(TICK, CLEAN_TICK_CASE.rows)),
+        cache_path,
+    )
+    target = QualityTarget(
+        path=str(cache_path),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe=TICK,
+        symbol="EURUSD",
+        period="201202",
+    )
+    read_count = 0
+    real_read_quality_polars_cache = tick_rules.read_quality_polars_cache
+
+    def counted_read_quality_polars_cache(*args, **kwargs):
+        nonlocal read_count
+        read_count += 1
+        return real_read_quality_polars_cache(*args, **kwargs)
+
+    def fail_if_text_payload_is_read(*args, **kwargs):
+        raise AssertionError("cache-backed TICK rules should stay typed")
+
+    monkeypatch.setattr(
+        tick_rules,
+        "read_quality_polars_cache",
+        counted_read_quality_polars_cache,
+    )
+    monkeypatch.setattr(
+        tick_rules,
+        "_read_text_payload",
+        fail_if_text_payload_is_read,
+    )
+
+    findings = rule_factory().evaluate(target)
+
+    assert read_count == 1
+    assert [finding.code for finding in findings] == [expected_code]
 
 
 def test_non_fx_tick_reports_select_asset_class_thresholds(

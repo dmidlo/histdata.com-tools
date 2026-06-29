@@ -80,6 +80,10 @@ def test_orchestration_maintenance_rotates_logs_and_prunes_status_store(
     assert runtime_policy.paths.sqlite_db.exists()
     assert payload["status_store"]["schema_state"] == "current"
     assert payload["status_store"]["schema_version"] == MANIFEST_SCHEMA_VERSION
+    assert payload["status_store"]["compacted"] is True
+    assert payload["status_store"]["size_after_bytes"] <= (
+        payload["status_store"]["size_before_bytes"]
+    )
     assert _table_count(store.db_path, "jobs") == 1
     assert _table_count(store.db_path, "stage_results") == 1
     assert _table_count(store.db_path, "dataset_plans") == 1
@@ -159,6 +163,102 @@ def test_orchestration_maintenance_reports_future_status_store_schema(
     assert payload["status_store"]["schema_version"] == (
         MANIFEST_SCHEMA_VERSION + 1
     )
+
+
+def test_orchestration_maintenance_compacts_pruned_status_store(
+    tmp_path: Path,
+) -> None:
+    """Maintenance should reclaim SQLite file space after pruning rows."""
+    runtime_policy = build_orchestration_runtime_policy(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+    )
+    store = ManifestStatusStore(runtime_policy.paths.manifests_dir)
+    with sqlite3.connect(store.db_path) as conn:
+        payload = "x" * 50_000
+        for index in range(80):
+            conn.execute(
+                """
+                INSERT INTO status_events (
+                    owner_kind,
+                    owner_id,
+                    work_id,
+                    stage,
+                    status,
+                    message,
+                    timestamp_utc,
+                    payload_json
+                )
+                VALUES ('job', 'histdatacom-run-bloat', '', 'stage',
+                    'CACHE_READY', ?, ?, ?)
+                """,
+                (f"event {index}", f"2026-06-28T00:{index:02d}:00Z", payload),
+            )
+    before_size = store.db_path.stat().st_size
+
+    result = run_orchestration_maintenance(
+        runtime_policy,
+        OrchestrationRetentionPolicy(max_status_events_per_owner=1),
+        orchestration_state="stopped",
+    )
+    payload = result.to_dict()
+
+    assert result.state == "completed"
+    assert payload["status_store"]["rows_deleted"]["status_events"] == 79
+    assert payload["status_store"]["compacted"] is True
+    assert payload["status_store"]["size_before_bytes"] >= before_size
+    assert payload["status_store"]["size_after_bytes"] < before_size
+    assert payload["status_store"]["bytes_recovered"] > 0
+    with sqlite3.connect(store.db_path) as conn:
+        assert (
+            conn.execute("SELECT COUNT(*) FROM status_events").fetchone()[0]
+            == 1
+        )
+
+
+def test_orchestration_maintenance_prunes_terminal_jobs_before_running_jobs(
+    tmp_path: Path,
+) -> None:
+    """Job snapshot retention should not delete active jobs first."""
+    runtime_policy = build_orchestration_runtime_policy(
+        workspace=tmp_path / "workspace",
+        runtime_home=tmp_path / "runtime",
+    )
+    store = ManifestStatusStore(runtime_policy.paths.manifests_dir)
+    for index in range(3):
+        store.write_job_snapshot(
+            {
+                "job_id": f"histdatacom-run-terminal-{index}",
+                "request_id": "run-retention",
+                "workflow_id": f"histdatacom-run-terminal-{index}",
+                "lifecycle": "succeeded",
+                "status": WorkStatus.COMPLETED.value,
+                "task_queue": "histdatacom.test.orchestration",
+            }
+        )
+    store.write_job_snapshot(
+        {
+            "job_id": "histdatacom-run-active",
+            "request_id": "run-retention",
+            "workflow_id": "histdatacom-run-active",
+            "lifecycle": "running",
+            "status": WorkStatus.CACHE_READY.value,
+            "task_queue": "histdatacom.test.orchestration",
+        }
+    )
+
+    result = run_orchestration_maintenance(
+        runtime_policy,
+        OrchestrationRetentionPolicy(max_job_snapshots=1),
+        orchestration_state="stopped",
+    )
+
+    assert result.state == "completed"
+    job_ids = {
+        snapshot["job_id"] for snapshot in store.list_job_snapshots(limit=None)
+    }
+    assert "histdatacom-run-active" in job_ids
+    assert len([job_id for job_id in job_ids if "terminal" in job_id]) == 1
 
 
 def _write_retained_rows(

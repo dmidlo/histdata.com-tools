@@ -123,7 +123,7 @@ Config:
   --pair-groups, --instrument-groups, --symbol-groups GROUP [GROUP ...]
                         named instrument groups to union with --pairs.
                         Common groups: majors, minors, crosses, exotics,
-                        metals, commodities, indices
+                        major-triangles, metals, commodities, indices
   -f, --formats FORMAT [FORMAT ...]
                         space separated formats. -f metatrader ascii
                         ninjatrader metastock
@@ -416,6 +416,19 @@ Use named instrument groups for common baskets:
 ```txt
 histdatacom --pair-groups majors exotics -f ascii -t tick-data-quotes -s 2022
 ```
+
+Use the major triangle basket when preparing data for cross-instrument quality
+analytics:
+
+```txt
+histdatacom --pair-groups major-triangles -f ascii -t tick-data-quotes -s 2022
+```
+
+`major-triangles` covers the USD, EUR, JPY, GBP, CAD, CHF, AUD, and NZD
+instruments needed by the data-quality triangular comparison rule: 28
+downloadable instruments supporting 56 oriented relationships such as
+`AUDCHF / CADCHF ~= AUDCAD`. It excludes exotics, metals, commodities, and
+indices.
 
 ##### to fetch a single month's data, include a month, but do not use the `-e, --end_yearmonth` flag
 
@@ -1263,7 +1276,7 @@ options.api_return_type = "polars"  # "polars", "pandas", or "arrow"
 options.formats = {"ascii"}  # Must be {"ascii"}
 options.timeframes = {"1-minute-bar-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
 options.pairs = {"eurusd"}
-# Or choose named baskets with options.pair_groups = {"majors", "metals"}
+# Or choose named baskets with options.pair_groups = {"majors", "major-triangles"}
 options.start_yearmonth = "2021-04"
 options.end_yearmonth = "2021-05"
 options.cpu_utilization = "medium"

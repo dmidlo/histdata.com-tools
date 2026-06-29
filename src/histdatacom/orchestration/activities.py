@@ -288,6 +288,21 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
         )
         return {"result": result.to_dict()}
 
+    quality_heartbeat_count = 0
+
+    def emit_quality_progress(metadata: Mapping[str, JSONValue]) -> None:
+        nonlocal quality_heartbeat_count
+        quality_heartbeat_count += 1
+        heartbeat_metadata = dict(metadata)
+        heartbeat_metadata.update(
+            {
+                "request_id": request.request_id,
+                "status": WorkStatus.PLANNED.value,
+                "work_id": request.request_id,
+            }
+        )
+        _activity_heartbeat(heartbeat_metadata)
+
     try:
         check_groups = normalize_quality_check_groups(
             request.quality_check_groups
@@ -331,6 +346,7 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
                 profile=request.quality_profile,
             ),
             metadata=quality_metadata,
+            progress_callback=emit_quality_progress,
         )
         artifact = write_quality_report(report, _quality_report_path(request))
         decision = exit_policy.evaluate(report.summary())
@@ -385,6 +401,7 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
                 "repo_quality_path": (
                     "" if repo_artifact is None else repo_artifact.path
                 ),
+                "heartbeat_count": quality_heartbeat_count,
             },
         )
         total_targets = report.summary().target_count
@@ -404,7 +421,10 @@ def data_quality_activity(payload: dict[str, Any]) -> dict[str, Any]:
                 message=str(err),
                 retryable=False,
             ),
-            metrics={"quality": quality_payload},
+            metrics={
+                "quality": quality_payload,
+                "heartbeat_count": quality_heartbeat_count,
+            },
         )
         total_targets = 0
         completed_targets = 0
