@@ -248,11 +248,13 @@ Commands:
   analytics   Run offline data analytics operations
   cleanup     Remove transient source artifacts
   jobs        Inspect and control orchestrated work
+  quality     Inspect local data quality evidence
   runtime     Inspect and manage the orchestration runtime
 
 Run `histdatacom analytics --help` for analytics commands.
 Run `histdatacom cleanup --help` for cleanup commands.
 Run `histdatacom jobs --help` for job telemetry commands.
+Run `histdatacom quality --help` for quality commands.
 ```
 
 Maintainers: this help excerpt is generated from `ArgParser.format_help()` at a
@@ -669,6 +671,25 @@ Evidence also has to be fresh by default; use
 window, or pass `--quality-preflight-evidence-stale-ok` to explicitly bypass the
 age check while still enforcing scope, version, policy, and cache-inventory
 matches.
+
+Inspect saved evidence directly when you need a non-interactive answer before a
+large run:
+
+```sh
+histdatacom quality evidence \
+  --evidence reports/major-triangles-tick-preflight.json \
+  --target data \
+  --pair-groups major-triangles \
+  -f ascii -t tick-data-quotes \
+  --quality-checks ticks
+```
+
+The command exits `0` only when the evidence is accepted for the current cache
+scope. Use `--json` for automation. Rejections distinguish stale evidence,
+package-version drift, Temporal policy drift, target/filter drift, and cache
+inventory count, byte, or fingerprint changes. Add
+`--quality-preflight-evidence-stale-ok` only when you intentionally want to
+bypass the age window while still enforcing the other checks.
 
 #### Full-Dataset Quality Campaigns
 

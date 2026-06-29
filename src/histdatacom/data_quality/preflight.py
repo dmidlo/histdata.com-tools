@@ -46,6 +46,9 @@ from histdatacom.publication_safety import (
 from histdatacom.runtime_contracts import JSONValue
 
 QUALITY_PREFLIGHT_SCHEMA_VERSION = "histdatacom.quality-preflight.v1"
+QUALITY_PREFLIGHT_INSPECTION_SCHEMA_VERSION = (
+    "histdatacom.quality-preflight-inspection.v1"
+)
 DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE = 4
 DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS = 24 * 60 * 60
 QUALITY_PREFLIGHT_WARN_FRACTION = 0.80
@@ -148,6 +151,123 @@ def write_quality_preflight_report(
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(quality_preflight_to_json(payload), encoding="utf-8")
     return output.resolve(strict=False)
+
+
+def inspect_quality_preflight_evidence(
+    root: str | Path,
+    evidence_path: str | Path,
+    *,
+    pairs: Iterable[object] | None = None,
+    pair_groups: Iterable[object] | None = None,
+    formats: Iterable[object] | None = None,
+    timeframes: Iterable[object] | None = None,
+    quality_check_groups: Iterable[str] | None = None,
+    evidence_max_age_seconds: int = (
+        DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS
+    ),
+    allow_stale_evidence: bool = False,
+    activity_budget_seconds: int | None = None,
+    utc_now: Callable[[], datetime] = _utc_now,
+) -> dict[str, JSONValue]:
+    """Inspect saved preflight evidence against the current target scope."""
+    root_path = Path(root).expanduser()
+    check_groups = normalize_quality_check_groups(quality_check_groups)
+    selected_groups = _normalize_groups(pair_groups)
+    selected_pairs = _selected_pairs(pairs, selected_groups)
+    selected_formats = _normalize_formats(formats)
+    selected_timeframes = _normalize_timeframes(timeframes)
+    budget_seconds = (
+        activity_budget_seconds
+        if activity_budget_seconds is not None
+        else activity_execution_policy(
+            "data_quality"
+        ).start_to_close_timeout_seconds
+    )
+    discovery = discover_quality_targets((root_path,))
+    cache_targets = _filtered_cache_targets(
+        discovery.targets,
+        pairs=selected_pairs,
+        formats=selected_formats,
+        timeframes=selected_timeframes,
+    )
+    cache_inventory = _cache_inventory_payload(cache_targets)
+    evidence = _quality_preflight_evidence_state(
+        evidence_path,
+        root_path=root_path,
+        check_groups=check_groups,
+        selected_groups=selected_groups,
+        selected_pairs=selected_pairs,
+        selected_formats=selected_formats,
+        selected_timeframes=selected_timeframes,
+        expected_target_count=len(cache_targets),
+        expected_cache_byte_count=sum(
+            target.size_bytes for target in cache_targets
+        ),
+        expected_cache_inventory=cache_inventory,
+        activity_budget_seconds=budget_seconds,
+        max_age_seconds=evidence_max_age_seconds,
+        allow_stale=allow_stale_evidence,
+        now_utc=utc_now(),
+    )
+    status = _inspection_status(evidence)
+    accepted = status == "accepted"
+    commands: dict[str, JSONValue] = {
+        "quality": _quality_command(
+            root=root_path,
+            check_groups=check_groups,
+            selected_groups=selected_groups,
+            selected_pairs=selected_pairs,
+            selected_formats=selected_formats,
+            selected_timeframes=selected_timeframes,
+        ),
+        "preflight": _quality_preflight_command(
+            root=root_path,
+            check_groups=check_groups,
+            selected_groups=selected_groups,
+            selected_pairs=selected_pairs,
+            selected_formats=selected_formats,
+            selected_timeframes=selected_timeframes,
+        ),
+    }
+    payload: dict[str, JSONValue] = {
+        "schema_version": QUALITY_PREFLIGHT_INSPECTION_SCHEMA_VERSION,
+        "operation": "quality-preflight-evidence-inspection",
+        "status": status,
+        "accepted": accepted,
+        "reason": str(evidence.get("reason", "")),
+        "root": str(publish_safe_path(str(root_path.resolve(strict=False)))),
+        "evidence_path": str(
+            publish_safe_path(str(Path(evidence_path).expanduser()))
+        ),
+        "filters": {
+            "checks": list(check_groups),
+            "pairs": list(selected_pairs),
+            "pair_groups": list(selected_groups),
+            "formats": list(selected_formats),
+            "timeframes": list(selected_timeframes),
+        },
+        "target_count": len(cache_targets),
+        "cache_byte_count": sum(target.size_bytes for target in cache_targets),
+        "cache_inventory": cache_inventory,
+        "policy": {
+            "activity": "data_quality",
+            "activity_budget_seconds": budget_seconds,
+            "evidence_max_age_seconds": max(
+                int(evidence_max_age_seconds),
+                0,
+            ),
+            "allow_stale_evidence": allow_stale_evidence,
+        },
+        "evidence": cast(JSONValue, evidence),
+        "commands": commands,
+        "action": (
+            "run full quality battery"
+            if accepted
+            else "rerun quality preflight for this target scope"
+        ),
+    }
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
+    return safe_payload
 
 
 def load_quality_preflight_evidence(
@@ -298,6 +418,40 @@ def format_quality_run_preflight_warning(
     command = warning.get("suggested_preflight_command")
     if command:
         lines.append(f"preflight first: {command}")
+    lines.append("continuing without prompting")
+    return "\n".join(lines)
+
+
+def format_quality_preflight_evidence_inspection(
+    payload: Mapping[str, JSONValue],
+) -> str:
+    """Return a compact human-readable evidence inspection report."""
+    filters = _mapping(payload.get("filters"))
+    commands = _mapping(payload.get("commands"))
+    evidence = _mapping(payload.get("evidence"))
+    lines = [
+        "Quality preflight evidence inspection",
+        f"status: {payload.get('status', 'unknown')}",
+        f"accepted: {'yes' if payload.get('accepted') else 'no'}",
+        f"reason: {payload.get('reason', '')}",
+        f"evidence: {payload.get('evidence_path', '')}",
+        f"root: {payload.get('root', '')}",
+        (
+            "checks: "
+            + ", ".join(str(item) for item in filters.get("checks", []))
+        ),
+        (
+            "targets: "
+            f"{payload.get('target_count', 0)} cache files, "
+            f"{_format_bytes(_int_value(payload.get('cache_byte_count')))}"
+        ),
+    ]
+    if evidence.get("mismatch_kind"):
+        lines.append(f"mismatch: {evidence['mismatch_kind']}")
+    if payload.get("accepted"):
+        lines.append(f"next: {commands.get('quality', '')}")
+    else:
+        lines.append(f"next: {commands.get('preflight', '')}")
     lines.append("continuing without prompting")
     return "\n".join(lines)
 
@@ -818,7 +972,11 @@ def _quality_preflight_evidence_state(
 
     expected_root = str(publish_safe_path(str(root_path.resolve(strict=False))))
     if payload.get("root") != expected_root:
-        return {"status": "mismatch", "reason": "target root differs"}
+        return {
+            "status": "mismatch",
+            "mismatch_kind": "root",
+            "reason": "target root differs",
+        }
     filters = _mapping(payload.get("filters"))
     expected_filters = {
         "checks": list(check_groups),
@@ -832,6 +990,8 @@ def _quality_preflight_evidence_state(
         if observed != expected:
             return {
                 "status": "mismatch",
+                "mismatch_kind": "filter",
+                "filter": key,
                 "reason": f"{key} filter differs",
             }
     decision = _mapping(payload.get("decision"))
@@ -865,11 +1025,13 @@ def _quality_preflight_evidence_state(
     if _int_value(payload.get("target_count")) != expected_target_count:
         return {
             "status": "mismatch",
+            "mismatch_kind": "cache-count",
             "reason": "cache target count differs",
         }
     if _int_value(payload.get("cache_byte_count")) != expected_cache_byte_count:
         return {
             "status": "mismatch",
+            "mismatch_kind": "cache-byte",
             "reason": "cache inventory bytes differ",
         }
     observed_inventory = _mapping(payload.get("cache_inventory"))
@@ -878,9 +1040,25 @@ def _quality_preflight_evidence_state(
     ):
         return {
             "status": "mismatch",
+            "mismatch_kind": "cache-fingerprint",
             "reason": "cache inventory fingerprint differs",
         }
     return {"status": "matched", "reason": "evidence matches target scope"}
+
+
+def _inspection_status(evidence: Mapping[str, JSONValue]) -> str:
+    status = str(evidence.get("status", "unknown"))
+    if status == "matched":
+        return "accepted"
+    if status == "stale":
+        return "stale"
+    if status in {"version-mismatch", "policy-mismatch"}:
+        return status
+    if status == "mismatch":
+        kind = str(evidence.get("mismatch_kind", "") or "")
+        if kind:
+            return f"{kind}-mismatch"
+    return status
 
 
 def _quality_command(
@@ -1308,10 +1486,13 @@ def _format_duration(value: object) -> str:
 __all__ = [
     "DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE",
     "QUALITY_PREFLIGHT_LARGE_CACHE_TARGET_COUNT",
+    "QUALITY_PREFLIGHT_INSPECTION_SCHEMA_VERSION",
     "QUALITY_PREFLIGHT_SCHEMA_VERSION",
     "QualityDiscoveryError",
+    "format_quality_preflight_evidence_inspection",
     "format_quality_preflight_console_summary",
     "format_quality_run_preflight_warning",
+    "inspect_quality_preflight_evidence",
     "load_quality_preflight_evidence",
     "quality_preflight_to_json",
     "quality_run_preflight_warning",

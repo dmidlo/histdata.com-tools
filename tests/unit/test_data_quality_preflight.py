@@ -13,8 +13,10 @@ from histdatacom import Options
 from histdatacom.cli import ArgParser
 from histdatacom.data_quality.preflight import (
     QUALITY_PREFLIGHT_SCHEMA_VERSION,
+    format_quality_preflight_evidence_inspection,
     format_quality_preflight_console_summary,
     format_quality_run_preflight_warning,
+    inspect_quality_preflight_evidence,
     quality_run_preflight_warning,
     run_cache_quality_preflight,
     write_quality_preflight_report,
@@ -445,6 +447,177 @@ def test_quality_run_warning_allows_explicit_stale_bypass(
     )
 
     assert warning is None
+
+
+def test_quality_preflight_evidence_inspection_accepts_matching_scope(
+    tmp_path: Path,
+) -> None:
+    """Evidence inspection should explain accepted evidence directly."""
+    data_dir = tmp_path / "data"
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    evidence = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+        utc_now=lambda: now,
+    )
+    report_path = write_quality_preflight_report(
+        evidence,
+        tmp_path / "preflight.json",
+    )
+
+    inspection = inspect_quality_preflight_evidence(
+        data_dir,
+        report_path,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        activity_budget_seconds=100,
+        utc_now=lambda: now,
+    )
+    summary = format_quality_preflight_evidence_inspection(inspection)
+
+    assert inspection["status"] == "accepted"
+    assert inspection["accepted"] is True
+    assert inspection["evidence"]["status"] == "matched"
+    assert "histdatacom --quality " in str(inspection["commands"]["quality"])
+    assert "Quality preflight evidence inspection" in summary
+    assert "accepted: yes" in summary
+    assert str(tmp_path) not in json.dumps(inspection, sort_keys=True)
+
+
+def test_quality_preflight_evidence_inspection_reports_stale_and_bypass(
+    tmp_path: Path,
+) -> None:
+    """Operators should see stale evidence unless they explicitly bypass age."""
+    data_dir = tmp_path / "data"
+    generated_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    evidence = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+        utc_now=lambda: generated_at,
+    )
+    report_path = write_quality_preflight_report(
+        evidence,
+        tmp_path / "preflight.json",
+    )
+
+    stale = inspect_quality_preflight_evidence(
+        data_dir,
+        report_path,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        evidence_max_age_seconds=60,
+        activity_budget_seconds=100,
+        utc_now=lambda: generated_at + timedelta(minutes=2),
+    )
+    bypassed = inspect_quality_preflight_evidence(
+        data_dir,
+        report_path,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        evidence_max_age_seconds=60,
+        allow_stale_evidence=True,
+        activity_budget_seconds=100,
+        utc_now=lambda: generated_at + timedelta(days=30),
+    )
+
+    assert stale["status"] == "stale"
+    assert stale["accepted"] is False
+    assert "older than 60 seconds" in str(stale["reason"])
+    assert bypassed["status"] == "accepted"
+    assert bypassed["accepted"] is True
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_status"),
+    (
+        ("version", "version-mismatch"),
+        ("policy", "policy-mismatch"),
+        ("root", "root-mismatch"),
+        ("filter", "filter-mismatch"),
+        ("count", "cache-count-mismatch"),
+        ("byte", "cache-byte-mismatch"),
+        ("fingerprint", "cache-fingerprint-mismatch"),
+    ),
+)
+def test_quality_preflight_evidence_inspection_reports_mismatch_classes(
+    tmp_path: Path,
+    mutation: str,
+    expected_status: str,
+) -> None:
+    """Evidence inspection should distinguish mismatch classes."""
+    data_dir = tmp_path / "data"
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    cache_path = _write_tick_cache(
+        data_dir,
+        symbol="eurusd",
+        row_multiplier=1,
+    )
+    if mutation == "filter":
+        _write_tick_cache(data_dir, symbol="gbpusd", row_multiplier=1)
+        evidence_pairs = ("eurusd",)
+        inspect_pairs = ("gbpusd",)
+    else:
+        evidence_pairs = ()
+        inspect_pairs = ()
+    evidence = run_cache_quality_preflight(
+        data_dir,
+        pairs=evidence_pairs,
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+        utc_now=lambda: now,
+    )
+    if mutation == "version":
+        evidence["package"]["version"] = "0.0.0"
+    if mutation == "fingerprint":
+        evidence["cache_inventory"]["fingerprint"] = "stale"
+    report_path = tmp_path / "preflight.json"
+    report_path.write_text(json.dumps(evidence), encoding="utf-8")
+    root = data_dir
+    budget = 100
+    if mutation == "policy":
+        budget = 200
+    if mutation == "root":
+        root = tmp_path / "other-data"
+        _write_tick_cache(root, symbol="eurusd", row_multiplier=1)
+    if mutation == "count":
+        _write_tick_cache(data_dir, symbol="gbpusd", row_multiplier=1)
+    if mutation == "byte":
+        cache_path.write_bytes(cache_path.read_bytes() + b"\n")
+
+    inspection = inspect_quality_preflight_evidence(
+        root,
+        report_path,
+        pairs=inspect_pairs,
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        activity_budget_seconds=budget,
+        utc_now=lambda: now,
+    )
+
+    assert inspection["status"] == expected_status
+    assert inspection["accepted"] is False
 
 
 def test_cli_accepts_quality_preflight_without_temporal_mode(

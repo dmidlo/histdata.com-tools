@@ -153,10 +153,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 "  analytics   Run offline data analytics operations\n"
                 "  cleanup     Remove transient source artifacts\n"
                 "  jobs        Inspect and control orchestrated work\n"
+                "  quality     Inspect local data quality evidence\n"
                 "  runtime     Inspect and manage the orchestration runtime\n\n"
                 "Run `histdatacom analytics --help` for analytics commands.\n"
                 "Run `histdatacom cleanup --help` for cleanup commands.\n"
                 "Run `histdatacom jobs --help` for job telemetry commands."
+                "\nRun `histdatacom quality --help` for quality commands."
             ),
         )
         # bring in the defaults arg DTO from outer class, use the

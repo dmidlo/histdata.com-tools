@@ -17,7 +17,14 @@ class CliConfigError(ValueError):
 _ROOT_KEY = "histdatacom"
 _CONFIG_KEYS = {"config", "config_path"}
 _SECTION_ALIASES = {"orchestration_worker": "worker"}
-_COMMAND_SECTION_KEYS = {"analytics", "cleanup", "jobs", "runtime", "worker"}
+_COMMAND_SECTION_KEYS = {
+    "analytics",
+    "cleanup",
+    "jobs",
+    "quality",
+    "runtime",
+    "worker",
+}
 _KEY_ALIASES = {
     "data_dir": "data_directory",
     "quality": "data_quality",
@@ -191,6 +198,54 @@ _CLEANUP_ALLOWED_KEYS = (
     | set(_CLEANUP_TRUE_FLAG_ARGS)
     | set(_CLEANUP_SCALAR_ARGS)
     | set(_CLEANUP_LIST_ARGS)
+)
+_QUALITY_COMMANDS = {"doctor-evidence", "evidence", "inspect-evidence"}
+_QUALITY_ALIASES = {
+    **_COMMAND_KEY_ALIASES,
+    "data_directory": "target_root",
+    "evidence": "evidence_path",
+    "instrument_group": "pair_groups",
+    "instrument_groups": "pair_groups",
+    "path": "target_root",
+    "pair_group": "pair_groups",
+    "preflight_evidence": "evidence_path",
+    "quality_check_groups": "quality_check_groups",
+    "quality_checks": "quality_check_groups",
+    "quality_path": "target_root",
+    "quality_preflight_evidence": "evidence_path",
+    "quality_preflight_evidence_max_age": ("evidence_max_age_seconds"),
+    "quality_preflight_evidence_max_age_seconds": ("evidence_max_age_seconds"),
+    "quality_preflight_evidence_path": "evidence_path",
+    "quality_preflight_evidence_stale_ok": "allow_stale_evidence",
+    "quality_target": "target_root",
+    "symbol_group": "pair_groups",
+    "symbol_groups": "pair_groups",
+    "target": "target_root",
+}
+_QUALITY_TRUE_FLAG_ARGS = {
+    "allow_stale_evidence": "--quality-preflight-evidence-stale-ok",
+    "json": "--json",
+}
+_QUALITY_SCALAR_ARGS = {
+    "evidence_max_age_seconds": (
+        "--quality-preflight-evidence-max-age-seconds"
+    ),
+    "evidence_path": "--evidence",
+    "target_root": "--target",
+}
+_QUALITY_LIST_ARGS = {
+    "formats": "--formats",
+    "pair_groups": "--pair-groups",
+    "pairs": "--pairs",
+    "quality_check_groups": "--quality-checks",
+    "timeframes": "--timeframes",
+}
+_QUALITY_ALLOWED_KEYS = (
+    {"command", "verbosity"}
+    | set(_COMMON_TRUE_FLAG_ARGS)
+    | set(_QUALITY_TRUE_FLAG_ARGS)
+    | set(_QUALITY_SCALAR_ARGS)
+    | set(_QUALITY_LIST_ARGS)
 )
 _RUNTIME_COMMANDS = {
     "cleanup",
@@ -453,6 +508,23 @@ def configured_cleanup_argv(args: Sequence[str]) -> list[str]:
         command_true_flags=_CLEANUP_TRUE_FLAG_ARGS,
         command_scalar_args=_CLEANUP_SCALAR_ARGS,
         command_list_args=_CLEANUP_LIST_ARGS,
+    )
+
+
+def configured_quality_argv(args: Sequence[str]) -> list[str]:
+    """Return quality argv with YAML defaults injected."""
+    return _configured_subcommand_argv(
+        args,
+        section_name="quality",
+        commands=_QUALITY_COMMANDS,
+        allowed_keys=_QUALITY_ALLOWED_KEYS,
+        aliases=_QUALITY_ALIASES,
+        global_true_flags={},
+        global_scalar_args={},
+        global_list_args={},
+        command_true_flags=_QUALITY_TRUE_FLAG_ARGS,
+        command_scalar_args=_QUALITY_SCALAR_ARGS,
+        command_list_args=_QUALITY_LIST_ARGS,
     )
 
 
@@ -813,14 +885,13 @@ def _section_mapping(
     for raw_key, value in root.items():
         key = _normalize_section_key(raw_key)
         if key == section_name:
-            if not isinstance(value, Mapping):
-                raise CliConfigError(
-                    f"{section_name!r} config section must be a mapping"
-                )
-            return value
+            if isinstance(value, Mapping):
+                return value
+            continue
     has_sections = any(
         _normalize_section_key(raw_key) in _COMMAND_SECTION_KEYS
-        for raw_key in root
+        and isinstance(value, Mapping)
+        for raw_key, value in root.items()
     )
     return {} if has_sections else root
 
@@ -833,11 +904,7 @@ def _normalized_config_mapping(
     for raw_key, value in mapping.items():
         key = _normalize_key(raw_key)
         section_key = _normalize_section_key(raw_key)
-        if section_key in _COMMAND_SECTION_KEYS:
-            if not isinstance(value, Mapping):
-                raise CliConfigError(
-                    f"{section_key!r} config section must be a mapping"
-                )
+        if section_key in _COMMAND_SECTION_KEYS and isinstance(value, Mapping):
             continue
         if key in _CONFIG_KEYS:
             raise CliConfigError(
@@ -902,7 +969,7 @@ def _normalize_key(
 
 
 def _normalize_section_key(key: object) -> str:
-    normalized = _normalize_key(key)
+    normalized = str(key).strip().lstrip("-").replace("-", "_")
     return _SECTION_ALIASES.get(normalized, normalized)
 
 
