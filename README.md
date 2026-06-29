@@ -314,7 +314,11 @@ closes the issue, and writes bounded execution evidence plus full ignored logs.
 Add `--pre-mutation-gates` to run the same closure gate battery before the first
 `git add`; the workflow blocks staging, commit, and push if those gates fail or
 rewrite files, and records the result separately from the post-push closure
-gates. Issue closure reports parse issue checklists or `Acceptance criteria`
+gates. Successful execution prints a compact closeout with final issue, branch,
+commit, acceptance, report-path, and runtime/process health. Use `--json` for
+the same compact closeout as a stable scriptable payload; use `--full-json` only
+when stdout needs the full execution evidence object. Issue closure reports
+parse issue checklists or `Acceptance criteria`
 bullets into acceptance coverage evidence. Attach criterion-specific or shared
 evidence with `--acceptance-status`, `--acceptance-file`, `--acceptance-test`,
 `--acceptance-report`, or `--acceptance-note` using `KEY=VALUE`; `KEY` can be

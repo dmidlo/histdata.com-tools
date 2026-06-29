@@ -604,7 +604,7 @@ def test_execute_workflow_infers_acceptance_evidence(
             "scripts/closure_readiness.py",
             "--commit-path",
             "tests/unit/test_closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -840,7 +840,7 @@ def test_execute_workflow_runs_ready_sequence_and_closes_issue(
             "scripts/closure_readiness.py",
             "--commit-path",
             "tests/unit/test_closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -872,6 +872,145 @@ def test_execute_workflow_runs_ready_sequence_and_closes_issue(
     assert any(call[:3] == ("gh", "issue", "close") for call in runner.calls)
 
 
+def test_execute_workflow_default_prints_compact_closeout(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Default execution output should be the final closeout, not raw evidence."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=(
+            " M scripts/closure_readiness.py\n"
+            " M tests/unit/test_closure_readiness.py\n"
+        ),
+        issue_body="""
+## Acceptance criteria
+
+- Print one compact closeout after execution.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "288",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--commit-message",
+            "feat(workflow): print compact closeout",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--commit-path",
+            "tests/unit/test_closure_readiness.py",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+    json_path = (
+        tmp_path
+        / ".histdatacom"
+        / "closure-readiness"
+        / "issue-workflow-288.json"
+    )
+    full_report = json.loads(json_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert "Issue workflow report summary" in output
+    assert "Issue workflow execution" not in output
+    assert "accepted: yes" in output
+    assert "issue: #288 CLOSED" in output
+    assert "branch: dev -> origin/dev (aligned) ahead=0 behind=0" in output
+    assert "commit: fedcba9 (HEAD -> dev) test commit" in output
+    assert "worktree dirty: no" in output
+    assert "pre-mutation gates: pass" in output
+    assert "closure: accepted" in output
+    assert "issue close: closed" in output
+    assert "acceptance: ready (1/1 covered, 0 missing)" in output
+    assert "report paths: ready" in output
+    assert "runtime/process health: clean (0)" in output
+    assert "reports:" in output
+    assert (
+        "json: .histdatacom/closure-readiness/issue-workflow-288.json "
+        "[ignored; write]"
+    ) in output
+    assert (
+        "markdown: .histdatacom/closure-readiness/issue-workflow-288.md "
+        "[ignored; write]"
+    ) in output
+    assert '"commands":' not in output
+    assert full_report["schema_version"] == module.ISSUE_WORKFLOW_SCHEMA_VERSION
+
+
+def test_execute_workflow_json_prints_compact_closeout_payload(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """JSON execution output should be compact while full evidence is saved."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=(
+            " M scripts/closure_readiness.py\n"
+            " M tests/unit/test_closure_readiness.py\n"
+        ),
+        issue_body="""
+## Acceptance criteria
+
+- Keep compact JSON scriptable.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "288",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--commit-message",
+            "feat(workflow): print compact closeout",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--commit-path",
+            "tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    summary = json.loads(capsys.readouterr().out)
+    json_path = (
+        tmp_path
+        / ".histdatacom"
+        / "closure-readiness"
+        / "issue-workflow-288.json"
+    )
+    full_report = json.loads(json_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert summary["schema_version"] == (
+        module.ISSUE_WORKFLOW_SUMMARY_SCHEMA_VERSION
+    )
+    assert summary["source_schema_version"] == (
+        module.ISSUE_WORKFLOW_SCHEMA_VERSION
+    )
+    assert summary["accepted"] is True
+    assert summary["issue"]["label"] == "#288 CLOSED"
+    assert summary["repo"]["upstream_state"] == "aligned"
+    assert summary["commit"]["summary"].startswith("fedcba9 ")
+    assert summary["pre_mutation_gates"]["state"] == "pass"
+    assert summary["closure"]["issue_close_state"] == "closed"
+    assert summary["acceptance_coverage"]["state"] == "ready"
+    assert summary["report_paths"]["state"] == "ready"
+    assert summary["report_paths"]["outputs"]["json"]["gitignore_state"] == (
+        "ignored"
+    )
+    assert summary["process_health"]["after"]["state"] == "clean"
+    assert "commands" not in summary
+    assert "closure_report" not in summary
+    assert full_report["schema_version"] == module.ISSUE_WORKFLOW_SCHEMA_VERSION
+    assert full_report["commands"]
+
+
 def test_execute_workflow_pre_mutation_gates_run_before_git_mutation(
     tmp_path: Path,
     capsys: Any,
@@ -890,7 +1029,7 @@ def test_execute_workflow_pre_mutation_gates_run_before_git_mutation(
             "feat(workflow): add pre-mutation gates",
             "--commit-path",
             "scripts/closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -947,7 +1086,7 @@ def test_execute_workflow_pre_mutation_gate_failure_blocks_mutation(
             "feat(workflow): add pre-mutation gates",
             "--commit-path",
             "scripts/closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -998,7 +1137,7 @@ def test_execute_workflow_pre_mutation_file_change_blocks_mutation(
             "feat(workflow): add pre-mutation gates",
             "--commit-path",
             "scripts/closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -1045,7 +1184,7 @@ def test_execute_workflow_blocks_clean_tree_without_mutation(
     output = capsys.readouterr().out
 
     assert exit_code == 1
-    assert "Issue workflow execution" in output
+    assert "Issue workflow report summary" in output
     assert "state: blocked" in output
     assert "no-changes" in output
     assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
@@ -1072,7 +1211,7 @@ def test_execute_workflow_blocks_invalid_commit_message(
             "bad message",
             "--commit-path",
             "scripts/closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -1104,7 +1243,7 @@ def test_execute_workflow_blocks_unrelated_dirty_paths(
             "feat(workflow): add executable workflow",
             "--commit-path",
             "scripts/closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -1140,7 +1279,7 @@ def test_execute_workflow_stops_on_commit_command_failure(
             "feat(workflow): add executable workflow",
             "--commit-path",
             "scripts/closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -1175,7 +1314,7 @@ def test_execute_workflow_stops_when_push_readiness_fails(
             "feat(workflow): add executable workflow",
             "--commit-path",
             "scripts/closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -1209,7 +1348,7 @@ def test_execute_workflow_reports_issue_close_failure(
             "feat(workflow): add executable workflow",
             "--commit-path",
             "scripts/closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -1245,7 +1384,7 @@ def test_execute_workflow_writes_full_logs_but_bounds_report_tails(
             "feat(workflow): add executable workflow",
             "--commit-path",
             "scripts/closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -1705,7 +1844,7 @@ def test_summarize_issue_workflow_report_outputs_final_readback(
             "scripts/closure_readiness.py",
             "--commit-path",
             "tests/unit/test_closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -1739,7 +1878,7 @@ def test_summarize_issue_workflow_report_outputs_final_readback(
     assert "issue close: closed" in output
     assert "acceptance: ready (2/2 covered, 0 missing)" in output
     assert "report paths: ready" in output
-    assert "process health: clean (0)" in output
+    assert "runtime/process health: clean (0)" in output
     assert "issue: not-requested" not in output
     assert "precheck:" not in output
     assert "gates: unknown" not in output
@@ -1776,7 +1915,7 @@ def test_summarize_issue_workflow_report_json_returns_stable_payload(
             "scripts/closure_readiness.py",
             "--commit-path",
             "tests/unit/test_closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,
@@ -1847,7 +1986,7 @@ def test_summarize_issue_workflow_report_routes_markdown_and_close_comment(
             "fix(workflow): summarize issue workflow reports",
             "--commit-path",
             "scripts/closure_readiness.py",
-            "--json",
+            "--full-json",
         ],
         repo_root=tmp_path,
         runner=runner,

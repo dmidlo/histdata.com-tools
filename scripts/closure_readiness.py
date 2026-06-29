@@ -1388,9 +1388,15 @@ def summarize_issue_workflow_report(
 ) -> dict[str, Any]:
     """Return key fields from an executable issue workflow report."""
     readiness = _mapping(report.get("readiness"))
+    commit_report = _mapping(report.get("commit_readiness"))
+    push_report = _mapping(report.get("push_readiness"))
     final = _mapping(report.get("final_readback"))
-    final_repo = _mapping(final.get("repo"))
-    final_issue = _mapping(final.get("issue"))
+    final_repo = _mapping(final.get("repo")) or _mapping(
+        push_report.get("repo")
+    ) or _mapping(commit_report.get("repo"))
+    final_issue = _mapping(final.get("issue")) or _mapping(
+        push_report.get("issue")
+    ) or _mapping(commit_report.get("issue"))
     final_commit = _mapping(final.get("commit"))
     pre_mutation = _mapping(report.get("pre_mutation_gates"))
     closure = _mapping(report.get("closure_summary"))
@@ -1893,7 +1899,7 @@ def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
         _acceptance_summary_human_line(acceptance),
         f"report paths: {report_paths.get('state', 'not-recorded')}",
         (
-            "process health: "
+            "runtime/process health: "
             f"{process_after.get('state', 'not-recorded')} "
             f"({process_after.get('total_count', 0)})"
         ),
@@ -1919,6 +1925,19 @@ def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
         )
     if closure.get("final_issue"):
         lines.append(f"issue final: {closure.get('final_issue')}")
+    outputs = _mapping(report_paths.get("outputs"))
+    if outputs:
+        lines.append("reports:")
+        for kind, payload in outputs.items():
+            payload_map = _mapping(payload)
+            write_state = (
+                "write" if payload_map.get("write_allowed", True) else "skip"
+            )
+            lines.append(
+                f"  {kind}: {payload_map.get('path', '')} "
+                f"[{payload_map.get('gitignore_state', 'unknown')}; "
+                f"{write_state}]"
+            )
     return "\n".join(lines)
 
 
@@ -2384,6 +2403,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--json", action="store_true", help="print JSON")
     parser.add_argument(
+        "--full-json",
+        action="store_true",
+        help=(
+            "with --execute-workflow, print the full evidence JSON instead of "
+            "the compact closeout summary JSON"
+        ),
+    )
+    parser.add_argument(
         "--markdown",
         action="store_true",
         help="print Markdown instead of the compact summary",
@@ -2458,6 +2485,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         or args.report_markdown
         or args.write_reports
         or args.summarize_report
+        or args.full_json
         or args.markdown
         or args.print_close_comment
         or args.close_issue
@@ -2501,6 +2529,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             )
     elif args.pre_mutation_gates:
         parser.error("--pre-mutation-gates requires --execute-workflow")
+    if args.full_json and not args.execute_workflow:
+        parser.error("--full-json requires --execute-workflow")
     if args.precheck and args.run_gates:
         parser.error("--precheck cannot be combined with --run-gates")
     if args.precheck and args.release_preflight:
@@ -2537,6 +2567,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         or args.report_json
         or args.report_markdown
         or args.write_reports
+        or args.full_json
         or args.close_issue
         or args.workflow
         or args.acceptance_status_specs
@@ -2548,10 +2579,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         or args.acceptance_override_reason
     ):
         parser.error("--summarize-report cannot be combined with live checks")
-    output_modes = (args.json, args.markdown, args.print_close_comment)
+    output_modes = (
+        args.json,
+        args.full_json,
+        args.markdown,
+        args.print_close_comment,
+    )
     if sum(1 for enabled in output_modes if enabled) > 1:
         parser.error(
-            "choose only one of --json, --markdown, or --print-close-comment"
+            "choose only one of --json, --full-json, --markdown, or "
+            "--print-close-comment"
         )
     return args
 
@@ -2596,12 +2633,15 @@ def main(
             runner=runner,
             **_acceptance_kwargs(args),
         )
-        if args.json:
+        summary = summarize_issue_workflow_report(report)
+        if args.full_json:
             print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
+        elif args.json:
+            print(json.dumps(summary, indent=2, sort_keys=True))  # noqa: T201
         elif args.markdown:
             print(render_issue_workflow_markdown(report))  # noqa: T201
         else:
-            print(render_issue_workflow_human(report))  # noqa: T201
+            print(render_issue_workflow_summary_human(summary))  # noqa: T201
         return (
             0
             if _mapping(report.get("readiness")).get("state") == "ready"
@@ -3336,61 +3376,9 @@ def _last_commit_payload(
 
 def render_issue_workflow_human(report: Mapping[str, Any]) -> str:
     """Render a compact executable workflow console summary."""
-    readiness = _mapping(report.get("readiness"))
-    commit_report = _mapping(report.get("commit_readiness"))
-    pre_mutation = _mapping(report.get("pre_mutation_gates"))
-    push_report = _mapping(report.get("push_readiness"))
-    commit_repo = _mapping(commit_report.get("repo"))
-    final = _mapping(report.get("final_readback"))
-    final_repo = _mapping(final.get("repo"))
-    final_issue = _mapping(final.get("issue"))
-    closure_summary = _mapping(report.get("closure_summary"))
-    issue_close = _mapping(closure_summary.get("issue_close"))
-    logs = _mapping(report.get("logs"))
-    acceptance = _mapping(report.get("acceptance_coverage"))
-    lines = [
-        "Issue workflow execution",
-        f"state: {readiness.get('state', 'unknown')}",
-        f"issue: {_issue_label(final_issue) if final_issue else '#' + str(report.get('issue_number', ''))}",
-        f"branch: {final_repo.get('branch', commit_repo.get('branch', 'unknown'))}",
-        f"upstream: {final_repo.get('upstream', commit_repo.get('upstream', ''))} "
-        f"ahead={final_repo.get('ahead', commit_repo.get('ahead', 0))} "
-        f"behind={final_repo.get('behind', commit_repo.get('behind', 0))}",
-        f"commit readiness: {_readiness_state(commit_report)}",
-        f"pre-mutation gates: {pre_mutation.get('state', 'not-run')}",
-        f"push readiness: {_readiness_state(push_report)}",
-        f"closure: {closure_summary.get('accepted', 'not-run')}",
-        f"issue close: {issue_close.get('state', 'not-run')}",
-        _acceptance_human_line(acceptance),
-        f"commands: {logs.get('command_count', len(report.get('commands', []) or []))}",
-        f"logs: {logs.get('directory', '')}",
-    ]
-    blockers = list(readiness.get("blocking_checks", []) or [])
-    if blockers:
-        lines.append("blocking: " + ", ".join(str(item) for item in blockers))
-    changed_paths = list(pre_mutation.get("changed_paths_after", []) or [])
-    if changed_paths:
-        lines.append(
-            "pre-mutation changed: "
-            + ", ".join(str(item) for item in changed_paths)
-        )
-    warnings = list(readiness.get("warnings", []) or [])
-    if warnings:
-        lines.append("warnings: " + ", ".join(str(item) for item in warnings))
-    report_paths = _mapping(report.get("report_paths"))
-    if report_paths:
-        lines.append("reports:")
-        for kind, payload in report_paths.items():
-            payload_map = _mapping(payload)
-            write_state = (
-                "write" if payload_map.get("write_allowed", True) else "skip"
-            )
-            lines.append(
-                f"  {kind}: {payload_map.get('path', '')} "
-                f"[{payload_map.get('gitignore_state', 'unknown')}; "
-                f"{write_state}]"
-            )
-    return "\n".join(lines)
+    return render_issue_workflow_summary_human(
+        summarize_issue_workflow_report(report)
+    )
 
 
 def render_issue_workflow_markdown(report: Mapping[str, Any]) -> str:
