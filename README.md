@@ -280,6 +280,11 @@ python scripts/closure_readiness.py --issue 274 --workflow
 python scripts/closure_readiness.py \
   --summarize-report .histdatacom/closure-readiness/closure-274.json
 python scripts/closure_readiness.py --issue 274 --workflow --close-issue
+python scripts/closure_readiness.py \
+  --issue 274 \
+  --execute-workflow \
+  --commit-message "feat(scope): describe the change" \
+  --commit-path path/to/changed-file.py
 ```
 
 The helper checks branch/upstream alignment, dirty and untracked files, linked
@@ -300,9 +305,13 @@ the current worktree. `--workflow` performs the cheap precheck first, stops
 before expensive gates when local state is blocked, writes safe default reports,
 and enforces the `dev` branch workflow. Use `--close-issue` only when ready to
 close; it remains an explicit opt-in action and reads back the final issue state
-after closing. Add `--release-preflight` only during publishing work; normal
-issue closure records the TestPyPI local simple-registry preflight as
-not-applicable.
+after closing. `--execute-workflow` is the explicit mutating mode: it validates
+the declared paths and Commitizen message, runs targeted `git add`, commits,
+checks push readiness, pushes to the expected upstream, runs closure gates,
+closes the issue, and writes bounded execution evidence plus full ignored logs.
+Default behavior remains report-only unless this flag is present. Add
+`--release-preflight` only during publishing work; normal issue closure records
+the TestPyPI local simple-registry preflight as not-applicable.
 
 ---
 

@@ -32,7 +32,12 @@ from histdatacom.source_cleanup import (  # noqa: E402
 SCHEMA_VERSION = "histdatacom.closure-readiness.v1"
 SUMMARY_SCHEMA_VERSION = "histdatacom.closure-report-summary.v1"
 COMMIT_READINESS_SCHEMA_VERSION = "histdatacom.commit-readiness.v1"
+ISSUE_WORKFLOW_SCHEMA_VERSION = "histdatacom.issue-workflow-execution.v1"
 DEFAULT_REPORT_DIR = Path(".histdatacom") / "closure-readiness"
+DEFAULT_REQUIRED_BRANCH = "dev"
+DEFAULT_EXPECTED_UPSTREAM = "origin/dev"
+DEFAULT_TAIL_LINE_LIMIT = 12
+DEFAULT_TAIL_CHAR_LIMIT = 4_000
 CommandRunner = Callable[
     [Sequence[str], Path],
     subprocess.CompletedProcess[str],
@@ -55,6 +60,82 @@ class ProcessObservation:
     pid: int
     category: str
     command: str
+
+
+class WorkflowExecutionLogger:
+    """Run commands while storing bounded evidence and full local logs."""
+
+    def __init__(
+        self,
+        *,
+        repo_root: Path,
+        log_dir: Path,
+        runner: CommandRunner,
+    ) -> None:
+        self.repo_root = repo_root
+        self.log_dir = log_dir
+        self.runner = runner
+        self.records: list[dict[str, Any]] = []
+        self._counter = 0
+
+    def __call__(
+        self,
+        command: Sequence[str],
+        cwd: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run one inferred workflow command step."""
+        return self.run(command, cwd, name=_workflow_command_name(command))
+
+    def run(
+        self,
+        command: Sequence[str],
+        cwd: Path,
+        *,
+        name: str,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run one named command and record bounded plus full output."""
+        result = self.runner(command, cwd)
+        self._counter += 1
+        payload = _workflow_command_payload(
+            command,
+            result,
+            name=name,
+            log_path=self._write_command_log(
+                command,
+                result,
+                name=name,
+                index=self._counter,
+                cwd=cwd,
+            ),
+            repo_root=self.repo_root,
+        )
+        self.records.append(payload)
+        return result
+
+    def _write_command_log(
+        self,
+        command: Sequence[str],
+        result: subprocess.CompletedProcess[str],
+        *,
+        name: str,
+        index: int,
+        cwd: Path,
+    ) -> Path:
+        filename = f"{index:03d}-{_slug(name)}.log"
+        path = self.log_dir / filename
+        body = [
+            f"command: {_shell_command(command)}",
+            f"cwd: {publish_safe_path(str(cwd))}",
+            f"returncode: {result.returncode}",
+            "",
+            "stdout:",
+            result.stdout or "",
+            "",
+            "stderr:",
+            result.stderr or "",
+        ]
+        _write_text(path, "\n".join(body))
+        return path
 
 
 GATE_SPECS = (
@@ -242,7 +323,8 @@ def build_commit_readiness_report(
     commit_message: str = "",
     commit_message_source: str = "argument",
     expected_paths: Sequence[Path] | None = None,
-    required_branch: str = "dev",
+    required_branch: str = DEFAULT_REQUIRED_BRANCH,
+    expected_upstream: str = DEFAULT_EXPECTED_UPSTREAM,
     runner: CommandRunner | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -273,6 +355,7 @@ def build_commit_readiness_report(
         scope=scope,
         commit_message=commit_validation,
         required_branch=required_branch,
+        expected_upstream=expected_upstream,
     )
     report: dict[str, Any] = {
         "schema_version": COMMIT_READINESS_SCHEMA_VERSION,
@@ -280,6 +363,7 @@ def build_commit_readiness_report(
         "generated_at_utc": generated_at.astimezone(timezone.utc).isoformat(),
         "mode": mode,
         "required_branch": required_branch,
+        "expected_upstream": expected_upstream,
         "repo": {
             "root": str(publish_safe_path(str(root))),
             **git_state,
@@ -594,7 +678,7 @@ def determine_precheck(
 def determine_workflow(
     report: Mapping[str, Any],
     *,
-    required_branch: str = "dev",
+    required_branch: str = DEFAULT_REQUIRED_BRANCH,
 ) -> dict[str, Any]:
     """Return guided closure workflow state for one report."""
     repo = _mapping(report.get("repo"))
@@ -646,7 +730,8 @@ def determine_commit_readiness(
     changes: Mapping[str, Any],
     scope: Mapping[str, Any],
     commit_message: Mapping[str, Any],
-    required_branch: str = "dev",
+    required_branch: str = DEFAULT_REQUIRED_BRANCH,
+    expected_upstream: str = DEFAULT_EXPECTED_UPSTREAM,
 ) -> dict[str, Any]:
     """Return report-only readiness for committing or pushing."""
     blockers: list[str] = []
@@ -655,6 +740,8 @@ def determine_commit_readiness(
         blockers.append("not-dev-branch")
     if not git_state.get("upstream"):
         blockers.append("upstream-missing")
+    elif expected_upstream and git_state.get("upstream") != expected_upstream:
+        blockers.append("unexpected-upstream")
     if _int(git_state.get("behind")) > 0:
         blockers.append("upstream-behind")
     if issue_state.get("state") == "unavailable":
@@ -694,7 +781,7 @@ def determine_commit_readiness(
 def attach_workflow(
     report: Mapping[str, Any],
     *,
-    required_branch: str = "dev",
+    required_branch: str = DEFAULT_REQUIRED_BRANCH,
 ) -> dict[str, Any]:
     """Return report with guided workflow state attached."""
     updated: dict[str, Any] = dict(report)
@@ -1279,6 +1366,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="report whether committed local changes are ready to push",
     )
     parser.add_argument(
+        "--execute-workflow",
+        "--execute-issue-workflow",
+        action="store_true",
+        help=(
+            "execute the audited issue workflow: readiness, targeted commit, "
+            "push, closure gates, issue close, and final readback"
+        ),
+    )
+    parser.add_argument(
         "--commit-message",
         "--message",
         dest="commit_message",
@@ -1299,8 +1395,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--required-branch",
-        default="dev",
+        default=DEFAULT_REQUIRED_BRANCH,
         help="branch required by guided maintainer workflows; default dev",
+    )
+    parser.add_argument(
+        "--expected-upstream",
+        default=DEFAULT_EXPECTED_UPSTREAM,
+        help="upstream branch required by maintainer workflows; default origin/dev",
     )
     parser.add_argument(
         "--precheck",
@@ -1384,6 +1485,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     change_readiness = args.commit_readiness or args.push_readiness
     if change_readiness and (
         args.issue_audit
+        or args.execute_workflow
         or args.precheck
         or args.run_gates
         or args.release_preflight
@@ -1399,8 +1501,33 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     ):
         parser.error(
             "--commit-readiness/--push-readiness can only be combined with "
-            "--issue, --json, --required-branch, and commit-readiness options"
+            "--issue, --json, --required-branch, --expected-upstream, "
+            "and commit-readiness options"
         )
+    if args.execute_workflow:
+        if args.issue is None:
+            parser.error("--execute-workflow requires --issue")
+        if not (args.commit_message or args.commit_message_file):
+            parser.error("--execute-workflow requires --commit-message")
+        if not args.commit_paths:
+            parser.error(
+                "--execute-workflow requires at least one --commit-path"
+            )
+        if (
+            args.issue_audit
+            or args.precheck
+            or args.run_gates
+            or args.workflow
+            or args.close_issue
+            or args.write_reports
+            or args.summarize_report
+            or args.print_close_comment
+        ):
+            parser.error(
+                "--execute-workflow cannot be combined with issue audit, "
+                "manual gate, guided workflow, close, report-write, summarize, "
+                "or close-comment modes"
+            )
     if args.precheck and args.run_gates:
         parser.error("--precheck cannot be combined with --run-gates")
     if args.precheck and args.release_preflight:
@@ -1429,6 +1556,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         or args.issue_audit
         or args.commit_readiness
         or args.push_readiness
+        or args.execute_workflow
         or args.precheck
         or args.run_gates
         or args.release_preflight
@@ -1470,6 +1598,33 @@ def main(
         else:
             print(render_report_summary_human(summary))  # noqa: T201
         return 0 if summary.get("accepted") is True else 1
+    if args.execute_workflow:
+        commit_message, commit_source = _selected_commit_message(args, root)
+        report = run_issue_workflow_execution(
+            repo_root=root,
+            issue=args.issue,
+            commit_message=commit_message,
+            commit_message_source=commit_source,
+            commit_paths=args.commit_paths,
+            required_branch=args.required_branch,
+            expected_upstream=args.expected_upstream,
+            release_preflight=args.release_preflight,
+            artifact_roots=args.artifact_roots,
+            report_json=args.report_json,
+            report_markdown=args.report_markdown,
+            runner=runner,
+        )
+        if args.json:
+            print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
+        elif args.markdown:
+            print(render_issue_workflow_markdown(report))  # noqa: T201
+        else:
+            print(render_issue_workflow_human(report))  # noqa: T201
+        return (
+            0
+            if _mapping(report.get("readiness")).get("state") == "ready"
+            else 1
+        )
     if args.workflow:
         return _run_guided_workflow(args, repo_root=root, runner=runner)
     if args.commit_readiness or args.push_readiness:
@@ -1482,6 +1637,7 @@ def main(
             commit_message_source=commit_source,
             expected_paths=args.commit_paths,
             required_branch=args.required_branch,
+            expected_upstream=args.expected_upstream,
             runner=runner,
         )
         if args.json:
@@ -1555,54 +1711,18 @@ def _run_guided_workflow(
     runner: CommandRunner | None,
 ) -> int:
     """Run precheck-first guided issue closure workflow."""
-    json_path, markdown_path, default_json, default_markdown = (
-        _selected_report_paths(args, repo_root)
-    )
-    report = build_readiness_report(
+    report, json_path, markdown_path = build_guided_workflow_report(
         repo_root=repo_root,
         issue=args.issue,
-        run_gates=False,
-        release_preflight=False,
+        release_preflight=args.release_preflight,
         artifact_roots=args.artifact_roots,
+        required_branch=args.required_branch,
+        close_issue=args.close_issue,
+        report_json=args.report_json,
+        report_markdown=args.report_markdown,
+        write_reports=True,
         runner=runner,
     )
-    report = attach_report_paths(
-        report,
-        json_path=json_path,
-        markdown_path=markdown_path,
-        repo_root=repo_root,
-        default_json=default_json,
-        default_markdown=default_markdown,
-        runner=runner,
-    )
-    report = attach_workflow(report)
-    workflow = _mapping(report.get("workflow"))
-    if workflow.get("state") == "ready-to-run-gates":
-        report = build_readiness_report(
-            repo_root=repo_root,
-            issue=args.issue,
-            run_gates=True,
-            release_preflight=args.release_preflight,
-            artifact_roots=args.artifact_roots,
-            runner=runner,
-        )
-        report = attach_report_paths(
-            report,
-            json_path=json_path,
-            markdown_path=markdown_path,
-            repo_root=repo_root,
-            default_json=default_json,
-            default_markdown=default_markdown,
-            runner=runner,
-        )
-        report = attach_workflow(report)
-    if args.close_issue:
-        report = attach_issue_close_action(
-            report,
-            repo_root=repo_root,
-            runner=runner,
-        )
-    _write_reports(report, json_path=json_path, markdown_path=markdown_path)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
     elif args.markdown:
@@ -1617,6 +1737,514 @@ def _run_guided_workflow(
             0 if issue_close.get("state") in {"closed", "already-closed"} else 1
         )
     return 0 if _mapping(report.get("workflow")).get("state") == "ready" else 1
+
+
+def build_guided_workflow_report(
+    *,
+    repo_root: Path,
+    issue: int,
+    release_preflight: bool,
+    artifact_roots: Sequence[Path] | None,
+    required_branch: str,
+    close_issue: bool,
+    report_json: Path | None = None,
+    report_markdown: Path | None = None,
+    write_reports: bool = True,
+    runner: CommandRunner | None = None,
+) -> tuple[dict[str, Any], Path | None, Path | None]:
+    """Build and optionally close one precheck-first closure workflow report."""
+    json_path, markdown_path, default_json, default_markdown = (
+        _selected_guided_report_paths(
+            repo_root=repo_root,
+            issue=issue,
+            report_json=report_json,
+            report_markdown=report_markdown,
+            write_reports=write_reports,
+        )
+    )
+    report = build_readiness_report(
+        repo_root=repo_root,
+        issue=issue,
+        run_gates=False,
+        release_preflight=False,
+        artifact_roots=artifact_roots,
+        runner=runner,
+    )
+    report = attach_report_paths(
+        report,
+        json_path=json_path,
+        markdown_path=markdown_path,
+        repo_root=repo_root,
+        default_json=default_json,
+        default_markdown=default_markdown,
+        runner=runner,
+    )
+    report = attach_workflow(report, required_branch=required_branch)
+    workflow = _mapping(report.get("workflow"))
+    if workflow.get("state") == "ready-to-run-gates":
+        report = build_readiness_report(
+            repo_root=repo_root,
+            issue=issue,
+            run_gates=True,
+            release_preflight=release_preflight,
+            artifact_roots=artifact_roots,
+            runner=runner,
+        )
+        report = attach_report_paths(
+            report,
+            json_path=json_path,
+            markdown_path=markdown_path,
+            repo_root=repo_root,
+            default_json=default_json,
+            default_markdown=default_markdown,
+            runner=runner,
+        )
+        report = attach_workflow(report, required_branch=required_branch)
+    if close_issue:
+        report = attach_issue_close_action(
+            report,
+            repo_root=repo_root,
+            runner=runner,
+        )
+    _write_reports(report, json_path=json_path, markdown_path=markdown_path)
+    return report, json_path, markdown_path
+
+
+def run_issue_workflow_execution(
+    *,
+    repo_root: Path = PROJECT_ROOT,
+    issue: int,
+    commit_message: str,
+    commit_message_source: str,
+    commit_paths: Sequence[Path],
+    required_branch: str = DEFAULT_REQUIRED_BRANCH,
+    expected_upstream: str = DEFAULT_EXPECTED_UPSTREAM,
+    release_preflight: bool = False,
+    artifact_roots: Sequence[Path] | None = None,
+    report_json: Path | None = None,
+    report_markdown: Path | None = None,
+    runner: CommandRunner | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Execute the audited issue workflow after report-only readiness passes."""
+    command_runner = runner or _run_command
+    root = repo_root.expanduser().resolve(strict=False)
+    generated_at = now or datetime.now(timezone.utc)
+    json_path, markdown_path, default_json, default_markdown = (
+        _selected_execution_report_paths(
+            repo_root=root,
+            issue=issue,
+            report_json=report_json,
+            report_markdown=report_markdown,
+        )
+    )
+    report_paths = _execution_report_path_payloads(
+        json_path=json_path,
+        markdown_path=markdown_path,
+        repo_root=root,
+        default_json=default_json,
+        default_markdown=default_markdown,
+        runner=command_runner,
+    )
+    blockers = _report_path_blockers(report_paths)
+    warnings = _report_path_warnings(report_paths)
+    log_dir = _default_execution_log_dir(root, issue)
+    log_payload = {
+        "directory": str(publish_safe_path(str(log_dir.resolve(strict=False)))),
+        "state": "ready" if not blockers else "blocked",
+        "reason": (
+            ""
+            if not blockers
+            else "execution report paths must be ignored before logs are written"
+        ),
+    }
+    if blockers:
+        report = _issue_workflow_execution_report(
+            generated_at=generated_at,
+            issue=issue,
+            required_branch=required_branch,
+            expected_upstream=expected_upstream,
+            release_preflight=release_preflight,
+            report_paths=report_paths,
+            logs=log_payload,
+            commands=(),
+            commit_readiness={},
+            push_readiness={},
+            closure_report={},
+            closure_summary={},
+            process_before={},
+            process_after={},
+            final_readback={},
+            state="blocked",
+            blockers=blockers,
+            warnings=warnings,
+        )
+        _write_execution_reports(
+            report,
+            json_path=json_path,
+            markdown_path=markdown_path,
+        )
+        return report
+
+    logger = WorkflowExecutionLogger(
+        repo_root=root,
+        log_dir=log_dir,
+        runner=command_runner,
+    )
+    process_before = collect_process_summary(root, runner=logger)
+    if process_before.get("state") == "dirty":
+        blockers.append("lingering-processes-before")
+    if not commit_paths:
+        blockers.append("commit-paths-missing")
+    commit_report = build_commit_readiness_report(
+        repo_root=root,
+        issue=issue,
+        mode="commit",
+        commit_message=commit_message,
+        commit_message_source=commit_message_source,
+        expected_paths=commit_paths,
+        required_branch=required_branch,
+        expected_upstream=expected_upstream,
+        runner=logger,
+        now=generated_at,
+    )
+    _merge_readiness_findings(
+        blockers,
+        warnings,
+        _mapping(commit_report.get("readiness")),
+    )
+
+    push_report: dict[str, Any] = {}
+    closure_report: dict[str, Any] = {}
+    closure_summary: dict[str, Any] = {}
+    state = "blocked" if blockers else "running"
+
+    if not blockers:
+        stage_paths = _execution_stage_paths(commit_report)
+        stage_result = logger.run(
+            ("git", "add", "--", *stage_paths),
+            root,
+            name="git-add",
+        )
+        if stage_result.returncode != 0:
+            blockers.append("command:git-add")
+            state = "failed"
+    if state == "running":
+        commit_result = logger.run(
+            ("git", "commit", "-m", commit_message),
+            root,
+            name="git-commit",
+        )
+        if commit_result.returncode != 0:
+            blockers.append("command:git-commit")
+            state = "failed"
+    if state == "running":
+        push_report = build_commit_readiness_report(
+            repo_root=root,
+            issue=issue,
+            mode="push",
+            required_branch=required_branch,
+            expected_upstream=expected_upstream,
+            runner=logger,
+            now=generated_at,
+        )
+        push_readiness = _mapping(push_report.get("readiness"))
+        if push_readiness.get("state") != "ready":
+            _merge_readiness_findings(blockers, warnings, push_readiness)
+            state = "blocked"
+    if state == "running":
+        push_result = logger.run(
+            _push_command(expected_upstream, required_branch),
+            root,
+            name="git-push",
+        )
+        if push_result.returncode != 0:
+            blockers.append("command:git-push")
+            state = "failed"
+    if state == "running":
+        closure_report, _, _ = build_guided_workflow_report(
+            repo_root=root,
+            issue=issue,
+            release_preflight=release_preflight,
+            artifact_roots=artifact_roots,
+            required_branch=required_branch,
+            close_issue=True,
+            write_reports=True,
+            runner=logger,
+        )
+        closure_summary = summarize_readiness_report(closure_report)
+        if closure_summary.get("accepted") is not True:
+            blockers.append("closure-workflow")
+            state = "failed"
+    final_readback = {
+        "repo": collect_git_state(root, runner=logger),
+        "issue": collect_issue_state(root, issue, runner=logger),
+        "commit": _last_commit_payload(root, runner=logger),
+    }
+    process_after = collect_process_summary(root, runner=logger)
+    if process_after.get("state") == "dirty":
+        blockers.append("lingering-processes-after")
+        state = "failed" if state != "blocked" else state
+    if state == "running":
+        state = "ready"
+
+    log_payload["command_count"] = len(logger.records)
+    report = _issue_workflow_execution_report(
+        generated_at=generated_at,
+        issue=issue,
+        required_branch=required_branch,
+        expected_upstream=expected_upstream,
+        release_preflight=release_preflight,
+        report_paths=report_paths,
+        logs=log_payload,
+        commands=tuple(logger.records),
+        commit_readiness=commit_report,
+        push_readiness=push_report,
+        closure_report=closure_report,
+        closure_summary=closure_summary,
+        process_before=process_before,
+        process_after=process_after,
+        final_readback=final_readback,
+        state=state,
+        blockers=blockers,
+        warnings=warnings,
+    )
+    _write_execution_reports(
+        report,
+        json_path=json_path,
+        markdown_path=markdown_path,
+    )
+    return report
+
+
+def _issue_workflow_execution_report(
+    *,
+    generated_at: datetime,
+    issue: int,
+    required_branch: str,
+    expected_upstream: str,
+    release_preflight: bool,
+    report_paths: Mapping[str, Any],
+    logs: Mapping[str, Any],
+    commands: Sequence[Mapping[str, Any]],
+    commit_readiness: Mapping[str, Any],
+    push_readiness: Mapping[str, Any],
+    closure_report: Mapping[str, Any],
+    closure_summary: Mapping[str, Any],
+    process_before: Mapping[str, Any],
+    process_after: Mapping[str, Any],
+    final_readback: Mapping[str, Any],
+    state: str,
+    blockers: Sequence[str],
+    warnings: Sequence[str],
+) -> dict[str, Any]:
+    """Return the publish-safe executable workflow evidence payload."""
+    report: dict[str, Any] = {
+        "schema_version": ISSUE_WORKFLOW_SCHEMA_VERSION,
+        "operation": "issue-workflow-execution",
+        "generated_at_utc": generated_at.astimezone(timezone.utc).isoformat(),
+        "issue_number": issue,
+        "required_branch": required_branch,
+        "expected_upstream": expected_upstream,
+        "release_preflight": {
+            "requested": bool(release_preflight),
+            "policy": (
+                "explicit"
+                if release_preflight
+                else "not-run-for-non-release-work"
+            ),
+        },
+        "readiness": {
+            "state": state,
+            "blocking_checks": list(
+                dict.fromkeys(str(item) for item in blockers)
+            ),
+            "warnings": list(dict.fromkeys(str(item) for item in warnings)),
+        },
+        "report_paths": dict(report_paths),
+        "logs": dict(logs),
+        "processes_before": dict(process_before),
+        "processes_after": dict(process_after),
+        "commit_readiness": dict(commit_readiness),
+        "push_readiness": dict(push_readiness),
+        "commands": [dict(command) for command in commands],
+        "closure_summary": dict(closure_summary),
+        "closure_report": dict(closure_report),
+        "final_readback": dict(final_readback),
+    }
+    safe = publish_safe_json_value(report)
+    if not isinstance(safe, dict):
+        raise TypeError("issue workflow execution report must be a JSON object")
+    return dict(safe)
+
+
+def _merge_readiness_findings(
+    blockers: list[str],
+    warnings: list[str],
+    readiness: Mapping[str, Any],
+) -> None:
+    for blocker in list(readiness.get("blocking_checks", []) or []):
+        text = str(blocker)
+        if text not in blockers:
+            blockers.append(text)
+    for warning in list(readiness.get("warnings", []) or []):
+        text = str(warning)
+        if text not in warnings:
+            warnings.append(text)
+
+
+def _execution_stage_paths(report: Mapping[str, Any]) -> tuple[str, ...]:
+    scope = _mapping(report.get("scope"))
+    paths = tuple(str(path) for path in scope.get("declared_paths", []) or [])
+    if paths:
+        return paths
+    changes = _mapping(report.get("changes"))
+    return tuple(str(path) for path in changes.get("changed_paths", []) or [])
+
+
+def _push_command(
+    expected_upstream: str, required_branch: str
+) -> tuple[str, ...]:
+    if "/" in expected_upstream:
+        remote, branch = expected_upstream.split("/", 1)
+        return ("git", "push", remote, branch)
+    return ("git", "push", "origin", required_branch)
+
+
+def _last_commit_payload(
+    repo_root: Path,
+    *,
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    result = _run_git(
+        repo_root, ("log", "-1", "--oneline", "--decorate"), runner
+    )
+    return {
+        "state": "available" if result.returncode == 0 else "unavailable",
+        "returncode": result.returncode,
+        "summary": _tail_text(result.stdout, line_limit=1),
+        "stderr_tail": _tail_text(result.stderr),
+    }
+
+
+def render_issue_workflow_human(report: Mapping[str, Any]) -> str:
+    """Render a compact executable workflow console summary."""
+    readiness = _mapping(report.get("readiness"))
+    commit_report = _mapping(report.get("commit_readiness"))
+    push_report = _mapping(report.get("push_readiness"))
+    commit_repo = _mapping(commit_report.get("repo"))
+    final = _mapping(report.get("final_readback"))
+    final_repo = _mapping(final.get("repo"))
+    final_issue = _mapping(final.get("issue"))
+    closure_summary = _mapping(report.get("closure_summary"))
+    issue_close = _mapping(closure_summary.get("issue_close"))
+    logs = _mapping(report.get("logs"))
+    lines = [
+        "Issue workflow execution",
+        f"state: {readiness.get('state', 'unknown')}",
+        f"issue: {_issue_label(final_issue) if final_issue else '#' + str(report.get('issue_number', ''))}",
+        f"branch: {final_repo.get('branch', commit_repo.get('branch', 'unknown'))}",
+        f"upstream: {final_repo.get('upstream', commit_repo.get('upstream', ''))} "
+        f"ahead={final_repo.get('ahead', commit_repo.get('ahead', 0))} "
+        f"behind={final_repo.get('behind', commit_repo.get('behind', 0))}",
+        f"commit readiness: {_readiness_state(commit_report)}",
+        f"push readiness: {_readiness_state(push_report)}",
+        f"closure: {closure_summary.get('accepted', 'not-run')}",
+        f"issue close: {issue_close.get('state', 'not-run')}",
+        f"commands: {logs.get('command_count', len(report.get('commands', []) or []))}",
+        f"logs: {logs.get('directory', '')}",
+    ]
+    blockers = list(readiness.get("blocking_checks", []) or [])
+    if blockers:
+        lines.append("blocking: " + ", ".join(str(item) for item in blockers))
+    warnings = list(readiness.get("warnings", []) or [])
+    if warnings:
+        lines.append("warnings: " + ", ".join(str(item) for item in warnings))
+    report_paths = _mapping(report.get("report_paths"))
+    if report_paths:
+        lines.append("reports:")
+        for kind, payload in report_paths.items():
+            payload_map = _mapping(payload)
+            write_state = (
+                "write" if payload_map.get("write_allowed", True) else "skip"
+            )
+            lines.append(
+                f"  {kind}: {payload_map.get('path', '')} "
+                f"[{payload_map.get('gitignore_state', 'unknown')}; "
+                f"{write_state}]"
+            )
+    return "\n".join(lines)
+
+
+def render_issue_workflow_markdown(report: Mapping[str, Any]) -> str:
+    """Render publish-safe Markdown for an executable issue workflow."""
+    readiness = _mapping(report.get("readiness"))
+    final = _mapping(report.get("final_readback"))
+    final_repo = _mapping(final.get("repo"))
+    final_issue = _mapping(final.get("issue"))
+    closure_summary = _mapping(report.get("closure_summary"))
+    closure_gates = _mapping(
+        _mapping(report.get("closure_report")).get("gates")
+    )
+    lines = [
+        "# Issue Workflow Execution",
+        "",
+        f"- State: **{readiness.get('state', 'unknown')}**",
+        f"- Issue: {_issue_label(final_issue)}",
+        f"- Branch: `{final_repo.get('branch', 'unknown')}`",
+        f"- Upstream: `{final_repo.get('upstream', '')}` "
+        f"(ahead {final_repo.get('ahead', 0)}, behind {final_repo.get('behind', 0)})",
+        f"- Expected upstream: `{report.get('expected_upstream', '')}`",
+        f"- Release preflight policy: "
+        f"{_mapping(report.get('release_preflight')).get('policy', '')}",
+        "",
+        "## Blocking Checks",
+        "",
+    ]
+    blockers = list(readiness.get("blocking_checks", []) or [])
+    if blockers:
+        lines.extend(f"- `{blocker}`" for blocker in blockers)
+    else:
+        lines.append("- None")
+    lines.extend(
+        [
+            "",
+            "## Commands",
+            "",
+            "| Step | Status | Return code | Log |",
+            "| --- | --- | ---: | --- |",
+        ]
+    )
+    for command in list(report.get("commands", []) or []):
+        payload = _mapping(command)
+        lines.append(
+            f"| `{payload.get('name', '')}` | {payload.get('status', '')} | "
+            f"{payload.get('returncode', '')} | `{payload.get('log_path', '')}` |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Closure Gates",
+            "",
+            f"- Closure accepted: {_yes_no(closure_summary.get('accepted'))}",
+            f"- Gate labels: {_gate_labels(closure_gates)}",
+            f"- Issue close: "
+            f"{_mapping(closure_summary.get('issue_close')).get('state', 'not-run')}",
+            "",
+            "## Process Health",
+            "",
+            f"- Before: {_mapping(report.get('processes_before')).get('state', 'unknown')}",
+            f"- After: {_mapping(report.get('processes_after')).get('state', 'unknown')}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _readiness_state(report: Mapping[str, Any]) -> str:
+    if not report:
+        return "not-run"
+    return str(_mapping(report.get("readiness")).get("state", "unknown"))
 
 
 def _run_gate(
@@ -1789,9 +2417,16 @@ def _issue_is_closed(issue: Mapping[str, Any]) -> bool:
     return str(issue.get("state", "")).upper() == "CLOSED"
 
 
-def _tail_text(value: str, *, line_limit: int = 12) -> str:
+def _tail_text(
+    value: str,
+    *,
+    line_limit: int = DEFAULT_TAIL_LINE_LIMIT,
+    char_limit: int = DEFAULT_TAIL_CHAR_LIMIT,
+) -> str:
     lines = value.splitlines()
     tail = "\n".join(lines[-line_limit:])
+    if len(tail) > char_limit:
+        tail = tail[-char_limit:]
     safe = publish_safe_json_value(tail)
     return str(safe)
 
@@ -1974,6 +2609,74 @@ def _closure_command(issue: Mapping[str, Any]) -> str:
             "--close-issue",
         )
     )
+
+
+def _workflow_command_payload(
+    command: Sequence[str],
+    result: subprocess.CompletedProcess[str],
+    *,
+    name: str,
+    log_path: Path,
+    repo_root: Path,
+) -> dict[str, Any]:
+    try:
+        display_path = log_path.resolve(strict=False).relative_to(repo_root)
+    except ValueError:
+        display_path = publish_safe_path(str(log_path.resolve(strict=False)))
+    return {
+        "name": name,
+        "command": _shell_command(command),
+        "status": "pass" if result.returncode == 0 else "fail",
+        "returncode": result.returncode,
+        "stdout_tail": _tail_text(result.stdout),
+        "stderr_tail": _tail_text(result.stderr),
+        "log_path": str(publish_safe_path(str(display_path))),
+    }
+
+
+def _workflow_command_name(command: Sequence[str]) -> str:
+    args = tuple(str(part) for part in command)
+    if args[:3] == ("git", "add", "--"):
+        return "git-add"
+    if args[:3] == ("git", "commit", "-m"):
+        return "git-commit"
+    if args[:2] == ("git", "push"):
+        return "git-push"
+    if args[:3] == ("gh", "issue", "close"):
+        return "gh-issue-close"
+    if args[:3] == ("gh", "issue", "view"):
+        return "gh-issue-view"
+    if args[:2] == ("git", "status"):
+        return "git-status"
+    if args[:2] == ("git", "rev-parse"):
+        return "git-rev-parse"
+    if args[:2] == ("git", "rev-list"):
+        return "git-rev-list"
+    if args[:2] == ("git", "log"):
+        return "git-log"
+    if args[:3] == (sys.executable, "-m", "pytest"):
+        return "gate-pytest"
+    if args[:3] == (sys.executable, "-m", "pre_commit"):
+        return "gate-pre-commit"
+    if args[:2] == (sys.executable, "scripts/sync_readme_cli_help.py"):
+        return "gate-readme-help-sync"
+    if args[:3] == (sys.executable, "-m", "histdatacom"):
+        return "gate-main-help-smoke"
+    if args[:2] == ("git", "diff"):
+        return "gate-git-diff-check"
+    if args[:4] == (sys.executable, "-m", "commitizen", "check"):
+        return "commitizen-check"
+    if args[:2] == ("ps", "-axo"):
+        return "process-check"
+    if args[:2] == ("git", "check-ignore"):
+        return "git-check-ignore"
+    return _slug(args[0] if args else "command")
+
+
+def _slug(value: object) -> str:
+    text = str(value).strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return text or "command"
 
 
 def _shell_command(parts: Sequence[str]) -> str:
@@ -2159,6 +2862,74 @@ def _selected_report_paths(
     return json_path, markdown_path, default_json, default_markdown
 
 
+def _selected_guided_report_paths(
+    *,
+    repo_root: Path,
+    issue: int | None,
+    report_json: Path | None,
+    report_markdown: Path | None,
+    write_reports: bool,
+) -> tuple[Path | None, Path | None, bool, bool]:
+    default_paths = _default_report_paths(repo_root, issue)
+    json_path = _output_path(report_json, repo_root)
+    markdown_path = _output_path(report_markdown, repo_root)
+    default_json = False
+    default_markdown = False
+    if write_reports:
+        if json_path is None:
+            json_path = default_paths["json"]
+            default_json = True
+        if markdown_path is None:
+            markdown_path = default_paths["markdown"]
+            default_markdown = True
+    return json_path, markdown_path, default_json, default_markdown
+
+
+def _selected_execution_report_paths(
+    *,
+    repo_root: Path,
+    issue: int | None,
+    report_json: Path | None,
+    report_markdown: Path | None,
+) -> tuple[Path, Path, bool, bool]:
+    default_paths = _default_execution_report_paths(repo_root, issue)
+    json_path = _output_path(report_json, repo_root)
+    markdown_path = _output_path(report_markdown, repo_root)
+    default_json = json_path is None
+    default_markdown = markdown_path is None
+    return (
+        json_path or default_paths["json"],
+        markdown_path or default_paths["markdown"],
+        default_json,
+        default_markdown,
+    )
+
+
+def _execution_report_path_payloads(
+    *,
+    json_path: Path,
+    markdown_path: Path,
+    repo_root: Path,
+    default_json: bool,
+    default_markdown: bool,
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    return {
+        "json": _report_path_payload(
+            json_path,
+            repo_root=repo_root,
+            default=default_json,
+            runner=runner,
+        ),
+        "markdown": _report_path_payload(
+            markdown_path,
+            repo_root=repo_root,
+            default=default_markdown,
+            runner=runner,
+        ),
+    }
+
+
 def _default_report_paths(
     repo_root: Path, issue: int | None
 ) -> dict[str, Path]:
@@ -2168,6 +2939,22 @@ def _default_report_paths(
         "json": base.with_suffix(".json"),
         "markdown": base.with_suffix(".md"),
     }
+
+
+def _default_execution_report_paths(
+    repo_root: Path, issue: int | None
+) -> dict[str, Path]:
+    issue_part = str(issue) if issue is not None else "no-issue"
+    base = repo_root / DEFAULT_REPORT_DIR / f"issue-workflow-{issue_part}"
+    return {
+        "json": base.with_suffix(".json"),
+        "markdown": base.with_suffix(".md"),
+    }
+
+
+def _default_execution_log_dir(repo_root: Path, issue: int | None) -> Path:
+    issue_part = str(issue) if issue is not None else "no-issue"
+    return repo_root / DEFAULT_REPORT_DIR / f"issue-workflow-{issue_part}-logs"
 
 
 def _output_path(path: Path | None, repo_root: Path) -> Path | None:
@@ -2232,6 +3019,19 @@ def _write_reports(
         _write_text(json_path, json.dumps(report, indent=2) + "\n")
     if markdown_path and _report_write_allowed(report_paths, "markdown"):
         _write_text(markdown_path, render_markdown(report))
+
+
+def _write_execution_reports(
+    report: Mapping[str, Any],
+    *,
+    json_path: Path,
+    markdown_path: Path,
+) -> None:
+    report_paths = _mapping(report.get("report_paths"))
+    if _report_write_allowed(report_paths, "json"):
+        _write_text(json_path, json.dumps(report, indent=2) + "\n")
+    if _report_write_allowed(report_paths, "markdown"):
+        _write_text(markdown_path, render_issue_workflow_markdown(report))
 
 
 def _write_text(path: Path, text: str) -> None:

@@ -39,7 +39,11 @@ class FakeRunner:
         upstream_counts: str = "0\t0\n",
         check_ignore_returncode: int = 0,
         commitizen_returncode: int = 0,
+        commit_returncode: int = 0,
+        push_returncode: int = 0,
+        post_commit_status_stdout: str = "",
         precommit_returncode: int = 0,
+        precommit_stdout: str = "all hooks passed\n",
         precommit_changes: str = "",
         release_returncode: int = 0,
         ps_outputs: Sequence[str] = ("",),
@@ -51,7 +55,11 @@ class FakeRunner:
         self.upstream_counts = upstream_counts
         self.check_ignore_returncode = check_ignore_returncode
         self.commitizen_returncode = commitizen_returncode
+        self.commit_returncode = commit_returncode
+        self.push_returncode = push_returncode
+        self.post_commit_status_stdout = post_commit_status_stdout
         self.precommit_returncode = precommit_returncode
+        self.precommit_stdout = precommit_stdout
         self.precommit_changes = precommit_changes
         self.release_returncode = release_returncode
         self.ps_outputs = tuple(ps_outputs)
@@ -60,6 +68,7 @@ class FakeRunner:
         self.calls: list[tuple[str, ...]] = []
         self.status_calls = 0
         self.ps_calls = 0
+        self.head = "abcdef1234567890abcdef1234567890abcdef12"
 
     def __call__(
         self,
@@ -74,7 +83,7 @@ class FakeRunner:
         if args == ("git", "rev-parse", "HEAD"):
             return _completed(
                 args,
-                stdout="abcdef1234567890abcdef1234567890abcdef12\n",
+                stdout=f"{self.head}\n",
             )
         if args == (
             "git",
@@ -106,6 +115,41 @@ class FakeRunner:
             if self.precommit_changes and self.status_calls >= 11:
                 return _completed(args, stdout=self.precommit_changes)
             return _completed(args, stdout=self.status_stdout)
+        if args[:3] == ("git", "add", "--"):
+            staged = []
+            for path in args[3:]:
+                staged.append(f"M  {path}")
+            self.status_stdout = "\n".join(staged) + ("\n" if staged else "")
+            return _completed(args)
+        if args[:3] == ("git", "commit", "-m"):
+            if self.commit_returncode == 0:
+                self.status_stdout = self.post_commit_status_stdout
+                self.upstream_counts = "1\t0\n"
+                self.head = "fedcba9876543210fedcba9876543210fedcba98"
+            return _completed(
+                args,
+                returncode=self.commit_returncode,
+                stdout=(
+                    "[dev fedcba9] feat(workflow): helper\n"
+                    if self.commit_returncode == 0
+                    else ""
+                ),
+                stderr="" if self.commit_returncode == 0 else "commit failed\n",
+            )
+        if args[:2] == ("git", "push"):
+            if self.push_returncode == 0:
+                self.upstream_counts = "0\t0\n"
+            return _completed(
+                args,
+                returncode=self.push_returncode,
+                stdout="pushed\n" if self.push_returncode == 0 else "",
+                stderr="" if self.push_returncode == 0 else "push failed\n",
+            )
+        if args == ("git", "log", "-1", "--oneline", "--decorate"):
+            return _completed(
+                args,
+                stdout=f"{self.head[:7]} (HEAD -> {self.branch}) test commit\n",
+            )
         if (
             len(args) == 6
             and args[:3] == ("gh", "issue", "view")
@@ -147,7 +191,7 @@ class FakeRunner:
                 stdout=(
                     "architecture-diagrams failed\n"
                     if self.precommit_returncode
-                    else "all hooks passed\n"
+                    else self.precommit_stdout
                 ),
             )
         if args[:4] == (sys.executable, "-m", "commitizen", "check"):
@@ -533,6 +577,307 @@ def test_push_readiness_reports_ready_to_push_state(
         call[:4] == (sys.executable, "-m", "commitizen", "check")
         for call in runner.calls
     )
+
+
+def test_execute_workflow_runs_ready_sequence_and_closes_issue(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Executable workflow should commit, push, run gates, and close."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=(
+            " M scripts/closure_readiness.py\n"
+            " M tests/unit/test_closure_readiness.py\n"
+        )
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "284",
+            "--execute-workflow",
+            "--commit-message",
+            "feat(workflow): add executable workflow",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--commit-path",
+            "tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == module.ISSUE_WORKFLOW_SCHEMA_VERSION
+    assert payload["readiness"]["state"] == "ready"
+    assert payload["final_readback"]["issue"]["state"] == "CLOSED"
+    assert payload["release_preflight"]["policy"] == (
+        "not-run-for-non-release-work"
+    )
+    assert (
+        tmp_path
+        / ".histdatacom"
+        / "closure-readiness"
+        / "issue-workflow-284.json"
+    ).exists()
+    assert (
+        tmp_path / ".histdatacom" / "closure-readiness" / "closure-284.json"
+    ).exists()
+    assert any(call[:3] == ("git", "add", "--") for call in runner.calls)
+    assert any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
+    assert any(call[:2] == ("git", "push") for call in runner.calls)
+    assert any(
+        call[:3] == (sys.executable, "-m", "pytest") for call in runner.calls
+    )
+    assert any(call[:3] == ("gh", "issue", "close") for call in runner.calls)
+
+
+def test_execute_workflow_blocks_clean_tree_without_mutation(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Executable workflow should stop when commit readiness is blocked."""
+    module = _module()
+    runner = FakeRunner()
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "284",
+            "--execute-workflow",
+            "--commit-message",
+            "feat(workflow): add executable workflow",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "Issue workflow execution" in output
+    assert "state: blocked" in output
+    assert "no-changes" in output
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+    assert not any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
+
+
+def test_execute_workflow_blocks_invalid_commit_message(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Commitizen failure should block before staging."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        commitizen_returncode=1,
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "284",
+            "--execute-workflow",
+            "--commit-message",
+            "bad message",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["readiness"]["state"] == "blocked"
+    assert "commit-message-invalid" in payload["readiness"]["blocking_checks"]
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+
+
+def test_execute_workflow_blocks_unrelated_dirty_paths(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Declared commit paths should prevent accidental unrelated commits."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n M pyproject.toml\n"
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "284",
+            "--execute-workflow",
+            "--commit-message",
+            "feat(workflow): add executable workflow",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["readiness"]["state"] == "blocked"
+    assert "unrelated-changes" in payload["readiness"]["blocking_checks"]
+    assert payload["commit_readiness"]["scope"]["unrelated_paths"] == [
+        "pyproject.toml"
+    ]
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+
+
+def test_execute_workflow_stops_on_commit_command_failure(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Command failures should stop the mutating sequence."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        commit_returncode=1,
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "284",
+            "--execute-workflow",
+            "--commit-message",
+            "feat(workflow): add executable workflow",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["readiness"]["state"] == "failed"
+    assert "command:git-commit" in payload["readiness"]["blocking_checks"]
+    assert any(call[:3] == ("git", "add", "--") for call in runner.calls)
+    assert any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
+    assert not any(call[:2] == ("git", "push") for call in runner.calls)
+
+
+def test_execute_workflow_stops_when_push_readiness_fails(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Generated dirty files after commit should block push."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        post_commit_status_stdout=" M generated.txt\n",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "284",
+            "--execute-workflow",
+            "--commit-message",
+            "feat(workflow): add executable workflow",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["readiness"]["state"] == "blocked"
+    assert "dirty-worktree" in payload["readiness"]["blocking_checks"]
+    assert payload["push_readiness"]["readiness"]["state"] == "blocked"
+    assert not any(call[:2] == ("git", "push") for call in runner.calls)
+
+
+def test_execute_workflow_reports_issue_close_failure(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Issue close failure should be visible after commit and push."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        close_returncode=1,
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "284",
+            "--execute-workflow",
+            "--commit-message",
+            "feat(workflow): add executable workflow",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["readiness"]["state"] == "failed"
+    assert "closure-workflow" in payload["readiness"]["blocking_checks"]
+    assert payload["closure_summary"]["issue_close"]["state"] == "failed"
+    assert payload["final_readback"]["issue"]["state"] == "OPEN"
+    assert any(call[:2] == ("git", "push") for call in runner.calls)
+
+
+def test_execute_workflow_writes_full_logs_but_bounds_report_tails(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Reports should expose bounded tails while ignored logs keep full output."""
+    module = _module()
+    long_stdout = "\n".join(f"line-{index:03d}" for index in range(30)) + "\n"
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        precommit_stdout=long_stdout,
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "284",
+            "--execute-workflow",
+            "--commit-message",
+            "feat(workflow): add executable workflow",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    precommit = [
+        command
+        for command in payload["commands"]
+        if command["name"] == "gate-pre-commit"
+    ][0]
+    log_path = tmp_path / precommit["log_path"]
+    log_text = log_path.read_text(encoding="utf-8")
+
+    assert exit_code == 0
+    assert "line-029" in precommit["stdout_tail"]
+    assert "line-000" not in precommit["stdout_tail"]
+    assert "line-000" in log_text
+    assert "line-029" in log_text
 
 
 def test_print_close_comment_outputs_only_comment(
