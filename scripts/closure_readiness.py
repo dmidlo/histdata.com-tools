@@ -211,9 +211,7 @@ class WorkflowProgressReporter:
         """Record a terminal phase event."""
         now = perf_counter()
         started_at = self._phase_started.get(phase)
-        duration = (
-            round(now - started_at, 3) if started_at is not None else None
-        )
+        duration = round(now - started_at, 3) if started_at is not None else None
         if status == "completed":
             self._last_completed_phase = phase
         phase_payload = self._phases.get(
@@ -351,6 +349,25 @@ GATE_SPECS = (
         "python -m pre_commit run --all-files",
     ),
 )
+FORMATTER_MUTATION_GATES = frozenset({"pre-commit", "readme-help-sync"})
+FORMATTER_MUTATION_SUFFIXES = frozenset(
+    {
+        ".cfg",
+        ".ini",
+        ".json",
+        ".md",
+        ".py",
+        ".pyi",
+        ".rst",
+        ".sh",
+        ".svg",
+        ".toml",
+        ".txt",
+        ".yaml",
+        ".yml",
+    }
+)
+FORMATTER_MUTATION_PATHS = frozenset({"README.md"})
 RELEASE_PREFLIGHT_GATE = GateSpec(
     "testpypi-local-preflight",
     ("bash", "pypi.sh", "testpypi_preflight"),
@@ -482,20 +499,14 @@ def collect_git_state(
     runner: CommandRunner,
 ) -> dict[str, Any]:
     """Return current branch, upstream, dirty, and alignment state."""
-    branch = _git_stdout(
-        repo_root, ("rev-parse", "--abbrev-ref", "HEAD"), runner
-    )
+    branch = _git_stdout(repo_root, ("rev-parse", "--abbrev-ref", "HEAD"), runner)
     head = _git_stdout(repo_root, ("rev-parse", "HEAD"), runner)
     upstream_result = _run_git(
         repo_root,
         ("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"),
         runner,
     )
-    upstream = (
-        upstream_result.stdout.strip()
-        if upstream_result.returncode == 0
-        else ""
-    )
+    upstream = upstream_result.stdout.strip() if upstream_result.returncode == 0 else ""
     status_result = _run_git(
         repo_root,
         ("status", "--porcelain=v1", "--untracked-files=all"),
@@ -524,9 +535,7 @@ def collect_git_state(
         "tracked_dirty_count": sum(
             1 for line in status_lines if not line.startswith("??")
         ),
-        "untracked_count": sum(
-            1 for line in status_lines if line.startswith("??")
-        ),
+        "untracked_count": sum(1 for line in status_lines if line.startswith("??")),
         "changed_paths": changed_paths,
         "changed_path_count": len(changed_paths),
     }
@@ -663,14 +672,10 @@ def collect_change_summary(
         }
     entries = [
         entry
-        for entry in (
-            _status_entry(line) for line in result.stdout.splitlines()
-        )
+        for entry in (_status_entry(line) for line in result.stdout.splitlines())
         if entry
     ]
-    staged = _unique_sorted(
-        str(entry["path"]) for entry in entries if entry["staged"]
-    )
+    staged = _unique_sorted(str(entry["path"]) for entry in entries if entry["staged"])
     unstaged = _unique_sorted(
         str(entry["path"]) for entry in entries if entry["unstaged"]
     )
@@ -843,11 +848,7 @@ def build_acceptance_coverage(
             "reason": (
                 override_reason
                 if override_reason
-                else (
-                    "operator override supplied"
-                    if missing_ok
-                    else ""
-                )
+                else ("operator override supplied" if missing_ok else "")
             ),
         },
         "items": items,
@@ -1063,9 +1064,7 @@ def _normalize_acceptance_status(value: object) -> str:
 
 
 def _safe_path_list(values: Sequence[str]) -> list[str]:
-    return list(
-        dict.fromkeys(publish_safe_path(str(value)) for value in values)
-    )
+    return list(dict.fromkeys(publish_safe_path(str(value)) for value in values))
 
 
 def _safe_text_list(values: Sequence[str]) -> list[str]:
@@ -1133,9 +1132,7 @@ def collect_artifact_summary(
         for root in artifact_roots
     ]
     dirty_roots = [
-        root
-        for root in roots
-        if int(root.get("source_artifact_count", 0) or 0) > 0
+        root for root in roots if int(root.get("source_artifact_count", 0) or 0) > 0
     ]
     return {
         "state": "clean" if not dirty_roots else "dirty",
@@ -1153,6 +1150,7 @@ def collect_gate_summary(
     *,
     run_gates: bool,
     runner: CommandRunner,
+    monitored_paths: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Run or summarize the required closure gates."""
     if not run_gates:
@@ -1162,12 +1160,18 @@ def collect_gate_summary(
             "required": [gate.display for gate in GATE_SPECS],
             "results": [],
         }
-    results = [_run_gate(repo_root, gate, runner=runner) for gate in GATE_SPECS]
+    results = [
+        _run_gate(
+            repo_root,
+            gate,
+            runner=runner,
+            monitored_paths=monitored_paths,
+        )
+        for gate in GATE_SPECS
+    ]
     return {
         "state": (
-            "pass"
-            if all(result["status"] == "pass" for result in results)
-            else "fail"
+            "pass" if all(result["status"] == "pass" for result in results) else "fail"
         ),
         "results": results,
     }
@@ -1258,8 +1262,7 @@ def determine_precheck(
     next_command = "python scripts/closure_readiness.py --run-gates"
     if issue is not None:
         next_command = (
-            "python scripts/closure_readiness.py "
-            f"--issue {issue} --run-gates"
+            "python scripts/closure_readiness.py " f"--issue {issue} --run-gates"
         )
     return {
         "state": state,
@@ -1305,8 +1308,7 @@ def determine_workflow(
     next_command = "python scripts/closure_readiness.py --workflow"
     if issue_number:
         next_command = (
-            "python scripts/closure_readiness.py "
-            f"--issue {issue_number} --workflow"
+            "python scripts/closure_readiness.py " f"--issue {issue_number} --workflow"
         )
     return {
         "state": state,
@@ -1361,14 +1363,9 @@ def determine_commit_readiness(
             blockers.append("commit-message-invalid")
         if scope.get("state") == "dirty-unrelated":
             blockers.append("unrelated-changes")
-        if (
-            scope.get("state") == "not-declared"
-            and changes.get("state") == "dirty"
-        ):
+        if scope.get("state") == "not-declared" and changes.get("state") == "dirty":
             warnings.append("scope-not-declared")
-    if acceptance_coverage and not _acceptance_close_ready(
-        acceptance_coverage
-    ):
+    if acceptance_coverage and not _acceptance_close_ready(acceptance_coverage):
         blockers.extend(_acceptance_readiness_blockers(acceptance_coverage))
 
     return {
@@ -1618,12 +1615,16 @@ def summarize_issue_workflow_report(
     commit_report = _mapping(report.get("commit_readiness"))
     push_report = _mapping(report.get("push_readiness"))
     final = _mapping(report.get("final_readback"))
-    final_repo = _mapping(final.get("repo")) or _mapping(
-        push_report.get("repo")
-    ) or _mapping(commit_report.get("repo"))
-    final_issue = _mapping(final.get("issue")) or _mapping(
-        push_report.get("issue")
-    ) or _mapping(commit_report.get("issue"))
+    final_repo = (
+        _mapping(final.get("repo"))
+        or _mapping(push_report.get("repo"))
+        or _mapping(commit_report.get("repo"))
+    )
+    final_issue = (
+        _mapping(final.get("issue"))
+        or _mapping(push_report.get("issue"))
+        or _mapping(commit_report.get("issue"))
+    )
     final_commit = _mapping(final.get("commit"))
     pre_mutation = _mapping(report.get("pre_mutation_gates"))
     closure = _mapping(report.get("closure_summary"))
@@ -1644,8 +1645,7 @@ def summarize_issue_workflow_report(
         pre_mutation_state == "not-run" and not pre_mutation_enabled
     )
     final_issue_ok = (
-        not final_issue
-        or str(final_issue.get("state", "")).upper() == "CLOSED"
+        not final_issue or str(final_issue.get("state", "")).upper() == "CLOSED"
     )
     repo_ok = (
         not bool(final_repo.get("dirty"))
@@ -1681,9 +1681,11 @@ def summarize_issue_workflow_report(
             "warnings": list(readiness.get("warnings", []) or []),
         },
         "issue": {
-            "label": _issue_label(final_issue)
-            if final_issue
-            else f"#{report.get('issue_number', '')}",
+            "label": (
+                _issue_label(final_issue)
+                if final_issue
+                else f"#{report.get('issue_number', '')}"
+            ),
             "number": final_issue.get("number", report.get("issue_number", 0)),
             "state": final_issue.get("state", "unknown"),
             "title": final_issue.get("title", ""),
@@ -1706,12 +1708,26 @@ def summarize_issue_workflow_report(
         "pre_mutation_gates": {
             "enabled": pre_mutation_enabled,
             "state": pre_mutation_state,
-            "blocking_checks": list(
-                pre_mutation.get("blocking_checks", []) or []
-            ),
+            "blocking_checks": list(pre_mutation.get("blocking_checks", []) or []),
             "changed_paths_after": list(
                 pre_mutation.get("changed_paths_after", []) or []
             ),
+            "mutation_summary": dict(_mapping(pre_mutation.get("mutation_summary"))),
+            "required_rerun": dict(_mapping(pre_mutation.get("required_rerun"))),
+            "rerun": {
+                "state": _mapping(pre_mutation.get("rerun")).get(
+                    "state",
+                    "not-run",
+                ),
+                "eligible": _mapping(pre_mutation.get("rerun")).get(
+                    "eligible",
+                    False,
+                ),
+                "requested": _mapping(pre_mutation.get("rerun")).get(
+                    "requested",
+                    False,
+                ),
+            },
         },
         "acceptance_coverage": _acceptance_summary(acceptance),
         "closure": {
@@ -1962,9 +1978,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             payload_map = _mapping(payload)
             default_text = "default" if payload_map.get("default") else "custom"
             write_text = (
-                "will write"
-                if payload_map.get("write_allowed", True)
-                else "skipped"
+                "will write" if payload_map.get("write_allowed", True) else "skipped"
             )
             lines.append(
                 f"| {kind} | `{payload_map.get('path', '')}` | "
@@ -2129,9 +2143,7 @@ def render_human(report: Mapping[str, Any]) -> str:
         lines.append("reports:")
         for kind, payload in report_paths.items():
             payload_map = _mapping(payload)
-            write_state = (
-                "write" if payload_map.get("write_allowed", True) else "skip"
-            )
+            write_state = "write" if payload_map.get("write_allowed", True) else "skip"
             lines.append(
                 f"  {kind}: {payload_map.get('path', '')} "
                 f"[{payload_map.get('gitignore_state', 'unknown')}; "
@@ -2180,8 +2192,7 @@ def render_report_summary_human(summary: Mapping[str, Any]) -> str:
     workflow_blockers = list(workflow.get("blocking_checks", []) or [])
     if workflow_blockers:
         lines.append(
-            "workflow blocking: "
-            + ", ".join(str(item) for item in workflow_blockers)
+            "workflow blocking: " + ", ".join(str(item) for item in workflow_blockers)
         )
     return "\n".join(lines)
 
@@ -2239,9 +2250,28 @@ def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
     changed_paths = list(pre_mutation.get("changed_paths_after", []) or [])
     if changed_paths:
         lines.append(
-            "pre-mutation changed: "
-            + ", ".join(str(item) for item in changed_paths)
+            "pre-mutation changed: " + ", ".join(str(item) for item in changed_paths)
         )
+    mutation = _mapping(pre_mutation.get("mutation_summary"))
+    if mutation.get("state") not in {None, "", "none"}:
+        lines.append(
+            "pre-mutation mutation: "
+            f"{mutation.get('state')} "
+            f"formatter/tool-only={_yes_no(mutation.get('formatter_tool_only'))}"
+        )
+    required_rerun = _mapping(pre_mutation.get("required_rerun"))
+    if required_rerun.get("state") not in {None, "", "not-required"}:
+        lines.append(
+            "pre-mutation rerun: "
+            f"{required_rerun.get('state')} "
+            f"automated={_yes_no(required_rerun.get('automated'))}"
+        )
+        commands = list(required_rerun.get("commands", []) or [])
+        if commands:
+            lines.append(
+                "pre-mutation rerun commands: "
+                + "; ".join(str(command) for command in commands)
+            )
     if closure.get("final_issue"):
         lines.append(f"issue final: {closure.get('final_issue')}")
     outputs = _mapping(report_paths.get("outputs"))
@@ -2249,9 +2279,7 @@ def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
         lines.append("reports:")
         for kind, payload in outputs.items():
             payload_map = _mapping(payload)
-            write_state = (
-                "write" if payload_map.get("write_allowed", True) else "skip"
-            )
+            write_state = "write" if payload_map.get("write_allowed", True) else "skip"
             lines.append(
                 f"  {kind}: {payload_map.get('path', '')} "
                 f"[{payload_map.get('gitignore_state', 'unknown')}; "
@@ -2268,9 +2296,7 @@ def _workflow_progress_human_line(
     terminal_phase = _mapping(workflow_progress.get("terminal_phase"))
     if terminal_phase:
         terminal_status = str(terminal_phase.get("status", "terminal"))
-        details.append(
-            f"{terminal_status}: {_workflow_phase_human(terminal_phase)}"
-        )
+        details.append(f"{terminal_status}: {_workflow_phase_human(terminal_phase)}")
     slow_phases = [
         _mapping(phase)
         for phase in workflow_progress.get("slow_phases", []) or []
@@ -2282,9 +2308,7 @@ def _workflow_progress_human_line(
             + ", ".join(
                 _workflow_phase_human(
                     phase,
-                    include_status=(
-                        str(phase.get("status", "")) != "completed"
-                    ),
+                    include_status=(str(phase.get("status", "")) != "completed"),
                 )
                 for phase in slow_phases
             )
@@ -2374,8 +2398,7 @@ def _acceptance_close_blockers(
         return []
     blockers = [ACCEPTANCE_MISSING_BLOCKER]
     blockers.extend(
-        f"acceptance:{item}"
-        for item in list(acceptance.get("missing_ids", []) or [])
+        f"acceptance:{item}" for item in list(acceptance.get("missing_ids", []) or [])
     )
     return blockers
 
@@ -2579,13 +2602,7 @@ def _acceptance_requested(
     override_reason: str = "",
 ) -> bool:
     return bool(
-        statuses
-        or files
-        or tests
-        or reports
-        or notes
-        or missing_ok
-        or override_reason
+        statuses or files or tests or reports or notes or missing_ok or override_reason
     )
 
 
@@ -2690,6 +2707,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "with --execute-workflow, run closure gates before git add/commit/"
             "push and block if they fail or change files"
+        ),
+    )
+    parser.add_argument(
+        "--rerun-formatter-mutations",
+        action="store_true",
+        help=(
+            "with --execute-workflow --pre-mutation-gates, rerun focused "
+            "tests and closure gates once after formatter/tool-only gate "
+            "mutations"
         ),
     )
     parser.add_argument(
@@ -2884,13 +2910,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         option="--acceptance-note",
     )
     if args.commit_readiness and args.push_readiness:
-        parser.error(
-            "--commit-readiness cannot be combined with --push-readiness"
-        )
+        parser.error("--commit-readiness cannot be combined with --push-readiness")
     if args.commit_message and args.commit_message_file:
-        parser.error(
-            "--commit-message cannot be combined with --commit-message-file"
-        )
+        parser.error("--commit-message cannot be combined with --commit-message-file")
     if args.push_readiness and (
         args.commit_message or args.commit_message_file or args.commit_paths
     ):
@@ -2908,6 +2930,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args.issue_audit
         or args.execute_workflow
         or args.pre_mutation_gates
+        or args.rerun_formatter_mutations
         or args.precheck
         or args.run_gates
         or args.release_preflight
@@ -2933,9 +2956,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         if not (args.commit_message or args.commit_message_file):
             parser.error("--execute-workflow requires --commit-message")
         if not args.commit_paths:
-            parser.error(
-                "--execute-workflow requires at least one --commit-path"
-            )
+            parser.error("--execute-workflow requires at least one --commit-path")
         if (
             args.issue_audit
             or args.precheck
@@ -2951,8 +2972,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                 "manual gate, guided workflow, close, report-write, summarize, "
                 "or close-comment modes"
             )
+        if args.rerun_formatter_mutations and not args.pre_mutation_gates:
+            parser.error("--rerun-formatter-mutations requires --pre-mutation-gates")
     elif args.pre_mutation_gates:
         parser.error("--pre-mutation-gates requires --execute-workflow")
+    elif args.rerun_formatter_mutations:
+        parser.error(
+            "--rerun-formatter-mutations requires --execute-workflow and "
+            "--pre-mutation-gates"
+        )
     if args.full_json and not args.execute_workflow:
         parser.error("--full-json requires --execute-workflow")
     if args.quiet_progress and not args.execute_workflow:
@@ -2973,9 +3001,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     if args.workflow and args.issue is None:
         parser.error("--workflow requires --issue")
     if args.workflow and (args.precheck or args.issue_audit):
-        parser.error(
-            "--workflow cannot be combined with --precheck or --issue-audit"
-        )
+        parser.error("--workflow cannot be combined with --precheck or --issue-audit")
     if args.close_issue and args.issue is None:
         parser.error("--close-issue requires --issue")
     if args.write_reports and args.issue is None:
@@ -2996,6 +3022,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         or args.full_json
         or args.close_issue
         or args.workflow
+        or args.rerun_formatter_mutations
         or args.acceptance_status_specs
         or args.acceptance_file_specs
         or args.acceptance_test_specs
@@ -3052,6 +3079,7 @@ def main(
             required_branch=args.required_branch,
             expected_upstream=args.expected_upstream,
             pre_mutation_gates=args.pre_mutation_gates,
+            rerun_formatter_mutations=args.rerun_formatter_mutations,
             release_preflight=args.release_preflight,
             artifact_roots=args.artifact_roots,
             report_json=args.report_json,
@@ -3069,11 +3097,7 @@ def main(
             print(render_issue_workflow_markdown(report))  # noqa: T201
         else:
             print(render_issue_workflow_summary_human(summary))  # noqa: T201
-        return (
-            0
-            if _mapping(report.get("readiness")).get("state") == "ready"
-            else 1
-        )
+        return 0 if _mapping(report.get("readiness")).get("state") == "ready" else 1
     if args.workflow:
         return _run_guided_workflow(args, repo_root=root, runner=runner)
     if args.commit_readiness or args.push_readiness:
@@ -3094,11 +3118,7 @@ def main(
             print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
         else:
             print(render_commit_readiness_human(report))  # noqa: T201
-        return (
-            0
-            if _mapping(report.get("readiness")).get("state") == "ready"
-            else 1
-        )
+        return 0 if _mapping(report.get("readiness")).get("state") == "ready" else 1
 
     report = build_readiness_report(
         repo_root=root,
@@ -3109,8 +3129,8 @@ def main(
         runner=runner,
         **_acceptance_kwargs(args),
     )
-    json_path, markdown_path, default_json, default_markdown = (
-        _selected_report_paths(args, root)
+    json_path, markdown_path, default_json, default_markdown = _selected_report_paths(
+        args, root
     )
     report = attach_report_paths(
         report,
@@ -3144,14 +3164,10 @@ def main(
         issue = _mapping(report.get("issue"))
         return 0 if issue.get("state") != "unavailable" else 1
     if args.precheck:
-        return (
-            0 if _mapping(report.get("precheck")).get("state") == "ready" else 1
-        )
+        return 0 if _mapping(report.get("precheck")).get("state") == "ready" else 1
     if args.close_issue:
         issue_close = _mapping(report.get("issue_close"))
-        return (
-            0 if issue_close.get("state") in {"closed", "already-closed"} else 1
-        )
+        return 0 if issue_close.get("state") in {"closed", "already-closed"} else 1
     return 0 if _mapping(report.get("readiness")).get("state") == "ready" else 1
 
 
@@ -3185,9 +3201,7 @@ def _run_guided_workflow(
         print(render_human(report))  # noqa: T201
     if args.close_issue:
         issue_close = _mapping(report.get("issue_close"))
-        return (
-            0 if issue_close.get("state") in {"closed", "already-closed"} else 1
-        )
+        return 0 if issue_close.get("state") in {"closed", "already-closed"} else 1
     return 0 if _mapping(report.get("workflow")).get("state") == "ready" else 1
 
 
@@ -3286,9 +3300,7 @@ def build_guided_workflow_report(
             )
             progress.finish(
                 "closure-gates",
-                status=(
-                    "completed" if readiness_state == "ready" else "blocked"
-                ),
+                status=("completed" if readiness_state == "ready" else "blocked"),
                 message=f"Closure gates {readiness_state}",
                 command_label="closure gates",
             )
@@ -3337,6 +3349,7 @@ def run_issue_workflow_execution(
     required_branch: str = DEFAULT_REQUIRED_BRANCH,
     expected_upstream: str = DEFAULT_EXPECTED_UPSTREAM,
     pre_mutation_gates: bool = False,
+    rerun_formatter_mutations: bool = False,
     release_preflight: bool = False,
     artifact_roots: Sequence[Path] | None = None,
     report_json: Path | None = None,
@@ -3524,10 +3537,9 @@ def run_issue_workflow_execution(
                 )
             ),
             runner=logger,
+            rerun_formatter_mutations=rerun_formatter_mutations,
         )
-        pre_mutation_state = str(
-            pre_mutation_gate_report.get("state", "unknown")
-        )
+        pre_mutation_state = str(pre_mutation_gate_report.get("state", "unknown"))
         progress.finish(
             "pre-mutation-gates",
             status="completed" if pre_mutation_state == "pass" else "blocked",
@@ -3562,9 +3574,11 @@ def run_issue_workflow_execution(
         progress.finish(
             "staging",
             status="completed" if stage_result.returncode == 0 else "failed",
-            message="Staging completed"
-            if stage_result.returncode == 0
-            else "Staging failed",
+            message=(
+                "Staging completed"
+                if stage_result.returncode == 0
+                else "Staging failed"
+            ),
             command_label="git add",
             log_path=str(logger.records[-1].get("log_path", "")),
         )
@@ -3585,9 +3599,9 @@ def run_issue_workflow_execution(
         progress.finish(
             "commit",
             status="completed" if commit_result.returncode == 0 else "failed",
-            message="Commit completed"
-            if commit_result.returncode == 0
-            else "Commit failed",
+            message=(
+                "Commit completed" if commit_result.returncode == 0 else "Commit failed"
+            ),
             command_label="git commit",
             log_path=str(logger.records[-1].get("log_path", "")),
         )
@@ -3612,9 +3626,7 @@ def run_issue_workflow_execution(
         progress.finish(
             "push-readiness",
             status=(
-                "completed"
-                if push_readiness.get("state") == "ready"
-                else "blocked"
+                "completed" if push_readiness.get("state") == "ready" else "blocked"
             ),
             message=f"Push readiness {push_readiness.get('state', 'unknown')}",
         )
@@ -3635,9 +3647,7 @@ def run_issue_workflow_execution(
         progress.finish(
             "push",
             status="completed" if push_result.returncode == 0 else "failed",
-            message="Push completed"
-            if push_result.returncode == 0
-            else "Push failed",
+            message="Push completed" if push_result.returncode == 0 else "Push failed",
             command_label="git push",
             log_path=str(logger.records[-1].get("log_path", "")),
         )
@@ -3773,16 +3783,12 @@ def _issue_workflow_execution_report(
         "release_preflight": {
             "requested": bool(release_preflight),
             "policy": (
-                "explicit"
-                if release_preflight
-                else "not-run-for-non-release-work"
+                "explicit" if release_preflight else "not-run-for-non-release-work"
             ),
         },
         "readiness": {
             "state": state,
-            "blocking_checks": list(
-                dict.fromkeys(str(item) for item in blockers)
-            ),
+            "blocking_checks": list(dict.fromkeys(str(item) for item in blockers)),
             "warnings": list(dict.fromkeys(str(item) for item in warnings)),
         },
         "report_paths": dict(report_paths),
@@ -3827,12 +3833,19 @@ def run_pre_mutation_gates(
     *,
     changed_paths: Sequence[str],
     runner: CommandRunner,
+    rerun_formatter_mutations: bool = False,
 ) -> dict[str, Any]:
     """Run closure gates before git mutation and report unsafe drift."""
     before = _path_fingerprints(repo_root, changed_paths)
-    gates = collect_gate_summary(repo_root, run_gates=True, runner=runner)
+    gates = collect_gate_summary(
+        repo_root,
+        run_gates=True,
+        runner=runner,
+        monitored_paths=changed_paths,
+    )
     after = _path_fingerprints(repo_root, changed_paths)
     gate_changed = _gate_changed_paths(gates)
+    gate_sources = _gate_changed_path_sources(gates)
     fingerprint_changed = _fingerprint_changed_paths(before, after)
     changed_after = _unique_sorted((*gate_changed, *fingerprint_changed))
     failed_gates = [
@@ -3840,19 +3853,317 @@ def run_pre_mutation_gates(
         for result in list(gates.get("results", []) or [])
         if _mapping(result).get("status") != "pass"
     ]
+    mutation_summary = _gate_mutation_summary(
+        changed_after,
+        gate_sources=gate_sources,
+    )
+    required_rerun = _formatter_mutation_rerun_guidance(
+        changed_after,
+        mutation_summary=mutation_summary,
+        automated=False,
+    )
     blockers: list[str] = []
     if gates.get("state") != "pass":
         blockers.append("pre-mutation-gates-failed")
         blockers.extend(f"pre-mutation-gate:{name}" for name in failed_gates)
     if changed_after:
         blockers.append("pre-mutation-gates-changed-files")
+    rerun_report = _formatter_mutation_rerun_not_run(
+        eligible=_formatter_mutation_rerun_eligible(
+            changed_after=changed_after,
+            failed_gates=failed_gates,
+            mutation_summary=mutation_summary,
+        ),
+        requested=rerun_formatter_mutations,
+    )
+    if (
+        blockers
+        and changed_after
+        and rerun_formatter_mutations
+        and _formatter_mutation_rerun_eligible(
+            changed_after=changed_after,
+            failed_gates=failed_gates,
+            mutation_summary=mutation_summary,
+        )
+    ):
+        rerun_report = _run_formatter_mutation_rerun(
+            repo_root,
+            changed_paths=changed_paths,
+            mutation_paths=changed_after,
+            runner=runner,
+        )
+        required_rerun = _formatter_mutation_rerun_guidance(
+            changed_after,
+            mutation_summary=mutation_summary,
+            automated=True,
+            passed=rerun_report.get("state") == "pass",
+        )
+        if rerun_report.get("state") == "pass":
+            blockers = [
+                blocker
+                for blocker in blockers
+                if blocker
+                not in {
+                    "pre-mutation-gates-changed-files",
+                    "pre-mutation-gates-failed",
+                    *(
+                        f"pre-mutation-gate:{name}"
+                        for name in failed_gates
+                        if name in FORMATTER_MUTATION_GATES
+                    ),
+                }
+            ]
+        else:
+            blockers.extend(
+                str(blocker)
+                for blocker in list(rerun_report.get("blocking_checks", []) or [])
+            )
     return {
         "enabled": True,
         "state": "pass" if not blockers else "blocked",
         "blocking_checks": list(dict.fromkeys(blockers)),
         "changed_paths_after": list(changed_after),
         "gate_changed_paths": list(gate_changed),
+        "gate_changed_path_sources": {
+            path: list(sources) for path, sources in gate_sources.items()
+        },
         "fingerprint_changed_paths": list(fingerprint_changed),
+        "mutation_summary": mutation_summary,
+        "required_rerun": required_rerun,
+        "rerun": rerun_report,
+        "gates": gates,
+        "results": list(gates.get("results", []) or []),
+    }
+
+
+def _gate_mutation_summary(
+    changed_paths: Sequence[str],
+    *,
+    gate_sources: Mapping[str, Sequence[str]],
+) -> dict[str, Any]:
+    items = [
+        _gate_mutation_item(path, gate_sources=gate_sources)
+        for path in _unique_sorted(str(path) for path in changed_paths)
+    ]
+    formatter_count = sum(
+        1 for item in items if item["classification"] == "formatter-tool"
+    )
+    non_formatter_count = sum(
+        1 for item in items if item["classification"] == "non-formatter"
+    )
+    unknown_count = sum(1 for item in items if item["classification"] == "unknown")
+    if not items:
+        state = "none"
+    elif formatter_count == len(items):
+        state = "formatter-tool"
+    elif non_formatter_count == len(items):
+        state = "non-formatter"
+    else:
+        state = "mixed"
+    return {
+        "state": state,
+        "changed_path_count": len(items),
+        "formatter_tool_count": formatter_count,
+        "non_formatter_count": non_formatter_count,
+        "unknown_count": unknown_count,
+        "formatter_tool_only": bool(items) and formatter_count == len(items),
+        "items": items,
+    }
+
+
+def _gate_mutation_item(
+    path: str,
+    *,
+    gate_sources: Mapping[str, Sequence[str]],
+) -> dict[str, Any]:
+    sources = _unique_sorted(
+        str(source) for source in gate_sources.get(path, ()) if str(source)
+    )
+    source_set = set(sources)
+    suffix = Path(path).suffix.lower()
+    formatter_gate = bool(source_set.intersection(FORMATTER_MUTATION_GATES))
+    formatter_path = (
+        suffix in FORMATTER_MUTATION_SUFFIXES
+        or path in FORMATTER_MUTATION_PATHS
+        or path.startswith("tests/architecture/")
+    )
+    if formatter_gate and formatter_path:
+        classification = "formatter-tool"
+        appears = True
+        reason = "formatter/tool gate changed a formatter-managed or generated path"
+    elif formatter_gate:
+        classification = "non-formatter"
+        appears = False
+        reason = "formatter/tool gate changed a path outside managed suffixes"
+    elif sources:
+        classification = "non-formatter"
+        appears = False
+        reason = "non-formatter gate reported the path mutation"
+    elif formatter_path:
+        classification = "unknown"
+        appears = False
+        reason = "path fingerprint changed without a responsible gate"
+    else:
+        classification = "non-formatter"
+        appears = False
+        reason = "path fingerprint changed outside formatter-managed paths"
+    return {
+        "path": path,
+        "responsible_gates": list(sources),
+        "classification": classification,
+        "appears_formatter_or_tool_output": appears,
+        "reason": reason,
+    }
+
+
+def _formatter_mutation_rerun_guidance(
+    changed_paths: Sequence[str],
+    *,
+    mutation_summary: Mapping[str, Any],
+    automated: bool,
+    passed: bool | None = None,
+) -> dict[str, Any]:
+    if not changed_paths:
+        state = "not-required"
+        reason = "pre-mutation gates did not change declared paths"
+    elif mutation_summary.get("formatter_tool_only") is True:
+        if automated and passed is True:
+            state = "passed"
+            reason = "opt-in formatter/tool rerun passed"
+        elif automated and passed is False:
+            state = "failed"
+            reason = "opt-in formatter/tool rerun did not pass"
+        else:
+            state = "required"
+            reason = (
+                "formatter/tool mutations require focused verification and "
+                "a clean full gate rerun before staging"
+            )
+    else:
+        state = "not-eligible"
+        reason = (
+            "changed paths include non-formatter/tool or unattributed "
+            "mutations; inspect manually before rerun"
+        )
+    return {
+        "state": state,
+        "automated": automated,
+        "reason": reason,
+        "commands": list(_formatter_mutation_rerun_commands(changed_paths)),
+    }
+
+
+def _formatter_mutation_rerun_commands(
+    changed_paths: Sequence[str],
+) -> tuple[str, ...]:
+    if not changed_paths:
+        return ()
+    commands: list[str] = []
+    focused_tests = _acceptance_tests_from_paths(changed_paths)
+    if focused_tests:
+        commands.append(_shell_command(("python", "-m", "pytest", *focused_tests)))
+    commands.append("python scripts/closure_readiness.py --run-gates")
+    return tuple(commands)
+
+
+def _formatter_mutation_rerun_eligible(
+    *,
+    changed_after: Sequence[str],
+    failed_gates: Sequence[str],
+    mutation_summary: Mapping[str, Any],
+) -> bool:
+    return (
+        bool(changed_after)
+        and bool(mutation_summary.get("formatter_tool_only"))
+        and all(str(name) in FORMATTER_MUTATION_GATES for name in failed_gates)
+    )
+
+
+def _formatter_mutation_rerun_not_run(
+    *,
+    eligible: bool,
+    requested: bool,
+) -> dict[str, Any]:
+    if not eligible:
+        reason = "formatter/tool-only mutation rerun is not eligible"
+    elif not requested:
+        reason = "run with --rerun-formatter-mutations to opt in"
+    else:
+        reason = "formatter/tool-only mutation rerun was not reached"
+    return {
+        "state": "not-run",
+        "requested": requested,
+        "eligible": eligible,
+        "reason": reason,
+        "blocking_checks": [],
+        "changed_paths_after": [],
+        "focused_tests": {"state": "not-run", "results": []},
+        "gates": {
+            "state": "not-run",
+            "results": [],
+        },
+        "results": [],
+    }
+
+
+def _run_formatter_mutation_rerun(
+    repo_root: Path,
+    *,
+    changed_paths: Sequence[str],
+    mutation_paths: Sequence[str],
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    focused_tests = _acceptance_tests_from_paths(mutation_paths)
+    focused_result: dict[str, Any] | None = None
+    if focused_tests:
+        focused_result = _run_gate(
+            repo_root,
+            GateSpec(
+                "focused-pytest-after-formatter-mutation",
+                (sys.executable, "-m", "pytest", *focused_tests),
+                _shell_command(("python", "-m", "pytest", *focused_tests)),
+            ),
+            runner=runner,
+            monitored_paths=changed_paths,
+        )
+    gates = collect_gate_summary(
+        repo_root,
+        run_gates=True,
+        runner=runner,
+        monitored_paths=changed_paths,
+    )
+    focused_changed = (
+        tuple(focused_result.get("changed_paths_after", []) or [])
+        if focused_result
+        else ()
+    )
+    gate_changed = _gate_changed_paths(gates)
+    changed_after = _unique_sorted((*focused_changed, *gate_changed))
+    failed_gates = [
+        str(_mapping(result).get("name", "unknown"))
+        for result in list(gates.get("results", []) or [])
+        if _mapping(result).get("status") != "pass"
+    ]
+    blockers: list[str] = []
+    if focused_result and focused_result.get("status") != "pass":
+        blockers.append("pre-mutation-rerun-focused-tests-failed")
+    if gates.get("state") != "pass":
+        blockers.append("pre-mutation-rerun-gates-failed")
+        blockers.extend(f"pre-mutation-rerun-gate:{name}" for name in failed_gates)
+    if changed_after:
+        blockers.append("pre-mutation-rerun-changed-files")
+    return {
+        "state": "pass" if not blockers else "failed",
+        "requested": True,
+        "eligible": True,
+        "blocking_checks": list(dict.fromkeys(blockers)),
+        "changed_paths_after": list(changed_after),
+        "focused_tests": {
+            "state": (
+                focused_result.get("status") if focused_result else "not-applicable"
+            ),
+            "results": [focused_result] if focused_result else [],
+        },
         "gates": gates,
         "results": list(gates.get("results", []) or []),
     }
@@ -3871,7 +4182,18 @@ def _pre_mutation_gates_not_run(*, enabled: bool) -> dict[str, Any]:
         "blocking_checks": [],
         "changed_paths_after": [],
         "gate_changed_paths": [],
+        "gate_changed_path_sources": {},
         "fingerprint_changed_paths": [],
+        "mutation_summary": _gate_mutation_summary((), gate_sources={}),
+        "required_rerun": _formatter_mutation_rerun_guidance(
+            (),
+            mutation_summary=_gate_mutation_summary((), gate_sources={}),
+            automated=False,
+        ),
+        "rerun": _formatter_mutation_rerun_not_run(
+            eligible=False,
+            requested=False,
+        ),
         "gates": {
             "state": "not-run",
             "reason": reason,
@@ -3887,10 +4209,26 @@ def _gate_changed_paths(gates: Mapping[str, Any]) -> tuple[str, ...]:
     for result in list(gates.get("results", []) or []):
         result_map = _mapping(result)
         values.extend(
-            str(path)
-            for path in list(result_map.get("changed_paths_after", []) or [])
+            str(path) for path in list(result_map.get("changed_paths_after", []) or [])
         )
     return _unique_sorted(values)
+
+
+def _gate_changed_path_sources(
+    gates: Mapping[str, Any],
+) -> dict[str, tuple[str, ...]]:
+    sources: dict[str, list[str]] = defaultdict(list)
+    for result in list(gates.get("results", []) or []):
+        result_map = _mapping(result)
+        gate_name = str(result_map.get("name", "unknown"))
+        for path in list(result_map.get("changed_paths_after", []) or []):
+            text = str(path)
+            if gate_name not in sources[text]:
+                sources[text].append(gate_name)
+    return {
+        path: tuple(values)
+        for path, values in sorted(sources.items(), key=lambda item: item[0])
+    }
 
 
 def _path_fingerprints(
@@ -3903,9 +4241,7 @@ def _path_fingerprints(
             continue
         relative = Path(path)
         resolved = (
-            relative.expanduser()
-            if relative.is_absolute()
-            else repo_root / relative
+            relative.expanduser() if relative.is_absolute() else repo_root / relative
         )
         fingerprints[str(publish_safe_path(path))] = _path_fingerprint(
             resolved,
@@ -3967,9 +4303,7 @@ def _execution_stage_paths(report: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(str(path) for path in changes.get("changed_paths", []) or [])
 
 
-def _push_command(
-    expected_upstream: str, required_branch: str
-) -> tuple[str, ...]:
+def _push_command(expected_upstream: str, required_branch: str) -> tuple[str, ...]:
     if "/" in expected_upstream:
         remote, branch = expected_upstream.split("/", 1)
         return ("git", "push", remote, branch)
@@ -3981,9 +4315,7 @@ def _last_commit_payload(
     *,
     runner: CommandRunner,
 ) -> dict[str, Any]:
-    result = _run_git(
-        repo_root, ("log", "-1", "--oneline", "--decorate"), runner
-    )
+    result = _run_git(repo_root, ("log", "-1", "--oneline", "--decorate"), runner)
     return {
         "state": "available" if result.returncode == 0 else "unavailable",
         "returncode": result.returncode,
@@ -3994,9 +4326,7 @@ def _last_commit_payload(
 
 def render_issue_workflow_human(report: Mapping[str, Any]) -> str:
     """Render a compact executable workflow console summary."""
-    return render_issue_workflow_summary_human(
-        summarize_issue_workflow_report(report)
-    )
+    return render_issue_workflow_summary_human(summarize_issue_workflow_report(report))
 
 
 def render_issue_workflow_markdown(report: Mapping[str, Any]) -> str:
@@ -4006,9 +4336,7 @@ def render_issue_workflow_markdown(report: Mapping[str, Any]) -> str:
     final_repo = _mapping(final.get("repo"))
     final_issue = _mapping(final.get("issue"))
     closure_summary = _mapping(report.get("closure_summary"))
-    closure_gates = _mapping(
-        _mapping(report.get("closure_report")).get("gates")
-    )
+    closure_gates = _mapping(_mapping(report.get("closure_report")).get("gates"))
     pre_mutation = _mapping(report.get("pre_mutation_gates"))
     pre_mutation_gates = _mapping(pre_mutation.get("gates"))
     acceptance = _mapping(report.get("acceptance_coverage"))
@@ -4047,7 +4375,52 @@ def render_issue_workflow_markdown(report: Mapping[str, Any]) -> str:
     changed_paths = list(pre_mutation.get("changed_paths_after", []) or [])
     if changed_paths:
         lines.append("- Changed paths after gates:")
-        lines.extend(f"  - `{path}`" for path in changed_paths)
+        mutation_items = {
+            str(_mapping(item).get("path")): _mapping(item)
+            for item in list(
+                _mapping(pre_mutation.get("mutation_summary")).get(
+                    "items",
+                    [],
+                )
+                or []
+            )
+        }
+        for path in changed_paths:
+            item = _mapping(mutation_items.get(str(path)))
+            gates = (
+                ", ".join(
+                    str(gate) for gate in list(item.get("responsible_gates", []) or [])
+                )
+                or "unknown"
+            )
+            lines.append(
+                f"  - `{path}`: gates={gates}; "
+                f"classification={item.get('classification', 'unknown')}; "
+                "formatter/tool="
+                f"{_yes_no(item.get('appears_formatter_or_tool_output'))}"
+            )
+        mutation = _mapping(pre_mutation.get("mutation_summary"))
+        required_rerun = _mapping(pre_mutation.get("required_rerun"))
+        rerun = _mapping(pre_mutation.get("rerun"))
+        lines.extend(
+            [
+                (
+                    "- Mutation summary: "
+                    f"{mutation.get('state', 'unknown')} "
+                    f"({mutation.get('changed_path_count', 0)} paths)"
+                ),
+                (
+                    "- Required rerun: "
+                    f"{required_rerun.get('state', 'not-required')} "
+                    f"({required_rerun.get('reason', '')})"
+                ),
+                f"- Rerun state: {rerun.get('state', 'not-run')}",
+            ]
+        )
+        commands = list(required_rerun.get("commands", []) or [])
+        if commands:
+            lines.append("- Required rerun commands:")
+            lines.extend(f"  - `{command}`" for command in commands)
         lines.append("")
     lines.extend(
         [
@@ -4094,17 +4467,20 @@ def _run_gate(
     gate: GateSpec,
     *,
     runner: CommandRunner,
+    monitored_paths: Sequence[str] = (),
 ) -> dict[str, Any]:
+    fingerprint_before = _path_fingerprints(repo_root, monitored_paths)
     before = set(_git_changed_paths(repo_root, runner))
     result = runner(gate.command, repo_root)
     after = set(_git_changed_paths(repo_root, runner))
-    changed_after = sorted(after - before)
-    if (
-        gate.name == "pre-commit"
-        and not changed_after
-        and result.returncode != 0
-    ):
-        changed_after = sorted(after)
+    fingerprint_after = _path_fingerprints(repo_root, monitored_paths)
+    fingerprint_changed = _fingerprint_changed_paths(
+        fingerprint_before,
+        fingerprint_after,
+    )
+    changed_after = _unique_sorted((*sorted(after - before), *fingerprint_changed))
+    if gate.name == "pre-commit" and not changed_after and result.returncode != 0:
+        changed_after = _unique_sorted((*sorted(after), *fingerprint_changed))
     return {
         "name": gate.name,
         "command": gate.display,
@@ -4112,7 +4488,8 @@ def _run_gate(
         "returncode": result.returncode,
         "stdout_tail": _tail_text(result.stdout),
         "stderr_tail": _tail_text(result.stderr),
-        "changed_paths_after": changed_after,
+        "changed_paths_after": list(changed_after),
+        "fingerprint_changed_paths": list(fingerprint_changed),
     }
 
 
@@ -4360,9 +4737,7 @@ def _commit_scope_payload(
     expected_paths: Sequence[Path],
 ) -> dict[str, Any]:
     declared = _declared_scope_paths(expected_paths, repo_root=repo_root)
-    changed = [
-        str(item) for item in list(changes.get("changed_paths", []) or [])
-    ]
+    changed = [str(item) for item in list(changes.get("changed_paths", []) or [])]
     if not declared:
         return {
             "state": "not-declared",
@@ -4640,9 +5015,7 @@ def _report_paths_summary(report_paths: Mapping[str, Any]) -> dict[str, Any]:
                 "unknown",
             ),
             "write_allowed": bool(payload_map.get("write_allowed", True)),
-            "closure_blocking": bool(
-                payload_map.get("closure_blocking", False)
-            ),
+            "closure_blocking": bool(payload_map.get("closure_blocking", False)),
         }
     state = "ready"
     if blockers:
@@ -4779,9 +5152,7 @@ def _execution_report_path_payloads(
     }
 
 
-def _default_report_paths(
-    repo_root: Path, issue: int | None
-) -> dict[str, Path]:
+def _default_report_paths(repo_root: Path, issue: int | None) -> dict[str, Path]:
     issue_part = str(issue) if issue is not None else "no-issue"
     base = repo_root / DEFAULT_REPORT_DIR / f"closure-{issue_part}"
     return {

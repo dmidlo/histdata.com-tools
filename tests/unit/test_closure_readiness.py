@@ -43,9 +43,14 @@ class FakeRunner:
         push_returncode: int = 0,
         post_commit_status_stdout: str = "",
         precommit_returncode: int = 0,
+        precommit_returncodes: Sequence[int] | None = None,
         precommit_stdout: str = "all hooks passed\n",
+        precommit_stdout_sequence: Sequence[str] | None = None,
         precommit_changes: str = "",
         precommit_file_mutations: Mapping[str, str] | None = None,
+        precommit_file_mutation_sequence: (
+            Sequence[Mapping[str, str]] | None
+        ) = None,
         release_returncode: int = 0,
         ps_outputs: Sequence[str] = ("",),
         issue_state: str = "OPEN",
@@ -61,9 +66,14 @@ class FakeRunner:
         self.push_returncode = push_returncode
         self.post_commit_status_stdout = post_commit_status_stdout
         self.precommit_returncode = precommit_returncode
+        self.precommit_returncodes = tuple(precommit_returncodes or ())
         self.precommit_stdout = precommit_stdout
+        self.precommit_stdout_sequence = tuple(precommit_stdout_sequence or ())
         self.precommit_changes = precommit_changes
         self.precommit_file_mutations = dict(precommit_file_mutations or {})
+        self.precommit_file_mutation_sequence = tuple(
+            dict(item) for item in precommit_file_mutation_sequence or ()
+        )
         self.release_returncode = release_returncode
         self.ps_outputs = tuple(ps_outputs)
         self.issue_state = issue_state
@@ -71,6 +81,7 @@ class FakeRunner:
         self.close_returncode = close_returncode
         self.calls: list[tuple[str, ...]] = []
         self.status_calls = 0
+        self.precommit_calls = 0
         self.ps_calls = 0
         self.head = "abcdef1234567890abcdef1234567890abcdef12"
 
@@ -196,17 +207,40 @@ class FakeRunner:
         if args[:3] == (sys.executable, "-m", "pytest"):
             return _completed(args, stdout="983 passed\n")
         if args[:3] == (sys.executable, "-m", "pre_commit"):
-            for path, text in self.precommit_file_mutations.items():
+            index = self.precommit_calls
+            self.precommit_calls += 1
+            returncode = (
+                self.precommit_returncodes[
+                    min(index, len(self.precommit_returncodes) - 1)
+                ]
+                if self.precommit_returncodes
+                else self.precommit_returncode
+            )
+            stdout = (
+                self.precommit_stdout_sequence[
+                    min(index, len(self.precommit_stdout_sequence) - 1)
+                ]
+                if self.precommit_stdout_sequence
+                else self.precommit_stdout
+            )
+            mutations = (
+                self.precommit_file_mutation_sequence[
+                    min(index, len(self.precommit_file_mutation_sequence) - 1)
+                ]
+                if self.precommit_file_mutation_sequence
+                else self.precommit_file_mutations
+            )
+            for path, text in mutations.items():
                 target = cwd / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(text, encoding="utf-8")
             return _completed(
                 args,
-                returncode=self.precommit_returncode,
+                returncode=returncode,
                 stdout=(
                     "architecture-diagrams failed\n"
-                    if self.precommit_returncode
-                    else self.precommit_stdout
+                    if returncode and not self.precommit_stdout_sequence
+                    else stdout
                 ),
             )
         if args[:4] == (sys.executable, "-m", "commitizen", "check"):
@@ -1548,6 +1582,225 @@ def test_execute_workflow_pre_mutation_file_change_blocks_mutation(
     assert path.read_text(encoding="utf-8") == "after\n"
     assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
     assert not any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
+
+
+def test_execute_workflow_pre_mutation_formatter_change_reports_rerun_guidance(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Formatter-only gate rewrites should identify the gate and rerun path."""
+    module = _module()
+    path = tmp_path / "tests" / "unit" / "test_closure_readiness.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("before\n", encoding="utf-8")
+    runner = FakeRunner(
+        status_stdout=" M tests/unit/test_closure_readiness.py\n",
+        precommit_returncode=1,
+        precommit_stdout="black reformatted files\n",
+        precommit_file_mutations={
+            "tests/unit/test_closure_readiness.py": "after\n",
+        },
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "292",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--commit-message",
+            "fix(workflow): classify formatter mutations",
+            "--commit-path",
+            "tests/unit/test_closure_readiness.py",
+            "--full-json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    mutation = payload["pre_mutation_gates"]["mutation_summary"]
+    item = mutation["items"][0]
+
+    assert exit_code == 1
+    assert payload["pre_mutation_gates"]["state"] == "blocked"
+    assert mutation["state"] == "formatter-tool"
+    assert mutation["formatter_tool_only"] is True
+    assert item["responsible_gates"] == ["pre-commit"]
+    assert item["classification"] == "formatter-tool"
+    assert item["appears_formatter_or_tool_output"] is True
+    assert payload["pre_mutation_gates"]["required_rerun"]["state"] == (
+        "required"
+    )
+    assert payload["pre_mutation_gates"]["rerun"]["eligible"] is True
+    assert payload["pre_mutation_gates"]["rerun"]["state"] == "not-run"
+    assert "python -m pytest tests/unit/test_closure_readiness.py" in (
+        payload["pre_mutation_gates"]["required_rerun"]["commands"]
+    )
+    assert "python scripts/closure_readiness.py --run-gates" in (
+        payload["pre_mutation_gates"]["required_rerun"]["commands"]
+    )
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+
+
+def test_execute_workflow_pre_mutation_non_formatter_change_blocks_rerun(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Non-formatter gate rewrites should require manual inspection."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M data/local-cache.sqlite3\n",
+        precommit_returncode=1,
+        precommit_file_mutations={
+            "data/local-cache.sqlite3": "binary-ish\n",
+        },
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "292",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--commit-message",
+            "fix(workflow): classify non formatter mutations",
+            "--commit-path",
+            "data/local-cache.sqlite3",
+            "--full-json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    mutation = payload["pre_mutation_gates"]["mutation_summary"]
+    item = mutation["items"][0]
+
+    assert exit_code == 1
+    assert payload["pre_mutation_gates"]["state"] == "blocked"
+    assert mutation["state"] == "non-formatter"
+    assert mutation["formatter_tool_only"] is False
+    assert item["responsible_gates"] == ["pre-commit"]
+    assert item["classification"] == "non-formatter"
+    assert item["appears_formatter_or_tool_output"] is False
+    assert payload["pre_mutation_gates"]["required_rerun"]["state"] == (
+        "not-eligible"
+    )
+    assert payload["pre_mutation_gates"]["rerun"]["eligible"] is False
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+
+
+def test_execute_workflow_pre_mutation_formatter_rerun_success_allows_commit(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Opt-in formatter reruns should permit staging only after verification."""
+    module = _module()
+    path = tmp_path / "tests" / "unit" / "test_closure_readiness.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("before\n", encoding="utf-8")
+    runner = FakeRunner(
+        status_stdout=" M tests/unit/test_closure_readiness.py\n",
+        precommit_returncodes=(1, 0, 0),
+        precommit_stdout_sequence=(
+            "black reformatted files\n",
+            "all hooks passed\n",
+            "all hooks passed\n",
+        ),
+        precommit_file_mutation_sequence=(
+            {"tests/unit/test_closure_readiness.py": "after\n"},
+            {},
+        ),
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "292",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--rerun-formatter-mutations",
+            "--commit-message",
+            "fix(workflow): rerun formatter mutations",
+            "--commit-path",
+            "tests/unit/test_closure_readiness.py",
+            "--full-json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["readiness"]["state"] == "ready"
+    assert payload["pre_mutation_gates"]["state"] == "pass"
+    assert payload["pre_mutation_gates"]["required_rerun"]["state"] == (
+        "passed"
+    )
+    assert payload["pre_mutation_gates"]["rerun"]["state"] == "pass"
+    assert (
+        payload["pre_mutation_gates"]["rerun"]["focused_tests"]["state"]
+        == "pass"
+    )
+    assert payload["pre_mutation_gates"]["rerun"]["changed_paths_after"] == []
+    assert runner.precommit_calls >= 2
+    assert any(call[:3] == ("git", "add", "--") for call in runner.calls)
+    assert any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
+    assert any(call[:2] == ("git", "push") for call in runner.calls)
+
+
+def test_execute_workflow_pre_mutation_formatter_rerun_failure_blocks_commit(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Failed opt-in formatter reruns should still block git mutation."""
+    module = _module()
+    path = tmp_path / "tests" / "unit" / "test_closure_readiness.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("before\n", encoding="utf-8")
+    runner = FakeRunner(
+        status_stdout=" M tests/unit/test_closure_readiness.py\n",
+        precommit_returncodes=(1, 1),
+        precommit_stdout_sequence=(
+            "black reformatted files\n",
+            "pre-commit still failing\n",
+        ),
+        precommit_file_mutation_sequence=(
+            {"tests/unit/test_closure_readiness.py": "after\n"},
+            {},
+        ),
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "292",
+            "--execute-workflow",
+            "--pre-mutation-gates",
+            "--rerun-formatter-mutations",
+            "--commit-message",
+            "fix(workflow): rerun formatter mutations",
+            "--commit-path",
+            "tests/unit/test_closure_readiness.py",
+            "--full-json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["readiness"]["state"] == "blocked"
+    assert payload["pre_mutation_gates"]["state"] == "blocked"
+    assert payload["pre_mutation_gates"]["required_rerun"]["state"] == "failed"
+    assert payload["pre_mutation_gates"]["rerun"]["state"] == "failed"
+    assert "pre-mutation-rerun-gates-failed" in (
+        payload["pre_mutation_gates"]["rerun"]["blocking_checks"]
+    )
+    assert "pre-mutation-rerun-gates-failed" in (
+        payload["readiness"]["blocking_checks"]
+    )
+    assert runner.precommit_calls == 2
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
 
 
 def test_execute_workflow_blocks_clean_tree_without_mutation(
