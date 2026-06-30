@@ -544,13 +544,48 @@ def build_commit_readiness_report(
     expected_upstream: str = DEFAULT_EXPECTED_UPSTREAM,
     runner: CommandRunner | None = None,
     now: datetime | None = None,
+    acceptance_statuses: Mapping[str, str] | None = None,
+    acceptance_files: Mapping[str, Sequence[str]] | None = None,
+    acceptance_tests: Mapping[str, Sequence[str]] | None = None,
+    acceptance_reports: Mapping[str, Sequence[str]] | None = None,
+    acceptance_notes: Mapping[str, Sequence[str]] | None = None,
+    acceptance_missing_ok: bool = False,
+    acceptance_override_reason: str = "",
 ) -> dict[str, Any]:
     """Return publish-safe commit or push readiness without mutating git."""
     command_runner = runner or _run_command
     root = repo_root.expanduser().resolve(strict=False)
     generated_at = now or datetime.now(timezone.utc)
     git_state = collect_git_state(root, runner=command_runner)
-    issue_state = collect_issue_state(root, issue, runner=command_runner)
+    acceptance_requested = _acceptance_requested(
+        statuses=acceptance_statuses,
+        files=acceptance_files,
+        tests=acceptance_tests,
+        reports=acceptance_reports,
+        notes=acceptance_notes,
+        missing_ok=acceptance_missing_ok,
+        override_reason=acceptance_override_reason,
+    )
+    issue_state = collect_issue_state(
+        root,
+        issue,
+        runner=command_runner,
+        include_body=acceptance_requested,
+    )
+    acceptance_coverage = (
+        build_acceptance_coverage(
+            issue_state,
+            statuses=acceptance_statuses,
+            files=acceptance_files,
+            tests=acceptance_tests,
+            reports=acceptance_reports,
+            notes=acceptance_notes,
+            missing_ok=acceptance_missing_ok,
+            override_reason=acceptance_override_reason,
+        )
+        if acceptance_requested
+        else {}
+    )
     changes = collect_change_summary(root, runner=command_runner)
     scope = _commit_scope_payload(
         changes,
@@ -571,6 +606,7 @@ def build_commit_readiness_report(
         changes=changes,
         scope=scope,
         commit_message=commit_validation,
+        acceptance_coverage=acceptance_coverage,
         required_branch=required_branch,
         expected_upstream=expected_upstream,
     )
@@ -591,6 +627,8 @@ def build_commit_readiness_report(
         "commit_message": commit_validation,
         "readiness": readiness,
     }
+    if acceptance_requested:
+        report["acceptance_coverage"] = acceptance_coverage
     report["command_plan"] = _commit_command_plan(report)
     safe = publish_safe_json_value(report)
     if not isinstance(safe, dict):
@@ -1287,6 +1325,7 @@ def determine_commit_readiness(
     changes: Mapping[str, Any],
     scope: Mapping[str, Any],
     commit_message: Mapping[str, Any],
+    acceptance_coverage: Mapping[str, Any] | None = None,
     required_branch: str = DEFAULT_REQUIRED_BRANCH,
     expected_upstream: str = DEFAULT_EXPECTED_UPSTREAM,
 ) -> dict[str, Any]:
@@ -1327,6 +1366,10 @@ def determine_commit_readiness(
             and changes.get("state") == "dirty"
         ):
             warnings.append("scope-not-declared")
+    if acceptance_coverage and not _acceptance_close_ready(
+        acceptance_coverage
+    ):
+        blockers.extend(_acceptance_readiness_blockers(acceptance_coverage))
 
     return {
         "state": "ready" if not blockers else "blocked",
@@ -2023,6 +2066,9 @@ def render_commit_readiness_human(report: Mapping[str, Any]) -> str:
     ]
     if mode == "commit":
         lines.append(f"message: {message.get('state', 'not-checked')}")
+    acceptance = _mapping(report.get("acceptance_coverage"))
+    if acceptance:
+        lines.append(_acceptance_human_line(acceptance))
     blockers = list(readiness.get("blocking_checks", []) or [])
     if blockers:
         lines.append("blocking: " + ", ".join(str(item) for item in blockers))
@@ -2334,6 +2380,16 @@ def _acceptance_close_blockers(
     return blockers
 
 
+def _acceptance_readiness_blockers(
+    acceptance: Mapping[str, Any],
+) -> list[str]:
+    blockers = _acceptance_close_blockers(acceptance)
+    if blockers:
+        return blockers
+    state = str(acceptance.get("state", "unknown") or "unknown")
+    return [f"acceptance-{_slug(state)}"]
+
+
 def _acceptance_close_ready(acceptance: Mapping[str, Any]) -> bool:
     if not acceptance:
         return True
@@ -2510,6 +2566,39 @@ def _parse_acceptance_value_specs(
         )
         parsed[key].append(value)
     return {key: tuple(values) for key, values in parsed.items()}
+
+
+def _acceptance_requested(
+    *,
+    statuses: Mapping[str, str] | None = None,
+    files: Mapping[str, Sequence[str]] | None = None,
+    tests: Mapping[str, Sequence[str]] | None = None,
+    reports: Mapping[str, Sequence[str]] | None = None,
+    notes: Mapping[str, Sequence[str]] | None = None,
+    missing_ok: bool = False,
+    override_reason: str = "",
+) -> bool:
+    return bool(
+        statuses
+        or files
+        or tests
+        or reports
+        or notes
+        or missing_ok
+        or override_reason
+    )
+
+
+def _acceptance_requested_from_args(args: argparse.Namespace) -> bool:
+    return _acceptance_requested(
+        statuses=args.acceptance_statuses,
+        files=args.acceptance_files,
+        tests=args.acceptance_tests,
+        reports=args.acceptance_reports,
+        notes=args.acceptance_notes,
+        missing_ok=bool(args.acceptance_missing_ok),
+        override_reason=str(args.acceptance_override_reason or ""),
+    )
 
 
 def _acceptance_kwargs(args: argparse.Namespace) -> dict[str, Any]:
@@ -2809,6 +2898,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "--push-readiness cannot be combined with commit message or path options"
         )
     change_readiness = args.commit_readiness or args.push_readiness
+    acceptance_requested = _acceptance_requested_from_args(args)
+    if change_readiness and acceptance_requested and args.issue is None:
+        parser.error(
+            "acceptance evidence with --commit-readiness/--push-readiness "
+            "requires --issue"
+        )
     if change_readiness and (
         args.issue_audit
         or args.execute_workflow
@@ -2826,18 +2921,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         or args.print_close_comment
         or args.close_issue
         or args.workflow
-        or args.acceptance_status_specs
-        or args.acceptance_file_specs
-        or args.acceptance_test_specs
-        or args.acceptance_report_specs
-        or args.acceptance_note_specs
-        or args.acceptance_missing_ok
-        or args.acceptance_override_reason
     ):
         parser.error(
             "--commit-readiness/--push-readiness can only be combined with "
             "--issue, --json, --required-branch, --expected-upstream, "
-            "and commit-readiness options"
+            "commit-readiness options, and acceptance evidence options"
         )
     if args.execute_workflow:
         if args.issue is None:
@@ -3000,6 +3088,7 @@ def main(
             required_branch=args.required_branch,
             expected_upstream=args.expected_upstream,
             runner=runner,
+            **_acceptance_kwargs(args),
         )
         if args.json:
             print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201

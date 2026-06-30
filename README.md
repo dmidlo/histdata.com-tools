@@ -273,7 +273,8 @@ python scripts/closure_readiness.py \
   --issue 274 \
   --commit-readiness \
   --commit-message "feat(scope): describe the change" \
-  --commit-path path/to/changed-file.py
+  --commit-path path/to/changed-file.py \
+  --acceptance-test '*=tests/unit/test_changed_behavior.py'
 python scripts/closure_readiness.py --issue 274 --push-readiness
 python scripts/closure_readiness.py --issue 274 --issue-audit
 python scripts/closure_readiness.py --issue 274 --workflow
@@ -297,9 +298,12 @@ output, pytest, and pre-commit. Reports are publish-safe JSON and Markdown with
 a GitHub-ready close comment block. `--commit-readiness` validates the current
 change scope and candidate Commitizen message without running `git add`,
 `git commit`, or `git push`; use repeated `--commit-path` flags to declare the
-intended file scope and catch unrelated dirty files. `--push-readiness` reports
-whether a clean `dev` branch with local commits ahead of `origin/dev` is ready
-to push. Default issue-scoped reports are local outputs under
+intended file scope and catch unrelated dirty files. When paired with
+`--issue`, the same report-only mode also accepts the `--acceptance-*` evidence
+flags and prints commit readiness plus acceptance coverage in one human or JSON
+payload. `--push-readiness` reports whether a clean `dev` branch with local
+commits ahead of `origin/dev` is ready to push. Default issue-scoped reports are
+local outputs under
 `.histdatacom/closure-readiness/`; the helper verifies those paths are
 gitignored before writing them and blocks closure if that safety check drifts.
 Explicit report paths still work, but the report marks whether they may dirty

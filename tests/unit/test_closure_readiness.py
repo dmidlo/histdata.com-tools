@@ -757,6 +757,190 @@ def test_commit_readiness_blocks_invalid_commit_message(
     assert "commit-message-invalid" in payload["readiness"]["blocking_checks"]
 
 
+def test_commit_readiness_accepts_acceptance_evidence_without_mutating(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Commit readiness should validate acceptance evidence report-only."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        issue_body="""
+## Acceptance criteria
+
+- Support acceptance evidence in commit readiness.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "291",
+            "--commit-readiness",
+            "--commit-message",
+            "feat(workflow): support non-mutating acceptance readiness",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--acceptance-test",
+            "*=tests/unit/test_closure_readiness.py",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "state: ready" in output
+    assert "acceptance: ready (1/1 covered, 0 missing)" in output
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+    assert not any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
+    assert not any(call[:2] == ("git", "push") for call in runner.calls)
+    assert not any(
+        call[:3] == ("gh", "issue", "close") for call in runner.calls
+    )
+
+
+def test_commit_readiness_json_includes_acceptance_coverage(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Commit readiness JSON should expose stable acceptance coverage."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        issue_body="""
+## Acceptance criteria
+
+- Include stable JSON output for automation.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "291",
+            "--commit-readiness",
+            "--commit-message",
+            "feat(workflow): support non-mutating acceptance readiness",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--acceptance-test",
+            "*=tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == module.COMMIT_READINESS_SCHEMA_VERSION
+    assert payload["readiness"]["state"] == "ready"
+    assert payload["acceptance_coverage"]["state"] == "ready"
+    assert payload["acceptance_coverage"]["criteria_count"] == 1
+    assert payload["acceptance_coverage"]["covered_count"] == 1
+    assert payload["acceptance_coverage"]["missing_count"] == 0
+    assert payload["acceptance_coverage"]["items"][0]["tests"] == [
+        "tests/unit/test_closure_readiness.py"
+    ]
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+    assert not any(call[:2] == ("git", "push") for call in runner.calls)
+    assert not any(
+        call[:3] == ("gh", "issue", "close") for call in runner.calls
+    )
+
+
+def test_commit_readiness_blocks_missing_acceptance_evidence(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Missing acceptance evidence should block non-mutating readiness."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        issue_body="""
+## Acceptance criteria
+
+- Cover the first criterion.
+- Cover the second criterion.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "291",
+            "--commit-readiness",
+            "--commit-message",
+            "feat(workflow): support non-mutating acceptance readiness",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--acceptance-test",
+            "ac-001=tests/unit/test_closure_readiness.py",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "state: blocked" in output
+    assert "acceptance: blocked (1/2 covered, 1 missing)" in output
+    assert "acceptance-criteria-missing" in output
+    assert "acceptance:ac-002" in output
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+    assert not any(
+        call[:3] == ("gh", "issue", "close") for call in runner.calls
+    )
+
+
+def test_commit_readiness_blocks_invalid_message_and_scope_with_acceptance(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Acceptance evidence should not hide commit message or scope blockers."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M README.md\n M pyproject.toml\n",
+        commitizen_returncode=1,
+        issue_body="""
+## Acceptance criteria
+
+- Keep existing commit readiness blockers.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "291",
+            "--commit-readiness",
+            "--commit-message",
+            "bad message",
+            "--commit-path",
+            "README.md",
+            "--acceptance-test",
+            "*=tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    blockers = payload["readiness"]["blocking_checks"]
+
+    assert exit_code == 1
+    assert payload["acceptance_coverage"]["state"] == "ready"
+    assert payload["commit_message"]["state"] == "invalid"
+    assert payload["scope"]["state"] == "dirty-unrelated"
+    assert "commit-message-invalid" in blockers
+    assert "unrelated-changes" in blockers
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+    assert not any(
+        call[:3] == ("gh", "issue", "close") for call in runner.calls
+    )
+
+
 def test_commit_readiness_blocks_upstream_behind(
     tmp_path: Path,
     capsys: Any,
