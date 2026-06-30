@@ -315,12 +315,13 @@ Add `--pre-mutation-gates` to run the same closure gate battery before the first
 `git add`; the workflow blocks staging, commit, and push if those gates fail or
 rewrite files, and records the result separately from the post-push closure
 gates. Successful execution prints a compact closeout with final issue, branch,
-commit, acceptance, report-path, and runtime/process health. Use `--json` for
-the same compact closeout as a stable scriptable payload; use `--full-json` only
-when stdout needs the full execution evidence object. Long workflow runs also
-stream bounded phase progress to stderr so JSON stdout stays parseable; add
-`--quiet-progress` when automation should suppress live progress while retaining
-phase timing in the saved evidence report. Issue closure reports
+commit, acceptance, report-path, runtime/process health, and the slowest
+workflow phases. Use `--json` for the same compact closeout as a stable
+scriptable payload; use `--full-json` only when stdout needs the full execution
+evidence object. Long workflow runs also stream bounded phase progress to stderr
+so JSON stdout stays parseable; add `--quiet-progress` when automation should
+suppress live progress while retaining phase timing in the saved evidence
+report. Issue closure reports
 parse issue checklists or `Acceptance criteria`
 bullets into acceptance coverage evidence. Attach criterion-specific or shared
 evidence with `--acceptance-status`, `--acceptance-file`, `--acceptance-test`,

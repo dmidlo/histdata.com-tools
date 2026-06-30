@@ -42,6 +42,7 @@ DEFAULT_REQUIRED_BRANCH = "dev"
 DEFAULT_EXPECTED_UPSTREAM = "origin/dev"
 DEFAULT_TAIL_LINE_LIMIT = 12
 DEFAULT_TAIL_CHAR_LIMIT = 4_000
+WORKFLOW_PROGRESS_SLOW_PHASE_LIMIT = 3
 ACCEPTANCE_STATUSES = {
     "verified",
     "manual",
@@ -1744,7 +1745,10 @@ def _workflow_progress_summary(
             "event_count": 0,
             "elapsed_seconds": 0.0,
             "last_completed_phase": "",
+            "slow_phases": [],
+            "terminal_phase": {},
         }
+    phases = _workflow_progress_phases(progress)
     return {
         "state": progress.get("state", "unknown"),
         "stream": progress.get("stream", "unknown"),
@@ -1752,7 +1756,65 @@ def _workflow_progress_summary(
         "event_count": progress.get("event_count", 0),
         "elapsed_seconds": progress.get("elapsed_seconds", 0.0),
         "last_completed_phase": progress.get("last_completed_phase", ""),
+        "slow_phases": _workflow_progress_slow_phases(phases),
+        "terminal_phase": _workflow_progress_terminal_phase(phases),
     }
+
+
+def _workflow_progress_phases(
+    progress: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], ...]:
+    phases = progress.get("phases", [])
+    if not isinstance(phases, Sequence) or isinstance(phases, str):
+        return ()
+    return tuple(_mapping(phase) for phase in phases if _mapping(phase))
+
+
+def _workflow_progress_slow_phases(
+    phases: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    timed_phases: list[tuple[float, int, Mapping[str, Any]]] = []
+    for index, phase in enumerate(phases):
+        duration = _float_or_none(phase.get("duration_seconds"))
+        if duration is None:
+            continue
+        if str(phase.get("status", "")) == "skipped":
+            continue
+        timed_phases.append((duration, index, phase))
+    timed_phases.sort(key=lambda item: (-item[0], item[1]))
+    return [
+        _workflow_phase_summary(phase)
+        for _, _, phase in timed_phases[:WORKFLOW_PROGRESS_SLOW_PHASE_LIMIT]
+    ]
+
+
+def _workflow_progress_terminal_phase(
+    phases: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    for phase in reversed(phases):
+        if str(phase.get("status", "")) in {"blocked", "failed"}:
+            return _workflow_phase_summary(phase)
+    return {}
+
+
+def _workflow_phase_summary(phase: Mapping[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "phase": str(phase.get("phase", "")),
+        "status": str(phase.get("status", "unknown")),
+    }
+    duration = _float_or_none(phase.get("duration_seconds"))
+    if duration is not None:
+        payload["duration_seconds"] = duration
+    message = str(phase.get("message", "") or "")
+    if message:
+        payload["message"] = message
+    command_label = str(phase.get("command_label", "") or "")
+    if command_label:
+        payload["command_label"] = command_label
+    safe = publish_safe_json_value(payload)
+    if not isinstance(safe, dict):
+        raise TypeError("workflow phase summary must be a JSON object")
+    return dict(safe)
 
 
 def render_markdown(report: Mapping[str, Any]) -> str:
@@ -2113,12 +2175,7 @@ def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
             f"{process_after.get('state', 'not-recorded')} "
             f"({process_after.get('total_count', 0)})"
         ),
-        (
-            "progress: "
-            f"{workflow_progress.get('state', 'not-recorded')} "
-            f"({workflow_progress.get('phase_count', 0)} phases, "
-            f"{workflow_progress.get('elapsed_seconds', 0.0)}s)"
-        ),
+        _workflow_progress_human_line(workflow_progress),
         (
             "logs: "
             f"{logs.get('directory', '')} "
@@ -2155,6 +2212,60 @@ def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
                 f"{write_state}]"
             )
     return "\n".join(lines)
+
+
+def _workflow_progress_human_line(
+    workflow_progress: Mapping[str, Any],
+) -> str:
+    state = workflow_progress.get("state", "not-recorded")
+    details: list[str] = []
+    terminal_phase = _mapping(workflow_progress.get("terminal_phase"))
+    if terminal_phase:
+        terminal_status = str(terminal_phase.get("status", "terminal"))
+        details.append(
+            f"{terminal_status}: {_workflow_phase_human(terminal_phase)}"
+        )
+    slow_phases = [
+        _mapping(phase)
+        for phase in workflow_progress.get("slow_phases", []) or []
+        if _mapping(phase)
+    ]
+    if slow_phases:
+        details.append(
+            "slow: "
+            + ", ".join(
+                _workflow_phase_human(
+                    phase,
+                    include_status=(
+                        str(phase.get("status", "")) != "completed"
+                    ),
+                )
+                for phase in slow_phases
+            )
+        )
+    suffix = ""
+    if details:
+        suffix = "; " + "; ".join(details)
+    return (
+        f"progress: {state} "
+        f"({workflow_progress.get('phase_count', 0)} phases, "
+        f"{workflow_progress.get('elapsed_seconds', 0.0)}s{suffix})"
+    )
+
+
+def _workflow_phase_human(
+    phase: Mapping[str, Any],
+    *,
+    include_status: bool = False,
+) -> str:
+    parts = [str(phase.get("phase", ""))]
+    status = str(phase.get("status", "") or "")
+    if include_status and status:
+        parts.append(status)
+    duration = _float_or_none(phase.get("duration_seconds"))
+    if duration is not None:
+        parts.append(f"{duration:.3f}s")
+    return " ".join(part for part in parts if part)
 
 
 def render_summary_human(summary: Mapping[str, Any]) -> str:
@@ -4082,6 +4193,13 @@ def _int(value: object) -> int:
         return int(str(value))
     except (TypeError, ValueError):
         return 0
+
+
+def _float_or_none(value: object) -> float | None:
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _yes_no(value: object) -> str:

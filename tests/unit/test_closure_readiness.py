@@ -1171,6 +1171,7 @@ def test_execute_workflow_json_stdout_stays_parseable_with_progress(
     )
     assert summary["workflow_progress"]["state"] == "completed"
     assert summary["workflow_progress"]["stream"] == "stderr-line"
+    assert summary["workflow_progress"]["slow_phases"]
     assert "commands" not in summary
     assert captured.err.startswith("issue-workflow progress:")
 
@@ -2166,6 +2167,170 @@ def test_summarize_issue_workflow_report_json_returns_stable_payload(
     assert "precheck" not in summary
     assert "gates" not in summary
     assert runner.calls == []
+
+
+def test_summarize_issue_workflow_report_includes_slow_phase_summary() -> None:
+    """Compact execution summaries should expose bounded slow phase evidence."""
+    module = _module()
+    report = {
+        "schema_version": module.ISSUE_WORKFLOW_SCHEMA_VERSION,
+        "issue_number": 290,
+        "readiness": {"state": "ready"},
+        "workflow_progress": {
+            "state": "completed",
+            "stream": "stderr-line",
+            "phase_count": 5,
+            "event_count": 10,
+            "elapsed_seconds": 40.5,
+            "last_completed_phase": "report-writing",
+            "phases": [
+                {
+                    "phase": "initial-readiness",
+                    "status": "completed",
+                    "duration_seconds": 1.25,
+                },
+                {
+                    "phase": "pytest",
+                    "status": "completed",
+                    "duration_seconds": 21.25,
+                    "log_path": "/Users/example/private/pytest.log",
+                },
+                {
+                    "phase": "pre-commit",
+                    "status": "completed",
+                    "duration_seconds": 12,
+                },
+                {
+                    "phase": "push",
+                    "status": "completed",
+                    "duration_seconds": 3.5,
+                    "command_label": "git push",
+                },
+                {
+                    "phase": "report-writing",
+                    "status": "completed",
+                    "duration_seconds": 0.25,
+                },
+            ],
+            "events": [],
+        },
+    }
+
+    summary = module.summarize_issue_workflow_report(report)
+    progress = summary["workflow_progress"]
+    human = module.render_issue_workflow_summary_human(summary)
+
+    assert [phase["phase"] for phase in progress["slow_phases"]] == [
+        "pytest",
+        "pre-commit",
+        "push",
+    ]
+    assert progress["slow_phases"][0]["duration_seconds"] == 21.25
+    assert progress["slow_phases"][2]["command_label"] == "git push"
+    assert "log_path" not in progress["slow_phases"][0]
+    assert progress["terminal_phase"] == {}
+    assert "slow: pytest 21.250s, pre-commit 12.000s, push 3.500s" in human
+
+
+def test_summarize_issue_workflow_report_shows_terminal_blocked_phase() -> None:
+    """Blocked summaries should show the blocking phase and existing timings."""
+    module = _module()
+    report = {
+        "schema_version": module.ISSUE_WORKFLOW_SCHEMA_VERSION,
+        "issue_number": 290,
+        "readiness": {
+            "state": "blocked",
+            "blocking_checks": ["pre-mutation-gates"],
+        },
+        "workflow_progress": {
+            "state": "blocked",
+            "stream": "stderr-line",
+            "phase_count": 3,
+            "event_count": 5,
+            "elapsed_seconds": 5.75,
+            "last_completed_phase": "initial-readiness",
+            "phases": [
+                {
+                    "phase": "initial-readiness",
+                    "status": "completed",
+                    "duration_seconds": 4.0,
+                },
+                {
+                    "phase": "pre-mutation-gates",
+                    "status": "blocked",
+                    "duration_seconds": 1.5,
+                    "message": "pre-commit failed",
+                },
+                {
+                    "phase": "closure-gates",
+                    "status": "skipped",
+                    "message": "workflow blocked",
+                },
+            ],
+            "events": [],
+        },
+    }
+
+    summary = module.summarize_issue_workflow_report(report)
+    progress = summary["workflow_progress"]
+    human = module.render_issue_workflow_summary_human(summary)
+
+    assert progress["terminal_phase"]["phase"] == "pre-mutation-gates"
+    assert progress["terminal_phase"]["status"] == "blocked"
+    assert progress["terminal_phase"]["message"] == "pre-commit failed"
+    assert [phase["phase"] for phase in progress["slow_phases"]] == [
+        "initial-readiness",
+        "pre-mutation-gates",
+    ]
+    assert "blocked: pre-mutation-gates 1.500s" in human
+    assert (
+        "slow: initial-readiness 4.000s, " "pre-mutation-gates blocked 1.500s"
+    ) in human
+
+
+def test_summarize_issue_workflow_report_shows_terminal_failed_phase() -> None:
+    """Failed summaries should show the failed phase even when it is not slow."""
+    module = _module()
+    report = {
+        "schema_version": module.ISSUE_WORKFLOW_SCHEMA_VERSION,
+        "issue_number": 290,
+        "readiness": {"state": "blocked", "blocking_checks": ["commit"]},
+        "workflow_progress": {
+            "state": "failed",
+            "stream": "stderr-line",
+            "phase_count": 2,
+            "event_count": 4,
+            "elapsed_seconds": 30.2,
+            "last_completed_phase": "pre-mutation-gates",
+            "phases": [
+                {
+                    "phase": "pre-mutation-gates",
+                    "status": "completed",
+                    "duration_seconds": 29.5,
+                },
+                {
+                    "phase": "commit",
+                    "status": "failed",
+                    "duration_seconds": 0.2,
+                    "message": "commit failed",
+                },
+            ],
+            "events": [],
+        },
+    }
+
+    summary = module.summarize_issue_workflow_report(report)
+    progress = summary["workflow_progress"]
+    human = module.render_issue_workflow_summary_human(summary)
+
+    assert progress["terminal_phase"]["phase"] == "commit"
+    assert progress["terminal_phase"]["status"] == "failed"
+    assert [phase["phase"] for phase in progress["slow_phases"]] == [
+        "pre-mutation-gates",
+        "commit",
+    ]
+    assert "failed: commit 0.200s" in human
+    assert "commit failed 0.200s" in human
 
 
 def test_summarize_issue_workflow_report_routes_markdown_and_close_comment(
