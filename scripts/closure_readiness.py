@@ -37,6 +37,7 @@ COMMIT_READINESS_SCHEMA_VERSION = "histdatacom.commit-readiness.v1"
 ISSUE_WORKFLOW_SCHEMA_VERSION = "histdatacom.issue-workflow-execution.v1"
 ISSUE_WORKFLOW_SUMMARY_SCHEMA_VERSION = "histdatacom.issue-workflow-summary.v1"
 OPEN_ISSUE_AUDIT_SCHEMA_VERSION = "histdatacom.open-issue-audit.v1"
+VERIFICATION_SCHEMA_VERSION = "histdatacom.closure-verification.v1"
 ACCEPTANCE_COVERAGE_SCHEMA_VERSION = "histdatacom.acceptance-coverage.v1"
 DEFAULT_REPORT_DIR = Path(".histdatacom") / "closure-readiness"
 DEFAULT_REQUIRED_BRANCH = "dev"
@@ -44,6 +45,7 @@ DEFAULT_EXPECTED_UPSTREAM = "origin/dev"
 DEFAULT_TAIL_LINE_LIMIT = 12
 DEFAULT_TAIL_CHAR_LIMIT = 4_000
 DEFAULT_OPEN_ISSUE_LIMIT = 200
+INFERRED_SCOPE_BROAD_PATH_LIMIT = 12
 OPEN_ISSUE_SEARCH_FILE_LIMIT = 400
 OPEN_ISSUE_SEARCH_FILE_BYTES_LIMIT = 200_000
 OPEN_ISSUE_SEARCH_TERM_LIMIT = 12
@@ -716,6 +718,360 @@ def build_commit_readiness_report(
     if not isinstance(safe, dict):
         raise TypeError("commit readiness report must be a JSON object")
     return dict(safe)
+
+
+def build_closure_verification_report(
+    *,
+    repo_root: Path = PROJECT_ROOT,
+    issue: int | None = None,
+    commit_message: str = "",
+    commit_message_source: str = "argument",
+    expected_paths: Sequence[Path] | None = None,
+    infer_commit_paths: bool = False,
+    required_branch: str = DEFAULT_REQUIRED_BRANCH,
+    expected_upstream: str = DEFAULT_EXPECTED_UPSTREAM,
+    rerun_standalone_formatter_mutations: bool = False,
+    release_preflight: bool = False,
+    artifact_roots: Sequence[Path] | None = None,
+    process_rows: Sequence[str] | None = None,
+    runner: CommandRunner | None = None,
+    now: datetime | None = None,
+    acceptance_statuses: Mapping[str, str] | None = None,
+    acceptance_files: Mapping[str, Sequence[str]] | None = None,
+    acceptance_tests: Mapping[str, Sequence[str]] | None = None,
+    acceptance_reports: Mapping[str, Sequence[str]] | None = None,
+    acceptance_notes: Mapping[str, Sequence[str]] | None = None,
+    acceptance_missing_ok: bool = False,
+    acceptance_override_reason: str = "",
+) -> dict[str, Any]:
+    """Return one non-mutating ready/blocked answer for issue closure."""
+    command_runner = runner or _run_command
+    root = repo_root.expanduser().resolve(strict=False)
+    generated_at = now or datetime.now(timezone.utc)
+    changes_before = collect_change_summary(root, runner=command_runner)
+    scope_intent = _closure_verification_scope_intent(
+        changes_before,
+        repo_root=root,
+        expected_paths=expected_paths or (),
+        infer_commit_paths=infer_commit_paths,
+    )
+    intended_paths = tuple(
+        Path(path) for path in list(scope_intent.get("intended_paths", []) or [])
+    )
+    github = collect_github_cli_summary(root, runner=command_runner)
+    policy = collect_workflow_policy_summary(root)
+    commit_report = build_commit_readiness_report(
+        repo_root=root,
+        issue=issue,
+        mode="commit",
+        commit_message=commit_message,
+        commit_message_source=commit_message_source,
+        expected_paths=intended_paths,
+        required_branch=required_branch,
+        expected_upstream=expected_upstream,
+        runner=command_runner,
+        now=generated_at,
+        acceptance_statuses=acceptance_statuses,
+        acceptance_files=acceptance_files,
+        acceptance_tests=acceptance_tests,
+        acceptance_reports=acceptance_reports,
+        acceptance_notes=acceptance_notes,
+        acceptance_missing_ok=acceptance_missing_ok,
+        acceptance_override_reason=acceptance_override_reason,
+    )
+    focused_tests = collect_focused_test_summary(
+        root,
+        acceptance_tests=acceptance_tests,
+        monitored_paths=tuple(scope_intent.get("intended_paths", []) or ()),
+        runner=command_runner,
+    )
+    closure_report = build_readiness_report(
+        repo_root=root,
+        issue=issue,
+        run_gates=True,
+        rerun_standalone_formatter_mutations=(
+            rerun_standalone_formatter_mutations
+        ),
+        release_preflight=release_preflight,
+        artifact_roots=artifact_roots,
+        process_rows=process_rows,
+        runner=command_runner,
+        now=generated_at,
+        acceptance_statuses=acceptance_statuses,
+        acceptance_files=acceptance_files,
+        acceptance_tests=acceptance_tests,
+        acceptance_reports=acceptance_reports,
+        acceptance_notes=acceptance_notes,
+        acceptance_missing_ok=acceptance_missing_ok,
+        acceptance_override_reason=acceptance_override_reason,
+    )
+    final_changes = collect_change_summary(root, runner=command_runner)
+    readiness = determine_closure_verification_readiness(
+        scope_intent=scope_intent,
+        github=github,
+        workflow_policy=policy,
+        commit_readiness=commit_report,
+        focused_tests=focused_tests,
+        closure_report=closure_report,
+        final_changes=final_changes,
+    )
+    command_plan = _closure_verification_command_plan(
+        issue=issue,
+        commit_message=commit_message,
+        commit_paths=tuple(scope_intent.get("intended_paths", []) or ()),
+        release_preflight=release_preflight,
+        artifact_roots=artifact_roots or (),
+        rerun_formatter_mutations=True,
+        acceptance_statuses=acceptance_statuses,
+        acceptance_files=acceptance_files,
+        acceptance_tests=acceptance_tests,
+        acceptance_reports=acceptance_reports,
+        acceptance_notes=acceptance_notes,
+        acceptance_missing_ok=acceptance_missing_ok,
+        acceptance_override_reason=acceptance_override_reason,
+        ready=readiness.get("state") == "ready",
+    )
+    report: dict[str, Any] = {
+        "schema_version": VERIFICATION_SCHEMA_VERSION,
+        "operation": "closure-verification",
+        "generated_at_utc": generated_at.astimezone(timezone.utc).isoformat(),
+        "issue": _mapping(closure_report.get("issue")),
+        "github_cli": github,
+        "workflow_policy": policy,
+        "scope_intent": scope_intent,
+        "commit_readiness": commit_report,
+        "focused_tests": focused_tests,
+        "gates": _mapping(closure_report.get("gates")),
+        "release_preflight": _mapping(closure_report.get("release_preflight")),
+        "acceptance_coverage": _mapping(
+            closure_report.get("acceptance_coverage")
+        ),
+        "process_health": {
+            "before": _mapping(closure_report.get("processes_before_gates")),
+            "after": _mapping(closure_report.get("processes")),
+        },
+        "source_artifacts": {
+            "before": _mapping(
+                closure_report.get("source_artifacts_before_gates")
+            ),
+            "after": _mapping(closure_report.get("source_artifacts")),
+        },
+        "repo": {
+            "before": _mapping(commit_report.get("repo")),
+            "after": _mapping(closure_report.get("repo")),
+            "final_changes": final_changes,
+        },
+        "check_plan": {
+            "already_run": [
+                "commit scope/message validation",
+                "acceptance coverage",
+                "focused pytest commands when recognized",
+                "README help sync",
+                "git diff --check",
+                "main CLI help smoke",
+                "full pytest",
+                "full pre-commit",
+                "optional TestPyPI local simple-registry preflight",
+                "final git status",
+                "issue readback",
+                "source-artifact cleanliness",
+                "owned process health",
+            ],
+            "execute_workflow_will_rerun": [
+                "pre-mutation closure gates",
+                "targeted git add/commit",
+                "push readiness",
+                "git push",
+                "post-push closure gates",
+                "GitHub issue close",
+                "final readback",
+            ],
+        },
+        "readiness": readiness,
+        "command_plan": command_plan,
+    }
+    safe = publish_safe_json_value(report)
+    if not isinstance(safe, dict):
+        raise TypeError("closure verification report must be a JSON object")
+    return dict(safe)
+
+
+def collect_github_cli_summary(
+    repo_root: Path,
+    *,
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    """Return GitHub CLI availability and authentication status."""
+    version = runner(("gh", "--version"), repo_root)
+    auth = runner(("gh", "auth", "status"), repo_root)
+    blockers: list[str] = []
+    if version.returncode != 0:
+        blockers.append("gh-version")
+    if auth.returncode != 0:
+        blockers.append("gh-auth-status")
+    return {
+        "state": "pass" if not blockers else "fail",
+        "blocking_checks": blockers,
+        "version": {
+            "returncode": version.returncode,
+            "stdout_tail": _tail_text(version.stdout),
+            "stderr_tail": _tail_text(version.stderr),
+        },
+        "auth": {
+            "returncode": auth.returncode,
+            "stdout_tail": _tail_text(auth.stdout),
+            "stderr_tail": _tail_text(auth.stderr),
+        },
+    }
+
+
+def collect_workflow_policy_summary(repo_root: Path) -> dict[str, Any]:
+    """Return a bounded readback of local maintainer workflow policy."""
+    candidates = (repo_root / "agents.MD", repo_root / "AGENTS.md")
+    path = next((item for item in candidates if item.exists()), candidates[0])
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {
+            "state": "missing",
+            "path": str(publish_safe_path(path.name)),
+            "rules": [],
+            "warning": "agents.MD was not found",
+        }
+    except OSError as exc:
+        return {
+            "state": "unavailable",
+            "path": str(publish_safe_path(path.name)),
+            "rules": [],
+            "warning": f"workflow policy could not be read: {exc.__class__.__name__}",
+        }
+    rules = [
+        _bounded_text(line.strip().lstrip("-").strip(), 180)
+        for line in text.splitlines()
+        if line.strip().startswith("-")
+    ]
+    return {
+        "state": "read",
+        "path": str(publish_safe_path(path.name)),
+        "rules": rules[:20],
+        "rule_count": len(rules),
+    }
+
+
+def collect_focused_test_summary(
+    repo_root: Path,
+    *,
+    acceptance_tests: Mapping[str, Sequence[str]] | None,
+    monitored_paths: Sequence[str],
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    """Run recognized focused pytest commands supplied as acceptance evidence."""
+    commands, skipped = _focused_test_commands_from_acceptance(acceptance_tests)
+    if not commands:
+        return {
+            "state": "not-run",
+            "reason": "no focused pytest acceptance tests supplied",
+            "results": [],
+            "skipped": skipped,
+        }
+    results = [
+        _run_gate(
+            repo_root,
+            GateSpec(
+                f"focused-pytest-{index}",
+                command,
+                _shell_command(_display_python_command(command)),
+            ),
+            runner=runner,
+            monitored_paths=monitored_paths,
+        )
+        for index, command in enumerate(commands, start=1)
+    ]
+    failed = [item for item in results if item.get("status") != "pass"]
+    return {
+        "state": "pass" if not failed else "fail",
+        "results": results,
+        "skipped": skipped,
+    }
+
+
+def determine_closure_verification_readiness(
+    *,
+    scope_intent: Mapping[str, Any],
+    github: Mapping[str, Any],
+    workflow_policy: Mapping[str, Any],
+    commit_readiness: Mapping[str, Any],
+    focused_tests: Mapping[str, Any],
+    closure_report: Mapping[str, Any],
+    final_changes: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return final report-only closure verification state."""
+    blockers: list[str] = []
+    warnings: list[str] = []
+    blockers.extend(str(item) for item in scope_intent.get("blocking_checks", []) or [])
+    warnings.extend(str(item) for item in scope_intent.get("warnings", []) or [])
+    if github.get("state") != "pass":
+        blockers.extend(f"github-cli:{item}" for item in github.get("blocking_checks", []) or [])
+    if workflow_policy.get("state") != "read":
+        warnings.append(f"workflow-policy-{workflow_policy.get('state', 'unknown')}")
+
+    commit_state = _mapping(commit_readiness.get("readiness"))
+    if commit_state.get("state") != "ready":
+        blockers.extend(
+            f"commit-readiness:{item}"
+            for item in list(commit_state.get("blocking_checks", []) or [])
+        )
+    warnings.extend(
+        f"commit-readiness:{item}"
+        for item in list(commit_state.get("warnings", []) or [])
+    )
+
+    acceptance = _mapping(closure_report.get("acceptance_coverage"))
+    if not _acceptance_close_ready(acceptance):
+        blockers.extend(_acceptance_readiness_blockers(acceptance))
+
+    if focused_tests.get("state") == "fail":
+        blockers.append("focused-tests-failed")
+
+    gates = _mapping(closure_report.get("gates"))
+    if gates.get("state") != "pass":
+        blockers.extend(
+            str(item) for item in list(gates.get("blocking_checks", []) or [])
+        )
+        for gate in list(gates.get("results", []) or []):
+            gate_map = _mapping(gate)
+            if gate_map.get("status") != "pass":
+                blockers.append(f"gate:{gate_map.get('name', 'unknown')}")
+
+    release = _mapping(closure_report.get("release_preflight"))
+    if release.get("state") not in {"not-applicable", "pass"}:
+        blockers.append("release-preflight")
+
+    processes = _mapping(closure_report.get("processes"))
+    if processes.get("state") == "dirty":
+        blockers.append("lingering-processes")
+    elif processes.get("state") == "unavailable":
+        warnings.append("process-state-unavailable")
+
+    artifacts = _mapping(closure_report.get("source_artifacts"))
+    if artifacts.get("state") == "dirty":
+        blockers.append("transient-source-artifacts")
+
+    issue = _mapping(closure_report.get("issue"))
+    if _issue_is_closed(issue):
+        blockers.append("issue-not-open")
+
+    blockers.extend(
+        _closure_verification_final_change_blockers(
+            final_changes,
+            intended_paths=tuple(scope_intent.get("intended_paths", []) or ()),
+        )
+    )
+    return {
+        "state": "ready" if not blockers else "blocked",
+        "blocking_checks": list(dict.fromkeys(blockers)),
+        "warnings": list(dict.fromkeys(warnings)),
+    }
 
 
 def collect_change_summary(
@@ -3355,6 +3711,125 @@ def render_commit_readiness_human(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_closure_verification_human(report: Mapping[str, Any]) -> str:
+    """Render a compact one-shot closure verification summary."""
+    readiness = _mapping(report.get("readiness"))
+    issue = _mapping(report.get("issue"))
+    scope = _mapping(report.get("scope_intent"))
+    commit_report = _mapping(report.get("commit_readiness"))
+    commit_state = _mapping(commit_report.get("readiness"))
+    message = _mapping(commit_report.get("commit_message"))
+    repo = _mapping(report.get("repo"))
+    repo_before = _mapping(repo.get("before"))
+    repo_after = _mapping(repo.get("after"))
+    final_changes = _mapping(repo.get("final_changes"))
+    gates = _mapping(report.get("gates"))
+    focused = _mapping(report.get("focused_tests"))
+    release = _mapping(report.get("release_preflight"))
+    process = _mapping(report.get("process_health"))
+    process_before = _mapping(process.get("before"))
+    process_after = _mapping(process.get("after"))
+    artifacts = _mapping(report.get("source_artifacts"))
+    artifacts_after = _mapping(artifacts.get("after"))
+    github = _mapping(report.get("github_cli"))
+    policy = _mapping(report.get("workflow_policy"))
+    acceptance = _mapping(report.get("acceptance_coverage"))
+    command_plan = _mapping(report.get("command_plan"))
+    lines = [
+        "Closure verification",
+        f"state: {readiness.get('state', 'unknown')}",
+        f"issue: {_issue_label(issue)}",
+        (
+            "branch: "
+            f"{repo_before.get('branch', 'unknown')} -> "
+            f"{repo_before.get('upstream', '')} "
+            f"ahead={repo_before.get('ahead', 0)} "
+            f"behind={repo_before.get('behind', 0)}"
+        ),
+        (
+            "scope: "
+            f"{scope.get('mode', 'unknown')} "
+            f"({scope.get('intended_path_count', 0)} paths)"
+        ),
+        f"message: {message.get('state', 'not-checked')}",
+        f"commit readiness: {commit_state.get('state', 'unknown')}",
+        _acceptance_human_line(acceptance),
+        f"focused tests: {focused.get('state', 'not-run')}",
+        f"gates: {gates.get('state', 'unknown')}",
+        f"release preflight: {release.get('state', 'unknown')}",
+        (
+            "processes: "
+            f"{process_before.get('state', 'unknown')} -> "
+            f"{process_after.get('state', 'unknown')}"
+        ),
+        f"source artifacts: {artifacts_after.get('state', 'unknown')}",
+        (
+            "final worktree: "
+            f"{final_changes.get('state', 'unknown')} "
+            f"({final_changes.get('changed_path_count', 0)} paths)"
+        ),
+        f"github: {github.get('state', 'unknown')}",
+        f"policy: {policy.get('state', 'unknown')}",
+        f"post-gate commit: {repo_after.get('head_short', '')}",
+    ]
+    blockers = list(readiness.get("blocking_checks", []) or [])
+    if blockers:
+        lines.append("blocking: " + ", ".join(str(item) for item in blockers))
+    warnings = list(readiness.get("warnings", []) or [])
+    if warnings:
+        lines.append("warnings: " + ", ".join(str(item) for item in warnings))
+    execute_command = str(command_plan.get("execute_workflow", ""))
+    if execute_command:
+        lines.append("next:")
+        lines.append(f"  {execute_command}")
+    return "\n".join(lines)
+
+
+def render_closure_verification_markdown(report: Mapping[str, Any]) -> str:
+    """Render closure verification as publish-safe Markdown."""
+    readiness = _mapping(report.get("readiness"))
+    issue = _mapping(report.get("issue"))
+    scope = _mapping(report.get("scope_intent"))
+    gates = _mapping(report.get("gates"))
+    focused = _mapping(report.get("focused_tests"))
+    release = _mapping(report.get("release_preflight"))
+    process = _mapping(report.get("process_health"))
+    artifacts = _mapping(report.get("source_artifacts"))
+    command_plan = _mapping(report.get("command_plan"))
+    lines = [
+        "# Closure Verification",
+        "",
+        f"- State: {readiness.get('state', 'unknown')}",
+        f"- Issue: {_issue_label(issue)}",
+        (
+            "- Scope: "
+            f"{scope.get('mode', 'unknown')} "
+            f"({scope.get('intended_path_count', 0)} paths)"
+        ),
+        f"- Acceptance: {_acceptance_human_line(_mapping(report.get('acceptance_coverage')))}",
+        f"- Focused tests: {focused.get('state', 'not-run')}",
+        f"- Gates: {gates.get('state', 'unknown')}",
+        f"- Release preflight: {release.get('state', 'unknown')}",
+        (
+            "- Processes: "
+            f"{_mapping(process.get('before')).get('state', 'unknown')} -> "
+            f"{_mapping(process.get('after')).get('state', 'unknown')}"
+        ),
+        (
+            "- Source artifacts: "
+            f"{_mapping(artifacts.get('after')).get('state', 'unknown')}"
+        ),
+    ]
+    blockers = list(readiness.get("blocking_checks", []) or [])
+    if blockers:
+        lines.extend(["", "## Blocking Checks", ""])
+        lines.extend(f"- {item}" for item in blockers)
+    execute_command = str(command_plan.get("execute_workflow", ""))
+    if execute_command:
+        lines.extend(["", "## Next Command", "", "```sh", execute_command, "```"])
+    return "\n".join(lines)
+
+
 def _gate_mutation_human_lines(gates: Mapping[str, Any]) -> list[str]:
     changed_paths = list(gates.get("changed_paths_after", []) or [])
     if not changed_paths:
@@ -4053,6 +4528,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="report whether current changes are ready to stage and commit",
     )
     parser.add_argument(
+        "--closure-verification",
+        "--verify-closure",
+        action="store_true",
+        help=(
+            "run one non-mutating verification for issue commit, push, and "
+            "closure readiness"
+        ),
+    )
+    parser.add_argument(
         "--push-readiness",
         action="store_true",
         help="report whether committed local changes are ready to push",
@@ -4110,6 +4594,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         action="append",
         help="intended changed path; repeat to declare the safe commit scope",
+    )
+    parser.add_argument(
+        "--infer-commit-paths",
+        action="store_true",
+        help=(
+            "with --closure-verification, infer the intended commit scope from "
+            "the current dirty worktree"
+        ),
     )
     parser.add_argument(
         "--acceptance-status",
@@ -4290,6 +4782,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args.issue is not None
         or args.issue_audit
         or args.commit_readiness
+        or args.closure_verification
         or args.push_readiness
         or args.execute_workflow
         or args.pre_mutation_gates
@@ -4310,6 +4803,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         or args.commit_message
         or args.commit_message_file
         or args.commit_paths
+        or args.infer_commit_paths
         or _acceptance_requested_from_args(args)
     ):
         parser.error(
@@ -4324,6 +4818,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error(
             "--push-readiness cannot be combined with commit message or path options"
         )
+    if args.push_readiness and args.infer_commit_paths:
+        parser.error("--push-readiness cannot be combined with --infer-commit-paths")
     change_readiness = args.commit_readiness or args.push_readiness
     acceptance_requested = _acceptance_requested_from_args(args)
     if change_readiness and acceptance_requested and args.issue is None:
@@ -4331,8 +4827,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "acceptance evidence with --commit-readiness/--push-readiness "
             "requires --issue"
         )
+    if change_readiness and args.infer_commit_paths:
+        parser.error(
+            "--infer-commit-paths can only be used with --closure-verification"
+        )
     if change_readiness and (
         args.issue_audit
+        or args.closure_verification
         or args.execute_workflow
         or args.pre_mutation_gates
         or args.rerun_formatter_mutations
@@ -4356,6 +4857,38 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "--issue, --json, --required-branch, --expected-upstream, "
             "commit-readiness options, and acceptance evidence options"
         )
+    if args.closure_verification:
+        if args.issue is None:
+            parser.error("--closure-verification requires --issue")
+        if args.commit_paths and args.infer_commit_paths:
+            parser.error(
+                "--closure-verification accepts either --commit-path or "
+                "--infer-commit-paths, not both"
+            )
+        if (
+            args.issue_audit
+            or args.commit_readiness
+            or args.push_readiness
+            or args.execute_workflow
+            or args.pre_mutation_gates
+            or args.rerun_formatter_mutations
+            or args.precheck
+            or args.run_gates
+            or args.workflow
+            or args.close_issue
+            or args.write_reports
+            or args.summarize_report
+            or args.report_json
+            or args.report_markdown
+            or args.full_json
+            or args.print_close_comment
+        ):
+            parser.error(
+                "--closure-verification cannot be combined with other live "
+                "workflow, mutation, report-write, summarize, or close modes"
+            )
+    elif args.infer_commit_paths:
+        parser.error("--infer-commit-paths requires --closure-verification")
     if args.execute_workflow:
         if args.issue is None:
             parser.error("--execute-workflow requires --issue")
@@ -4388,8 +4921,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "--rerun-formatter-mutations requires --execute-workflow and "
             "--pre-mutation-gates"
         )
-    if args.rerun_standalone_formatter_mutations and not args.run_gates:
-        parser.error("--rerun-standalone-formatter-mutations requires --run-gates")
+    if args.rerun_standalone_formatter_mutations and not (
+        args.run_gates or args.closure_verification
+    ):
+        parser.error(
+            "--rerun-standalone-formatter-mutations requires --run-gates "
+            "or --closure-verification"
+        )
     if args.full_json and not args.execute_workflow:
         parser.error("--full-json requires --execute-workflow")
     if args.quiet_progress and not args.execute_workflow:
@@ -4427,6 +4965,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args.issue is not None
         or args.issue_audit
         or args.commit_readiness
+        or args.closure_verification
         or args.push_readiness
         or args.execute_workflow
         or args.precheck
@@ -4499,6 +5038,32 @@ def main(
         else:
             print(render_open_issue_audit_human(report))  # noqa: T201
         return 0 if report.get("state") == "ready" else 1
+    if args.closure_verification:
+        commit_message, commit_source = _selected_commit_message(args, root)
+        report = build_closure_verification_report(
+            repo_root=root,
+            issue=args.issue,
+            commit_message=commit_message,
+            commit_message_source=commit_source,
+            expected_paths=args.commit_paths,
+            infer_commit_paths=args.infer_commit_paths,
+            required_branch=args.required_branch,
+            expected_upstream=args.expected_upstream,
+            rerun_standalone_formatter_mutations=(
+                args.rerun_standalone_formatter_mutations
+            ),
+            release_preflight=args.release_preflight,
+            artifact_roots=args.artifact_roots,
+            runner=runner,
+            **_acceptance_kwargs(args),
+        )
+        if args.json:
+            print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
+        elif args.markdown:
+            print(render_closure_verification_markdown(report))  # noqa: T201
+        else:
+            print(render_closure_verification_human(report))  # noqa: T201
+        return 0 if _mapping(report.get("readiness")).get("state") == "ready" else 1
     if args.execute_workflow:
         commit_message, commit_source = _selected_commit_message(args, root)
         report = run_issue_workflow_execution(
@@ -6277,6 +6842,199 @@ def _declared_scope_paths(
 def _path_in_scope(path: str, scope: str) -> bool:
     scope_value = scope.rstrip("/")
     return path == scope_value or path.startswith(f"{scope_value}/")
+
+
+def _closure_verification_scope_intent(
+    changes: Mapping[str, Any],
+    *,
+    repo_root: Path,
+    expected_paths: Sequence[Path],
+    infer_commit_paths: bool,
+) -> dict[str, Any]:
+    declared = _declared_scope_paths(expected_paths, repo_root=repo_root)
+    changed = [str(item) for item in list(changes.get("changed_paths", []) or [])]
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if declared:
+        mode = "declared"
+        intended = declared
+    elif infer_commit_paths:
+        mode = "inferred"
+        intended = tuple(changed)
+        if not intended:
+            blockers.append("inferred-scope-empty")
+        if len(intended) > INFERRED_SCOPE_BROAD_PATH_LIMIT:
+            warnings.append("inferred-scope-broad")
+        if _int(changes.get("untracked_count")) > 0:
+            warnings.append("inferred-scope-includes-untracked")
+        if _int(changes.get("staged_count")) > 0:
+            warnings.append("inferred-scope-includes-staged")
+    else:
+        mode = "not-declared"
+        intended = ()
+        blockers.append("scope-not-declared")
+    return {
+        "mode": mode,
+        "infer_commit_paths": bool(infer_commit_paths),
+        "intended_paths": list(intended),
+        "intended_path_count": len(intended),
+        "changed_paths_before": changed,
+        "changed_path_count_before": len(changed),
+        "blocking_checks": blockers,
+        "warnings": warnings,
+    }
+
+
+def _focused_test_commands_from_acceptance(
+    acceptance_tests: Mapping[str, Sequence[str]] | None,
+) -> tuple[tuple[tuple[str, ...], ...], list[dict[str, str]]]:
+    values = _unique_sorted(
+        str(value)
+        for value_list in (acceptance_tests or {}).values()
+        for value in value_list
+        if str(value).strip()
+    )
+    commands: list[tuple[str, ...]] = []
+    skipped: list[dict[str, str]] = []
+    for value in values:
+        command = _focused_test_command(value)
+        if command is None:
+            skipped.append(
+                {
+                    "value": _bounded_text(value, 240),
+                    "reason": "not a focused pytest command or test path",
+                }
+            )
+        else:
+            commands.append(command)
+    return tuple(dict.fromkeys(commands)), skipped
+
+
+def _focused_test_command(value: str) -> tuple[str, ...] | None:
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        parts = shlex.split(text)
+    except ValueError:
+        parts = []
+    if parts:
+        command = Path(parts[0]).name
+        if command in {"python", "python3", Path(sys.executable).name} and (
+            len(parts) >= 3 and parts[1:3] == ["-m", "pytest"]
+        ):
+            return (sys.executable, "-m", "pytest", *parts[3:])
+        if command == "pytest":
+            return (sys.executable, "-m", "pytest", *parts[1:])
+    if text.startswith("tests/") or "::" in text:
+        return (sys.executable, "-m", "pytest", text)
+    return None
+
+
+def _display_python_command(command: Sequence[str]) -> tuple[str, ...]:
+    if command and command[0] == sys.executable:
+        return ("python", *tuple(command[1:]))
+    return tuple(command)
+
+
+def _closure_verification_final_change_blockers(
+    final_changes: Mapping[str, Any],
+    *,
+    intended_paths: Sequence[str],
+) -> list[str]:
+    if final_changes.get("state") == "unavailable":
+        return ["final-git-status-unavailable"]
+    changed = [str(item) for item in list(final_changes.get("changed_paths", []) or [])]
+    if not changed:
+        return ["no-changes-after-verification"]
+    unexpected = [
+        path
+        for path in changed
+        if not any(_path_in_scope(path, scope) for scope in intended_paths)
+    ]
+    if unexpected:
+        return ["unexpected-dirty-files-after-verification"]
+    return []
+
+
+def _closure_verification_command_plan(
+    *,
+    issue: int | None,
+    commit_message: str,
+    commit_paths: Sequence[str],
+    release_preflight: bool,
+    artifact_roots: Sequence[Path],
+    rerun_formatter_mutations: bool,
+    acceptance_statuses: Mapping[str, str] | None,
+    acceptance_files: Mapping[str, Sequence[str]] | None,
+    acceptance_tests: Mapping[str, Sequence[str]] | None,
+    acceptance_reports: Mapping[str, Sequence[str]] | None,
+    acceptance_notes: Mapping[str, Sequence[str]] | None,
+    acceptance_missing_ok: bool,
+    acceptance_override_reason: str,
+    ready: bool,
+) -> dict[str, Any]:
+    if not ready:
+        return {
+            "state": "blocked",
+            "execute_workflow": "",
+            "notes": [
+                "resolve blocking checks before running the mutating workflow"
+            ],
+        }
+    parts: list[str] = [
+        "python",
+        "scripts/closure_readiness.py",
+        "--issue",
+        str(issue or 0),
+        "--execute-workflow",
+        "--pre-mutation-gates",
+    ]
+    if rerun_formatter_mutations:
+        parts.append("--rerun-formatter-mutations")
+    if release_preflight:
+        parts.append("--release-preflight")
+    parts.extend(("--commit-message", commit_message))
+    for path in commit_paths:
+        parts.extend(("--commit-path", path))
+    for root in artifact_roots:
+        parts.extend(("--artifact-root", str(publish_safe_path(str(root)))))
+    _append_acceptance_specs(parts, "--acceptance-status", acceptance_statuses)
+    _append_acceptance_value_specs(parts, "--acceptance-file", acceptance_files)
+    _append_acceptance_value_specs(parts, "--acceptance-test", acceptance_tests)
+    _append_acceptance_value_specs(parts, "--acceptance-report", acceptance_reports)
+    _append_acceptance_value_specs(parts, "--acceptance-note", acceptance_notes)
+    if acceptance_missing_ok:
+        parts.append("--acceptance-missing-ok")
+    if acceptance_override_reason:
+        parts.extend(("--acceptance-override-reason", acceptance_override_reason))
+    return {
+        "state": "ready",
+        "execute_workflow": _shell_command(parts),
+        "notes": [
+            "execute-workflow will rerun closure gates before mutation",
+            "execute-workflow will rerun closure gates after push before close",
+        ],
+    }
+
+
+def _append_acceptance_specs(
+    parts: list[str],
+    option: str,
+    values: Mapping[str, str] | None,
+) -> None:
+    for key, value in sorted((values or {}).items()):
+        parts.extend((option, f"{key}={value}"))
+
+
+def _append_acceptance_value_specs(
+    parts: list[str],
+    option: str,
+    values: Mapping[str, Sequence[str]] | None,
+) -> None:
+    for key, value_list in sorted((values or {}).items()):
+        for value in value_list:
+            parts.extend((option, f"{key}={value}"))
 
 
 def _commit_command_plan(report: Mapping[str, Any]) -> list[str]:

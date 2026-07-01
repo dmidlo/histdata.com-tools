@@ -57,6 +57,8 @@ class FakeRunner:
         issue_body: str = "",
         open_issues: Sequence[Mapping[str, Any]] | None = None,
         issue_list_returncode: int = 0,
+        gh_version_returncode: int = 0,
+        gh_auth_returncode: int = 0,
         issue_unavailable_after_close: bool = False,
         close_returncode: int = 0,
         status_after_close_stdout: str = "",
@@ -85,6 +87,8 @@ class FakeRunner:
         self.issue_body = issue_body
         self.open_issues = tuple(dict(item) for item in open_issues or ())
         self.issue_list_returncode = issue_list_returncode
+        self.gh_version_returncode = gh_version_returncode
+        self.gh_auth_returncode = gh_auth_returncode
         self.issue_unavailable_after_close = issue_unavailable_after_close
         self.close_returncode = close_returncode
         self.status_after_close_stdout = status_after_close_stdout
@@ -173,6 +177,31 @@ class FakeRunner:
             return _completed(
                 args,
                 stdout=f"{self.head[:7]} (HEAD -> {self.branch}) test commit\n",
+            )
+        if args == ("gh", "--version"):
+            return _completed(
+                args,
+                returncode=self.gh_version_returncode,
+                stdout=(
+                    "gh version 2.0.0\n"
+                    if self.gh_version_returncode == 0
+                    else ""
+                ),
+                stderr=(
+                    ""
+                    if self.gh_version_returncode == 0
+                    else "gh unavailable\n"
+                ),
+            )
+        if args == ("gh", "auth", "status"):
+            return _completed(
+                args,
+                returncode=self.gh_auth_returncode,
+                stderr=(
+                    "Logged in to github.com\n"
+                    if self.gh_auth_returncode == 0
+                    else "not logged in\n"
+                ),
             )
         if (
             len(args) == 6
@@ -1517,6 +1546,334 @@ def test_commit_readiness_blocks_upstream_behind(
     assert exit_code == 1
     assert "upstream: origin/dev ahead=0 behind=1" in output
     assert "upstream-behind" in output
+
+
+def test_closure_verification_infers_scope_runs_gates_without_mutation(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """One-shot closure verification should answer ready without mutating."""
+    module = _module()
+    (tmp_path / "agents.MD").write_text(
+        "- Work from `dev`.\n- Use Commitizen `cz`.\n",
+        encoding="utf-8",
+    )
+    runner = FakeRunner(
+        status_stdout=(
+            " M scripts/closure_readiness.py\n"
+            " M tests/unit/test_closure_readiness.py\n"
+        ),
+        issue_body="""
+## Acceptance criteria
+
+- Run the configured readiness checks.
+- Emit stable JSON output.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "293",
+            "--closure-verification",
+            "--infer-commit-paths",
+            "--commit-message",
+            "feat(workflow): add closure verification",
+            "--acceptance-test",
+            "*=tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    execute_command = payload["command_plan"]["execute_workflow"]
+
+    assert exit_code == 0
+    assert payload["schema_version"] == module.VERIFICATION_SCHEMA_VERSION
+    assert payload["readiness"]["state"] == "ready"
+    assert payload["scope_intent"]["mode"] == "inferred"
+    assert payload["scope_intent"]["intended_paths"] == [
+        "scripts/closure_readiness.py",
+        "tests/unit/test_closure_readiness.py",
+    ]
+    assert payload["commit_readiness"]["readiness"]["state"] == "ready"
+    assert payload["acceptance_coverage"]["state"] == "ready"
+    assert payload["acceptance_coverage"]["covered_count"] == 2
+    assert payload["focused_tests"]["state"] == "pass"
+    assert payload["gates"]["state"] == "pass"
+    assert payload["github_cli"]["state"] == "pass"
+    assert payload["workflow_policy"]["state"] == "read"
+    assert "--execute-workflow" in execute_command
+    assert "--pre-mutation-gates" in execute_command
+    assert "--rerun-formatter-mutations" in execute_command
+    assert "--commit-path scripts/closure_readiness.py" in execute_command
+    assert "--acceptance-test '*=tests/unit/test_closure_readiness.py'" in (
+        execute_command
+    )
+    pytest_calls = [
+        call
+        for call in runner.calls
+        if call[:3] == (sys.executable, "-m", "pytest")
+    ]
+    assert len(pytest_calls) >= 2
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+    assert not any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
+    assert not any(call[:2] == ("git", "push") for call in runner.calls)
+    assert not any(
+        call[:3] == ("gh", "issue", "close") for call in runner.calls
+    )
+
+
+def test_closure_verification_blocks_missing_acceptance_evidence(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Closure verification should require issue acceptance evidence."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        issue_body="""
+## Acceptance criteria
+
+- Cover the first criterion.
+- Cover the second criterion.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "293",
+            "--closure-verification",
+            "--commit-message",
+            "feat(workflow): add closure verification",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["acceptance_coverage"]["state"] == "blocked"
+    assert "acceptance-criteria-missing" in (
+        payload["readiness"]["blocking_checks"]
+    )
+    assert payload["command_plan"]["state"] == "blocked"
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+
+
+def test_closure_verification_blocks_failed_gate(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Failed full gates should block the one-shot verification."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        precommit_returncode=1,
+        issue_body="""
+## Acceptance criteria
+
+- Run the full gate battery.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "293",
+            "--closure-verification",
+            "--commit-message",
+            "feat(workflow): add closure verification",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--acceptance-test",
+            "*=tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["gates"]["state"] == "fail"
+    assert "gate:pre-commit" in payload["readiness"]["blocking_checks"]
+    assert not any(call[:2] == ("git", "push") for call in runner.calls)
+
+
+def test_closure_verification_blocks_unexpected_dirty_after_gates(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Gate-generated dirt outside intended scope should block closure."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        precommit_changes=" M scripts/closure_readiness.py\n M pyproject.toml\n",
+        issue_body="""
+## Acceptance criteria
+
+- Detect unexpected dirty files.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "293",
+            "--closure-verification",
+            "--commit-message",
+            "feat(workflow): add closure verification",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--acceptance-test",
+            "*=tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert "unexpected-dirty-files-after-verification" in (
+        payload["readiness"]["blocking_checks"]
+    )
+    assert payload["repo"]["final_changes"]["changed_paths"] == [
+        "pyproject.toml",
+        "scripts/closure_readiness.py",
+    ]
+
+
+def test_closure_verification_blocks_lingering_process(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Final owned process health should be authoritative."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        ps_outputs=(
+            "",
+            "303 python python -m histdatacom.orchestration.worker",
+        ),
+        issue_body="""
+## Acceptance criteria
+
+- Detect lingering owned processes.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "293",
+            "--closure-verification",
+            "--commit-message",
+            "feat(workflow): add closure verification",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--acceptance-test",
+            "*=tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["process_health"]["after"]["state"] == "dirty"
+    assert "lingering-processes" in payload["readiness"]["blocking_checks"]
+
+
+def test_closure_verification_blocks_source_artifact_drift(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Transient ZIP/CSV artifacts should block publishable closure."""
+    module = _module()
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "leftover.csv").write_text("source", encoding="utf-8")
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        issue_body="""
+## Acceptance criteria
+
+- Detect source artifact drift.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "293",
+            "--closure-verification",
+            "--commit-message",
+            "feat(workflow): add closure verification",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--acceptance-test",
+            "*=tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["source_artifacts"]["after"]["state"] == "dirty"
+    assert "transient-source-artifacts" in (
+        payload["readiness"]["blocking_checks"]
+    )
+
+
+def test_closure_verification_includes_optional_release_preflight(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Optional TestPyPI/local simple-registry preflight should be included."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        release_returncode=1,
+        issue_body="""
+## Acceptance criteria
+
+- Include release preflight when requested.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "293",
+            "--closure-verification",
+            "--release-preflight",
+            "--commit-message",
+            "feat(workflow): add closure verification",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--acceptance-test",
+            "*=tests/unit/test_closure_readiness.py",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["release_preflight"]["state"] == "fail"
+    assert "release-preflight" in payload["readiness"]["blocking_checks"]
+    assert ("bash", "pypi.sh", "testpypi_preflight") in runner.calls
 
 
 def test_push_readiness_reports_ready_to_push_state(

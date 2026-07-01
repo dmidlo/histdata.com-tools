@@ -275,6 +275,12 @@ python scripts/closure_readiness.py \
   --commit-message "feat(scope): describe the change" \
   --commit-path path/to/changed-file.py \
   --acceptance-test '*=tests/unit/test_changed_behavior.py'
+python scripts/closure_readiness.py \
+  --issue 274 \
+  --closure-verification \
+  --infer-commit-paths \
+  --commit-message "feat(scope): describe the change" \
+  --acceptance-test '*=tests/unit/test_changed_behavior.py'
 python scripts/closure_readiness.py --issue 274 --push-readiness
 python scripts/closure_readiness.py --issue 274 --issue-audit
 python scripts/closure_readiness.py --issue 274 --workflow
@@ -313,6 +319,15 @@ commits ahead of `origin/dev` is ready to push. Default issue-scoped reports are
 local outputs under
 `.histdatacom/closure-readiness/`; the helper verifies those paths are
 gitignored before writing them and blocks closure if that safety check drifts.
+`--closure-verification` is the one-shot non-mutating readiness mode for issue
+work: it validates commit scope and message, acceptance coverage, focused pytest
+commands supplied through `--acceptance-test`, full closure gates, optional
+TestPyPI/simple-registry preflight, final git status, GitHub CLI/auth state,
+issue readback, local workflow policy, source-artifact cleanliness, and owned
+process health, then prints the exact `--execute-workflow` command when ready.
+Use repeated `--commit-path` flags for an explicit scope or
+`--infer-commit-paths` to record the current dirty worktree as the intended
+scope while warning on broad or ambiguous inferred sets.
 Explicit report paths still work, but the report marks whether they may dirty
 the current worktree. `--workflow` performs the cheap precheck first, stops
 before expensive gates when local state is blocked, writes safe default reports,
