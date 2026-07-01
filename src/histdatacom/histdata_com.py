@@ -45,8 +45,10 @@ from histdatacom.exceptions import (
 from histdatacom.data_quality.preflight import (
     format_quality_preflight_console_summary,
     format_quality_run_preflight_warning,
+    quality_preflight_to_markdown,
     quality_run_preflight_warning,
     run_cache_quality_preflight,
+    write_quality_preflight_markdown_report,
     write_quality_preflight_report,
 )
 from histdatacom.fx_enums import expand_pair_selection
@@ -107,6 +109,8 @@ class RuntimeContext:
     quality_preflight_evidence_allow_stale: bool
     quality_preflight_evidence_max_age_seconds: int
     quality_preflight_evidence_path: str | None
+    quality_preflight_markdown: bool
+    quality_preflight_markdown_report_path: str | None
     quality_preflight_report_path: str | None
     quality_preflight_sample_size: int
     quality_profile_path: str
@@ -208,9 +212,22 @@ class _HistDataCom:  # noqa:R701
                 publish_safe_path(str(report_path.resolve(strict=False)))
             )
             write_quality_preflight_report(payload, report_path)
+        if self.context.quality_preflight_markdown_report_path:
+            markdown_path = Path(
+                self.context.quality_preflight_markdown_report_path
+            ).expanduser()
+            payload["markdown_report_path"] = str(
+                publish_safe_path(str(markdown_path.resolve(strict=False)))
+            )
+            write_quality_preflight_markdown_report(payload, markdown_path)
         if self.context.from_api:
             return payload
-        print(format_quality_preflight_console_summary(payload))  # noqa:T201
+        if self.context.quality_preflight_markdown:
+            print(quality_preflight_to_markdown(payload))  # noqa:T201
+        else:
+            print(
+                format_quality_preflight_console_summary(payload)
+            )  # noqa:T201
         if payload.get("status") == "fail":
             raise SystemExit(1)
         return payload
@@ -457,6 +474,12 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
             None
             if args.get("quality_preflight_evidence_path") is None
             else str(args["quality_preflight_evidence_path"])
+        ),
+        quality_preflight_markdown=bool(args["quality_preflight_markdown"]),
+        quality_preflight_markdown_report_path=(
+            None
+            if args.get("quality_preflight_markdown_report_path") is None
+            else str(args["quality_preflight_markdown_report_path"])
         ),
         quality_preflight_report_path=(
             None

@@ -39,6 +39,8 @@ class Options:
         "quality_preflight_evidence_allow_stale",
         "quality_preflight_evidence_max_age_seconds",
         "quality_preflight_evidence_path",
+        "quality_preflight_markdown",
+        "quality_preflight_markdown_report_path",
         "quality_preflight_report_path",
         "quality_preflight_sample_size",
         "quality_paths",
@@ -98,6 +100,8 @@ class Options:
         self.quality_preflight_evidence_allow_stale: bool = False
         self.quality_preflight_evidence_max_age_seconds: int = 86400
         self.quality_preflight_evidence_path: str | None = None
+        self.quality_preflight_markdown: bool = False
+        self.quality_preflight_markdown_report_path: str | None = None
         self.quality_preflight_sample_size: int = 4
         self.quality_preflight_report_path: str | None = None
         self.quality_profile_path: str | None = None

@@ -107,6 +107,8 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--repo-quality-columns] [--quality-target PATH [PATH ...]]
                    [--quality-checks GROUP [GROUP ...]]
                    [--quality-report PATH] [--quality-preflight-report PATH]
+                   [--quality-preflight-markdown]
+                   [--quality-preflight-markdown-report PATH]
                    [--quality-preflight-evidence PATH]
                    [--quality-preflight-evidence-max-age-seconds SECONDS]
                    [--quality-preflight-evidence-stale-ok]
@@ -206,6 +208,12 @@ Data quality:
   --quality-preflight-report PATH
                         write the publish-safe JSON quality preflight report
                         to PATH
+  --quality-preflight-markdown
+                        print the publish-safe Markdown quality preflight
+                        evidence report to stdout
+  --quality-preflight-markdown-report PATH
+                        write the publish-safe Markdown quality preflight
+                        evidence report to PATH
   --quality-preflight-evidence PATH
                         use a saved quality preflight JSON report as evidence
                         before a large cache-backed --quality run
@@ -756,7 +764,8 @@ histdatacom --quality-preflight \
   --pair-groups major-triangles \
   -f ascii -t tick-data-quotes \
   --quality-checks ticks \
-  --quality-preflight-report reports/major-triangles-tick-preflight.json
+  --quality-preflight-report reports/major-triangles-tick-preflight.json \
+  --quality-preflight-markdown-report reports/major-triangles-tick-preflight.md
 ```
 
 The console output is human-readable. The optional
@@ -766,7 +775,15 @@ summary, generated timestamp, package version, preflight policy inputs,
 no-target diagnostics, and a decision section that says whether the full battery
 is safe, warned, failed, or has no matching targets. Safe and warned decisions
 include the next `histdatacom --quality ...` command for the same target scope.
-Use `--quality-preflight-sample-size COUNT` to tune the bounded sample.
+Use `--quality-preflight-markdown-report PATH` to write the matching
+copy/paste-safe Markdown evidence report for GitHub issue updates, release
+handoffs, or operator notes. That Markdown includes command/config summary,
+package version, cache inventory, benchmark sample, ETA/rate, Temporal budget,
+source-artifact cleanliness, POSIX disk headroom, validation commands, and the
+explicit runtime-cleanup disposition for the local preflight run. Use
+`--quality-preflight-markdown` when stdout should be the Markdown report instead
+of the compact console summary. Use `--quality-preflight-sample-size COUNT` to
+tune the bounded sample.
 
 When launching a large cache-backed `--quality` run, pass the saved report with
 `--quality-preflight-evidence PATH`. If no matching evidence is available, the

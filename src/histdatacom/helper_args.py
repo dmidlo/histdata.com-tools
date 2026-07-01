@@ -37,6 +37,10 @@ DEFAULT_HELPER_ARGS: dict[str, Any] = {
     "quality_preflight_evidence_allow_stale": False,
     "quality_preflight_evidence_max_age_seconds": 86400,
     "quality_preflight_evidence_path": "",
+    "quality_preflight_markdown": False,
+    "quality_preflight_markdown_report_path": "",
+    "quality_preflight_report_path": "",
+    "quality_preflight_sample_size": 4,
     "repo_quality_refresh": False,
     "repo_quality_columns": False,
 }

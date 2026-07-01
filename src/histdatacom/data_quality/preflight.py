@@ -13,6 +13,7 @@ from time import perf_counter
 from typing import Any, cast
 
 from histdatacom import __version__ as HISTDATACOM_VERSION
+from histdatacom.cache_status import collect_cache_run_status
 from histdatacom.data_quality.contracts import (
     QualityReport,
     QualityTarget,
@@ -46,6 +47,9 @@ from histdatacom.publication_safety import (
 from histdatacom.runtime_contracts import JSONValue
 
 QUALITY_PREFLIGHT_SCHEMA_VERSION = "histdatacom.quality-preflight.v1"
+QUALITY_PREFLIGHT_EVIDENCE_SCHEMA_VERSION = (
+    "histdatacom.quality-preflight-evidence.v1"
+)
 QUALITY_PREFLIGHT_INSPECTION_SCHEMA_VERSION = (
     "histdatacom.quality-preflight-inspection.v1"
 )
@@ -150,6 +154,249 @@ def write_quality_preflight_report(
     output = Path(path).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(quality_preflight_to_json(payload), encoding="utf-8")
+    return output.resolve(strict=False)
+
+
+def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
+    """Return publish-safe Markdown evidence for a quality preflight payload."""
+    safe_payload = publish_safe_json_mapping(payload)
+    evidence = _mapping(safe_payload.get("evidence"))
+    commands = _mapping(evidence.get("commands"))
+    operational = _mapping(evidence.get("operational"))
+    runtime_cleanup = _mapping(evidence.get("runtime_cleanup"))
+    release = _mapping(evidence.get("release_preflight"))
+    final_readback = _mapping(evidence.get("final_readback"))
+    filters = _mapping(safe_payload.get("filters"))
+    package = _mapping(safe_payload.get("package"))
+    sample = _mapping(safe_payload.get("sample"))
+    benchmark = _mapping(safe_payload.get("benchmark"))
+    estimate = _mapping(safe_payload.get("estimate"))
+    budget = _mapping(safe_payload.get("temporal_budget"))
+    quality = _mapping(safe_payload.get("sample_quality"))
+    quality_summary = _mapping(quality.get("summary"))
+    decision = _mapping(safe_payload.get("decision"))
+    cache_inventory = _mapping(safe_payload.get("cache_inventory"))
+    lines = [
+        "# Quality Preflight Evidence",
+        "",
+        "## Operator Verdict",
+        "",
+        *_markdown_table(
+            ("Field", "Value"),
+            (
+                ("Status", str(safe_payload.get("status", "unknown"))),
+                ("Decision", str(decision.get("label", "unknown"))),
+                ("Reason", str(decision.get("reason", ""))),
+                ("Action", str(decision.get("action", ""))),
+                ("Generated", str(safe_payload.get("generated_at_utc", ""))),
+                ("Package", _package_label(package)),
+                ("Root", str(safe_payload.get("root", ""))),
+            ),
+        ),
+        "",
+        "## Command And Configuration",
+        "",
+        *_markdown_table(
+            ("Item", "Value"),
+            (
+                ("Preflight command", str(commands.get("preflight", ""))),
+                ("Quality command", str(commands.get("quality", ""))),
+                ("Checks", _join_or_all(filters.get("checks"))),
+                ("Pair groups", _join_or_all(filters.get("pair_groups"))),
+                ("Pairs", _join_or_all(filters.get("pairs"))),
+                ("Formats", _join_or_all(filters.get("formats"))),
+                ("Timeframes", _join_or_all(filters.get("timeframes"))),
+            ),
+        ),
+        "",
+        "## Target And Cache Inventory",
+        "",
+        *_markdown_table(
+            ("Measure", "Value"),
+            (
+                (
+                    "Target cache count",
+                    str(safe_payload.get("target_count", 0)),
+                ),
+                (
+                    "Target cache bytes",
+                    _format_bytes(
+                        _int_value(safe_payload.get("cache_byte_count"))
+                    ),
+                ),
+                (
+                    "Estimated row count",
+                    f"{_int_value(safe_payload.get('estimated_row_count')):,}",
+                ),
+                (
+                    "Inventory fingerprint",
+                    str(cache_inventory.get("fingerprint", "")),
+                ),
+            ),
+        ),
+        "",
+        "## Benchmark Sample",
+        "",
+        *_markdown_table(
+            ("Measure", "Value"),
+            (
+                ("Strategy", str(sample.get("strategy", ""))),
+                ("Requested samples", str(sample.get("requested_count", 0))),
+                ("Selected samples", str(sample.get("selected_count", 0))),
+                (
+                    "Elapsed",
+                    _format_duration(benchmark.get("elapsed_seconds")),
+                ),
+                (
+                    "Sample rows",
+                    f"{_int_value(benchmark.get('sample_row_count')):,}",
+                ),
+                (
+                    "Rows/sec",
+                    f"{_float_value(benchmark.get('rows_per_second')):.1f}",
+                ),
+                (
+                    "Bytes/sec",
+                    f"{_float_value(benchmark.get('bytes_per_second')):.1f}",
+                ),
+            ),
+        ),
+        "",
+    ]
+    sample_rows = _sample_target_rows(sample)
+    if sample_rows:
+        lines.extend(
+            [
+                "### Sample Targets",
+                "",
+                *_markdown_table(
+                    (
+                        "Symbol",
+                        "Format",
+                        "Timeframe",
+                        "Period",
+                        "Rows",
+                        "Bytes",
+                    ),
+                    sample_rows,
+                ),
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## ETA And Temporal Budget",
+            "",
+            *_markdown_table(
+                ("Measure", "Value"),
+                (
+                    (
+                        "Estimated duration",
+                        (
+                            f"{_format_duration(estimate.get('estimated_seconds_min'))}"
+                            " to "
+                            f"{_format_duration(estimate.get('estimated_seconds_max'))}"
+                        ),
+                    ),
+                    (
+                        "Sample coverage",
+                        str(estimate.get("sample_coverage_fraction", 0.0)),
+                    ),
+                    (
+                        "Activity budget",
+                        _format_duration(budget.get("activity_budget_seconds")),
+                    ),
+                    ("Budget status", str(budget.get("status", "unknown"))),
+                    ("Budget reason", str(budget.get("reason", ""))),
+                ),
+            ),
+            "",
+            "## Sample Quality",
+            "",
+            *_markdown_table(
+                ("Measure", "Value"),
+                (
+                    ("Status", str(quality_summary.get("status", "unknown"))),
+                    (
+                        "Targets",
+                        str(quality_summary.get("target_count", 0)),
+                    ),
+                    (
+                        "Findings",
+                        str(quality_summary.get("finding_count", 0)),
+                    ),
+                    (
+                        "Warnings",
+                        str(quality_summary.get("warning_count", 0)),
+                    ),
+                    ("Errors", str(quality_summary.get("error_count", 0))),
+                ),
+            ),
+            "",
+        ]
+    )
+    lines.extend(_operational_markdown_lines(operational, runtime_cleanup))
+    lines.extend(
+        [
+            "## Validation Commands",
+            "",
+            *_markdown_table(
+                ("Name", "Status", "Command"),
+                _validation_command_rows(evidence.get("validation_commands")),
+            ),
+            "",
+            "## Final Readback",
+            "",
+            *_markdown_table(
+                ("Check", "Value"),
+                (
+                    (
+                        "Release preflight",
+                        (
+                            f"{release.get('state', 'not-applicable')}: "
+                            f"{release.get('reason', '')}"
+                        ),
+                    ),
+                    (
+                        "Git/GitHub readback",
+                        (
+                            f"{final_readback.get('state', 'not-applicable')}: "
+                            f"{final_readback.get('reason', '')}"
+                        ),
+                    ),
+                ),
+            ),
+            "",
+            "## GitHub Issue Evidence",
+            "",
+            f"- Decision: {decision.get('label', 'unknown')}",
+            f"- Targets: {safe_payload.get('target_count', 0)} cache files, "
+            f"{_format_bytes(_int_value(safe_payload.get('cache_byte_count')))}",
+            (
+                "- ETA: "
+                f"{_format_duration(estimate.get('estimated_seconds_min'))} to "
+                f"{_format_duration(estimate.get('estimated_seconds_max'))}"
+            ),
+            f"- Temporal budget: {budget.get('status', 'unknown')}",
+            ("- Source artifacts: " f"{_source_artifact_state(operational)}"),
+            (
+                "- Runtime cleanup: "
+                f"{runtime_cleanup.get('state', 'not-applicable')}"
+            ),
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def write_quality_preflight_markdown_report(
+    payload: Mapping[str, JSONValue],
+    path: str | Path,
+) -> Path:
+    """Write a publish-safe Markdown quality preflight evidence report."""
+    output = Path(path).expanduser()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(quality_preflight_to_markdown(payload), encoding="utf-8")
     return output.resolve(strict=False)
 
 
@@ -808,6 +1055,164 @@ def _payload(
         selected_formats=selected_formats,
         selected_timeframes=selected_timeframes,
     )
+    payload["evidence"] = _quality_preflight_evidence_payload(
+        root_path=root_path,
+        check_groups=check_groups,
+        selected_groups=selected_groups,
+        selected_pairs=selected_pairs,
+        selected_formats=selected_formats,
+        selected_timeframes=selected_timeframes,
+    )
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
+    return safe_payload
+
+
+def _quality_preflight_evidence_payload(
+    *,
+    root_path: Path,
+    check_groups: tuple[str, ...],
+    selected_groups: tuple[str, ...],
+    selected_pairs: tuple[str, ...],
+    selected_formats: tuple[str, ...],
+    selected_timeframes: tuple[str, ...],
+) -> dict[str, JSONValue]:
+    payload: dict[str, JSONValue] = {
+        "schema_version": QUALITY_PREFLIGHT_EVIDENCE_SCHEMA_VERSION,
+        "report_kind": "quality-preflight-github-evidence",
+        "commands": _evidence_commands_payload(
+            root=root_path,
+            check_groups=check_groups,
+            selected_groups=selected_groups,
+            selected_pairs=selected_pairs,
+            selected_formats=selected_formats,
+            selected_timeframes=selected_timeframes,
+        ),
+        "validation_commands": _validation_commands_payload(),
+        "runtime_cleanup": _preflight_runtime_cleanup_payload(),
+        "operational": _preflight_operational_payload(
+            root_path=root_path,
+            selected_groups=selected_groups,
+            selected_pairs=selected_pairs,
+            selected_formats=selected_formats,
+            selected_timeframes=selected_timeframes,
+        ),
+        "release_preflight": {
+            "state": "not-applicable",
+            "reason": (
+                "quality preflight evidence does not publish packages; "
+                "release workflows record TestPyPI preflight separately"
+            ),
+        },
+        "final_readback": {
+            "state": "not-applicable",
+            "reason": (
+                "quality preflight does not mutate git or GitHub; closure "
+                "readiness records branch, commit, issue, and process readback"
+            ),
+        },
+    }
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
+    return safe_payload
+
+
+def _evidence_commands_payload(
+    *,
+    root: Path,
+    check_groups: tuple[str, ...],
+    selected_groups: tuple[str, ...],
+    selected_pairs: tuple[str, ...],
+    selected_formats: tuple[str, ...],
+    selected_timeframes: tuple[str, ...],
+) -> dict[str, JSONValue]:
+    return {
+        "preflight": _quality_preflight_command(
+            root=root,
+            check_groups=check_groups,
+            selected_groups=selected_groups,
+            selected_pairs=selected_pairs,
+            selected_formats=selected_formats,
+            selected_timeframes=selected_timeframes,
+        ),
+        "quality": _quality_command(
+            root=root,
+            check_groups=check_groups,
+            selected_groups=selected_groups,
+            selected_pairs=selected_pairs,
+            selected_formats=selected_formats,
+            selected_timeframes=selected_timeframes,
+        ),
+    }
+
+
+def _validation_commands_payload() -> list[JSONValue]:
+    commands: tuple[tuple[str, str], ...] = (
+        (
+            "focused-quality-preflight-tests",
+            (
+                "python -m pytest tests/unit/test_data_quality_preflight.py "
+                "tests/unit/test_quality_cli.py -q"
+            ),
+        ),
+        ("full-pytest", "python -m pytest"),
+        ("full-pre-commit", "python -m pre_commit run --all-files"),
+        ("git-diff-check", "git diff --check"),
+    )
+    return [
+        {
+            "name": name,
+            "command": command,
+            "status": "not-run",
+            "reason": (
+                "quality preflight records validation commands but does not "
+                "execute repository gates"
+            ),
+        }
+        for name, command in commands
+    ]
+
+
+def _preflight_runtime_cleanup_payload() -> dict[str, JSONValue]:
+    return {
+        "state": "not-applicable",
+        "started_runtime": False,
+        "cleanup_required": False,
+        "reason": (
+            "quality preflight runs local cache reads and does not start the "
+            "Temporal runtime"
+        ),
+    }
+
+
+def _preflight_operational_payload(
+    *,
+    root_path: Path,
+    selected_groups: tuple[str, ...],
+    selected_pairs: tuple[str, ...],
+    selected_formats: tuple[str, ...],
+    selected_timeframes: tuple[str, ...],
+) -> dict[str, JSONValue]:
+    runtime = {
+        "state": "not-applicable",
+        "message": "quality preflight does not start Temporal runtime",
+    }
+    status = collect_cache_run_status(
+        root_path,
+        pairs=selected_pairs,
+        pair_groups=selected_groups,
+        formats=selected_formats,
+        timeframes=selected_timeframes,
+        runtime=runtime,
+        job_snapshots=(),
+    ).to_dict()
+    payload = {
+        "status": status.get("status", "unknown"),
+        "summary": status.get("summary", {}),
+        "disk": status.get("disk", {}),
+        "cleanup": status.get("cleanup", {}),
+        "runtime": runtime,
+        "workflows": status.get("workflows", {}),
+        "groups": status.get("groups", []),
+    }
     safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
     return safe_payload
 
@@ -1427,6 +1832,178 @@ def _join_or_none(value: object) -> str:
     return ", ".join(items) if items else "none"
 
 
+def _package_label(package: Mapping[str, Any]) -> str:
+    name = str(package.get("name", "histdatacom") or "histdatacom")
+    version = str(package.get("version", "") or "")
+    return f"{name} {version}".strip()
+
+
+def _markdown_table(
+    headers: tuple[str, ...],
+    rows: Iterable[tuple[object, ...]],
+) -> list[str]:
+    lines = [
+        "| " + " | ".join(_markdown_cell(header) for header in headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    for row in rows:
+        padded = tuple(row) + ("",) * max(len(headers) - len(row), 0)
+        lines.append(
+            "| "
+            + " | ".join(
+                _markdown_cell(str(value)) for value in padded[: len(headers)]
+            )
+            + " |"
+        )
+    return lines
+
+
+def _markdown_cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", "<br>")
+
+
+def _sample_target_rows(
+    sample: Mapping[str, Any],
+) -> tuple[tuple[str, str, str, str, str, str], ...]:
+    rows: list[tuple[str, str, str, str, str, str]] = []
+    for item in _list_of_mappings(sample.get("targets"))[:8]:
+        rows.append(
+            (
+                str(item.get("symbol", "")),
+                str(item.get("data_format", "")),
+                str(item.get("timeframe", "")),
+                str(item.get("period", "")),
+                f"{_int_value(item.get('row_count')):,}",
+                _format_bytes(_int_value(item.get("size_bytes"))),
+            )
+        )
+    return tuple(rows)
+
+
+def _operational_markdown_lines(
+    operational: Mapping[str, Any],
+    runtime_cleanup: Mapping[str, Any],
+) -> list[str]:
+    disk = _mapping(operational.get("disk"))
+    cleanup = _mapping(operational.get("cleanup"))
+    summary = _mapping(operational.get("summary"))
+    runtime = _mapping(operational.get("runtime"))
+    workflows = _mapping(operational.get("workflows"))
+    groups = _list_of_mappings(operational.get("groups"))
+    lines = [
+        "## Operational Evidence",
+        "",
+        *_markdown_table(
+            ("Signal", "State", "Detail"),
+            (
+                (
+                    "Runtime cleanup",
+                    str(runtime_cleanup.get("state", "not-applicable")),
+                    str(runtime_cleanup.get("reason", "")),
+                ),
+                (
+                    "Runtime",
+                    str(runtime.get("state", "not-applicable")),
+                    str(runtime.get("message", "")),
+                ),
+                ("Workflows", str(workflows.get("state", "unknown")), ""),
+                (
+                    "Disk",
+                    str(disk.get("state", "unknown")),
+                    _disk_markdown_detail(disk),
+                ),
+                (
+                    "Cache inventory",
+                    str(operational.get("status", "unknown")),
+                    (
+                        f"{summary.get('cache_count', 0)} caches, "
+                        f"{_format_bytes(_int_value(summary.get('cache_size_bytes')))}"
+                    ),
+                ),
+                (
+                    "Source artifacts",
+                    str(cleanup.get("state", "unknown")),
+                    _source_artifact_cleanup_detail(cleanup),
+                ),
+            ),
+        ),
+        "",
+    ]
+    if groups:
+        lines.extend(
+            [
+                "### Instrument Groups",
+                "",
+                *_markdown_table(
+                    ("Group", "Status", "Caches", "Sources", "Coverage"),
+                    tuple(
+                        (
+                            str(group.get("group", "")),
+                            str(group.get("status", "")),
+                            str(group.get("cache_count", 0)),
+                            str(group.get("source_artifact_count", 0)),
+                            (
+                                f"{group.get('symbols_with_cache', 0)}/"
+                                f"{group.get('expected_symbol_count', 0)}"
+                            ),
+                        )
+                        for group in groups
+                    ),
+                ),
+                "",
+            ]
+        )
+    return lines
+
+
+def _disk_markdown_detail(disk: Mapping[str, Any]) -> str:
+    total = _int_value(disk.get("total_bytes"))
+    used = _int_value(disk.get("used_bytes"))
+    free = _int_value(disk.get("free_bytes"))
+    percent = _float_value(disk.get("percent_used"))
+    if not total:
+        return str(disk.get("message", "not collected") or "not collected")
+    return (
+        f"{_format_bytes(free)} free, {_format_bytes(used)} used, "
+        f"{_format_bytes(total)} total, {percent:.1f}% used"
+    )
+
+
+def _source_artifact_cleanup_detail(cleanup: Mapping[str, Any]) -> str:
+    count = _int_value(cleanup.get("source_artifact_count"))
+    size = _format_bytes(_int_value(cleanup.get("source_artifact_size_bytes")))
+    return f"{count} transient source artifacts, {size}"
+
+
+def _source_artifact_state(operational: Mapping[str, Any]) -> str:
+    cleanup = _mapping(operational.get("cleanup"))
+    return (
+        f"{cleanup.get('state', 'unknown')} "
+        f"({cleanup.get('source_artifact_count', 0)} artifacts)"
+    )
+
+
+def _validation_command_rows(
+    value: object,
+) -> tuple[tuple[str, str, str], ...]:
+    rows: list[tuple[str, str, str]] = []
+    for item in _list_of_mappings(value):
+        rows.append(
+            (
+                str(item.get("name", "")),
+                str(item.get("status", "unknown")),
+                str(item.get("command", "")),
+            )
+        )
+    return tuple(rows)
+
+
+def _list_of_mappings(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list | tuple):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
 def _int_value(value: object, default: int = 0) -> int:
     if isinstance(value, bool):
         return int(value)
@@ -1494,8 +2071,10 @@ __all__ = [
     "format_quality_run_preflight_warning",
     "inspect_quality_preflight_evidence",
     "load_quality_preflight_evidence",
+    "quality_preflight_to_markdown",
     "quality_preflight_to_json",
     "quality_run_preflight_warning",
     "run_cache_quality_preflight",
+    "write_quality_preflight_markdown_report",
     "write_quality_preflight_report",
 ]

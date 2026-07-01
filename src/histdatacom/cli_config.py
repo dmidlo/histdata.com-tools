@@ -33,6 +33,13 @@ _KEY_ALIASES = {
     "quality_paths": "quality_paths",
     "quality_report": "quality_report_path",
     "quality_preflight_report": "quality_preflight_report_path",
+    "quality_preflight_markdown": "quality_preflight_markdown",
+    "quality_preflight_markdown_report": (
+        "quality_preflight_markdown_report_path"
+    ),
+    "quality_preflight_markdown_report_path": (
+        "quality_preflight_markdown_report_path"
+    ),
     "quality_preflight_sample": "quality_preflight_sample_size",
     "quality_preflight_samples": "quality_preflight_sample_size",
     "quality_target": "quality_paths",
@@ -102,6 +109,7 @@ _TRUE_FLAG_ARGS = {
     "quality_preflight_evidence_allow_stale": (
         "--quality-preflight-evidence-stale-ok"
     ),
+    "quality_preflight_markdown": "--quality-preflight-markdown",
     "repo_quality_columns": "--repo-quality-columns",
 }
 _SCALAR_ARGS = {
@@ -113,6 +121,9 @@ _SCALAR_ARGS = {
     "data_directory": "--data-directory",
     "quality_report_path": "--quality-report",
     "quality_preflight_evidence_path": "--quality-preflight-evidence",
+    "quality_preflight_markdown_report_path": (
+        "--quality-preflight-markdown-report"
+    ),
     "quality_preflight_report_path": "--quality-preflight-report",
     "quality_preflight_sample_size": "--quality-preflight-sample-size",
     "quality_profile_path": "--quality-profile",

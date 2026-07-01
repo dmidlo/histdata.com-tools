@@ -17,8 +17,10 @@ from histdatacom.data_quality.preflight import (
     format_quality_preflight_console_summary,
     format_quality_run_preflight_warning,
     inspect_quality_preflight_evidence,
+    quality_preflight_to_markdown,
     quality_run_preflight_warning,
     run_cache_quality_preflight,
+    write_quality_preflight_markdown_report,
     write_quality_preflight_report,
 )
 from histdatacom.histdata_ascii import (
@@ -82,6 +84,19 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
     assert payload["decision"]["next_command"].startswith(
         "histdatacom --quality"
     )
+    assert payload["evidence"]["schema_version"].endswith(
+        "quality-preflight-evidence.v1"
+    )
+    assert payload["evidence"]["runtime_cleanup"]["state"] == ("not-applicable")
+    assert payload["evidence"]["operational"]["disk"]["state"] in {
+        "ok",
+        "unknown",
+    }
+    assert (
+        payload["evidence"]["operational"]["cleanup"]["source_artifact_count"]
+        == 0
+    )
+    assert payload["evidence"]["validation_commands"][0]["status"] == "not-run"
     assert "--pair-groups majors" in payload["decision"]["next_command"]
     assert payload["sample_quality"]["summary"]["target_count"] == 3
     encoded = json.dumps(payload, sort_keys=True)
@@ -198,6 +213,43 @@ def test_quality_preflight_report_and_summary_are_publish_safe(
     assert "Data quality cache preflight" in summary
     assert "report: reports/preflight.json" in summary
     assert str(tmp_path) not in json.dumps(loaded, sort_keys=True)
+
+
+def test_quality_preflight_markdown_evidence_is_publish_safe(
+    tmp_path: Path,
+) -> None:
+    """Markdown evidence should cover operator, benchmark, and health fields."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    source = data_dir / "ASCII" / "T" / "eurusd" / "source.csv"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("x\n", encoding="utf-8")
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+
+    markdown = quality_preflight_to_markdown(payload)
+    report_path = write_quality_preflight_markdown_report(
+        payload,
+        tmp_path / "reports" / "preflight.md",
+    )
+
+    assert report_path.read_text(encoding="utf-8") == markdown
+    assert "# Quality Preflight Evidence" in markdown
+    assert "## GitHub Issue Evidence" in markdown
+    assert "Runtime cleanup" in markdown
+    assert "Source artifacts" in markdown
+    assert "1 transient source artifacts" in markdown
+    assert "python -m pytest" in markdown
+    assert "histdatacom --quality-preflight" in markdown
+    assert str(tmp_path) not in markdown
+    assert "/Users/" not in markdown
 
 
 def test_quality_run_warning_requires_matching_preflight_evidence(
@@ -639,6 +691,9 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
             "ticks",
             "--quality-preflight-sample-size",
             "2",
+            "--quality-preflight-markdown",
+            "--quality-preflight-markdown-report",
+            str(tmp_path / "preflight.md"),
             "--pair-groups",
             "majors",
             "-f",
@@ -654,6 +709,10 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
     assert options.quality_paths == [str(tmp_path)]
     assert options.quality_check_groups == ["ticks"]
     assert options.quality_preflight_sample_size == 2
+    assert options.quality_preflight_markdown
+    assert options.quality_preflight_markdown_report_path == str(
+        tmp_path / "preflight.md"
+    )
     assert options.pair_groups == ["majors"]
 
 
@@ -689,6 +748,44 @@ def test_api_quality_preflight_returns_payload_without_temporal_submit(
     assert payload["operation"] == "data-quality-cache-preflight"
     assert payload["target_count"] == 1
     assert payload["sample"]["selected_count"] == 1
+
+
+def test_api_quality_preflight_writes_markdown_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """API callers can request the shareable Markdown report artifact."""
+    import histdatacom.histdata_com as histdata_com
+
+    data_dir = tmp_path / "data"
+    markdown_path = tmp_path / "reports" / "preflight.md"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    def fail_submit(*args: object, **kwargs: object) -> None:
+        raise AssertionError("preflight should not submit to Temporal")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    options = Options()
+    options.quality_preflight = True
+    options.quality_paths = (str(data_dir),)
+    options.quality_check_groups = {"inventory"}
+    options.quality_preflight_sample_size = 1
+    options.quality_preflight_markdown_report_path = str(markdown_path)
+    options.pairs = {"eurusd"}
+    options.formats = {"ascii"}
+    options.timeframes = {"T"}
+
+    payload = histdata_com.main(options)
+
+    assert payload["markdown_report_path"] == "reports/preflight.md"
+    assert markdown_path.exists()
+    assert "Quality Preflight Evidence" in markdown_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def _write_tick_cache(

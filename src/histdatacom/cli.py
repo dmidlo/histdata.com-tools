@@ -295,6 +295,17 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     "--quality-preflight-report requires --quality-preflight"
                 )
                 raise SystemExit(1)
+            if self.arg_namespace.quality_preflight_markdown:
+                print(  # noqa:T201
+                    "--quality-preflight-markdown requires --quality-preflight"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_preflight_markdown_report_path:
+                print(  # noqa:T201
+                    "--quality-preflight-markdown-report requires "
+                    "--quality-preflight"
+                )
+                raise SystemExit(1)
             if (
                 self.arg_namespace.quality_preflight_sample_size
                 != DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE
@@ -482,6 +493,17 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                         [
                             "--quality-preflight-report",
                             self.arg_namespace.quality_preflight_report_path,
+                        ]
+                    )
+                if self.arg_namespace.quality_preflight_markdown:
+                    args.append("--quality-preflight-markdown")
+                if self.arg_namespace.quality_preflight_markdown_report_path:
+                    args.extend(
+                        [
+                            "--quality-preflight-markdown-report",
+                            (
+                                self.arg_namespace.quality_preflight_markdown_report_path
+                            ),
                         ]
                     )
                 args.extend(
@@ -1461,6 +1483,25 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             metavar="PATH",
             help=(
                 "write the publish-safe JSON quality preflight report to PATH"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-markdown",
+            dest="quality_preflight_markdown",
+            action="store_true",
+            help=(
+                "print the publish-safe Markdown quality preflight evidence "
+                "report to stdout"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-markdown-report",
+            dest="quality_preflight_markdown_report_path",
+            type=str,
+            metavar="PATH",
+            help=(
+                "write the publish-safe Markdown quality preflight evidence "
+                "report to PATH"
             ),
         )
         quality_args.add_argument(
