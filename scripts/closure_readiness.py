@@ -36,12 +36,18 @@ SUMMARY_SCHEMA_VERSION = "histdatacom.closure-report-summary.v1"
 COMMIT_READINESS_SCHEMA_VERSION = "histdatacom.commit-readiness.v1"
 ISSUE_WORKFLOW_SCHEMA_VERSION = "histdatacom.issue-workflow-execution.v1"
 ISSUE_WORKFLOW_SUMMARY_SCHEMA_VERSION = "histdatacom.issue-workflow-summary.v1"
+OPEN_ISSUE_AUDIT_SCHEMA_VERSION = "histdatacom.open-issue-audit.v1"
 ACCEPTANCE_COVERAGE_SCHEMA_VERSION = "histdatacom.acceptance-coverage.v1"
 DEFAULT_REPORT_DIR = Path(".histdatacom") / "closure-readiness"
 DEFAULT_REQUIRED_BRANCH = "dev"
 DEFAULT_EXPECTED_UPSTREAM = "origin/dev"
 DEFAULT_TAIL_LINE_LIMIT = 12
 DEFAULT_TAIL_CHAR_LIMIT = 4_000
+DEFAULT_OPEN_ISSUE_LIMIT = 200
+OPEN_ISSUE_SEARCH_FILE_LIMIT = 400
+OPEN_ISSUE_SEARCH_FILE_BYTES_LIMIT = 200_000
+OPEN_ISSUE_SEARCH_TERM_LIMIT = 12
+OPEN_ISSUE_SIGNAL_LIMIT = 5
 WORKFLOW_PROGRESS_SLOW_PHASE_LIMIT = 3
 ACCEPTANCE_STATUSES = {
     "verified",
@@ -382,6 +388,70 @@ PROCESS_CATEGORY_ORDER = (
     "ruff",
     "mypy",
 )
+OPEN_ISSUE_SEARCH_SUFFIXES = frozenset(
+    {".cfg", ".ini", ".md", ".py", ".rst", ".sh", ".toml", ".txt", ".yaml", ".yml"}
+)
+OPEN_ISSUE_SEARCH_ROOTS = ("scripts", "src", "tests/unit", "docs", "samples")
+OPEN_ISSUE_SEARCH_FILES = frozenset(
+    {"README.md", "agents.MD", "pyproject.toml", "pytest.ini", "mypy.ini"}
+)
+OPEN_ISSUE_STOPWORDS = frozenset(
+    {
+        "about",
+        "after",
+        "against",
+        "also",
+        "and",
+        "available",
+        "build",
+        "cache",
+        "check",
+        "close",
+        "code",
+        "codebase",
+        "command",
+        "context",
+        "criteria",
+        "current",
+        "data",
+        "during",
+        "each",
+        "evidence",
+        "expected",
+        "feat",
+        "files",
+        "fresh",
+        "from",
+        "github",
+        "include",
+        "issue",
+        "issues",
+        "local",
+        "manual",
+        "mode",
+        "open",
+        "operator",
+        "problem",
+        "report",
+        "required",
+        "should",
+        "state",
+        "status",
+        "still",
+        "test",
+        "tests",
+        "that",
+        "this",
+        "when",
+        "with",
+        "work",
+        "workflow",
+    }
+)
+OPEN_ISSUE_GENERATED_PATH_PARTS = frozenset(
+    {"__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv", "venv"}
+)
+OPEN_ISSUE_DOC_ONLY_PATHS = frozenset({"README.md", "agents.MD"})
 
 
 def build_readiness_report(
@@ -754,6 +824,607 @@ def collect_issue_state(
     if include_body:
         payload_out["body"] = str(payload.get("body", "") or "")
     return payload_out
+
+
+def build_open_issue_audit_report(
+    *,
+    repo_root: Path = PROJECT_ROOT,
+    runner: CommandRunner | None = None,
+    now: datetime | None = None,
+    issue_limit: int = DEFAULT_OPEN_ISSUE_LIMIT,
+    process_rows: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Return a non-mutating recommendation report for all open issues."""
+    command_runner = runner or _run_command
+    root = repo_root.expanduser().resolve(strict=False)
+    generated_at = now or datetime.now(timezone.utc)
+    repo_state = collect_git_state(root, runner=command_runner)
+    processes = collect_process_summary(
+        root,
+        rows=process_rows,
+        runner=command_runner,
+    )
+    issues = collect_open_issue_set(
+        root,
+        runner=command_runner,
+        issue_limit=issue_limit,
+    )
+    search_index = _open_issue_search_index(root)
+    candidates = [
+        _open_issue_candidate(
+            issue,
+            repo_root=root,
+            repo_state=repo_state,
+            search_index=search_index,
+            now=generated_at,
+        )
+        for issue in issues.get("items", [])
+    ]
+    candidates = sorted(
+        candidates,
+        key=lambda item: (
+            -int(item.get("score", 0)),
+            int(_mapping(item.get("issue")).get("number", 0)),
+        ),
+    )
+    for index, candidate in enumerate(candidates, start=1):
+        candidate["rank"] = index
+    recommendation = candidates[0] if candidates else {}
+    report = {
+        "schema_version": OPEN_ISSUE_AUDIT_SCHEMA_VERSION,
+        "operation": "open-issue-audit",
+        "generated_at_utc": generated_at.astimezone(timezone.utc).isoformat(),
+        "state": "ready" if issues.get("state") == "ready" else "unavailable",
+        "repo": {
+            "root": str(publish_safe_path(str(root))),
+            **repo_state,
+        },
+        "processes": processes,
+        "open_issues": {
+            "state": issues.get("state", "unknown"),
+            "count": issues.get("count", 0),
+            "limit": issues.get("limit", issue_limit),
+            "reason": issues.get("reason", ""),
+        },
+        "summary": {
+            "candidate_count": len(candidates),
+            "classification_counts": _open_issue_classification_counts(candidates),
+            "top_issue": _open_issue_label(recommendation),
+            "top_classification": recommendation.get("classification", ""),
+        },
+        "recommendation": recommendation,
+        "candidates": candidates,
+    }
+    safe = publish_safe_json_value(report)
+    if not isinstance(safe, dict):
+        raise TypeError("open issue audit report must be a JSON object")
+    return dict(safe)
+
+
+def collect_open_issue_set(
+    repo_root: Path,
+    *,
+    runner: CommandRunner,
+    issue_limit: int,
+) -> dict[str, Any]:
+    """Return normalized open issue metadata from GitHub."""
+    result = runner(
+        (
+            "gh",
+            "issue",
+            "list",
+            "--state",
+            "open",
+            "--limit",
+            str(max(issue_limit, 1)),
+            "--json",
+            "number,title,state,url,labels,updatedAt,createdAt,body,comments",
+        ),
+        repo_root,
+    )
+    if result.returncode != 0:
+        return {
+            "state": "unavailable",
+            "limit": issue_limit,
+            "count": 0,
+            "reason": _tail_text(result.stderr or result.stdout),
+            "items": [],
+        }
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return {
+            "state": "unavailable",
+            "limit": issue_limit,
+            "count": 0,
+            "reason": f"invalid gh issue list JSON: {exc}",
+            "items": [],
+        }
+    if not isinstance(payload, list):
+        return {
+            "state": "unavailable",
+            "limit": issue_limit,
+            "count": 0,
+            "reason": "gh issue list JSON was not a list",
+            "items": [],
+        }
+    issues = [_open_issue_payload(item) for item in payload if isinstance(item, Mapping)]
+    return {
+        "state": "ready",
+        "limit": issue_limit,
+        "count": len(issues),
+        "reason": "",
+        "items": issues,
+    }
+
+
+def _open_issue_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    comments = _open_issue_comment_context(payload.get("comments"))
+    labels = [
+        str(_mapping(label).get("name", label))
+        for label in payload.get("labels", []) or []
+    ]
+    return {
+        "number": _int(payload.get("number")),
+        "title": str(payload.get("title", "")),
+        "state": str(payload.get("state", "unknown")),
+        "url": str(payload.get("url", "")),
+        "labels": labels,
+        "created_at": str(payload.get("createdAt", "")),
+        "updated_at": str(payload.get("updatedAt", "")),
+        "body": str(payload.get("body", "") or ""),
+        "body_excerpt": _bounded_text(str(payload.get("body", "") or ""), 700),
+        "comments": comments,
+    }
+
+
+def _open_issue_comment_context(value: object) -> dict[str, Any]:
+    if isinstance(value, int):
+        return {"count": value, "recent": []}
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return {"count": 0, "recent": []}
+    comments = [_mapping(item) for item in value if _mapping(item)]
+    recent = []
+    for item in comments[-2:]:
+        author = _mapping(item.get("author"))
+        recent.append(
+            {
+                "author": str(author.get("login", "")),
+                "created_at": str(item.get("createdAt", "")),
+                "body_excerpt": _bounded_text(str(item.get("body", "") or ""), 500),
+                "url": str(item.get("url", "")),
+            }
+        )
+    return {"count": len(comments), "recent": recent}
+
+
+def _open_issue_candidate(
+    issue: Mapping[str, Any],
+    *,
+    repo_root: Path,
+    repo_state: Mapping[str, Any],
+    search_index: Sequence[Mapping[str, Any]],
+    now: datetime,
+) -> dict[str, Any]:
+    criteria = parse_acceptance_criteria(str(issue.get("body", "") or ""))
+    signals = _repository_issue_signals(repo_root, issue, search_index=search_index)
+    classification = _open_issue_classification(
+        issue,
+        criteria=criteria,
+        signals=signals,
+        repo_state=repo_state,
+    )
+    score, factors = _open_issue_score(
+        issue,
+        classification=classification,
+        criteria=criteria,
+        signals=signals,
+        now=now,
+    )
+    issue_payload = dict(issue)
+    issue_payload.pop("body", None)
+    return {
+        "rank": 0,
+        "score": score,
+        "classification": classification,
+        "next_action": _open_issue_next_action(issue, classification),
+        "reason": _open_issue_candidate_reason(issue, classification, factors),
+        "rank_factors": factors,
+        "issue": issue_payload,
+        "acceptance": {
+            "criteria_count": len(criteria),
+            "checked_count": sum(
+                1 for item in criteria if item.get("issue_checked") is True
+            ),
+        },
+        "code_signals": signals,
+    }
+
+
+def _repository_issue_signals(
+    repo_root: Path,
+    issue: Mapping[str, Any],
+    *,
+    search_index: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    terms = _open_issue_search_terms(issue)
+    if not terms:
+        return {
+            "state": "no-terms",
+            "search_terms": [],
+            "files_scanned": len(search_index),
+            "match_count": 0,
+            "path_count": 0,
+            "paths": [],
+            "snippets": [],
+        }
+    match_count = 0
+    paths: list[str] = []
+    snippets: list[dict[str, Any]] = []
+    for item in search_index:
+        relative = str(item.get("path", ""))
+        lines = [str(line) for line in item.get("lines", []) or []]
+        lower_lines = [str(line) for line in item.get("lower_lines", []) or []]
+        path_matches = False
+        for line_number, line in enumerate(lower_lines, start=1):
+            matched_terms = [term for term in terms if term in line]
+            if not matched_terms:
+                continue
+            match_count += len(matched_terms)
+            path_matches = True
+            if len(snippets) < OPEN_ISSUE_SIGNAL_LIMIT:
+                original_line = lines[line_number - 1]
+                snippets.append(
+                    {
+                        "path": relative,
+                        "line": line_number,
+                        "terms": matched_terms[:3],
+                        "excerpt": _bounded_text(original_line.strip(), 220),
+                    }
+                )
+        if path_matches and len(paths) < OPEN_ISSUE_SIGNAL_LIMIT:
+            paths.append(relative)
+    return {
+        "state": "matched" if match_count else "unmatched",
+        "search_terms": list(terms),
+        "files_scanned": len(search_index),
+        "match_count": match_count,
+        "path_count": len(paths),
+        "paths": paths,
+        "snippets": snippets,
+    }
+
+
+def _open_issue_search_index(repo_root: Path) -> tuple[dict[str, Any], ...]:
+    items: list[dict[str, Any]] = []
+    for path in _iter_open_issue_search_files(repo_root):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            continue
+        items.append(
+            {
+                "path": _repo_relative_path(repo_root, path),
+                "lines": lines,
+                "lower_lines": [line.lower() for line in lines],
+            }
+        )
+    return tuple(items)
+
+
+def _iter_open_issue_search_files(repo_root: Path) -> Iterable[Path]:
+    yielded: set[Path] = set()
+
+    for filename in sorted(OPEN_ISSUE_SEARCH_FILES):
+        path = repo_root / filename
+        if _open_issue_index_path(path, yielded):
+            yield path
+
+    for root_name in OPEN_ISSUE_SEARCH_ROOTS:
+        search_root = repo_root / root_name
+        if not search_root.exists():
+            continue
+        for path in sorted(search_root.rglob("*"), key=lambda item: str(item)):
+            if _open_issue_index_path(path, yielded):
+                yield path
+            if len(yielded) >= OPEN_ISSUE_SEARCH_FILE_LIMIT:
+                return
+
+
+def _open_issue_index_path(path: Path, yielded: set[Path]) -> bool:
+    if len(yielded) >= OPEN_ISSUE_SEARCH_FILE_LIMIT:
+        return False
+    if not path.is_file():
+        return False
+    if path in yielded:
+        return False
+    if any(
+        part in OPEN_ISSUE_GENERATED_PATH_PARTS or part.endswith(".egg-info")
+        for part in path.parts
+    ):
+        return False
+    if path.suffix.lower() not in OPEN_ISSUE_SEARCH_SUFFIXES and path.name not in (
+        OPEN_ISSUE_SEARCH_FILES
+    ):
+        return False
+    try:
+        if path.stat().st_size > OPEN_ISSUE_SEARCH_FILE_BYTES_LIMIT:
+            return False
+    except OSError:
+        return False
+    yielded.add(path)
+    return True
+
+
+def _open_issue_search_terms(issue: Mapping[str, Any]) -> tuple[str, ...]:
+    text = "\n".join(
+        (
+            str(issue.get("title", "")),
+            str(issue.get("body", "")),
+            " ".join(str(label) for label in issue.get("labels", []) or []),
+        )
+    )
+    terms: list[str] = []
+    for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_-]{3,}", text.lower()):
+        token = token.replace("_", "-")
+        if token in OPEN_ISSUE_STOPWORDS or token.isdigit():
+            continue
+        terms.append(token)
+    title = str(issue.get("title", "")).lower()
+    if "open" in title and "issue" in title:
+        terms.append("issue-audit")
+    if "recommend" in title:
+        terms.extend(("recommend", "recommendation"))
+    if "closure" in title:
+        terms.append("closure")
+    if "quality" in title:
+        terms.append("quality")
+    return tuple(list(dict.fromkeys(terms))[:OPEN_ISSUE_SEARCH_TERM_LIMIT])
+
+
+def _open_issue_classification(
+    issue: Mapping[str, Any],
+    *,
+    criteria: Sequence[Mapping[str, Any]],
+    signals: Mapping[str, Any],
+    repo_state: Mapping[str, Any],
+) -> str:
+    text = _open_issue_text(issue)
+    if _open_issue_is_superseded_candidate(text):
+        return "superseded/duplicate-candidate"
+    if _open_issue_is_operational_data(text):
+        return "operational-data-needed"
+    if _open_issue_is_backlog(issue, text):
+        return "backlog"
+    if criteria and all(item.get("issue_checked") is True for item in criteria):
+        return "ready-to-close"
+    if repo_state.get("dirty") and _open_issue_matches_changed_paths(
+        issue,
+        repo_state=repo_state,
+        signals=signals,
+    ):
+        return "ready-to-commit/push"
+    return "implementation-needed"
+
+
+def _open_issue_is_superseded_candidate(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b("
+            r"superseded by|superseded in favor|"
+            r"duplicate of|duplicate issue|close as duplicate"
+            r")\b",
+            text,
+        )
+    )
+
+
+def _open_issue_is_operational_data(text: str) -> bool:
+    return any(
+        token in text
+        for token in (
+            "build major-triangle tick caches",
+            "build the local ascii tick",
+            "download all tick",
+            "purge transient source artifacts",
+            "do not publish or commit generated cache artifacts",
+        )
+    )
+
+
+def _open_issue_is_backlog(issue: Mapping[str, Any], text: str) -> bool:
+    number = _int(issue.get("number"))
+    backlog_terms = (
+        "graphql api",
+        "rest api",
+        "synthetic",
+        "other data sources",
+        "downsampling",
+        "docker image",
+        "binary distributions",
+        "conda package",
+        "cron setup",
+        "random flag",
+        "timezone",
+        "readthedocs",
+    )
+    return number < 100 or any(term in text for term in backlog_terms)
+
+
+def _open_issue_matches_changed_paths(
+    issue: Mapping[str, Any],
+    *,
+    repo_state: Mapping[str, Any],
+    signals: Mapping[str, Any],
+) -> bool:
+    changed_paths = {
+        str(path) for path in repo_state.get("changed_paths", []) or []
+    }
+    changed_code_paths = {
+        path
+        for path in changed_paths
+        if path not in OPEN_ISSUE_DOC_ONLY_PATHS and not path.startswith("docs/")
+    }
+    signal_paths = set(str(path) for path in signals.get("paths", []) or [])
+    if changed_code_paths & signal_paths:
+        return True
+    terms = set(_open_issue_search_terms(issue))
+    return any(
+        any(term in path.lower() for term in terms) for path in changed_code_paths
+    )
+
+
+def _open_issue_score(
+    issue: Mapping[str, Any],
+    *,
+    classification: str,
+    criteria: Sequence[Mapping[str, Any]],
+    signals: Mapping[str, Any],
+    now: datetime,
+) -> tuple[int, list[str]]:
+    score = {
+        "ready-to-close": 95,
+        "ready-to-commit/push": 90,
+        "implementation-needed": 60,
+        "operational-data-needed": 35,
+        "superseded/duplicate-candidate": 30,
+        "backlog": 10,
+    }.get(classification, 0)
+    factors = [f"classification:{classification}"]
+    text = _open_issue_text(issue)
+    if _open_issue_recently_updated(issue, now=now):
+        score += 10
+        factors.append("recently-updated")
+    if criteria:
+        score += 5
+        factors.append("acceptance-criteria-present")
+    path_count = _int(signals.get("path_count"))
+    if path_count:
+        score += min(path_count, 5)
+        factors.append(f"local-code-signals:{path_count}")
+    if "open-issue audit" in text or "open issue set" in text:
+        score += 25
+        factors.append("matches-current-open-issue-audit-loop")
+    if "recommend" in text and "next" in text:
+        score += 15
+        factors.append("ranks-next-action")
+    if "scope guard" in text or "not become a recursive" in text:
+        score += 8
+        factors.append("scope-guard-against-recursion")
+    if "one-shot" in text and "non-mutating" in text:
+        score += 12
+        factors.append("closure-verification-polish")
+    if classification == "operational-data-needed":
+        score -= 20
+        factors.append("requires-local-data-or-storage")
+    if classification == "backlog":
+        score -= 5
+        factors.append("older-or-large-backlog")
+    return max(score, 0), factors
+
+
+def _open_issue_recently_updated(
+    issue: Mapping[str, Any],
+    *,
+    now: datetime,
+) -> bool:
+    updated = _parse_github_datetime(str(issue.get("updated_at", "")))
+    if updated is None:
+        return False
+    return (now.astimezone(timezone.utc) - updated).days <= 10
+
+
+def _parse_github_datetime(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(
+            timezone.utc
+        )
+    except ValueError:
+        return None
+
+
+def _open_issue_next_action(issue: Mapping[str, Any], classification: str) -> str:
+    number = _int(issue.get("number"))
+    if classification == "ready-to-close":
+        return f"run closure readiness and close #{number}"
+    if classification == "ready-to-commit/push":
+        return f"run commit/push readiness for #{number}"
+    if classification == "operational-data-needed":
+        return f"continue data operation for #{number} only after storage/runtime check"
+    if classification == "superseded/duplicate-candidate":
+        return f"audit #{number} for explicit close or merge into another issue"
+    if classification == "backlog":
+        return f"leave #{number} open as backlog unless priorities change"
+    return f"implement #{number}"
+
+
+def _open_issue_candidate_reason(
+    issue: Mapping[str, Any],
+    classification: str,
+    factors: Sequence[str],
+) -> str:
+    number = _int(issue.get("number"))
+    if "matches-current-open-issue-audit-loop" in factors:
+        return (
+            f"#{number} directly productizes this live open-issue audit loop "
+            "and has a scope guard against recursive process churn."
+        )
+    if classification == "operational-data-needed":
+        return f"#{number} is blocked on local data/storage state, not code."
+    if classification == "backlog":
+        return f"#{number} is older or large backlog work."
+    return f"#{number} is classified as {classification} from issue and repo evidence."
+
+
+def _open_issue_classification_counts(
+    candidates: Sequence[Mapping[str, Any]],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for candidate in candidates:
+        key = str(candidate.get("classification", "unknown"))
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _open_issue_label(candidate: Mapping[str, Any]) -> str:
+    issue = _mapping(candidate.get("issue"))
+    number = _int(issue.get("number"))
+    if not number:
+        return ""
+    return f"#{number} {issue.get('title', '')}"
+
+
+def _open_issue_text(issue: Mapping[str, Any]) -> str:
+    comments = _mapping(issue.get("comments"))
+    recent_comments = " ".join(
+        str(_mapping(comment).get("body_excerpt", ""))
+        for comment in comments.get("recent", []) or []
+    )
+    return "\n".join(
+        (
+            str(issue.get("title", "")),
+            str(issue.get("body", "")),
+            str(issue.get("body_excerpt", "")),
+            recent_comments,
+        )
+    ).lower()
+
+
+def _repo_relative_path(repo_root: Path, path: Path) -> str:
+    try:
+        relative = path.resolve(strict=False).relative_to(repo_root)
+    except ValueError:
+        return str(publish_safe_path(str(path)))
+    return str(publish_safe_path(str(relative)))
+
+
+def _bounded_text(value: str, limit: int) -> str:
+    normalized = re.sub(r"\s+", " ", value).strip()
+    if len(normalized) <= limit:
+        return str(publish_safe_json_value(normalized))
+    return str(publish_safe_json_value(normalized[: max(limit - 3, 0)] + "..."))
 
 
 def build_acceptance_coverage(
@@ -2492,6 +3163,128 @@ def render_issue_audit_human(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_open_issue_audit_human(report: Mapping[str, Any]) -> str:
+    """Render a compact open-issue recommendation report."""
+    repo = _mapping(report.get("repo"))
+    open_issues = _mapping(report.get("open_issues"))
+    summary = _mapping(report.get("summary"))
+    recommendation = _mapping(report.get("recommendation"))
+    issue = _mapping(recommendation.get("issue"))
+    candidates = [
+        _mapping(candidate)
+        for candidate in report.get("candidates", []) or []
+        if _mapping(candidate)
+    ]
+    lines = [
+        "Open issue audit",
+        f"state: {report.get('state', 'unknown')}",
+        f"open issues: {open_issues.get('count', 0)}",
+        f"branch: {repo.get('branch', 'unknown')} -> "
+        f"{repo.get('upstream', '')} "
+        f"ahead={repo.get('ahead', 0)} behind={repo.get('behind', 0)}",
+        f"worktree dirty: {_yes_no(repo.get('dirty'))}",
+    ]
+    if issue:
+        lines.extend(
+            [
+                (
+                    "recommendation: "
+                    f"#{issue.get('number')} "
+                    f"{recommendation.get('classification', 'unknown')} "
+                    f"score={recommendation.get('score', 0)}"
+                ),
+                f"title: {issue.get('title', '')}",
+                f"reason: {recommendation.get('reason', '')}",
+                f"next: {recommendation.get('next_action', '')}",
+            ]
+        )
+    counts = _mapping(summary.get("classification_counts"))
+    if counts:
+        lines.append(
+            "classifications: "
+            + ", ".join(f"{key}={value}" for key, value in counts.items())
+        )
+    top = candidates[:5]
+    if top:
+        lines.append("top candidates:")
+        for candidate in top:
+            item_issue = _mapping(candidate.get("issue"))
+            lines.append(
+                "  "
+                f"{candidate.get('rank', 0)}. "
+                f"#{item_issue.get('number')} "
+                f"{candidate.get('classification', 'unknown')} "
+                f"score={candidate.get('score', 0)} - "
+                f"{item_issue.get('title', '')}"
+            )
+    reason = open_issues.get("reason", "")
+    if reason:
+        lines.append(f"warning: {reason}")
+    return "\n".join(lines)
+
+
+def render_open_issue_audit_markdown(report: Mapping[str, Any]) -> str:
+    """Render a publish-safe Markdown open-issue audit."""
+    repo = _mapping(report.get("repo"))
+    open_issues = _mapping(report.get("open_issues"))
+    recommendation = _mapping(report.get("recommendation"))
+    rec_issue = _mapping(recommendation.get("issue"))
+    candidates = [
+        _mapping(candidate)
+        for candidate in report.get("candidates", []) or []
+        if _mapping(candidate)
+    ]
+    lines = [
+        "# Open Issue Audit",
+        "",
+        f"- State: `{report.get('state', 'unknown')}`",
+        f"- Open issues: `{open_issues.get('count', 0)}`",
+        (
+            "- Branch: "
+            f"`{repo.get('branch', 'unknown')} -> {repo.get('upstream', '')}` "
+            f"(ahead `{repo.get('ahead', 0)}`, behind `{repo.get('behind', 0)}`)"
+        ),
+        f"- Worktree dirty: `{_yes_no(repo.get('dirty'))}`",
+        "",
+        "## Recommendation",
+        "",
+    ]
+    if rec_issue:
+        lines.extend(
+            [
+                (
+                    f"- Issue: `#{rec_issue.get('number')}` "
+                    f"{rec_issue.get('title', '')}"
+                ),
+                f"- Classification: `{recommendation.get('classification', '')}`",
+                f"- Score: `{recommendation.get('score', 0)}`",
+                f"- Reason: {recommendation.get('reason', '')}",
+                f"- Next action: `{recommendation.get('next_action', '')}`",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Top Candidates",
+            "",
+            "| Rank | Issue | Classification | Score | Next Action |",
+            "| ---: | --- | --- | ---: | --- |",
+        ]
+    )
+    for candidate in candidates[:10]:
+        issue = _mapping(candidate.get("issue"))
+        lines.append(
+            "| "
+            f"{candidate.get('rank', 0)} | "
+            f"#{issue.get('number')} {issue.get('title', '')} | "
+            f"`{candidate.get('classification', '')}` | "
+            f"{candidate.get('score', 0)} | "
+            f"`{candidate.get('next_action', '')}` |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
 def render_precheck_human(report: Mapping[str, Any]) -> str:
     """Render a compact pre-gate console summary."""
     repo = _mapping(report.get("repo"))
@@ -3243,6 +4036,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="read back the linked issue and cheap local closure state",
     )
     parser.add_argument(
+        "--open-issue-audit",
+        "--issue-recommendation",
+        action="store_true",
+        help="audit all open issues and recommend the next non-mutating action",
+    )
+    parser.add_argument(
+        "--open-issue-limit",
+        type=int,
+        default=DEFAULT_OPEN_ISSUE_LIMIT,
+        help=f"maximum open issues to inspect; default {DEFAULT_OPEN_ISSUE_LIMIT}",
+    )
+    parser.add_argument(
         "--commit-readiness",
         action="store_true",
         help="report whether current changes are ready to stage and commit",
@@ -3479,6 +4284,38 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     if args.commit_readiness and args.push_readiness:
         parser.error("--commit-readiness cannot be combined with --push-readiness")
+    if args.open_issue_limit < 1:
+        parser.error("--open-issue-limit must be positive")
+    if args.open_issue_audit and (
+        args.issue is not None
+        or args.issue_audit
+        or args.commit_readiness
+        or args.push_readiness
+        or args.execute_workflow
+        or args.pre_mutation_gates
+        or args.rerun_formatter_mutations
+        or args.rerun_standalone_formatter_mutations
+        or args.precheck
+        or args.run_gates
+        or args.release_preflight
+        or args.artifact_roots
+        or args.report_json
+        or args.report_markdown
+        or args.write_reports
+        or args.summarize_report
+        or args.full_json
+        or args.print_close_comment
+        or args.close_issue
+        or args.workflow
+        or args.commit_message
+        or args.commit_message_file
+        or args.commit_paths
+        or _acceptance_requested_from_args(args)
+    ):
+        parser.error(
+            "--open-issue-audit cannot be combined with issue-specific, "
+            "mutation, gate, report-write, commit, or acceptance options"
+        )
     if args.commit_message and args.commit_message_file:
         parser.error("--commit-message cannot be combined with --commit-message-file")
     if args.push_readiness and (
@@ -3649,6 +4486,19 @@ def main(
         else:
             print(render_summary_human(summary))  # noqa: T201
         return 0 if summary.get("accepted") is True else 1
+    if args.open_issue_audit:
+        report = build_open_issue_audit_report(
+            repo_root=root,
+            runner=runner,
+            issue_limit=args.open_issue_limit,
+        )
+        if args.json:
+            print(json.dumps(report, indent=2, sort_keys=True))  # noqa: T201
+        elif args.markdown:
+            print(render_open_issue_audit_markdown(report))  # noqa: T201
+        else:
+            print(render_open_issue_audit_human(report))  # noqa: T201
+        return 0 if report.get("state") == "ready" else 1
     if args.execute_workflow:
         commit_message, commit_source = _selected_commit_message(args, root)
         report = run_issue_workflow_execution(

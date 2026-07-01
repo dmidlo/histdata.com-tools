@@ -55,6 +55,8 @@ class FakeRunner:
         ps_outputs: Sequence[str] = ("",),
         issue_state: str = "OPEN",
         issue_body: str = "",
+        open_issues: Sequence[Mapping[str, Any]] | None = None,
+        issue_list_returncode: int = 0,
         issue_unavailable_after_close: bool = False,
         close_returncode: int = 0,
         status_after_close_stdout: str = "",
@@ -81,6 +83,8 @@ class FakeRunner:
         self.ps_outputs = tuple(ps_outputs)
         self.issue_state = issue_state
         self.issue_body = issue_body
+        self.open_issues = tuple(dict(item) for item in open_issues or ())
+        self.issue_list_returncode = issue_list_returncode
         self.issue_unavailable_after_close = issue_unavailable_after_close
         self.close_returncode = close_returncode
         self.status_after_close_stdout = status_after_close_stdout
@@ -202,6 +206,21 @@ class FakeRunner:
                         for key, value in payload.items()
                         if key in fields
                     }
+                ),
+            )
+        if args[:3] == ("gh", "issue", "list"):
+            return _completed(
+                args,
+                returncode=self.issue_list_returncode,
+                stdout=(
+                    json.dumps(list(self.open_issues))
+                    if self.issue_list_returncode == 0
+                    else ""
+                ),
+                stderr=(
+                    ""
+                    if self.issue_list_returncode == 0
+                    else "gh issue list failed\n"
                 ),
             )
         if args[:3] == ("gh", "issue", "close"):
@@ -731,6 +750,210 @@ def test_issue_audit_mode_reads_issue_without_running_gates(
         call[:3] == (sys.executable, "-m", "pre_commit")
         for call in runner.calls
     )
+
+
+def test_open_issue_audit_recommends_whole_issue_report(
+    tmp_path: Path,
+) -> None:
+    """Open issue audit should rank the next target from live issue data."""
+    module = _module()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "closure_readiness.py").write_text(
+        "def render_issue_audit_human():\n"
+        "    return 'issue audit recommendation readiness'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "histdatacom" / "orchestration").mkdir(parents=True)
+    (
+        tmp_path / "src" / "histdatacom" / "orchestration" / "rich_progress.py"
+    ).write_text("runtime disk cache artifact progress\n", encoding="utf-8")
+    issues = [
+        {
+            "number": 294,
+            "state": "OPEN",
+            "title": "feat(v1.6.0): add open-issue audit recommendation report",
+            "url": "https://github.com/example/repo/issues/294",
+            "labels": [],
+            "createdAt": "2026-06-30T23:16:24Z",
+            "updatedAt": "2026-07-01T02:19:47Z",
+            "body": """
+## Problem
+Manual work still required: pull the live open issue list and rank the next
+most optimal recommendation.
+
+## Acceptance criteria
+
+- Fetch the live open issue set.
+- Rank the top recommendation with explicit evidence.
+- Emit compact human output and stable JSON.
+""",
+            "comments": [
+                {
+                    "author": {"login": "dmidlo"},
+                    "createdAt": "2026-07-01T02:19:47Z",
+                    "body": (
+                        "Scope guard: rank the next actionable issue and do "
+                        "not become a recursive dev-experience loop."
+                    ),
+                    "url": "https://github.com/example/repo/issues/294#comment",
+                }
+            ],
+        },
+        {
+            "number": 293,
+            "state": "OPEN",
+            "title": "feat(v1.6.0): add one-shot non-mutating closure verification",
+            "url": "https://github.com/example/repo/issues/293",
+            "labels": [],
+            "createdAt": "2026-06-30T23:05:41Z",
+            "updatedAt": "2026-07-01T00:07:36Z",
+            "body": """
+## Acceptance criteria
+
+- Add a report-only closure verification mode.
+""",
+            "comments": [],
+        },
+        {
+            "number": 262,
+            "state": "OPEN",
+            "title": "chore(v1.3.0): build major-triangle tick caches and purge source artifacts",
+            "url": "https://github.com/example/repo/issues/262",
+            "labels": [],
+            "createdAt": "2026-06-27T21:39:10Z",
+            "updatedAt": "2026-06-28T04:11:51Z",
+            "body": (
+                "Build the local ASCII tick Polars cache set. Do not publish "
+                "or commit generated cache artifacts."
+            ),
+            "comments": [],
+        },
+        {
+            "number": 81,
+            "state": "OPEN",
+            "title": "Synthetic tick data based on reference set",
+            "url": "https://github.com/example/repo/issues/81",
+            "labels": [],
+            "createdAt": "2022-12-28T01:38:44Z",
+            "updatedAt": "2022-12-28T01:38:44Z",
+            "body": "",
+            "comments": [],
+        },
+    ]
+
+    report = module.build_open_issue_audit_report(
+        repo_root=tmp_path,
+        runner=FakeRunner(open_issues=issues),
+        now=datetime(2026, 7, 1, tzinfo=timezone.utc),
+    )
+
+    recommendation = report["recommendation"]
+    counts = report["summary"]["classification_counts"]
+
+    assert report["schema_version"] == module.OPEN_ISSUE_AUDIT_SCHEMA_VERSION
+    assert report["state"] == "ready"
+    assert report["open_issues"]["count"] == 4
+    assert recommendation["issue"]["number"] == 294
+    assert recommendation["classification"] == "implementation-needed"
+    assert "matches-current-open-issue-audit-loop" in (
+        recommendation["rank_factors"]
+    )
+    assert "scope-guard-against-recursion" in recommendation["rank_factors"]
+    assert counts["implementation-needed"] == 2
+    assert counts["operational-data-needed"] == 1
+    assert counts["backlog"] == 1
+    assert recommendation["code_signals"]["files_scanned"] >= 1
+    assert recommendation["code_signals"]["state"] == "matched"
+
+
+def test_open_issue_audit_cli_json_is_non_mutating(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """The open issue audit CLI should not stage, commit, push, or close."""
+    module = _module()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "closure_readiness.py").write_text(
+        "issue audit recommendation\n",
+        encoding="utf-8",
+    )
+    runner = FakeRunner(
+        open_issues=[
+            {
+                "number": 294,
+                "state": "OPEN",
+                "title": (
+                    "feat(v1.6.0): add open-issue audit recommendation report"
+                ),
+                "url": "https://github.com/example/repo/issues/294",
+                "labels": [],
+                "createdAt": "2026-06-30T23:16:24Z",
+                "updatedAt": "2026-07-01T02:19:47Z",
+                "body": """
+## Acceptance criteria
+
+- Fetch the live open issue set.
+""",
+                "comments": [],
+            }
+        ],
+    )
+
+    exit_code = module.main(
+        ["--open-issue-audit", "--open-issue-limit", "25", "--json"],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["operation"] == "open-issue-audit"
+    assert payload["summary"]["top_issue"].startswith("#294")
+    assert any(
+        call[:7]
+        == (
+            "gh",
+            "issue",
+            "list",
+            "--state",
+            "open",
+            "--limit",
+            "25",
+        )
+        for call in runner.calls
+    )
+    assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
+    assert not any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
+    assert not any(call[:2] == ("git", "push") for call in runner.calls)
+    assert not any(
+        call[:3] == ("gh", "issue", "close") for call in runner.calls
+    )
+    assert not any(
+        call[:3] == (sys.executable, "-m", "pytest") for call in runner.calls
+    )
+    assert not any(
+        call[:3] == (sys.executable, "-m", "pre_commit")
+        for call in runner.calls
+    )
+
+
+def test_open_issue_audit_reports_github_list_failure(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """A GitHub readback failure should be explicit, not a fake recommendation."""
+    module = _module()
+    exit_code = module.main(
+        ["--open-issue-audit"],
+        repo_root=tmp_path,
+        runner=FakeRunner(issue_list_returncode=1),
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "Open issue audit" in output
+    assert "state: unavailable" in output
+    assert "warning: gh issue list failed" in output
 
 
 def test_acceptance_criteria_parser_reads_checklists_and_section_bullets() -> (

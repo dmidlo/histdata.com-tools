@@ -284,6 +284,8 @@ python scripts/closure_readiness.py \
   --rerun-standalone-formatter-mutations
 python scripts/closure_readiness.py \
   --summarize-report .histdatacom/closure-readiness/closure-274.json
+python scripts/closure_readiness.py --open-issue-audit
+python scripts/closure_readiness.py --open-issue-audit --json
 python scripts/closure_readiness.py --issue 274 --workflow --close-issue
 python scripts/closure_readiness.py \
   --issue 274 \
@@ -320,6 +322,10 @@ after closing. `--execute-workflow` is the explicit mutating mode: it validates
 the declared paths and Commitizen message, runs targeted `git add`, commits,
 checks push readiness, pushes to the expected upstream, runs closure gates,
 closes the issue, and writes bounded execution evidence plus full ignored logs.
+`--open-issue-audit` is the non-mutating whole-queue triage mode: it reads the
+live open GitHub issue set, local branch/upstream/worktree state, bounded source
+signals, and recent issue context, then classifies and ranks the next suggested
+action in compact human output or stable JSON.
 Add `--pre-mutation-gates` to run the same closure gate battery before the first
 `git add`; the workflow blocks staging, commit, and push if those gates fail or
 rewrite files, and records the result separately from the post-push closure
