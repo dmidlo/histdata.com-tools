@@ -14,7 +14,10 @@ import pytest
 from histdatacom import Options
 from histdatacom.cli import ArgParser
 from histdatacom.data_quality.preflight import (
+    DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR,
     QUALITY_PREFLIGHT_SCHEMA_VERSION,
+    QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST,
+    discover_latest_quality_preflight_validation_report,
     format_quality_preflight_evidence_inspection,
     format_quality_preflight_console_summary,
     format_quality_run_preflight_warning,
@@ -174,6 +177,148 @@ def test_quality_preflight_imports_validation_report_status(
     assert "ruff failed" in markdown
     assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
     assert str(tmp_path) not in markdown
+
+
+def test_quality_preflight_discovers_latest_validation_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The latest sentinel should import the newest compatible report."""
+    monkeypatch.chdir(tmp_path)
+    data_dir = tmp_path / "data"
+    report_dir = tmp_path / DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    _write_validation_report(
+        report_dir / "closure-old.json",
+        generated_at_utc="2026-07-01T01:00:00Z",
+        results=[
+            {
+                "name": "git-diff-check",
+                "command": "git diff --check",
+                "status": "fail",
+            }
+        ],
+    )
+    _write_validation_report(
+        report_dir / "closure-new.json",
+        generated_at_utc="2026-07-01T03:00:00Z",
+        results=[
+            {
+                "name": "git-diff-check",
+                "command": "git diff --check",
+                "status": "pass",
+            },
+            {
+                "name": "pre-commit",
+                "command": "python -m pre_commit run --all-files",
+                "status": "skipped",
+            },
+        ],
+    )
+    _write_validation_report(
+        report_dir / "unsupported-newer.json",
+        generated_at_utc="2026-07-01T04:00:00Z",
+        results=[
+            {
+                "name": "unrelated",
+                "command": "python unrelated.py",
+                "status": "pass",
+            }
+        ],
+    )
+    (report_dir / "malformed-newest.json").write_text("{", encoding="utf-8")
+
+    discovered = discover_latest_quality_preflight_validation_report()
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        validation_report_path=QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST,
+    )
+    source = payload["evidence"]["validation_source"]
+    assert isinstance(source, dict)
+    statuses = _validation_statuses(payload)
+
+    assert discovered == Path(".histdatacom/closure-readiness/closure-new.json")
+    assert source["state"] == "imported"
+    assert source["mode"] == "latest"
+    assert source["path"] == ".histdatacom/closure-readiness/closure-new.json"
+    assert source["reports_directory"] == ".histdatacom/closure-readiness"
+    assert source["candidate_count"] == 2
+    assert statuses["git-diff-check"] == "pass"
+    assert statuses["full-pre-commit"] == "skipped"
+    encoded = json.dumps(payload, sort_keys=True)
+    assert str(tmp_path) not in encoded
+    assert "/Users/" not in encoded
+
+
+def test_quality_preflight_latest_reports_no_compatible_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Explicit latest discovery should be safe when no report can be used."""
+    monkeypatch.chdir(tmp_path)
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        validation_report_path=QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST,
+    )
+    source = payload["evidence"]["validation_source"]
+    assert isinstance(source, dict)
+    statuses = _validation_statuses(payload)
+
+    assert discover_latest_quality_preflight_validation_report() is None
+    assert source["state"] == "unavailable"
+    assert source["mode"] == "latest"
+    assert source["reports_directory"] == ".histdatacom/closure-readiness"
+    assert "no compatible validation reports found" in str(source["reason"])
+    assert set(statuses.values()) == {"skipped"}
+
+
+def test_quality_preflight_default_does_not_discover_latest_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Ordinary preflight should not inspect ignored closure artifacts."""
+    monkeypatch.chdir(tmp_path)
+    data_dir = tmp_path / "data"
+    report_dir = tmp_path / DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    _write_validation_report(
+        report_dir / "closure-new.json",
+        generated_at_utc="2026-07-01T03:00:00Z",
+        results=[
+            {
+                "name": "git-diff-check",
+                "command": "git diff --check",
+                "status": "pass",
+            }
+        ],
+    )
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+    )
+    source = payload["evidence"]["validation_source"]
+    assert isinstance(source, dict)
+
+    assert source["state"] == "not-provided"
+    assert set(_validation_statuses(payload).values()) == {"not-run"}
 
 
 def test_quality_preflight_runs_bounded_validation_bundle(
@@ -799,7 +944,7 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
             "--quality-preflight-markdown-report",
             str(tmp_path / "preflight.md"),
             "--quality-preflight-validation-report",
-            str(tmp_path / "closure.json"),
+            "latest",
             "--quality-preflight-run-validation",
             "--pair-groups",
             "majors",
@@ -820,9 +965,7 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
     assert options.quality_preflight_markdown_report_path == str(
         tmp_path / "preflight.md"
     )
-    assert options.quality_preflight_validation_report_path == str(
-        tmp_path / "closure.json"
-    )
+    assert options.quality_preflight_validation_report_path == "latest"
     assert options.quality_preflight_run_validation
     assert options.pair_groups == ["majors"]
 
@@ -831,28 +974,23 @@ def test_api_quality_preflight_returns_payload_without_temporal_submit(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """API callers should get preflight evidence without job submission."""
+    """API callers should get latest preflight evidence without job submission."""
     import histdatacom.histdata_com as histdata_com
 
+    monkeypatch.chdir(tmp_path)
     data_dir = tmp_path / "data"
+    report_dir = tmp_path / DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR
     _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
-    validation_path = tmp_path / "closure.json"
-    validation_path.write_text(
-        json.dumps(
+    _write_validation_report(
+        report_dir / "closure-new.json",
+        generated_at_utc="2026-07-01T03:00:00Z",
+        results=[
             {
-                "schema_version": "histdatacom.closure-readiness.v1",
-                "gates": {
-                    "results": [
-                        {
-                            "name": "git-diff-check",
-                            "command": "git diff --check",
-                            "status": "pass",
-                        }
-                    ]
-                },
+                "name": "git-diff-check",
+                "command": "git diff --check",
+                "status": "pass",
             }
-        ),
-        encoding="utf-8",
+        ],
     )
 
     def fail_submit(*args: object, **kwargs: object) -> None:
@@ -868,7 +1006,7 @@ def test_api_quality_preflight_returns_payload_without_temporal_submit(
     options.quality_paths = (str(data_dir),)
     options.quality_check_groups = {"inventory"}
     options.quality_preflight_sample_size = 1
-    options.quality_preflight_validation_report_path = str(validation_path)
+    options.quality_preflight_validation_report_path = "latest"
     options.pairs = {"eurusd"}
     options.formats = {"ascii"}
     options.timeframes = {"T"}
@@ -878,6 +1016,7 @@ def test_api_quality_preflight_returns_payload_without_temporal_submit(
     assert payload["operation"] == "data-quality-cache-preflight"
     assert payload["target_count"] == 1
     assert payload["sample"]["selected_count"] == 1
+    assert payload["evidence"]["validation_source"]["mode"] == "latest"
     assert _validation_statuses(payload)["git-diff-check"] == "pass"
 
 
@@ -929,6 +1068,26 @@ def _validation_statuses(payload: dict[str, object]) -> dict[str, str]:
         for command in commands
         if isinstance(command, dict)
     }
+
+
+def _write_validation_report(
+    path: Path,
+    *,
+    generated_at_utc: str,
+    results: list[dict[str, object]],
+) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "histdatacom.closure-readiness.v1",
+                "generated_at_utc": generated_at_utc,
+                "gates": {"results": results},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def _write_tick_cache(

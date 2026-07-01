@@ -61,6 +61,10 @@ DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS = 24 * 60 * 60
 QUALITY_PREFLIGHT_WARN_FRACTION = 0.80
 QUALITY_PREFLIGHT_LARGE_CACHE_TARGET_COUNT = 32
 QUALITY_PREFLIGHT_VALIDATION_TEXT_LIMIT = 1200
+QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST = "latest"
+DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR = (
+    Path(".histdatacom") / "closure-readiness"
+)
 
 ValidationRunner = Callable[
     [Sequence[str]],
@@ -75,6 +79,16 @@ class _CacheTarget:
     target: QualityTarget
     path: Path
     size_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class _ValidationReportCandidate:
+    """One compatible closure/readiness report candidate."""
+
+    path: Path
+    payload: dict[str, JSONValue]
+    generated_at_utc: datetime
+    result_count: int
 
 
 def _utc_now() -> datetime:
@@ -548,6 +562,16 @@ def load_quality_preflight_evidence(
             "quality preflight evidence schema is not supported"
         )
     return payload
+
+
+def discover_latest_quality_preflight_validation_report(
+    report_dir: str | Path = DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR,
+) -> Path | None:
+    """Return the latest compatible closure/readiness report, when available."""
+    candidate = _latest_validation_report_candidate(
+        Path(report_dir).expanduser()
+    )
+    return None if candidate is None else candidate.path
 
 
 def quality_run_preflight_warning(
@@ -1108,12 +1132,12 @@ def _quality_preflight_evidence_payload(
         ),
     }
     if validation_report_path:
-        validation_source = _validation_report_source_payload(
-            validation_report_path
+        resolved_report_path, validation_source = (
+            _resolve_validation_report_source(validation_report_path)
         )
         validation = _merge_validation_report_rows(
             validation,
-            validation_report_path=validation_report_path,
+            validation_report_path=resolved_report_path,
             validation_source=validation_source,
         )
     if run_validation:
@@ -1225,6 +1249,107 @@ def _validation_commands_payload() -> list[JSONValue]:
     ]
 
 
+def _resolve_validation_report_source(
+    validation_report_path: str | Path,
+) -> tuple[Path | None, dict[str, JSONValue]]:
+    if _is_latest_validation_report_request(validation_report_path):
+        return _latest_validation_report_source_payload()
+    report_path = Path(validation_report_path).expanduser()
+    return report_path, _validation_report_source_payload(report_path)
+
+
+def _is_latest_validation_report_request(value: str | Path) -> bool:
+    return (
+        str(value).strip().lower() == QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST
+    )
+
+
+def _latest_validation_report_source_payload(
+    report_dir: str | Path = DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR,
+) -> tuple[Path | None, dict[str, JSONValue]]:
+    report_dir_path = Path(report_dir).expanduser()
+    safe_dir = str(
+        publish_safe_path(str(report_dir_path.resolve(strict=False)))
+    )
+    candidates = _compatible_validation_report_candidates(report_dir_path)
+    if not candidates:
+        return None, {
+            "state": "unavailable",
+            "mode": QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST,
+            "reports_directory": safe_dir,
+            "reason": "no compatible validation reports found",
+        }
+    candidate = max(
+        candidates,
+        key=lambda item: (
+            item.generated_at_utc,
+            item.path.as_posix(),
+        ),
+    )
+    return candidate.path, {
+        "state": "imported",
+        "mode": QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST,
+        "path": str(
+            publish_safe_path(str(candidate.path.resolve(strict=False)))
+        ),
+        "reports_directory": safe_dir,
+        "schema_version": str(candidate.payload.get("schema_version", "")),
+        "generated_at_utc": str(candidate.payload.get("generated_at_utc", "")),
+        "matched_result_count": candidate.result_count,
+        "candidate_count": len(candidates),
+        "reason": "latest compatible validation report imported",
+    }
+
+
+def _latest_validation_report_candidate(
+    report_dir: Path,
+) -> _ValidationReportCandidate | None:
+    candidates = _compatible_validation_report_candidates(report_dir)
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda item: (
+            item.generated_at_utc,
+            item.path.as_posix(),
+        ),
+    )
+
+
+def _compatible_validation_report_candidates(
+    report_dir: Path,
+) -> list[_ValidationReportCandidate]:
+    try:
+        paths = sorted(
+            report_dir.glob("*.json"), key=lambda path: path.as_posix()
+        )
+    except OSError:
+        return []
+    candidates: list[_ValidationReportCandidate] = []
+    for path in paths:
+        try:
+            payload = _load_validation_json(path)
+        except (OSError, ValueError):
+            continue
+        results = _validation_results_from_report(payload)
+        if not results:
+            continue
+        generated_at = _parse_utc_timestamp(payload.get("generated_at_utc"))
+        candidates.append(
+            _ValidationReportCandidate(
+                path=path,
+                payload=payload,
+                generated_at_utc=(
+                    generated_at
+                    if generated_at is not None
+                    else datetime.min.replace(tzinfo=timezone.utc)
+                ),
+                result_count=len(results),
+            )
+        )
+    return candidates
+
+
 def _validation_report_source_payload(
     validation_report_path: str | Path,
 ) -> dict[str, JSONValue]:
@@ -1275,10 +1400,12 @@ def _load_validation_json(path: Path) -> dict[str, JSONValue]:
 def _merge_validation_report_rows(
     rows: list[JSONValue],
     *,
-    validation_report_path: str | Path,
+    validation_report_path: str | Path | None,
     validation_source: Mapping[str, JSONValue],
 ) -> list[JSONValue]:
-    if validation_source.get("state") == "unavailable":
+    if validation_source.get("state") == "unavailable" or (
+        validation_report_path is None
+    ):
         return _mark_validation_rows_unavailable(rows, validation_source)
     try:
         payload = _load_validation_json(
@@ -2492,11 +2619,14 @@ def _format_duration(value: object) -> str:
 
 
 __all__ = [
+    "DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR",
     "DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE",
     "QUALITY_PREFLIGHT_LARGE_CACHE_TARGET_COUNT",
     "QUALITY_PREFLIGHT_INSPECTION_SCHEMA_VERSION",
     "QUALITY_PREFLIGHT_SCHEMA_VERSION",
+    "QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST",
     "QualityDiscoveryError",
+    "discover_latest_quality_preflight_validation_report",
     "format_quality_preflight_evidence_inspection",
     "format_quality_preflight_console_summary",
     "format_quality_run_preflight_warning",

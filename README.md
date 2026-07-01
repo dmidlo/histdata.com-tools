@@ -219,7 +219,8 @@ Data quality:
   --quality-preflight-validation-report PATH
                         merge validation command status from a
                         closure/readiness JSON report into quality preflight
-                        evidence
+                        evidence; use 'latest' to discover the newest
+                        compatible report under .histdatacom/closure-readiness
   --quality-preflight-run-validation
                         run bounded quality preflight validation commands
                         before rendering evidence
@@ -797,10 +798,13 @@ tune the bounded sample.
 Validation rows stay `not-run` by default so ordinary quality preflights do not
 run repository gates. For release notes or GitHub issue evidence, pass
 `--quality-preflight-validation-report PATH` to merge command status from a
-closure/readiness JSON report, or pass `--quality-preflight-run-validation` to
-run only the bounded local validation bundle: focused quality-preflight tests
-and `git diff --check`. Full pytest, pre-commit, publishing, and GitHub issue
-closure remain explicit closure/release workflow responsibilities.
+closure/readiness JSON report. Use
+`--quality-preflight-validation-report latest` to resolve the newest compatible
+JSON report under `.histdatacom/closure-readiness` without running gates. Pass
+`--quality-preflight-run-validation` to run only the bounded local validation
+bundle: focused quality-preflight tests and `git diff --check`. Full pytest,
+pre-commit, publishing, and GitHub issue closure remain explicit
+closure/release workflow responsibilities.
 
 When launching a large cache-backed `--quality` run, pass the saved report with
 `--quality-preflight-evidence PATH`. If no matching evidence is available, the

@@ -1531,7 +1531,9 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             metavar="PATH",
             help=(
                 "merge validation command status from a closure/readiness "
-                "JSON report into quality preflight evidence"
+                "JSON report into quality preflight evidence; use 'latest' "
+                "to discover the newest compatible report under "
+                ".histdatacom/closure-readiness"
             ),
         )
         quality_args.add_argument(
