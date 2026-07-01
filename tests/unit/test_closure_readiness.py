@@ -394,6 +394,99 @@ def test_standalone_gate_run_formatter_mutation_reports_rerun_guidance(
     assert "Required rerun commands" in markdown
 
 
+def test_standalone_gate_run_without_mutation_reports_no_rerun_contract(
+    tmp_path: Path,
+) -> None:
+    """Clean standalone gate output should be stable and unambiguous."""
+    module = _module()
+    runner = FakeRunner()
+
+    report = module.build_readiness_report(
+        repo_root=tmp_path,
+        issue=296,
+        run_gates=True,
+        artifact_roots=(tmp_path / "data",),
+        process_rows=(),
+        runner=runner,
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    human = module.render_human(report)
+    markdown = module.render_markdown(report)
+    summary = module.summarize_readiness_report(report)
+
+    assert report["readiness"]["state"] == "ready"
+    assert report["gates"]["state"] == "pass"
+    assert report["gates"]["changed_paths_after"] == []
+    assert report["gates"]["mutation_summary"]["state"] == "none"
+    assert report["gates"]["mutation_summary"]["changed_path_count"] == 0
+    assert report["gates"]["mutation_summary"]["items"] == []
+    assert report["gates"]["required_rerun"]["state"] == "not-required"
+    assert report["gates"]["required_rerun"]["commands"] == []
+    assert report["gates"]["required_rerun"]["reason"] == (
+        "closure gates did not change monitored paths"
+    )
+    assert report["gates"]["rerun"]["state"] == "not-run"
+    assert report["gates"]["rerun"]["eligible"] is False
+    assert report["gates"]["rerun"]["requested"] is False
+    assert report["gates"]["rerun"]["reason"] == (
+        "formatter/tool-only mutation rerun is not required"
+    )
+    assert summary["gates"]["changed_paths_after"] == []
+    assert summary["gates"]["mutation_summary"]["state"] == "none"
+    assert summary["gates"]["required_rerun"]["state"] == "not-required"
+    assert summary["gates"]["rerun"]["state"] == "not-run"
+    assert "gate mutations:" not in human
+    assert "required rerun:" not in human
+    assert "rerun:" not in human
+    assert "Gate-Induced File Mutations" not in markdown
+    assert "Required rerun commands" not in markdown
+
+
+def test_standalone_gate_run_without_mutation_opt_in_does_not_rerun(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Opting into formatter reruns should be a no-op when gates are clean."""
+    module = _module()
+    runner = FakeRunner()
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "296",
+            "--run-gates",
+            "--rerun-standalone-formatter-mutations",
+            "--json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    pytest_calls = [
+        call
+        for call in runner.calls
+        if call[:3] == (sys.executable, "-m", "pytest")
+    ]
+
+    assert exit_code == 0
+    assert payload["readiness"]["state"] == "ready"
+    assert payload["gates"]["changed_paths_after"] == []
+    assert payload["gates"]["mutation_summary"]["state"] == "none"
+    assert payload["gates"]["required_rerun"]["state"] == "not-required"
+    assert payload["gates"]["required_rerun"]["commands"] == []
+    assert payload["gates"]["required_rerun"]["reason"] == (
+        "closure gates did not change monitored paths"
+    )
+    assert payload["gates"]["rerun"]["requested"] is True
+    assert payload["gates"]["rerun"]["eligible"] is False
+    assert payload["gates"]["rerun"]["state"] == "not-run"
+    assert payload["gates"]["rerun"]["reason"] == (
+        "formatter/tool-only mutation rerun is not required"
+    )
+    assert runner.precommit_calls == 1
+    assert len(pytest_calls) == 1
+
+
 def test_standalone_gate_run_non_formatter_mutation_blocks_rerun(
     tmp_path: Path,
 ) -> None:
