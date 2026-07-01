@@ -112,7 +112,9 @@ class RuntimeContext:
     quality_preflight_markdown: bool
     quality_preflight_markdown_report_path: str | None
     quality_preflight_report_path: str | None
+    quality_preflight_run_validation: bool
     quality_preflight_sample_size: int
+    quality_preflight_validation_report_path: str | None
     quality_profile_path: str
     quality_profile: Mapping[str, Any]
     repo_quality_refresh: bool
@@ -202,6 +204,10 @@ class _HistDataCom:  # noqa:R701
                 quality_check_groups=self.context.quality_check_groups,
                 quality_profile=self.context.quality_profile,
                 sample_size=self.context.quality_preflight_sample_size,
+                validation_report_path=(
+                    self.context.quality_preflight_validation_report_path
+                ),
+                run_validation=self.context.quality_preflight_run_validation,
             )
         )
         if self.context.quality_preflight_report_path:
@@ -486,8 +492,16 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
             if args.get("quality_preflight_report_path") is None
             else str(args["quality_preflight_report_path"])
         ),
+        quality_preflight_run_validation=bool(
+            args["quality_preflight_run_validation"]
+        ),
         quality_preflight_sample_size=int(
             args["quality_preflight_sample_size"]
+        ),
+        quality_preflight_validation_report_path=(
+            None
+            if args.get("quality_preflight_validation_report_path") is None
+            else str(args["quality_preflight_validation_report_path"])
         ),
         quality_profile_path=str(args.get("quality_profile_path") or ""),
         quality_profile=dict(args.get("quality_profile") or {}),
@@ -523,8 +537,7 @@ def _attach_influx_config_metadata(
     if missing:
         missing_text = ", ".join(missing)
         raise InfluxConfigurationError(
-            "influxdb.yaml is missing required influxdb keys: "
-            f"{missing_text}."
+            f"influxdb.yaml is missing required influxdb keys: {missing_text}."
         )
     metadata["influx_config"] = {
         "INFLUX_ORG": str(influx_config.get("org", "") or ""),
@@ -546,7 +559,7 @@ def _validate_influx_metadata_config(config: Mapping[str, Any]) -> None:
     if missing:
         missing_text = ", ".join(missing)
         raise InfluxConfigurationError(
-            "influx metadata is missing required keys: " f"{missing_text}."
+            f"influx metadata is missing required keys: {missing_text}."
         )
 
 
@@ -846,7 +859,7 @@ def _format_orchestration_quality_console_summary(
         lines.append("quality report: scratch report deleted after validation")
     elif report_disposition.get("delete_error"):
         lines.append(
-            "quality report cleanup: " f"{report_disposition['delete_error']}"
+            f"quality report cleanup: {report_disposition['delete_error']}"
         )
     source_cleanliness = _mapping_from_payload(
         quality_payload.get("source_cleanliness")
@@ -910,7 +923,7 @@ def _format_quality_target_counts(
         )
     target_summaries = _quality_target_summaries(quality_payload)
     if not target_summaries:
-        return "targets: " f"{summary.get('target_count', 0)}"
+        return f"targets: {summary.get('target_count', 0)}"
     return (
         "targets: "
         f"{summary.get('target_count', 0)} "

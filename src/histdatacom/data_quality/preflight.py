@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
 import shlex
+import subprocess
+import sys
 from time import perf_counter
 from typing import Any, cast
 
@@ -42,6 +44,7 @@ from histdatacom.fx_enums import (
 from histdatacom.orchestration.workflows import activity_execution_policy
 from histdatacom.publication_safety import (
     publish_safe_json_mapping,
+    publish_safe_json_value,
     publish_safe_path,
 )
 from histdatacom.runtime_contracts import JSONValue
@@ -57,6 +60,12 @@ DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE = 4
 DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS = 24 * 60 * 60
 QUALITY_PREFLIGHT_WARN_FRACTION = 0.80
 QUALITY_PREFLIGHT_LARGE_CACHE_TARGET_COUNT = 32
+QUALITY_PREFLIGHT_VALIDATION_TEXT_LIMIT = 1200
+
+ValidationRunner = Callable[
+    [Sequence[str]],
+    subprocess.CompletedProcess[str],
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +93,9 @@ def run_cache_quality_preflight(
     quality_profile: Mapping[str, Any] | None = None,
     sample_size: int = DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE,
     activity_budget_seconds: int | None = None,
+    validation_report_path: str | Path | None = None,
+    run_validation: bool = False,
+    validation_runner: ValidationRunner | None = None,
     clock: Callable[[], float] = perf_counter,
     utc_now: Callable[[], datetime] = _utc_now,
 ) -> dict[str, JSONValue]:
@@ -138,6 +150,9 @@ def run_cache_quality_preflight(
         budget_seconds=budget_seconds,
         quality_profile=quality_profile,
         all_cache_targets=all_cache_targets,
+        validation_report_path=validation_report_path,
+        run_validation=run_validation,
+        validation_runner=validation_runner,
     )
 
 
@@ -341,7 +356,7 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
             "## Validation Commands",
             "",
             *_markdown_table(
-                ("Name", "Status", "Command"),
+                ("Name", "Status", "Command", "Details"),
                 _validation_command_rows(evidence.get("validation_commands")),
             ),
             "",
@@ -378,10 +393,9 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
                 f"{_format_duration(estimate.get('estimated_seconds_max'))}"
             ),
             f"- Temporal budget: {budget.get('status', 'unknown')}",
-            ("- Source artifacts: " f"{_source_artifact_state(operational)}"),
+            (f"- Source artifacts: {_source_artifact_state(operational)}"),
             (
-                "- Runtime cleanup: "
-                f"{runtime_cleanup.get('state', 'not-applicable')}"
+                f"- Runtime cleanup: {runtime_cleanup.get('state', 'not-applicable')}"
             ),
             "",
         ]
@@ -802,7 +816,7 @@ def _filtered_cache_targets(
                 size_bytes=_file_size(path),
             )
         )
-    return tuple(sorted(selected, key=lambda item: (item.path.as_posix())))
+    return tuple(sorted(selected, key=lambda item: item.path.as_posix()))
 
 
 def _select_sample(
@@ -963,6 +977,9 @@ def _payload(
     budget_seconds: int,
     quality_profile: Mapping[str, Any] | None,
     all_cache_targets: tuple[QualityTarget, ...],
+    validation_report_path: str | Path | None,
+    run_validation: bool,
+    validation_runner: ValidationRunner | None,
 ) -> dict[str, JSONValue]:
     target_bytes = sum(item.size_bytes for item in cache_targets)
     sample_bytes = _int_value(benchmark.get("sample_cache_bytes"))
@@ -1062,6 +1079,9 @@ def _payload(
         selected_pairs=selected_pairs,
         selected_formats=selected_formats,
         selected_timeframes=selected_timeframes,
+        validation_report_path=validation_report_path,
+        run_validation=run_validation,
+        validation_runner=validation_runner,
     )
     safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
     return safe_payload
@@ -1075,7 +1095,40 @@ def _quality_preflight_evidence_payload(
     selected_pairs: tuple[str, ...],
     selected_formats: tuple[str, ...],
     selected_timeframes: tuple[str, ...],
+    validation_report_path: str | Path | None,
+    run_validation: bool,
+    validation_runner: ValidationRunner | None,
 ) -> dict[str, JSONValue]:
+    validation = _validation_commands_payload()
+    validation_source: dict[str, JSONValue] = {
+        "state": "not-provided",
+        "reason": (
+            "quality preflight records validation commands but does not run "
+            "repository gates unless explicit validation options are supplied"
+        ),
+    }
+    if validation_report_path:
+        validation_source = _validation_report_source_payload(
+            validation_report_path
+        )
+        validation = _merge_validation_report_rows(
+            validation,
+            validation_report_path=validation_report_path,
+            validation_source=validation_source,
+        )
+    if run_validation:
+        bundle = _run_quality_preflight_validation_bundle(
+            runner=validation_runner
+        )
+        validation_source = _combine_validation_sources(
+            validation_source,
+            _mapping(bundle.get("source")),
+        )
+        validation = _merge_validation_result_rows(
+            validation,
+            _list_of_mappings(bundle.get("results")),
+            source=_mapping(bundle.get("source")),
+        )
     payload: dict[str, JSONValue] = {
         "schema_version": QUALITY_PREFLIGHT_EVIDENCE_SCHEMA_VERSION,
         "report_kind": "quality-preflight-github-evidence",
@@ -1087,7 +1140,8 @@ def _quality_preflight_evidence_payload(
             selected_formats=selected_formats,
             selected_timeframes=selected_timeframes,
         ),
-        "validation_commands": _validation_commands_payload(),
+        "validation_source": validation_source,
+        "validation_commands": validation,
         "runtime_cleanup": _preflight_runtime_cleanup_payload(),
         "operational": _preflight_operational_payload(
             root_path=root_path,
@@ -1169,6 +1223,373 @@ def _validation_commands_payload() -> list[JSONValue]:
         }
         for name, command in commands
     ]
+
+
+def _validation_report_source_payload(
+    validation_report_path: str | Path,
+) -> dict[str, JSONValue]:
+    report_path = Path(validation_report_path).expanduser()
+    safe_path = str(publish_safe_path(str(report_path.resolve(strict=False))))
+    try:
+        payload = _load_validation_json(report_path)
+    except (OSError, ValueError) as exc:
+        return {
+            "state": "unavailable",
+            "path": safe_path,
+            "reason": str(exc),
+        }
+    results = _validation_results_from_report(payload)
+    return {
+        "state": "imported" if results else "unsupported",
+        "path": safe_path,
+        "schema_version": str(payload.get("schema_version", "")),
+        "matched_result_count": len(results),
+        "reason": (
+            "validation results imported"
+            if results
+            else "report did not contain recognized validation command results"
+        ),
+    }
+
+
+def _load_validation_json(path: Path) -> dict[str, JSONValue]:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise OSError(f"cannot read validation report: {exc}") from exc
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"validation report is not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("validation report must be a JSON object")
+    typed_payload: dict[str, JSONValue] = {
+        str(key): cast(JSONValue, value) for key, value in payload.items()
+    }
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(
+        typed_payload
+    )
+    return safe_payload
+
+
+def _merge_validation_report_rows(
+    rows: list[JSONValue],
+    *,
+    validation_report_path: str | Path,
+    validation_source: Mapping[str, JSONValue],
+) -> list[JSONValue]:
+    if validation_source.get("state") == "unavailable":
+        return _mark_validation_rows_unavailable(rows, validation_source)
+    try:
+        payload = _load_validation_json(
+            Path(validation_report_path).expanduser()
+        )
+    except (OSError, ValueError):
+        return _mark_validation_rows_unavailable(rows, validation_source)
+    return _merge_validation_result_rows(
+        rows,
+        _validation_results_from_report(payload),
+        source=validation_source,
+    )
+
+
+def _mark_validation_rows_unavailable(
+    rows: list[JSONValue],
+    source: Mapping[str, JSONValue],
+) -> list[JSONValue]:
+    marked: list[JSONValue] = []
+    for row in _list_of_mappings(rows):
+        marked.append(
+            {
+                **row,
+                "status": "skipped",
+                "reason": source.get(
+                    "reason",
+                    "validation evidence source is unavailable",
+                ),
+                "source": dict(source),
+            }
+        )
+    return marked
+
+
+def _validation_results_from_report(
+    payload: Mapping[str, JSONValue],
+) -> list[dict[str, JSONValue]]:
+    results: list[dict[str, JSONValue]] = []
+    schema = str(payload.get("schema_version", ""))
+    if schema == "histdatacom.issue-workflow-execution.v1":
+        results.extend(
+            _gate_results(
+                _mapping(_mapping(payload.get("closure_report")).get("gates"))
+            )
+        )
+        if not results:
+            results.extend(
+                _gate_results(
+                    _mapping(
+                        _mapping(payload.get("pre_mutation_gates")).get("gates")
+                    )
+                )
+            )
+        if not results:
+            results.extend(
+                _gate_results(_mapping(payload.get("pre_mutation_gates")))
+            )
+    else:
+        results.extend(_gate_results(_mapping(payload.get("gates"))))
+    if not results:
+        results.extend(_list_of_mappings(payload.get("commands")))
+    return [
+        result
+        for result in results
+        if _validation_target_name(result) in _validation_command_names()
+    ]
+
+
+def _gate_results(gates: Mapping[str, JSONValue]) -> list[dict[str, JSONValue]]:
+    return _list_of_mappings(gates.get("results"))
+
+
+def _merge_validation_result_rows(
+    rows: list[JSONValue],
+    results: Sequence[Mapping[str, JSONValue]],
+    *,
+    source: Mapping[str, JSONValue],
+) -> list[JSONValue]:
+    by_name: dict[str, list[Mapping[str, JSONValue]]] = {}
+    for candidate in results:
+        name = _validation_target_name(candidate)
+        if name:
+            by_name.setdefault(name, []).append(candidate)
+    merged: list[JSONValue] = []
+    full_pytest = _best_validation_result(by_name.get("full-pytest", ()))
+    for row in _list_of_mappings(rows):
+        target = str(row.get("name", ""))
+        result = _best_validation_result(by_name.get(target, ()))
+        if result is not None:
+            merged.append(
+                _validation_row_from_result(row, result, source=source)
+            )
+            continue
+        if (
+            target == "focused-quality-preflight-tests"
+            and full_pytest is not None
+        ):
+            covered = {
+                **full_pytest,
+                "status": (
+                    "pass"
+                    if str(full_pytest.get("status", "")) == "pass"
+                    else "skipped"
+                ),
+                "reason": (
+                    "covered by imported full pytest result"
+                    if str(full_pytest.get("status", "")) == "pass"
+                    else "focused tests were not reported separately"
+                ),
+            }
+            merged.append(
+                _validation_row_from_result(row, covered, source=source)
+            )
+            continue
+        if source.get("state") in {"generated", "merged"} and target in {
+            "full-pytest",
+            "full-pre-commit",
+        }:
+            merged.append(
+                {
+                    **row,
+                    "status": "skipped",
+                    "reason": (
+                        "bounded quality preflight validation does not run "
+                        "full repository gates"
+                    ),
+                    "source": dict(source),
+                }
+            )
+            continue
+        merged.append(row)
+    return merged
+
+
+def _best_validation_result(
+    results: Sequence[Mapping[str, JSONValue]],
+) -> Mapping[str, JSONValue] | None:
+    if not results:
+        return None
+    failures = [
+        result for result in results if str(result.get("status", "")) == "fail"
+    ]
+    if failures:
+        return failures[-1]
+    return results[-1]
+
+
+def _validation_row_from_result(
+    row: Mapping[str, JSONValue],
+    result: Mapping[str, JSONValue],
+    *,
+    source: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    status = _normalized_validation_status(result.get("status"))
+    reason = str(
+        result.get("reason")
+        or result.get("stderr_tail")
+        or result.get("stdout_tail")
+        or "validation command result imported"
+    )
+    payload: dict[str, JSONValue] = {
+        **row,
+        "status": status,
+        "reason": _bounded_text(reason),
+        "source": dict(source),
+    }
+    if "returncode" in result:
+        payload["returncode"] = _int_value(result.get("returncode"))
+    stdout_tail = _bounded_text(str(result.get("stdout_tail", "") or ""))
+    stderr_tail = _bounded_text(str(result.get("stderr_tail", "") or ""))
+    if stdout_tail:
+        payload["stdout_tail"] = stdout_tail
+    if stderr_tail:
+        payload["stderr_tail"] = stderr_tail
+    return payload
+
+
+def _normalized_validation_status(value: object) -> str:
+    status = str(value or "").lower()
+    if status in {"pass", "passed", "success", "succeeded"}:
+        return "pass"
+    if status in {"fail", "failed", "error"}:
+        return "fail"
+    if status in {"skip", "skipped"}:
+        return "skipped"
+    if status in {"not-run", "not_run", "not run"}:
+        return "not-run"
+    return "fail"
+
+
+def _validation_target_name(result: Mapping[str, JSONValue]) -> str:
+    name = str(result.get("name", "") or "")
+    command = str(result.get("command", "") or "")
+    normalized_name = name.removeprefix("gate-")
+    aliases = {
+        "pytest": "full-pytest",
+        "full-pytest": "full-pytest",
+        "pre-commit": "full-pre-commit",
+        "pre_commit": "full-pre-commit",
+        "full-pre-commit": "full-pre-commit",
+        "git-diff-check": "git-diff-check",
+        "focused-quality-preflight-tests": "focused-quality-preflight-tests",
+    }
+    if normalized_name in aliases:
+        return aliases[normalized_name]
+    command_key = command.replace("_", "-")
+    if (
+        "pytest" in command_key
+        and "tests/unit/test-data-quality-preflight.py" in command_key
+        and "tests/unit/test-quality-cli.py" in command_key
+    ):
+        return "focused-quality-preflight-tests"
+    if "pytest" in command_key and " -m pytest" in command_key:
+        return "full-pytest"
+    if "pre-commit" in command_key or "pre_commit" in command:
+        return "full-pre-commit"
+    if "git diff --check" in command_key:
+        return "git-diff-check"
+    return ""
+
+
+def _validation_command_names() -> set[str]:
+    return {
+        str(row.get("name", ""))
+        for row in _list_of_mappings(_validation_commands_payload())
+    }
+
+
+def _run_quality_preflight_validation_bundle(
+    *,
+    runner: ValidationRunner | None = None,
+) -> dict[str, JSONValue]:
+    source: dict[str, JSONValue] = {
+        "state": "generated",
+        "reason": (
+            "bounded quality preflight validation ran focused tests and "
+            "git diff check only"
+        ),
+    }
+    commands: tuple[tuple[str, tuple[str, ...]], ...] = (
+        (
+            "focused-quality-preflight-tests",
+            (
+                sys.executable,
+                "-m",
+                "pytest",
+                "tests/unit/test_data_quality_preflight.py",
+                "tests/unit/test_quality_cli.py",
+                "-q",
+            ),
+        ),
+        ("git-diff-check", ("git", "diff", "--check")),
+    )
+    results: list[JSONValue] = [
+        _run_validation_command(name, command, runner=runner)
+        for name, command in commands
+    ]
+    return {"source": source, "results": results}
+
+
+def _run_validation_command(
+    name: str,
+    command: Sequence[str],
+    *,
+    runner: ValidationRunner | None,
+) -> dict[str, JSONValue]:
+    if runner is None:
+        result = subprocess.run(
+            list(command),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        result = runner(tuple(command))
+    return {
+        "name": name,
+        "command": _display_validation_command(name),
+        "status": "pass" if result.returncode == 0 else "fail",
+        "returncode": result.returncode,
+        "stdout_tail": _bounded_text(result.stdout or ""),
+        "stderr_tail": _bounded_text(result.stderr or ""),
+    }
+
+
+def _display_validation_command(name: str) -> str:
+    for row in _list_of_mappings(_validation_commands_payload()):
+        if row.get("name") == name:
+            return str(row.get("command", ""))
+    return name
+
+
+def _combine_validation_sources(
+    current: Mapping[str, JSONValue],
+    new: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    if current.get("state") == "not-provided":
+        return dict(new)
+    return {
+        "state": "merged",
+        "sources": [dict(current), dict(new)],
+        "reason": "validation evidence imported and bounded validation ran",
+    }
+
+
+def _bounded_text(value: str) -> str:
+    safe = publish_safe_json_value(str(value), key="text")
+    text = str(safe)
+    if len(text) <= QUALITY_PREFLIGHT_VALIDATION_TEXT_LIMIT:
+        return text
+    return text[-QUALITY_PREFLIGHT_VALIDATION_TEXT_LIMIT:]
 
 
 def _preflight_runtime_cleanup_payload() -> dict[str, JSONValue]:
@@ -1985,17 +2406,27 @@ def _source_artifact_state(operational: Mapping[str, Any]) -> str:
 
 def _validation_command_rows(
     value: object,
-) -> tuple[tuple[str, str, str], ...]:
-    rows: list[tuple[str, str, str]] = []
+) -> tuple[tuple[str, str, str, str], ...]:
+    rows: list[tuple[str, str, str, str]] = []
     for item in _list_of_mappings(value):
         rows.append(
             (
                 str(item.get("name", "")),
                 str(item.get("status", "unknown")),
                 str(item.get("command", "")),
+                _validation_markdown_detail(item),
             )
         )
     return tuple(rows)
+
+
+def _validation_markdown_detail(item: Mapping[str, Any]) -> str:
+    details = [
+        str(item.get(key, "") or "")
+        for key in ("reason", "stderr_tail", "stdout_tail")
+        if item.get(key)
+    ]
+    return _bounded_text(" | ".join(details))
 
 
 def _list_of_mappings(value: object) -> list[dict[str, Any]]:

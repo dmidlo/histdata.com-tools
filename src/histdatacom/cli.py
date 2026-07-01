@@ -302,8 +302,17 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 raise SystemExit(1)
             if self.arg_namespace.quality_preflight_markdown_report_path:
                 print(  # noqa:T201
-                    "--quality-preflight-markdown-report requires "
-                    "--quality-preflight"
+                    "--quality-preflight-markdown-report requires --quality-preflight"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_preflight_validation_report_path:
+                print(  # noqa:T201
+                    "--quality-preflight-validation-report requires --quality-preflight"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_preflight_run_validation:
+                print(  # noqa:T201
+                    "--quality-preflight-run-validation requires --quality-preflight"
                 )
                 raise SystemExit(1)
             if (
@@ -311,8 +320,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 != DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE
             ):
                 print(  # noqa:T201
-                    "--quality-preflight-sample-size requires "
-                    "--quality-preflight"
+                    "--quality-preflight-sample-size requires --quality-preflight"
                 )
                 raise SystemExit(1)
             return
@@ -351,8 +359,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         if self.arg_namespace.quality_preflight:
             if len(tuple(self.arg_namespace.quality_paths or ())) > 1:
                 print(  # noqa:T201
-                    "--quality-preflight accepts one --quality-target "
-                    "directory"
+                    "--quality-preflight accepts one --quality-target directory"
                 )
                 raise SystemExit(1)
             if self.arg_namespace.quality_report_path:
@@ -372,10 +379,17 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 raise SystemExit(1)
             if self.arg_namespace.quality_max_warnings != 0:
                 print(  # noqa:T201
-                    "--quality-max-warnings requires --quality or "
-                    "--repo-quality"
+                    "--quality-max-warnings requires --quality or --repo-quality"
                 )
                 raise SystemExit(1)
+        elif (
+            self.arg_namespace.quality_preflight_validation_report_path
+            or self.arg_namespace.quality_preflight_run_validation
+        ):
+            print(  # noqa:T201
+                "quality preflight validation options require --quality-preflight"
+            )
+            raise SystemExit(1)
 
         if (
             self.arg_namespace.quality_preflight_evidence_path
@@ -506,6 +520,17 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                             ),
                         ]
                     )
+                if self.arg_namespace.quality_preflight_validation_report_path:
+                    args.extend(
+                        [
+                            "--quality-preflight-validation-report",
+                            (
+                                self.arg_namespace.quality_preflight_validation_report_path
+                            ),
+                        ]
+                    )
+                if self.arg_namespace.quality_preflight_run_validation:
+                    args.append("--quality-preflight-run-validation")
                 args.extend(
                     [
                         "--quality-preflight-sample-size",
@@ -1114,7 +1139,6 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             if (start_yearmonth := self.arg_namespace.start_yearmonth) and (
                 end_yearmonth := self.arg_namespace.end_yearmonth
             ):
-
                 err_text_start_date_after_end_date = f"""
                     ERROR on -s {start_yearmonth} -e {end_yearmonth}    ERROR
                         * logic error: end year-month is before start year-month.
@@ -1197,8 +1221,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             "--by",
             type=str,
             help=(
-                "With -A, -U, to sort --by"
-                " [pair_asc, pair_dsc, start_asc, start_dsc]"
+                "With -A, -U, to sort --by [pair_asc, pair_dsc, start_asc, start_dsc]"
             ),
         )
         info_args.add_argument(
@@ -1362,8 +1385,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             action="count",
             default=0,
             help=(
-                "increase logging verbosity; repeat as -vv for debug and "
-                "-vvv for trace"
+                "increase logging verbosity; repeat as -vv for debug and -vvv for trace"
             ),
         )
         orchestration_args.add_argument(
@@ -1380,8 +1402,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             dest="orchestration_start",
             action="store_false",
             help=(
-                "submit only when a healthy orchestration runtime is already "
-                "running"
+                "submit only when a healthy orchestration runtime is already running"
             ),
         )
         orchestration_args.add_argument(
@@ -1404,8 +1425,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             dest="orchestration_keep_runtime",
             action="store_false",
             help=(
-                "stop a runtime started by this command after waited jobs "
-                "complete"
+                "stop a runtime started by this command after waited jobs complete"
             ),
         )
         quality_args.add_argument(
@@ -1502,6 +1522,25 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "write the publish-safe Markdown quality preflight evidence "
                 "report to PATH"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-validation-report",
+            dest="quality_preflight_validation_report_path",
+            type=str,
+            metavar="PATH",
+            help=(
+                "merge validation command status from a closure/readiness "
+                "JSON report into quality preflight evidence"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-run-validation",
+            dest="quality_preflight_run_validation",
+            action="store_true",
+            help=(
+                "run bounded quality preflight validation commands before "
+                "rendering evidence"
             ),
         )
         quality_args.add_argument(

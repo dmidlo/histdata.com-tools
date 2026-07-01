@@ -109,6 +109,8 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--quality-report PATH] [--quality-preflight-report PATH]
                    [--quality-preflight-markdown]
                    [--quality-preflight-markdown-report PATH]
+                   [--quality-preflight-validation-report PATH]
+                   [--quality-preflight-run-validation]
                    [--quality-preflight-evidence PATH]
                    [--quality-preflight-evidence-max-age-seconds SECONDS]
                    [--quality-preflight-evidence-stale-ok]
@@ -214,6 +216,13 @@ Data quality:
   --quality-preflight-markdown-report PATH
                         write the publish-safe Markdown quality preflight
                         evidence report to PATH
+  --quality-preflight-validation-report PATH
+                        merge validation command status from a
+                        closure/readiness JSON report into quality preflight
+                        evidence
+  --quality-preflight-run-validation
+                        run bounded quality preflight validation commands
+                        before rendering evidence
   --quality-preflight-evidence PATH
                         use a saved quality preflight JSON report as evidence
                         before a large cache-backed --quality run
@@ -784,6 +793,14 @@ explicit runtime-cleanup disposition for the local preflight run. Use
 `--quality-preflight-markdown` when stdout should be the Markdown report instead
 of the compact console summary. Use `--quality-preflight-sample-size COUNT` to
 tune the bounded sample.
+
+Validation rows stay `not-run` by default so ordinary quality preflights do not
+run repository gates. For release notes or GitHub issue evidence, pass
+`--quality-preflight-validation-report PATH` to merge command status from a
+closure/readiness JSON report, or pass `--quality-preflight-run-validation` to
+run only the bounded local validation bundle: focused quality-preflight tests
+and `git diff --check`. Full pytest, pre-commit, publishing, and GitHub issue
+closure remain explicit closure/release workflow responsibilities.
 
 When launching a large cache-backed `--quality` run, pass the saved report with
 `--quality-preflight-evidence PATH`. If no matching evidence is available, the

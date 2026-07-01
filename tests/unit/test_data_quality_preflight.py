@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+import subprocess
 
 import histdatacom
 import pytest
@@ -104,6 +106,108 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
     assert "/Users/" not in encoded
     assert "/private/" not in encoded
     assert "/var/folders/" not in encoded
+
+
+def test_quality_preflight_imports_validation_report_status(
+    tmp_path: Path,
+) -> None:
+    """Saved closure evidence should populate validation command rows."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    validation_path = tmp_path / "closure.json"
+    validation_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "histdatacom.closure-readiness.v1",
+                "gates": {
+                    "results": [
+                        {
+                            "name": "pytest",
+                            "command": "python -m pytest",
+                            "status": "pass",
+                            "returncode": 0,
+                            "stdout_tail": "1071 passed",
+                        },
+                        {
+                            "name": "pre-commit",
+                            "command": "python -m pre_commit run --all-files",
+                            "status": "fail",
+                            "returncode": 1,
+                            "stderr_tail": (
+                                f"ruff failed at {tmp_path / 'private.py'}"
+                            ),
+                        },
+                        {
+                            "name": "git-diff-check",
+                            "command": "git diff --check",
+                            "status": "pass",
+                            "returncode": 0,
+                        },
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        validation_report_path=validation_path,
+    )
+    statuses = _validation_statuses(payload)
+
+    assert payload["evidence"]["validation_source"]["state"] == "imported"
+    assert statuses["focused-quality-preflight-tests"] == "pass"
+    assert statuses["full-pytest"] == "pass"
+    assert statuses["full-pre-commit"] == "fail"
+    assert statuses["git-diff-check"] == "pass"
+    markdown = quality_preflight_to_markdown(payload)
+    assert (
+        "| full-pre-commit | fail | python -m pre_commit run --all-files |"
+        in (markdown)
+    )
+    assert "ruff failed" in markdown
+    assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
+    assert str(tmp_path) not in markdown
+
+
+def test_quality_preflight_runs_bounded_validation_bundle(
+    tmp_path: Path,
+) -> None:
+    """Explicit local validation should avoid full gate side effects."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        args = tuple(command)
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="ok\n", stderr="")
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        run_validation=True,
+        validation_runner=runner,
+    )
+    statuses = _validation_statuses(payload)
+
+    assert payload["evidence"]["validation_source"]["state"] == "generated"
+    assert statuses["focused-quality-preflight-tests"] == "pass"
+    assert statuses["git-diff-check"] == "pass"
+    assert statuses["full-pytest"] == "skipped"
+    assert statuses["full-pre-commit"] == "skipped"
+    assert any(call[-3:] == ("git", "diff", "--check") for call in calls)
+    assert not any("pre_commit" in " ".join(call) for call in calls)
 
 
 def test_quality_preflight_flags_budget_failures(tmp_path: Path) -> None:
@@ -694,6 +798,9 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
             "--quality-preflight-markdown",
             "--quality-preflight-markdown-report",
             str(tmp_path / "preflight.md"),
+            "--quality-preflight-validation-report",
+            str(tmp_path / "closure.json"),
+            "--quality-preflight-run-validation",
             "--pair-groups",
             "majors",
             "-f",
@@ -713,6 +820,10 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
     assert options.quality_preflight_markdown_report_path == str(
         tmp_path / "preflight.md"
     )
+    assert options.quality_preflight_validation_report_path == str(
+        tmp_path / "closure.json"
+    )
+    assert options.quality_preflight_run_validation
     assert options.pair_groups == ["majors"]
 
 
@@ -725,6 +836,24 @@ def test_api_quality_preflight_returns_payload_without_temporal_submit(
 
     data_dir = tmp_path / "data"
     _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    validation_path = tmp_path / "closure.json"
+    validation_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "histdatacom.closure-readiness.v1",
+                "gates": {
+                    "results": [
+                        {
+                            "name": "git-diff-check",
+                            "command": "git diff --check",
+                            "status": "pass",
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
     def fail_submit(*args: object, **kwargs: object) -> None:
         raise AssertionError("preflight should not submit to Temporal")
@@ -739,6 +868,7 @@ def test_api_quality_preflight_returns_payload_without_temporal_submit(
     options.quality_paths = (str(data_dir),)
     options.quality_check_groups = {"inventory"}
     options.quality_preflight_sample_size = 1
+    options.quality_preflight_validation_report_path = str(validation_path)
     options.pairs = {"eurusd"}
     options.formats = {"ascii"}
     options.timeframes = {"T"}
@@ -748,6 +878,7 @@ def test_api_quality_preflight_returns_payload_without_temporal_submit(
     assert payload["operation"] == "data-quality-cache-preflight"
     assert payload["target_count"] == 1
     assert payload["sample"]["selected_count"] == 1
+    assert _validation_statuses(payload)["git-diff-check"] == "pass"
 
 
 def test_api_quality_preflight_writes_markdown_report(
@@ -786,6 +917,18 @@ def test_api_quality_preflight_writes_markdown_report(
     assert "Quality Preflight Evidence" in markdown_path.read_text(
         encoding="utf-8"
     )
+
+
+def _validation_statuses(payload: dict[str, object]) -> dict[str, str]:
+    evidence = payload["evidence"]
+    assert isinstance(evidence, dict)
+    commands = evidence["validation_commands"]
+    assert isinstance(commands, list)
+    return {
+        str(command["name"]): str(command["status"])
+        for command in commands
+        if isinstance(command, dict)
+    }
 
 
 def _write_tick_cache(

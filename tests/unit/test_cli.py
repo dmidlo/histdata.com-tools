@@ -198,6 +198,8 @@ def test_help_advertises_quality_preflight_mode() -> None:
     assert "--quality-preflight-evidence" in help_text
     assert "--quality-preflight-evidence-max-age-seconds" in help_text
     assert "--quality-preflight-evidence-stale-ok" in help_text
+    assert "--quality-preflight-validation-report" in help_text
+    assert "--quality-preflight-run-validation" in help_text
     assert "--quality-preflight-sample-size" in help_text
 
 
@@ -686,6 +688,8 @@ histdatacom:
   data_directory: {tmp_path}
   quality_checks: [ticks]
   quality_preflight_report: {report_path}
+  quality_preflight_validation_report: {tmp_path / "closure.json"}
+  quality_preflight_run_validation: true
   quality_preflight_sample_size: 2
   pair_groups: [majors]
   formats: [ascii]
@@ -705,6 +709,10 @@ histdatacom:
     assert options.quality_paths == (str(tmp_path),)
     assert options.quality_check_groups == ["ticks"]
     assert options.quality_preflight_report_path == str(report_path)
+    assert options.quality_preflight_validation_report_path == str(
+        tmp_path / "closure.json"
+    )
+    assert options.quality_preflight_run_validation
     assert options.quality_preflight_sample_size == 2
     assert options.pair_groups == ["majors"]
     assert not options.validate_urls

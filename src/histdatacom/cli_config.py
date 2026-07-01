@@ -40,8 +40,15 @@ _KEY_ALIASES = {
     "quality_preflight_markdown_report_path": (
         "quality_preflight_markdown_report_path"
     ),
+    "quality_preflight_run_validation": "quality_preflight_run_validation",
     "quality_preflight_sample": "quality_preflight_sample_size",
     "quality_preflight_samples": "quality_preflight_sample_size",
+    "quality_preflight_validation_report": (
+        "quality_preflight_validation_report_path"
+    ),
+    "quality_preflight_validation_report_path": (
+        "quality_preflight_validation_report_path"
+    ),
     "quality_target": "quality_paths",
     "quality_targets": "quality_paths",
     "quality_check_groups": "quality_check_groups",
@@ -110,6 +117,7 @@ _TRUE_FLAG_ARGS = {
         "--quality-preflight-evidence-stale-ok"
     ),
     "quality_preflight_markdown": "--quality-preflight-markdown",
+    "quality_preflight_run_validation": "--quality-preflight-run-validation",
     "repo_quality_columns": "--repo-quality-columns",
 }
 _SCALAR_ARGS = {
@@ -125,6 +133,9 @@ _SCALAR_ARGS = {
         "--quality-preflight-markdown-report"
     ),
     "quality_preflight_report_path": "--quality-preflight-report",
+    "quality_preflight_validation_report_path": (
+        "--quality-preflight-validation-report"
+    ),
     "quality_preflight_sample_size": "--quality-preflight-sample-size",
     "quality_profile_path": "--quality-profile",
     "quality_fail_on": "--quality-fail-on",
@@ -956,8 +967,7 @@ def _normalized_section_mapping(
             continue
         if key in normalized:
             raise CliConfigError(
-                f"duplicate {section_name} config key after normalization: "
-                f"{key}"
+                f"duplicate {section_name} config key after normalization: {key}"
             )
         normalized[key] = value
     if unknown:

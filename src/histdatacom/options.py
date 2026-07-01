@@ -42,7 +42,9 @@ class Options:
         "quality_preflight_markdown",
         "quality_preflight_markdown_report_path",
         "quality_preflight_report_path",
+        "quality_preflight_run_validation",
         "quality_preflight_sample_size",
+        "quality_preflight_validation_report_path",
         "quality_paths",
         "quality_profile",
         "quality_profile_path",
@@ -104,6 +106,8 @@ class Options:
         self.quality_preflight_markdown_report_path: str | None = None
         self.quality_preflight_sample_size: int = 4
         self.quality_preflight_report_path: str | None = None
+        self.quality_preflight_run_validation: bool = False
+        self.quality_preflight_validation_report_path: str | None = None
         self.quality_profile_path: str | None = None
         self.quality_profile: dict = {}
         self.repo_quality_refresh: bool = False

@@ -40,7 +40,9 @@ DEFAULT_HELPER_ARGS: dict[str, Any] = {
     "quality_preflight_markdown": False,
     "quality_preflight_markdown_report_path": "",
     "quality_preflight_report_path": "",
+    "quality_preflight_run_validation": False,
     "quality_preflight_sample_size": 4,
+    "quality_preflight_validation_report_path": "",
     "repo_quality_refresh": False,
     "repo_quality_columns": False,
 }
