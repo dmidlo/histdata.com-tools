@@ -68,6 +68,9 @@ from histdatacom.orchestration.cutover import (
     should_submit_to_orchestration,
 )
 from histdatacom.orchestration.rich_progress import LiveJobProgressRenderer
+from histdatacom.operational_health import (
+    operational_health_provider_for_request,
+)
 from histdatacom.utils import (
     load_influx_yaml,
     set_working_data_dir,
@@ -348,7 +351,11 @@ class _HistDataCom:  # noqa:R701
                 self.context.request,
                 **kwargs,
             )
-        with LiveJobProgressRenderer() as progress_renderer:
+        with LiveJobProgressRenderer(
+            health_provider=operational_health_provider_for_request(
+                self.context.request
+            )
+        ) as progress_renderer:
             return submit_run_request_and_observe_sync(
                 self.context.request,
                 progress_observer=progress_renderer.update,

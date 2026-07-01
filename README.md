@@ -1297,7 +1297,11 @@ histdatacom jobs cancel histdatacom-<request-id> --reason "operator stop"
 ```
 
 Omit `--json` on `jobs progress` for the Rich terminal progress view; add
-`--watch` to live-refresh it until the job reaches a terminal state.
+`--watch` to live-refresh it until the job reaches a terminal state. The Rich
+view includes a bounded operational health panel with runtime/component/PID
+state, POSIX disk headroom, cache inventory, source-artifact cleanup counts,
+active workflow counts, and ETA/rate information when progress metadata is
+available.
 
 - `histdatacom --version` stays local and does not require orchestration.
 - `-A`, `-U`, `-V`, `-D`, `-X`, `-C`, and `-I` keep their existing option semantics before an orchestration request is submitted.

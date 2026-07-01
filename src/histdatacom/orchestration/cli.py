@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
+from dataclasses import replace
 import json
 import sys
+import time
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, cast
 
 from histdatacom.cli_config import (
     CliConfigError,
@@ -14,7 +17,7 @@ from histdatacom.cli_config import (
     configured_jobs_argv,
     configured_runtime_argv,
 )
-from histdatacom.runtime_contracts import RunRequest
+from histdatacom.runtime_contracts import JSONValue, RunRequest
 from histdatacom.orchestration.performance import (
     DEFAULT_INFLUX_WORKERS,
     DEFAULT_NETWORK_MULTIPLIER,
@@ -61,6 +64,12 @@ from histdatacom.orchestration.supervisor import (
     OrchestrationStatus,
     OrchestrationSupervisor,
 )
+from histdatacom.operational_health import (
+    OPERATIONAL_HEALTH_METADATA_KEY,
+    attach_operational_health_from_snapshot,
+)
+
+JOB_PROGRESS_HEALTH_REFRESH_SECONDS = 30.0
 
 
 def _add_common_args(
@@ -619,9 +628,19 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
         _write_control_payload(snapshot.to_dict(), as_json=args.json)
         return 0
     if args.jobs_command == "progress":
+        health_cache: dict[str, object] = {}
 
         def fetch_snapshot() -> OrchestrationJobSnapshot:
-            return inspect_job_status_sync(args.workflow_id, **identity_kwargs)
+            snapshot: OrchestrationJobSnapshot = inspect_job_status_sync(
+                args.workflow_id,
+                **identity_kwargs,
+            )
+            if args.json:
+                return snapshot
+            return _attach_progress_operational_health(
+                snapshot,
+                health_cache=health_cache,
+            )
 
         if getattr(args, "watch", False) and not args.json:
             watch_job_progress(
@@ -700,6 +719,63 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
         _write_control_payload(snapshot.to_dict(), as_json=args.json)
         return 0
     raise ValueError(f"unsupported jobs command: {args.jobs_command}")
+
+
+def _attach_progress_operational_health(
+    snapshot: OrchestrationJobSnapshot,
+    *,
+    health_cache: dict[str, object],
+) -> OrchestrationJobSnapshot:
+    now = time.monotonic()
+    cached = health_cache.get("payload")
+    updated_at = _float_value(health_cache.get("updated_at"))
+    if (
+        isinstance(cached, Mapping)
+        and now - updated_at < JOB_PROGRESS_HEALTH_REFRESH_SECONDS
+    ):
+        return replace(
+            snapshot,
+            metadata={
+                **snapshot.metadata,
+                OPERATIONAL_HEALTH_METADATA_KEY: dict(cached),
+            },
+        )
+
+    enriched: OrchestrationJobSnapshot
+    try:
+        enriched = attach_operational_health_from_snapshot(snapshot)
+    except Exception:
+        runtime = snapshot.metadata.get("runtime_health")
+        runtime_payload = (
+            cast(dict[str, JSONValue], dict(runtime))
+            if isinstance(runtime, Mapping)
+            else {}
+        )
+        health: dict[str, JSONValue] = {
+            "status": "unavailable",
+            "runtime": runtime_payload,
+        }
+        enriched = replace(
+            snapshot,
+            metadata={
+                **snapshot.metadata,
+                OPERATIONAL_HEALTH_METADATA_KEY: health,
+            },
+        )
+    payload = enriched.metadata.get(OPERATIONAL_HEALTH_METADATA_KEY)
+    if isinstance(payload, Mapping):
+        health_cache["payload"] = dict(payload)
+        health_cache["updated_at"] = now
+    return enriched
+
+
+def _float_value(value: object) -> float:
+    if not isinstance(value, int | float | str | bytes | bytearray):
+        return 0.0
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -1095,6 +1095,9 @@ def test_interactive_cli_waited_job_uses_rich_progress_observer(
     captured: dict[str, object] = {}
 
     class FakeProgressRenderer:
+        def __init__(self, **kwargs: object) -> None:
+            captured["renderer_kwargs"] = kwargs
+
         def __enter__(self):
             captured["entered"] = True
             return self
@@ -1146,6 +1149,9 @@ def test_interactive_cli_waited_job_uses_rich_progress_observer(
     assert isinstance(kwargs, dict)
     assert captured["entered"] is True
     assert captured["exited"] is True
+    renderer_kwargs = captured["renderer_kwargs"]
+    assert isinstance(renderer_kwargs, dict)
+    assert callable(renderer_kwargs["health_provider"])
     assert callable(kwargs["progress_observer"])
     assert captured["progress_snapshot"] == "progress"
 

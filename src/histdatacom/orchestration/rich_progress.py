@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import replace
+from typing import Any
 
 from rich import box
 from rich.console import Console, Group, RenderableType
@@ -23,6 +25,15 @@ from histdatacom.orchestration.control import (
 RECENT_EVENT_LIMIT = 6
 STAGE_LIMIT = 8
 ARTIFACT_LIMIT = 5
+COMPONENT_LIMIT = 5
+GROUP_LIMIT = 4
+DEFAULT_HEALTH_REFRESH_SECONDS = 30.0
+OPERATIONAL_HEALTH_METADATA_KEY = "operational_health"
+RUNTIME_HEALTH_METADATA_KEY = "runtime_health"
+HealthProvider = Callable[
+    [OrchestrationJobSnapshot],
+    Mapping[str, Any] | None,
+]
 STAGE_LABELS = {
     "RepositoryRefreshWorkflow": "Repository refresh",
     "DataQualityWorkflow": "Data quality",
@@ -85,9 +96,19 @@ def watch_job_progress(
 class LiveJobProgressRenderer:
     """Callback-friendly Rich live renderer for a waited foreground job."""
 
-    def __init__(self, *, console: Console | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        console: Console | None = None,
+        health_provider: HealthProvider | None = None,
+        health_refresh_seconds: float = DEFAULT_HEALTH_REFRESH_SECONDS,
+    ) -> None:
         self.console = console or Console()
         self._live: Live | None = None
+        self._health_provider = health_provider
+        self._health_refresh_seconds = max(1.0, health_refresh_seconds)
+        self._last_health_refresh = 0.0
+        self._cached_health: dict[str, Any] | None = None
 
     def __enter__(self) -> "LiveJobProgressRenderer":
         return self
@@ -97,6 +118,7 @@ class LiveJobProgressRenderer:
 
     def update(self, snapshot: OrchestrationJobSnapshot) -> None:
         """Render the latest snapshot, starting the live display if needed."""
+        snapshot = self._snapshot_with_health(snapshot)
         renderable = build_job_progress_renderable(snapshot)
         if self._live is None:
             self._live = Live(
@@ -116,6 +138,35 @@ class LiveJobProgressRenderer:
         self._live.stop()
         self._live = None
 
+    def _snapshot_with_health(
+        self,
+        snapshot: OrchestrationJobSnapshot,
+    ) -> OrchestrationJobSnapshot:
+        if self._health_provider is None:
+            return snapshot
+        now = time.monotonic()
+        if (
+            self._cached_health is None
+            or now - self._last_health_refresh >= self._health_refresh_seconds
+        ):
+            self._last_health_refresh = now
+            try:
+                payload = self._health_provider(snapshot)
+            except Exception:  # pragma: no cover - UI fallback only
+                payload = {
+                    "status": "unavailable",
+                    "message": "health unavailable",
+                    "runtime": _mapping(
+                        snapshot.metadata.get(RUNTIME_HEALTH_METADATA_KEY)
+                    ),
+                }
+            self._cached_health = dict(payload or {})
+        metadata = {
+            **snapshot.metadata,
+            OPERATIONAL_HEALTH_METADATA_KEY: self._cached_health,
+        }
+        return replace(snapshot, metadata=metadata)
+
 
 def build_job_progress_renderable(
     snapshot: OrchestrationJobSnapshot,
@@ -128,6 +179,9 @@ def build_job_progress_renderable(
         _summary_table(snapshot),
         _progress_bar(snapshot),
     ]
+    operational_health = _operational_health_table(snapshot)
+    if operational_health is not None:
+        body.append(operational_health)
     if progress is not None and progress.planned_children:
         body.append(_stage_table(progress))
     if progress is not None and progress.events:
@@ -194,6 +248,9 @@ def _summary_table(snapshot: OrchestrationJobSnapshot) -> Table:
             "Rate:",
             _format_rate(progress.rate_per_second, progress.unit),
         )
+        eta = _format_eta(progress)
+        if eta:
+            table.add_row("ETA:", eta)
         table.add_row("Unit:", progress.unit)
     if progress is not None and progress.last_error:
         table.add_row(
@@ -231,6 +288,220 @@ def _progress_bar(snapshot: OrchestrationJobSnapshot) -> Progress:
         ),
     )
     return progress_bar
+
+
+def _operational_health_table(
+    snapshot: OrchestrationJobSnapshot,
+) -> Table | None:
+    health = _mapping(snapshot.metadata.get(OPERATIONAL_HEALTH_METADATA_KEY))
+    runtime = _mapping(health.get("runtime")) or _mapping(
+        snapshot.metadata.get(RUNTIME_HEALTH_METADATA_KEY)
+    )
+    if not runtime and (
+        snapshot.orchestration_state or snapshot.orchestration_message
+    ):
+        runtime = {
+            "state": snapshot.orchestration_state,
+            "message": snapshot.orchestration_message,
+        }
+    summary = _mapping(health.get("summary"))
+    cleanup = _mapping(health.get("cleanup"))
+    workflows = _mapping(health.get("workflows"))
+    disk = _mapping(health.get("disk")) or _mapping(runtime.get("disk"))
+    groups = _list_of_mappings(health.get("groups"))
+    if not any((runtime, summary, cleanup, workflows, disk, groups)):
+        return None
+
+    table = Table(
+        title="Operational Health",
+        box=box.SIMPLE_HEAD,
+        expand=True,
+        show_lines=False,
+    )
+    table.add_column("Signal", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Detail", overflow="fold")
+
+    if runtime:
+        runtime_state = str(runtime.get("state", "unknown") or "unknown")
+        table.add_row(
+            "Runtime",
+            Text(runtime_state, style=_health_style(runtime_state)),
+            _runtime_detail(runtime),
+        )
+        component_detail = _component_detail(runtime)
+        if component_detail:
+            table.add_row(
+                "Components",
+                _component_status(runtime),
+                component_detail,
+            )
+
+    if disk:
+        disk_state = str(disk.get("state", "unknown") or "unknown")
+        table.add_row(
+            "Disk",
+            Text(disk_state, style=_health_style(disk_state)),
+            _disk_detail(disk),
+        )
+
+    if summary:
+        status = str(health.get("status", "") or "cache-status")
+        source_state = _source_state(summary, cleanup)
+        table.add_row(
+            "Cache",
+            Text(status, style=_health_style(status)),
+            _cache_detail(summary),
+        )
+        table.add_row(
+            "Sources",
+            Text(source_state, style=_health_style(source_state)),
+            _source_detail(summary),
+        )
+
+    if workflows:
+        workflow_state = str(workflows.get("state", "unknown") or "unknown")
+        table.add_row(
+            "Workflows",
+            Text(workflow_state, style=_health_style(workflow_state)),
+            _workflow_detail(workflows),
+        )
+
+    if groups:
+        table.add_row(
+            "Groups",
+            Text(str(len(groups)), style="cyan"),
+            _group_detail(groups),
+        )
+
+    return table
+
+
+def _runtime_detail(runtime: Mapping[str, Any]) -> str:
+    message = str(runtime.get("message", "") or "").strip()
+    pid_count = _int_value(runtime.get("pid_count"))
+    component_count = _int_value(runtime.get("component_count"))
+    parts = []
+    if message:
+        parts.append(message)
+    if component_count:
+        parts.append(f"{component_count} component(s)")
+    if pid_count:
+        parts.append(f"{pid_count} PID(s)")
+    return "; ".join(parts) or "-"
+
+
+def _component_status(runtime: Mapping[str, Any]) -> Text:
+    components = _mapping(runtime.get("components"))
+    states = {
+        str(_mapping(component).get("state", "unknown") or "unknown")
+        for component in components.values()
+    }
+    if not components:
+        return Text("unknown", style="dim")
+    if states <= {"running", "ready"}:
+        return Text("running", style="green")
+    if "missing" in states or "dead" in states:
+        return Text("attention", style="red")
+    return Text("mixed", style="yellow")
+
+
+def _component_detail(runtime: Mapping[str, Any]) -> str:
+    components = _mapping(runtime.get("components"))
+    if not components:
+        return ""
+    rows = []
+    for name, raw_component in list(sorted(components.items()))[
+        :COMPONENT_LIMIT
+    ]:
+        component = _mapping(raw_component)
+        state = str(component.get("state", "unknown") or "unknown")
+        pid = _int_value(component.get("pid"))
+        pid_text = f" pid {pid}" if pid > 0 else ""
+        readiness = str(component.get("readiness_state", "") or "")
+        readiness_text = (
+            f" readiness {readiness}"
+            if readiness and readiness != state
+            else ""
+        )
+        rows.append(f"{name} {state}{pid_text}{readiness_text}")
+    remaining = len(components) - len(rows)
+    if remaining > 0:
+        rows.append(f"+{remaining} more")
+    return "; ".join(rows)
+
+
+def _disk_detail(disk: Mapping[str, Any]) -> str:
+    free = _int_value(disk.get("free_bytes"))
+    used = _int_value(disk.get("used_bytes"))
+    percent = disk.get("percent_used")
+    percent_text = (
+        f"{float(percent):.1f}% used"
+        if isinstance(percent, int | float)
+        else "used unknown"
+    )
+    return (
+        f"{_format_size(free)} free, {_format_size(used)} used, "
+        f"{percent_text} (POSIX writes)"
+    )
+
+
+def _cache_detail(summary: Mapping[str, Any]) -> str:
+    cache_count = _int_value(summary.get("cache_count"))
+    cache_size = _int_value(summary.get("cache_size_bytes"))
+    symbol_count = _int_value(summary.get("symbol_count"))
+    symbols_with_cache = _int_value(summary.get("symbols_with_cache"))
+    parts = [f"{cache_count} .data cache(s)", _format_size(cache_size)]
+    if symbol_count:
+        parts.append(f"{symbols_with_cache}/{symbol_count} symbols cached")
+    return "; ".join(parts)
+
+
+def _source_state(
+    summary: Mapping[str, Any],
+    cleanup: Mapping[str, Any],
+) -> str:
+    explicit = str(cleanup.get("state", "") or "")
+    if explicit:
+        return explicit
+    return (
+        "clean"
+        if _int_value(summary.get("source_artifact_count")) == 0
+        else "dirty"
+    )
+
+
+def _source_detail(summary: Mapping[str, Any]) -> str:
+    count = _int_value(summary.get("source_artifact_count"))
+    size = _int_value(summary.get("source_artifact_size_bytes"))
+    return (
+        f"{count} transient ZIP/CSV/XLS/XLSX artifact(s), "
+        f"{_format_size(size)}"
+    )
+
+
+def _workflow_detail(workflows: Mapping[str, Any]) -> str:
+    active = _int_value(workflows.get("active_count"))
+    jobs = _int_value(workflows.get("job_count"))
+    return f"active={active}, jobs={jobs}"
+
+
+def _group_detail(groups: list[dict[str, Any]]) -> str:
+    rows = []
+    for group in groups[:GROUP_LIMIT]:
+        name = str(group.get("group", "") or "-")
+        status = str(group.get("status", "unknown") or "unknown")
+        cached = _int_value(group.get("symbols_with_cache"))
+        expected = _int_value(group.get("expected_symbol_count"))
+        source_count = _int_value(group.get("source_artifact_count"))
+        rows.append(
+            f"{name}: {status}, {cached}/{expected} cached, "
+            f"sources={source_count}"
+        )
+    remaining = len(groups) - len(rows)
+    if remaining > 0:
+        rows.append(f"+{remaining} more")
+    return "; ".join(rows)
 
 
 def _stage_table(progress: JobProgressSnapshot) -> Table:
@@ -342,6 +613,29 @@ def _format_rate(rate: float, unit: str) -> str:
     return f"{rate:.2f} {unit}/s"
 
 
+def _format_eta(progress: JobProgressSnapshot) -> str:
+    if progress.rate_per_second <= 0 or progress.total_children <= 0:
+        return ""
+    remaining = max(
+        0.0,
+        float(progress.total_children - progress.completed_children),
+    )
+    if remaining <= 0:
+        return "complete"
+    return _format_duration(remaining / progress.rate_per_second)
+
+
+def _format_duration(seconds: float) -> str:
+    total_seconds = max(0, int(round(seconds)))
+    if total_seconds < 60:
+        return f"{total_seconds}s"
+    minutes, seconds = divmod(total_seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m"
+
+
 def _format_number(value: float | int) -> str:
     numeric = float(value)
     if numeric.is_integer():
@@ -375,3 +669,57 @@ def _status_style(
     if lifecycle in {JobLifecycle.SUBMITTED, JobLifecycle.UNKNOWN}:
         return "blue"
     return "cyan"
+
+
+def _health_style(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {
+        "ok",
+        "running",
+        "ready",
+        "clean",
+        "cache-ready",
+        "completed",
+        "succeeded",
+    }:
+        return "green"
+    if normalized in {
+        "warning",
+        "dirty",
+        "partial-cache",
+        "mixed",
+        "stop_pending",
+        "stopped",
+    }:
+        return "yellow"
+    if normalized in {
+        "failed",
+        "fail",
+        "error",
+        "stale",
+        "missing",
+        "dead",
+        "unavailable",
+        "attention",
+    }:
+        return "red"
+    return "cyan"
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _list_of_mappings(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list | tuple):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _int_value(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0

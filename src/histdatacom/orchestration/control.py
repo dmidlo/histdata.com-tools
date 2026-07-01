@@ -10,6 +10,7 @@ from histdatacom.cancellation import (
     job_cancellation_metadata,
     operation_resume_metadata,
 )
+from histdatacom.publication_safety import publish_safe_json_value
 from histdatacom.runtime_contracts import (
     ArtifactRef,
     JSONValue,
@@ -454,6 +455,9 @@ class OrchestrationJobSnapshot:
             metadata["orchestration_logs"] = {
                 str(key): str(value) for key, value in logs.items()
             }
+        runtime_health = _runtime_health_metadata(orchestration_status)
+        if runtime_health:
+            metadata["runtime_health"] = runtime_health
         return replace(
             self,
             orchestration_state=str(
@@ -780,6 +784,61 @@ def lifecycle_from_work_status(status: WorkStatus) -> JobLifecycle:
     return JobLifecycle.RUNNING
 
 
+def _runtime_health_metadata(status: Any) -> dict[str, JSONValue]:
+    """Return bounded, path-free runtime health for operator displays."""
+    pids = _coerce_mapping(getattr(status, "pids", {}))
+    components = _coerce_mapping(getattr(status, "components", {}))
+    worker_readiness = _coerce_mapping(getattr(status, "worker_readiness", {}))
+    component_payload: dict[str, JSONValue] = {}
+    for component, state in sorted(components.items()):
+        component_name = str(component)
+        payload: dict[str, JSONValue] = {
+            "state": str(state or "unknown"),
+        }
+        pid = _int_value(pids.get(component_name))
+        if pid > 0:
+            payload["pid"] = pid
+        lane = component_name.removeprefix("worker:")
+        readiness = _coerce_mapping(worker_readiness.get(lane))
+        if readiness:
+            payload["readiness_state"] = str(
+                readiness.get("state", "") or "unknown"
+            )
+            payload["ready"] = bool(readiness.get("ready", False))
+        component_payload[component_name] = payload
+
+    disk = _coerce_mapping(getattr(status, "disk", {}))
+    return {
+        "state": str(getattr(status, "state", "") or "unknown"),
+        "message": str(
+            publish_safe_json_value(str(getattr(status, "message", "") or ""))
+        ),
+        "pid_count": sum(1 for value in pids.values() if _int_value(value) > 0),
+        "component_count": len(component_payload),
+        "components": component_payload,
+        "disk": _disk_health_metadata(disk),
+    }
+
+
+def _disk_health_metadata(disk: Mapping[str, Any]) -> dict[str, JSONValue]:
+    """Return path-free disk headroom metadata."""
+    total = _int_value(disk.get("total_bytes"))
+    used = _int_value(disk.get("used_bytes"))
+    free = _int_value(disk.get("free_bytes"))
+    percent_used = round((used / total) * 100, 1) if total > 0 else 0.0
+    state = "unknown"
+    if total > 0:
+        state = "warning" if percent_used >= 90 or free < 5 * 1024**3 else "ok"
+    return {
+        "state": state,
+        "semantics": str(disk.get("semantics", "") or "posix_write_available"),
+        "total_bytes": total,
+        "used_bytes": used,
+        "free_bytes": free,
+        "percent_used": percent_used,
+    }
+
+
 def _bounded_result_payload(result: Any) -> dict[str, JSONValue]:
     if not isinstance(result, Mapping):
         return {
@@ -874,6 +933,13 @@ def _float_value(value: Any) -> float:
         return float(value or 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _int_value(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _last_event_error(events: tuple[StatusEvent, ...]) -> str:
