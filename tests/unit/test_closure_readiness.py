@@ -339,6 +339,188 @@ def test_gate_run_reports_precommit_generated_artifact_changes(
     ]
 
 
+def test_standalone_gate_run_formatter_mutation_reports_rerun_guidance(
+    tmp_path: Path,
+) -> None:
+    """Standalone gate rewrites should identify formatter/tool-only drift."""
+    module = _module()
+    path = tmp_path / "tests" / "unit" / "test_closure_readiness.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("before\n", encoding="utf-8")
+    runner = FakeRunner(
+        status_stdout=" M tests/unit/test_closure_readiness.py\n",
+        precommit_returncode=1,
+        precommit_stdout="black reformatted files\n",
+        precommit_file_mutations={
+            "tests/unit/test_closure_readiness.py": "after\n",
+        },
+    )
+
+    report = module.build_readiness_report(
+        repo_root=tmp_path,
+        issue=295,
+        run_gates=True,
+        artifact_roots=(tmp_path / "data",),
+        process_rows=(),
+        runner=runner,
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    mutation = report["gates"]["mutation_summary"]
+    item = mutation["items"][0]
+    human = module.render_human(report)
+    markdown = module.render_markdown(report)
+
+    assert report["gates"]["state"] == "fail"
+    assert "closure-gates-changed-files" in (
+        report["readiness"]["blocking_checks"]
+    )
+    assert mutation["state"] == "formatter-tool"
+    assert item["responsible_gates"] == ["pre-commit"]
+    assert item["classification"] == "formatter-tool"
+    assert item["appears_formatter_or_tool_output"] is True
+    assert report["gates"]["required_rerun"]["state"] == "required"
+    assert report["gates"]["rerun"]["eligible"] is True
+    assert report["gates"]["rerun"]["state"] == "not-run"
+    assert "python -m pytest tests/unit/test_closure_readiness.py" in (
+        report["gates"]["required_rerun"]["commands"]
+    )
+    assert "python scripts/closure_readiness.py --run-gates" in (
+        report["gates"]["required_rerun"]["commands"]
+    )
+    assert "--rerun-standalone-formatter-mutations" in (
+        report["gates"]["rerun"]["reason"]
+    )
+    assert "required rerun: required" in human
+    assert "Required rerun commands" in markdown
+
+
+def test_standalone_gate_run_non_formatter_mutation_blocks_rerun(
+    tmp_path: Path,
+) -> None:
+    """Standalone non-formatter rewrites should require manual inspection."""
+    module = _module()
+    path = tmp_path / "data" / "local-cache.sqlite3"
+    path.parent.mkdir(parents=True)
+    path.write_text("before\n", encoding="utf-8")
+    runner = FakeRunner(
+        status_stdout=" M data/local-cache.sqlite3\n",
+        precommit_returncode=1,
+        precommit_file_mutations={
+            "data/local-cache.sqlite3": "after\n",
+        },
+    )
+
+    report = module.build_readiness_report(
+        repo_root=tmp_path,
+        issue=295,
+        run_gates=True,
+        artifact_roots=(tmp_path / "data",),
+        process_rows=(),
+        runner=runner,
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    mutation = report["gates"]["mutation_summary"]
+    item = mutation["items"][0]
+
+    assert report["gates"]["state"] == "fail"
+    assert "closure-gates-changed-files" in (
+        report["readiness"]["blocking_checks"]
+    )
+    assert mutation["state"] == "non-formatter"
+    assert mutation["formatter_tool_only"] is False
+    assert item["responsible_gates"] == ["pre-commit"]
+    assert item["classification"] == "non-formatter"
+    assert item["appears_formatter_or_tool_output"] is False
+    assert report["gates"]["required_rerun"]["state"] == "not-eligible"
+    assert report["gates"]["rerun"]["eligible"] is False
+
+
+def test_standalone_gate_run_formatter_rerun_success_clears_gate_blocker(
+    tmp_path: Path,
+) -> None:
+    """Opt-in standalone reruns should clear formatter-only gate blockers."""
+    module = _module()
+    path = tmp_path / "tests" / "unit" / "test_closure_readiness.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("before\n", encoding="utf-8")
+    runner = FakeRunner(
+        status_stdout=" M tests/unit/test_closure_readiness.py\n",
+        precommit_returncodes=(1, 0),
+        precommit_stdout_sequence=(
+            "black reformatted files\n",
+            "all hooks passed\n",
+        ),
+        precommit_file_mutation_sequence=(
+            {"tests/unit/test_closure_readiness.py": "after\n"},
+            {},
+        ),
+    )
+
+    report = module.build_readiness_report(
+        repo_root=tmp_path,
+        issue=295,
+        run_gates=True,
+        rerun_standalone_formatter_mutations=True,
+        artifact_roots=(tmp_path / "data",),
+        process_rows=(),
+        runner=runner,
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert report["gates"]["state"] == "pass"
+    assert report["gates"]["required_rerun"]["state"] == "passed"
+    assert report["gates"]["rerun"]["state"] == "pass"
+    assert "closure-gates-changed-files" not in (
+        report["readiness"]["blocking_checks"]
+    )
+    assert "gate:pre-commit" not in report["readiness"]["blocking_checks"]
+    assert "dirty-worktree" in report["readiness"]["blocking_checks"]
+    assert runner.precommit_calls == 2
+
+
+def test_standalone_gate_run_formatter_rerun_failure_blocks_readiness(
+    tmp_path: Path,
+) -> None:
+    """Failed opt-in standalone reruns should keep closure blocked."""
+    module = _module()
+    path = tmp_path / "tests" / "unit" / "test_closure_readiness.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("before\n", encoding="utf-8")
+    runner = FakeRunner(
+        status_stdout=" M tests/unit/test_closure_readiness.py\n",
+        precommit_returncodes=(1, 1),
+        precommit_stdout_sequence=(
+            "black reformatted files\n",
+            "pre-commit still failing\n",
+        ),
+        precommit_file_mutation_sequence=(
+            {"tests/unit/test_closure_readiness.py": "after\n"},
+            {},
+        ),
+    )
+
+    report = module.build_readiness_report(
+        repo_root=tmp_path,
+        issue=295,
+        run_gates=True,
+        rerun_standalone_formatter_mutations=True,
+        artifact_roots=(tmp_path / "data",),
+        process_rows=(),
+        runner=runner,
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert report["gates"]["state"] == "fail"
+    assert report["gates"]["required_rerun"]["state"] == "failed"
+    assert report["gates"]["rerun"]["state"] == "failed"
+    assert "standalone-gate-rerun-gates-failed" in (
+        report["gates"]["rerun"]["blocking_checks"]
+    )
+    assert "standalone-gate-rerun-gates-failed" in (
+        report["readiness"]["blocking_checks"]
+    )
+
+
 def test_gate_run_uses_final_lingering_process_check(tmp_path: Path) -> None:
     """A process spawned by a gate should block closure readiness."""
     module = _module()

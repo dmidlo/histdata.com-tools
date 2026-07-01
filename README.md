@@ -279,6 +279,10 @@ python scripts/closure_readiness.py --issue 274 --push-readiness
 python scripts/closure_readiness.py --issue 274 --issue-audit
 python scripts/closure_readiness.py --issue 274 --workflow
 python scripts/closure_readiness.py \
+  --issue 274 \
+  --run-gates \
+  --rerun-standalone-formatter-mutations
+python scripts/closure_readiness.py \
   --summarize-report .histdatacom/closure-readiness/closure-274.json
 python scripts/closure_readiness.py --issue 274 --workflow --close-issue
 python scripts/closure_readiness.py \
@@ -322,7 +326,9 @@ rewrite files, and records the result separately from the post-push closure
 gates. Gate-induced file rewrites are reported with changed paths, responsible
 gates, and whether the mutation appears to be formatter/tool output. The default
 behavior stays conservative: formatter rewrites still block until the required
-focused verification and full gate rerun are complete. Add
+focused verification and full gate rerun are complete. For standalone
+`--run-gates` reports, add `--rerun-standalone-formatter-mutations` only when
+you want that one-time formatter/tool-only rerun performed automatically. Add
 `--rerun-formatter-mutations` only when you want the workflow to perform that
 one-time formatter/tool-only rerun automatically before staging. Successful
 execution prints a compact closeout with final issue, branch, commit,
