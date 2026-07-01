@@ -55,7 +55,10 @@ class FakeRunner:
         ps_outputs: Sequence[str] = ("",),
         issue_state: str = "OPEN",
         issue_body: str = "",
+        issue_unavailable_after_close: bool = False,
         close_returncode: int = 0,
+        status_after_close_stdout: str = "",
+        upstream_counts_after_push: str = "0\t0\n",
     ) -> None:
         self.branch = branch
         self.status_stdout = status_stdout
@@ -78,7 +81,10 @@ class FakeRunner:
         self.ps_outputs = tuple(ps_outputs)
         self.issue_state = issue_state
         self.issue_body = issue_body
+        self.issue_unavailable_after_close = issue_unavailable_after_close
         self.close_returncode = close_returncode
+        self.status_after_close_stdout = status_after_close_stdout
+        self.upstream_counts_after_push = upstream_counts_after_push
         self.calls: list[tuple[str, ...]] = []
         self.status_calls = 0
         self.precommit_calls = 0
@@ -152,7 +158,7 @@ class FakeRunner:
             )
         if args[:2] == ("git", "push"):
             if self.push_returncode == 0:
-                self.upstream_counts = "0\t0\n"
+                self.upstream_counts = self.upstream_counts_after_push
             return _completed(
                 args,
                 returncode=self.push_returncode,
@@ -169,6 +175,15 @@ class FakeRunner:
             and args[:3] == ("gh", "issue", "view")
             and args[4] == "--json"
         ):
+            if (
+                self.issue_unavailable_after_close
+                and self.issue_state == "CLOSED"
+            ):
+                return _completed(
+                    args,
+                    returncode=1,
+                    stderr="gh issue readback unavailable\n",
+                )
             number = int(args[3])
             fields = set(args[5].split(","))
             payload = {
@@ -192,6 +207,8 @@ class FakeRunner:
         if args[:3] == ("gh", "issue", "close"):
             if self.close_returncode == 0:
                 self.issue_state = "CLOSED"
+                if self.status_after_close_stdout:
+                    self.status_stdout = self.status_after_close_stdout
             return _completed(
                 args,
                 returncode=self.close_returncode,
@@ -1422,6 +1439,10 @@ def test_execute_workflow_default_prints_compact_closeout(
     assert "acceptance: ready (1/1 covered, 0 missing)" in output
     assert "report paths: ready" in output
     assert "runtime/process health: clean (0)" in output
+    assert "final readback: pass" in output
+    assert "readback stages:" in output
+    assert "after-issue-close=dev@fedcba9 dirty=no ahead=0 behind=0" in output
+    assert "processes=clean(0)" in output
     assert "reports:" in output
     assert (
         "json: .histdatacom/closure-readiness/issue-workflow-288.json "
@@ -1433,6 +1454,16 @@ def test_execute_workflow_default_prints_compact_closeout(
     ) in output
     assert '"commands":' not in output
     assert full_report["schema_version"] == module.ISSUE_WORKFLOW_SCHEMA_VERSION
+    assert (
+        full_report["post_push_readback"]["repo"]["upstream_state"] == "aligned"
+    )
+    assert full_report["final_readback_validation"]["state"] == "pass"
+    assert (
+        full_report["final_readback_validation"]["observations"][
+            "after_issue_close"
+        ]["issue"]["label"]
+        == "#288 CLOSED"
+    )
 
 
 def test_execute_workflow_json_prints_compact_closeout_payload(
@@ -1498,9 +1529,26 @@ def test_execute_workflow_json_prints_compact_closeout_payload(
         "ignored"
     )
     assert summary["process_health"]["after"]["state"] == "clean"
+    assert summary["final_readback"]["state"] == "pass"
+    assert (
+        summary["final_readback"]["observations"]["after_push"]["repo"][
+            "upstream_state"
+        ]
+        == "aligned"
+    )
+    assert summary["final_readback"]["observations"]["after_closure_gates"][
+        "gates"
+    ]["labels"]
+    assert (
+        summary["final_readback"]["observations"]["after_issue_close"]["issue"][
+            "label"
+        ]
+        == "#288 CLOSED"
+    )
     assert "commands" not in summary
     assert "closure_report" not in summary
     assert full_report["schema_version"] == module.ISSUE_WORKFLOW_SCHEMA_VERSION
+    assert full_report["final_readback_validation"]["state"] == "pass"
     assert full_report["commands"]
 
 
@@ -2278,7 +2326,199 @@ def test_execute_workflow_reports_issue_close_failure(
     assert "closure-workflow" in payload["readiness"]["blocking_checks"]
     assert payload["closure_summary"]["issue_close"]["state"] == "failed"
     assert payload["final_readback"]["issue"]["state"] == "OPEN"
+    assert payload["final_readback_validation"]["state"] == "pass"
     assert any(call[:2] == ("git", "push") for call in runner.calls)
+
+
+def test_execute_workflow_blocks_post_close_dirty_worktree(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Final readback should catch worktree drift after issue close."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        status_after_close_stdout=" M docs/post-close-drift.md\n",
+        issue_body="""
+## Acceptance criteria
+
+- Detect post-close dirty worktree.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "297",
+            "--execute-workflow",
+            "--commit-message",
+            "fix(workflow): make final readback self sufficient",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--full-json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["readiness"]["state"] == "failed"
+    assert "final-readback-dirty-worktree" in (
+        payload["readiness"]["blocking_checks"]
+    )
+    assert payload["final_readback"]["repo"]["dirty"] is True
+    assert payload["final_readback_validation"]["state"] == "blocked"
+    assert "final-readback-dirty-worktree" in (
+        payload["final_readback_validation"]["blocking_checks"]
+    )
+
+
+def test_execute_workflow_blocks_upstream_divergence_after_push(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Final readback should report upstream drift observed after push."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        upstream_counts_after_push="1\t0\n",
+        issue_body="""
+## Acceptance criteria
+
+- Detect upstream divergence after push.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "297",
+            "--execute-workflow",
+            "--commit-message",
+            "fix(workflow): make final readback self sufficient",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--full-json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert (
+        payload["post_push_readback"]["repo"]["upstream_state"] == "not-aligned"
+    )
+    assert payload["final_readback"]["repo"]["ahead"] == 1
+    assert "final-readback-upstream-not-aligned" in (
+        payload["final_readback_validation"]["blocking_checks"]
+    )
+    assert (
+        payload["final_readback_validation"]["observations"]["after_push"][
+            "repo"
+        ]["ahead"]
+        == 1
+    )
+
+
+def test_execute_workflow_blocks_lingering_process_after_workflow(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Final readback should make lingering owned processes authoritative."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        ps_outputs=(
+            "",
+            "",
+            "",
+            "",
+            "",
+            (
+                "101 python python -m histdatacom.orchestration.worker "
+                "--state /tmp/runtime/state\n"
+            ),
+        ),
+        issue_body="""
+## Acceptance criteria
+
+- Detect lingering owned process after workflow.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "297",
+            "--execute-workflow",
+            "--commit-message",
+            "fix(workflow): make final readback self sufficient",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--full-json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["processes_after"]["state"] == "dirty"
+    assert (
+        "lingering-processes-after" in payload["readiness"]["blocking_checks"]
+    )
+    assert "lingering-processes-after" in (
+        payload["final_readback_validation"]["blocking_checks"]
+    )
+    assert (
+        payload["final_readback_validation"]["observations"][
+            "after_issue_close"
+        ]["processes"]["state"]
+        == "dirty"
+    )
+
+
+def test_execute_workflow_reports_unavailable_github_final_readback(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    """Unavailable final GitHub readback should be explicit evidence."""
+    module = _module()
+    runner = FakeRunner(
+        status_stdout=" M scripts/closure_readiness.py\n",
+        issue_unavailable_after_close=True,
+        issue_body="""
+## Acceptance criteria
+
+- Detect unavailable GitHub readback.
+""",
+    )
+
+    exit_code = module.main(
+        [
+            "--issue",
+            "297",
+            "--execute-workflow",
+            "--commit-message",
+            "fix(workflow): make final readback self sufficient",
+            "--commit-path",
+            "scripts/closure_readiness.py",
+            "--full-json",
+        ],
+        repo_root=tmp_path,
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["closure_summary"]["issue_close"]["state"] == "failed"
+    assert payload["final_readback"]["issue"]["state"] == "unavailable"
+    assert payload["final_readback_validation"]["state"] == "warning"
+    assert "final-readback-issue-unavailable" in (
+        payload["final_readback_validation"]["warnings"]
+    )
 
 
 def test_execute_workflow_writes_full_logs_but_bounds_report_tails(

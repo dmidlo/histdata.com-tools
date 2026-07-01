@@ -1785,6 +1785,20 @@ def summarize_issue_workflow_report(
     report_paths = _report_paths_summary(_mapping(report.get("report_paths")))
     process_before = _process_summary(_mapping(report.get("processes_before")))
     process_after = _process_summary(_mapping(report.get("processes_after")))
+    final_validation = _mapping(report.get("final_readback_validation"))
+    if not final_validation:
+        final_validation = validate_issue_workflow_final_readback(
+            expected_upstream=str(report.get("expected_upstream", "")),
+            commit_readiness=commit_report,
+            push_readiness=push_report,
+            post_push_readback=_mapping(report.get("post_push_readback")),
+            closure_summary=closure,
+            report_paths=_mapping(report.get("report_paths")),
+            process_after=process_after,
+            final_readback=final,
+            workflow_state=str(readiness.get("state", "unknown")),
+        )
+    final_readback_summary = _final_readback_validation_summary(final_validation)
     workflow_progress = _workflow_progress_summary(
         _mapping(report.get("workflow_progress"))
     )
@@ -1809,6 +1823,7 @@ def summarize_issue_workflow_report(
     }
     process_ok = process_after.get("state") in {"clean", "not-recorded"}
     report_paths_ok = report_paths.get("state") != "blocked"
+    final_readback_ok = final_readback_summary.get("state") != "blocked"
     accepted = bool(
         readiness.get("state") == "ready"
         and final_issue_ok
@@ -1819,6 +1834,7 @@ def summarize_issue_workflow_report(
         and _acceptance_close_ready(acceptance)
         and process_ok
         and report_paths_ok
+        and final_readback_ok
     )
     payload: dict[str, Any] = {
         "schema_version": ISSUE_WORKFLOW_SUMMARY_SCHEMA_VERSION,
@@ -1893,6 +1909,7 @@ def summarize_issue_workflow_report(
             "before": process_before,
             "after": process_after,
         },
+        "final_readback": final_readback_summary,
         "workflow_progress": workflow_progress,
         "logs": {
             "directory": logs.get("directory", ""),
@@ -1940,6 +1957,244 @@ def _process_summary(processes: Mapping[str, Any]) -> dict[str, Any]:
         "state": processes.get("state", "unknown"),
         "total_count": processes.get("total_count", 0),
         "categories": dict(_mapping(processes.get("categories"))),
+    }
+
+
+def validate_issue_workflow_final_readback(
+    *,
+    expected_upstream: str,
+    commit_readiness: Mapping[str, Any],
+    push_readiness: Mapping[str, Any],
+    post_push_readback: Mapping[str, Any],
+    closure_summary: Mapping[str, Any],
+    report_paths: Mapping[str, Any],
+    process_after: Mapping[str, Any],
+    final_readback: Mapping[str, Any],
+    workflow_state: str,
+) -> dict[str, Any]:
+    """Return explicit final-readback consistency evidence."""
+    final_repo = _mapping(final_readback.get("repo"))
+    final_issue = _mapping(final_readback.get("issue"))
+    final_commit = _mapping(final_readback.get("commit"))
+    closure = _mapping(closure_summary)
+    issue_close = _mapping(closure.get("issue_close"))
+    report_paths_summary = _report_paths_summary(report_paths)
+    process_summary = _process_summary(process_after)
+    issue_close_state = str(issue_close.get("state", "not-run"))
+    closure_expected_closed = issue_close_state in {"closed", "already-closed"}
+    workflow_expected_ready = workflow_state in {"running", "ready"}
+    strict = workflow_expected_ready or closure.get("accepted") is True
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+
+    def record(code: str, *, blocking: bool | None = None) -> None:
+        target = blockers if (strict if blocking is None else blocking) else warnings
+        if code not in target:
+            target.append(code)
+
+    if not final_repo:
+        record("final-readback-repo-missing")
+    else:
+        if final_repo.get("branch") in {"", "unknown"} or not final_repo.get("head"):
+            record("final-readback-repo-unavailable")
+        if final_repo.get("dirty"):
+            record("final-readback-dirty-worktree", blocking=True)
+        if expected_upstream and final_repo.get("upstream") != expected_upstream:
+            record("final-readback-unexpected-upstream", blocking=True)
+        if final_repo.get("upstream_state") != "aligned":
+            record("final-readback-upstream-not-aligned", blocking=True)
+
+    if final_commit.get("state") != "available" or not final_commit.get("summary"):
+        record("final-readback-commit-unavailable")
+    elif final_repo.get("head_short") and not str(
+        final_commit.get("summary", "")
+    ).startswith(str(final_repo.get("head_short"))):
+        record("final-readback-head-mismatch", blocking=True)
+
+    if final_issue.get("state") == "unavailable":
+        record("final-readback-issue-unavailable")
+    elif closure_expected_closed and not _issue_is_closed(final_issue):
+        record("final-readback-issue-not-closed", blocking=True)
+    elif issue_close_state == "failed" and _issue_is_closed(final_issue):
+        record("final-readback-issue-close-mismatch", blocking=True)
+
+    if process_summary.get("state") == "dirty":
+        record("lingering-processes-after", blocking=True)
+    elif process_summary.get("state") == "unavailable":
+        record("final-readback-process-unavailable")
+
+    if report_paths_summary.get("state") == "blocked":
+        record("final-readback-report-paths-blocked", blocking=True)
+
+    observations = _final_readback_observations(
+        commit_readiness=commit_readiness,
+        push_readiness=push_readiness,
+        post_push_readback=post_push_readback,
+        closure_summary=closure_summary,
+        final_readback=final_readback,
+        process_after=process_after,
+        report_paths_summary=report_paths_summary,
+    )
+    payload: dict[str, Any] = {
+        "state": "blocked" if blockers else ("warning" if warnings else "pass"),
+        "blocking_checks": blockers,
+        "warnings": warnings,
+        "observations": observations,
+        "changed_observations": _final_readback_changed_observations(observations),
+    }
+    safe = publish_safe_json_value(payload)
+    if not isinstance(safe, dict):
+        raise TypeError("final readback validation must be a JSON object")
+    return dict(safe)
+
+
+def _final_readback_observations(
+    *,
+    commit_readiness: Mapping[str, Any],
+    push_readiness: Mapping[str, Any],
+    post_push_readback: Mapping[str, Any],
+    closure_summary: Mapping[str, Any],
+    final_readback: Mapping[str, Any],
+    process_after: Mapping[str, Any],
+    report_paths_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    closure = _mapping(closure_summary)
+    post_push = _mapping(post_push_readback)
+    return {
+        "before_mutation": {
+            "repo": _repo_observation(_mapping(commit_readiness.get("repo"))),
+            "issue": _issue_observation(_mapping(commit_readiness.get("issue"))),
+        },
+        "after_push": {
+            "repo": _repo_observation(
+                _mapping(post_push.get("repo"))
+                or _mapping(_mapping(push_readiness).get("repo"))
+            ),
+            "commit": _commit_observation(_mapping(post_push.get("commit"))),
+        },
+        "after_closure_gates": {
+            "repo": _repo_observation(_mapping(closure.get("repo"))),
+            "issue": _issue_observation(_mapping(closure.get("issue"))),
+            "gates": {
+                "state": _mapping(closure.get("gates")).get("state", "unknown"),
+                "labels": _mapping(closure.get("gates")).get("labels", "unknown"),
+            },
+        },
+        "after_issue_close": {
+            "repo": _repo_observation(_mapping(final_readback.get("repo"))),
+            "issue": _issue_observation(_mapping(final_readback.get("issue"))),
+            "commit": _commit_observation(_mapping(final_readback.get("commit"))),
+            "processes": _process_summary(process_after),
+            "report_paths": report_paths_summary,
+        },
+    }
+
+
+def _repo_observation(repo: Mapping[str, Any]) -> dict[str, Any]:
+    if not repo:
+        return {
+            "state": "not-recorded",
+            "branch": "unknown",
+            "upstream": "",
+            "upstream_state": "unknown",
+            "ahead": 0,
+            "behind": 0,
+            "dirty": False,
+            "head_short": "",
+        }
+    return {
+        "state": "available",
+        "branch": repo.get("branch", "unknown"),
+        "upstream": repo.get("upstream", ""),
+        "upstream_state": repo.get("upstream_state", "unknown"),
+        "ahead": repo.get("ahead", 0),
+        "behind": repo.get("behind", 0),
+        "dirty": bool(repo.get("dirty")),
+        "head_short": repo.get("head_short", ""),
+        "changed_path_count": repo.get("changed_path_count", 0),
+    }
+
+
+def _issue_observation(issue: Mapping[str, Any]) -> dict[str, Any]:
+    if not issue:
+        return {
+            "label": "not-recorded",
+            "state": "not-recorded",
+            "number": 0,
+            "url": "",
+        }
+    return {
+        "label": _issue_label(issue),
+        "state": issue.get("state", "unknown"),
+        "number": issue.get("number", 0),
+        "url": issue.get("url", ""),
+    }
+
+
+def _commit_observation(commit: Mapping[str, Any]) -> dict[str, Any]:
+    if not commit:
+        return {
+            "state": "not-recorded",
+            "summary": "",
+        }
+    return {
+        "state": commit.get("state", "unknown"),
+        "summary": commit.get("summary", ""),
+    }
+
+
+def _final_readback_changed_observations(
+    observations: Mapping[str, Any],
+) -> list[str]:
+    stage_names = (
+        "before_mutation",
+        "after_push",
+        "after_closure_gates",
+        "after_issue_close",
+    )
+    changed: list[str] = []
+    previous_name = ""
+    previous_signature: tuple[object, ...] | None = None
+    for name in stage_names:
+        stage = _mapping(observations.get(name))
+        repo = _mapping(stage.get("repo"))
+        issue = _mapping(stage.get("issue"))
+        signature = (
+            repo.get("branch"),
+            repo.get("upstream"),
+            repo.get("ahead"),
+            repo.get("behind"),
+            repo.get("dirty"),
+            repo.get("head_short"),
+            issue.get("state"),
+        )
+        if previous_signature is not None and signature != previous_signature:
+            changed.append(f"{previous_name}->{name}")
+        previous_name = name
+        previous_signature = signature
+    return changed
+
+
+def _final_readback_validation_summary(
+    validation: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not validation:
+        return {
+            "state": "not-recorded",
+            "blocking_checks": [],
+            "warnings": [],
+            "observations": {},
+            "changed_observations": [],
+        }
+    return {
+        "state": validation.get("state", "unknown"),
+        "blocking_checks": list(validation.get("blocking_checks", []) or []),
+        "warnings": list(validation.get("warnings", []) or []),
+        "observations": dict(_mapping(validation.get("observations"))),
+        "changed_observations": list(
+            validation.get("changed_observations", []) or []
+        ),
     }
 
 
@@ -2461,6 +2716,7 @@ def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
     acceptance = _mapping(summary.get("acceptance_coverage"))
     process_health = _mapping(summary.get("process_health"))
     process_after = _mapping(process_health.get("after"))
+    final_readback = _mapping(summary.get("final_readback"))
     workflow_progress = _mapping(summary.get("workflow_progress"))
     logs = _mapping(summary.get("logs"))
     lines = [
@@ -2484,6 +2740,8 @@ def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
             f"{process_after.get('state', 'not-recorded')} "
             f"({process_after.get('total_count', 0)})"
         ),
+        f"final readback: {final_readback.get('state', 'not-recorded')}",
+        _final_readback_timeline_human_line(final_readback),
         _workflow_progress_human_line(workflow_progress),
         (
             "logs: "
@@ -2499,6 +2757,18 @@ def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
     warnings = list(readiness.get("warnings", []) or [])
     if warnings:
         lines.append("warnings: " + ", ".join(str(item) for item in warnings))
+    final_blockers = list(final_readback.get("blocking_checks", []) or [])
+    if final_blockers:
+        lines.append(
+            "final readback blocking: "
+            + ", ".join(str(item) for item in final_blockers)
+        )
+    final_warnings = list(final_readback.get("warnings", []) or [])
+    if final_warnings:
+        lines.append(
+            "final readback warnings: "
+            + ", ".join(str(item) for item in final_warnings)
+        )
     changed_paths = list(pre_mutation.get("changed_paths_after", []) or [])
     if changed_paths:
         lines.append(
@@ -2538,6 +2808,44 @@ def render_issue_workflow_summary_human(summary: Mapping[str, Any]) -> str:
                 f"{write_state}]"
             )
     return "\n".join(lines)
+
+
+def _final_readback_timeline_human_line(final_readback: Mapping[str, Any]) -> str:
+    observations = _mapping(final_readback.get("observations"))
+    if not observations:
+        return "readback stages: not-recorded"
+    stages = (
+        ("before-mutation", _mapping(observations.get("before_mutation"))),
+        ("after-push", _mapping(observations.get("after_push"))),
+        ("after-closure-gates", _mapping(observations.get("after_closure_gates"))),
+        ("after-issue-close", _mapping(observations.get("after_issue_close"))),
+    )
+    return "readback stages: " + " | ".join(
+        _final_readback_stage_human(label, stage) for label, stage in stages
+    )
+
+
+def _final_readback_stage_human(label: str, stage: Mapping[str, Any]) -> str:
+    repo = _mapping(stage.get("repo"))
+    issue = _mapping(stage.get("issue"))
+    gates = _mapping(stage.get("gates"))
+    processes = _mapping(stage.get("processes"))
+    parts = [
+        f"{label}={repo.get('branch', 'unknown')}@{repo.get('head_short', '')}",
+        f"dirty={_yes_no(repo.get('dirty'))}",
+        f"ahead={repo.get('ahead', 0)}",
+        f"behind={repo.get('behind', 0)}",
+    ]
+    if issue:
+        parts.append(f"issue={issue.get('label', '')}")
+    if gates:
+        parts.append(f"gates={gates.get('labels', gates.get('state', 'unknown'))}")
+    if processes:
+        parts.append(
+            f"processes={processes.get('state', 'unknown')}"
+            f"({processes.get('total_count', 0)})"
+        )
+    return " ".join(parts)
 
 
 def _workflow_progress_human_line(
@@ -3719,7 +4027,9 @@ def run_issue_workflow_execution(
             closure_summary={},
             process_before={},
             process_after={},
+            post_push_readback={},
             final_readback={},
+            final_readback_validation={},
             state="blocked",
             blockers=blockers,
             warnings=warnings,
@@ -3774,6 +4084,7 @@ def run_issue_workflow_execution(
     )
 
     push_report: dict[str, Any] = {}
+    post_push_readback: dict[str, Any] = {}
     closure_report: dict[str, Any] = {}
     closure_summary: dict[str, Any] = {}
     pre_mutation_gate_report = _pre_mutation_gates_not_run(
@@ -3930,6 +4241,11 @@ def run_issue_workflow_execution(
         if push_result.returncode != 0:
             blockers.append("command:git-push")
             state = "failed"
+        else:
+            post_push_readback = {
+                "repo": collect_git_state(root, runner=logger),
+                "commit": _last_commit_payload(root, runner=logger),
+            }
     if state == "running":
         closure_report, _, _ = build_guided_workflow_report(
             repo_root=root,
@@ -3977,8 +4293,26 @@ def run_issue_workflow_execution(
         message="Final readback completed",
     )
     process_after = collect_process_summary(root, runner=logger)
-    if process_after.get("state") == "dirty":
-        blockers.append("lingering-processes-after")
+    final_readback_validation = validate_issue_workflow_final_readback(
+        expected_upstream=expected_upstream,
+        commit_readiness=commit_report,
+        push_readiness=push_report,
+        post_push_readback=post_push_readback,
+        closure_summary=closure_summary,
+        report_paths=report_paths,
+        process_after=process_after,
+        final_readback=final_readback,
+        workflow_state=state,
+    )
+    for blocker in list(final_readback_validation.get("blocking_checks", []) or []):
+        text = str(blocker)
+        if text not in blockers:
+            blockers.append(text)
+    for warning in list(final_readback_validation.get("warnings", []) or []):
+        text = str(warning)
+        if text not in warnings:
+            warnings.append(text)
+    if final_readback_validation.get("state") == "blocked":
         state = "failed" if state != "blocked" else state
     if state == "running":
         state = "ready"
@@ -4011,7 +4345,9 @@ def run_issue_workflow_execution(
         closure_summary=closure_summary,
         process_before=process_before,
         process_after=process_after,
+        post_push_readback=post_push_readback,
         final_readback=final_readback,
+        final_readback_validation=final_readback_validation,
         state=state,
         blockers=blockers,
         warnings=warnings,
@@ -4042,7 +4378,9 @@ def _issue_workflow_execution_report(
     closure_summary: Mapping[str, Any],
     process_before: Mapping[str, Any],
     process_after: Mapping[str, Any],
+    post_push_readback: Mapping[str, Any],
     final_readback: Mapping[str, Any],
+    final_readback_validation: Mapping[str, Any],
     state: str,
     blockers: Sequence[str],
     warnings: Sequence[str],
@@ -4080,7 +4418,9 @@ def _issue_workflow_execution_report(
         ),
         "closure_summary": dict(closure_summary),
         "closure_report": dict(closure_report),
+        "post_push_readback": dict(post_push_readback),
         "final_readback": dict(final_readback),
+        "final_readback_validation": dict(final_readback_validation),
         "workflow_progress": dict(workflow_progress or {}),
     }
     safe = publish_safe_json_value(report)
@@ -4618,6 +4958,10 @@ def render_issue_workflow_markdown(report: Mapping[str, Any]) -> str:
     final = _mapping(report.get("final_readback"))
     final_repo = _mapping(final.get("repo"))
     final_issue = _mapping(final.get("issue"))
+    final_commit = _mapping(final.get("commit"))
+    final_validation = _final_readback_validation_summary(
+        _mapping(report.get("final_readback_validation"))
+    )
     closure_summary = _mapping(report.get("closure_summary"))
     closure_gates = _mapping(_mapping(report.get("closure_report")).get("gates"))
     pre_mutation = _mapping(report.get("pre_mutation_gates"))
@@ -4729,6 +5073,17 @@ def render_issue_workflow_markdown(report: Mapping[str, Any]) -> str:
             f"- Issue close: "
             f"{_mapping(closure_summary.get('issue_close')).get('state', 'not-run')}",
             "",
+            "## Final Readback",
+            "",
+            f"- State: {final_validation.get('state', 'not-recorded')}",
+            f"- Issue: {_issue_label(final_issue)}",
+            f"- Branch: `{final_repo.get('branch', 'unknown')}`",
+            f"- Upstream: `{final_repo.get('upstream', '')}` "
+            f"(ahead {final_repo.get('ahead', 0)}, behind {final_repo.get('behind', 0)})",
+            f"- Worktree dirty: {_yes_no(final_repo.get('dirty'))}",
+            f"- Head commit: {final_commit.get('summary', '')}",
+            f"- Report paths: {_report_paths_summary(_mapping(report.get('report_paths'))).get('state', 'not-recorded')}",
+            "",
             "## Process Health",
             "",
             f"- Before: {_mapping(report.get('processes_before')).get('state', 'unknown')}",
@@ -4736,6 +5091,14 @@ def render_issue_workflow_markdown(report: Mapping[str, Any]) -> str:
             "",
         ]
     )
+    final_blockers = list(final_validation.get("blocking_checks", []) or [])
+    final_warnings = list(final_validation.get("warnings", []) or [])
+    if final_blockers:
+        lines.append("- Final readback blockers:")
+        lines.extend(f"  - `{blocker}`" for blocker in final_blockers)
+    if final_warnings:
+        lines.append("- Final readback warnings:")
+        lines.extend(f"  - `{warning}`" for warning in final_warnings)
     return "\n".join(lines)
 
 
