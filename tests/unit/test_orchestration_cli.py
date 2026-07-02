@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -114,13 +115,17 @@ def _snapshot(
     *,
     lifecycle: JobLifecycle = JobLifecycle.RUNNING,
     status: WorkStatus = WorkStatus.UNKNOWN,
+    metadata: dict[str, object] | None = None,
 ) -> OrchestrationJobSnapshot:
     """Return a fake control snapshot."""
-    return OrchestrationJobSnapshot.from_handle(
+    snapshot = OrchestrationJobSnapshot.from_handle(
         _Handle(),
         lifecycle=lifecycle,
         status=status,
     )
+    if metadata is None:
+        return snapshot
+    return replace(snapshot, metadata=dict(metadata))
 
 
 def _snapshot_with_progress(
@@ -625,6 +630,153 @@ def test_orchestration_jobs_list_accepts_json_before_or_after_subcommand(
     assert payload["jobs"][0]["workflow_id"] == "histdatacom-run-cli"
 
 
+def test_orchestration_jobs_list_passes_schedule_filters(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """List filters should pass schedule identity and active-only options."""
+    captured: dict[str, object] = {}
+
+    def fake_list_jobs(**kwargs: object) -> OrchestrationJobList:
+        captured.update(kwargs)
+        return OrchestrationJobList(
+            jobs=(
+                _snapshot(
+                    metadata={
+                        "no_overlap": True,
+                        "schedule_key": "eurusd-cache",
+                        "schedule_fingerprint": "sha256:abc123",
+                    }
+                ),
+            )
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(cli, "list_job_statuses_sync", fake_list_jobs)
+
+    exit_code = cli.main(
+        [
+            "jobs",
+            "--json",
+            "list",
+            "--schedule-key",
+            "eurusd-cache",
+            "--schedule-fingerprint",
+            "sha256:abc123",
+            "--active",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert captured["schedule_key"] == "eurusd-cache"
+    assert captured["schedule_fingerprint"] == "sha256:abc123"
+    assert captured["active_only"] is True
+    identity = payload["jobs"][0]["schedule_identity"]
+    assert identity["schedule_key"] == "eurusd-cache"
+    assert identity["schedule_fingerprint"] == "sha256:abc123"
+    assert identity["active"] is True
+    assert identity["blocks_duplicate"] is True
+
+
+def test_orchestration_jobs_list_human_explains_schedule_filters(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Human filtered list output should identify related scheduled jobs."""
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(
+        cli,
+        "list_job_statuses_sync",
+        lambda **kwargs: OrchestrationJobList(
+            jobs=(
+                _snapshot(
+                    metadata={
+                        "no_overlap": True,
+                        "schedule_key": "eurusd-cache",
+                    }
+                ),
+            )
+        ),
+    )
+
+    exit_code = cli.main(
+        ["jobs", "list", "--schedule-key", "eurusd-cache", "--active"]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "filters: active=true schedule_key=eurusd-cache" in output
+    assert "histdatacom-run-cli: running (UNKNOWN)" in output
+    assert "schedule: schedule_key=eurusd-cache" in output
+    assert "state=active" in output
+
+
+def test_orchestration_jobs_inspect_human_explains_schedule_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Human inspect output should explain schedule overlap identity."""
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(
+        cli,
+        "inspect_job_status_sync",
+        lambda workflow_id, **kwargs: _snapshot(
+            metadata={
+                "no_overlap": True,
+                "schedule_key": "eurusd-cache",
+            }
+        ),
+    )
+
+    exit_code = cli.main(["jobs", "inspect", "histdatacom-run-cli"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "histdatacom-run-cli: running (UNKNOWN)" in output
+    assert "schedule: schedule_key=eurusd-cache" in output
+    assert "blocks_duplicate=yes" in output
+
+
+def test_orchestration_jobs_inspect_human_preserves_unscheduled_output(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unscheduled inspect output should keep the existing compact shape."""
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(
+        cli,
+        "inspect_job_status_sync",
+        lambda workflow_id, **kwargs: _snapshot(),
+    )
+
+    exit_code = cli.main(["jobs", "inspect", "histdatacom-run-cli"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert output == "histdatacom-run-cli: running (UNKNOWN)\n"
+
+
 def test_orchestration_jobs_cli_reads_yaml_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -640,8 +792,11 @@ histdatacom:
     command: list
     json: true
     offline: true
+    active: true
     query: WorkflowType = "HistDataRunWorkflow"
     limit: 7
+    schedule_key: eurusd-cache
+    schedule_fingerprint: sha256:abc123
 """,
         encoding="utf-8",
     )
@@ -664,8 +819,11 @@ histdatacom:
     assert exit_code == 0
     assert payload["jobs"][0]["workflow_id"] == "histdatacom-run-cli"
     assert captured["offline"] is True
+    assert captured["active_only"] is True
     assert captured["limit"] == 7
     assert captured["query"] == 'WorkflowType = "HistDataRunWorkflow"'
+    assert captured["schedule_key"] == "eurusd-cache"
+    assert captured["schedule_fingerprint"] == "sha256:abc123"
 
 
 def test_orchestration_runtime_cli_reads_yaml_config(

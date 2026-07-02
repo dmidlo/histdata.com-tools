@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import replace
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -470,6 +471,27 @@ def _run_request(
         api_return_type="polars",
         metadata=dict(metadata or {}),
     )
+
+
+def _job_snapshot(
+    *,
+    request_id: str,
+    lifecycle: JobLifecycle = JobLifecycle.RUNNING,
+    status: WorkStatus = WorkStatus.UNKNOWN,
+    metadata: dict[str, JSONValue] | None = None,
+) -> OrchestrationJobSnapshot:
+    snapshot = OrchestrationJobSnapshot.from_handle(
+        SimpleNamespace(
+            request_id=request_id,
+            workflow_id=f"histdatacom-{request_id}",
+            run_id=f"{request_id}-run",
+            task_queue="histdatacom.test.orchestration",
+            namespace="histdatacom-test",
+        ),
+        lifecycle=lifecycle,
+        status=status,
+    )
+    return replace(snapshot, metadata=dict(metadata or {}))
 
 
 def _submit_seed_run(
@@ -1553,6 +1575,182 @@ def test_list_job_statuses_offline_reads_local_store(
     assert len(jobs.jobs) == 1
     assert jobs.jobs[0].workflow_id == "histdatacom-run-offline"
     assert jobs.jobs[0].lifecycle == JobLifecycle.SUBMITTED
+
+
+def test_job_snapshot_serializes_schedule_identity() -> None:
+    """Snapshot JSON should expose stable schedule overlap identity."""
+    active = _job_snapshot(
+        request_id="run-scheduled",
+        metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+    )
+    terminal = _job_snapshot(
+        request_id="run-terminal",
+        lifecycle=JobLifecycle.SUCCEEDED,
+        status=WorkStatus.COMPLETED,
+        metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+    )
+
+    active_identity = active.to_dict()["schedule_identity"]
+    terminal_identity = terminal.to_dict()["schedule_identity"]
+
+    assert active_identity == {
+        "enabled": True,
+        "source": "schedule_key",
+        "value": "eurusd-cache",
+        "schedule_key": "eurusd-cache",
+        "schedule_fingerprint": "",
+        "active": True,
+        "terminal": False,
+        "blocks_duplicate": True,
+    }
+    assert terminal_identity["active"] is False
+    assert terminal_identity["terminal"] is True
+    assert terminal_identity["blocks_duplicate"] is False
+
+
+def test_list_job_statuses_filters_schedule_key_active_and_terminal(
+    tmp_path: Path,
+) -> None:
+    """Stored list filters should compose schedule key and active-only state."""
+    config = _config(tmp_path)
+    store = client.orchestration_job_store(config)
+    store.write_job_snapshot(
+        _job_snapshot(
+            request_id="run-active",
+            metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+        )
+    )
+    store.write_job_snapshot(
+        _job_snapshot(
+            request_id="run-terminal",
+            lifecycle=JobLifecycle.SUCCEEDED,
+            status=WorkStatus.COMPLETED,
+            metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+        )
+    )
+    store.write_job_snapshot(
+        _job_snapshot(
+            request_id="run-other",
+            metadata={"no_overlap": True, "schedule_key": "gbpusd-cache"},
+        )
+    )
+
+    jobs = asyncio.run(
+        client.list_job_statuses(
+            config=config,
+            offline=True,
+            schedule_key=" eurusd-cache ",
+            active_only=True,
+        )
+    )
+
+    assert [job.workflow_id for job in jobs.jobs] == ["histdatacom-run-active"]
+
+
+def test_list_job_statuses_filters_schedule_fingerprint(
+    tmp_path: Path,
+) -> None:
+    """Stored list filters should support fingerprint-only scheduled jobs."""
+    config = _config(tmp_path)
+    store = client.orchestration_job_store(config)
+    store.write_job_snapshot(
+        _job_snapshot(
+            request_id="run-fingerprint",
+            metadata={
+                "no_overlap": True,
+                "schedule_fingerprint": "sha256:abc123",
+            },
+        )
+    )
+    store.write_job_snapshot(
+        _job_snapshot(
+            request_id="run-other",
+            metadata={
+                "no_overlap": True,
+                "schedule_fingerprint": "sha256:def456",
+            },
+        )
+    )
+
+    jobs = asyncio.run(
+        client.list_job_statuses(
+            config=config,
+            offline=True,
+            schedule_fingerprint="sha256:abc123",
+        )
+    )
+
+    assert [job.workflow_id for job in jobs.jobs] == [
+        "histdatacom-run-fingerprint"
+    ]
+
+
+def test_list_job_statuses_filters_after_limit(
+    tmp_path: Path,
+) -> None:
+    """Limit should apply after schedule and active filters."""
+    config = _config(tmp_path)
+    store = client.orchestration_job_store(config)
+    store.write_job_snapshot(
+        _job_snapshot(
+            request_id="run-active",
+            metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+        )
+    )
+    store.write_job_snapshot(
+        _job_snapshot(
+            request_id="run-terminal",
+            lifecycle=JobLifecycle.SUCCEEDED,
+            status=WorkStatus.COMPLETED,
+            metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+        )
+    )
+
+    jobs = asyncio.run(
+        client.list_job_statuses(
+            config=config,
+            offline=True,
+            schedule_key="eurusd-cache",
+            active_only=True,
+            limit=1,
+        )
+    )
+
+    assert [job.workflow_id for job in jobs.jobs] == ["histdatacom-run-active"]
+
+
+def test_list_job_statuses_live_merges_stored_schedule_metadata(
+    tmp_path: Path,
+) -> None:
+    """Live Temporal visibility listing should return stored schedule fields."""
+    config = _config(tmp_path)
+    store = client.orchestration_job_store(config)
+    store.write_job_snapshot(
+        replace(
+            _job_snapshot(
+                request_id="run-listed",
+                metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+            ),
+            workflow_id="histdatacom-run-listed",
+            job_id="histdatacom-run-listed",
+        )
+    )
+    temporal_client = _FakeTemporalClient()
+
+    jobs = asyncio.run(
+        client.list_job_statuses(
+            config=config,
+            client=temporal_client,
+            schedule_key="eurusd-cache",
+            active_only=True,
+        )
+    )
+
+    assert [job.workflow_id for job in jobs.jobs] == ["histdatacom-run-listed"]
+    assert jobs.jobs[0].metadata["schedule_key"] == "eurusd-cache"
+    assert (
+        jobs.jobs[0].to_dict()["schedule_identity"]["blocks_duplicate"] is True
+    )
 
 
 @pytest.mark.parametrize(

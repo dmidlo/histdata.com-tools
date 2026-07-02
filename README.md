@@ -1340,11 +1340,19 @@ The JSON control surface supports job inspection and future GUI polling:
 
 ```sh
 histdatacom jobs list --json
+histdatacom jobs list --schedule-key eurusd-cache --active --json
 histdatacom jobs progress histdatacom-<request-id> --watch
 histdatacom jobs progress histdatacom-<request-id> --json
 histdatacom jobs artifacts histdatacom-<request-id> --json
 histdatacom jobs cancel histdatacom-<request-id> --reason "operator stop"
 ```
+
+Use `jobs list --schedule-key <key> --active` to find the non-terminal job that
+would block a scheduled `--no-overlap` submission. Fingerprint-only scheduled
+runs can be matched with `--schedule-fingerprint sha256:...`. `jobs inspect
+--json` includes a stable `schedule_identity` object with the schedule key or
+fingerprint, active/terminal state, and whether the job blocks duplicate
+submissions.
 
 Omit `--json` on `jobs progress` for the Rich terminal progress view; add
 `--watch` to live-refresh it until the job reaches a terminal state. The Rich
@@ -1410,6 +1418,10 @@ defense when available, but it is no longer the only overlap protection. The
 examples below append logs and use `--submit-only` for scheduled data/cache work
 so cron records the job metadata quickly; inspect progress later with
 `histdatacom jobs ...`.
+
+```sh
+histdatacom jobs list --schedule-key eurusd-cache --active --json
+```
 
 ```cron
 # Build current-month EURUSD ASCII tick caches every weekday at 01:15.

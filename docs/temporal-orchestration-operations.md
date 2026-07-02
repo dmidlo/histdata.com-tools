@@ -159,6 +159,7 @@ List recent jobs:
 
 ```sh
 histdatacom jobs list --json
+histdatacom jobs list --schedule-key eurusd-cache --active --json
 ```
 
 Inspect one job:
@@ -191,6 +192,13 @@ Submit a serialized request:
 histdatacom jobs submit --start --submit-only --no-overlap \
   --schedule-key eurusd-cache --request-json request.json --json
 ```
+
+Use `jobs list --schedule-key <key> --active` to find the non-terminal job that
+would block a scheduled `--no-overlap` submission. Jobs that rely on the fallback
+request fingerprint can be found with `--schedule-fingerprint sha256:...`.
+`jobs inspect --json` includes a `schedule_identity` object with the key or
+fingerprint, active/terminal state, and whether the job currently blocks a
+duplicate submission.
 
 The workflow ID format is `histdatacom-<request_id>`.
 

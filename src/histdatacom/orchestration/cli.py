@@ -285,6 +285,21 @@ def _add_jobs_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="maximum stored jobs to return in offline/fallback mode",
     )
+    list_jobs.add_argument(
+        "--active",
+        action="store_true",
+        help="only show non-terminal jobs",
+    )
+    list_jobs.add_argument(
+        "--schedule-key",
+        default="",
+        help="only show jobs with this scheduled overlap key",
+    )
+    list_jobs.add_argument(
+        "--schedule-fingerprint",
+        default="",
+        help="only show jobs with this scheduled overlap fingerprint",
+    )
     _add_job_command_common_args(list_jobs, include_offline=True)
 
     for command, help_text in (
@@ -578,6 +593,81 @@ def _write_control_payload(payload: dict, *, as_json: bool) -> None:
     lifecycle = payload.get("lifecycle", "")
     status = payload.get("status", "")
     print(f"{workflow_id}: {lifecycle} ({status})")  # noqa:T201
+    schedule_line = _format_schedule_identity(payload)
+    if schedule_line:
+        print(schedule_line)  # noqa:T201
+
+
+def _write_job_list_payload(
+    payload: dict,
+    *,
+    as_json: bool,
+    active_only: bool,
+    schedule_key: str,
+    schedule_fingerprint: str,
+) -> None:
+    """Write list output with optional schedule-filter explanation."""
+    if as_json:
+        _write_control_payload(payload, as_json=True)
+        return
+    jobs = payload.get("jobs", [])
+    print(f"jobs: {len(jobs)}")  # noqa:T201
+    if not (active_only or schedule_key or schedule_fingerprint):
+        return
+    print(  # noqa:T201
+        "filters: "
+        + _format_schedule_filters(
+            active_only=active_only,
+            schedule_key=schedule_key,
+            schedule_fingerprint=schedule_fingerprint,
+        )
+    )
+    for job in jobs:
+        if isinstance(job, Mapping):
+            print(_format_job_summary(job))  # noqa:T201
+
+
+def _format_schedule_filters(
+    *,
+    active_only: bool,
+    schedule_key: str,
+    schedule_fingerprint: str,
+) -> str:
+    parts: list[str] = []
+    if active_only:
+        parts.append("active=true")
+    if schedule_key:
+        parts.append(f"schedule_key={schedule_key}")
+    if schedule_fingerprint:
+        parts.append(f"schedule_fingerprint={schedule_fingerprint}")
+    return " ".join(parts) if parts else "none"
+
+
+def _format_job_summary(job: Mapping[str, object]) -> str:
+    workflow_id = str(job.get("workflow_id") or job.get("job_id") or "")
+    lifecycle = str(job.get("lifecycle", "") or "")
+    status = str(job.get("status", "") or "")
+    schedule_line = _format_schedule_identity(job)
+    if not schedule_line:
+        return f"{workflow_id}: {lifecycle} ({status})"
+    return f"{workflow_id}: {lifecycle} ({status}) {schedule_line}"
+
+
+def _format_schedule_identity(payload: Mapping[str, object]) -> str:
+    identity = payload.get("schedule_identity")
+    if not isinstance(identity, Mapping):
+        return ""
+    source = str(identity.get("source", "") or "")
+    value = str(identity.get("value", "") or "")
+    if not source or not value:
+        return ""
+    guard = "enabled" if bool(identity.get("enabled")) else "disabled"
+    state = "active" if bool(identity.get("active")) else "terminal"
+    blocks = "yes" if bool(identity.get("blocks_duplicate")) else "no"
+    return (
+        f"schedule: {source}={value} guard={guard} "
+        f"state={state} blocks_duplicate={blocks}"
+    )
 
 
 def _retention_policy(args: argparse.Namespace) -> OrchestrationRetentionPolicy:
@@ -641,8 +731,17 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
             query=args.query,
             offline=args.offline,
             limit=args.limit,
+            schedule_key=args.schedule_key,
+            schedule_fingerprint=args.schedule_fingerprint,
+            active_only=args.active,
         )
-        _write_control_payload(jobs.to_dict(), as_json=args.json)
+        _write_job_list_payload(
+            jobs.to_dict(),
+            as_json=args.json,
+            active_only=args.active,
+            schedule_key=args.schedule_key,
+            schedule_fingerprint=args.schedule_fingerprint,
+        )
         return 0
 
     identity_kwargs = {

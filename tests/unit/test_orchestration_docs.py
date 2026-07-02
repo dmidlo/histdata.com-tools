@@ -91,6 +91,12 @@ def test_readme_documents_cron_setup_examples() -> None:
     for document in (guide, runbook):
         assert "--no-overlap" in document
         assert "--schedule-key eurusd-cache" in document
+        assert (
+            "histdatacom jobs list --schedule-key eurusd-cache --active --json"
+            in (document)
+        )
+        assert "schedule_identity" in document
+    assert "--schedule-fingerprint sha256:..." in runbook
 
 
 def test_cache_only_mode_is_documented() -> None:

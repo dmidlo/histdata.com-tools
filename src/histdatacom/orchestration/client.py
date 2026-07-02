@@ -852,6 +852,9 @@ async def list_job_statuses(
     store_fallback: bool = True,
     status: WorkStatus | str | None = None,
     limit: int | None = None,
+    schedule_key: str = "",
+    schedule_fingerprint: str = "",
+    active_only: bool = False,
 ) -> OrchestrationJobList:
     """List known HistData job handles without reading workflow histories."""
     resolved_config = resolve_orchestration_worker_config(
@@ -864,6 +867,9 @@ async def list_job_statuses(
             status_store=status_store,
             status=status,
             limit=limit,
+            schedule_key=schedule_key,
+            schedule_fingerprint=schedule_fingerprint,
+            active_only=active_only,
         )
     try:
         temporal_client = client or await connect_temporal_client(
@@ -879,19 +885,25 @@ async def list_job_statuses(
         )
         descriptions = await _collect_workflow_descriptions(raw_jobs)
         snapshots = tuple(
-            _snapshot_from_workflow_description(
-                description,
-                config=resolved_config,
-            )
-            for description in descriptions
-        )
-        for snapshot in snapshots:
             _persist_job_snapshot(
-                snapshot,
+                _snapshot_from_workflow_description(
+                    description,
+                    config=resolved_config,
+                ),
                 config=resolved_config,
                 status_store=status_store,
             )
-        return OrchestrationJobList(jobs=snapshots)
+            for description in descriptions
+        )
+        return OrchestrationJobList(
+            jobs=_filter_job_snapshots(
+                snapshots,
+                schedule_key=schedule_key,
+                schedule_fingerprint=schedule_fingerprint,
+                active_only=active_only,
+                limit=limit,
+            )
+        )
     except Exception:
         if store_fallback:
             return list_stored_job_statuses(
@@ -899,6 +911,9 @@ async def list_job_statuses(
                 status_store=status_store,
                 status=status,
                 limit=limit,
+                schedule_key=schedule_key,
+                schedule_fingerprint=schedule_fingerprint,
+                active_only=active_only,
             )
         raise
 
@@ -1367,6 +1382,58 @@ def _schedule_identity_from_snapshot(
     return ""
 
 
+def _has_job_snapshot_filters(
+    *,
+    schedule_key: str = "",
+    schedule_fingerprint: str = "",
+    active_only: bool = False,
+) -> bool:
+    return bool(
+        active_only
+        or _normalized_schedule_key(schedule_key)
+        or str(schedule_fingerprint or "").strip()
+    )
+
+
+def _filter_job_snapshots(
+    snapshots: tuple[OrchestrationJobSnapshot, ...],
+    *,
+    schedule_key: str = "",
+    schedule_fingerprint: str = "",
+    active_only: bool = False,
+    limit: int | None = None,
+) -> tuple[OrchestrationJobSnapshot, ...]:
+    normalized_key = _normalized_schedule_key(schedule_key)
+    normalized_fingerprint = str(schedule_fingerprint or "").strip()
+    if not _has_job_snapshot_filters(
+        schedule_key=normalized_key,
+        schedule_fingerprint=normalized_fingerprint,
+        active_only=active_only,
+    ):
+        return snapshots
+
+    filtered: list[OrchestrationJobSnapshot] = []
+    for snapshot in snapshots:
+        if active_only and not _snapshot_is_active(snapshot):
+            continue
+        if normalized_key and not _snapshot_identity_matches(
+            snapshot,
+            identity_source=SCHEDULE_KEY_METADATA_KEY,
+            identity=normalized_key,
+        ):
+            continue
+        if normalized_fingerprint and not _snapshot_identity_matches(
+            snapshot,
+            identity_source=SCHEDULE_FINGERPRINT_METADATA_KEY,
+            identity=normalized_fingerprint,
+        ):
+            continue
+        filtered.append(snapshot)
+        if limit is not None and len(filtered) >= limit:
+            break
+    return tuple(filtered)
+
+
 def _snapshot_run_request_payload(
     snapshot: OrchestrationJobSnapshot,
 ) -> Mapping[str, Any]:
@@ -1490,16 +1557,32 @@ def list_stored_job_statuses(
     status_store: ManifestStatusStore | None = None,
     status: WorkStatus | str | None = None,
     limit: int | None = None,
+    schedule_key: str = "",
+    schedule_fingerprint: str = "",
+    active_only: bool = False,
 ) -> OrchestrationJobList:
     """List durable orchestration jobs without querying Temporal."""
     store = status_store or orchestration_job_store(config)
+    needs_filter = _has_job_snapshot_filters(
+        schedule_key=schedule_key,
+        schedule_fingerprint=schedule_fingerprint,
+        active_only=active_only,
+    )
+    store_limit = None if needs_filter else limit
+    snapshots = tuple(
+        OrchestrationJobSnapshot.from_dict(payload)
+        for payload in store.list_job_snapshots(
+            status=status,
+            limit=store_limit,
+        )
+    )
     return OrchestrationJobList(
-        jobs=tuple(
-            OrchestrationJobSnapshot.from_dict(payload)
-            for payload in store.list_job_snapshots(
-                status=status,
-                limit=limit,
-            )
+        jobs=_filter_job_snapshots(
+            snapshots,
+            schedule_key=schedule_key,
+            schedule_fingerprint=schedule_fingerprint,
+            active_only=active_only,
+            limit=limit if needs_filter else None,
         )
     )
 

@@ -20,6 +20,9 @@ from histdatacom.runtime_contracts import (
 
 CONTROL_SCHEMA_VERSION = 1
 MAX_RESULT_REPR_CHARS = 256
+OVERLAP_GUARD_METADATA_KEY = "no_overlap"
+SCHEDULE_KEY_METADATA_KEY = "schedule_key"
+SCHEDULE_FINGERPRINT_METADATA_KEY = "schedule_fingerprint"
 
 
 class JobControlAction(str, Enum):
@@ -694,6 +697,7 @@ class OrchestrationJobSnapshot:
             "orchestration_state": self.orchestration_state,
             "orchestration_message": self.orchestration_message,
             "updated_at_utc": self.updated_at_utc,
+            "schedule_identity": _schedule_identity_payload(self),
             "metadata": dict(self.metadata),
         }
 
@@ -782,6 +786,61 @@ def lifecycle_from_work_status(status: WorkStatus) -> JobLifecycle:
     if status.terminal:
         return JobLifecycle.SUCCEEDED
     return JobLifecycle.RUNNING
+
+
+def _schedule_identity_payload(
+    snapshot: OrchestrationJobSnapshot,
+) -> dict[str, JSONValue]:
+    metadata = snapshot.metadata
+    schedule_key = _metadata_text(metadata.get(SCHEDULE_KEY_METADATA_KEY))
+    fingerprint = _metadata_text(
+        metadata.get(SCHEDULE_FINGERPRINT_METADATA_KEY)
+    )
+    source = ""
+    value = ""
+    if schedule_key:
+        source = SCHEDULE_KEY_METADATA_KEY
+        value = schedule_key
+    elif fingerprint:
+        source = SCHEDULE_FINGERPRINT_METADATA_KEY
+        value = fingerprint
+    enabled = _metadata_bool(metadata.get(OVERLAP_GUARD_METADATA_KEY))
+    active = _snapshot_is_active(snapshot)
+    terminal = not active
+    return {
+        "enabled": enabled,
+        "source": source,
+        "value": value,
+        "schedule_key": schedule_key,
+        "schedule_fingerprint": fingerprint,
+        "active": active,
+        "terminal": terminal,
+        "blocks_duplicate": enabled and active and bool(value),
+    }
+
+
+def _snapshot_is_active(snapshot: OrchestrationJobSnapshot) -> bool:
+    if snapshot.status.terminal:
+        return False
+    return snapshot.lifecycle not in {
+        JobLifecycle.SUCCEEDED,
+        JobLifecycle.FAILED,
+        JobLifecycle.CANCELLED,
+    }
+
+
+def _metadata_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _metadata_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
 
 
 def _runtime_health_metadata(status: Any) -> dict[str, JSONValue]:

@@ -328,6 +328,7 @@ _JOBS_ALIASES = {
     "request": "request_json",
 }
 _JOBS_TRUE_FLAG_ARGS = {
+    "active": "--active",
     "keep_runtime": "--keep-runtime",
     "no_overlap": "--no-overlap",
     "offline": "--offline",
@@ -341,6 +342,7 @@ _JOBS_SCALAR_ARGS = {
     "reason": "--reason",
     "request_json": "--request-json",
     "run_id": "--run-id",
+    "schedule_fingerprint": "--schedule-fingerprint",
     "schedule_key": "--schedule-key",
 }
 _JOBS_ALLOWED_KEYS = (
@@ -859,10 +861,15 @@ def _jobs_command_args(
         scalar_args["request_json"] = _JOBS_SCALAR_ARGS["request_json"]
         scalar_args["schedule_key"] = _JOBS_SCALAR_ARGS["schedule_key"]
     elif command == "list":
+        true_flags["active"] = _JOBS_TRUE_FLAG_ARGS["active"]
         scalar_args.update(
             {
                 "limit": _JOBS_SCALAR_ARGS["limit"],
                 "query": _JOBS_SCALAR_ARGS["query"],
+                "schedule_fingerprint": _JOBS_SCALAR_ARGS[
+                    "schedule_fingerprint"
+                ],
+                "schedule_key": _JOBS_SCALAR_ARGS["schedule_key"],
             }
         )
     elif command in _JOBS_IDENTITY_COMMANDS:

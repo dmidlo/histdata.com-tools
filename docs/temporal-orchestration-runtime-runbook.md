@@ -298,6 +298,19 @@ so duplicate active jobs are blocked by the application before a new workflow is
 submitted in that workspace. Shell locks can still wrap those commands as an
 outer host-specific defense.
 
+When a scheduled submission is blocked, query the same runtime workspace for the
+active job that owns the schedule identity:
+
+```sh
+histdatacom jobs list --schedule-key eurusd-cache --active --json
+histdatacom jobs list --schedule-fingerprint sha256:... --active --json
+histdatacom jobs inspect histdatacom-<request-id> --json
+```
+
+The snapshot JSON includes `schedule_identity` with the schedule key or
+fingerprint, active/terminal state, and whether the job currently blocks a
+duplicate `--no-overlap` submission.
+
 ## Maintenance And Retention
 
 Long-running PyPI installs and future GUI bundles should run runtime maintenance
@@ -442,6 +455,7 @@ Inspect and control jobs:
 
 ```sh
 histdatacom jobs list --json
+histdatacom jobs list --schedule-key eurusd-cache --active --json
 histdatacom jobs inspect histdatacom-<request-id> --json
 histdatacom jobs progress histdatacom-<request-id> --watch
 histdatacom jobs progress histdatacom-<request-id> --json
