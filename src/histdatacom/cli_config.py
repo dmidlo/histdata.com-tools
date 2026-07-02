@@ -317,6 +317,7 @@ _JOBS_COMMANDS = {
     "inspect",
     "list",
     "logs",
+    "preflight",
     "progress",
     "result",
     "resume",
@@ -850,14 +851,19 @@ def _jobs_command_args(
         args.append(str(config["workflow_id"]))
     true_flags: dict[str, str] = {}
     scalar_args: dict[str, str] = {}
-    if command == "submit":
+    if command in {"preflight", "submit"}:
         true_flags.update(
             {
                 "no_overlap": _JOBS_TRUE_FLAG_ARGS["no_overlap"],
-                "start": _JOBS_TRUE_FLAG_ARGS["start"],
-                "submit_only": _JOBS_TRUE_FLAG_ARGS["submit_only"],
             }
         )
+        if command == "submit":
+            true_flags.update(
+                {
+                    "start": _JOBS_TRUE_FLAG_ARGS["start"],
+                    "submit_only": _JOBS_TRUE_FLAG_ARGS["submit_only"],
+                }
+            )
         scalar_args["request_json"] = _JOBS_SCALAR_ARGS["request_json"]
         scalar_args["schedule_key"] = _JOBS_SCALAR_ARGS["schedule_key"]
     elif command == "list":

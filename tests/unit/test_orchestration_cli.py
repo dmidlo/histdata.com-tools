@@ -128,6 +128,36 @@ def _snapshot(
     return replace(snapshot, metadata=dict(metadata))
 
 
+def _preflight_result(
+    tmp_path: Path,
+    *,
+    request: RunRequest,
+    allowed: bool = True,
+    blocking_snapshot: OrchestrationJobSnapshot | None = None,
+) -> orchestration_client.OrchestrationSubmissionPreflight:
+    """Return a real preflight payload for CLI writer tests."""
+    config = build_orchestration_worker_config(
+        runtime_policy=build_orchestration_runtime_policy(
+            workspace=tmp_path / "workspace",
+            runtime_home=tmp_path / "runtime",
+        ),
+        namespace="histdatacom-test",
+    )
+    return orchestration_client.OrchestrationSubmissionPreflight(
+        request=request,
+        config=config,
+        status_store_path=tmp_path / "manifest-status.sqlite3",
+        allowed=allowed,
+        overlap_guard_enabled=True,
+        schedule_identity_source="schedule_key",
+        schedule_identity="eurusd-cache",
+        checked_job_count=1 if blocking_snapshot is not None else 0,
+        checked_job_source="stored",
+        offline=True,
+        blocking_snapshot=blocking_snapshot,
+    )
+
+
 def _snapshot_with_progress(
     *,
     status: WorkStatus = WorkStatus.UNKNOWN,
@@ -1190,6 +1220,185 @@ def test_orchestration_jobs_submit_json_reports_overlap(
     assert payload["detail"]["blocking_job"]["job_id"] == (
         "histdatacom-run-active"
     )
+
+
+def test_orchestration_jobs_preflight_json_allows_without_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Jobs preflight should return structured decisions without submitting."""
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(RunRequest(request_id="run-cli").to_dict()),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_preflight(
+        request: RunRequest,
+        **kwargs: object,
+    ) -> orchestration_client.OrchestrationSubmissionPreflight:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _preflight_result(tmp_path, request=request)
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("preflight must not submit")
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(
+        cli,
+        "preflight_scheduled_submission_sync",
+        fake_preflight,
+    )
+    monkeypatch.setattr(cli, "submit_control_job_sync", fail_submit)
+
+    exit_code = cli.jobs_main(
+        [
+            "--json",
+            "preflight",
+            "--request-json",
+            str(request_path),
+            "--no-overlap",
+            "--schedule-key",
+            " eurusd-cache ",
+            "--offline",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert captured["request"].metadata["no_overlap"] is True
+    assert captured["request"].metadata["schedule_key"] == "eurusd-cache"
+    assert captured["kwargs"]["offline"] is True
+    assert payload["state"] == "allowed"
+    assert payload["operation"] == "scheduled-submission-preflight"
+    assert payload["schedule_identity"]["source"] == "schedule_key"
+    assert payload["checked_jobs"]["offline"] is True
+
+
+def test_orchestration_jobs_preflight_human_reports_blocked_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Human preflight output should be shell-friendly when blocked."""
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(RunRequest(request_id="run-cli").to_dict()),
+        encoding="utf-8",
+    )
+
+    def fake_preflight(
+        request: RunRequest,
+        **kwargs: object,
+    ) -> orchestration_client.OrchestrationSubmissionPreflight:
+        return _preflight_result(
+            tmp_path,
+            request=request,
+            allowed=False,
+            blocking_snapshot=_snapshot(
+                metadata={
+                    "no_overlap": True,
+                    "schedule_key": "eurusd-cache",
+                }
+            ),
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(
+        cli,
+        "preflight_scheduled_submission_sync",
+        fake_preflight,
+    )
+
+    exit_code = cli.jobs_main(
+        [
+            "preflight",
+            "--request-json",
+            str(request_path),
+            "--no-overlap",
+            "--schedule-key",
+            "eurusd-cache",
+            "--offline",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == orchestration_client.OVERLAP_GUARD_EXIT_CODE
+    assert "blocked: Active scheduled HistData job already exists" in output
+    assert "schedule: schedule_key=eurusd-cache" in output
+    assert "checked_jobs: 1 source=stored" in output
+    assert "blocking_job: histdatacom-run-cli" in output
+    assert "workspace:" in output
+
+
+def test_orchestration_jobs_preflight_reads_yaml_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Jobs preflight config should carry scheduled-overlap defaults."""
+    request_path = tmp_path / "request.json"
+    config_path = tmp_path / "histdatacom.yaml"
+    request_path.write_text(
+        json.dumps(RunRequest(request_id="run-cli").to_dict()),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        f"""
+histdatacom:
+  jobs:
+    command: preflight
+    json: true
+    offline: true
+    request_json: {request_path}
+    no_overlap: true
+    schedule_key: eurusd-cache
+""",
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_preflight(
+        request: RunRequest,
+        **kwargs: object,
+    ) -> orchestration_client.OrchestrationSubmissionPreflight:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _preflight_result(tmp_path, request=request)
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(
+        cli,
+        "preflight_scheduled_submission_sync",
+        fake_preflight,
+    )
+
+    exit_code = cli.jobs_main(["--config", str(config_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert captured["request"].metadata["no_overlap"] is True
+    assert captured["request"].metadata["schedule_key"] == "eurusd-cache"
+    assert captured["kwargs"]["offline"] is True
+    assert payload["state"] == "allowed"
 
 
 def test_orchestration_jobs_submit_reads_overlap_yaml_config(

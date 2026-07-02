@@ -29,6 +29,7 @@ from histdatacom.orchestration.client import (
     inspect_job_status_sync,
     list_job_statuses_sync,
     OrchestrationOverlapError,
+    preflight_scheduled_submission_sync,
     resume_job_sync,
     resolve_orchestration_worker_config,
     retry_job_sync,
@@ -269,6 +270,30 @@ def _add_jobs_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     _add_job_command_common_args(submit, include_offline=False)
+
+    preflight = job_subparsers.add_parser(
+        "preflight",
+        help="check whether a scheduled request would be blocked",
+    )
+    preflight.add_argument(
+        "--request-json",
+        required=True,
+        help="path to a RunRequest JSON payload, or '-' for stdin",
+    )
+    preflight.add_argument(
+        "--no-overlap",
+        action="store_true",
+        help=(
+            "check for an active matching scheduled job in this runtime "
+            "workspace"
+        ),
+    )
+    preflight.add_argument(
+        "--schedule-key",
+        default="",
+        help="stable logical key used by --no-overlap for scheduled jobs",
+    )
+    _add_job_command_common_args(preflight, include_offline=True)
 
     list_jobs = job_subparsers.add_parser(
         "list",
@@ -627,6 +652,32 @@ def _write_job_list_payload(
             print(_format_job_summary(job))  # noqa:T201
 
 
+def _write_preflight_payload(payload: dict, *, as_json: bool) -> None:
+    """Write a scheduled submission preflight decision."""
+    if as_json:
+        _write_control_payload(payload, as_json=True)
+        return
+    print(f"{payload['state']}: {payload['message']}")  # noqa:T201
+    identity = payload.get("schedule_identity", {})
+    if isinstance(identity, Mapping) and identity.get("source"):
+        print(  # noqa:T201
+            "schedule: " f"{identity.get('source')}={identity.get('value')}"
+        )
+    checked = payload.get("checked_jobs", {})
+    if isinstance(checked, Mapping):
+        print(  # noqa:T201
+            "checked_jobs: "
+            f"{checked.get('count', 0)} source={checked.get('source', '')}"
+        )
+    blocking = payload.get("blocking_job")
+    if isinstance(blocking, Mapping):
+        print(  # noqa:T201
+            "blocking_job: "
+            f"{blocking.get('workflow_id') or blocking.get('job_id')}"
+        )
+    print(f"workspace: {payload['workspace']}")  # noqa:T201
+
+
 def _format_schedule_filters(
     *,
     active_only: bool,
@@ -724,6 +775,15 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
         )
         _write_control_payload(snapshot.to_dict(), as_json=args.json)
         return 0
+    if args.jobs_command == "preflight":
+        result = preflight_scheduled_submission_sync(
+            _job_submit_request(args),
+            config=config,
+            supervisor=supervisor,
+            offline=args.offline,
+        )
+        _write_preflight_payload(result.to_dict(), as_json=args.json)
+        return result.exit_code
     if args.jobs_command == "list":
         jobs = list_job_statuses_sync(
             config=config,

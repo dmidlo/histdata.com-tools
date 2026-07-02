@@ -770,6 +770,223 @@ def test_submit_run_request_uses_fingerprint_when_schedule_key_missing(
     assert str(err.value.detail["schedule_fingerprint"]).startswith("sha256:")
 
 
+def test_preflight_scheduled_submission_allows_ready_schedule_key(
+    tmp_path: Path,
+) -> None:
+    """Preflight should allow a same-workspace key with no active blocker."""
+    config = _config(tmp_path)
+    request = _run_request(
+        request_id="run-preflight",
+        metadata={"no_overlap": True, "schedule_key": " eurusd-cache "},
+    )
+
+    result = asyncio.run(
+        client.preflight_scheduled_submission(
+            request,
+            config=config,
+            offline=True,
+        )
+    )
+    payload = result.to_dict()
+
+    assert result.allowed is True
+    assert result.exit_code == 0
+    assert payload["state"] == "allowed"
+    assert payload["schedule_identity"]["source"] == "schedule_key"
+    assert payload["schedule_identity"]["value"] == "eurusd-cache"
+    assert payload["checked_jobs"] == {
+        "count": 0,
+        "source": "stored",
+        "offline": True,
+    }
+
+
+def test_preflight_scheduled_submission_blocks_active_duplicate_key(
+    tmp_path: Path,
+) -> None:
+    """Preflight should return duplicate blocker details without submitting."""
+    config = _config(tmp_path)
+    store = client.orchestration_job_store(config)
+    store.write_job_snapshot(
+        _job_snapshot(
+            request_id="run-active",
+            metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+        )
+    )
+    request = _run_request(
+        request_id="run-preflight",
+        metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+    )
+
+    result = asyncio.run(
+        client.preflight_scheduled_submission(
+            request,
+            config=config,
+            offline=True,
+        )
+    )
+    payload = result.to_dict()
+
+    assert result.allowed is False
+    assert result.exit_code == client.OVERLAP_GUARD_EXIT_CODE
+    assert payload["state"] == "blocked"
+    assert payload["blocking_job"]["job_id"] == "histdatacom-run-active"
+    assert payload["workspace"] == str(config.runtime_policy.workspace)
+    assert payload["status_store"] == str(store.db_path)
+
+
+def test_preflight_scheduled_submission_allows_terminal_prior_key(
+    tmp_path: Path,
+) -> None:
+    """Terminal same-key jobs should not block preflight."""
+    config = _config(tmp_path)
+    client.orchestration_job_store(config).write_job_snapshot(
+        _job_snapshot(
+            request_id="run-terminal",
+            lifecycle=JobLifecycle.SUCCEEDED,
+            status=WorkStatus.COMPLETED,
+            metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+        )
+    )
+    request = _run_request(
+        request_id="run-preflight",
+        metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+    )
+
+    result = asyncio.run(
+        client.preflight_scheduled_submission(
+            request,
+            config=config,
+            offline=True,
+        )
+    )
+
+    assert result.allowed is True
+    assert result.blocking_snapshot is None
+
+
+def test_preflight_scheduled_submission_scopes_to_workspace(
+    tmp_path: Path,
+) -> None:
+    """A matching key in another workspace should not block preflight."""
+    first_config = _config(tmp_path / "one")
+    second_config = _config(tmp_path / "two")
+    client.orchestration_job_store(first_config).write_job_snapshot(
+        _job_snapshot(
+            request_id="run-other-workspace",
+            metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+        )
+    )
+    request = _run_request(
+        request_id="run-preflight",
+        metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+    )
+
+    result = asyncio.run(
+        client.preflight_scheduled_submission(
+            request,
+            config=second_config,
+            offline=True,
+        )
+    )
+
+    assert result.allowed is True
+    assert result.to_dict()["workspace"] == str(
+        second_config.runtime_policy.workspace
+    )
+
+
+def test_preflight_scheduled_submission_uses_fingerprint_without_key(
+    tmp_path: Path,
+) -> None:
+    """No-overlap requests without a key should preflight by fingerprint."""
+    config = _config(tmp_path)
+    first = _run_request(
+        request_id="run-fingerprint-one",
+        metadata={"no_overlap": True},
+    )
+    second = _run_request(
+        request_id="run-fingerprint-two",
+        metadata={"no_overlap": True},
+    )
+
+    asyncio.run(
+        client.submit_run_request(
+            first,
+            config=config,
+            client=_FakeTemporalClient(),
+        )
+    )
+    result = asyncio.run(
+        client.preflight_scheduled_submission(
+            second,
+            config=config,
+            offline=True,
+        )
+    )
+    payload = result.to_dict()
+
+    assert result.allowed is False
+    assert payload["schedule_identity"]["source"] == "schedule_fingerprint"
+    assert str(payload["schedule_identity"]["value"]).startswith("sha256:")
+    assert str(payload["schedule_identity"]["schedule_fingerprint"]).startswith(
+        "sha256:"
+    )
+
+
+def test_preflight_scheduled_submission_live_terminal_overrides_stale_store(
+    tmp_path: Path,
+) -> None:
+    """Live visibility should prevent a stale active snapshot from blocking."""
+    config = _config(tmp_path)
+    store = client.orchestration_job_store(config)
+    store.write_job_snapshot(
+        replace(
+            _job_snapshot(
+                request_id="run-listed",
+                metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+            ),
+            workflow_id="histdatacom-run-listed",
+            job_id="histdatacom-run-listed",
+            run_id="run-listed",
+        )
+    )
+    temporal_client = _FakeTemporalClient()
+
+    def completed_list_workflows(*, query: str):
+        temporal_client.list_query = query
+        return [
+            SimpleNamespace(
+                execution=SimpleNamespace(
+                    workflow_id="histdatacom-run-listed",
+                    run_id="run-listed",
+                ),
+                status="WORKFLOW_EXECUTION_STATUS_COMPLETED",
+            )
+        ]
+
+    temporal_client.list_workflows = completed_list_workflows
+    request = _run_request(
+        request_id="run-preflight",
+        metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+    )
+
+    result = asyncio.run(
+        client.preflight_scheduled_submission(
+            request,
+            config=config,
+            client=temporal_client,
+        )
+    )
+    stored = store.get_job_snapshot("histdatacom-run-listed")
+
+    assert result.allowed is True
+    assert result.checked_job_source == "live"
+    assert temporal_client.list_query == "WorkflowType='HistDataRunWorkflow'"
+    assert stored is not None
+    assert stored["lifecycle"] == JobLifecycle.RUNNING.value
+
+
 def test_submit_run_request_without_config_fails_on_malformed_running_state(
     tmp_path: Path,
 ) -> None:

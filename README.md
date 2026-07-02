@@ -1340,6 +1340,7 @@ The JSON control surface supports job inspection and future GUI polling:
 
 ```sh
 histdatacom jobs list --json
+histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json
 histdatacom jobs list --schedule-key eurusd-cache --active --json
 histdatacom jobs progress histdatacom-<request-id> --watch
 histdatacom jobs progress histdatacom-<request-id> --json
@@ -1347,12 +1348,16 @@ histdatacom jobs artifacts histdatacom-<request-id> --json
 histdatacom jobs cancel histdatacom-<request-id> --reason "operator stop"
 ```
 
-Use `jobs list --schedule-key <key> --active` to find the non-terminal job that
-would block a scheduled `--no-overlap` submission. Fingerprint-only scheduled
-runs can be matched with `--schedule-fingerprint sha256:...`. `jobs inspect
---json` includes a stable `schedule_identity` object with the schedule key or
-fingerprint, active/terminal state, and whether the job blocks duplicate
-submissions.
+Use `jobs preflight --no-overlap --schedule-key <key> --request-json request.json`
+before serialized scheduled submissions when cron, launchd, CI, or a GUI shell
+needs an advisory allow/block answer without starting Temporal or submitting a
+workflow. Allowed preflights exit `0`; blocked preflights exit `75` and include
+the blocking job in JSON output. Use `jobs list --schedule-key <key> --active`
+to inspect the non-terminal job that would block a scheduled `--no-overlap`
+submission. Fingerprint-only scheduled runs can be matched with
+`--schedule-fingerprint sha256:...`. `jobs inspect --json` includes a stable
+`schedule_identity` object with the schedule key or fingerprint,
+active/terminal state, and whether the job blocks duplicate submissions.
 
 Omit `--json` on `jobs progress` for the Rich terminal progress view; add
 `--watch` to live-refresh it until the job reaches a terminal state. The Rich
@@ -1420,15 +1425,23 @@ so cron records the job metadata quickly; inspect progress later with
 `histdatacom jobs ...`.
 
 ```sh
+histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json
 histdatacom jobs list --schedule-key eurusd-cache --active --json
 ```
 
+Direct CLI submissions that are not driven by a serialized `RunRequest` still
+use the submit-time guard:
+
+```sh
+histdatacom --submit-only --no-overlap --schedule-key eurusd-cache --build-cache --data-directory "$HISTDATACOM_DATA" -p eurusd -f ascii -t tick-data-quotes -s now
+```
+
 ```cron
-# Build current-month EURUSD ASCII tick caches every weekday at 01:15.
-15 1 * * 1-5 cd "$HISTDATACOM_PROJECT" && histdatacom --submit-only --no-overlap --schedule-key eurusd-cache --build-cache --data-directory "$HISTDATACOM_DATA" -p eurusd -f ascii -t tick-data-quotes -s now >> "$HISTDATACOM_LOG_DIR/eurusd-cache.log" 2>&1
+# Submit a serialized EURUSD cache request only when preflight allows it.
+15 1 * * 1-5 cd "$HISTDATACOM_PROJECT" && histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json >> "$HISTDATACOM_LOG_DIR/eurusd-cache-preflight.jsonl" 2>&1 && histdatacom jobs submit --start --submit-only --no-overlap --schedule-key eurusd-cache --request-json request.json --json >> "$HISTDATACOM_LOG_DIR/eurusd-cache.log" 2>&1
 
 # Optional outer shell lock for hosts that provide flock.
-15 1 * * 1-5 cd "$HISTDATACOM_PROJECT" && flock -n /tmp/histdatacom-eurusd.lock histdatacom --submit-only --no-overlap --schedule-key eurusd-cache --build-cache --data-directory "$HISTDATACOM_DATA" -p eurusd -f ascii -t tick-data-quotes -s now >> "$HISTDATACOM_LOG_DIR/eurusd-cache.log" 2>&1
+15 1 * * 1-5 cd "$HISTDATACOM_PROJECT" && flock -n /tmp/histdatacom-eurusd.lock sh -c 'histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json >> "$HISTDATACOM_LOG_DIR/eurusd-cache-preflight.jsonl" 2>&1 && histdatacom jobs submit --start --submit-only --no-overlap --schedule-key eurusd-cache --request-json request.json --json >> "$HISTDATACOM_LOG_DIR/eurusd-cache.log" 2>&1'
 ```
 
 Source cleanup can stay in dry-run mode until the reported paths are expected;

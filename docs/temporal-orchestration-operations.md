@@ -100,6 +100,17 @@ workspace before submission. Use a stable `--schedule-key` for recurring
 scheduled work; if no key is supplied, the guard falls back to a deterministic
 request fingerprint.
 
+For serialized scheduled requests, preflight the same workspace before
+submission when automation needs a shell-friendly allow/block decision:
+
+```sh
+histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache \
+  --request-json request.json --json
+```
+
+Allowed preflights exit `0`. Blocked preflights exit `75` and include the
+blocking job, workspace, status store, and schedule identity in JSON output.
+
 The main operation flags keep their documented meaning before the request is
 submitted:
 
@@ -193,12 +204,15 @@ histdatacom jobs submit --start --submit-only --no-overlap \
   --schedule-key eurusd-cache --request-json request.json --json
 ```
 
-Use `jobs list --schedule-key <key> --active` to find the non-terminal job that
-would block a scheduled `--no-overlap` submission. Jobs that rely on the fallback
-request fingerprint can be found with `--schedule-fingerprint sha256:...`.
-`jobs inspect --json` includes a `schedule_identity` object with the key or
-fingerprint, active/terminal state, and whether the job currently blocks a
-duplicate submission.
+Use `jobs preflight --no-overlap --schedule-key <key> --request-json request.json`
+before a serialized scheduled submission when the caller should skip wasted work
+instead of discovering the duplicate at submit time. Use
+`jobs list --schedule-key <key> --active` to inspect the non-terminal job that
+would block the submission. Jobs that rely on the fallback request fingerprint
+can be found with `--schedule-fingerprint sha256:...`. `jobs inspect --json`
+includes a `schedule_identity` object with the key or fingerprint,
+active/terminal state, and whether the job currently blocks a duplicate
+submission.
 
 The workflow ID format is `histdatacom-<request_id>`.
 

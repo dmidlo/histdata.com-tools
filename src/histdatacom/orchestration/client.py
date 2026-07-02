@@ -156,6 +156,88 @@ RuntimeDependencyError = TemporalDependencyError
 
 
 @dataclass(frozen=True, slots=True)
+class OrchestrationSubmissionPreflight:
+    """Non-mutating scheduled submission overlap decision."""
+
+    request: RunRequest
+    config: OrchestrationWorkerConfig
+    status_store_path: Path
+    allowed: bool
+    overlap_guard_enabled: bool
+    schedule_identity_source: str = ""
+    schedule_identity: str = ""
+    checked_job_count: int = 0
+    checked_job_source: str = "not-run"
+    offline: bool = False
+    blocking_snapshot: OrchestrationJobSnapshot | None = None
+
+    @property
+    def state(self) -> str:
+        """Return the shell-friendly decision state."""
+        return "allowed" if self.allowed else "blocked"
+
+    @property
+    def exit_code(self) -> int:
+        """Return the shell exit code for this preflight decision."""
+        return 0 if self.allowed else OVERLAP_GUARD_EXIT_CODE
+
+    @property
+    def message(self) -> str:
+        """Return a human-readable decision message."""
+        if not self.overlap_guard_enabled:
+            return "Overlap guard disabled; no duplicate check was performed."
+        identity = (
+            f"{self.schedule_identity_source}={self.schedule_identity}"
+            if self.schedule_identity_source and self.schedule_identity
+            else "scheduled submission"
+        )
+        if self.allowed:
+            return f"Scheduled submission allowed for {identity}."
+        return f"Active scheduled HistData job already exists for {identity}."
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return a JSON-compatible preflight decision payload."""
+        schedule_key = _normalized_schedule_key(
+            self.request.metadata.get(SCHEDULE_KEY_METADATA_KEY)
+        )
+        schedule_fingerprint = str(
+            self.request.metadata.get(SCHEDULE_FINGERPRINT_METADATA_KEY) or ""
+        )
+        return {
+            "schema_version": "histdatacom.orchestration.preflight.v1",
+            "operation": "scheduled-submission-preflight",
+            "state": self.state,
+            "allowed": self.allowed,
+            "exit_code": self.exit_code,
+            "message": self.message,
+            "request_id": self.request.request_id,
+            "workspace": str(self.config.runtime_policy.workspace),
+            "workspace_id": self.config.runtime_policy.workspace_id,
+            "status_store": str(self.status_store_path),
+            "overlap_guard": {
+                "enabled": self.overlap_guard_enabled,
+            },
+            "schedule_identity": {
+                "enabled": self.overlap_guard_enabled,
+                "source": self.schedule_identity_source,
+                "value": self.schedule_identity,
+                "schedule_key": schedule_key,
+                "schedule_fingerprint": schedule_fingerprint,
+            },
+            "checked_jobs": {
+                "count": self.checked_job_count,
+                "source": self.checked_job_source,
+                "offline": self.offline,
+            },
+            "blocking_job": (
+                _blocking_job_detail(self.blocking_snapshot)
+                if self.blocking_snapshot is not None
+                else None
+            ),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class _OrchestrationAvailability:
     """Runtime availability plus ownership for this invocation."""
 
@@ -923,6 +1005,71 @@ def list_job_statuses_sync(**kwargs: Any) -> OrchestrationJobList:
     return asyncio.run(list_job_statuses(**kwargs))
 
 
+async def preflight_scheduled_submission(
+    request: RunRequest,
+    *,
+    config: OrchestrationWorkerConfig | None = None,
+    client: Any | None = None,
+    client_class: Any | None = None,
+    supervisor: OrchestrationSupervisor | None = None,
+    status_store: ManifestStatusStore | None = None,
+    offline: bool = False,
+    store_fallback: bool = True,
+) -> OrchestrationSubmissionPreflight:
+    """Return the scheduled overlap decision without submitting a workflow."""
+    resolved_config = resolve_orchestration_worker_config(
+        config=config,
+        supervisor=supervisor,
+    )
+    store = status_store or orchestration_job_store(resolved_config)
+    if not _overlap_guard_enabled(request):
+        return OrchestrationSubmissionPreflight(
+            request=request,
+            config=resolved_config,
+            status_store_path=Path(store.db_path),
+            allowed=True,
+            overlap_guard_enabled=False,
+            offline=offline,
+        )
+
+    guarded = _request_with_schedule_identity(request)
+    identity_source, identity = _schedule_identity(guarded)
+    snapshots, checked_source = await _preflight_job_snapshots(
+        config=resolved_config,
+        store=store,
+        client=client,
+        client_class=client_class,
+        supervisor=supervisor,
+        offline=offline,
+        store_fallback=store_fallback,
+    )
+    blocking_snapshot = _active_overlap_snapshot_from_snapshots(
+        guarded,
+        snapshots,
+    )
+    return OrchestrationSubmissionPreflight(
+        request=guarded,
+        config=resolved_config,
+        status_store_path=Path(store.db_path),
+        allowed=blocking_snapshot is None,
+        overlap_guard_enabled=True,
+        schedule_identity_source=identity_source,
+        schedule_identity=identity,
+        checked_job_count=len(snapshots),
+        checked_job_source=checked_source,
+        offline=offline,
+        blocking_snapshot=blocking_snapshot,
+    )
+
+
+def preflight_scheduled_submission_sync(
+    request: RunRequest,
+    **kwargs: Any,
+) -> OrchestrationSubmissionPreflight:
+    """Synchronously return the scheduled overlap preflight decision."""
+    return asyncio.run(preflight_scheduled_submission(request, **kwargs))
+
+
 async def get_job_progress(
     workflow_id: str,
     **kwargs: Any,
@@ -1316,9 +1463,18 @@ def _active_overlap_snapshot(
     request: RunRequest,
     store: ManifestStatusStore,
 ) -> OrchestrationJobSnapshot | None:
+    return _active_overlap_snapshot_from_snapshots(
+        request,
+        _stored_job_snapshots(store),
+    )
+
+
+def _active_overlap_snapshot_from_snapshots(
+    request: RunRequest,
+    snapshots: tuple[OrchestrationJobSnapshot, ...],
+) -> OrchestrationJobSnapshot | None:
     identity_source, identity = _schedule_identity(request)
-    for payload in store.list_job_snapshots(limit=None):
-        snapshot = OrchestrationJobSnapshot.from_dict(payload)
+    for snapshot in snapshots:
         if not _snapshot_is_active(snapshot):
             continue
         if _snapshot_identity_matches(
@@ -1328,6 +1484,78 @@ def _active_overlap_snapshot(
         ):
             return snapshot
     return None
+
+
+async def _preflight_job_snapshots(
+    *,
+    config: OrchestrationWorkerConfig,
+    store: ManifestStatusStore,
+    client: Any | None,
+    client_class: Any | None,
+    supervisor: OrchestrationSupervisor | None,
+    offline: bool,
+    store_fallback: bool,
+) -> tuple[tuple[OrchestrationJobSnapshot, ...], str]:
+    stored_snapshots = _stored_job_snapshots(store)
+    if offline:
+        return stored_snapshots, "stored"
+    try:
+        temporal_client = client or await connect_temporal_client(
+            config=config,
+            supervisor=supervisor,
+            client_class=client_class,
+        )
+        list_workflows = getattr(temporal_client, "list_workflows", None)
+        if list_workflows is None:
+            raise TypeError("Temporal client must define list_workflows()")
+        raw_jobs = list_workflows(query="WorkflowType='HistDataRunWorkflow'")
+        descriptions = await _collect_workflow_descriptions(raw_jobs)
+        live_snapshots = tuple(
+            _merge_stored_snapshot_metadata(
+                _snapshot_from_workflow_description(
+                    description,
+                    config=config,
+                ),
+                store,
+            )
+            for description in descriptions
+        )
+    except Exception:
+        if store_fallback:
+            return stored_snapshots, "stored-fallback"
+        raise
+    return (
+        _merge_live_and_stored_snapshots(live_snapshots, stored_snapshots),
+        "live",
+    )
+
+
+def _stored_job_snapshots(
+    store: ManifestStatusStore,
+) -> tuple[OrchestrationJobSnapshot, ...]:
+    return tuple(
+        OrchestrationJobSnapshot.from_dict(payload)
+        for payload in store.list_job_snapshots(limit=None)
+    )
+
+
+def _merge_live_and_stored_snapshots(
+    live_snapshots: tuple[OrchestrationJobSnapshot, ...],
+    stored_snapshots: tuple[OrchestrationJobSnapshot, ...],
+) -> tuple[OrchestrationJobSnapshot, ...]:
+    seen = {_snapshot_dedup_key(snapshot) for snapshot in live_snapshots}
+    combined = list(live_snapshots)
+    for snapshot in stored_snapshots:
+        key = _snapshot_dedup_key(snapshot)
+        if key in seen:
+            continue
+        seen.add(key)
+        combined.append(snapshot)
+    return tuple(combined)
+
+
+def _snapshot_dedup_key(snapshot: OrchestrationJobSnapshot) -> tuple[str, str]:
+    return (snapshot.workflow_id or snapshot.job_id, snapshot.run_id)
 
 
 def _snapshot_is_active(snapshot: OrchestrationJobSnapshot) -> bool:
