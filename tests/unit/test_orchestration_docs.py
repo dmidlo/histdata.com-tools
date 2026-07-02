@@ -72,6 +72,20 @@ def test_readme_links_user_and_maintainer_orchestration_docs() -> None:
     assert "for maintainer lifecycle commands" in readme
 
 
+def test_readme_documents_cron_setup_examples() -> None:
+    """README should include copyable scheduled-operation examples."""
+    readme = _read_doc("README.md")
+
+    assert "#### Cron Setup and Examples" in readme
+    assert "HISTDATACOM_RUNTIME_WORKSPACE" in readme
+    assert "flock -n /tmp/histdatacom-eurusd.lock" in readme
+    assert "histdatacom --submit-only --build-cache" in readme
+    assert "histdatacom cleanup status" in readme
+    assert "histdatacom cleanup sources" in readme
+    assert "histdatacom runtime --workspace" in readme
+    assert "runtime-maintenance.jsonl" in readme
+
+
 def test_cache_only_mode_is_documented() -> None:
     """Public docs should advertise source-cleaning cache builds."""
     readme = _read_doc("README.md")

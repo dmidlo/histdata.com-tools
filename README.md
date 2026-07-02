@@ -48,6 +48,7 @@ Works on macOS, Linux, and Windows.
     - [Public Orchestration API Boundary](#public-orchestration-api-boundary)
     - [Maintainer Runtime Diagnostics](#maintainer-runtime-diagnostics)
     - [Job Telemetry and Automation](#job-telemetry-and-automation)
+    - [Cron Setup and Examples](#cron-setup-and-examples)
     - [Runtime User and Maintainer Docs](#runtime-user-and-maintainer-docs)
   - [API - Other Scripts, Modules, & Jupyter Support](#api-other-scripts-modules-jupyter-support)
     - [Script and Application Automation](#script-and-application-automation)
@@ -1371,6 +1372,57 @@ Set `options.orchestration_wait_result = False` to submit a job and receive
 job metadata instead of a materialized API return object. Set
 `options.orchestration_start = False` when a caller requires a pre-started
 runtime. `options.use_orchestration = False` is not supported.
+
+#### Cron Setup and Examples
+
+Cron jobs should run from a stable project directory, use a predictable runtime
+workspace, and write logs outside the package tree. Use the same workspace for
+every scheduled `histdatacom`, `histdatacom runtime`, `histdatacom jobs`, and
+`histdatacom cleanup` command that should share runtime state.
+
+A crontab header can make those assumptions explicit:
+
+```cron
+SHELL=/bin/sh
+PATH=/usr/local/bin:/usr/bin:/bin
+HISTDATACOM_PROJECT=/srv/histdatacom
+HISTDATACOM_DATA=/srv/histdatacom/data
+HISTDATACOM_LOG_DIR=/var/log/histdatacom
+HISTDATACOM_RUNTIME_WORKSPACE=/srv/histdatacom
+```
+
+Use a shell wrapper or `flock` where available to prevent overlapping
+long-running downloads from competing for the same runtime workspace and data
+directory. The examples below append logs and use `--submit-only` for scheduled
+data/cache work so cron records the job metadata quickly; inspect progress later
+with `histdatacom jobs ...`.
+
+```cron
+# Build current-month EURUSD ASCII tick caches every weekday at 01:15.
+15 1 * * 1-5 cd "$HISTDATACOM_PROJECT" && flock -n /tmp/histdatacom-eurusd.lock histdatacom --submit-only --build-cache --data-directory "$HISTDATACOM_DATA" -p eurusd -f ascii -t tick-data-quotes -s now >> "$HISTDATACOM_LOG_DIR/eurusd-cache.log" 2>&1
+```
+
+Source cleanup can stay in dry-run mode until the reported paths are expected;
+add `--apply` only when the cleanup policy is understood for that data root.
+
+```cron
+# Record cache/source cleanup status each morning.
+30 6 * * * cd "$HISTDATACOM_PROJECT" && histdatacom cleanup status --data-directory "$HISTDATACOM_DATA" --pair-groups majors -f ascii -t tick-data-quotes --json >> "$HISTDATACOM_LOG_DIR/cleanup-status.jsonl" 2>&1
+
+# Remove transient ZIP/CSV/XLS/XLSX sources while preserving .data caches.
+45 6 * * 0 cd "$HISTDATACOM_PROJECT" && flock -n /tmp/histdatacom-cleanup.lock histdatacom cleanup sources --data-directory "$HISTDATACOM_DATA" --apply >> "$HISTDATACOM_LOG_DIR/source-cleanup.log" 2>&1
+```
+
+Runtime health and maintenance jobs should use the same stable workspace as the
+scheduled submissions:
+
+```cron
+# Emit runtime health for monitoring.
+*/15 * * * * histdatacom runtime --workspace "$HISTDATACOM_RUNTIME_WORKSPACE" status --json >> "$HISTDATACOM_LOG_DIR/runtime-status.jsonl" 2>&1
+
+# Prune runtime logs and persisted status metadata weekly.
+10 3 * * 0 histdatacom runtime --workspace "$HISTDATACOM_RUNTIME_WORKSPACE" maintenance --json >> "$HISTDATACOM_LOG_DIR/runtime-maintenance.jsonl" 2>&1
+```
 
 #### Runtime User and Maintainer Docs
 
