@@ -964,13 +964,125 @@ def test_orchestration_jobs_submit_cli_loads_run_request_json(
             str(request_path),
             "--keep-runtime",
             "--submit-only",
+            "--no-overlap",
+            "--schedule-key",
+            "eurusd-cache",
         ]
     )
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == 0
     assert captured["request"].request_id == "run-cli"
+    assert captured["request"].metadata["no_overlap"] is True
+    assert captured["request"].metadata["schedule_key"] == "eurusd-cache"
     assert captured["kwargs"]["keep_runtime"] is True
+    assert captured["kwargs"]["wait_for_result"] is False
+    assert payload["lifecycle"] == JobLifecycle.SUBMITTED.value
+
+
+def test_orchestration_jobs_submit_json_reports_overlap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Jobs submit JSON should include structured duplicate-job details."""
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(RunRequest(request_id="run-cli").to_dict()),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_submit(request: RunRequest, **kwargs: object) -> object:
+        captured["request"] = request
+        raise orchestration_client.OrchestrationOverlapError(
+            "blocked",
+            detail={
+                "schedule_key": "eurusd-cache",
+                "blocking_job": {"job_id": "histdatacom-run-active"},
+            },
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(cli, "submit_control_job_sync", fake_submit)
+
+    exit_code = cli.jobs_main(
+        [
+            "--json",
+            "submit",
+            "--request-json",
+            str(request_path),
+            "--no-overlap",
+            "--schedule-key",
+            "eurusd-cache",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == orchestration_client.OVERLAP_GUARD_EXIT_CODE
+    assert captured["request"].metadata["no_overlap"] is True
+    assert captured["request"].metadata["schedule_key"] == "eurusd-cache"
+    assert payload["code"] == "ORCHESTRATION_OVERLAP_BLOCKED"
+    assert payload["detail"]["schedule_key"] == "eurusd-cache"
+    assert payload["detail"]["blocking_job"]["job_id"] == (
+        "histdatacom-run-active"
+    )
+
+
+def test_orchestration_jobs_submit_reads_overlap_yaml_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Jobs submit config should carry scheduled-overlap defaults."""
+    request_path = tmp_path / "request.json"
+    config_path = tmp_path / "histdatacom.yaml"
+    request_path.write_text(
+        json.dumps(RunRequest(request_id="run-cli").to_dict()),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        f"""
+histdatacom:
+  jobs:
+    command: submit
+    json: true
+    request_json: {request_path}
+    submit_only: true
+    no_overlap: true
+    schedule_key: eurusd-cache
+""",
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_submit(
+        request: RunRequest,
+        **kwargs: object,
+    ) -> OrchestrationJobSnapshot:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _snapshot(lifecycle=JobLifecycle.SUBMITTED)
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(cli, "submit_control_job_sync", fake_submit)
+
+    exit_code = cli.jobs_main(["--config", str(config_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert captured["request"].metadata["no_overlap"] is True
+    assert captured["request"].metadata["schedule_key"] == "eurusd-cache"
     assert captured["kwargs"]["wait_for_result"] is False
     assert payload["lifecycle"] == JobLifecycle.SUBMITTED.value
 

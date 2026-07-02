@@ -631,6 +631,10 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args.append("--keep-runtime")
         if not self.arg_namespace.orchestration_wait_result:
             args.append("--submit-only")
+        if self.arg_namespace.no_overlap:
+            args.append("--no-overlap")
+        if self.arg_namespace.schedule_key:
+            args.extend(["--schedule-key", self.arg_namespace.schedule_key])
         return args
 
     def _config_args_from_cli(self, cli_args: list[str]) -> list[str]:
@@ -1410,6 +1414,21 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             dest="orchestration_wait_result",
             action="store_false",
             help="submit the orchestration job without waiting for its result",
+        )
+        orchestration_args.add_argument(
+            "--no-overlap",
+            dest="no_overlap",
+            action="store_true",
+            help=(
+                "refuse submission when an active matching scheduled job "
+                "already exists in this runtime workspace"
+            ),
+        )
+        orchestration_args.add_argument(
+            "--schedule-key",
+            dest="schedule_key",
+            type=str,
+            help="stable logical key used by --no-overlap for scheduled jobs",
         )
         orchestration_args.add_argument(
             "--keep-runtime",

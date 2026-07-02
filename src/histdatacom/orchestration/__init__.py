@@ -273,6 +273,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.orchestration.queues",
         "OrchestrationTaskQueues",
     ),
+    "OrchestrationOverlapError": (
+        "histdatacom.orchestration.client",
+        "OrchestrationOverlapError",
+    ),
     "OrchestrationUnavailableError": (
         "histdatacom.orchestration.client",
         "OrchestrationUnavailableError",

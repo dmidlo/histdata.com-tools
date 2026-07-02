@@ -28,6 +28,7 @@ from histdatacom.orchestration.client import (
     get_job_result_sync,
     inspect_job_status_sync,
     list_job_statuses_sync,
+    OrchestrationOverlapError,
     resume_job_sync,
     resolve_orchestration_worker_config,
     retry_job_sync,
@@ -245,6 +246,19 @@ def _add_jobs_args(parser: argparse.ArgumentParser) -> None:
         "--submit-only",
         action="store_true",
         help="return after submission instead of waiting for the result",
+    )
+    submit.add_argument(
+        "--no-overlap",
+        action="store_true",
+        help=(
+            "refuse submission when an active matching scheduled job already "
+            "exists in this runtime workspace"
+        ),
+    )
+    submit.add_argument(
+        "--schedule-key",
+        default="",
+        help="stable logical key used by --no-overlap for scheduled jobs",
     )
     submit.add_argument(
         "--keep-runtime",
@@ -531,6 +545,20 @@ def _load_run_request(path: str) -> RunRequest:
     return RunRequest.from_dict(json.loads(payload))
 
 
+def _job_submit_request(args: argparse.Namespace) -> RunRequest:
+    """Return a submit request with CLI scheduling metadata applied."""
+    request = _load_run_request(args.request_json)
+    metadata = dict(request.metadata)
+    if args.no_overlap:
+        metadata["no_overlap"] = True
+    schedule_key = str(args.schedule_key or "").strip()
+    if schedule_key:
+        metadata["schedule_key"] = schedule_key
+    if metadata == request.metadata:
+        return request
+    return replace(request, metadata=metadata)
+
+
 def _worker_config(args: argparse.Namespace) -> OrchestrationWorkerConfig:
     """Create an orchestration worker config from CLI arguments."""
     return resolve_orchestration_worker_config(
@@ -601,7 +629,7 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
         if args.keep_runtime:
             submit_kwargs["keep_runtime"] = True
         snapshot = submit_control_job_sync(
-            _load_run_request(args.request_json),
+            _job_submit_request(args),
             **submit_kwargs,
         )
         _write_control_payload(snapshot.to_dict(), as_json=args.json)
@@ -778,6 +806,21 @@ def _float_value(value: object) -> float:
         return 0.0
 
 
+def _write_overlap_error(
+    err: OrchestrationOverlapError,
+    args: argparse.Namespace,
+) -> None:
+    """Write a scheduled-overlap error for shell and JSON callers."""
+    if args.json:
+        payload = err.to_dict()
+        payload["state"] = "error"
+        payload["workspace"] = str(args.workspace)
+        payload["state_dir"] = str(args.state_dir or "")
+        print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+        return
+    print(f"{err.code}: {err.message}", file=sys.stderr)  # noqa:T201
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run orchestration runtime lifecycle commands."""
     parser = build_parser()
@@ -845,6 +888,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "jobs":
             return _run_jobs_command(args)
         parser.error(f"unsupported runtime command: {args.command}")
+    except OrchestrationOverlapError as err:
+        _write_overlap_error(err, args)
+        return err.exit_code or 1
     except (
         RuntimeError,
         OrchestrationResourceError,
@@ -881,6 +927,9 @@ def jobs_main(argv: Sequence[str] | None = None) -> int:
 
     try:
         return _run_jobs_command(args)
+    except OrchestrationOverlapError as err:
+        _write_overlap_error(err, args)
+        return err.exit_code or 1
     except (
         RuntimeError,
         OrchestrationResourceError,

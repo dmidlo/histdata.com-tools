@@ -148,6 +148,8 @@ def test_run_request_round_trips_options_payload() -> None:
     }
     options.repo_quality_refresh = True
     options.repo_quality_columns = True
+    options.no_overlap = True
+    options.schedule_key = "eurusd-cache"
 
     request = RunRequest.from_options(options, request_id="run-test")
     restored = RunRequest.from_dict(json.loads(json.dumps(request.to_dict())))
@@ -176,6 +178,8 @@ def test_run_request_round_trips_options_payload() -> None:
     }
     assert restored.repo_quality_refresh
     assert restored.repo_quality_columns
+    assert restored.metadata["no_overlap"] is True
+    assert restored.metadata["schedule_key"] == "eurusd-cache"
 
 
 def test_run_request_carries_verbosity() -> None:

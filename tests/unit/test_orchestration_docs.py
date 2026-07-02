@@ -75,15 +75,22 @@ def test_readme_links_user_and_maintainer_orchestration_docs() -> None:
 def test_readme_documents_cron_setup_examples() -> None:
     """README should include copyable scheduled-operation examples."""
     readme = _read_doc("README.md")
+    guide = _read_doc("docs/temporal-orchestration-operations.md")
+    runbook = _read_doc("docs/temporal-orchestration-runtime-runbook.md")
 
     assert "#### Cron Setup and Examples" in readme
     assert "HISTDATACOM_RUNTIME_WORKSPACE" in readme
+    assert "--no-overlap" in readme
+    assert "--schedule-key eurusd-cache" in readme
     assert "flock -n /tmp/histdatacom-eurusd.lock" in readme
-    assert "histdatacom --submit-only --build-cache" in readme
+    assert "histdatacom --submit-only --no-overlap" in readme
     assert "histdatacom cleanup status" in readme
     assert "histdatacom cleanup sources" in readme
     assert "histdatacom runtime --workspace" in readme
     assert "runtime-maintenance.jsonl" in readme
+    for document in (guide, runbook):
+        assert "--no-overlap" in document
+        assert "--schedule-key eurusd-cache" in document
 
 
 def test_cache_only_mode_is_documented() -> None:

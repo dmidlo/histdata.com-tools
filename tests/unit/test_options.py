@@ -16,6 +16,8 @@ def test_orchestration_options_default_to_production_runtime() -> None:
     assert options.orchestration_start
     assert not options.orchestration_keep_runtime
     assert options.orchestration_wait_result
+    assert not options.no_overlap
+    assert options.schedule_key == ""
 
 
 def test_options_reject_unknown_runtime_fields() -> None:

@@ -13,6 +13,7 @@ import pytest
 from histdatacom.manifest_store import STATUS_STORE_REF_KEY
 from histdatacom.runtime_contracts import (
     ArtifactRef,
+    JSONValue,
     RunRequest,
     StatusEvent,
     WorkStatus,
@@ -455,6 +456,7 @@ def _run_request(
     *,
     request_id: str = "run-test",
     data_directory: str = "data",
+    metadata: dict[str, JSONValue] | None = None,
 ) -> RunRequest:
     return RunRequest(
         request_id=request_id,
@@ -466,6 +468,7 @@ def _run_request(
         download_data_archives=True,
         extract_csvs=True,
         api_return_type="polars",
+        metadata=dict(metadata or {}),
     )
 
 
@@ -567,6 +570,182 @@ def test_submit_run_request_uses_orchestration_queue(
         client.orchestration_job_store_path(config).parent.name
         == ".histdatacom"
     )
+
+
+def test_submit_run_request_records_schedule_key_metadata(
+    tmp_path: Path,
+) -> None:
+    """Ready scheduled submissions should persist their overlap metadata."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient()
+    request = _run_request(
+        request_id="run-scheduled",
+        metadata={"no_overlap": True, "schedule_key": " eurusd-cache "},
+    )
+
+    handle = asyncio.run(
+        client.submit_run_request(
+            request,
+            config=config,
+            client=temporal_client,
+        )
+    )
+
+    assert handle.workflow_id == "histdatacom-run-scheduled"
+    payload = temporal_client.started[0]["payload"]
+    assert payload["metadata"]["schedule_key"] == "eurusd-cache"
+    assert payload["metadata"]["no_overlap"] is True
+    stored = client.orchestration_job_store(config).get_job_snapshot(
+        "histdatacom-run-scheduled"
+    )
+    assert stored is not None
+    assert stored["metadata"]["schedule_key"] == "eurusd-cache"
+    assert stored["metadata"]["no_overlap"] is True
+    assert stored["metadata"]["run_request"]["metadata"]["schedule_key"] == (
+        "eurusd-cache"
+    )
+
+
+def test_submit_run_request_blocks_active_duplicate_schedule_key(
+    tmp_path: Path,
+) -> None:
+    """An active same-key job in the workspace should block submission."""
+    config = _config(tmp_path)
+    first_client = _FakeTemporalClient()
+    first = _run_request(
+        request_id="run-first",
+        metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+    )
+    second_client = _FakeTemporalClient()
+    second = _run_request(
+        request_id="run-second",
+        metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+    )
+
+    asyncio.run(
+        client.submit_run_request(first, config=config, client=first_client)
+    )
+    with pytest.raises(client.OrchestrationOverlapError) as err:
+        asyncio.run(
+            client.submit_run_request(
+                second,
+                config=config,
+                client=second_client,
+            )
+        )
+
+    assert second_client.started == []
+    assert err.value.exit_code == client.OVERLAP_GUARD_EXIT_CODE
+    assert err.value.detail["schedule_key"] == "eurusd-cache"
+    assert err.value.detail["schedule_identity_source"] == "schedule_key"
+    assert err.value.detail["blocking_job"]["job_id"] == "histdatacom-run-first"
+
+
+def test_submit_run_request_allows_terminal_prior_schedule_key(
+    tmp_path: Path,
+) -> None:
+    """A terminal prior job should not block a new scheduled submission."""
+    config = _config(tmp_path)
+    first_client = _FakeTemporalClient()
+    first = _run_request(
+        request_id="run-terminal",
+        metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+    )
+    second_client = _FakeTemporalClient()
+    second = _run_request(
+        request_id="run-after-terminal",
+        metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+    )
+
+    asyncio.run(
+        client.submit_run_request(first, config=config, client=first_client)
+    )
+    store = client.orchestration_job_store(config)
+    stored = store.get_job_snapshot("histdatacom-run-terminal")
+    assert stored is not None
+    store.write_job_snapshot(
+        OrchestrationJobSnapshot.from_dict(stored).with_result(
+            _workflow_result_payload()
+        )
+    )
+
+    asyncio.run(
+        client.submit_run_request(second, config=config, client=second_client)
+    )
+
+    assert second_client.started[0]["id"] == "histdatacom-run-after-terminal"
+
+
+def test_submit_run_request_scopes_overlap_to_workspace(
+    tmp_path: Path,
+) -> None:
+    """The same schedule key in another workspace should not block."""
+    first_config = _config(tmp_path / "one")
+    second_config = _config(tmp_path / "two")
+    first = _run_request(
+        request_id="run-workspace-one",
+        metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+    )
+    second_client = _FakeTemporalClient()
+    second = _run_request(
+        request_id="run-workspace-two",
+        metadata={"no_overlap": True, "schedule_key": "eurusd-cache"},
+    )
+
+    asyncio.run(
+        client.submit_run_request(
+            first,
+            config=first_config,
+            client=_FakeTemporalClient(),
+        )
+    )
+    asyncio.run(
+        client.submit_run_request(
+            second,
+            config=second_config,
+            client=second_client,
+        )
+    )
+
+    assert second_client.started[0]["id"] == "histdatacom-run-workspace-two"
+
+
+def test_submit_run_request_uses_fingerprint_when_schedule_key_missing(
+    tmp_path: Path,
+) -> None:
+    """Explicit opt-in without a key should fall back to request fingerprint."""
+    config = _config(tmp_path)
+    first = _run_request(
+        request_id="run-fingerprint-one",
+        metadata={"no_overlap": True},
+    )
+    second = _run_request(
+        request_id="run-fingerprint-two",
+        metadata={"no_overlap": True},
+    )
+    second_client = _FakeTemporalClient()
+
+    asyncio.run(
+        client.submit_run_request(
+            first,
+            config=config,
+            client=_FakeTemporalClient(),
+        )
+    )
+    with pytest.raises(client.OrchestrationOverlapError) as err:
+        asyncio.run(
+            client.submit_run_request(
+                second,
+                config=config,
+                client=second_client,
+            )
+        )
+
+    assert second_client.started == []
+    assert err.value.detail["schedule_identity_source"] == (
+        "schedule_fingerprint"
+    )
+    assert str(err.value.detail["schedule_fingerprint"]).startswith("sha256:")
 
 
 def test_submit_run_request_without_config_fails_on_malformed_running_state(

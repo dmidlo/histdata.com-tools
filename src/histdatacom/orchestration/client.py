@@ -5,18 +5,24 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+import hashlib
 from importlib import import_module
 from inspect import isawaitable
+import json
 import logging
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from histdatacom.cancellation import (
     PartialArtifactDisposition,
     cleanup_partial_artifacts,
     operation_resume_policy,
 )
-from histdatacom.exceptions import DependencyOperationError, ErrorCategory
+from histdatacom.exceptions import (
+    DependencyOperationError,
+    ErrorCategory,
+    HistDataOperationError,
+)
 from histdatacom.manifest_store import (
     STATUS_STORE_REF_KEY,
     ManifestStatusStore,
@@ -62,6 +68,10 @@ CONTROL_ATTEMPTS_METADATA_KEY = "control_attempts"
 CONTROL_EXECUTION_METADATA_KEY = "control_execution"
 TEMPORAL_EXECUTION_STATUS_PREFIX = "WORKFLOW_EXECUTION_STATUS_"
 TEMPORAL_EXECUTION_STATUS_METADATA_KEY = "temporal_execution_status"
+OVERLAP_GUARD_METADATA_KEY = "no_overlap"
+SCHEDULE_KEY_METADATA_KEY = "schedule_key"
+SCHEDULE_FINGERPRINT_METADATA_KEY = "schedule_fingerprint"
+OVERLAP_GUARD_EXIT_CODE = 75
 LOGGER = logging.getLogger(__name__)
 ProgressObserver = Callable[[OrchestrationJobSnapshot], None]
 
@@ -79,6 +89,15 @@ class TemporalDependencyError(OrchestrationUnavailableError):
     """Raised when Temporal SDK functionality is used without temporalio."""
 
     code = "TEMPORAL_DEPENDENCY_UNAVAILABLE"
+
+
+class OrchestrationOverlapError(HistDataOperationError):
+    """Raised when an opt-in scheduled job overlap guard blocks submission."""
+
+    category = ErrorCategory.VALIDATION
+    code = "ORCHESTRATION_OVERLAP_BLOCKED"
+    retryable = False
+    exit_code = OVERLAP_GUARD_EXIT_CODE
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +224,11 @@ async def submit_run_request(
         supervisor=supervisor,
         require_running=config is None,
     )
+    request = _prepare_overlap_guarded_request(
+        request,
+        config=resolved_config,
+        status_store=status_store,
+    )
     temporal_client = client or await connect_temporal_client(
         config=resolved_config,
         supervisor=supervisor,
@@ -308,6 +332,11 @@ async def submit_run_request_and_observe(
             supervisor=resolved_supervisor,
             status=orchestration_status,
             require_running=True,
+        )
+        request = _prepare_overlap_guarded_request(
+            request,
+            config=resolved_config,
+            status_store=status_store,
         )
         temporal_client = client or await connect_temporal_client(
             config=resolved_config,
@@ -1196,6 +1225,235 @@ def run_request_payload(
     return payload
 
 
+def _prepare_overlap_guarded_request(
+    request: RunRequest,
+    *,
+    config: OrchestrationWorkerConfig,
+    status_store: ManifestStatusStore | None = None,
+) -> RunRequest:
+    """Return request enriched with guard metadata, or raise on overlap."""
+    if not _overlap_guard_enabled(request):
+        return request
+    guarded = _request_with_schedule_identity(request)
+    store = status_store or orchestration_job_store(config)
+    blocking_snapshot = _active_overlap_snapshot(guarded, store)
+    if blocking_snapshot is None:
+        return guarded
+    identity_source, identity = _schedule_identity(guarded)
+    detail = _overlap_error_detail(
+        guarded,
+        blocking_snapshot,
+        config=config,
+        store=store,
+        identity_source=identity_source,
+        identity=identity,
+    )
+    raise OrchestrationOverlapError(
+        "Active scheduled HistData job already exists for "
+        f"{identity_source}={identity}.",
+        detail=detail,
+    )
+
+
+def _overlap_guard_enabled(request: RunRequest) -> bool:
+    return _metadata_bool(request.metadata.get(OVERLAP_GUARD_METADATA_KEY))
+
+
+def _metadata_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _request_with_schedule_identity(request: RunRequest) -> RunRequest:
+    metadata = dict(request.metadata)
+    metadata[OVERLAP_GUARD_METADATA_KEY] = True
+    schedule_key = _normalized_schedule_key(
+        metadata.get(SCHEDULE_KEY_METADATA_KEY)
+    )
+    if schedule_key:
+        metadata[SCHEDULE_KEY_METADATA_KEY] = schedule_key
+        metadata.pop(SCHEDULE_FINGERPRINT_METADATA_KEY, None)
+        return replace(request, metadata=metadata)
+    metadata[SCHEDULE_FINGERPRINT_METADATA_KEY] = _request_schedule_fingerprint(
+        request
+    )
+    return replace(request, metadata=metadata)
+
+
+def _schedule_identity(request: RunRequest) -> tuple[str, str]:
+    schedule_key = _normalized_schedule_key(
+        request.metadata.get(SCHEDULE_KEY_METADATA_KEY)
+    )
+    if schedule_key:
+        return SCHEDULE_KEY_METADATA_KEY, schedule_key
+    fingerprint = str(
+        request.metadata.get(SCHEDULE_FINGERPRINT_METADATA_KEY) or ""
+    )
+    return SCHEDULE_FINGERPRINT_METADATA_KEY, fingerprint
+
+
+def _active_overlap_snapshot(
+    request: RunRequest,
+    store: ManifestStatusStore,
+) -> OrchestrationJobSnapshot | None:
+    identity_source, identity = _schedule_identity(request)
+    for payload in store.list_job_snapshots(limit=None):
+        snapshot = OrchestrationJobSnapshot.from_dict(payload)
+        if not _snapshot_is_active(snapshot):
+            continue
+        if _snapshot_identity_matches(
+            snapshot,
+            identity_source=identity_source,
+            identity=identity,
+        ):
+            return snapshot
+    return None
+
+
+def _snapshot_is_active(snapshot: OrchestrationJobSnapshot) -> bool:
+    if snapshot.status.terminal:
+        return False
+    return snapshot.lifecycle not in {
+        JobLifecycle.SUCCEEDED,
+        JobLifecycle.FAILED,
+        JobLifecycle.CANCELLED,
+    }
+
+
+def _snapshot_identity_matches(
+    snapshot: OrchestrationJobSnapshot,
+    *,
+    identity_source: str,
+    identity: str,
+) -> bool:
+    if not identity:
+        return False
+    snapshot_identity = _schedule_identity_from_snapshot(
+        snapshot,
+        identity_source=identity_source,
+    )
+    return snapshot_identity == identity
+
+
+def _schedule_identity_from_snapshot(
+    snapshot: OrchestrationJobSnapshot,
+    *,
+    identity_source: str,
+) -> str:
+    metadata = dict(snapshot.metadata)
+    request_payload = _snapshot_run_request_payload(snapshot)
+    request_metadata = _run_request_metadata(request_payload)
+    if identity_source == SCHEDULE_KEY_METADATA_KEY:
+        return _normalized_schedule_key(
+            metadata.get(SCHEDULE_KEY_METADATA_KEY)
+            or request_metadata.get(SCHEDULE_KEY_METADATA_KEY)
+        )
+    fingerprint = str(
+        metadata.get(SCHEDULE_FINGERPRINT_METADATA_KEY)
+        or request_metadata.get(SCHEDULE_FINGERPRINT_METADATA_KEY)
+        or ""
+    )
+    if fingerprint:
+        return fingerprint
+    if request_payload:
+        return _request_schedule_fingerprint(
+            RunRequest.from_dict(request_payload)
+        )
+    return ""
+
+
+def _snapshot_run_request_payload(
+    snapshot: OrchestrationJobSnapshot,
+) -> Mapping[str, Any]:
+    payload = snapshot.metadata.get(RUN_REQUEST_METADATA_KEY)
+    return payload if isinstance(payload, Mapping) else {}
+
+
+def _run_request_metadata(
+    request_payload: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    metadata = request_payload.get("metadata")
+    return metadata if isinstance(metadata, Mapping) else {}
+
+
+def _request_schedule_fingerprint(request: RunRequest) -> str:
+    payload = request.to_dict()
+    payload.pop("request_id", None)
+    metadata_value = payload.get("metadata")
+    metadata: dict[str, JSONValue] = (
+        dict(cast(Mapping[str, JSONValue], metadata_value))
+        if isinstance(metadata_value, Mapping)
+        else {}
+    )
+    for key in (
+        CONTROL_EXECUTION_METADATA_KEY,
+        OVERLAP_GUARD_METADATA_KEY,
+        SCHEDULE_FINGERPRINT_METADATA_KEY,
+        SCHEDULE_KEY_METADATA_KEY,
+        STATUS_STORE_REF_KEY,
+        TASK_QUEUE_METADATA_KEY,
+        TOPOLOGY_METADATA_KEY,
+    ):
+        metadata.pop(key, None)
+    payload["metadata"] = metadata
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:24]
+    return f"sha256:{digest}"
+
+
+def _normalized_schedule_key(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _overlap_error_detail(
+    request: RunRequest,
+    blocking_snapshot: OrchestrationJobSnapshot,
+    *,
+    config: OrchestrationWorkerConfig,
+    store: ManifestStatusStore,
+    identity_source: str,
+    identity: str,
+) -> dict[str, JSONValue]:
+    schedule_key = _normalized_schedule_key(
+        request.metadata.get(SCHEDULE_KEY_METADATA_KEY)
+    )
+    fingerprint = str(
+        request.metadata.get(SCHEDULE_FINGERPRINT_METADATA_KEY) or ""
+    )
+    detail: dict[str, JSONValue] = {
+        "workspace": str(config.runtime_policy.workspace),
+        "workspace_id": config.runtime_policy.workspace_id,
+        "status_store": str(store.db_path),
+        "schedule_identity_source": identity_source,
+        "schedule_identity": identity,
+        "blocking_job": _blocking_job_detail(blocking_snapshot),
+    }
+    if schedule_key:
+        detail[SCHEDULE_KEY_METADATA_KEY] = schedule_key
+    if fingerprint:
+        detail[SCHEDULE_FINGERPRINT_METADATA_KEY] = fingerprint
+    return detail
+
+
+def _blocking_job_detail(
+    snapshot: OrchestrationJobSnapshot,
+) -> dict[str, JSONValue]:
+    return {
+        "job_id": snapshot.job_id,
+        "workflow_id": snapshot.workflow_id,
+        "run_id": snapshot.run_id,
+        "request_id": snapshot.request_id,
+        "lifecycle": snapshot.lifecycle.value,
+        "status": snapshot.status.value,
+        "updated_at_utc": snapshot.updated_at_utc,
+    }
+
+
 def orchestration_job_store_root(
     config: OrchestrationWorkerConfig | None = None,
 ) -> Path:
@@ -1379,10 +1637,32 @@ def _snapshot_with_run_request(
     snapshot: OrchestrationJobSnapshot,
     request: RunRequest,
 ) -> OrchestrationJobSnapshot:
+    metadata: dict[str, JSONValue] = {
+        RUN_REQUEST_METADATA_KEY: request.to_dict()
+    }
+    metadata.update(_schedule_metadata_for_snapshot(request))
     return _snapshot_with_metadata(
         snapshot,
-        {RUN_REQUEST_METADATA_KEY: request.to_dict()},
+        metadata,
     )
+
+
+def _schedule_metadata_for_snapshot(
+    request: RunRequest,
+) -> dict[str, JSONValue]:
+    metadata = dict(request.metadata)
+    snapshot_metadata: dict[str, JSONValue] = {}
+    if _metadata_bool(metadata.get(OVERLAP_GUARD_METADATA_KEY)):
+        snapshot_metadata[OVERLAP_GUARD_METADATA_KEY] = True
+    schedule_key = _normalized_schedule_key(
+        metadata.get(SCHEDULE_KEY_METADATA_KEY)
+    )
+    if schedule_key:
+        snapshot_metadata[SCHEDULE_KEY_METADATA_KEY] = schedule_key
+    fingerprint = str(metadata.get(SCHEDULE_FINGERPRINT_METADATA_KEY) or "")
+    if fingerprint:
+        snapshot_metadata[SCHEDULE_FINGERPRINT_METADATA_KEY] = fingerprint
+    return snapshot_metadata
 
 
 def _snapshot_with_metadata(

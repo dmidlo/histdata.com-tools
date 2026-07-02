@@ -26,6 +26,7 @@ class Options:
         "from_api",
         "import_to_influxdb",
         "metadata",
+        "no_overlap",
         "orchestration_start",
         "orchestration_keep_runtime",
         "orchestration_wait_result",
@@ -51,6 +52,7 @@ class Options:
         "quality_report_path",
         "repo_quality_columns",
         "repo_quality_refresh",
+        "schedule_key",
         "start_yearmonth",
         "timeframes",
         "update_remote_data",
@@ -116,6 +118,8 @@ class Options:
         self.orchestration_start: bool = True
         self.orchestration_keep_runtime: bool = False
         self.orchestration_wait_result: bool = True
+        self.no_overlap: bool = False
+        self.schedule_key: str = ""
         self.verbosity: int = 0
         self.metadata: dict = {}
 

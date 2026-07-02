@@ -62,6 +62,7 @@ from histdatacom.records import Record
 from histdatacom.runtime_contracts import FailureInfo, RunRequest, WorkStatus
 from histdatacom.orchestration.client import (
     JobResult,
+    OrchestrationOverlapError,
     OrchestrationUnavailableError,
     submit_run_request_and_observe_sync,
 )
@@ -245,6 +246,17 @@ class _HistDataCom:  # noqa:R701
         self._warn_before_large_quality_run_without_preflight()
         try:
             result = self._submit_orchestration_job()
+        except OrchestrationOverlapError as err:
+            if self.context.from_api:
+                raise
+            print(  # noqa:T201
+                format_exception_for_cli(
+                    err,
+                    title="HistData scheduled job overlap blocked",
+                ),
+                file=sys.stderr,
+            )
+            raise SystemExit(err.exit_code or 1) from err
         except OrchestrationUnavailableError as err:
             if self.context.from_api:
                 raise

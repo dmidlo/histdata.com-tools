@@ -16,6 +16,7 @@ from histdatacom.runtime_contracts import WorkStatus
 from histdatacom.orchestration.client import (
     JobHandle,
     JobResult,
+    OrchestrationOverlapError,
     OrchestrationUnavailableError,
     RuntimeDependencyError,
 )
@@ -1805,6 +1806,89 @@ def test_api_orchestration_unavailable_error_is_raised(
 
     with pytest.raises(OrchestrationUnavailableError, match="not running"):
         histdata_com.main(_orchestration_options())
+
+
+def test_api_orchestration_overlap_error_preserves_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API callers should get catchable duplicate-job details."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fake_submit(*args: object, **kwargs: object) -> object:
+        raise OrchestrationOverlapError(
+            "blocked",
+            detail={
+                "schedule_key": "eurusd-cache",
+                "blocking_job": {"job_id": "histdatacom-run-active"},
+            },
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+
+    with pytest.raises(OrchestrationOverlapError) as err:
+        histdata_com.main(_orchestration_options())
+
+    assert err.value.detail["schedule_key"] == "eurusd-cache"
+    assert err.value.detail["blocking_job"]["job_id"] == (
+        "histdatacom-run-active"
+    )
+
+
+def test_cli_orchestration_overlap_exits_with_guard_code(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI duplicate-job blocks should be shell-friendly."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fake_submit(*args: object, **kwargs: object) -> object:
+        raise OrchestrationOverlapError(
+            "blocked",
+            detail={
+                "schedule_key": "eurusd-cache",
+                "blocking_job": {"job_id": "histdatacom-run-active"},
+            },
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--submit-only",
+            "--no-overlap",
+            "--schedule-key",
+            "eurusd-cache",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    captured = capsys.readouterr()
+    assert err.value.code == 75
+    assert "HistData scheduled job overlap blocked" in captured.err
+    assert "code: ORCHESTRATION_OVERLAP_BLOCKED" in captured.err
+    assert "schedule_key: eurusd-cache" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_cli_orchestration_unavailable_exits_nonzero(

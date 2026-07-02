@@ -103,9 +103,11 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE]
                    [-c CPU_UTILIZATION] [--data-directory DATA_DIRECTORY] [-v]
                    [--orchestration-start] [--no-orchestration-start]
-                   [--submit-only] [--keep-runtime] [--no-keep-runtime]
-                   [--quality] [--repo-quality] [--quality-preflight]
-                   [--repo-quality-columns] [--quality-target PATH [PATH ...]]
+                   [--submit-only] [--no-overlap]
+                   [--schedule-key SCHEDULE_KEY] [--keep-runtime]
+                   [--no-keep-runtime] [--quality] [--repo-quality]
+                   [--quality-preflight] [--repo-quality-columns]
+                   [--quality-target PATH [PATH ...]]
                    [--quality-checks GROUP [GROUP ...]]
                    [--quality-report PATH] [--quality-preflight-report PATH]
                    [--quality-preflight-markdown]
@@ -185,6 +187,11 @@ Orchestration:
                         already running
   --submit-only         submit the orchestration job without waiting for its
                         result
+  --no-overlap          refuse submission when an active matching scheduled
+                        job already exists in this runtime workspace
+  --schedule-key SCHEDULE_KEY
+                        stable logical key used by --no-overlap for scheduled
+                        jobs
   --keep-runtime        leave a runtime started by this command running after
                         the job completes
   --no-keep-runtime     stop a runtime started by this command after waited
@@ -461,6 +468,8 @@ histdatacom:
   cpu_utilization: medium
   orchestration_start: true
   orchestration_wait_result: false
+  no_overlap: true
+  schedule_key: eurusd-cache
   verbosity: 1
 ```
 
@@ -494,10 +503,12 @@ histdatacom:
     report: reports/eurusd-feed-regimes.json
     json: true
   jobs:
-    command: list
-    offline: true
+    command: submit
+    request_json: requests/eurusd-cache.json
+    submit_only: true
+    no_overlap: true
+    schedule_key: eurusd-cache
     json: true
-    limit: 20
   cleanup:
     command: status
     data_directory: data/
@@ -1391,15 +1402,21 @@ HISTDATACOM_LOG_DIR=/var/log/histdatacom
 HISTDATACOM_RUNTIME_WORKSPACE=/srv/histdatacom
 ```
 
-Use a shell wrapper or `flock` where available to prevent overlapping
-long-running downloads from competing for the same runtime workspace and data
-directory. The examples below append logs and use `--submit-only` for scheduled
-data/cache work so cron records the job metadata quickly; inspect progress later
-with `histdatacom jobs ...`.
+Use `--no-overlap` with a stable `--schedule-key` for scheduled submissions that
+must not run twice in the same runtime workspace. The application checks
+persisted job state before submission and exits nonzero when an active matching
+job already exists. A shell wrapper or `flock` can still be useful as an outer
+defense when available, but it is no longer the only overlap protection. The
+examples below append logs and use `--submit-only` for scheduled data/cache work
+so cron records the job metadata quickly; inspect progress later with
+`histdatacom jobs ...`.
 
 ```cron
 # Build current-month EURUSD ASCII tick caches every weekday at 01:15.
-15 1 * * 1-5 cd "$HISTDATACOM_PROJECT" && flock -n /tmp/histdatacom-eurusd.lock histdatacom --submit-only --build-cache --data-directory "$HISTDATACOM_DATA" -p eurusd -f ascii -t tick-data-quotes -s now >> "$HISTDATACOM_LOG_DIR/eurusd-cache.log" 2>&1
+15 1 * * 1-5 cd "$HISTDATACOM_PROJECT" && histdatacom --submit-only --no-overlap --schedule-key eurusd-cache --build-cache --data-directory "$HISTDATACOM_DATA" -p eurusd -f ascii -t tick-data-quotes -s now >> "$HISTDATACOM_LOG_DIR/eurusd-cache.log" 2>&1
+
+# Optional outer shell lock for hosts that provide flock.
+15 1 * * 1-5 cd "$HISTDATACOM_PROJECT" && flock -n /tmp/histdatacom-eurusd.lock histdatacom --submit-only --no-overlap --schedule-key eurusd-cache --build-cache --data-directory "$HISTDATACOM_DATA" -p eurusd -f ascii -t tick-data-quotes -s now >> "$HISTDATACOM_LOG_DIR/eurusd-cache.log" 2>&1
 ```
 
 Source cleanup can stay in dry-run mode until the reported paths are expected;

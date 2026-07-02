@@ -448,6 +448,11 @@ class RunRequest:
         )
         if pair_groups:
             metadata["pair_groups"] = list(pair_groups)
+        if bool(getattr(options, "no_overlap", False)):
+            metadata["no_overlap"] = True
+        schedule_key = str(getattr(options, "schedule_key", "") or "").strip()
+        if schedule_key:
+            metadata["schedule_key"] = schedule_key
         verbosity = max(0, int(getattr(options, "verbosity", 0) or 0))
         return cls(
             request_id=request_id or new_request_id(),

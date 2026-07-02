@@ -293,6 +293,11 @@ launchd, systemd, scheduled tasks, or a future GUI shell:
 histdatacom runtime --workspace /path/to/project status --json
 ```
 
+Scheduled submissions should use `--no-overlap` with a stable `--schedule-key`
+so duplicate active jobs are blocked by the application before a new workflow is
+submitted in that workspace. Shell locks can still wrap those commands as an
+outer host-specific defense.
+
 ## Maintenance And Retention
 
 Long-running PyPI installs and future GUI bundles should run runtime maintenance
@@ -387,7 +392,7 @@ histdatacom --no-orchestration-start -p eurusd -f ascii -t 1-minute-bar-quotes -
 Submit without waiting for the workflow result:
 
 ```sh
-histdatacom --submit-only -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+histdatacom --submit-only --no-overlap --schedule-key eurusd-cache -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
 
 Orchestrated API calls use the same public options and runtime defaults:
@@ -430,7 +435,7 @@ and future GUI polling.
 Submit a serialized `RunRequest`:
 
 ```sh
-histdatacom jobs submit --start --submit-only --request-json request.json --json
+histdatacom jobs submit --start --submit-only --no-overlap --schedule-key eurusd-cache --request-json request.json --json
 ```
 
 Inspect and control jobs:

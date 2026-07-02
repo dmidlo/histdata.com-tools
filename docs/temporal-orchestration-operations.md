@@ -91,9 +91,14 @@ histdatacom --no-orchestration-start \
 Submit work without waiting for the workflow result:
 
 ```sh
-histdatacom --submit-only \
+histdatacom --submit-only --no-overlap --schedule-key eurusd-cache \
   -p eurusd -f ascii -t 1-minute-bar-quotes -s now
 ```
+
+`--no-overlap` is opt-in and checks persisted job state in the current runtime
+workspace before submission. Use a stable `--schedule-key` for recurring
+scheduled work; if no key is supplied, the guard falls back to a deterministic
+request fingerprint.
 
 The main operation flags keep their documented meaning before the request is
 submitted:
@@ -183,7 +188,8 @@ histdatacom jobs result histdatacom-<request-id> --json
 Submit a serialized request:
 
 ```sh
-histdatacom jobs submit --start --submit-only --request-json request.json --json
+histdatacom jobs submit --start --submit-only --no-overlap \
+  --schedule-key eurusd-cache --request-json request.json --json
 ```
 
 The workflow ID format is `histdatacom-<request_id>`.

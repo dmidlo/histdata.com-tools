@@ -74,6 +74,7 @@ _KEY_ALIASES = {
     "symbol_groups": "pair_groups",
     "keep_runtime": "orchestration_keep_runtime",
     "repo_quality": "repo_quality_refresh",
+    "schedule": "schedule_key",
     "verbose": "verbosity",
 }
 _COMMAND_KEY_ALIASES = {
@@ -119,6 +120,7 @@ _TRUE_FLAG_ARGS = {
     "quality_preflight_markdown": "--quality-preflight-markdown",
     "quality_preflight_run_validation": "--quality-preflight-run-validation",
     "repo_quality_columns": "--repo-quality-columns",
+    "no_overlap": "--no-overlap",
 }
 _SCALAR_ARGS = {
     "by": "--by",
@@ -144,6 +146,7 @@ _SCALAR_ARGS = {
     "quality_preflight_evidence_max_age_seconds": (
         "--quality-preflight-evidence-max-age-seconds"
     ),
+    "schedule_key": "--schedule-key",
 }
 _LIST_ARGS = {
     "pair_groups": "--pair-groups",
@@ -326,6 +329,7 @@ _JOBS_ALIASES = {
 }
 _JOBS_TRUE_FLAG_ARGS = {
     "keep_runtime": "--keep-runtime",
+    "no_overlap": "--no-overlap",
     "offline": "--offline",
     "recompute_complete": "--recompute-complete",
     "start": "--start",
@@ -337,6 +341,7 @@ _JOBS_SCALAR_ARGS = {
     "reason": "--reason",
     "request_json": "--request-json",
     "run_id": "--run-id",
+    "schedule_key": "--schedule-key",
 }
 _JOBS_ALLOWED_KEYS = (
     {"command", "workflow_id"}
@@ -846,11 +851,13 @@ def _jobs_command_args(
     if command == "submit":
         true_flags.update(
             {
+                "no_overlap": _JOBS_TRUE_FLAG_ARGS["no_overlap"],
                 "start": _JOBS_TRUE_FLAG_ARGS["start"],
                 "submit_only": _JOBS_TRUE_FLAG_ARGS["submit_only"],
             }
         )
         scalar_args["request_json"] = _JOBS_SCALAR_ARGS["request_json"]
+        scalar_args["schedule_key"] = _JOBS_SCALAR_ARGS["schedule_key"]
     elif command == "list":
         scalar_args.update(
             {

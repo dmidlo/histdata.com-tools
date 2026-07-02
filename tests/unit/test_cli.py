@@ -100,6 +100,9 @@ def test_orchestration_cli_flags_preserve_default_runtime_controls(
             "--orchestration-start",
             "--keep-runtime",
             "--submit-only",
+            "--no-overlap",
+            "--schedule-key",
+            "eurusd-cache",
             "-V",
             "-p",
             "eurusd",
@@ -118,6 +121,8 @@ def test_orchestration_cli_flags_preserve_default_runtime_controls(
     assert options.orchestration_start
     assert options.orchestration_keep_runtime
     assert not options.orchestration_wait_result
+    assert options.no_overlap
+    assert options.schedule_key == "eurusd-cache"
     assert options.validate_urls
 
 
@@ -479,8 +484,10 @@ histdatacom:
   cpu_utilization: low
   batch_size: 123
   keep_runtime: true
+  no_overlap: true
   orchestration_start: false
   orchestration_wait_result: false
+  schedule_key: eurusd-cache
   verbosity: 2
   analytics:
     command: feed-regimes
@@ -515,6 +522,8 @@ histdatacom:
     assert not options.orchestration_start
     assert options.orchestration_keep_runtime
     assert not options.orchestration_wait_result
+    assert options.no_overlap
+    assert options.schedule_key == "eurusd-cache"
     assert options.verbosity == 2
 
 
@@ -817,11 +826,15 @@ def test_options_expose_orchestration_named_runtime_controls() -> None:
     options.orchestration_start = False
     options.orchestration_keep_runtime = True
     options.orchestration_wait_result = False
+    options.no_overlap = True
+    options.schedule_key = "eurusd-cache"
 
     assert options.use_orchestration
     assert not options.orchestration_start
     assert options.orchestration_keep_runtime
     assert not options.orchestration_wait_result
+    assert options.no_overlap
+    assert options.schedule_key == "eurusd-cache"
 
 
 def test_data_quality_cli_mode_bypasses_legacy_prerequisites(
