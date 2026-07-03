@@ -162,9 +162,9 @@ def _write_dist_info(wheel: ZipFile, *, tag: str) -> None:
                 "Classifier: Operating System :: POSIX :: Linux",
                 "Provides-Extra: temporal",
                 "Provides-Extra: all",
-                "Requires-Dist: temporalio>=1.10,<2",
-                'Requires-Dist: temporalio>=1.10,<2; extra == "temporal"',
-                'Requires-Dist: temporalio>=1.10,<2; extra == "all"',
+                "Requires-Dist: temporalio>=1.10,<1.30",
+                'Requires-Dist: temporalio>=1.10,<1.30; extra == "temporal"',
+                'Requires-Dist: temporalio>=1.10,<1.30; extra == "all"',
                 "",
             ]
         ),
