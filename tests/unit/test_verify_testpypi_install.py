@@ -198,6 +198,7 @@ def test_cli_parity_probe_requires_current_flags(
 ) -> None:
     """The verifier should reject stale artifacts with old CLI help."""
     module = _module()
+    json_commands: list[list[str]] = []
 
     def fake_run(command: list[str], **_: Any) -> SimpleNamespace:
         executable = Path(command[0]).stem
@@ -215,9 +216,48 @@ def test_cli_parity_probe_requires_current_flags(
                 stdout=" ".join(module.EXPECTED_RUNTIME_COMMANDS),
                 stderr="",
             )
+        if executable == "histdatacom" and command[1:] == [
+            "groups",
+            "--help",
+        ]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=" ".join(module.EXPECTED_GROUPS_COMMANDS),
+                stderr="",
+            )
+        if executable == "histdatacom" and command[1:] == [
+            "groups",
+            "show",
+            module.EXPECTED_TRIANGLE_GROUP,
+        ]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    f"Group: {module.EXPECTED_TRIANGLE_GROUP}\n"
+                    "Type: triangle\n"
+                    f"Rule: {module.EXPECTED_TRIANGLE_RULE}\n"
+                ),
+                stderr="",
+            )
         return SimpleNamespace(returncode=0, stdout="worker help", stderr="")
 
+    def fake_run_json(command: list[str], **_: Any) -> dict[str, Any]:
+        json_commands.append(command)
+        return {
+            "mode": "triangles",
+            "group_count": module.EXPECTED_TRIANGLE_GROUP_COUNT,
+            "groups": [
+                {
+                    "name": module.EXPECTED_TRIANGLE_GROUP,
+                    "relationship": {
+                        "rule": module.EXPECTED_TRIANGLE_RULE,
+                    },
+                }
+            ],
+        }
+
     monkeypatch.setattr(module, "_run", fake_run)
+    monkeypatch.setattr(module, "_run_json", fake_run_json)
 
     report = module._cli_parity_probe(
         venv_dir=tmp_path / "venv",
@@ -228,6 +268,19 @@ def test_cli_parity_probe_requires_current_flags(
     assert report["version"] == "0.79.0"
     assert "--quality" in report["required_help_tokens"]
     assert "doctor" in report["runtime_commands"]
+    assert report["groups"]["triangle_group"] == module.EXPECTED_TRIANGLE_GROUP
+    assert report["groups"]["triangle_group_count"] == (
+        module.EXPECTED_TRIANGLE_GROUP_COUNT
+    )
+    assert json_commands == [
+        [
+            str(module._script_path(tmp_path / "venv", "histdatacom")),
+            "groups",
+            "list",
+            "--triangles",
+            "--json",
+        ]
+    ]
 
 
 def test_cli_parity_probe_fails_on_stale_help(
@@ -248,6 +301,46 @@ def test_cli_parity_probe_fails_on_stale_help(
     monkeypatch.setattr(module, "_run", fake_run)
 
     with pytest.raises(SystemExit, match="missing current flags"):
+        module._cli_parity_probe(
+            venv_dir=tmp_path / "venv",
+            version="0.79.0",
+            timeout=30.0,
+        )
+
+
+def test_cli_parity_probe_fails_on_missing_groups_commands(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A TestPyPI wheel missing group discovery commands should fail."""
+    module = _module()
+
+    def fake_run(command: list[str], **_: Any) -> SimpleNamespace:
+        executable = Path(command[0]).stem
+        if executable == "histdatacom" and "--version" in command:
+            return SimpleNamespace(returncode=0, stdout="0.79.0\n", stderr="")
+        if executable == "histdatacom" and "-h" in command:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=" ".join(module.EXPECTED_HELP_TOKENS),
+                stderr="",
+            )
+        if executable == "histdatacom" and "runtime" in command:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=" ".join(module.EXPECTED_RUNTIME_COMMANDS),
+                stderr="",
+            )
+        if executable == "histdatacom" and command[1:] == [
+            "groups",
+            "--help",
+        ]:
+            return SimpleNamespace(returncode=0, stdout="list", stderr="")
+        return SimpleNamespace(returncode=0, stdout="worker help", stderr="")
+
+    monkeypatch.setattr(module, "_run", fake_run)
+
+    with pytest.raises(SystemExit, match="groups CLI help"):
         module._cli_parity_probe(
             venv_dir=tmp_path / "venv",
             version="0.79.0",

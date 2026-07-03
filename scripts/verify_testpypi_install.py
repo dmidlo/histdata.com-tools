@@ -18,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TESTPYPI_INDEX = "https://test.pypi.org/simple/"
 DEFAULT_DEPENDENCY_INDEX = "https://pypi.org/simple/"
 EXPECTED_HELP_TOKENS = (
+    "groups",
     "--orchestration-start",
     "--no-orchestration-start",
     "--submit-only",
@@ -38,6 +39,13 @@ EXPECTED_RUNTIME_COMMANDS = (
     "start",
     "stop",
 )
+EXPECTED_GROUPS_COMMANDS = (
+    "list",
+    "show",
+)
+EXPECTED_TRIANGLE_GROUP = "triangle-eurgbp-eurusd-gbpusd"
+EXPECTED_TRIANGLE_GROUP_COUNT = 56
+EXPECTED_TRIANGLE_RULE = "EURUSD / GBPUSD ~= EURGBP"
 METADATA_PROBE = r"""
 import json
 import sys
@@ -401,11 +409,110 @@ def _cli_parity_probe(
         [str(venv_python), "-m", "histdatacom.orchestration.worker", "--help"],
         timeout=timeout,
     )
+    groups_report = _groups_cli_parity_probe(
+        histdatacom=histdatacom,
+        timeout=timeout,
+    )
 
     return {
         "version": actual_version,
         "required_help_tokens": sorted(EXPECTED_HELP_TOKENS),
         "runtime_commands": sorted(EXPECTED_RUNTIME_COMMANDS),
+        "groups": groups_report,
+    }
+
+
+def _groups_cli_parity_probe(
+    *,
+    histdatacom: Path,
+    timeout: float,
+) -> dict[str, Any]:
+    """Validate installed instrument-group discovery commands."""
+    groups_help = _run(
+        [str(histdatacom), "groups", "--help"], timeout=timeout
+    ).stdout
+    missing_groups_commands = [
+        command
+        for command in EXPECTED_GROUPS_COMMANDS
+        if command not in groups_help
+    ]
+    if missing_groups_commands:
+        raise SystemExit(
+            "installed groups CLI help is missing commands: "
+            + ", ".join(missing_groups_commands)
+        )
+
+    triangles_payload = _run_json(
+        [
+            str(histdatacom),
+            "groups",
+            "list",
+            "--triangles",
+            "--json",
+        ],
+        timeout=timeout,
+    )
+    if triangles_payload.get("mode") != "triangles":
+        raise SystemExit(
+            "installed groups CLI emitted unexpected triangle catalog mode: "
+            f"{triangles_payload.get('mode')!r}"
+        )
+    group_count = triangles_payload.get("group_count")
+    if group_count != EXPECTED_TRIANGLE_GROUP_COUNT:
+        raise SystemExit(
+            "installed groups CLI emitted unexpected triangle group count: "
+            f"{group_count!r}"
+        )
+    groups = triangles_payload.get("groups")
+    if not isinstance(groups, list):
+        raise SystemExit("installed groups CLI emitted non-list groups payload")
+    groups_by_name = {
+        str(group.get("name")): group
+        for group in groups
+        if isinstance(group, dict)
+    }
+    triangle = groups_by_name.get(EXPECTED_TRIANGLE_GROUP)
+    if triangle is None:
+        raise SystemExit(
+            "installed groups CLI catalog is missing canonical triangle group: "
+            f"{EXPECTED_TRIANGLE_GROUP}"
+        )
+    relationship = triangle.get("relationship")
+    if not isinstance(relationship, dict):
+        raise SystemExit(
+            "installed groups CLI triangle payload is missing relationship: "
+            f"{EXPECTED_TRIANGLE_GROUP}"
+        )
+    if relationship.get("rule") != EXPECTED_TRIANGLE_RULE:
+        raise SystemExit(
+            "installed groups CLI triangle rule changed unexpectedly: "
+            f"{relationship.get('rule')!r}"
+        )
+
+    detail_output = _run(
+        [str(histdatacom), "groups", "show", EXPECTED_TRIANGLE_GROUP],
+        timeout=timeout,
+    ).stdout
+    missing_detail_tokens = [
+        token
+        for token in (
+            f"Group: {EXPECTED_TRIANGLE_GROUP}",
+            "Type: triangle",
+            f"Rule: {EXPECTED_TRIANGLE_RULE}",
+        )
+        if token not in detail_output
+    ]
+    if missing_detail_tokens:
+        raise SystemExit(
+            "installed groups CLI detail is missing expected content: "
+            + ", ".join(missing_detail_tokens)
+        )
+
+    return {
+        "commands": sorted(EXPECTED_GROUPS_COMMANDS),
+        "triangle_group": EXPECTED_TRIANGLE_GROUP,
+        "triangle_group_count": group_count,
+        "triangle_rule": EXPECTED_TRIANGLE_RULE,
     }
 
 
