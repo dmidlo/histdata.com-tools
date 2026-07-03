@@ -517,12 +517,12 @@ def test_cli_request_json_export_stdout_without_submit(
     assert not request.extract_csvs
 
 
-def test_cli_request_json_export_round_trips_to_jobs_preflight(
+def test_cli_request_json_export_round_trips_to_jobs_preflight_and_submit(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Exported requests should be valid jobs preflight input."""
+    """Exported requests should be valid jobs preflight and submit input."""
     import histdatacom.histdata_com as histdata_com
     import histdatacom.orchestration.cli as jobs_cli
 
@@ -608,6 +608,48 @@ def test_cli_request_json_export_round_trips_to_jobs_preflight(
     assert request.metadata["no_overlap"] is True
     assert request.metadata["schedule_key"] == "eurusd-cache"
     assert captured["kwargs"]["offline"] is True
+
+    captured_submit: dict[str, object] = {}
+
+    def fake_control_submit(request: RunRequest, **kwargs: object) -> object:
+        captured_submit["request"] = request
+        captured_submit["kwargs"] = kwargs
+        return SimpleNamespace(
+            to_dict=lambda: {
+                "workflow_id": "histdatacom-run-cli",
+                "lifecycle": "submitted",
+                "status": "submitted",
+            },
+        )
+
+    monkeypatch.setattr(
+        jobs_cli, "submit_control_job_sync", fake_control_submit
+    )
+
+    exit_code = jobs_cli.jobs_main(
+        [
+            "--json",
+            "submit",
+            "--request-json",
+            str(request_path),
+            "--submit-only",
+            "--no-overlap",
+            "--schedule-key",
+            "eurusd-cache",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    submit_request = captured_submit["request"]
+
+    assert exit_code == 0
+    assert payload["lifecycle"] == "submitted"
+    assert isinstance(submit_request, RunRequest)
+    assert submit_request.pairs == ("eurusd",)
+    assert submit_request.validate_urls
+    assert submit_request.download_data_archives
+    assert submit_request.metadata["no_overlap"] is True
+    assert submit_request.metadata["schedule_key"] == "eurusd-cache"
+    assert captured_submit["kwargs"]["wait_for_result"] is False
 
 
 @pytest.mark.parametrize(
