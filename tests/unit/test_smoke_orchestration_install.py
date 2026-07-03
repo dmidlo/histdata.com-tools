@@ -227,6 +227,136 @@ def test_check_cli_smoke_runs_installed_worker_launcher(
     )
 
 
+def test_windows_runtime_diagnostic_separates_startup_layers(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """Windows diagnostic should identify worker startup after earlier passes."""
+    module = _module()
+    calls: list[tuple[str, list[str]]] = []
+
+    def fake_script_path(name: str) -> str:
+        return f"/venv/bin/{name}"
+
+    def fake_run_diagnostic_command(
+        phase: str,
+        command: list[str],
+        **kwargs: object,
+    ) -> dict[str, Any]:
+        calls.append((phase, command))
+        if phase == "runtime_worker_start":
+            return {
+                "phase": phase,
+                "status": "failed",
+                "command": command,
+                "returncode": 1,
+                "stdout": json.dumps(
+                    {
+                        "state": "error",
+                        "message": "worker exited before readiness",
+                    }
+                ),
+                "stderr": "",
+                "runtime_log_diagnostics": "worker log empty",
+            }
+        return {
+            "phase": phase,
+            "status": "passed",
+            "command": command,
+            "returncode": 0,
+            "stdout": "{}",
+            "stderr": "",
+            "runtime_log_diagnostics": "",
+        }
+
+    monkeypatch.setattr(module, "_script_path", fake_script_path)
+    monkeypatch.setattr(
+        module,
+        "_run_diagnostic_command",
+        fake_run_diagnostic_command,
+    )
+
+    report = module.check_windows_runtime_diagnostic(
+        tmp_path / "state",
+        startup_timeout=3.0,
+        stop_timeout=5.0,
+    )
+
+    assert report["summary"] == {
+        "layer": "runtime_worker_startup",
+        "phase": "runtime_worker_start",
+        "status": "failed",
+    }
+    assert report["phases"]["python_import"]["status"] == "passed"
+    assert report["phases"]["temporalio_bridge"]["status"] == "passed"
+    assert report["phases"]["histdatacom_console"]["status"] == "passed"
+    assert report["phases"]["worker_console"]["status"] == "passed"
+    assert "runtime_stop" not in report["phases"]
+    assert (tmp_path / "state-windows-diagnostic").as_posix() in calls[-1][1]
+    assert "windows runtime diagnostic:" in capsys.readouterr().out
+
+
+def test_windows_runtime_diagnostic_stops_running_runtime(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """A successful diagnostic start should not leak a runtime process."""
+    module = _module()
+    calls: list[tuple[str, list[str]]] = []
+
+    def fake_script_path(name: str) -> str:
+        return f"/venv/bin/{name}"
+
+    def fake_run_diagnostic_command(
+        phase: str,
+        command: list[str],
+        **kwargs: object,
+    ) -> dict[str, Any]:
+        calls.append((phase, command))
+        stdout = "{}"
+        if phase == "runtime_worker_start":
+            stdout = json.dumps({"state": "running"})
+        if phase == "runtime_stop":
+            stdout = json.dumps({"state": "stopped"})
+        return {
+            "phase": phase,
+            "status": "passed",
+            "command": command,
+            "returncode": 0,
+            "stdout": stdout,
+            "stderr": "",
+            "runtime_log_diagnostics": "",
+        }
+
+    monkeypatch.setattr(module, "_script_path", fake_script_path)
+    monkeypatch.setattr(
+        module,
+        "_run_diagnostic_command",
+        fake_run_diagnostic_command,
+    )
+
+    report = module.check_windows_runtime_diagnostic(
+        tmp_path / "state",
+        startup_timeout=3.0,
+        stop_timeout=5.0,
+    )
+
+    assert report["summary"]["status"] == "passed"
+    assert report["phases"]["runtime_stop"]["status"] == "passed"
+    assert calls[-1] == (
+        "runtime_stop",
+        [
+            "/venv/bin/histdatacom",
+            "runtime",
+            "--state-dir",
+            str(tmp_path / "state-windows-diagnostic"),
+            "--json",
+            "stop",
+        ],
+    )
+
+
 def test_check_quality_runtime_smoke_runs_installed_quality_cli(
     monkeypatch,
     tmp_path: Path,

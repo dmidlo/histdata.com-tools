@@ -218,6 +218,19 @@ jobs:
       - name: Upgrade installer
         run: python -m pip install --upgrade pip
 
+      - name: Diagnose Windows runtime startup
+        if: matrix.platform_key == 'windows-x86_64'
+        run: >
+          python scripts/smoke_runtime_install.py
+          --wheel-dir dist-platform
+          --state-dir .runtime-diagnostic
+          --require-bundled-current-platform
+          --check-executable-version
+          --skip-cli
+          --windows-runtime-diagnostic
+          --live-startup-timeout 45
+          --live-stop-timeout 45
+
       - name: Smoke bundled runtime install hermetically
         run: >
           python scripts/smoke_runtime_install.py

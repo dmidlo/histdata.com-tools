@@ -113,6 +113,20 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
     assert smoke_runners["macos-x86_64"] == "macos-15-intel"
     assert smoke_runners["macos-arm64"] == "macos-15"
     assert smoke_runners["windows-x86_64"] == "windows-2022"
+    diagnostic_step = next(
+        step
+        for step in smoke_platform["steps"]
+        if step.get("name") == "Diagnose Windows runtime startup"
+    )
+    assert diagnostic_step["if"] == "matrix.platform_key == 'windows-x86_64'"
+    diagnostic_command = _step_run(
+        smoke_platform,
+        "Diagnose Windows runtime startup",
+    )
+    assert "--skip-cli" in diagnostic_command
+    assert "--windows-runtime-diagnostic" in diagnostic_command
+    assert "--require-bundled-current-platform" in diagnostic_command
+    assert "--check-executable-version" in diagnostic_command
     smoke_command = _step_run(
         smoke_platform,
         "Smoke bundled runtime install hermetically",

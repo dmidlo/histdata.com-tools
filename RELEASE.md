@@ -271,7 +271,6 @@ CI inspects the built wheel with `scripts/inspect_wheel.py`, writes
 `dist/runtime-wheel-report.json`, uploads that report with the distribution
 artifacts, and then installs the built wheel on Ubuntu, macOS, and Windows.
 Those platform smoke checks verify the runtime resource manifest and the
-Those platform smoke checks verify the runtime resource manifest and the
 offline runtime CLI probes against the artifact that would be published. They
 also run the installed `histdatacom --quality` command through the packaged
 Temporal runtime against clean and dirty local fixtures.
@@ -311,6 +310,17 @@ guarded to match local policy: TestPyPI is only dispatchable from `dev`, and
 PyPI is only dispatchable from `main`. Publishing through GitHub Actions also
 requires a matching protected environment approval and OIDC Trusted Publishing
 configured on the target index.
+
+Actions publishing remains a guarded release path, not the authoritative local
+publish path. Before any Actions publish job can run, the release workflow must
+build all bundled platform wheels, install each artifact, and pass the
+blocking bundled-runtime smoke matrix. The Windows leg is intentionally pinned
+to `windows-2022` with Python 3.12 and the current Temporal SDK constraint; it
+also runs a Windows-only diagnostic before the blocking smoke. That diagnostic
+separates package import, Temporal bridge import, console-script startup, and
+runtime worker startup so failures can be assigned to the runner image, Python
+runtime, Temporal native bridge, or this package's worker startup path with
+workflow evidence.
 
 Release artifact provenance covers everything under `dist/`, including the
 runtime wheel inspection report. The release build runs the same runtime wheel

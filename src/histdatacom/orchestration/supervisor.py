@@ -344,10 +344,6 @@ def _orchestration_worker_command_prefix(
     os_name: str | None = None,
 ) -> tuple[str, ...]:
     """Return the command prefix used to launch an orchestration worker."""
-    if (os_name or os.name) == "nt":
-        worker_launcher = _windows_orchestration_worker_launcher(executable)
-        if worker_launcher is not None:
-            return (str(worker_launcher),)
     return (
         _python_module_executable(executable, os_name=os_name),
         "-m",

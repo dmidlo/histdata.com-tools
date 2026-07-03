@@ -340,23 +340,29 @@ def test_build_orchestration_worker_start_command_uses_lane_config(
     assert command[command.index("--max-concurrent-activities") + 1] == "7"
 
 
-def test_orchestration_worker_command_prefix_uses_windows_launcher(
+def test_orchestration_worker_command_prefix_uses_python_module_on_windows(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Windows installed workers should run through their console script."""
+    """Windows runtime workers should avoid console-script launcher crashes."""
     scripts_dir = tmp_path / "venv" / "Scripts"
     scripts_dir.mkdir(parents=True)
     launcher = scripts_dir / "histdatacom.exe"
     worker = scripts_dir / "histdatacom-orchestration-worker.exe"
     launcher.write_text("", encoding="utf-8")
     worker.write_text("", encoding="utf-8")
+    python = scripts_dir / "python.exe"
+    python.write_text("", encoding="utf-8")
     monkeypatch.setattr(supervisor_module.shutil, "which", lambda name: None)
 
     assert supervisor_module._orchestration_worker_command_prefix(
         str(launcher),
         os_name="nt",
-    ) == (str(worker),)
+    ) == (
+        str(python),
+        "-m",
+        supervisor_module.ORCHESTRATION_WORKER_MODULE,
+    )
 
 
 def test_build_orchestration_worker_start_command_uses_worker_prefix(

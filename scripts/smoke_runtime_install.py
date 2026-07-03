@@ -17,6 +17,7 @@ from typing import Any, Mapping, Sequence
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 120.0
 MAX_DIAGNOSTIC_LOG_CHARS = 12000
 MAX_DIAGNOSTIC_LOGS = 8
+MAX_DIAGNOSTIC_STREAM_CHARS = 4000
 EXPECTED_ASSETS = (
     "README.md",
     "manifest.json",
@@ -250,6 +251,225 @@ def _run_json(
             f"command emitted non-object JSON: {' '.join(command)}"
         )
     return payload
+
+
+def _diagnostic_stream_text(text: str) -> str:
+    """Return bounded command output for diagnostic JSON."""
+    if len(text) <= MAX_DIAGNOSTIC_STREAM_CHARS:
+        return text
+    return (
+        f"... <truncated to last {MAX_DIAGNOSTIC_STREAM_CHARS} chars>\n"
+        f"{text[-MAX_DIAGNOSTIC_STREAM_CHARS:]}"
+    )
+
+
+def _run_diagnostic_command(
+    phase: str,
+    command: Sequence[str],
+    *,
+    env: Mapping[str, str] | None = None,
+    timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Run a diagnostic command without hiding later blocking smoke output."""
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            env=(dict(env) if env is not None else None),
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as err:
+        stdout = _command_output_text(err.stdout)
+        stderr = _command_output_text(err.stderr)
+        diagnostics = _runtime_log_diagnostics(command, stdout=stdout)
+        return {
+            "phase": phase,
+            "status": "timed_out",
+            "command": list(command),
+            "timeout_seconds": timeout,
+            "stdout": _diagnostic_stream_text(stdout),
+            "stderr": _diagnostic_stream_text(stderr),
+            "runtime_log_diagnostics": _diagnostic_stream_text(diagnostics),
+        }
+
+    diagnostics = ""
+    if completed.returncode != 0:
+        diagnostics = _runtime_log_diagnostics(
+            command,
+            stdout=completed.stdout,
+        )
+    return {
+        "phase": phase,
+        "status": "passed" if completed.returncode == 0 else "failed",
+        "command": list(command),
+        "returncode": completed.returncode,
+        "stdout": _diagnostic_stream_text(completed.stdout),
+        "stderr": _diagnostic_stream_text(completed.stderr),
+        "runtime_log_diagnostics": _diagnostic_stream_text(diagnostics),
+    }
+
+
+def _diagnostic_phase_passed(
+    phases: Mapping[str, Mapping[str, Any]],
+    name: str,
+) -> bool:
+    return phases.get(name, {}).get("status") == "passed"
+
+
+def _runtime_startup_diagnostic_summary(
+    phases: Mapping[str, Mapping[str, Any]],
+) -> dict[str, str]:
+    """Return the first failing startup layer for release-run triage."""
+    checks = (
+        ("python_import", "python_import"),
+        ("temporalio_bridge", "temporalio_bridge"),
+        ("histdatacom_console", "console_script_startup"),
+        ("worker_console", "console_script_startup"),
+        ("runtime_worker_start", "runtime_worker_startup"),
+    )
+    for phase_name, layer in checks:
+        if not _diagnostic_phase_passed(phases, phase_name):
+            return {
+                "layer": layer,
+                "phase": phase_name,
+                "status": "failed",
+            }
+    return {
+        "layer": "runtime_startup",
+        "phase": "runtime_worker_start",
+        "status": "passed",
+    }
+
+
+def _mark_runtime_start_payload(
+    phase: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Attach parsed runtime start JSON and fail non-running payloads."""
+    payload = _json_object_or_none(str(phase.get("stdout", "")))
+    if payload is not None:
+        phase["payload"] = payload
+    if phase.get("status") == "passed" and payload is None:
+        phase["status"] = "failed"
+        phase["message"] = "runtime start did not emit JSON"
+    elif phase.get("status") == "passed" and payload.get("state") != "running":
+        phase["status"] = "failed"
+        phase["message"] = "runtime start did not report running state"
+    return payload
+
+
+def check_windows_runtime_diagnostic(
+    state_dir: Path,
+    *,
+    startup_timeout: float,
+    stop_timeout: float,
+) -> dict[str, Any]:
+    """Collect a Windows release-smoke startup diagnostic by layer."""
+    diagnostic_state_dir = (
+        state_dir.parent / f"{state_dir.name}-windows-diagnostic"
+    )
+    diagnostic_state_dir.mkdir(parents=True, exist_ok=True)
+    histdatacom = _script_path("histdatacom")
+    worker = _script_path("histdatacom-orchestration-worker")
+    phases: dict[str, dict[str, Any]] = {}
+
+    phases["python_import"] = _run_diagnostic_command(
+        "python_import",
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json, sys; "
+                "import histdatacom; "
+                "import histdatacom.orchestration.supervisor; "
+                "import histdatacom.orchestration.worker; "
+                "print(json.dumps({"
+                "'python': sys.version.split()[0], "
+                "'executable': sys.executable, "
+                "'histdatacom': histdatacom.__version__"
+                "}))"
+            ),
+        ],
+    )
+    phases["temporalio_bridge"] = _run_diagnostic_command(
+        "temporalio_bridge",
+        [
+            sys.executable,
+            "-c",
+            (
+                "import importlib.metadata, json; "
+                "import temporalio, temporalio.bridge, "
+                "temporalio.client, temporalio.worker; "
+                "print(json.dumps({"
+                "'temporalio': importlib.metadata.version('temporalio'), "
+                "'bridge': temporalio.bridge.__name__"
+                "}))"
+            ),
+        ],
+    )
+    phases["histdatacom_console"] = _run_diagnostic_command(
+        "histdatacom_console",
+        [histdatacom, "--version"],
+    )
+    phases["worker_console"] = _run_diagnostic_command(
+        "worker_console",
+        [worker, "--help"],
+    )
+
+    start_command = [
+        histdatacom,
+        "runtime",
+        "--state-dir",
+        str(diagnostic_state_dir),
+        "--json",
+        "start",
+        "--startup-timeout",
+        str(startup_timeout),
+    ]
+    runtime_start = _run_diagnostic_command(
+        "runtime_worker_start",
+        start_command,
+        timeout=startup_timeout + 60.0,
+    )
+    start_payload = _mark_runtime_start_payload(runtime_start)
+    phases["runtime_worker_start"] = runtime_start
+
+    if (
+        start_payload is not None
+        and start_payload.get("state") == "running"
+    ):
+        phases["runtime_stop"] = _run_diagnostic_command(
+            "runtime_stop",
+            [
+                histdatacom,
+                "runtime",
+                "--state-dir",
+                str(diagnostic_state_dir),
+                "--json",
+                "stop",
+            ],
+            timeout=stop_timeout + 60.0,
+        )
+
+    report = {
+        "os_name": os.name,
+        "platform": sys.platform,
+        "python_executable": sys.executable,
+        "state_dir": str(diagnostic_state_dir),
+        "console_scripts": {
+            "histdatacom": histdatacom,
+            "histdatacom-orchestration-worker": worker,
+        },
+        "summary": _runtime_startup_diagnostic_summary(phases),
+        "phases": phases,
+    }
+    print(  # noqa:T201
+        "windows runtime diagnostic: "
+        f"{json.dumps(report, sort_keys=True)}",
+        flush=True,
+    )
+    return report
 
 
 def install_wheel(
@@ -1076,6 +1296,14 @@ def main() -> None:
         help="start the runtime without --executable and then stop it",
     )
     parser.add_argument(
+        "--windows-runtime-diagnostic",
+        action="store_true",
+        help=(
+            "collect layered Windows startup diagnostics before the blocking "
+            "runtime smoke"
+        ),
+    )
+    parser.add_argument(
         "--live-runtime-smoke",
         action="store_true",
         help=(
@@ -1181,11 +1409,20 @@ def main() -> None:
                 temporal_executable=args.temporal_executable,
             ),
             "cli": None,
+            "windows_runtime_diagnostic": None,
             "hermetic_runtime": None,
             "default_routing_runtime": None,
             "quality_runtime": None,
             "live_runtime": None,
         }
+        if args.windows_runtime_diagnostic:
+            report["windows_runtime_diagnostic"] = (
+                check_windows_runtime_diagnostic(
+                    state_dir,
+                    startup_timeout=args.live_startup_timeout,
+                    stop_timeout=args.live_stop_timeout,
+                )
+            )
         if not args.skip_cli:
             report["cli"] = check_cli_smoke(
                 state_dir,
