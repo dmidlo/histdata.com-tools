@@ -54,13 +54,17 @@ def _append_resource(manifest: dict[str, object], resource: str) -> None:
         resource_files.append(resource)
 
 
-def _provenance() -> dict[str, object]:
+def _provenance(
+    *,
+    platform_key: str = "macos-arm64",
+    executable_resource: str = "bin/macos-arm64/temporal",
+) -> dict[str, object]:
     """Return bundled Temporal CLI provenance for the test executable."""
     return {
         "schema_version": 1,
         "component": "temporal-cli",
         "bundled": True,
-        "platform": "macos-arm64",
+        "platform": platform_key,
         "version": "1.7.2",
         "upstream": {
             "repository": "https://github.com/temporalio/cli",
@@ -80,7 +84,7 @@ def _provenance() -> dict[str, object]:
             "sha256_verified": True,
         },
         "executable": {
-            "resource_path": "bin/macos-arm64/temporal",
+            "resource_path": executable_resource,
             "sha256": hashlib.sha256(EXECUTABLE_BYTES).hexdigest(),
             "size_bytes": len(EXECUTABLE_BYTES),
             "version_probe": "temporal version 1.7.2",
@@ -237,6 +241,103 @@ def test_inspect_wheel_accepts_bundled_platform_executable(
         report["classifiers"]
     )
     assert report["wheel_tags"] == ["py3-none-macosx_11_0_arm64"]
+
+
+def test_inspect_wheel_accepts_windows_exe_without_unix_execute_mode(
+    tmp_path: Path,
+) -> None:
+    """Windows bundled executables should not require POSIX execute bits."""
+    module = _load_script()
+    manifest = _base_manifest()
+    manifest["embedded_binary"] = True
+    _append_resource(manifest, "bin/windows-x86_64/temporal.exe")
+    _append_resource(manifest, "temporal-cli-provenance.json")
+    platforms = manifest["platforms"]
+    assert isinstance(platforms, dict)
+    platform_resource = platforms["windows-x86_64"]
+    assert isinstance(platform_resource, dict)
+    platform_resource["bundled"] = True
+    platform_resource["provenance"] = "temporal-cli-provenance.json"
+    platform_resource["license"] = "third-party/temporal-cli/LICENSE"
+    platform_resource["notice"] = "third-party/temporal-cli/NOTICE.md"
+    platform_resource["notes"] = "test bundled executable"
+    wheel_path = tmp_path / "histdatacom-1.0.0-py3-none-win_amd64.whl"
+
+    with ZipFile(wheel_path, "w") as wheel:
+        _write_common_assets(wheel, manifest=manifest)
+        wheel.writestr(
+            "histdatacom/orchestration/assets/temporal-cli-provenance.json",
+            json.dumps(
+                _provenance(
+                    platform_key="windows-x86_64",
+                    executable_resource="bin/windows-x86_64/temporal.exe",
+                )
+            ),
+        )
+        wheel.writestr(
+            _wheel_info(
+                "histdatacom/orchestration/assets/bin/windows-x86_64/temporal.exe",
+                mode=0o644,
+            ),
+            EXECUTABLE_BYTES,
+        )
+        _write_dist_info(wheel, tag="py3-none-win_amd64")
+
+    report = module.inspect_wheel(
+        wheel_path,
+        require_bundled_platforms={"windows-x86_64"},
+    )
+
+    assert report["runtime"]["bundled_platforms"] == ["windows-x86_64"]
+    assert (
+        report["runtime"]["provenance"]["windows-x86_64"]["executable"][
+            "resource_path"
+        ]
+        == "bin/windows-x86_64/temporal.exe"
+    )
+    assert report["wheel_tags"] == ["py3-none-win_amd64"]
+
+
+def test_inspect_wheel_rejects_posix_executable_without_execute_mode(
+    tmp_path: Path,
+) -> None:
+    """POSIX bundled executables still need executable mode metadata."""
+    module = _load_script()
+    manifest = _base_manifest()
+    manifest["embedded_binary"] = True
+    _append_resource(manifest, "bin/macos-arm64/temporal")
+    _append_resource(manifest, "temporal-cli-provenance.json")
+    platforms = manifest["platforms"]
+    assert isinstance(platforms, dict)
+    platform_resource = platforms["macos-arm64"]
+    assert isinstance(platform_resource, dict)
+    platform_resource["bundled"] = True
+    platform_resource["provenance"] = "temporal-cli-provenance.json"
+    platform_resource["license"] = "third-party/temporal-cli/LICENSE"
+    platform_resource["notice"] = "third-party/temporal-cli/NOTICE.md"
+    platform_resource["notes"] = "test bundled executable"
+    wheel_path = tmp_path / "histdatacom-1.0.0-py3-none-macosx_11_0_arm64.whl"
+
+    with ZipFile(wheel_path, "w") as wheel:
+        _write_common_assets(wheel, manifest=manifest)
+        wheel.writestr(
+            "histdatacom/orchestration/assets/temporal-cli-provenance.json",
+            json.dumps(_provenance()),
+        )
+        wheel.writestr(
+            _wheel_info(
+                "histdatacom/orchestration/assets/bin/macos-arm64/temporal",
+                mode=0o644,
+            ),
+            EXECUTABLE_BYTES,
+        )
+        _write_dist_info(wheel, tag="py3-none-macosx_11_0_arm64")
+
+    with pytest.raises(SystemExit, match="not executable for macos-arm64"):
+        module.inspect_wheel(
+            wheel_path,
+            require_bundled_platforms={"macos-arm64"},
+        )
 
 
 def test_inspect_wheel_accepts_metadata_only_fallback(

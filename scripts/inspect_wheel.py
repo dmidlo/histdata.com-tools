@@ -74,6 +74,11 @@ def _current_platform_key(
     )
 
 
+def _is_windows_platform(platform_key: str) -> bool:
+    """Return whether a runtime platform key targets Windows."""
+    return platform_key.startswith("windows-")
+
+
 def _single_wheel(dist_dir: Path) -> Path:
     wheels = sorted(dist_dir.glob("histdatacom-*.whl"))
     if len(wheels) != 1:
@@ -386,7 +391,11 @@ def inspect_wheel(
                     )
                 info = wheel.getinfo(executable_path)
                 mode = (info.external_attr >> 16) & 0o777
-                if mode and mode & 0o111 == 0:
+                if (
+                    mode
+                    and mode & 0o111 == 0
+                    and not _is_windows_platform(str(key))
+                ):
                     raise SystemExit(
                         f"runtime executable is not executable for {key}: "
                         f"{executable_path}"
