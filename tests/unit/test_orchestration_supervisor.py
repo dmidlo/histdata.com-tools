@@ -422,6 +422,35 @@ def test_start_writes_state_and_is_idempotent_for_running_orchestration(
     assert not paths.lock_file.exists()
 
 
+def test_start_preserves_launch_error_when_cleanup_is_denied(
+    tmp_path: Path,
+) -> None:
+    """Windows cleanup failures should not mask the startup failure."""
+    executable = _executable(tmp_path)
+    policy = _policy(tmp_path)
+    launches = 0
+
+    def process_factory(command: list[str], **_kwargs: object) -> _FakeProcess:
+        nonlocal launches
+        launches += 1
+        if launches == 1:
+            return _FakeProcess(4321)
+        raise RuntimeError(f"worker launch failed: {' '.join(command)}")
+
+    def terminate(_pid: int) -> None:
+        raise PermissionError("[WinError 5] Access is denied")
+
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: pid == 4321,
+        process_factory=process_factory,
+        process_terminate=terminate,
+    )
+
+    with pytest.raises(RuntimeError, match="worker launch failed"):
+        supervisor.start(executable=executable)
+
+
 def test_start_without_explicit_executable_uses_runtime_resolver(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -939,6 +968,39 @@ def test_stop_force_kills_processes_that_ignore_termination(
     assert killed == [200, 300, 100]
     assert not paths.pid_file.exists()
     assert not paths.lock_file.exists()
+
+
+def test_stop_reports_running_processes_when_termination_is_denied(
+    tmp_path: Path,
+) -> None:
+    """Denied PID termination should surface as still-running state."""
+    paths = OrchestrationPaths.from_state_dir(tmp_path / "state")
+    paths.state_dir.mkdir(parents=True)
+    paths.pid_file.write_text(
+        json.dumps(
+            {
+                "pids": {"server": 100},
+                "command": ["/tmp/temporal", "server", "start-dev"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def denied(_pid: int) -> None:
+        raise PermissionError("[WinError 5] Access is denied")
+
+    supervisor = _supervisor(
+        paths=paths,
+        process_exists=lambda pid: pid == 100,
+        process_terminate=denied,
+        process_kill=denied,
+    )
+
+    status = supervisor.stop(stop_timeout=0.0)
+
+    assert status.state == "stopping"
+    assert status.pids == {"server": 100}
+    assert paths.pid_file.exists()
 
 
 def test_process_exists_treats_reaped_child_pid_as_dead(

@@ -570,7 +570,18 @@ class OrchestrationSupervisor:
             if current.state == "stopped":
                 return current
             if current.state == "stale":
-                self._terminate_and_wait(current.pids, stop_timeout)
+                still_running = self._terminate_and_wait(
+                    current.pids,
+                    stop_timeout,
+                )
+                if still_running:
+                    return self._status(
+                        "stopping",
+                        "Stale orchestration processes still running: "
+                        f"{still_running}.",
+                        still_running,
+                        current.command,
+                    )
                 self._remove_state_files()
                 return self._status(
                     "stopped",
@@ -727,6 +738,7 @@ class OrchestrationSupervisor:
         )
         runtime_policy.write_manifest()
         pids: dict[str, int] = {}
+        processes: dict[str, Any] = {}
         commands: dict[str, list[str]] = {}
         logs: dict[str, str] = {"server": str(self.paths.server_log)}
         worker_readiness: dict[str, dict[str, Any]] = {}
@@ -738,6 +750,7 @@ class OrchestrationSupervisor:
                 self.paths.server_log,
             )
             pids["server"] = int(server_process.pid)
+            processes["server"] = server_process
             commands["server"] = list(server_command)
             if not self._process_running(server_process):
                 raise RuntimeError(
@@ -766,6 +779,7 @@ class OrchestrationSupervisor:
                         f"startup. See log: {log_path}"
                     )
                 pids[component] = int(worker_process.pid)
+                processes[component] = worker_process
                 commands[component] = list(worker_command)
                 logs[component] = str(log_path)
                 worker_readiness[lane.value] = self._wait_for_worker_ready(
@@ -801,7 +815,7 @@ class OrchestrationSupervisor:
                 worker_readiness=worker_readiness,
             )
         except Exception:
-            self._terminate_pids(pids)
+            self._cleanup_started_processes(processes, pids)
             raise
 
     def _acquire_lock(self) -> None:
@@ -1541,7 +1555,10 @@ class OrchestrationSupervisor:
             key=lambda item: 1 if item[0] == "server" else 0,
         ):
             if pid > 0 and self._process_exists(pid):
-                self._process_terminate(pid)
+                self._attempt_process_action(
+                    self._process_terminate,
+                    pid,
+                )
 
     def _kill_pids(self, pids: Mapping[str, int]) -> None:
         """Force termination for all known component PIDs."""
@@ -1550,7 +1567,81 @@ class OrchestrationSupervisor:
             key=lambda item: 1 if item[0] == "server" else 0,
         ):
             if pid > 0 and self._process_exists(pid):
-                self._process_kill(pid)
+                self._attempt_process_action(
+                    self._process_kill,
+                    pid,
+                )
+
+    def _cleanup_started_processes(
+        self,
+        processes: Mapping[str, Any],
+        pids: Mapping[str, int],
+    ) -> None:
+        """Best-effort cleanup for a startup that failed partway through."""
+        for component, process in sorted(
+            processes.items(),
+            key=lambda item: 1 if item[0] == "server" else 0,
+        ):
+            terminate = getattr(process, "terminate", None)
+            pid = int(getattr(process, "pid", 0) or pids.get(component, 0))
+            if callable(terminate):
+                self._attempt_process_action(terminate)
+            elif pid > 0 and self._process_exists(pid):
+                self._attempt_process_action(self._process_terminate, pid)
+
+        self._wait_for_started_processes(processes, timeout=1.0)
+
+        for component, process in sorted(
+            processes.items(),
+            key=lambda item: 1 if item[0] == "server" else 0,
+        ):
+            pid = int(getattr(process, "pid", 0) or pids.get(component, 0))
+            if pid <= 0 or not self._process_exists(pid):
+                continue
+            kill = getattr(process, "kill", None)
+            if callable(kill):
+                self._attempt_process_action(kill)
+            else:
+                self._attempt_process_action(self._process_kill, pid)
+
+        missing_processes = {
+            component: pid
+            for component, pid in pids.items()
+            if component not in processes
+        }
+        if missing_processes:
+            self._kill_pids(missing_processes)
+
+    def _wait_for_started_processes(
+        self,
+        processes: Mapping[str, Any],
+        *,
+        timeout: float,
+    ) -> None:
+        """Best-effort wait for owned process handles to exit."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        for process in processes.values():
+            wait = getattr(process, "wait", None)
+            if not callable(wait):
+                continue
+            remaining = max(0.0, deadline - time.monotonic())
+            try:
+                wait(timeout=remaining)
+            except subprocess.TimeoutExpired:
+                continue
+            except (OSError, PermissionError, ProcessLookupError):
+                continue
+
+    @staticmethod
+    def _attempt_process_action(
+        action: Callable[..., None],
+        *args: object,
+    ) -> None:
+        """Run a process action without masking a caller's primary error."""
+        try:
+            action(*args)
+        except (OSError, PermissionError, ProcessLookupError):
+            return
 
     def _remove_state_files(self) -> None:
         """Remove PID and lock files."""
