@@ -1203,7 +1203,7 @@ class OrchestrationSupervisor:
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=subprocess.STDOUT,
-                close_fds=os.name != "nt",
+                close_fds=True,
                 start_new_session=os.name != "nt",
             )
         finally:

@@ -348,6 +348,7 @@ def test_start_writes_state_and_is_idempotent_for_running_orchestration(
     policy = _policy(tmp_path)
     paths = policy.paths
     calls: list[list[str]] = []
+    launch_kwargs: list[dict[str, object]] = []
     live_pids: set[int] = set()
     next_pid = iter(range(1234, 1240))
 
@@ -355,6 +356,7 @@ def test_start_writes_state_and_is_idempotent_for_running_orchestration(
         pid = next(next_pid)
         live_pids.add(pid)
         calls.append(command)
+        launch_kwargs.append(dict(kwargs))
         _write_ready_marker_from_command(command, pid)
         return _FakeProcess(pid)
 
@@ -383,6 +385,11 @@ def test_start_writes_state_and_is_idempotent_for_running_orchestration(
         "cpu-file",
         "influx",
     ]
+    assert all(kwargs["close_fds"] is True for kwargs in launch_kwargs)
+    assert all(
+        kwargs["start_new_session"] is (supervisor_module.os.name != "nt")
+        for kwargs in launch_kwargs
+    )
     assert state["schema_version"] == ORCHESTRATION_STATE_SCHEMA_VERSION
     assert state["pids"] == {
         "server": 1234,

@@ -229,6 +229,7 @@ def test_check_quality_runtime_smoke_runs_installed_quality_cli(
         command: list[str],
         *,
         env: dict[str, str] | None = None,
+        timeout: float = module.DEFAULT_COMMAND_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         commands.append(command)
         run_envs.append(dict(env or {}))
@@ -302,6 +303,32 @@ def test_check_quality_runtime_smoke_runs_installed_quality_cli(
         env.get("HISTDATACOM_RUNTIME_HOME") == str(tmp_path / "runtime")
         for env in run_envs
     )
+
+
+def test_smoke_command_timeout_fails_with_command_output(monkeypatch) -> None:
+    """Smoke subprocesses should fail boundedly when a CLI command wedges."""
+    module = _module()
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        raise module.subprocess.TimeoutExpired(
+            cmd=["histdatacom", "runtime", "start"],
+            timeout=12.0,
+            output="partial stdout",
+            stderr="partial stderr",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    try:
+        module._run(["histdatacom", "runtime", "start"], timeout=12.0)
+    except SystemExit as err:
+        message = str(err)
+        assert "command timed out after 12s" in message
+        assert "histdatacom runtime start" in message
+        assert "partial stdout" in message
+        assert "partial stderr" in message
+    else:  # pragma: no cover - defensive assertion shape
+        raise AssertionError("expected timed-out command to fail")
 
 
 def test_quality_runtime_smoke_rejects_shutdown_leaks() -> None:

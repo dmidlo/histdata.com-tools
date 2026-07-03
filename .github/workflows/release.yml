@@ -178,6 +178,7 @@ jobs:
     name: Smoke bundled wheel for ${{ matrix.platform_key }}
     needs: build-platform-wheels
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:

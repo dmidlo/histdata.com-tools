@@ -14,6 +14,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 120.0
 EXPECTED_ASSETS = (
     "README.md",
     "manifest.json",
@@ -58,15 +59,26 @@ def _run(
     *,
     env: Mapping[str, str] | None = None,
     expected_returncodes: tuple[int, ...] = (0,),
+    timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
     """Run a smoke command and fail with useful output when it breaks."""
-    completed = subprocess.run(
-        command,
-        capture_output=True,
-        check=False,
-        env=(dict(env) if env is not None else None),
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            env=(dict(env) if env is not None else None),
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as err:
+        stdout = err.stdout or ""
+        stderr = err.stderr or ""
+        raise SystemExit(
+            f"command timed out after {timeout:g}s: {' '.join(command)}\n"
+            f"stdout:\n{stdout}\n"
+            f"stderr:\n{stderr}"
+        ) from err
     if completed.returncode not in expected_returncodes:
         expected = ", ".join(str(code) for code in expected_returncodes)
         raise SystemExit(
@@ -83,9 +95,10 @@ def _run_json(
     command: Sequence[str],
     *,
     env: Mapping[str, str] | None = None,
+    timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Run a command that emits JSON and return the decoded payload."""
-    completed = _run(command, env=env)
+    completed = _run(command, env=env, timeout=timeout)
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as err:
@@ -301,6 +314,8 @@ def check_cli_smoke(
     *,
     require_bundled_current_platform: bool = False,
     start_runtime: bool = False,
+    startup_timeout: float = 20.0,
+    stop_timeout: float = 30.0,
 ) -> dict[str, Any]:
     """Run offline CLI smoke checks against a temporary runtime state dir."""
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -355,8 +370,9 @@ def check_cli_smoke(
                 "--json",
                 "start",
                 "--startup-timeout",
-                "20",
-            ]
+                str(startup_timeout),
+            ],
+            timeout=startup_timeout + 60.0,
         )
         start_state = str(start.get("state", ""))
         if start_state != "running":
@@ -369,7 +385,8 @@ def check_cli_smoke(
                 str(state_dir),
                 "--json",
                 "stop",
-            ]
+            ],
+            timeout=stop_timeout + 60.0,
         )
         stop_state = str(stop.get("state", ""))
     return {
@@ -630,7 +647,7 @@ def _start_quality_runtime(
     ]
     if temporal_executable is not None:
         command.extend(["--executable", str(temporal_executable)])
-    payload = _run_json(command, env=env)
+    payload = _run_json(command, env=env, timeout=startup_timeout + 60.0)
     if payload.get("state") != "running":
         raise SystemExit(f"quality runtime did not start: {payload}")
     return payload
@@ -835,6 +852,7 @@ def _stop_quality_runtime(
             str(stop_timeout),
         ],
         env=env,
+        timeout=stop_timeout + 60.0,
     )
 
 
@@ -1035,6 +1053,8 @@ def main() -> None:
                     args.require_bundled_current_platform
                 ),
                 start_runtime=args.start_runtime,
+                startup_timeout=args.live_startup_timeout,
+                stop_timeout=args.live_stop_timeout,
             )
         if args.hermetic_runtime_smoke:
             live_workspace = args.live_workspace or Path(temporary_dir) / (

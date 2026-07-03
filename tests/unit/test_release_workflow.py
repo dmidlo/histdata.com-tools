@@ -99,6 +99,7 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
 
     smoke_platform = jobs["smoke-platform-wheels"]
     assert isinstance(smoke_platform, dict)
+    assert smoke_platform["timeout-minutes"] == 20
     smoke_strategy = smoke_platform["strategy"]
     assert isinstance(smoke_strategy, dict)
     smoke_matrix = smoke_strategy["matrix"]
