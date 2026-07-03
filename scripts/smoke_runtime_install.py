@@ -478,6 +478,8 @@ def _runtime_startup_diagnostic_checks() -> tuple[tuple[str, str], ...]:
         ("temporalio_bridge", "temporalio_bridge"),
         ("histdatacom_console", "console_script_startup"),
         ("worker_console", "console_script_startup"),
+        ("runtime_worker_start", "runtime_worker_startup"),
+        ("runtime_stop", "runtime_shutdown"),
         ("server_only_start", "temporal_server_startup"),
         ("worker_client_connect", "temporal_client_connect"),
     ]
@@ -497,7 +499,6 @@ def _runtime_startup_diagnostic_checks() -> tuple[tuple[str, str], ...]:
     checks.extend(
         [
             ("server_only_stop", "temporal_server_shutdown"),
-            ("runtime_worker_start", "runtime_worker_startup"),
         ]
     )
     return tuple(checks)
@@ -601,6 +602,45 @@ def _mark_runtime_start_payload(
     return payload
 
 
+def _run_full_runtime_start_stop_diagnostic(
+    phases: dict[str, dict[str, Any]],
+    histdatacom: str,
+    state_dir: Path,
+    *,
+    startup_timeout: float,
+    stop_timeout: float,
+) -> None:
+    """Run the real supervised runtime path before lower-level probes."""
+    runtime_start = _run_diagnostic_command(
+        "runtime_worker_start",
+        [
+            histdatacom,
+            "runtime",
+            "--state-dir",
+            str(state_dir),
+            "--json",
+            "start",
+            "--startup-timeout",
+            str(startup_timeout),
+        ],
+        timeout=startup_timeout + 60.0,
+    )
+    _mark_runtime_start_payload(runtime_start)
+    phases["runtime_worker_start"] = runtime_start
+    phases["runtime_stop"] = _run_diagnostic_command(
+        "runtime_stop",
+        [
+            histdatacom,
+            "runtime",
+            "--state-dir",
+            str(state_dir),
+            "--json",
+            "stop",
+        ],
+        timeout=stop_timeout + 60.0,
+    )
+
+
 def check_windows_runtime_diagnostic(
     state_dir: Path,
     *,
@@ -609,7 +649,9 @@ def check_windows_runtime_diagnostic(
 ) -> dict[str, Any]:
     """Collect a Windows release-smoke startup diagnostic by layer."""
     diagnostic_state_dir = state_dir.parent / f"{state_dir.name}-windows-diagnostic"
+    runtime_state_dir = state_dir.parent / f"{state_dir.name}-windows-runtime"
     diagnostic_state_dir.mkdir(parents=True, exist_ok=True)
+    runtime_state_dir.mkdir(parents=True, exist_ok=True)
     histdatacom = _script_path("histdatacom")
     worker = _script_path("histdatacom-orchestration-worker")
     phases: dict[str, dict[str, Any]] = {}
@@ -657,108 +699,85 @@ def check_windows_runtime_diagnostic(
         [worker, "--help"],
     )
 
-    server_start, server_supervisor = _start_server_only_runtime(
-        diagnostic_state_dir,
-        startup_timeout=startup_timeout,
-    )
-    phases["server_only_start"] = server_start
-    try:
-        if (
-            _diagnostic_phase_passed(phases, "server_only_start")
-            and server_supervisor is not None
-        ):
-            worker_env = _server_only_runtime_env(server_supervisor)
-            phases["worker_client_connect"] = _run_diagnostic_command(
-                "worker_client_connect",
-                _worker_startup_diagnostic_command(
-                    diagnostic_state_dir,
-                    stop_after="client-connect",
-                ),
-                env=worker_env,
-                timeout=startup_timeout + 60.0,
-            )
-            for lane in WORKER_STARTUP_DIAGNOSTIC_LANES:
-                construct_phase = _worker_startup_phase_name(
-                    "worker_construct",
-                    lane,
-                )
-                phases[construct_phase] = _run_diagnostic_command(
-                    construct_phase,
-                    _worker_startup_diagnostic_command(
-                        diagnostic_state_dir,
-                        stop_after="worker-construct",
-                        lane=lane,
-                    ),
-                    env=worker_env,
-                    timeout=startup_timeout + 60.0,
-                )
-                run_phase = _worker_startup_phase_name(
-                    "worker_run_probe",
-                    lane,
-                )
-                phases[run_phase] = _run_diagnostic_command(
-                    run_phase,
-                    _worker_startup_diagnostic_command(
-                        diagnostic_state_dir,
-                        stop_after="worker-run",
-                        lane=lane,
-                    ),
-                    env=worker_env,
-                    timeout=startup_timeout + 60.0,
-                )
-    finally:
-        if server_supervisor is not None:
-            phases["server_only_stop"] = _stop_server_only_runtime(
-                server_supervisor,
-                stop_timeout=stop_timeout,
-            )
-
-    preflight_phase_names = [
-        phase_name
-        for phase_name, _layer in _runtime_startup_diagnostic_checks()
-        if phase_name != "runtime_worker_start"
-    ]
     if all(
         _diagnostic_phase_passed(phases, phase_name)
-        for phase_name in preflight_phase_names
-    ):
-        start_command = [
-            histdatacom,
-            "runtime",
-            "--state-dir",
-            str(diagnostic_state_dir),
-            "--json",
-            "start",
-            "--startup-timeout",
-            str(startup_timeout),
-        ]
-        runtime_start = _run_diagnostic_command(
-            "runtime_worker_start",
-            start_command,
-            timeout=startup_timeout + 60.0,
+        for phase_name in (
+            "python_import",
+            "temporalio_bridge",
+            "histdatacom_console",
+            "worker_console",
         )
-        start_payload = _mark_runtime_start_payload(runtime_start)
-        phases["runtime_worker_start"] = runtime_start
+    ):
+        _run_full_runtime_start_stop_diagnostic(
+            phases,
+            histdatacom,
+            runtime_state_dir,
+            startup_timeout=startup_timeout,
+            stop_timeout=stop_timeout,
+        )
 
-        if start_payload is not None and start_payload.get("state") == "running":
-            phases["runtime_stop"] = _run_diagnostic_command(
-                "runtime_stop",
-                [
-                    histdatacom,
-                    "runtime",
-                    "--state-dir",
-                    str(diagnostic_state_dir),
-                    "--json",
-                    "stop",
-                ],
-                timeout=stop_timeout + 60.0,
-            )
+        server_start, server_supervisor = _start_server_only_runtime(
+            diagnostic_state_dir,
+            startup_timeout=startup_timeout,
+        )
+        phases["server_only_start"] = server_start
+        try:
+            if (
+                _diagnostic_phase_passed(phases, "server_only_start")
+                and server_supervisor is not None
+            ):
+                worker_env = _server_only_runtime_env(server_supervisor)
+                phases["worker_client_connect"] = _run_diagnostic_command(
+                    "worker_client_connect",
+                    _worker_startup_diagnostic_command(
+                        diagnostic_state_dir,
+                        stop_after="client-connect",
+                    ),
+                    env=worker_env,
+                    timeout=startup_timeout + 60.0,
+                )
+                for lane in WORKER_STARTUP_DIAGNOSTIC_LANES:
+                    construct_phase = _worker_startup_phase_name(
+                        "worker_construct",
+                        lane,
+                    )
+                    phases[construct_phase] = _run_diagnostic_command(
+                        construct_phase,
+                        _worker_startup_diagnostic_command(
+                            diagnostic_state_dir,
+                            stop_after="worker-construct",
+                            lane=lane,
+                        ),
+                        env=worker_env,
+                        timeout=startup_timeout + 60.0,
+                    )
+                    run_phase = _worker_startup_phase_name(
+                        "worker_run_probe",
+                        lane,
+                    )
+                    phases[run_phase] = _run_diagnostic_command(
+                        run_phase,
+                        _worker_startup_diagnostic_command(
+                            diagnostic_state_dir,
+                            stop_after="worker-run",
+                            lane=lane,
+                        ),
+                        env=worker_env,
+                        timeout=startup_timeout + 60.0,
+                    )
+        finally:
+            if server_supervisor is not None:
+                phases["server_only_stop"] = _stop_server_only_runtime(
+                    server_supervisor,
+                    stop_timeout=stop_timeout,
+                )
 
     report = {
         "os_name": os.name,
         "platform": sys.platform,
         "python_executable": sys.executable,
         "state_dir": str(diagnostic_state_dir),
+        "runtime_state_dir": str(runtime_state_dir),
         "console_scripts": {
             "histdatacom": histdatacom,
             "histdatacom-orchestration-worker": worker,

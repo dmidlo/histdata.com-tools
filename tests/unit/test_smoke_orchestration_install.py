@@ -343,12 +343,15 @@ def test_windows_runtime_diagnostic_separates_startup_layers(
     assert report["phases"]["worker_construct_cpu_file"]["status"] == "passed"
     assert report["phases"]["worker_run_probe_cpu_file"]["status"] == "passed"
     assert report["phases"]["server_only_stop"]["status"] == "passed"
-    assert "runtime_stop" not in report["phases"]
-    assert (tmp_path / "state-windows-diagnostic").as_posix() in calls[-1][1]
+    assert report["phases"]["runtime_stop"]["status"] == "passed"
+    assert calls[4][0] == "runtime_worker_start"
+    assert calls[5][0] == "runtime_stop"
+    assert (tmp_path / "state-windows-runtime").as_posix() in calls[4][1]
     assert any(
         phase == "worker_run_probe_cpu_file"
         and "--lane" in command
         and "cpu-file" in command
+        and (tmp_path / "state-windows-diagnostic").as_posix() in command
         and kwargs["env"]["HISTDATACOM_RUNTIME_PORT"] == "17233"
         for phase, command, kwargs in calls
     )
@@ -359,7 +362,7 @@ def test_windows_runtime_diagnostic_classifies_direct_worker_native_crash(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """A direct per-lane worker probe crash should stop before full runtime."""
+    """A direct per-lane worker probe crash should still be classified."""
     module = _module()
     calls: list[str] = []
     supervisor = SimpleNamespace(
@@ -412,12 +415,17 @@ def test_windows_runtime_diagnostic_classifies_direct_worker_native_crash(
                 "stderr": "",
                 "runtime_log_diagnostics": "",
             }
+        stdout = "{}"
+        if phase == "runtime_worker_start":
+            stdout = json.dumps({"state": "running"})
+        if phase == "runtime_stop":
+            stdout = json.dumps({"state": "stopped"})
         return {
             "phase": phase,
             "status": "passed",
             "command": command,
             "returncode": 0,
-            "stdout": "{}",
+            "stdout": stdout,
             "stderr": "",
             "runtime_log_diagnostics": "",
         }
@@ -451,7 +459,11 @@ def test_windows_runtime_diagnostic_classifies_direct_worker_native_crash(
         "status": "failed",
         "lane": "network",
     }
-    assert "runtime_worker_start" not in calls
+    assert calls[:2] == ["python_import", "temporalio_bridge"]
+    assert "runtime_worker_start" in calls
+    assert calls.index("runtime_worker_start") < calls.index(
+        "worker_run_probe_network"
+    )
 
 
 def test_diagnostic_command_uses_windows_process_group(monkeypatch) -> None:
@@ -597,13 +609,26 @@ def test_windows_runtime_diagnostic_stops_running_runtime(
     assert report["summary"]["status"] == "passed"
     assert report["phases"]["server_only_stop"]["status"] == "passed"
     assert report["phases"]["runtime_stop"]["status"] == "passed"
-    assert calls[-1] == (
+    assert calls[4] == (
+        "runtime_worker_start",
+        [
+            "/venv/bin/histdatacom",
+            "runtime",
+            "--state-dir",
+            str(tmp_path / "state-windows-runtime"),
+            "--json",
+            "start",
+            "--startup-timeout",
+            "3.0",
+        ],
+    )
+    assert calls[5] == (
         "runtime_stop",
         [
             "/venv/bin/histdatacom",
             "runtime",
             "--state-dir",
-            str(tmp_path / "state-windows-diagnostic"),
+            str(tmp_path / "state-windows-runtime"),
             "--json",
             "stop",
         ],
