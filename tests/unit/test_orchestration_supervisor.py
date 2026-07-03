@@ -340,6 +340,53 @@ def test_build_orchestration_worker_start_command_uses_lane_config(
     assert command[command.index("--max-concurrent-activities") + 1] == "7"
 
 
+def test_python_module_executable_uses_windows_venv_python_for_launcher(
+    tmp_path: Path,
+) -> None:
+    """Windows console-script launchers should not be reused for ``-m``."""
+    scripts_dir = tmp_path / "venv" / "Scripts"
+    scripts_dir.mkdir(parents=True)
+    launcher = scripts_dir / "histdatacom.exe"
+    python = scripts_dir / "python.exe"
+    launcher.write_text("", encoding="utf-8")
+    python.write_text("", encoding="utf-8")
+
+    assert supervisor_module._python_module_executable(
+        str(launcher),
+        os_name="nt",
+    ) == str(python)
+
+
+def test_python_module_executable_uses_windows_install_python_for_launcher(
+    tmp_path: Path,
+) -> None:
+    """Global Windows installs keep scripts below the Python executable."""
+    install_dir = tmp_path / "Python313"
+    scripts_dir = install_dir / "Scripts"
+    scripts_dir.mkdir(parents=True)
+    launcher = scripts_dir / "histdatacom.exe"
+    python = install_dir / "python.exe"
+    launcher.write_text("", encoding="utf-8")
+    python.write_text("", encoding="utf-8")
+
+    assert supervisor_module._python_module_executable(
+        str(launcher),
+        os_name="nt",
+    ) == str(python)
+
+
+def test_python_module_executable_keeps_current_python_on_posix(
+    tmp_path: Path,
+) -> None:
+    """POSIX console scripts already run under the interpreter binary."""
+    executable = tmp_path / "bin" / "python"
+
+    assert supervisor_module._python_module_executable(
+        str(executable),
+        os_name="posix",
+    ) == str(executable)
+
+
 def test_start_writes_state_and_is_idempotent_for_running_orchestration(
     tmp_path: Path,
 ) -> None:

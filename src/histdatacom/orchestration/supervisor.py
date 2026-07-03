@@ -61,6 +61,7 @@ DEFAULT_STOP_TIMEOUT_SECONDS = 10.0
 DEFAULT_FRONTEND_PROBE_TIMEOUT_SECONDS = 0.2
 DEFAULT_WORKER_LANES = tuple(TaskQueueLane)
 WORKER_COMPONENT_PREFIX = "worker:"
+WINDOWS_PYTHON_EXECUTABLE_NAMES = frozenset({"python.exe", "pythonw.exe"})
 
 ProcessFactory = Callable[..., Any]
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -307,7 +308,7 @@ def build_orchestration_worker_start_command(
     """Build the worker lane subprocess command."""
     profile = config.concurrency_profile
     return (
-        sys.executable,
+        _python_module_executable(),
         "-m",
         "histdatacom.orchestration.worker",
         "--workspace",
@@ -334,6 +335,33 @@ def build_orchestration_worker_start_command(
         "--max-concurrent-activities",
         str(profile.workers_for_lane(config.lane)),
     )
+
+
+def _python_module_executable(
+    executable: str | None = None,
+    *,
+    os_name: str | None = None,
+) -> str:
+    """Return a Python executable suitable for launching ``python -m``."""
+    resolved = Path(executable or sys.executable)
+    if (os_name or os.name) != "nt":
+        return str(resolved)
+    if resolved.name.lower() in WINDOWS_PYTHON_EXECUTABLE_NAMES:
+        return str(resolved)
+
+    for candidate in (
+        resolved.with_name("python.exe"),
+        resolved.parent.parent / "python.exe",
+    ):
+        if candidate.exists():
+            return str(candidate)
+
+    base_executable = getattr(sys, "_base_executable", "")
+    if base_executable:
+        candidate = Path(str(base_executable))
+        if candidate.name.lower() in WINDOWS_PYTHON_EXECUTABLE_NAMES:
+            return str(candidate)
+    return str(resolved)
 
 
 def _temporal_worker_dependency_available() -> bool:
