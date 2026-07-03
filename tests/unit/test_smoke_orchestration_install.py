@@ -191,6 +191,42 @@ def test_check_default_routing_runtime_smoke_returns_report(
     assert captured["stop_timeout"] == 5.0
 
 
+def test_check_cli_smoke_runs_installed_worker_launcher(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Install smoke should verify the packaged worker console script."""
+    module = _module()
+    commands: list[list[str]] = []
+
+    def fake_script_path(name: str) -> str:
+        return f"/venv/bin/{name}"
+
+    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def fake_run_json(command: list[str], **kwargs: object) -> dict[str, Any]:
+        commands.append(command)
+        if "status" in command:
+            return {"state": "stopped"}
+        if "doctor" in command:
+            return {"platform": {"supported": True}}
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(module, "_script_path", fake_script_path)
+    monkeypatch.setattr(module, "_run", fake_run)
+    monkeypatch.setattr(module, "_run_json", fake_run_json)
+
+    report = module.check_cli_smoke(tmp_path / "state")
+
+    assert report["status_state"] == "stopped"
+    assert ["/venv/bin/histdatacom", "--version"] in commands
+    assert ["/venv/bin/histdatacom-orchestration-worker", "--help"] in (
+        commands
+    )
+
+
 def test_check_quality_runtime_smoke_runs_installed_quality_cli(
     monkeypatch,
     tmp_path: Path,

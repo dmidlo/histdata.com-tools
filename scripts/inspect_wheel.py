@@ -39,6 +39,7 @@ EXPECTED_RUNTIME_PLATFORMS = {
 }
 EXPECTED_CONSOLE_SCRIPTS = {
     "histdatacom = histdatacom.histdata_com:main",
+    "histdatacom-orchestration-worker = histdatacom.orchestration.worker:main",
 }
 EXPECTED_METADATA_CLASSIFIERS = {
     "Operating System :: MacOS",

@@ -84,6 +84,7 @@ entry_points = {
 }
 expected_scripts = {
     "histdatacom": "histdatacom.histdata_com:main",
+    "histdatacom-orchestration-worker": "histdatacom.orchestration.worker:main",
 }
 for name, target in expected_scripts.items():
     if entry_points.get(name) != target:
@@ -372,7 +373,7 @@ def _cli_parity_probe(
 ) -> dict[str, Any]:
     """Validate current installed CLI surface and entry-point behavior."""
     histdatacom = _script_path(venv_dir, "histdatacom")
-    venv_python = _venv_python(venv_dir)
+    worker = _script_path(venv_dir, "histdatacom-orchestration-worker")
 
     version_output = _run([str(histdatacom), "--version"], timeout=timeout)
     actual_version = version_output.stdout.strip()
@@ -405,10 +406,7 @@ def _cli_parity_probe(
             "installed runtime CLI help is missing commands: "
             + ", ".join(missing_commands)
         )
-    _run(
-        [str(venv_python), "-m", "histdatacom.orchestration.worker", "--help"],
-        timeout=timeout,
-    )
+    _run([str(worker), "--help"], timeout=timeout)
     groups_report = _groups_cli_parity_probe(
         histdatacom=histdatacom,
         timeout=timeout,

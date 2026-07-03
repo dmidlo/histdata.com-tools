@@ -198,9 +198,11 @@ def test_cli_parity_probe_requires_current_flags(
 ) -> None:
     """The verifier should reject stale artifacts with old CLI help."""
     module = _module()
+    commands: list[list[str]] = []
     json_commands: list[list[str]] = []
 
     def fake_run(command: list[str], **_: Any) -> SimpleNamespace:
+        commands.append(command)
         executable = Path(command[0]).stem
         if executable == "histdatacom" and "--version" in command:
             return SimpleNamespace(returncode=0, stdout="0.79.0\n", stderr="")
@@ -272,6 +274,15 @@ def test_cli_parity_probe_requires_current_flags(
     assert report["groups"]["triangle_group_count"] == (
         module.EXPECTED_TRIANGLE_GROUP_COUNT
     )
+    assert [
+        str(
+            module._script_path(
+                tmp_path / "venv",
+                "histdatacom-orchestration-worker",
+            )
+        ),
+        "--help",
+    ] in commands
     assert json_commands == [
         [
             str(module._script_path(tmp_path / "venv", "histdatacom")),

@@ -62,6 +62,8 @@ DEFAULT_STOP_TIMEOUT_SECONDS = 10.0
 DEFAULT_FRONTEND_PROBE_TIMEOUT_SECONDS = 0.2
 DEFAULT_WORKER_LANES = tuple(TaskQueueLane)
 WORKER_COMPONENT_PREFIX = "worker:"
+ORCHESTRATION_WORKER_MODULE = "histdatacom.orchestration.worker"
+ORCHESTRATION_WORKER_SCRIPT = "histdatacom-orchestration-worker"
 WINDOWS_PYTHON_EXECUTABLE_NAMES = frozenset({"python.exe", "pythonw.exe"})
 
 ProcessFactory = Callable[..., Any]
@@ -309,9 +311,7 @@ def build_orchestration_worker_start_command(
     """Build the worker lane subprocess command."""
     profile = config.concurrency_profile
     return (
-        _python_module_executable(),
-        "-m",
-        "histdatacom.orchestration.worker",
+        *_orchestration_worker_command_prefix(),
         "--workspace",
         str(config.runtime_policy.workspace),
         "--runtime-home",
@@ -336,6 +336,52 @@ def build_orchestration_worker_start_command(
         "--max-concurrent-activities",
         str(profile.workers_for_lane(config.lane)),
     )
+
+
+def _orchestration_worker_command_prefix(
+    executable: str | None = None,
+    *,
+    os_name: str | None = None,
+) -> tuple[str, ...]:
+    """Return the command prefix used to launch an orchestration worker."""
+    if (os_name or os.name) == "nt":
+        worker_launcher = _windows_orchestration_worker_launcher(executable)
+        if worker_launcher is not None:
+            return (str(worker_launcher),)
+    return (
+        _python_module_executable(executable, os_name=os_name),
+        "-m",
+        ORCHESTRATION_WORKER_MODULE,
+    )
+
+
+def _windows_orchestration_worker_launcher(
+    executable: str | None = None,
+) -> Path | None:
+    """Return the installed Windows worker launcher when it is available."""
+    resolved = Path(executable or sys.executable)
+    candidate_dirs = (
+        resolved.parent,
+        resolved.parent / "Scripts",
+        resolved.parent.parent / "Scripts",
+    )
+    script_names = (
+        f"{ORCHESTRATION_WORKER_SCRIPT}.exe",
+        f"{ORCHESTRATION_WORKER_SCRIPT}.cmd",
+        ORCHESTRATION_WORKER_SCRIPT,
+    )
+    seen: set[Path] = set()
+    for directory in candidate_dirs:
+        for script_name in script_names:
+            candidate = directory / script_name
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if candidate.exists():
+                return candidate
+
+    discovered = shutil.which(ORCHESTRATION_WORKER_SCRIPT)
+    return Path(discovered) if discovered else None
 
 
 def _python_module_executable(

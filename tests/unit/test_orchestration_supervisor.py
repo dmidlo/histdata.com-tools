@@ -340,6 +340,81 @@ def test_build_orchestration_worker_start_command_uses_lane_config(
     assert command[command.index("--max-concurrent-activities") + 1] == "7"
 
 
+def test_orchestration_worker_command_prefix_uses_windows_launcher(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Windows installed workers should run through their console script."""
+    scripts_dir = tmp_path / "venv" / "Scripts"
+    scripts_dir.mkdir(parents=True)
+    launcher = scripts_dir / "histdatacom.exe"
+    worker = scripts_dir / "histdatacom-orchestration-worker.exe"
+    launcher.write_text("", encoding="utf-8")
+    worker.write_text("", encoding="utf-8")
+    monkeypatch.setattr(supervisor_module.shutil, "which", lambda name: None)
+
+    assert supervisor_module._orchestration_worker_command_prefix(
+        str(launcher),
+        os_name="nt",
+    ) == (str(worker),)
+
+
+def test_build_orchestration_worker_start_command_uses_worker_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Worker subprocess commands should be assembled after the prefix."""
+    worker = (
+        tmp_path / "venv" / "Scripts" / "histdatacom-orchestration-worker.exe"
+    )
+    monkeypatch.setattr(
+        supervisor_module,
+        "_orchestration_worker_command_prefix",
+        lambda: (str(worker),),
+    )
+    policy = _policy(tmp_path)
+    config = build_orchestration_worker_config(
+        runtime_policy=policy,
+        namespace="histdatacom-test",
+        task_queue_prefix="histdatacom-test",
+        lane=TaskQueueLane.NETWORK,
+    )
+
+    command = build_orchestration_worker_start_command(config)
+
+    assert command[0] == str(worker)
+    assert "-m" not in command[:3]
+    assert command[1:5] == (
+        "--workspace",
+        str(policy.workspace),
+        "--runtime-home",
+        str(policy.runtime_home),
+    )
+
+
+def test_orchestration_worker_command_prefix_falls_back_to_python_module(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Missing Windows worker launchers should keep the Python-module path."""
+    scripts_dir = tmp_path / "venv" / "Scripts"
+    scripts_dir.mkdir(parents=True)
+    launcher = scripts_dir / "histdatacom.exe"
+    python = scripts_dir / "python.exe"
+    launcher.write_text("", encoding="utf-8")
+    python.write_text("", encoding="utf-8")
+    monkeypatch.setattr(supervisor_module.shutil, "which", lambda name: None)
+
+    assert supervisor_module._orchestration_worker_command_prefix(
+        str(launcher),
+        os_name="nt",
+    ) == (
+        str(python),
+        "-m",
+        supervisor_module.ORCHESTRATION_WORKER_MODULE,
+    )
+
+
 def test_python_module_executable_uses_windows_venv_python_for_launcher(
     tmp_path: Path,
 ) -> None:

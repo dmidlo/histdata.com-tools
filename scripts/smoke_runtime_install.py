@@ -27,6 +27,9 @@ EXPECTED_ASSETS = (
 )
 EXPECTED_CONSOLE_SCRIPTS = {
     "histdatacom": "histdatacom.histdata_com:main",
+    "histdatacom-orchestration-worker": (
+        "histdatacom.orchestration.worker:main"
+    ),
 }
 QUALITY_REPORT_SCHEMA_VERSION = "histdatacom.quality-report.v1"
 QUALITY_SMOKE_CLEAN_ROWS = (
@@ -456,8 +459,9 @@ def check_cli_smoke(
     """Run offline CLI smoke checks against a temporary runtime state dir."""
     state_dir.mkdir(parents=True, exist_ok=True)
     histdatacom = _script_path("histdatacom")
+    worker = _script_path("histdatacom-orchestration-worker")
     _run([histdatacom, "--version"])
-    _run([sys.executable, "-m", "histdatacom.orchestration.worker", "--help"])
+    _run([worker, "--help"])
 
     status = _run_json(
         [
