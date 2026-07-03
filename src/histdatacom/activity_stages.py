@@ -1558,6 +1558,7 @@ def dataset_plan_stage(
     current_yearmonth: str | None = None,
     zip_persist: bool = False,
     cache_only: bool = False,
+    repository_ranges: Mapping[str, Any] | None = None,
 ) -> DatasetPlanOutput:
     """Plan explicit dataset work items without queues or side effects."""
     formats_input = tuple(formats or ())
@@ -1574,6 +1575,7 @@ def dataset_plan_stage(
         current_yearmonth=current_yearmonth,
         zip_persist=zip_persist,
         cache_only=cache_only,
+        repository_ranges=repository_ranges,
     )
     dimensions = valid_dataset_dimensions(
         formats_input,
@@ -1629,6 +1631,7 @@ def plan_dataset_work_items(
     current_yearmonth: str | None = None,
     zip_persist: bool = False,
     cache_only: bool = False,
+    repository_ranges: Mapping[str, Any] | None = None,
 ) -> tuple[WorkItem, ...]:
     """Return deterministic URL work items for a HistData request."""
     formats_input = tuple(formats or ())
@@ -1637,21 +1640,29 @@ def plan_dataset_work_items(
     resolved_current = current_yearmonth or get_current_datemonth_gmt_minus5()
     start = _coerce_yearmonth(start_yearmonth)
     end = _coerce_yearmonth(end_yearmonth)
+    full_scope = not start and not end
     if not start and not end:
         start = "200001"
         end = resolved_current
 
     planned: list[WorkItem] = []
     normalized_pairs = normalize_dataset_pairs(pairs_input)
+    pair_ranges = _dataset_pair_ranges(
+        normalized_pairs,
+        repository_ranges=repository_ranges if full_scope else None,
+        fallback_start=start,
+        fallback_end=end,
+    )
     for csv_format, timeframe in valid_dataset_dimensions(
         formats_input,
         timeframes_input,
         cache_only=cache_only,
     ):
         for pair in normalized_pairs:
+            pair_start, pair_end = pair_ranges[pair]
             for period in iter_dataset_periods(
-                start,
-                end,
+                pair_start,
+                pair_end,
                 timeframe=timeframe,
                 current_yearmonth=resolved_current,
             ):
@@ -1667,6 +1678,28 @@ def plan_dataset_work_items(
                     )
                 )
     return tuple(planned)
+
+
+def _dataset_pair_ranges(
+    pairs: tuple[str, ...],
+    *,
+    repository_ranges: Mapping[str, Any] | None,
+    fallback_start: str | None,
+    fallback_end: str | None,
+) -> dict[str, tuple[str | None, str | None]]:
+    """Return the date range each pair should use for dataset planning."""
+    repo_pairs = repository_pair_data(repository_ranges or {})
+    ranges: dict[str, tuple[str | None, str | None]] = {}
+    for pair in pairs:
+        repo_range = repo_pairs.get(pair)
+        if repo_range:
+            repo_start = _coerce_yearmonth(repo_range.get("start"))
+            repo_end = _coerce_yearmonth(repo_range.get("end"))
+            if repo_start and repo_end:
+                ranges[pair] = (repo_start, repo_end)
+                continue
+        ranges[pair] = (fallback_start, fallback_end)
+    return ranges
 
 
 def plan_dataset_urls(

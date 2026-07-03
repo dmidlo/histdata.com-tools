@@ -16,7 +16,10 @@ from typing import Any, get_type_hints
 import pytest
 from temporalio.exceptions import ApplicationError
 
-from histdatacom.activity_stages import UrlValidationError
+from histdatacom.activity_stages import (
+    UrlValidationError,
+    write_repository_data_file,
+)
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     convert_polars_datetime_to_utc_ms,
@@ -370,6 +373,44 @@ def test_dataset_plan_activity_returns_explicit_work_items(tmp_path) -> None:
         "?/ascii/1-minute-bar-quotes/eurusd/2022"
     )
     assert result["work_items"][0]["data_datemonth"] == "2022"
+
+
+def test_dataset_plan_activity_uses_repo_ranges_for_full_scope(
+    tmp_path,
+) -> None:
+    """Full-scope activity planning should use per-symbol repo ranges."""
+    write_repository_data_file(
+        {
+            "eurusd": {"start": "200005", "end": "200006"},
+            "gbpusd": {"start": "200005", "end": "200006"},
+            "eurgbp": {"start": "200203", "end": "200204"},
+        },
+        tmp_path / ".repo",
+    )
+    request = RunRequest(
+        request_id="run-plan-repo-ranges",
+        pairs=("eurusd", "eurgbp", "gbpusd"),
+        formats=("ascii",),
+        timeframes=("T",),
+        data_directory=str(tmp_path),
+    )
+
+    result = dataset_plan_activity({"request": request.to_dict()})
+
+    by_pair = {
+        pair: [
+            item["data_datemonth"]
+            for item in result["work_items"]
+            if item["data_fxpair"] == pair
+        ]
+        for pair in ("eurgbp", "eurusd", "gbpusd")
+    }
+    assert by_pair == {
+        "eurgbp": ["200203", "200204"],
+        "eurusd": ["200005", "200006"],
+        "gbpusd": ["200005", "200006"],
+    }
+    assert result["result"]["metrics"]["repository_range_count"] == 3
 
 
 def test_dataset_plan_activity_spills_large_plan_to_manifest(

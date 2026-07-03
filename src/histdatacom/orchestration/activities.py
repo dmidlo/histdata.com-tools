@@ -18,6 +18,7 @@ from histdatacom.activity_stages import (
     import_to_influx_work_item,
     merge_cache_work_items,
     read_repository_data_file,
+    repository_pair_data,
     repository_refresh_stage,
     validate_url_work_item,
     write_repository_data_file,
@@ -171,6 +172,7 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
     """Run deterministic URL and dataset planning as a Temporal activity."""
     request = RunRequest.from_dict(_mapping(payload.get("request", {})))
     data_root = set_working_data_dir(request.data_directory)
+    repo_path = Path(data_root) / ".repo"
     if _activity_cancelled():
         result = _observe_and_persist_stage_result(
             _cancelled_stage_result(
@@ -188,6 +190,16 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
             dict[str, Any],
             {"work_items": [], "result": result.to_dict()},
         )
+    repository_ranges = (
+        read_repository_data_file(repo_path)
+        if (
+            not request.start_yearmonth
+            and not request.end_yearmonth
+            and repo_path.exists()
+        )
+        else {}
+    )
+    repository_range_count = len(repository_pair_data(repository_ranges))
 
     output = dataset_plan_stage(
         start_yearmonth=request.start_yearmonth,
@@ -198,6 +210,7 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
         default_download_dir=data_root,
         zip_persist=request.zip_persist,
         cache_only=request.build_cache,
+        repository_ranges=repository_ranges,
     )
     plan_id = derive_work_id(
         request.request_id,
@@ -216,6 +229,7 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
             "pairs": list(request.pairs),
             "timeframes": list(request.timeframes),
             "build_cache": request.build_cache,
+            "repository_range_count": repository_range_count,
         },
     )
     plan_batches = _dataset_plan_batches(request, output.work_items)
@@ -227,6 +241,7 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
             "dataset_plan_ref": plan_ref,
             "dataset_plan_batch_count": len(plan_batches),
             "inline_work_item_limit": inline_limit,
+            "repository_range_count": repository_range_count,
             "work_items_spilled": spilled,
         }
     )
@@ -810,7 +825,8 @@ def _quality_report_path(request: RunRequest) -> Path:
 def _quality_source_cleanliness(request: RunRequest) -> dict[str, Any]:
     """Return publish-safe source-artifact cleanliness for this data root."""
     data_dir = Path(set_working_data_dir(request.data_directory))
-    return source_artifact_cleanliness_payload(data_dir)
+    payload: dict[str, Any] = source_artifact_cleanliness_payload(data_dir)
+    return payload
 
 
 def _quality_report_disposition(

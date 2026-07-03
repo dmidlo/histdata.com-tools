@@ -1136,6 +1136,70 @@ def test_dataset_plan_stage_preserves_tick_monthly_behavior() -> None:
     ]
 
 
+def test_dataset_plan_stage_uses_repository_ranges_for_full_scope() -> None:
+    """No-date full-scope planning should honor per-symbol repo ranges."""
+    output = dataset_plan_stage(
+        start_yearmonth="",
+        end_yearmonth="",
+        formats=("ascii",),
+        pairs=("eurusd", "eurgbp", "gbpusd"),
+        timeframes=("T",),
+        current_yearmonth="202606",
+        repository_ranges={
+            "eurusd": {"start": "200005", "end": "200006"},
+            "gbpusd": {"start": "200005", "end": "200006"},
+            "eurgbp": {"start": "200203", "end": "200204"},
+        },
+    )
+
+    by_pair = {
+        pair: [
+            item.data_datemonth
+            for item in output.work_items
+            if item.data_fxpair == pair
+        ]
+        for pair in ("eurgbp", "eurusd", "gbpusd")
+    }
+
+    assert by_pair == {
+        "eurgbp": ["200203", "200204"],
+        "eurusd": ["200005", "200006"],
+        "gbpusd": ["200005", "200006"],
+    }
+
+
+def test_dataset_plan_stage_explicit_range_overrides_repository_ranges() -> (
+    None
+):
+    """Explicit dates should keep applying to every selected symbol."""
+    output = dataset_plan_stage(
+        start_yearmonth="202201",
+        end_yearmonth="202202",
+        formats=("ascii",),
+        pairs=("eurusd", "eurgbp", "gbpusd"),
+        timeframes=("T",),
+        current_yearmonth="202606",
+        repository_ranges={
+            "eurusd": {"start": "200005", "end": "200006"},
+            "gbpusd": {"start": "200005", "end": "200006"},
+            "eurgbp": {"start": "200203", "end": "200204"},
+        },
+    )
+
+    assert {
+        pair: [
+            item.data_datemonth
+            for item in output.work_items
+            if item.data_fxpair == pair
+        ]
+        for pair in ("eurgbp", "eurusd", "gbpusd")
+    } == {
+        "eurgbp": ["202201", "202202"],
+        "eurusd": ["202201", "202202"],
+        "gbpusd": ["202201", "202202"],
+    }
+
+
 def test_dataset_plan_stage_is_deterministic_for_sets_and_generators() -> None:
     """Plan output order and IDs should not depend on input container order."""
     first = dataset_plan_stage(
