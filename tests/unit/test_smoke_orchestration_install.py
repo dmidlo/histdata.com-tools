@@ -306,6 +306,23 @@ def test_windows_runtime_diagnostic_separates_startup_layers(
             "runtime_log_diagnostics": "",
         }
 
+    def fake_worker_run_command(supervisor_arg: object, lane: str) -> list[str]:
+        assert supervisor_arg is supervisor
+        return ["python", "-m", "histdatacom.orchestration.worker", "run", lane]
+
+    def fake_run_probe(
+        phase: str,
+        command: list[str],
+        *args: object,
+        **kwargs: object,
+    ) -> dict[str, Any]:
+        return {
+            "phase": phase,
+            "status": "passed",
+            "command": command,
+            "message": "probe passed",
+        }
+
     monkeypatch.setattr(module, "_script_path", fake_script_path)
     monkeypatch.setattr(
         module,
@@ -321,6 +338,17 @@ def test_windows_runtime_diagnostic_separates_startup_layers(
         module,
         "_run_diagnostic_command",
         fake_run_diagnostic_command,
+    )
+    monkeypatch.setattr(module, "_worker_run_command", fake_worker_run_command)
+    monkeypatch.setattr(
+        module,
+        "_run_worker_foreground_run_probe",
+        fake_run_probe,
+    )
+    monkeypatch.setattr(
+        module,
+        "_run_worker_supervised_run_probe",
+        fake_run_probe,
     )
 
     report = module.check_windows_runtime_diagnostic(
@@ -342,6 +370,14 @@ def test_windows_runtime_diagnostic_separates_startup_layers(
     assert report["phases"]["worker_client_connect"]["status"] == "passed"
     assert report["phases"]["worker_construct_cpu_file"]["status"] == "passed"
     assert report["phases"]["worker_run_probe_cpu_file"]["status"] == "passed"
+    assert (
+        report["phases"]["worker_foreground_run_probe_orchestration"]["status"]
+        == "passed"
+    )
+    assert (
+        report["phases"]["worker_supervised_run_probe_orchestration"]["status"]
+        == "passed"
+    )
     assert report["phases"]["server_only_stop"]["status"] == "passed"
     assert report["phases"]["runtime_stop"]["status"] == "passed"
     assert calls[4][0] == "runtime_worker_start"
@@ -430,6 +466,24 @@ def test_windows_runtime_diagnostic_classifies_direct_worker_native_crash(
             "runtime_log_diagnostics": "",
         }
 
+    def fake_worker_run_command(supervisor_arg: object, lane: str) -> list[str]:
+        assert supervisor_arg is supervisor
+        return ["python", "-m", "histdatacom.orchestration.worker", "run", lane]
+
+    def fake_run_probe(
+        phase: str,
+        command: list[str],
+        *args: object,
+        **kwargs: object,
+    ) -> dict[str, Any]:
+        calls.append(phase)
+        return {
+            "phase": phase,
+            "status": "passed",
+            "command": command,
+            "message": "probe passed",
+        }
+
     monkeypatch.setattr(module, "_script_path", fake_script_path)
     monkeypatch.setattr(
         module,
@@ -445,6 +499,17 @@ def test_windows_runtime_diagnostic_classifies_direct_worker_native_crash(
         module,
         "_run_diagnostic_command",
         fake_run_diagnostic_command,
+    )
+    monkeypatch.setattr(module, "_worker_run_command", fake_worker_run_command)
+    monkeypatch.setattr(
+        module,
+        "_run_worker_foreground_run_probe",
+        fake_run_probe,
+    )
+    monkeypatch.setattr(
+        module,
+        "_run_worker_supervised_run_probe",
+        fake_run_probe,
     )
 
     report = module.check_windows_runtime_diagnostic(
@@ -520,6 +585,79 @@ def test_diagnostic_command_reports_windows_keyboard_interrupt(
     assert "console-control event" in phase["message"]
 
 
+def test_worker_foreground_run_probe_treats_timeout_as_startup_success(
+    monkeypatch,
+) -> None:
+    """A long-running foreground worker run means startup survived."""
+    module = _module()
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        raise module.subprocess.TimeoutExpired(
+            cmd=["python", "-m", "histdatacom.orchestration.worker"],
+            timeout=kwargs["timeout"],
+            output="worker ready",
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    phase = module._run_worker_foreground_run_probe(
+        "worker_foreground_run_probe_orchestration",
+        ["python", "-m", "histdatacom.orchestration.worker", "run"],
+        timeout=1.0,
+    )
+
+    assert phase["status"] == "passed"
+    assert "survived" in phase["message"]
+    assert phase["stdout"] == "worker ready"
+
+
+def test_worker_supervised_run_probe_reports_process_exit(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Supervisor-style worker probes should surface native process exits."""
+    module = _module()
+    captured_kwargs: dict[str, object] = {}
+
+    class FakeProcess:
+        pid = 4321
+
+        def poll(self) -> int:
+            return 3221225794
+
+        def terminate(self) -> None:  # pragma: no cover - defensive
+            raise AssertionError("terminated an already-exited process")
+
+        def kill(self) -> None:  # pragma: no cover - defensive
+            raise AssertionError("killed an already-exited process")
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 3221225794
+
+    def fake_popen(command: list[str], **kwargs: object) -> FakeProcess:
+        captured_kwargs.update(kwargs)
+        return FakeProcess()
+
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+
+    phase = module._run_worker_supervised_run_probe(
+        "worker_supervised_run_probe_orchestration",
+        ["python", "-m", "histdatacom.orchestration.worker", "run"],
+        tmp_path / "state",
+        lane="orchestration",
+        timeout=1.0,
+    )
+
+    assert phase["status"] == "failed"
+    assert phase["returncode"] == 3221225794
+    assert phase["pid"] == 4321
+    assert phase["log_path"].endswith(
+        "worker_supervised_run_probe_orchestration.log"
+    )
+    assert captured_kwargs["close_fds"] is True
+
+
 def test_windows_runtime_diagnostic_stops_running_runtime(
     monkeypatch,
     tmp_path: Path,
@@ -583,6 +721,23 @@ def test_windows_runtime_diagnostic_stops_running_runtime(
             "runtime_log_diagnostics": "",
         }
 
+    def fake_worker_run_command(supervisor_arg: object, lane: str) -> list[str]:
+        assert supervisor_arg is supervisor
+        return ["python", "-m", "histdatacom.orchestration.worker", "run", lane]
+
+    def fake_run_probe(
+        phase: str,
+        command: list[str],
+        *args: object,
+        **kwargs: object,
+    ) -> dict[str, Any]:
+        return {
+            "phase": phase,
+            "status": "passed",
+            "command": command,
+            "message": "probe passed",
+        }
+
     monkeypatch.setattr(module, "_script_path", fake_script_path)
     monkeypatch.setattr(
         module,
@@ -599,6 +754,17 @@ def test_windows_runtime_diagnostic_stops_running_runtime(
         "_run_diagnostic_command",
         fake_run_diagnostic_command,
     )
+    monkeypatch.setattr(module, "_worker_run_command", fake_worker_run_command)
+    monkeypatch.setattr(
+        module,
+        "_run_worker_foreground_run_probe",
+        fake_run_probe,
+    )
+    monkeypatch.setattr(
+        module,
+        "_run_worker_supervised_run_probe",
+        fake_run_probe,
+    )
 
     report = module.check_windows_runtime_diagnostic(
         tmp_path / "state",
@@ -609,6 +775,14 @@ def test_windows_runtime_diagnostic_stops_running_runtime(
     assert report["summary"]["status"] == "passed"
     assert report["phases"]["server_only_stop"]["status"] == "passed"
     assert report["phases"]["runtime_stop"]["status"] == "passed"
+    assert (
+        report["phases"]["worker_foreground_run_probe_orchestration"]["status"]
+        == "passed"
+    )
+    assert (
+        report["phases"]["worker_supervised_run_probe_orchestration"]["status"]
+        == "passed"
+    )
     assert calls[4] == (
         "runtime_worker_start",
         [

@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from importlib import metadata
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -25,6 +26,7 @@ WORKER_STARTUP_DIAGNOSTIC_LANES = (
     "influx",
 )
 WORKER_STARTUP_RUN_PROBE_SECONDS = 0.5
+WORKER_COMMAND_RUN_PROBE_SECONDS = 5.0
 WINDOWS_PARENT_INTERRUPT_MESSAGE = (
     "parent received KeyboardInterrupt while waiting for diagnostic subprocess; "
     "this usually means a Windows console-control event crossed a runtime "
@@ -465,6 +467,197 @@ def _worker_startup_diagnostic_command(
     return command
 
 
+def _worker_run_command(supervisor: Any, lane: str) -> list[str]:
+    """Build the exact supervised worker ``run`` command for a lane."""
+    from histdatacom.orchestration.queues import build_orchestration_worker_config
+    from histdatacom.orchestration.supervisor import (
+        build_orchestration_worker_start_command,
+    )
+
+    config = build_orchestration_worker_config(
+        runtime_policy=supervisor.runtime_policy,
+        lane=lane,
+    )
+    return list(build_orchestration_worker_start_command(config))
+
+
+def _run_worker_foreground_run_probe(
+    phase: str,
+    command: Sequence[str],
+    *,
+    timeout: float,
+) -> dict[str, Any]:
+    """Run the real worker ``run`` command in the foreground briefly."""
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=timeout,
+            **_windows_process_group_kwargs(),
+        )
+    except subprocess.TimeoutExpired as err:
+        stdout = _command_output_text(err.stdout)
+        stderr = _command_output_text(err.stderr)
+        diagnostics = _runtime_log_diagnostics(command, stdout=stdout)
+        return {
+            "phase": phase,
+            "status": "passed",
+            "command": list(command),
+            "message": "worker run command survived the startup probe",
+            "timeout_seconds": timeout,
+            "stdout": _diagnostic_stream_text(stdout),
+            "stderr": _diagnostic_stream_text(stderr),
+            "runtime_log_diagnostics": _diagnostic_stream_text(diagnostics),
+        }
+    except KeyboardInterrupt:
+        if os.name != "nt":
+            raise
+        diagnostics = _runtime_log_diagnostics(command, stdout="")
+        return {
+            "phase": phase,
+            "status": "interrupted",
+            "command": list(command),
+            "error_type": "KeyboardInterrupt",
+            "message": WINDOWS_PARENT_INTERRUPT_MESSAGE,
+            "runtime_log_diagnostics": _diagnostic_stream_text(diagnostics),
+        }
+
+    diagnostics = _runtime_log_diagnostics(command, stdout=completed.stdout)
+    return {
+        "phase": phase,
+        "status": "failed",
+        "command": list(command),
+        "message": "worker run command exited before the startup probe elapsed",
+        "returncode": completed.returncode,
+        "stdout": _diagnostic_stream_text(completed.stdout),
+        "stderr": _diagnostic_stream_text(completed.stderr),
+        "runtime_log_diagnostics": _diagnostic_stream_text(diagnostics),
+    }
+
+
+def _run_worker_supervised_run_probe(
+    phase: str,
+    command: Sequence[str],
+    state_dir: Path,
+    *,
+    lane: str,
+    timeout: float,
+) -> dict[str, Any]:
+    """Launch a worker with supervisor-style ``Popen`` settings."""
+    from histdatacom.orchestration.readiness import (
+        read_worker_readiness,
+        remove_worker_readiness,
+    )
+
+    log_path = state_dir / "logs" / f"{phase}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.unlink(missing_ok=True)
+    remove_worker_readiness(state_dir, lane)
+
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        with log_path.open("ab") as log:
+            process = subprocess.Popen(
+                list(command),
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                start_new_session=os.name != "nt",
+                **_windows_process_group_kwargs(),
+            )
+    except KeyboardInterrupt:
+        if os.name != "nt":
+            raise
+        return {
+            "phase": phase,
+            "status": "interrupted",
+            "command": list(command),
+            "error_type": "KeyboardInterrupt",
+            "message": WINDOWS_PARENT_INTERRUPT_MESSAGE,
+            "log_path": str(log_path),
+        }
+    except Exception as err:
+        return {
+            "phase": phase,
+            "status": "failed",
+            "command": list(command),
+            "error_type": type(err).__name__,
+            "message": str(err),
+            "log_path": str(log_path),
+        }
+
+    try:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            returncode = process.poll()
+            if returncode is not None:
+                log_tail = _tail_text(
+                    log_path,
+                    limit=MAX_DIAGNOSTIC_LOG_CHARS,
+                )
+                return {
+                    "phase": phase,
+                    "status": "failed",
+                    "command": list(command),
+                    "pid": int(process.pid),
+                    "returncode": returncode,
+                    "message": (
+                        "supervisor-style worker process exited before "
+                        "readiness"
+                    ),
+                    "log_path": str(log_path),
+                    "log_tail": _diagnostic_stream_text(log_tail),
+                }
+
+            readiness = read_worker_readiness(state_dir, lane)
+            if (
+                readiness is not None
+                and int(readiness.get("pid", 0) or 0) == int(process.pid)
+                and readiness.get("state") == "ready"
+            ):
+                log_tail = _tail_text(
+                    log_path,
+                    limit=MAX_DIAGNOSTIC_LOG_CHARS,
+                )
+                return {
+                    "phase": phase,
+                    "status": "passed",
+                    "command": list(command),
+                    "pid": int(process.pid),
+                    "message": (
+                        "supervisor-style worker process wrote readiness"
+                    ),
+                    "readiness": readiness,
+                    "log_path": str(log_path),
+                    "log_tail": _diagnostic_stream_text(log_tail),
+                }
+
+            time.sleep(0.05)
+
+        log_tail = _tail_text(log_path, limit=MAX_DIAGNOSTIC_LOG_CHARS)
+        return {
+            "phase": phase,
+            "status": "timed_out",
+            "command": list(command),
+            "pid": int(process.pid),
+            "message": "supervisor-style worker process did not become ready",
+            "timeout_seconds": timeout,
+            "log_path": str(log_path),
+            "log_tail": _diagnostic_stream_text(log_tail),
+        }
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5.0)
+
+
 def _diagnostic_phase_passed(
     phases: Mapping[str, Mapping[str, Any]],
     name: str,
@@ -496,6 +689,24 @@ def _runtime_startup_diagnostic_checks() -> tuple[tuple[str, str], ...]:
                 "temporal_worker_run_start",
             )
         )
+    checks.append(
+        (
+            _worker_startup_phase_name(
+                "worker_foreground_run_probe",
+                "orchestration",
+            ),
+            "temporal_worker_run_command",
+        )
+    )
+    checks.append(
+        (
+            _worker_startup_phase_name(
+                "worker_supervised_run_probe",
+                "orchestration",
+            ),
+            "supervised_worker_process_boundary",
+        )
+    )
     checks.extend(
         [
             ("server_only_stop", "temporal_server_shutdown"),
@@ -535,7 +746,12 @@ def _diagnostic_failure_summary(
     if lane:
         summary["lane"] = lane
     if _phase_has_windows_native_startup_crash(phase) and phase_name.startswith(
-        ("worker_construct_", "worker_run_probe_")
+        (
+            "worker_construct_",
+            "worker_run_probe_",
+            "worker_foreground_run_probe_",
+            "worker_supervised_run_probe_",
+        )
     ):
         summary["layer"] = "temporalio_nexus_native_worker_initialization"
     return summary
@@ -546,6 +762,8 @@ def _diagnostic_lane_from_phase(phase_name: str) -> str:
         if phase_name in {
             _worker_startup_phase_name("worker_construct", lane),
             _worker_startup_phase_name("worker_run_probe", lane),
+            _worker_startup_phase_name("worker_foreground_run_probe", lane),
+            _worker_startup_phase_name("worker_supervised_run_probe", lane),
         }:
             return lane
     return ""
@@ -765,6 +983,39 @@ def check_windows_runtime_diagnostic(
                         env=worker_env,
                         timeout=startup_timeout + 60.0,
                     )
+
+                exact_run_command = _worker_run_command(
+                    server_supervisor,
+                    "orchestration",
+                )
+                phases[
+                    _worker_startup_phase_name(
+                        "worker_foreground_run_probe",
+                        "orchestration",
+                    )
+                ] = _run_worker_foreground_run_probe(
+                    _worker_startup_phase_name(
+                        "worker_foreground_run_probe",
+                        "orchestration",
+                    ),
+                    exact_run_command,
+                    timeout=WORKER_COMMAND_RUN_PROBE_SECONDS,
+                )
+                phases[
+                    _worker_startup_phase_name(
+                        "worker_supervised_run_probe",
+                        "orchestration",
+                    )
+                ] = _run_worker_supervised_run_probe(
+                    _worker_startup_phase_name(
+                        "worker_supervised_run_probe",
+                        "orchestration",
+                    ),
+                    exact_run_command,
+                    diagnostic_state_dir,
+                    lane="orchestration",
+                    timeout=startup_timeout,
+                )
         finally:
             if server_supervisor is not None:
                 phases["server_only_stop"] = _stop_server_only_runtime(
