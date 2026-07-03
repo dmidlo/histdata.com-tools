@@ -473,6 +473,147 @@ def test_histdatacom_main_dispatches_runtime_command(
     assert captured["argv"] == ("status", "--json")
 
 
+def test_histdatacom_main_reexecs_windows_runtime_launcher(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Windows launcher-backed runtime commands should run under python -m."""
+    import histdatacom.histdata_com as histdata_com
+    import histdatacom.orchestration.cli as orchestration_cli
+
+    scripts_dir = tmp_path / "Scripts"
+    scripts_dir.mkdir()
+    launcher = scripts_dir / "histdatacom.exe"
+    python = scripts_dir / "python.exe"
+    launcher.write_text("", encoding="utf-8")
+    python.write_text("", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_runtime_main(argv: list[str]) -> int:
+        raise AssertionError(f"runtime CLI should be re-executed: {argv}")
+
+    def fake_run(command: list[str], **kwargs: object):
+        captured["command"] = tuple(command)
+        captured["env"] = dict(kwargs["env"])
+        captured["check"] = kwargs["check"]
+        return histdata_com.subprocess.CompletedProcess(command, 17)
+
+    monkeypatch.setattr(histdata_com.os, "name", "nt")
+    monkeypatch.setattr(histdata_com.sys, "executable", str(launcher))
+    monkeypatch.delenv(histdata_com.WINDOWS_RUNTIME_REEXEC_ENV, raising=False)
+    monkeypatch.setattr(histdata_com.subprocess, "run", fake_run)
+    monkeypatch.setattr(orchestration_cli, "main", fake_runtime_main)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--config",
+            str(tmp_path / "histdatacom.yaml"),
+            "runtime",
+            "start",
+            "--json",
+        ],
+    )
+
+    assert histdata_com.main() == 17
+    assert captured["command"] == (
+        str(python),
+        "-m",
+        "histdatacom",
+        "--config",
+        str(tmp_path / "histdatacom.yaml"),
+        "runtime",
+        "start",
+        "--json",
+    )
+    assert captured["check"] is False
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env[histdata_com.WINDOWS_RUNTIME_REEXEC_ENV] == "1"
+
+
+def test_histdatacom_main_reexecs_windows_runtime_launcher_python_child(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A launcher-started Python child should also trampoline once."""
+    import histdatacom.histdata_com as histdata_com
+    import histdatacom.orchestration.cli as orchestration_cli
+
+    launcher = tmp_path / "histdatacom.exe"
+    python = tmp_path / "python.exe"
+    launcher.write_text("", encoding="utf-8")
+    python.write_text("", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_runtime_main(argv: list[str]) -> int:
+        raise AssertionError(f"runtime CLI should be re-executed: {argv}")
+
+    def fake_run(command: list[str], **kwargs: object):
+        captured["command"] = tuple(command)
+        captured["env"] = dict(kwargs["env"])
+        return histdata_com.subprocess.CompletedProcess(command, 23)
+
+    monkeypatch.setattr(histdata_com.os, "name", "nt")
+    monkeypatch.setattr(histdata_com.sys, "executable", str(python))
+    monkeypatch.delenv(histdata_com.WINDOWS_RUNTIME_REEXEC_ENV, raising=False)
+    monkeypatch.setattr(histdata_com.subprocess, "run", fake_run)
+    monkeypatch.setattr(orchestration_cli, "main", fake_runtime_main)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(launcher),
+            "runtime",
+            "start",
+            "--json",
+        ],
+    )
+
+    assert histdata_com.main() == 23
+    assert captured["command"] == (
+        str(python),
+        "-m",
+        "histdatacom",
+        "runtime",
+        "start",
+        "--json",
+    )
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env[histdata_com.WINDOWS_RUNTIME_REEXEC_ENV] == "1"
+
+
+def test_histdatacom_main_skips_windows_runtime_reexec_under_python(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The module child should dispatch normally instead of re-executing."""
+    import histdatacom.histdata_com as histdata_com
+    import histdatacom.orchestration.cli as orchestration_cli
+
+    python = tmp_path / "python.exe"
+    python.write_text("", encoding="utf-8")
+    captured: dict[str, tuple[str, ...]] = {}
+
+    def fake_runtime_main(argv: list[str]) -> int:
+        captured["argv"] = tuple(argv)
+        return 0
+
+    def fake_run(command: list[str], **kwargs: object):
+        raise AssertionError(f"unexpected re-exec: {command}, {kwargs}")
+
+    monkeypatch.setattr(histdata_com.os, "name", "nt")
+    monkeypatch.setattr(histdata_com.sys, "executable", str(python))
+    monkeypatch.setattr(histdata_com.subprocess, "run", fake_run)
+    monkeypatch.setattr(orchestration_cli, "main", fake_runtime_main)
+    monkeypatch.setattr(sys, "argv", ["histdatacom", "runtime", "status"])
+
+    assert histdata_com.main() == 0
+    assert captured["argv"] == ("status",)
+
+
 def test_histdatacom_main_does_not_route_orchestration_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

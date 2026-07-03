@@ -25,10 +25,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Mapping, TypeGuard
+from typing import TYPE_CHECKING, Any, Mapping, Sequence, TypeGuard
 
 import histdatacom
 from histdatacom import Options
@@ -91,6 +92,10 @@ if TYPE_CHECKING:
     from pandas import DataFrame
     from polars import DataFrame as PolarsDataFrame
     from pyarrow import Table
+
+WINDOWS_RUNTIME_REEXEC_ENV = "HISTDATACOM_WINDOWS_RUNTIME_REEXEC"
+WINDOWS_PYTHON_EXECUTABLE_NAMES = frozenset({"python.exe", "pythonw.exe"})
+WINDOWS_HISTDATACOM_LAUNCHER_NAMES = frozenset({"histdatacom.exe"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -705,6 +710,10 @@ def main(
             remove_routed_command_from_cli_args(cli_args, "quality")
         )
     if not options and routed_command == "runtime":
+        reexec_code = _maybe_reexec_windows_runtime_cli(cli_args)
+        if reexec_code is not None:
+            return reexec_code
+
         from histdatacom.orchestration.cli import main as runtime_main
 
         return runtime_main(
@@ -723,6 +732,58 @@ def main(
         return None
     options.from_api = True
     return _HistDataCom(options).run()
+
+
+def _maybe_reexec_windows_runtime_cli(
+    cli_args: Sequence[str],
+) -> int | None:
+    """Route Windows runtime management away from console launcher parents."""
+    if os.name != "nt":
+        return None
+    if os.environ.get(WINDOWS_RUNTIME_REEXEC_ENV) == "1":
+        return None
+    python = _windows_runtime_reexec_python()
+    if python is None:
+        return None
+
+    env = dict(os.environ)
+    env[WINDOWS_RUNTIME_REEXEC_ENV] = "1"
+    completed = subprocess.run(
+        [python, "-m", "histdatacom", *cli_args],
+        check=False,
+        env=env,
+    )
+    return int(completed.returncode)
+
+
+def _windows_runtime_reexec_python() -> str | None:
+    """Return the Python executable for Windows runtime CLI re-exec."""
+    executable = str(sys.executable)
+    executable_name = os.path.basename(executable).lower()
+    if executable_name in WINDOWS_PYTHON_EXECUTABLE_NAMES:
+        argv0_name = os.path.basename(str(sys.argv[0])).lower()
+        if argv0_name in WINDOWS_HISTDATACOM_LAUNCHER_NAMES:
+            return executable
+        return None
+    return _windows_python_for_launcher(executable)
+
+
+def _windows_python_for_launcher(launcher: str) -> str | None:
+    """Resolve the Python executable beside a Windows console launcher."""
+    launcher_dir = os.path.dirname(launcher)
+    candidates = (
+        os.path.join(launcher_dir, "python.exe"),
+        os.path.join(os.path.dirname(launcher_dir), "python.exe"),
+        str(getattr(sys, "_base_executable", "")),
+    )
+    for candidate in candidates:
+        if os.path.basename(
+            candidate
+        ).lower() in WINDOWS_PYTHON_EXECUTABLE_NAMES and os.path.exists(
+            candidate
+        ):
+            return candidate
+    return None
 
 
 def _cache_records_from_orchestration_payload(payload: dict) -> list[Record]:

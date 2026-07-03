@@ -257,6 +257,9 @@ jobs:
           --state-dir .runtime-smoke
           --require-bundled-current-platform
           --check-executable-version
+          --start-runtime
+          --live-startup-timeout 45
+          --live-stop-timeout 45
 
   assemble-release-artifacts:
     name: Assemble release artifacts

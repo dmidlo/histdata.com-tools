@@ -163,7 +163,9 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
     )
     assert "--require-bundled-current-platform" in windows_smoke_command
     assert "--check-executable-version" in windows_smoke_command
-    assert "--start-runtime" not in windows_smoke_command
+    assert "--start-runtime" in windows_smoke_command
+    assert "--live-startup-timeout 45" in windows_smoke_command
+    assert "--live-stop-timeout 45" in windows_smoke_command
     assert "--hermetic-runtime-smoke" not in windows_smoke_command
     assert "--default-routing-runtime-smoke" not in windows_smoke_command
 
