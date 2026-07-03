@@ -60,6 +60,7 @@ ORCHESTRATION_STATE_SCHEMA_VERSION = 1
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 10.0
 DEFAULT_STOP_TIMEOUT_SECONDS = 10.0
 DEFAULT_FRONTEND_PROBE_TIMEOUT_SECONDS = 0.2
+DEFAULT_WINDOWS_WORKER_LAUNCH_SETTLE_SECONDS = 3.0
 DEFAULT_WORKER_LANES = tuple(TaskQueueLane)
 WORKER_COMPONENT_PREFIX = "worker:"
 ORCHESTRATION_WORKER_MODULE = "histdatacom.orchestration.worker"
@@ -230,6 +231,13 @@ def _windows_process_group_kwargs() -> dict[str, int]:
     return {
         "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
     }
+
+
+def _worker_launch_settle_seconds() -> float:
+    """Return the post-frontend delay before launching worker processes."""
+    if os.name != "nt":
+        return 0.0
+    return DEFAULT_WINDOWS_WORKER_LAUNCH_SETTLE_SECONDS
 
 
 def _namespace_already_exists(
@@ -894,6 +902,7 @@ class OrchestrationSupervisor:
                 )
             self._wait_for_frontend(server_process, runtime_policy, deadline)
             self._ensure_namespace(executable, runtime_policy)
+            self._settle_before_worker_launch()
 
             base_worker_config = self._worker_config(runtime_policy)
             for lane in self.worker_lanes:
@@ -1416,6 +1425,14 @@ class OrchestrationSupervisor:
             f"{self.namespace!r}; stdout={create.stdout!r}; "
             f"stderr={create.stderr!r}"
         )
+
+    def _settle_before_worker_launch(self) -> None:
+        """Allow Windows server process startup to settle before workers."""
+        if not self.worker_lanes:
+            return
+        settle_seconds = _worker_launch_settle_seconds()
+        if settle_seconds > 0:
+            self._sleep(settle_seconds)
 
     def _run_temporal_command(
         self,

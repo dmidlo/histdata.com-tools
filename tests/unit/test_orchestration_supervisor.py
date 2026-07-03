@@ -125,6 +125,10 @@ def _supervisor(
         ...,
         subprocess.CompletedProcess[str],
     ] = _default_command_runner,
+    frontend_ready: Callable[
+        [OrchestrationRuntimePolicy], bool
+    ] = _frontend_ready,
+    sleep: Callable[[float], None] = _sleep,
     worker_lanes: tuple[TaskQueueLane, ...] = tuple(TaskQueueLane),
     namespace: str = "default",
     task_queue_prefix: str = "histdatacom",
@@ -139,9 +143,9 @@ def _supervisor(
         process_factory=process_factory,
         command_runner=command_runner,
         port_available=_port_available,
-        frontend_ready=_frontend_ready,
+        frontend_ready=frontend_ready,
         worker_dependency_available=_worker_dependency_available,
-        sleep=_sleep,
+        sleep=sleep,
         worker_lanes=worker_lanes,
         namespace=namespace,
         task_queue_prefix=task_queue_prefix,
@@ -764,6 +768,61 @@ def test_start_creates_non_default_namespace_before_workers(
     ]
     assert state["worker_fleet"]["namespace"] == "histdatacom-smoke"
     assert state["worker_fleet"]["task_queue_prefix"] == "histdatacom-smoke"
+
+
+def test_start_settles_after_frontend_before_worker_launch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Windows worker launch should wait after the server frontend is ready."""
+    executable = _executable(tmp_path)
+    policy = _policy(tmp_path)
+    events: list[tuple[str, str]] = []
+    live_pids: set[int] = set()
+    next_pid = iter(range(2100, 2103))
+
+    def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
+        pid = next(next_pid)
+        live_pids.add(pid)
+        label = "server"
+        if "histdatacom.orchestration.worker" in command:
+            label = f"worker:{command[command.index('--lane') + 1]}"
+            _write_ready_marker_from_command(command, pid)
+        events.append(("process", label))
+        return _FakeProcess(pid)
+
+    def frontend_ready(
+        _runtime_policy: OrchestrationRuntimePolicy,
+    ) -> bool:
+        events.append(("frontend", "ready"))
+        return True
+
+    def sleep(seconds: float) -> None:
+        events.append(("sleep", str(seconds)))
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "_worker_launch_settle_seconds",
+        lambda: 1.25,
+    )
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: pid in live_pids,
+        process_factory=process_factory,
+        frontend_ready=frontend_ready,
+        sleep=sleep,
+        worker_lanes=(TaskQueueLane.NETWORK,),
+    )
+
+    status = supervisor.start(executable=executable)
+
+    assert status.state == "running"
+    assert events == [
+        ("process", "server"),
+        ("frontend", "ready"),
+        ("sleep", "1.25"),
+        ("process", "worker:network"),
+    ]
 
 
 def test_start_repairs_stale_pid_and_lock_files(tmp_path: Path) -> None:
