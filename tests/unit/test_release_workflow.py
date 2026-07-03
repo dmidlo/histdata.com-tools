@@ -112,6 +112,7 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
     assert smoke_runners["linux-arm64"] == "ubuntu-24.04-arm"
     assert smoke_runners["macos-x86_64"] == "macos-15-intel"
     assert smoke_runners["macos-arm64"] == "macos-15"
+    assert smoke_runners["windows-x86_64"] == "windows-2022"
     smoke_command = _step_run(
         smoke_platform,
         "Smoke bundled runtime install hermetically",

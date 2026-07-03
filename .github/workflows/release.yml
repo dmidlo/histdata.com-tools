@@ -196,7 +196,7 @@ jobs:
             runner: macos-15
             python-version: "3.13"
           - platform_key: windows-x86_64
-            runner: windows-2025
+            runner: windows-2022
             python-version: "3.12"
 
     steps:
