@@ -101,13 +101,28 @@ the password is intentionally omitted from `.pypirc`. Keep upload credentials
 out of the repository. The local preflight does not need TestPyPI/PyPI
 credentials or keyring access.
 
-Local uploads sign distributions by default. On a TestPyPI verification machine
-without the release GPG secret key, set `HISTDATACOM_SKIP_GPG_SIGNING=1`
-explicitly to upload unsigned TestPyPI artifacts:
+Local uploads sign distributions by default and run a non-interactive GPG
+preflight before building or uploading. Set `HISTDATACOM_GPG_KEY` to the
+release signing key ID, fingerprint, or email address when the maintainer
+machine does not have the intended key configured as GPG's default signing key:
+
+```sh
+HISTDATACOM_GPG_KEY=release@example.com bash pypi.sh pypi
+```
+
+The signing preflight fails before the expensive build/upload path if GPG is not
+available, the selected key cannot sign non-interactively, or no default signing
+key is configured. On a TestPyPI verification machine without the release GPG
+secret key, set `HISTDATACOM_SKIP_GPG_SIGNING=1` explicitly to upload unsigned
+TestPyPI artifacts:
 
 ```sh
 HISTDATACOM_SKIP_GPG_SIGNING=1 bash pypi.sh testpypi
 ```
+
+Skipping signing also removes stale `dist/*.asc` files before upload so an
+unsigned TestPyPI run cannot accidentally reuse signatures from an earlier
+build.
 
 Local uploads also preflight distribution file sizes before calling Twine.
 PyPI and TestPyPI commonly default to a 100 MB per-file upload limit, and the
@@ -217,7 +232,9 @@ must use `setuptools>=77` so the built artifacts include current SPDX license
 metadata.
 
 The upload commands use local `.pypirc` credentials and GPG detached
-signatures, matching the historical release process. Move to the GitHub
+signatures, matching the historical release process. Use `HISTDATACOM_GPG_KEY`
+for production publishes unless the intended key is already GPG's default
+signing key. Move to the GitHub
 Trusted Publishing path only after the branch, runtime, runner, and approval
 model is reviewed as a separate release-engineering change.
 

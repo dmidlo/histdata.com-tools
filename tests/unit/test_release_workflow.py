@@ -181,6 +181,11 @@ def test_local_publishing_script_enforces_branch_contract() -> None:
     assert "--check-version" in script
     assert "python -m twine check dist/*.whl dist/*.tar.gz" in script
     assert "HISTDATACOM_SKIP_GPG_SIGNING" in script
+    assert "HISTDATACOM_GPG_KEY" in script
+    assert "require_release_signing_ready" in script
+    assert "clear_dist_signatures" in script
+    assert "--local-user" in script
+    assert "gpg_args=(--batch --yes)" in script
     assert "HISTDATACOM_MAX_UPLOAD_FILE_BYTES" in script
     assert "HISTDATACOM_ALLOW_OVERSIZE_UPLOAD" in script
     assert "validate_dist_artifact_sizes" in script
@@ -219,7 +224,7 @@ def test_local_pypi_install_smoke_stops_runtime_workspace() -> None:
     assert 'stop_release_smoke_runtime "${workspace}"' in script
     assert "pypi_install()" in script
     assert "destroyenv" in script
-    assert "pypi_install\n        ;;" in script
+    assert "pypi_install)\n            pypi_install\n            ;;" in script
 
 
 def test_release_docs_mark_local_publishing_as_current_path() -> None:
@@ -246,6 +251,9 @@ def test_release_docs_mark_local_publishing_as_current_path() -> None:
     assert "HISTDATACOM_ALLOW_OVERSIZE_UPLOAD=1" in release_docs
     assert "HISTDATACOM_MAX_UPLOAD_FILE_BYTES" in release_docs
     assert "keyring" in release_docs
+    assert "HISTDATACOM_GPG_KEY" in release_docs
+    assert "non-interactive GPG" in release_docs
+    assert "stale `dist/*.asc`" in release_docs
     assert "HISTDATACOM_TEMPORAL_CACHE_DIR" in release_docs
     assert "network access" in release_docs
     assert "python -m twine check dist/*.whl dist/*.tar.gz" in release_docs

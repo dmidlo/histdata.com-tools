@@ -124,25 +124,124 @@ PY
 
 sign_dist_artifacts()
 {
-    local artifacts=(dist/*.whl dist/*.tar.gz)
+    local -a artifacts=()
+    local gpg_args=(--batch --yes)
+    local gpg_key="${HISTDATACOM_GPG_KEY:-}"
 
+    mapfile -t artifacts < <(dist_artifacts)
+    clear_dist_signatures
     if [[ "${HISTDATACOM_SKIP_GPG_SIGNING:-}" == "1" ]]; then
         echo "pypi.sh: skipping GPG signing because HISTDATACOM_SKIP_GPG_SIGNING=1." >&2
         return
     fi
 
-    gpg --detach-sign --armor "${artifacts[@]}"
+    require_dist_artifacts "${artifacts[@]}"
+    if [[ -n "${gpg_key}" ]]; then
+        gpg_args+=(--local-user "${gpg_key}")
+    fi
+
+    gpg "${gpg_args[@]}" --detach-sign --armor "${artifacts[@]}"
+}
+
+dist_artifacts()
+{
+    local artifact
+
+    for artifact in dist/*.whl dist/*.tar.gz; do
+        if [[ -e "${artifact}" ]]; then
+            printf '%s\n' "${artifact}"
+        fi
+    done
+}
+
+dist_signatures()
+{
+    local signature
+
+    for signature in dist/*.asc; do
+        if [[ -e "${signature}" ]]; then
+            printf '%s\n' "${signature}"
+        fi
+    done
+}
+
+clear_dist_signatures()
+{
+    local -a signatures=()
+
+    mapfile -t signatures < <(dist_signatures)
+    if ((${#signatures[@]} > 0)); then
+        rm -f "${signatures[@]}"
+    fi
+}
+
+require_dist_artifacts()
+{
+    local -a artifacts=("$@")
+
+    if ((${#artifacts[@]} == 0)); then
+        echo "pypi.sh: no wheel or source distribution artifacts found in dist." >&2
+        exit 2
+    fi
+}
+
+require_release_signing_ready()
+{
+    local gpg_args=(--batch --yes)
+    local gpg_key="${HISTDATACOM_GPG_KEY:-}"
+    local probe_dir
+    local probe_file
+    local signing_status=0
+
+    if [[ "${HISTDATACOM_SKIP_GPG_SIGNING:-}" == "1" ]]; then
+        echo "pypi.sh: release signing preflight skipped because HISTDATACOM_SKIP_GPG_SIGNING=1." >&2
+        return
+    fi
+
+    if ! command -v gpg >/dev/null 2>&1; then
+        echo "pypi.sh: GPG signing is required, but gpg is not on PATH." >&2
+        echo "Set HISTDATACOM_GPG_KEY to the release signing key or HISTDATACOM_SKIP_GPG_SIGNING=1 for an explicitly unsigned upload." >&2
+        exit 2
+    fi
+
+    if [[ -n "${gpg_key}" ]]; then
+        gpg_args+=(--local-user "${gpg_key}")
+    fi
+
+    probe_dir=$(mktemp -d)
+    probe_file="${probe_dir}/histdatacom-release-signing-preflight.txt"
+    printf 'histdatacom release signing preflight\n' > "${probe_file}"
+
+    set +e
+    gpg "${gpg_args[@]}" --detach-sign --armor "${probe_file}" >/dev/null
+    signing_status=$?
+    set -e
+    rm -rf "${probe_dir}"
+
+    if ((signing_status != 0)); then
+        if [[ -n "${gpg_key}" ]]; then
+            echo "pypi.sh: GPG signing preflight failed for HISTDATACOM_GPG_KEY=${gpg_key}." >&2
+        else
+            echo "pypi.sh: GPG signing preflight failed with the default signing key." >&2
+            echo "Set HISTDATACOM_GPG_KEY to the release signing key before publishing." >&2
+        fi
+        echo "Set HISTDATACOM_SKIP_GPG_SIGNING=1 only for an explicitly unsigned TestPyPI or emergency upload." >&2
+        exit 2
+    fi
 }
 
 upload_dist_artifacts()
 {
     local repository="$1"
-    local artifacts=(dist/*.whl dist/*.tar.gz)
-    local signatures=(dist/*.asc)
+    local -a artifacts=()
+    local -a signatures=()
 
+    mapfile -t artifacts < <(dist_artifacts)
+    require_dist_artifacts "${artifacts[@]}"
     validate_dist_artifact_sizes
+    mapfile -t signatures < <(dist_signatures)
 
-    if [[ -e "${signatures[0]}" ]]; then
+    if ((${#signatures[@]} > 0)); then
         artifacts+=("${signatures[@]}")
     fi
 
@@ -435,41 +534,50 @@ pypi_install()
     return "${status}"
 }
 
-case "${1:-}" in
-    dev)
-        dev
-        ;;
-    build)
-        build
-        ;;
-    runtime_wheel)
-        install_release_frontend
-        runtime_platform_wheel
-        ;;
-    pypi)
-        prepare_release_upload "PyPI" "${pypi_branch}"
-        build
-        sign_dist_artifacts
-        upload_dist_artifacts pypi
-        ;;
-    testpypi)
-        prepare_release_upload "TestPyPI" "${testpypi_branch}"
-        build
-        sign_dist_artifacts
-        upload_dist_artifacts testpypi
-        ;;
-    testpypi_preflight)
-        testpypi_preflight
-        ;;
-    testpypi_install)
-        echo "${bold}verifying histdatacom from testpypi: https://test.pypi.org/simple/${normal}"
-        verify_release_install "https://test.pypi.org/simple/"
-        ;;
-    pypi_install)
-        pypi_install
-        ;;
-    *)
-        echo "Usage: $0 {dev|build|runtime_wheel|pypi|testpypi|testpypi_preflight|testpypi_install|pypi_install}" >&2
-        exit 2
-        ;;
-esac
+main()
+{
+    case "${1:-}" in
+        dev)
+            dev
+            ;;
+        build)
+            build
+            ;;
+        runtime_wheel)
+            install_release_frontend
+            runtime_platform_wheel
+            ;;
+        pypi)
+            prepare_release_upload "PyPI" "${pypi_branch}"
+            require_release_signing_ready
+            build
+            sign_dist_artifacts
+            upload_dist_artifacts pypi
+            ;;
+        testpypi)
+            prepare_release_upload "TestPyPI" "${testpypi_branch}"
+            require_release_signing_ready
+            build
+            sign_dist_artifacts
+            upload_dist_artifacts testpypi
+            ;;
+        testpypi_preflight)
+            testpypi_preflight
+            ;;
+        testpypi_install)
+            echo "${bold}verifying histdatacom from testpypi: https://test.pypi.org/simple/${normal}"
+            verify_release_install "https://test.pypi.org/simple/"
+            ;;
+        pypi_install)
+            pypi_install
+            ;;
+        *)
+            echo "Usage: $0 {dev|build|runtime_wheel|pypi|testpypi|testpypi_preflight|testpypi_install|pypi_install}" >&2
+            exit 2
+            ;;
+    esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
