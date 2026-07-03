@@ -185,14 +185,19 @@ jobs:
         include:
           - platform_key: linux-x86_64
             runner: ubuntu-latest
+            python-version: "3.13"
           - platform_key: linux-arm64
             runner: ubuntu-24.04-arm
+            python-version: "3.13"
           - platform_key: macos-x86_64
             runner: macos-15-intel
+            python-version: "3.13"
           - platform_key: macos-arm64
             runner: macos-15
+            python-version: "3.13"
           - platform_key: windows-x86_64
             runner: windows-2025
+            python-version: "3.12"
 
     steps:
       - name: Check out source
@@ -201,7 +206,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6.2.0
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Download bundled platform wheel
