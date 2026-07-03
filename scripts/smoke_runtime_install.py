@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 120.0
+MAX_DIAGNOSTIC_LOG_CHARS = 12000
+MAX_DIAGNOSTIC_LOGS = 8
 EXPECTED_ASSETS = (
     "README.md",
     "manifest.json",
@@ -72,23 +74,144 @@ def _run(
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as err:
-        stdout = err.stdout or ""
-        stderr = err.stderr or ""
+        stdout = _command_output_text(err.stdout)
+        stderr = _command_output_text(err.stderr)
+        diagnostics = _runtime_log_diagnostics(command, stdout=stdout)
         raise SystemExit(
             f"command timed out after {timeout:g}s: {' '.join(command)}\n"
             f"stdout:\n{stdout}\n"
             f"stderr:\n{stderr}"
+            f"{diagnostics}"
         ) from err
     if completed.returncode not in expected_returncodes:
         expected = ", ".join(str(code) for code in expected_returncodes)
+        diagnostics = _runtime_log_diagnostics(
+            command,
+            stdout=completed.stdout,
+        )
         raise SystemExit(
             f"command returned exit {completed.returncode}; expected "
             f"{expected}: "
             f"{' '.join(command)}\n"
             f"stdout:\n{completed.stdout}\n"
             f"stderr:\n{completed.stderr}"
+            f"{diagnostics}"
         )
     return completed
+
+
+def _command_output_text(value: bytes | str | None) -> str:
+    """Return subprocess timeout output as text."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _runtime_log_diagnostics(
+    command: Sequence[str],
+    *,
+    stdout: str,
+) -> str:
+    """Return bounded runtime log excerpts for failed runtime commands."""
+    log_dirs = _runtime_log_dirs(command, stdout=stdout)
+    excerpts: list[str] = []
+    for log_dir in log_dirs:
+        if not log_dir.is_dir():
+            continue
+        for log_path in sorted(log_dir.glob("*.log")):
+            if len(excerpts) >= MAX_DIAGNOSTIC_LOGS:
+                break
+            excerpt = _tail_text(log_path, limit=MAX_DIAGNOSTIC_LOG_CHARS)
+            if not excerpt:
+                continue
+            excerpts.append(
+                f"\n--- runtime log: {log_path} ---\n{excerpt}"
+            )
+        if len(excerpts) >= MAX_DIAGNOSTIC_LOGS:
+            break
+    if not excerpts:
+        return ""
+    return "\nruntime log diagnostics:" + "".join(excerpts)
+
+
+def _runtime_log_dirs(
+    command: Sequence[str],
+    *,
+    stdout: str,
+) -> list[Path]:
+    """Return candidate runtime log directories for a command failure."""
+    candidates: list[Path] = []
+    command_parts = list(command)
+    for option in ("--state-dir", "--runtime-home"):
+        for value in _option_values(command_parts, option):
+            path = Path(value)
+            if option == "--state-dir":
+                runtime_dir = path.parent if path.name == "state" else path
+                candidates.append(runtime_dir / "logs")
+            else:
+                candidates.append(path)
+
+    stdout_payload = _json_object_or_none(stdout)
+    if stdout_payload is not None:
+        logs = stdout_payload.get("logs")
+        if isinstance(logs, Mapping):
+            for value in logs.values():
+                if isinstance(value, str):
+                    candidates.append(Path(value).parent)
+        state_dir = stdout_payload.get("state_dir")
+        if isinstance(state_dir, str):
+            path = Path(state_dir)
+            runtime_dir = path.parent if path.name == "state" else path
+            candidates.append(runtime_dir / "logs")
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped
+
+
+def _option_values(command: Sequence[str], option: str) -> list[str]:
+    """Return values that follow an option in a command sequence."""
+    values: list[str] = []
+    parts = list(command)
+    for index, part in enumerate(parts):
+        if part != option or index + 1 >= len(parts):
+            continue
+        values.append(parts[index + 1])
+    return values
+
+
+def _json_object_or_none(text: str) -> dict[str, Any] | None:
+    """Return a JSON object parsed from text, if the text is one."""
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+def _tail_text(path: Path, *, limit: int) -> str:
+    """Return a bounded text tail from a log path."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return ""
+    if not data:
+        return ""
+    tail = data[-limit:]
+    text = tail.decode("utf-8", errors="replace")
+    if len(data) > limit:
+        return f"... <truncated to last {limit} bytes>\n{text}"
+    return text
 
 
 def _run_json(

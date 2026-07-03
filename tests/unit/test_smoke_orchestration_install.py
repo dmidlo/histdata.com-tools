@@ -331,6 +331,55 @@ def test_smoke_command_timeout_fails_with_command_output(monkeypatch) -> None:
         raise AssertionError("expected timed-out command to fail")
 
 
+def test_smoke_command_failure_includes_runtime_logs(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Failed runtime commands should surface bounded component log tails."""
+    module = _module()
+    state_dir = tmp_path / ".runtime-smoke"
+    log_dir = state_dir / "logs"
+    worker_log = log_dir / "temporal-worker-orchestration.log"
+    worker_log.parent.mkdir(parents=True)
+    worker_log.write_text("worker import failed on startup\n", encoding="utf-8")
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        return module.subprocess.CompletedProcess(
+            args=["histdatacom"],
+            returncode=1,
+            stdout=json.dumps(
+                {
+                    "state": "error",
+                    "state_dir": str(state_dir),
+                    "message": "worker exited before readiness",
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    try:
+        module._run(
+            [
+                "histdatacom",
+                "runtime",
+                "--state-dir",
+                str(state_dir),
+                "--json",
+                "start",
+            ],
+        )
+    except SystemExit as err:
+        message = str(err)
+        assert "command returned exit 1" in message
+        assert "runtime log diagnostics" in message
+        assert str(worker_log) in message
+        assert "worker import failed on startup" in message
+    else:  # pragma: no cover - defensive assertion shape
+        raise AssertionError("expected failed command to include runtime logs")
+
+
 def test_quality_runtime_smoke_rejects_shutdown_leaks() -> None:
     """Quality smoke should fail if runtime stop leaves live PIDs."""
     module = _module()
