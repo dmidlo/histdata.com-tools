@@ -825,6 +825,86 @@ def test_start_settles_after_frontend_before_worker_launch(
     ]
 
 
+def test_start_retries_windows_native_worker_startup_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Transient Windows native worker startup exits should be retried."""
+    executable = _executable(tmp_path)
+    policy = _policy(tmp_path)
+    events: list[tuple[str, str]] = []
+    live_pids: set[int] = set()
+    next_pid = iter(range(2300, 2304))
+    worker_attempts = 0
+
+    def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
+        nonlocal worker_attempts
+        pid = next(next_pid)
+        label = "server"
+        if "histdatacom.orchestration.worker" not in command:
+            live_pids.add(pid)
+            events.append(("process", label))
+            return _FakeProcess(pid)
+
+        worker_attempts += 1
+        label = f"worker:{command[command.index('--lane') + 1]}"
+        events.append(("process", f"{label}:{worker_attempts}"))
+        if worker_attempts == 1:
+            return _FakeProcess(
+                pid,
+                supervisor_module.WINDOWS_NATIVE_WORKER_STARTUP_EXIT_CODE,
+            )
+
+        live_pids.add(pid)
+        _write_ready_marker_from_command(command, pid)
+        return _FakeProcess(pid)
+
+    def sleep(seconds: float) -> None:
+        events.append(("sleep", str(seconds)))
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "_worker_launch_settle_seconds",
+        lambda: 0.0,
+    )
+    monkeypatch.setattr(supervisor_module, "_worker_launch_attempts", lambda: 3)
+    monkeypatch.setattr(
+        supervisor_module,
+        "_worker_launch_retry_delay_seconds",
+        lambda returncode: (
+            supervisor_module.DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_DELAY_SECONDS
+            if returncode
+            == supervisor_module.WINDOWS_NATIVE_WORKER_STARTUP_EXIT_CODE
+            else 0.0
+        ),
+    )
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: pid in live_pids,
+        process_factory=process_factory,
+        sleep=sleep,
+        worker_lanes=(TaskQueueLane.NETWORK,),
+    )
+
+    status = supervisor.start(executable=executable)
+    state = json.loads(policy.paths.pid_file.read_text(encoding="utf-8"))
+
+    assert status.state == "running"
+    assert events == [
+        ("process", "server"),
+        ("process", "worker:network:1"),
+        (
+            "sleep",
+            str(
+                supervisor_module.DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_DELAY_SECONDS
+            ),
+        ),
+        ("process", "worker:network:2"),
+    ]
+    assert state["pids"] == {"server": 2300, "worker:network": 2302}
+    assert state["worker_readiness"]["network"]["pid"] == 2302
+
+
 def test_start_repairs_stale_pid_and_lock_files(tmp_path: Path) -> None:
     """Dead PID and lock files should not block a new start."""
     executable = _executable(tmp_path)

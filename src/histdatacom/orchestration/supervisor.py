@@ -61,12 +61,15 @@ DEFAULT_STARTUP_TIMEOUT_SECONDS = 10.0
 DEFAULT_STOP_TIMEOUT_SECONDS = 10.0
 DEFAULT_FRONTEND_PROBE_TIMEOUT_SECONDS = 0.2
 DEFAULT_WINDOWS_WORKER_LAUNCH_SETTLE_SECONDS = 3.0
+DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_ATTEMPTS = 3
+DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_DELAY_SECONDS = 2.0
 DEFAULT_WORKER_LANES = tuple(TaskQueueLane)
 WORKER_COMPONENT_PREFIX = "worker:"
 ORCHESTRATION_WORKER_MODULE = "histdatacom.orchestration.worker"
 ORCHESTRATION_WORKER_SCRIPT = "histdatacom-orchestration-worker"
 WINDOWS_PYTHON_EXECUTABLE_NAMES = frozenset({"python.exe", "pythonw.exe"})
 WINDOWS_ERROR_INVALID_PARAMETER = 87
+WINDOWS_NATIVE_WORKER_STARTUP_EXIT_CODE = 0xC0000142
 WINDOWS_PROCESS_TERMINATE = 0x0001
 
 ProcessFactory = Callable[..., Any]
@@ -238,6 +241,20 @@ def _worker_launch_settle_seconds() -> float:
     if os.name != "nt":
         return 0.0
     return DEFAULT_WINDOWS_WORKER_LAUNCH_SETTLE_SECONDS
+
+
+def _worker_launch_attempts() -> int:
+    """Return the maximum number of worker launch attempts."""
+    if os.name != "nt":
+        return 1
+    return DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_ATTEMPTS
+
+
+def _worker_launch_retry_delay_seconds(returncode: int | None) -> float:
+    """Return the retry delay for transient native worker startup exits."""
+    if os.name != "nt" or returncode != WINDOWS_NATIVE_WORKER_STARTUP_EXIT_CODE:
+        return 0.0
+    return DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_DELAY_SECONDS
 
 
 def _namespace_already_exists(
@@ -907,39 +924,23 @@ class OrchestrationSupervisor:
             base_worker_config = self._worker_config(runtime_policy)
             for lane in self.worker_lanes:
                 worker_config = base_worker_config.for_lane(lane)
-                worker_command = build_orchestration_worker_start_command(
-                    worker_config
-                )
                 component = self._worker_component(lane)
-                log_path = self._worker_log_path(lane)
-                remove_worker_readiness(self.paths.state_dir, lane)
-                worker_process = self._launch_component(
-                    worker_command,
-                    log_path,
-                )
-                if not self._process_running(worker_process):
-                    raise RuntimeError(
-                        self._worker_exit_message(
-                            lane,
-                            int(worker_process.pid),
-                            worker_process,
-                            worker_command,
-                            log_path,
-                            phase="startup",
-                        )
-                    )
-                pids[component] = int(worker_process.pid)
-                processes[component] = worker_process
-                commands[component] = list(worker_command)
-                logs[component] = str(log_path)
-                worker_readiness[lane.value] = self._wait_for_worker_ready(
-                    lane,
-                    int(worker_process.pid),
+                (
                     worker_process,
                     worker_command,
-                    deadline,
                     log_path,
+                    readiness,
+                ) = self._start_worker_lane(
+                    lane,
+                    worker_config,
+                    component,
+                    processes,
+                    pids,
+                    deadline,
                 )
+                commands[component] = list(worker_command)
+                logs[component] = str(log_path)
+                worker_readiness[lane.value] = readiness
 
             state = {
                 "schema_version": ORCHESTRATION_STATE_SCHEMA_VERSION,
@@ -1135,6 +1136,110 @@ class OrchestrationSupervisor:
             orchestration_workers=self.orchestration_workers,
             influx_workers=self.influx_workers,
         )
+
+    def _start_worker_lane(
+        self,
+        lane: TaskQueueLane,
+        worker_config: OrchestrationWorkerConfig,
+        component: str,
+        processes: dict[str, Any],
+        pids: dict[str, int],
+        deadline: float,
+    ) -> tuple[Any, list[str], Path, dict[str, Any]]:
+        """Launch one worker lane, retrying transient Windows native exits."""
+        worker_command = list(
+            build_orchestration_worker_start_command(worker_config)
+        )
+        log_path = self._worker_log_path(lane)
+        attempts = _worker_launch_attempts()
+        attempt = 0
+        last_error: RuntimeError | None = None
+
+        while attempt < attempts:
+            attempt += 1
+            remove_worker_readiness(self.paths.state_dir, lane)
+            worker_process = self._launch_component(
+                worker_command,
+                log_path,
+            )
+            pid = int(worker_process.pid)
+            pids[component] = pid
+            processes[component] = worker_process
+            if not self._process_running(worker_process):
+                last_error = RuntimeError(
+                    self._worker_exit_message(
+                        lane,
+                        pid,
+                        worker_process,
+                        worker_command,
+                        log_path,
+                        phase="startup",
+                    )
+                )
+                retry_delay = self._worker_launch_retry_delay(
+                    worker_process,
+                    deadline,
+                    attempt=attempt,
+                    attempts=attempts,
+                )
+                if retry_delay > 0:
+                    pids.pop(component, None)
+                    processes.pop(component, None)
+                    self._sleep(retry_delay)
+                    continue
+                raise last_error
+
+            try:
+                readiness = self._wait_for_worker_ready(
+                    lane,
+                    pid,
+                    worker_process,
+                    worker_command,
+                    deadline,
+                    log_path,
+                )
+            except RuntimeError as err:
+                last_error = err
+                retry_delay = self._worker_launch_retry_delay(
+                    worker_process,
+                    deadline,
+                    attempt=attempt,
+                    attempts=attempts,
+                )
+                if retry_delay > 0:
+                    pids.pop(component, None)
+                    processes.pop(component, None)
+                    self._sleep(retry_delay)
+                    continue
+                raise
+            return worker_process, worker_command, log_path, readiness
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError(
+            f"Temporal worker lane {lane.value!r} did not start before "
+            "worker launch attempts were exhausted."
+        )
+
+    def _worker_launch_retry_delay(
+        self,
+        worker_process: Any,
+        deadline: float,
+        *,
+        attempt: int,
+        attempts: int,
+    ) -> float:
+        """Return a bounded retry delay for a failed worker process."""
+        if attempt >= attempts:
+            return 0.0
+        delay = _worker_launch_retry_delay_seconds(
+            self._process_returncode(worker_process)
+        )
+        if delay <= 0:
+            return 0.0
+        if time.monotonic() + delay >= deadline:
+            return 0.0
+        return delay
 
     def _client_worker_config_from_running_state(
         self,
