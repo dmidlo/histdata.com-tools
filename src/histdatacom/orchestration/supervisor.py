@@ -65,6 +65,8 @@ WORKER_COMPONENT_PREFIX = "worker:"
 ORCHESTRATION_WORKER_MODULE = "histdatacom.orchestration.worker"
 ORCHESTRATION_WORKER_SCRIPT = "histdatacom-orchestration-worker"
 WINDOWS_PYTHON_EXECUTABLE_NAMES = frozenset({"python.exe", "pythonw.exe"})
+WINDOWS_ERROR_INVALID_PARAMETER = 87
+WINDOWS_PROCESS_TERMINATE = 0x0001
 
 ProcessFactory = Callable[..., Any]
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -158,6 +160,9 @@ def _terminate_process(pid: int) -> None:
     """Request process termination for a PID."""
     if pid <= 0:
         return
+    if os.name == "nt":
+        _terminate_windows_process(pid, exit_code=int(signal.SIGTERM))
+        return
     os.kill(pid, signal.SIGTERM)
 
 
@@ -165,7 +170,41 @@ def _kill_process(pid: int) -> None:
     """Force process termination for a PID."""
     if pid <= 0:
         return
-    os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    kill_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
+    if os.name == "nt":
+        _terminate_windows_process(pid, exit_code=int(kill_signal))
+        return
+    os.kill(pid, kill_signal)
+
+
+def _terminate_windows_process(pid: int, *, exit_code: int) -> None:
+    """Terminate a Windows process by PID without console-control signals."""
+    import ctypes
+
+    win_dll = getattr(ctypes, "WinDLL")
+    get_last_error = getattr(ctypes, "get_last_error")
+    kernel32 = win_dll("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(WINDOWS_PROCESS_TERMINATE, False, pid)
+    if not handle:
+        error = int(get_last_error())
+        if error == WINDOWS_ERROR_INVALID_PARAMETER:
+            return
+        raise OSError(error, _windows_error_message(ctypes, error))
+    try:
+        if not kernel32.TerminateProcess(handle, exit_code):
+            error = int(get_last_error())
+            if error != WINDOWS_ERROR_INVALID_PARAMETER:
+                raise OSError(error, _windows_error_message(ctypes, error))
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _windows_error_message(ctypes_module: Any, error: int) -> str:
+    """Return a Windows error message with a portable fallback."""
+    format_error = getattr(ctypes_module, "FormatError", None)
+    if callable(format_error):
+        return str(format_error(error))
+    return os.strerror(error)
 
 
 def _windows_process_group_kwargs() -> dict[str, int]:

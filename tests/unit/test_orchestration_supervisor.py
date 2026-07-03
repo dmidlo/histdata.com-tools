@@ -580,6 +580,53 @@ def test_launch_component_uses_windows_process_group(
     assert captured_kwargs["creationflags"] == 512
 
 
+def test_terminate_process_uses_windows_termination_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows stop should terminate PIDs without console-control signals."""
+    calls: list[tuple[int, int]] = []
+
+    def terminate_windows_process(pid: int, *, exit_code: int) -> None:
+        calls.append((pid, exit_code))
+
+    monkeypatch.setattr(supervisor_module.os, "name", "nt")
+    monkeypatch.setattr(
+        supervisor_module,
+        "_terminate_windows_process",
+        terminate_windows_process,
+    )
+
+    supervisor_module._terminate_process(1234)
+
+    assert calls == [(1234, int(supervisor_module.signal.SIGTERM))]
+
+
+def test_kill_process_uses_windows_termination_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows kill should use the same non-console termination primitive."""
+    calls: list[tuple[int, int]] = []
+
+    def terminate_windows_process(pid: int, *, exit_code: int) -> None:
+        calls.append((pid, exit_code))
+
+    monkeypatch.setattr(supervisor_module.os, "name", "nt")
+    monkeypatch.setattr(
+        supervisor_module,
+        "_terminate_windows_process",
+        terminate_windows_process,
+    )
+
+    supervisor_module._kill_process(1234)
+
+    expected_signal = getattr(
+        supervisor_module.signal,
+        "SIGKILL",
+        supervisor_module.signal.SIGTERM,
+    )
+    assert calls == [(1234, int(expected_signal))]
+
+
 def test_start_preserves_launch_error_when_cleanup_is_denied(
     tmp_path: Path,
 ) -> None:
