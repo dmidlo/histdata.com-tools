@@ -11,7 +11,10 @@ import pytest
 
 import histdatacom
 from histdatacom.exceptions import InfluxConfigurationError
-from histdatacom.fx_enums import MAJOR_TRIANGLE_SYMBOLS
+from histdatacom.fx_enums import (
+    MAJOR_TRIANGLE_PAIR_GROUPS,
+    MAJOR_TRIANGLE_SYMBOLS,
+)
 from histdatacom.options import Options
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
 from histdatacom.orchestration.client import (
@@ -1397,6 +1400,39 @@ def test_api_major_triangle_group_submits_expanded_pairs(
 
     assert result["status"] == "completed"
     assert captured["request"].pairs == MAJOR_TRIANGLE_SYMBOLS
+
+
+def test_api_individual_triangle_group_submits_expanded_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API callers should be able to submit individual triangle groups."""
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> JobResult:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _job_result()
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    group = "triangle-eurgbp-eurusd-gbpusd"
+    options = Options()
+    options.pair_groups = {group}
+    options.formats = {"ascii"}
+    options.timeframes = {"M1"}
+    options.start_yearmonth = "2022-12"
+
+    result = histdata_com.main(options)
+
+    assert result["status"] == "completed"
+    assert captured["request"].pairs == tuple(
+        sorted(MAJOR_TRIANGLE_PAIR_GROUPS[group])
+    )
 
 
 def test_cli_default_runtime_uses_orchestration(

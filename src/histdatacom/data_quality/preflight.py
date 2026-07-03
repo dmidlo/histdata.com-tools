@@ -36,7 +36,7 @@ from histdatacom.data_quality.rules import (
 )
 from histdatacom.fx_enums import (
     Format,
-    PAIR_GROUPS,
+    PAIR_GROUP_BASKETS,
     Timeframe,
     expand_pair_selection,
     normalize_pair_group,
@@ -1823,7 +1823,7 @@ def _cache_dimensions(
     pair_set = set(pairs)
     groups = sorted(
         group
-        for group, group_pairs in PAIR_GROUPS.items()
+        for group, group_pairs in PAIR_GROUP_BASKETS.items()
         if pair_set.intersection(group_pairs)
     )
     return cast(

@@ -9,7 +9,10 @@ import pytest
 from histdatacom import Options
 from histdatacom.data_quality import QUALITY_PROFILE_SCHEMA_VERSION
 from histdatacom.cli import ArgParser
-from histdatacom.fx_enums import MAJOR_TRIANGLE_SYMBOLS
+from histdatacom.fx_enums import (
+    MAJOR_TRIANGLE_PAIR_GROUPS,
+    MAJOR_TRIANGLE_SYMBOLS,
+)
 
 
 def test_cli() -> None:
@@ -435,6 +438,36 @@ def test_pair_groups_cli_accepts_unquoted_major_triangles(
     assert options.pair_groups == ["majors", "major-triangles"]
 
 
+def test_pair_groups_cli_accepts_individual_triangle_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Individual triangle groups should expand to one relationship."""
+    group = "triangle-eurgbp-eurusd-gbpusd"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "--pair-groups",
+            "triangle_eurgbp_eurusd_gbpusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert tuple(sorted(options.pairs)) == tuple(
+        sorted(MAJOR_TRIANGLE_PAIR_GROUPS[group])
+    )
+    assert options.pair_groups == [group]
+
+
 def test_pair_groups_cli_unions_with_explicit_pairs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -653,6 +686,38 @@ histdatacom:
 
     assert tuple(sorted(options.pairs)) == MAJOR_TRIANGLE_SYMBOLS
     assert options.pair_groups == ["major-triangles"]
+
+
+def test_config_file_applies_individual_triangle_pair_group(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """YAML defaults should accept individual triangle group names."""
+    group = "triangle-eurgbp-eurusd-gbpusd"
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  instrument_groups:
+    - {group}
+  formats: [ascii]
+  timeframes: [tick-data-quotes]
+  start_yearmonth: 2022-10
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    options = ArgParser(Options())()
+
+    assert tuple(sorted(options.pairs)) == tuple(
+        sorted(MAJOR_TRIANGLE_PAIR_GROUPS[group])
+    )
+    assert options.pair_groups == [group]
 
 
 def test_config_file_applies_quality_command_defaults(

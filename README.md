@@ -620,6 +620,17 @@ downloadable instruments supporting 56 oriented relationships such as
 `AUDCHF / CADCHF ~= AUDCAD`. It excludes exotics, metals, commodities, and
 indices.
 
+Select one oriented triangle by naming all three symbols in the relationship:
+
+```txt
+histdatacom --pair-groups triangle-eurgbp-eurusd-gbpusd -f ascii -t tick-data-quotes -s 2022
+```
+
+Individual triangle group names use the pattern
+`triangle-{direct}-{numerator}-{denominator}`. For example,
+`triangle-eurgbp-eurusd-gbpusd` downloads `eurgbp`, `eurusd`, and `gbpusd`
+for the rule `EURUSD / GBPUSD ~= EURGBP`.
+
 ##### to fetch a single month's data, include a month, but do not use the `-e, --end_yearmonth` flag
 
 - if you're requesting 1-minute-bar-quotes for any
@@ -1643,6 +1654,7 @@ options.formats = {"ascii"}  # Must be {"ascii"}
 options.timeframes = {"1-minute-bar-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
 options.pairs = {"eurusd"}
 # Or choose named baskets with options.pair_groups = {"majors", "major-triangles"}
+# Or one triangle with options.pair_groups = {"triangle-eurgbp-eurusd-gbpusd"}
 options.start_yearmonth = "2021-04"
 options.end_yearmonth = "2021-05"
 options.cpu_utilization = "medium"

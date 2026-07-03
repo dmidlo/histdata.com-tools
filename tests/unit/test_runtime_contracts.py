@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 
-from histdatacom.fx_enums import MAJOR_TRIANGLE_SYMBOLS
+from histdatacom.fx_enums import (
+    MAJOR_TRIANGLE_PAIR_GROUPS,
+    MAJOR_TRIANGLE_SYMBOLS,
+)
 from histdatacom.options import Options
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import (
@@ -229,6 +232,23 @@ def test_run_request_expands_major_triangle_group_from_options() -> None:
 
     assert request.pairs == MAJOR_TRIANGLE_SYMBOLS
     assert request.metadata["pair_groups"] == ["major-triangles"]
+
+
+def test_run_request_expands_individual_triangle_group_from_options() -> None:
+    """Direct API callers should be able to select one major triangle."""
+    group = "triangle-eurgbp-eurusd-gbpusd"
+    options = Options()
+    options.pair_groups = {group}
+    options.formats = {"ascii"}
+    options.timeframes = {"T"}
+
+    request = RunRequest.from_options(
+        options,
+        request_id="run-individual-triangle",
+    )
+
+    assert request.pairs == tuple(sorted(MAJOR_TRIANGLE_PAIR_GROUPS[group]))
+    assert request.metadata["pair_groups"] == [group]
 
 
 def test_stage_result_round_trips_artifacts_events_and_failure() -> None:

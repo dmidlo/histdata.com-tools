@@ -177,6 +177,21 @@ def _major_triangle_relationships() -> tuple[tuple[str, str, str], ...]:
     return tuple(sorted(relationships))
 
 
+def _major_triangle_group_name(
+    relationship: tuple[str, str, str],
+) -> str:
+    """Return the canonical group name for one major triangle."""
+    return "triangle-" + "-".join(relationship)
+
+
+def _major_triangle_pair_groups() -> dict[str, tuple[str, str, str]]:
+    """Return user-selectable pair groups for individual triangles."""
+    return {
+        _major_triangle_group_name(relationship): relationship
+        for relationship in MAJOR_TRIANGLE_RELATIONSHIPS
+    }
+
+
 MAJOR_TRIANGLE_RELATIONSHIPS: tuple[tuple[str, str, str], ...] = (
     _major_triangle_relationships()
 )
@@ -189,9 +204,12 @@ MAJOR_TRIANGLE_SYMBOLS: tuple[str, ...] = tuple(
         }
     )
 )
+MAJOR_TRIANGLE_PAIR_GROUPS: dict[str, tuple[str, str, str]] = (
+    _major_triangle_pair_groups()
+)
 
 
-PAIR_GROUPS: dict[str, tuple[str, ...]] = {
+PAIR_GROUP_BASKETS: dict[str, tuple[str, ...]] = {
     "majors": (
         "eurusd",
         "usdjpy",
@@ -291,6 +309,10 @@ PAIR_GROUPS: dict[str, tuple[str, ...]] = {
         "etxeur",
     ),
 }
+PAIR_GROUPS: dict[str, tuple[str, ...]] = {
+    **PAIR_GROUP_BASKETS,
+    **MAJOR_TRIANGLE_PAIR_GROUPS,
+}
 PAIR_GROUP_ALIASES: dict[str, str] = {
     "major": "majors",
     "major-triangle": "major-triangles",
@@ -314,6 +336,20 @@ def pair_group_names(*, include_aliases: bool = False) -> tuple[str, ...]:
     names = set(PAIR_GROUPS)
     if include_aliases:
         names.update(PAIR_GROUP_ALIASES)
+    return tuple(sorted(names))
+
+
+def pair_group_basket_names(
+    *, include_aliases: bool = False
+) -> tuple[str, ...]:
+    """Return broad pair-group basket names, excluding individual triangles."""
+    names = set(PAIR_GROUP_BASKETS)
+    if include_aliases:
+        names.update(
+            alias
+            for alias, canonical in PAIR_GROUP_ALIASES.items()
+            if canonical in PAIR_GROUP_BASKETS
+        )
     return tuple(sorted(names))
 
 

@@ -1,13 +1,17 @@
 """Pytest unit tests for histdatacom.fx_enums.py."""
 
 from histdatacom.fx_enums import (
+    MAJOR_TRIANGLE_PAIR_GROUPS,
     MAJOR_TRIANGLE_RELATIONSHIPS,
     MAJOR_TRIANGLE_SYMBOLS,
+    PAIR_GROUP_BASKETS,
     PAIR_GROUPS,
     Pairs,
     TimePrecision,
     expand_pair_groups,
     expand_pair_selection,
+    normalize_pair_group,
+    pair_group_basket_names,
     pair_group_names,
 )
 
@@ -66,6 +70,32 @@ def test_major_triangle_group_covers_complete_major_fx_triangle_set() -> None:
     assert ("eurusd", "eurjpy", "usdjpy") in MAJOR_TRIANGLE_RELATIONSHIPS
     assert ("cadchf", "cadjpy", "chfjpy") in MAJOR_TRIANGLE_RELATIONSHIPS
     assert ("audcad", "audchf", "cadchf") in MAJOR_TRIANGLE_RELATIONSHIPS
+
+
+def test_individual_major_triangle_groups_are_user_selectable() -> None:
+    """Each oriented major triangle should have a stable pair-group name."""
+    assert len(MAJOR_TRIANGLE_PAIR_GROUPS) == len(MAJOR_TRIANGLE_RELATIONSHIPS)
+    assert set(MAJOR_TRIANGLE_PAIR_GROUPS).issubset(PAIR_GROUPS)
+    assert set(PAIR_GROUP_BASKETS).isdisjoint(MAJOR_TRIANGLE_PAIR_GROUPS)
+
+    for relationship in MAJOR_TRIANGLE_RELATIONSHIPS:
+        group = f"triangle-{'-'.join(relationship)}"
+        assert MAJOR_TRIANGLE_PAIR_GROUPS[group] == relationship
+        assert PAIR_GROUPS[group] == relationship
+        assert expand_pair_groups((group,)) == tuple(sorted(relationship))
+
+    group = "triangle-eurgbp-eurusd-gbpusd"
+    assert normalize_pair_group("triangle eurgbp eurusd gbpusd") == group
+    assert normalize_pair_group("triangle_eurgbp_eurusd_gbpusd") == group
+    assert normalize_pair_group("triangleeurgbpeurusdgbpusd") == group
+
+
+def test_pair_group_basket_names_exclude_individual_triangles() -> None:
+    """Summary basket names should stay readable as triangle groups grow."""
+    assert set(pair_group_basket_names()) == set(PAIR_GROUP_BASKETS)
+    assert "major-triangles" in pair_group_basket_names()
+    assert "triangle-eurgbp-eurusd-gbpusd" in pair_group_names()
+    assert "triangle-eurgbp-eurusd-gbpusd" not in pair_group_basket_names()
 
 
 def test_pair_group_selection_replaces_default_all_pair_selection() -> None:

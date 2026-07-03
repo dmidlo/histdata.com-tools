@@ -28,6 +28,7 @@ from histdatacom.data_quality.preflight import (
     write_quality_preflight_markdown_report,
     write_quality_preflight_report,
 )
+from histdatacom.fx_enums import MAJOR_TRIANGLE_PAIR_GROUPS
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     TICK,
@@ -109,6 +110,33 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
     assert "/Users/" not in encoded
     assert "/private/" not in encoded
     assert "/var/folders/" not in encoded
+
+
+def test_quality_preflight_accepts_individual_triangle_group(
+    tmp_path: Path,
+) -> None:
+    """Preflight filters should accept one generated triangle group."""
+    data_dir = tmp_path / "data"
+    group = "triangle-eurgbp-eurusd-gbpusd"
+    for index, symbol in enumerate(MAJOR_TRIANGLE_PAIR_GROUPS[group], start=1):
+        _write_tick_cache(data_dir, symbol=symbol, row_multiplier=index)
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pair_groups=(group,),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+
+    assert payload["status"] == "pass"
+    assert payload["target_count"] == 3
+    assert payload["filters"]["pair_groups"] == [group]
+    assert payload["filters"]["pairs"] == sorted(
+        MAJOR_TRIANGLE_PAIR_GROUPS[group]
+    )
 
 
 def test_quality_preflight_imports_validation_report_status(
@@ -432,6 +460,10 @@ def test_quality_preflight_no_target_diagnostics_report_cache_dimensions(
     assert dimensions["canonical_data_cache_count"] == 1
     assert dimensions["matching_cache_count"] == 0
     assert dimensions["pairs"] == ["eurusd"]
+    assert all(
+        not str(group).startswith("triangle-")
+        for group in dimensions["pair_groups"]
+    )
     assert "requested filters: groups=all; pairs=gbpusd" in summary
     assert "discovered caches: 1 canonical .data" in summary
 
