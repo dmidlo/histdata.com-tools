@@ -138,6 +138,13 @@ def _process_exists(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+    except OSError as err:
+        if (
+            os.name == "nt"
+            and _windows_os_error_code(err) == WINDOWS_ERROR_INVALID_PARAMETER
+        ):
+            return False
+        raise
     return True
 
 
@@ -205,6 +212,15 @@ def _windows_error_message(ctypes_module: Any, error: int) -> str:
     if callable(format_error):
         return str(format_error(error))
     return os.strerror(error)
+
+
+def _windows_os_error_code(error: OSError) -> int | None:
+    """Return a Windows error code from an OS error when one is available."""
+    winerror = getattr(error, "winerror", None)
+    if isinstance(winerror, int):
+        return winerror
+    errno = getattr(error, "errno", None)
+    return errno if isinstance(errno, int) else None
 
 
 def _windows_process_group_kwargs() -> dict[str, int]:

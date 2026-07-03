@@ -1233,6 +1233,28 @@ def test_process_exists_treats_reaped_child_pid_as_dead(
     assert kill_calls == []
 
 
+def test_process_exists_treats_windows_invalid_parameter_as_dead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows may report a dead PID probe as WinError 87."""
+
+    def raise_invalid_parameter(_pid: int, _signal: int) -> None:
+        raise OSError(
+            supervisor_module.WINDOWS_ERROR_INVALID_PARAMETER,
+            "The parameter is incorrect",
+        )
+
+    monkeypatch.setattr(supervisor_module.os, "name", "nt")
+    monkeypatch.setattr(
+        supervisor_module,
+        "_reap_child_process",
+        lambda _pid: False,
+    )
+    monkeypatch.setattr(supervisor_module.os, "kill", raise_invalid_parameter)
+
+    assert not supervisor_module._process_exists(700)
+
+
 def test_restart_stops_existing_fleet_and_starts_new_fleet(
     tmp_path: Path,
 ) -> None:
