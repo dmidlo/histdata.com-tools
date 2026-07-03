@@ -454,6 +454,60 @@ def test_windows_runtime_diagnostic_classifies_direct_worker_native_crash(
     assert "runtime_worker_start" not in calls
 
 
+def test_diagnostic_command_uses_windows_process_group(monkeypatch) -> None:
+    """Windows diagnostic subprocesses should not share console control events."""
+    module = _module()
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        captured_kwargs.update(kwargs)
+        return module.subprocess.CompletedProcess(
+            args=["python"],
+            returncode=0,
+            stdout="{}",
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.os, "name", "nt")
+    monkeypatch.setattr(
+        module.subprocess,
+        "CREATE_NEW_PROCESS_GROUP",
+        512,
+        raising=False,
+    )
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    phase = module._run_diagnostic_command(
+        "worker_client_connect",
+        ["python", "-m", "histdatacom.orchestration.worker"],
+    )
+
+    assert phase["status"] == "passed"
+    assert captured_kwargs["creationflags"] == 512
+
+
+def test_diagnostic_command_reports_windows_keyboard_interrupt(
+    monkeypatch,
+) -> None:
+    """A leaked Windows console interrupt should be diagnostic evidence."""
+    module = _module()
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(module.os, "name", "nt")
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    phase = module._run_diagnostic_command(
+        "worker_client_connect",
+        ["python", "-m", "histdatacom.orchestration.worker"],
+    )
+
+    assert phase["status"] == "interrupted"
+    assert phase["error_type"] == "KeyboardInterrupt"
+    assert "console-control event" in phase["message"]
+
+
 def test_windows_runtime_diagnostic_stops_running_runtime(
     monkeypatch,
     tmp_path: Path,

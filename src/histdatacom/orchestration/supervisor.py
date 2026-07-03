@@ -168,6 +168,15 @@ def _kill_process(pid: int) -> None:
     os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
 
 
+def _windows_process_group_kwargs() -> dict[str, int]:
+    """Return subprocess flags that isolate Windows console-control events."""
+    if os.name != "nt":
+        return {}
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+    }
+
+
 def _namespace_already_exists(
     completed: subprocess.CompletedProcess[str],
 ) -> bool:
@@ -1297,6 +1306,7 @@ class OrchestrationSupervisor:
                 stderr=subprocess.STDOUT,
                 close_fds=True,
                 start_new_session=os.name != "nt",
+                **_windows_process_group_kwargs(),
             )
         finally:
             log.close()

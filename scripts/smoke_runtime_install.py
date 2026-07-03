@@ -25,6 +25,11 @@ WORKER_STARTUP_DIAGNOSTIC_LANES = (
     "influx",
 )
 WORKER_STARTUP_RUN_PROBE_SECONDS = 0.5
+WINDOWS_PARENT_INTERRUPT_MESSAGE = (
+    "parent received KeyboardInterrupt while waiting for diagnostic subprocess; "
+    "this usually means a Windows console-control event crossed a runtime "
+    "process boundary"
+)
 EXPECTED_ASSETS = (
     "README.md",
     "manifest.json",
@@ -81,6 +86,7 @@ def _run(
             env=(dict(env) if env is not None else None),
             text=True,
             timeout=timeout,
+            **_windows_process_group_kwargs(),
         )
     except subprocess.TimeoutExpired as err:
         stdout = _command_output_text(err.stdout)
@@ -280,6 +286,7 @@ def _run_diagnostic_command(
             env=(dict(env) if env is not None else None),
             text=True,
             timeout=timeout,
+            **_windows_process_group_kwargs(),
         )
     except subprocess.TimeoutExpired as err:
         stdout = _command_output_text(err.stdout)
@@ -292,6 +299,18 @@ def _run_diagnostic_command(
             "timeout_seconds": timeout,
             "stdout": _diagnostic_stream_text(stdout),
             "stderr": _diagnostic_stream_text(stderr),
+            "runtime_log_diagnostics": _diagnostic_stream_text(diagnostics),
+        }
+    except KeyboardInterrupt:
+        if os.name != "nt":
+            raise
+        diagnostics = _runtime_log_diagnostics(command, stdout="")
+        return {
+            "phase": phase,
+            "status": "interrupted",
+            "command": list(command),
+            "error_type": "KeyboardInterrupt",
+            "message": WINDOWS_PARENT_INTERRUPT_MESSAGE,
             "runtime_log_diagnostics": _diagnostic_stream_text(diagnostics),
         }
 
@@ -365,6 +384,15 @@ def _stop_server_only_runtime(
     """Stop a server-only diagnostic runtime."""
     try:
         status = supervisor.stop(stop_timeout=stop_timeout)
+    except KeyboardInterrupt:
+        if os.name != "nt":
+            raise
+        return {
+            "phase": "server_only_stop",
+            "status": "interrupted",
+            "error_type": "KeyboardInterrupt",
+            "message": WINDOWS_PARENT_INTERRUPT_MESSAGE,
+        }
     except Exception as err:
         return {
             "phase": "server_only_stop",
@@ -382,6 +410,15 @@ def _stop_server_only_runtime(
     if status.state != "stopped":
         phase["message"] = status.message
     return phase
+
+
+def _windows_process_group_kwargs() -> dict[str, int]:
+    """Return subprocess flags that isolate Windows console-control events."""
+    if os.name != "nt":
+        return {}
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+    }
 
 
 def _server_only_runtime_env(supervisor: Any) -> dict[str, str]:

@@ -518,6 +518,7 @@ def test_start_writes_state_and_is_idempotent_for_running_orchestration(
         kwargs["start_new_session"] is (supervisor_module.os.name != "nt")
         for kwargs in launch_kwargs
     )
+    assert all("creationflags" not in kwargs for kwargs in launch_kwargs)
     assert state["schema_version"] == ORCHESTRATION_STATE_SCHEMA_VERSION
     assert state["pids"] == {
         "server": 1234,
@@ -548,6 +549,35 @@ def test_start_writes_state_and_is_idempotent_for_running_orchestration(
     assert state["runtime_policy"]["paths"]["sqlite_db"] == str(paths.sqlite_db)
     assert paths.runtime_manifest.exists()
     assert not paths.lock_file.exists()
+
+
+def test_launch_component_uses_windows_process_group(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Windows runtime components should launch in a separate process group."""
+    captured_kwargs: dict[str, object] = {}
+
+    def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
+        captured_kwargs.update(kwargs)
+        return _FakeProcess(1234)
+
+    supervisor = _supervisor(process_factory=process_factory)
+
+    monkeypatch.setattr(supervisor_module.os, "name", "nt")
+    monkeypatch.setattr(
+        supervisor_module.subprocess,
+        "CREATE_NEW_PROCESS_GROUP",
+        512,
+        raising=False,
+    )
+
+    supervisor._launch_component(
+        ["temporal", "server"], tmp_path / "server.log"
+    )
+
+    assert captured_kwargs["start_new_session"] is False
+    assert captured_kwargs["creationflags"] == 512
 
 
 def test_start_preserves_launch_error_when_cleanup_is_denied(
