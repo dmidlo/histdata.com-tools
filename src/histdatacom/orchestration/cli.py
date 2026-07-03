@@ -18,6 +18,10 @@ from histdatacom.cli_config import (
     configured_runtime_argv,
 )
 from histdatacom.runtime_contracts import JSONValue, RunRequest
+from histdatacom.scheduled_run_bundle import (
+    ScheduledRunBundleError,
+    load_scheduled_run_bundle_json,
+)
 from histdatacom.orchestration.performance import (
     DEFAULT_INFLUX_WORKERS,
     DEFAULT_NETWORK_MULTIPLIER,
@@ -231,12 +235,18 @@ def _add_jobs_args(parser: argparse.ArgumentParser) -> None:
 
     submit = job_subparsers.add_parser(
         "submit",
-        help="submit a serialized RunRequest JSON payload",
+        help="submit a serialized RunRequest or scheduled-run bundle",
     )
-    submit.add_argument(
+    submit_source = submit.add_mutually_exclusive_group(required=True)
+    submit_source.add_argument(
         "--request-json",
-        required=True,
         help="path to a RunRequest JSON payload, or '-' for stdin",
+    )
+    submit_source.add_argument(
+        "--bundle",
+        "--request-bundle",
+        dest="request_bundle",
+        help="path to a scheduled-run bundle JSON payload, or '-' for stdin",
     )
     submit.add_argument(
         "--start",
@@ -248,13 +258,19 @@ def _add_jobs_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="return after submission instead of waiting for the result",
     )
-    submit.add_argument(
+    submit_overlap = submit.add_mutually_exclusive_group()
+    submit_overlap.add_argument(
         "--no-overlap",
         action="store_true",
         help=(
             "refuse submission when an active matching scheduled job already "
             "exists in this runtime workspace"
         ),
+    )
+    submit_overlap.add_argument(
+        "--allow-overlap",
+        action="store_true",
+        help="override bundled or request-level scheduled overlap guarding",
     )
     submit.add_argument(
         "--schedule-key",
@@ -275,18 +291,30 @@ def _add_jobs_args(parser: argparse.ArgumentParser) -> None:
         "preflight",
         help="check whether a scheduled request would be blocked",
     )
-    preflight.add_argument(
+    preflight_source = preflight.add_mutually_exclusive_group(required=True)
+    preflight_source.add_argument(
         "--request-json",
-        required=True,
         help="path to a RunRequest JSON payload, or '-' for stdin",
     )
-    preflight.add_argument(
+    preflight_source.add_argument(
+        "--bundle",
+        "--request-bundle",
+        dest="request_bundle",
+        help="path to a scheduled-run bundle JSON payload, or '-' for stdin",
+    )
+    preflight_overlap = preflight.add_mutually_exclusive_group()
+    preflight_overlap.add_argument(
         "--no-overlap",
         action="store_true",
         help=(
             "check for an active matching scheduled job in this runtime "
             "workspace"
         ),
+    )
+    preflight_overlap.add_argument(
+        "--allow-overlap",
+        action="store_true",
+        help="override bundled or request-level scheduled overlap guarding",
     )
     preflight.add_argument(
         "--schedule-key",
@@ -585,12 +613,28 @@ def _load_run_request(path: str) -> RunRequest:
     return RunRequest.from_dict(json.loads(payload))
 
 
+def _load_scheduled_run_bundle(path: str) -> RunRequest:
+    """Load a scheduled-run bundle and return its job request."""
+    payload = sys.stdin.read() if path == "-" else Path(path).read_text()
+    request: RunRequest = load_scheduled_run_bundle_json(
+        payload
+    ).request_for_jobs()
+    return request
+
+
 def _job_submit_request(args: argparse.Namespace) -> RunRequest:
     """Return a submit request with CLI scheduling metadata applied."""
-    request = _load_run_request(args.request_json)
+    bundle_path = str(getattr(args, "request_bundle", "") or "")
+    request = (
+        _load_scheduled_run_bundle(bundle_path)
+        if bundle_path
+        else _load_run_request(args.request_json)
+    )
     metadata = dict(request.metadata)
     if args.no_overlap:
         metadata["no_overlap"] = True
+    if getattr(args, "allow_overlap", False):
+        metadata.pop("no_overlap", None)
     schedule_key = str(args.schedule_key or "").strip()
     if schedule_key:
         metadata["schedule_key"] = schedule_key
@@ -783,7 +827,7 @@ def _run_jobs_command(args: argparse.Namespace) -> int:
             offline=args.offline,
         )
         _write_preflight_payload(result.to_dict(), as_json=args.json)
-        return result.exit_code
+        return int(result.exit_code)
     if args.jobs_command == "list":
         jobs = list_job_statuses_sync(
             config=config,
@@ -1051,6 +1095,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_overlap_error(err, args)
         return err.exit_code or 1
     except (
+        ScheduledRunBundleError,
         RuntimeError,
         OrchestrationResourceError,
         PortAllocationError,
@@ -1090,6 +1135,7 @@ def jobs_main(argv: Sequence[str] | None = None) -> int:
         _write_overlap_error(err, args)
         return err.exit_code or 1
     except (
+        ScheduledRunBundleError,
         RuntimeError,
         OrchestrationResourceError,
         PortAllocationError,

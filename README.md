@@ -105,9 +105,10 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--orchestration-start] [--no-orchestration-start]
                    [--submit-only] [--no-overlap]
                    [--schedule-key SCHEDULE_KEY] [--keep-runtime]
-                   [--no-keep-runtime] [--request-json-out PATH] [--quality]
-                   [--repo-quality] [--quality-preflight]
-                   [--repo-quality-columns] [--quality-target PATH [PATH ...]]
+                   [--no-keep-runtime] [--request-json-out PATH]
+                   [--request-bundle-out PATH] [--quality] [--repo-quality]
+                   [--quality-preflight] [--repo-quality-columns]
+                   [--quality-target PATH [PATH ...]]
                    [--quality-checks GROUP [GROUP ...]]
                    [--quality-report PATH] [--quality-preflight-report PATH]
                    [--quality-preflight-markdown]
@@ -198,6 +199,9 @@ Orchestration:
                         jobs complete
   --request-json-out PATH
                         write the resolved RunRequest JSON payload to PATH
+                        without submitting work; use '-' for stdout
+  --request-bundle-out PATH
+                        write a scheduled-run bundle JSON payload to PATH
                         without submitting work; use '-' for stdout
 
 Data quality:
@@ -468,6 +472,7 @@ histdatacom:
   start_yearmonth: 2022-01
   end_yearmonth: 2022-03
   data_directory: /data/histdata
+  request_bundle_out: requests/eurusd-cache-bundle.json
   request_json_out: requests/eurusd-cache.json
   cpu_utilization: medium
   orchestration_start: true
@@ -508,10 +513,8 @@ histdatacom:
     json: true
   jobs:
     command: submit
-    request_json: requests/eurusd-cache.json
+    request_bundle: requests/eurusd-cache-bundle.json
     submit_only: true
-    no_overlap: true
-    schedule_key: eurusd-cache
     json: true
   cleanup:
     command: status
@@ -1344,8 +1347,8 @@ The JSON control surface supports job inspection and future GUI polling:
 
 ```sh
 histdatacom jobs list --json
-histdatacom --request-json-out request.json --build-cache -p eurusd -f ascii -t tick-data-quotes -s now
-histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json
+histdatacom --request-bundle-out run.json --no-overlap --schedule-key eurusd-cache --build-cache -p eurusd -f ascii -t tick-data-quotes -s now
+histdatacom jobs preflight --bundle run.json --json
 histdatacom jobs list --schedule-key eurusd-cache --active --json
 histdatacom jobs progress histdatacom-<request-id> --watch
 histdatacom jobs progress histdatacom-<request-id> --json
@@ -1353,13 +1356,21 @@ histdatacom jobs artifacts histdatacom-<request-id> --json
 histdatacom jobs cancel histdatacom-<request-id> --reason "operator stop"
 ```
 
-Use `--request-json-out PATH` to export the resolved `RunRequest` from ordinary
-CLI options without starting Temporal, submitting work, downloading archives, or
-mutating job state. Use `--request-json-out -` to print the payload to stdout.
-That payload can be passed directly to `jobs preflight --request-json` and
-`jobs submit --request-json`. Put `--no-overlap --schedule-key <key>` on the
-`jobs` commands when schedule identity should be applied at preflight/submit
-time. Allowed preflights exit `0`; blocked preflights exit `75` and include the
+Use `--request-bundle-out PATH` to export a scheduled-run bundle from ordinary
+CLI options plus `--no-overlap --schedule-key <key>` without starting Temporal,
+submitting work, downloading archives, or mutating job state. Use
+`--request-bundle-out -` to print the bundle to stdout. That payload can be
+passed directly to `jobs preflight --bundle` and `jobs submit --bundle`; the
+bundled schedule metadata is applied automatically. Explicit jobs flags override
+the bundle when needed: `--schedule-key <key>` replaces the bundled key,
+`--no-overlap` enables the guard, and `--allow-overlap` disables a bundled or
+request-level guard for a deliberate one-off run.
+
+Use `--request-json-out PATH` when a lower-level raw `RunRequest` is needed.
+Raw request payloads still work with `jobs preflight --request-json` and
+`jobs submit --request-json`; put `--no-overlap --schedule-key <key>` on those
+jobs commands when schedule identity should be applied at preflight/submit time.
+Allowed preflights exit `0`; blocked preflights exit `75` and include the
 blocking job in JSON output. Use `jobs list --schedule-key <key> --active` to
 inspect the non-terminal job that would block a scheduled `--no-overlap`
 submission. Fingerprint-only scheduled runs can be matched with
@@ -1433,8 +1444,8 @@ so cron records the job metadata quickly; inspect progress later with
 `histdatacom jobs ...`.
 
 ```sh
-histdatacom --request-json-out request.json --build-cache --data-directory "$HISTDATACOM_DATA" -p eurusd -f ascii -t tick-data-quotes -s now
-histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json
+histdatacom --request-bundle-out run.json --no-overlap --schedule-key eurusd-cache --build-cache --data-directory "$HISTDATACOM_DATA" -p eurusd -f ascii -t tick-data-quotes -s now
+histdatacom jobs preflight --bundle run.json --json
 histdatacom jobs list --schedule-key eurusd-cache --active --json
 ```
 
@@ -1446,11 +1457,11 @@ histdatacom --submit-only --no-overlap --schedule-key eurusd-cache --build-cache
 ```
 
 ```cron
-# Submit a serialized EURUSD cache request only when preflight allows it.
-15 1 * * 1-5 cd "$HISTDATACOM_PROJECT" && histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json >> "$HISTDATACOM_LOG_DIR/eurusd-cache-preflight.jsonl" 2>&1 && histdatacom jobs submit --start --submit-only --no-overlap --schedule-key eurusd-cache --request-json request.json --json >> "$HISTDATACOM_LOG_DIR/eurusd-cache.log" 2>&1
+# Submit a serialized EURUSD cache bundle only when preflight allows it.
+15 1 * * 1-5 cd "$HISTDATACOM_PROJECT" && histdatacom jobs preflight --bundle run.json --json >> "$HISTDATACOM_LOG_DIR/eurusd-cache-preflight.jsonl" 2>&1 && histdatacom jobs submit --start --submit-only --bundle run.json --json >> "$HISTDATACOM_LOG_DIR/eurusd-cache.log" 2>&1
 
 # Optional outer shell lock for hosts that provide flock.
-15 1 * * 1-5 cd "$HISTDATACOM_PROJECT" && flock -n /tmp/histdatacom-eurusd.lock sh -c 'histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json >> "$HISTDATACOM_LOG_DIR/eurusd-cache-preflight.jsonl" 2>&1 && histdatacom jobs submit --start --submit-only --no-overlap --schedule-key eurusd-cache --request-json request.json --json >> "$HISTDATACOM_LOG_DIR/eurusd-cache.log" 2>&1'
+15 1 * * 1-5 cd "$HISTDATACOM_PROJECT" && flock -n /tmp/histdatacom-eurusd.lock sh -c 'histdatacom jobs preflight --bundle run.json --json >> "$HISTDATACOM_LOG_DIR/eurusd-cache-preflight.jsonl" 2>&1 && histdatacom jobs submit --start --submit-only --bundle run.json --json >> "$HISTDATACOM_LOG_DIR/eurusd-cache.log" 2>&1'
 ```
 
 Source cleanup can stay in dry-run mode until the reported paths are expected;

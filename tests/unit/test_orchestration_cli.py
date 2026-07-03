@@ -11,6 +11,7 @@ import pytest
 
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
 from histdatacom.runtime_contracts import ArtifactRef, StatusEvent
+from histdatacom.scheduled_run_bundle import build_scheduled_run_bundle
 from histdatacom.orchestration import client as orchestration_client
 from histdatacom.orchestration import cli
 from histdatacom.orchestration.control import (
@@ -155,6 +156,26 @@ def _preflight_result(
         checked_job_source="stored",
         offline=True,
         blocking_snapshot=blocking_snapshot,
+    )
+
+
+def _write_scheduled_bundle(
+    path: Path,
+    *,
+    no_overlap: bool = True,
+    schedule_key: str = "eurusd-cache",
+) -> None:
+    """Write a minimal scheduled-run bundle for jobs CLI tests."""
+    request = RunRequest(
+        request_id="run-cli",
+        metadata={
+            "no_overlap": no_overlap,
+            "schedule_key": schedule_key,
+        },
+    )
+    path.write_text(
+        json.dumps(build_scheduled_run_bundle(request).to_dict()),
+        encoding="utf-8",
     )
 
 
@@ -1283,6 +1304,186 @@ def test_orchestration_jobs_preflight_json_allows_without_submit(
     assert payload["checked_jobs"]["offline"] is True
 
 
+def test_orchestration_jobs_preflight_accepts_scheduled_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Jobs preflight should apply bundled schedule metadata."""
+    bundle_path = tmp_path / "run-bundle.json"
+    _write_scheduled_bundle(bundle_path)
+    captured: dict[str, object] = {}
+
+    def fake_preflight(
+        request: RunRequest,
+        **kwargs: object,
+    ) -> orchestration_client.OrchestrationSubmissionPreflight:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _preflight_result(tmp_path, request=request)
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("preflight must not submit")
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(
+        cli,
+        "preflight_scheduled_submission_sync",
+        fake_preflight,
+    )
+    monkeypatch.setattr(cli, "submit_control_job_sync", fail_submit)
+
+    exit_code = cli.jobs_main(
+        [
+            "--json",
+            "preflight",
+            "--bundle",
+            str(bundle_path),
+            "--offline",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    request = captured["request"]
+    assert exit_code == 0
+    assert isinstance(request, RunRequest)
+    assert request.metadata["no_overlap"] is True
+    assert request.metadata["schedule_key"] == "eurusd-cache"
+    assert captured["kwargs"]["offline"] is True
+    assert payload["state"] == "allowed"
+
+
+def test_orchestration_jobs_submit_accepts_scheduled_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Jobs submit should apply bundled schedule metadata."""
+    bundle_path = tmp_path / "run-bundle.json"
+    _write_scheduled_bundle(bundle_path)
+    captured: dict[str, object] = {}
+
+    def fake_submit(
+        request: RunRequest,
+        **kwargs: object,
+    ) -> OrchestrationJobSnapshot:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _snapshot(lifecycle=JobLifecycle.SUBMITTED)
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(cli, "submit_control_job_sync", fake_submit)
+
+    exit_code = cli.jobs_main(
+        [
+            "--json",
+            "submit",
+            "--bundle",
+            str(bundle_path),
+            "--submit-only",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    request = captured["request"]
+    assert exit_code == 0
+    assert isinstance(request, RunRequest)
+    assert request.metadata["no_overlap"] is True
+    assert request.metadata["schedule_key"] == "eurusd-cache"
+    assert captured["kwargs"]["wait_for_result"] is False
+    assert payload["lifecycle"] == JobLifecycle.SUBMITTED.value
+
+
+def test_orchestration_jobs_bundle_cli_overrides_schedule_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Explicit CLI scheduling flags should override bundle metadata."""
+    bundle_path = tmp_path / "run-bundle.json"
+    _write_scheduled_bundle(bundle_path, schedule_key="bundle-key")
+    captured: dict[str, object] = {}
+
+    def fake_submit(
+        request: RunRequest,
+        **kwargs: object,
+    ) -> OrchestrationJobSnapshot:
+        captured["request"] = request
+        return _snapshot(lifecycle=JobLifecycle.SUBMITTED)
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(cli, "submit_control_job_sync", fake_submit)
+
+    exit_code = cli.jobs_main(
+        [
+            "--json",
+            "submit",
+            "--bundle",
+            str(bundle_path),
+            "--submit-only",
+            "--allow-overlap",
+            "--schedule-key",
+            "cli-key",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    request = captured["request"]
+    assert exit_code == 0
+    assert isinstance(request, RunRequest)
+    assert "no_overlap" not in request.metadata
+    assert request.metadata["schedule_key"] == "cli-key"
+    assert payload["lifecycle"] == JobLifecycle.SUBMITTED.value
+
+
+def test_orchestration_jobs_bundle_malformed_payload_reports_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Malformed scheduled-run bundles should fail with a clear CLI error."""
+    bundle_path = tmp_path / "run-bundle.json"
+    bundle_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+
+    exit_code = cli.jobs_main(
+        [
+            "--json",
+            "preflight",
+            "--bundle",
+            str(bundle_path),
+            "--offline",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["state"] == "error"
+    assert "scheduled-run bundle" in payload["message"]
+    assert "supported" in payload["message"]
+
+
 def test_orchestration_jobs_preflight_human_reports_blocked_exit(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1401,6 +1602,58 @@ histdatacom:
     assert payload["state"] == "allowed"
 
 
+def test_orchestration_jobs_preflight_reads_bundle_yaml_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Jobs preflight config should accept scheduled-run bundle input."""
+    bundle_path = tmp_path / "run-bundle.json"
+    config_path = tmp_path / "histdatacom.yaml"
+    _write_scheduled_bundle(bundle_path)
+    config_path.write_text(
+        f"""
+histdatacom:
+  jobs:
+    command: preflight
+    json: true
+    offline: true
+    request_bundle: {bundle_path}
+""",
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_preflight(
+        request: RunRequest,
+        **kwargs: object,
+    ) -> orchestration_client.OrchestrationSubmissionPreflight:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _preflight_result(tmp_path, request=request)
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(
+        cli,
+        "preflight_scheduled_submission_sync",
+        fake_preflight,
+    )
+
+    exit_code = cli.jobs_main(["--config", str(config_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert captured["request"].metadata["no_overlap"] is True
+    assert captured["request"].metadata["schedule_key"] == "eurusd-cache"
+    assert captured["kwargs"]["offline"] is True
+    assert payload["state"] == "allowed"
+
+
 def test_orchestration_jobs_submit_reads_overlap_yaml_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1450,6 +1703,56 @@ histdatacom:
     assert exit_code == 0
     assert captured["request"].metadata["no_overlap"] is True
     assert captured["request"].metadata["schedule_key"] == "eurusd-cache"
+    assert captured["kwargs"]["wait_for_result"] is False
+    assert payload["lifecycle"] == JobLifecycle.SUBMITTED.value
+
+
+def test_orchestration_jobs_submit_bundle_yaml_config_overrides_overlap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Jobs submit config should make bundle override precedence explicit."""
+    bundle_path = tmp_path / "run-bundle.json"
+    config_path = tmp_path / "histdatacom.yaml"
+    _write_scheduled_bundle(bundle_path, schedule_key="bundle-key")
+    config_path.write_text(
+        f"""
+histdatacom:
+  jobs:
+    command: submit
+    json: true
+    request_bundle: {bundle_path}
+    submit_only: true
+    allow_overlap: true
+    schedule_key: config-key
+""",
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_submit(
+        request: RunRequest,
+        **kwargs: object,
+    ) -> OrchestrationJobSnapshot:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return _snapshot(lifecycle=JobLifecycle.SUBMITTED)
+
+    monkeypatch.setattr(
+        cli,
+        "_supervisor",
+        lambda args: _StatusOnlySupervisor("running"),
+    )
+    monkeypatch.setattr(cli, "_worker_config", lambda args: _FakeConfig())
+    monkeypatch.setattr(cli, "submit_control_job_sync", fake_submit)
+
+    exit_code = cli.jobs_main(["--config", str(config_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert "no_overlap" not in captured["request"].metadata
+    assert captured["request"].metadata["schedule_key"] == "config-key"
     assert captured["kwargs"]["wait_for_result"] is False
     assert payload["lifecycle"] == JobLifecycle.SUBMITTED.value
 

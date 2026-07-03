@@ -100,22 +100,26 @@ workspace before submission. Use a stable `--schedule-key` for recurring
 scheduled work; if no key is supplied, the guard falls back to a deterministic
 request fingerprint.
 
-For serialized scheduled requests, first export the resolved request from the
-ordinary CLI options, then preflight the same workspace before submission when
-automation needs a shell-friendly allow/block decision:
+For serialized scheduled requests, first export a scheduled-run bundle from the
+ordinary CLI options plus schedule guard options, then preflight the same
+workspace before submission when automation needs a shell-friendly allow/block
+decision:
 
 ```sh
-histdatacom --request-json-out request.json --build-cache \
+histdatacom --request-bundle-out run.json --no-overlap \
+  --schedule-key eurusd-cache --build-cache \
   --data-directory /srv/histdatacom/data \
   -p eurusd -f ascii -t tick-data-quotes -s now
-histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache \
-  --request-json request.json --json
+histdatacom jobs preflight --bundle run.json --json
 ```
 
-`--request-json-out -` prints the same payload to stdout. Exporting a request
+`--request-bundle-out -` prints the same payload to stdout. Exporting a bundle
 does not start Temporal, submit work, download archives, or mutate job state.
 Allowed preflights exit `0`. Blocked preflights exit `75` and include the
 blocking job, workspace, status store, and schedule identity in JSON output.
+Use `--request-json-out` only when raw `RunRequest` JSON is needed; raw requests
+still require `--no-overlap --schedule-key <key>` on `jobs preflight` and
+`jobs submit`.
 
 The main operation flags keep their documented meaning before the request is
 submitted:
@@ -203,19 +207,21 @@ histdatacom jobs artifacts histdatacom-<request-id> --json
 histdatacom jobs result histdatacom-<request-id> --json
 ```
 
-Submit a serialized request:
+Submit a serialized scheduled-run bundle:
 
 ```sh
-histdatacom --request-json-out request.json --build-cache \
+histdatacom --request-bundle-out run.json --no-overlap \
+  --schedule-key eurusd-cache --build-cache \
   --data-directory /srv/histdatacom/data \
   -p eurusd -f ascii -t tick-data-quotes -s now
-histdatacom jobs submit --start --submit-only --no-overlap \
-  --schedule-key eurusd-cache --request-json request.json --json
+histdatacom jobs submit --start --submit-only --bundle run.json --json
 ```
 
-Use `jobs preflight --no-overlap --schedule-key <key> --request-json request.json`
-before a serialized scheduled submission when the caller should skip wasted work
-instead of discovering the duplicate at submit time. Use
+Use `jobs preflight --bundle run.json` before a serialized scheduled submission
+when the caller should skip wasted work instead of discovering the duplicate at
+submit time. Explicit jobs flags override bundled schedule metadata:
+`--schedule-key <key>` replaces the bundled key, `--no-overlap` enables the
+guard, and `--allow-overlap` disables a bundled or request-level guard. Use
 `jobs list --schedule-key <key> --active` to inspect the non-terminal job that
 would block the submission. Jobs that rely on the fallback request fingerprint
 can be found with `--schedule-fingerprint sha256:...`. `jobs inspect --json`

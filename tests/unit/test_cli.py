@@ -216,6 +216,7 @@ def test_help_advertises_request_json_export() -> None:
     help_text = parser.format_help()
 
     assert "--request-json-out" in help_text
+    assert "--request-bundle-out" in help_text
     assert "without submitting work" in help_text
 
 
@@ -477,11 +478,13 @@ def test_config_file_applies_recurrent_run_defaults(
     """Issue #31: YAML config should cover the top-level command surface."""
     config_path = tmp_path / "histdatacom.yaml"
     data_dir = tmp_path / "data"
+    bundle_path = tmp_path / "requests" / "eurusd-cache-bundle.json"
     request_path = tmp_path / "requests" / "eurusd-cache.json"
     config_path.write_text(
         f"""
 histdatacom:
   download_data_archives: true
+  request_bundle_out: {bundle_path}
   request_json_out: {request_path}
   pairs:
     - eurusd
@@ -536,6 +539,7 @@ histdatacom:
     assert not options.orchestration_wait_result
     assert options.no_overlap
     assert options.schedule_key == "eurusd-cache"
+    assert options.request_bundle_out == str(bundle_path)
     assert options.request_json_out == str(request_path)
     assert options.verbosity == 2
 

@@ -64,9 +64,13 @@ _KEY_ALIASES = {
         "quality_preflight_evidence_max_age_seconds"
     ),
     "quality_preflight_evidence_path": "quality_preflight_evidence_path",
+    "request_bundle": "request_bundle_out",
+    "request_bundle_output": "request_bundle_out",
+    "run_request_bundle": "request_bundle_out",
     "request_out": "request_json_out",
     "request_json_output": "request_json_out",
     "run_request_json": "request_json_out",
+    "scheduled_run_bundle": "request_bundle_out",
     "quality_preflight_evidence_stale_ok": (
         "quality_preflight_evidence_allow_stale"
     ),
@@ -149,6 +153,7 @@ _SCALAR_ARGS = {
     "quality_preflight_evidence_max_age_seconds": (
         "--quality-preflight-evidence-max-age-seconds"
     ),
+    "request_bundle_out": "--request-bundle-out",
     "request_json_out": "--request-json-out",
     "schedule_key": "--schedule-key",
 }
@@ -330,10 +335,16 @@ _JOBS_COMMANDS = {
 }
 _JOBS_ALIASES = {
     **_COMMAND_KEY_ALIASES,
+    "bundle": "request_bundle",
     "request": "request_json",
+    "request_bundle": "request_bundle",
+    "request_bundle_json": "request_bundle",
+    "run_request_bundle": "request_bundle",
+    "scheduled_run_bundle": "request_bundle",
 }
 _JOBS_TRUE_FLAG_ARGS = {
     "active": "--active",
+    "allow_overlap": "--allow-overlap",
     "keep_runtime": "--keep-runtime",
     "no_overlap": "--no-overlap",
     "offline": "--offline",
@@ -345,6 +356,7 @@ _JOBS_SCALAR_ARGS = {
     "limit": "--limit",
     "query": "--query",
     "reason": "--reason",
+    "request_bundle": "--bundle",
     "request_json": "--request-json",
     "run_id": "--run-id",
     "schedule_fingerprint": "--schedule-fingerprint",
@@ -858,6 +870,7 @@ def _jobs_command_args(
     if command in {"preflight", "submit"}:
         true_flags.update(
             {
+                "allow_overlap": _JOBS_TRUE_FLAG_ARGS["allow_overlap"],
                 "no_overlap": _JOBS_TRUE_FLAG_ARGS["no_overlap"],
             }
         )
@@ -868,6 +881,7 @@ def _jobs_command_args(
                     "submit_only": _JOBS_TRUE_FLAG_ARGS["submit_only"],
                 }
             )
+        scalar_args["request_bundle"] = _JOBS_SCALAR_ARGS["request_bundle"]
         scalar_args["request_json"] = _JOBS_SCALAR_ARGS["request_json"]
         scalar_args["schedule_key"] = _JOBS_SCALAR_ARGS["schedule_key"]
     elif command == "list":

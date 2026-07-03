@@ -1457,6 +1457,16 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 "submitting work; use '-' for stdout"
             ),
         )
+        orchestration_args.add_argument(
+            "--request-bundle-out",
+            dest="request_bundle_out",
+            type=str,
+            metavar="PATH",
+            help=(
+                "write a scheduled-run bundle JSON payload to PATH without "
+                "submitting work; use '-' for stdout"
+            ),
+        )
         quality_args.add_argument(
             "--quality",
             dest="data_quality",

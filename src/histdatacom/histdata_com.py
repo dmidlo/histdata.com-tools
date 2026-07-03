@@ -65,6 +65,7 @@ from histdatacom.runtime_contracts import (
     RunRequest,
     WorkStatus,
 )
+from histdatacom.scheduled_run_bundle import build_scheduled_run_bundle
 from histdatacom.orchestration.client import (
     JobResult,
     OrchestrationOverlapError,
@@ -129,6 +130,7 @@ class RuntimeContext:
     update_remote_data: bool
     import_to_influxdb: bool
     verbosity: int
+    request_bundle_out: str
     request_json_out: str
 
 
@@ -186,13 +188,36 @@ class _HistDataCom:  # noqa:R701
                 print(histdatacom.__version__)  # noqa:T201
             return histdatacom.__version__
 
-        if self.context.request_json_out:
-            return self._export_run_request_json()
+        if self.context.request_json_out or self.context.request_bundle_out:
+            return self._export_run_artifacts()
 
         if self.context.quality_preflight:
             return self._run_quality_preflight()
 
         return self._run_orchestration_job()
+
+    def _export_run_artifacts(self) -> dict[str, JSONValue]:
+        """Write requested non-submitting run artifacts."""
+        if (
+            self.context.request_json_out == "-"
+            and self.context.request_bundle_out == "-"
+        ):
+            raise ValueError(
+                "request JSON and request bundle exports cannot both target "
+                "stdout"
+            )
+        request_payload: dict[str, JSONValue] = self.context.request.to_dict()
+        if self.context.request_json_out:
+            _write_run_request_json(
+                request_payload, self.context.request_json_out
+            )
+        if not self.context.request_bundle_out:
+            return request_payload
+        bundle_payload: dict[str, JSONValue] = build_scheduled_run_bundle(
+            self.context.request
+        ).to_dict()
+        _write_json_payload(bundle_payload, self.context.request_bundle_out)
+        return bundle_payload
 
     def _export_run_request_json(self) -> dict[str, JSONValue]:
         """Write the resolved RunRequest payload without submitting work."""
@@ -538,6 +563,7 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         update_remote_data=bool(args["update_remote_data"]),
         import_to_influxdb=bool(args["import_to_influxdb"]),
         verbosity=int(args["verbosity"]),
+        request_bundle_out=str(args.get("request_bundle_out") or ""),
         request_json_out=str(args.get("request_json_out") or ""),
     )
 
@@ -547,6 +573,14 @@ def _write_run_request_json(
     destination: str,
 ) -> None:
     """Write a deterministic JSON RunRequest payload to stdout or a file."""
+    _write_json_payload(payload, destination)
+
+
+def _write_json_payload(
+    payload: Mapping[str, Any],
+    destination: str,
+) -> None:
+    """Write a deterministic JSON payload to stdout or a file."""
     content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     if destination == "-":
         print(content, end="")  # noqa:T201

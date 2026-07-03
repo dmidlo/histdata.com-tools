@@ -517,6 +517,129 @@ def test_cli_request_json_export_stdout_without_submit(
     assert not request.extract_csvs
 
 
+def test_cli_request_bundle_export_writes_file_without_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Bundle export should carry schedule metadata without submitting work."""
+    import histdatacom.histdata_com as histdata_com
+    from histdatacom.scheduled_run_bundle import (
+        SCHEDULED_RUN_BUNDLE_KIND,
+        SCHEDULED_RUN_BUNDLE_SCHEMA_VERSION,
+        load_scheduled_run_bundle_json,
+    )
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("request bundle export must not submit")
+
+    bundle_path = tmp_path / "requests" / "eurusd-cache-bundle.json"
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--request-bundle-out",
+            str(bundle_path),
+            "--no-overlap",
+            "--schedule-key",
+            " eurusd-cache ",
+            "--build-cache",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+            "--data-directory",
+            str(data_dir),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    assert payload["kind"] == SCHEDULED_RUN_BUNDLE_KIND
+    assert payload["schema_version"] == SCHEDULED_RUN_BUNDLE_SCHEMA_VERSION
+    assert payload["schedule"] == {
+        "no_overlap": True,
+        "schedule_key": "eurusd-cache",
+    }
+    assert "no_overlap" not in payload["request"]["metadata"]
+    assert "schedule_key" not in payload["request"]["metadata"]
+
+    bundle = load_scheduled_run_bundle_json(
+        bundle_path.read_text(encoding="utf-8")
+    )
+    request = bundle.request_for_jobs()
+    assert request.pairs == ("eurusd",)
+    assert request.formats == ("ascii",)
+    assert request.timeframes == ("T",)
+    assert request.start_yearmonth == "202212"
+    assert request.data_directory == str(data_dir)
+    assert request.build_cache
+    assert request.validate_urls
+    assert request.download_data_archives
+    assert request.metadata["no_overlap"] is True
+    assert request.metadata["schedule_key"] == "eurusd-cache"
+
+
+def test_cli_request_bundle_export_stdout_without_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A '-' bundle target should emit only the scheduled-run bundle JSON."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("request bundle export must not submit")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--request-bundle-out",
+            "-",
+            "--no-overlap",
+            "--schedule-key",
+            "eurusd-cache",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    payload = json.loads(capsys.readouterr().out)
+    request = RunRequest.from_dict(payload["request"])
+    assert payload["schedule"]["no_overlap"] is True
+    assert payload["schedule"]["schedule_key"] == "eurusd-cache"
+    assert request.pairs == ("eurusd",)
+    assert request.validate_urls
+    assert "no_overlap" not in request.metadata
+    assert "schedule_key" not in request.metadata
+
+
 def test_cli_request_json_export_round_trips_to_jobs_preflight_and_submit(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

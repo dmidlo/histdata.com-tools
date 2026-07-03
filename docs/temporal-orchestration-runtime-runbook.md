@@ -298,20 +298,22 @@ so duplicate active jobs are blocked by the application before a new workflow is
 submitted in that workspace. Shell locks can still wrap those commands as an
 outer host-specific defense.
 
-When automation needs a serialized `RunRequest`, export it from the ordinary CLI
-request options, then preflight the same runtime workspace before submission to
-get an advisory allow/block decision without starting Temporal or submitting a
-workflow:
+When automation needs a serialized scheduled request, export a scheduled-run
+bundle from the ordinary CLI request options plus schedule guard options, then
+preflight the same runtime workspace before submission to get an advisory
+allow/block decision without starting Temporal or submitting a workflow:
 
 ```sh
-histdatacom --request-json-out request.json --build-cache --data-directory /srv/histdatacom/data -p eurusd -f ascii -t tick-data-quotes -s now
-histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json
+histdatacom --request-bundle-out run.json --no-overlap --schedule-key eurusd-cache --build-cache --data-directory /srv/histdatacom/data -p eurusd -f ascii -t tick-data-quotes -s now
+histdatacom jobs preflight --bundle run.json --json
 ```
 
-`--request-json-out -` writes the payload to stdout. Exporting the request does
+`--request-bundle-out -` writes the payload to stdout. Exporting the bundle does
 not start Temporal, submit work, download archives, or mutate job state. Allowed
 preflights exit `0`. Blocked preflights exit `75` and include the blocking job,
-workspace, status store, and schedule identity in JSON output.
+workspace, status store, and schedule identity in JSON output. Raw
+`--request-json-out` exports remain available for lower-level `RunRequest`
+workflows, but raw requests still need schedule flags on jobs commands.
 When a scheduled submission is blocked, query the same runtime workspace for the
 active job that owns the schedule identity:
 
@@ -459,13 +461,18 @@ repository requests still return runtime job metadata.
 The runtime control surface is intentionally JSON-friendly for CLI automation
 and future GUI polling.
 
-Submit a serialized `RunRequest`:
+Submit a serialized scheduled-run bundle:
 
 ```sh
-histdatacom --request-json-out request.json --build-cache --data-directory /srv/histdatacom/data -p eurusd -f ascii -t tick-data-quotes -s now
-histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json
-histdatacom jobs submit --start --submit-only --no-overlap --schedule-key eurusd-cache --request-json request.json --json
+histdatacom --request-bundle-out run.json --no-overlap --schedule-key eurusd-cache --build-cache --data-directory /srv/histdatacom/data -p eurusd -f ascii -t tick-data-quotes -s now
+histdatacom jobs preflight --bundle run.json --json
+histdatacom jobs submit --start --submit-only --bundle run.json --json
 ```
+
+Jobs flags intentionally override bundled schedule metadata when necessary:
+`--schedule-key <key>` replaces the bundled key, `--no-overlap` enables the
+guard, and `--allow-overlap` disables a bundled or request-level guard for a
+deliberate one-off run.
 
 Inspect and control jobs:
 

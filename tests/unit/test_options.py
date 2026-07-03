@@ -18,6 +18,7 @@ def test_orchestration_options_default_to_production_runtime() -> None:
     assert options.orchestration_wait_result
     assert not options.no_overlap
     assert options.schedule_key == ""
+    assert options.request_bundle_out is None
     assert options.request_json_out is None
 
 
