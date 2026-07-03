@@ -100,14 +100,20 @@ workspace before submission. Use a stable `--schedule-key` for recurring
 scheduled work; if no key is supplied, the guard falls back to a deterministic
 request fingerprint.
 
-For serialized scheduled requests, preflight the same workspace before
-submission when automation needs a shell-friendly allow/block decision:
+For serialized scheduled requests, first export the resolved request from the
+ordinary CLI options, then preflight the same workspace before submission when
+automation needs a shell-friendly allow/block decision:
 
 ```sh
+histdatacom --request-json-out request.json --build-cache \
+  --data-directory /srv/histdatacom/data \
+  -p eurusd -f ascii -t tick-data-quotes -s now
 histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache \
   --request-json request.json --json
 ```
 
+`--request-json-out -` prints the same payload to stdout. Exporting a request
+does not start Temporal, submit work, download archives, or mutate job state.
 Allowed preflights exit `0`. Blocked preflights exit `75` and include the
 blocking job, workspace, status store, and schedule identity in JSON output.
 
@@ -200,6 +206,9 @@ histdatacom jobs result histdatacom-<request-id> --json
 Submit a serialized request:
 
 ```sh
+histdatacom --request-json-out request.json --build-cache \
+  --data-directory /srv/histdatacom/data \
+  -p eurusd -f ascii -t tick-data-quotes -s now
 histdatacom jobs submit --start --submit-only --no-overlap \
   --schedule-key eurusd-cache --request-json request.json --json
 ```

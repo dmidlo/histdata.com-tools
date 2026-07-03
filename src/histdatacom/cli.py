@@ -1447,6 +1447,16 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 "stop a runtime started by this command after waited jobs complete"
             ),
         )
+        orchestration_args.add_argument(
+            "--request-json-out",
+            dest="request_json_out",
+            type=str,
+            metavar="PATH",
+            help=(
+                "write the resolved RunRequest JSON payload to PATH without "
+                "submitting work; use '-' for stdout"
+            ),
+        )
         quality_args.add_argument(
             "--quality",
             dest="data_quality",

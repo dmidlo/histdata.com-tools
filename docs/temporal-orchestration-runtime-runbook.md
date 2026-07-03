@@ -298,16 +298,20 @@ so duplicate active jobs are blocked by the application before a new workflow is
 submitted in that workspace. Shell locks can still wrap those commands as an
 outer host-specific defense.
 
-When automation has a serialized `RunRequest`, preflight the same runtime
-workspace before submission to get an advisory allow/block decision without
-starting Temporal or submitting a workflow:
+When automation needs a serialized `RunRequest`, export it from the ordinary CLI
+request options, then preflight the same runtime workspace before submission to
+get an advisory allow/block decision without starting Temporal or submitting a
+workflow:
 
 ```sh
+histdatacom --request-json-out request.json --build-cache --data-directory /srv/histdatacom/data -p eurusd -f ascii -t tick-data-quotes -s now
 histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json
 ```
 
-Allowed preflights exit `0`. Blocked preflights exit `75` and include the
-blocking job, workspace, status store, and schedule identity in JSON output.
+`--request-json-out -` writes the payload to stdout. Exporting the request does
+not start Temporal, submit work, download archives, or mutate job state. Allowed
+preflights exit `0`. Blocked preflights exit `75` and include the blocking job,
+workspace, status store, and schedule identity in JSON output.
 When a scheduled submission is blocked, query the same runtime workspace for the
 active job that owns the schedule identity:
 
@@ -458,6 +462,7 @@ and future GUI polling.
 Submit a serialized `RunRequest`:
 
 ```sh
+histdatacom --request-json-out request.json --build-cache --data-directory /srv/histdatacom/data -p eurusd -f ascii -t tick-data-quotes -s now
 histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json
 histdatacom jobs submit --start --submit-only --no-overlap --schedule-key eurusd-cache --request-json request.json --json
 ```

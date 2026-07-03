@@ -105,9 +105,9 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--orchestration-start] [--no-orchestration-start]
                    [--submit-only] [--no-overlap]
                    [--schedule-key SCHEDULE_KEY] [--keep-runtime]
-                   [--no-keep-runtime] [--quality] [--repo-quality]
-                   [--quality-preflight] [--repo-quality-columns]
-                   [--quality-target PATH [PATH ...]]
+                   [--no-keep-runtime] [--request-json-out PATH] [--quality]
+                   [--repo-quality] [--quality-preflight]
+                   [--repo-quality-columns] [--quality-target PATH [PATH ...]]
                    [--quality-checks GROUP [GROUP ...]]
                    [--quality-report PATH] [--quality-preflight-report PATH]
                    [--quality-preflight-markdown]
@@ -196,6 +196,9 @@ Orchestration:
                         the job completes
   --no-keep-runtime     stop a runtime started by this command after waited
                         jobs complete
+  --request-json-out PATH
+                        write the resolved RunRequest JSON payload to PATH
+                        without submitting work; use '-' for stdout
 
 Data quality:
   --quality             run offline data-quality assessment against local
@@ -465,6 +468,7 @@ histdatacom:
   start_yearmonth: 2022-01
   end_yearmonth: 2022-03
   data_directory: /data/histdata
+  request_json_out: requests/eurusd-cache.json
   cpu_utilization: medium
   orchestration_start: true
   orchestration_wait_result: false
@@ -1340,6 +1344,7 @@ The JSON control surface supports job inspection and future GUI polling:
 
 ```sh
 histdatacom jobs list --json
+histdatacom --request-json-out request.json --build-cache -p eurusd -f ascii -t tick-data-quotes -s now
 histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json
 histdatacom jobs list --schedule-key eurusd-cache --active --json
 histdatacom jobs progress histdatacom-<request-id> --watch
@@ -1348,16 +1353,19 @@ histdatacom jobs artifacts histdatacom-<request-id> --json
 histdatacom jobs cancel histdatacom-<request-id> --reason "operator stop"
 ```
 
-Use `jobs preflight --no-overlap --schedule-key <key> --request-json request.json`
-before serialized scheduled submissions when cron, launchd, CI, or a GUI shell
-needs an advisory allow/block answer without starting Temporal or submitting a
-workflow. Allowed preflights exit `0`; blocked preflights exit `75` and include
-the blocking job in JSON output. Use `jobs list --schedule-key <key> --active`
-to inspect the non-terminal job that would block a scheduled `--no-overlap`
+Use `--request-json-out PATH` to export the resolved `RunRequest` from ordinary
+CLI options without starting Temporal, submitting work, downloading archives, or
+mutating job state. Use `--request-json-out -` to print the payload to stdout.
+That payload can be passed directly to `jobs preflight --request-json` and
+`jobs submit --request-json`. Put `--no-overlap --schedule-key <key>` on the
+`jobs` commands when schedule identity should be applied at preflight/submit
+time. Allowed preflights exit `0`; blocked preflights exit `75` and include the
+blocking job in JSON output. Use `jobs list --schedule-key <key> --active` to
+inspect the non-terminal job that would block a scheduled `--no-overlap`
 submission. Fingerprint-only scheduled runs can be matched with
 `--schedule-fingerprint sha256:...`. `jobs inspect --json` includes a stable
-`schedule_identity` object with the schedule key or fingerprint,
-active/terminal state, and whether the job blocks duplicate submissions.
+`schedule_identity` object with the schedule key or fingerprint, active/terminal
+state, and whether the job blocks duplicate submissions.
 
 Omit `--json` on `jobs progress` for the Rich terminal progress view; add
 `--watch` to live-refresh it until the job reaches a terminal state. The Rich
@@ -1425,6 +1433,7 @@ so cron records the job metadata quickly; inspect progress later with
 `histdatacom jobs ...`.
 
 ```sh
+histdatacom --request-json-out request.json --build-cache --data-directory "$HISTDATACOM_DATA" -p eurusd -f ascii -t tick-data-quotes -s now
 histdatacom jobs preflight --no-overlap --schedule-key eurusd-cache --request-json request.json --json
 histdatacom jobs list --schedule-key eurusd-cache --active --json
 ```

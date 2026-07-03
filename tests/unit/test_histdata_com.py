@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,7 +13,7 @@ import histdatacom
 from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.fx_enums import MAJOR_TRIANGLE_SYMBOLS
 from histdatacom.options import Options
-from histdatacom.runtime_contracts import WorkStatus
+from histdatacom.runtime_contracts import RunRequest, WorkStatus
 from histdatacom.orchestration.client import (
     JobHandle,
     JobResult,
@@ -418,6 +419,195 @@ def test_api_build_cache_submits_cache_only_request(
         "start_if_needed": True,
         "wait_for_result": True,
     }
+
+
+def test_cli_request_json_export_writes_file_without_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Request export should materialize a RunRequest without starting work."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("request export must not submit")
+
+    request_path = tmp_path / "requests" / "eurusd-cache.json"
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--request-json-out",
+            str(request_path),
+            "--build-cache",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+            "--data-directory",
+            str(data_dir),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    payload = json.loads(request_path.read_text(encoding="utf-8"))
+    request = RunRequest.from_dict(payload)
+    assert request.pairs == ("eurusd",)
+    assert request.formats == ("ascii",)
+    assert request.timeframes == ("T",)
+    assert request.start_yearmonth == "202212"
+    assert request.data_directory == str(data_dir)
+    assert request.build_cache
+    assert request.validate_urls
+    assert request.download_data_archives
+    assert not request.extract_csvs
+
+
+def test_cli_request_json_export_stdout_without_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A '-' export target should emit only the serialized request JSON."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("request export must not submit")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--request-json-out",
+            "-",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    request = RunRequest.from_dict(json.loads(capsys.readouterr().out))
+    assert request.pairs == ("eurusd",)
+    assert request.validate_urls
+    assert not request.download_data_archives
+    assert not request.extract_csvs
+
+
+def test_cli_request_json_export_round_trips_to_jobs_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Exported requests should be valid jobs preflight input."""
+    import histdatacom.histdata_com as histdata_com
+    import histdatacom.orchestration.cli as jobs_cli
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("request export must not submit")
+
+    request_path = tmp_path / "requests" / "eurusd-cache.json"
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--request-json-out",
+            str(request_path),
+            "-D",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+    assert histdata_com.main() is None
+    assert capsys.readouterr().out == ""
+
+    captured: dict[str, object] = {}
+
+    def fake_preflight(request: RunRequest, **kwargs: object) -> object:
+        captured["request"] = request
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(
+            exit_code=0,
+            to_dict=lambda: {
+                "state": "allowed",
+                "operation": "scheduled-submission-preflight",
+                "request_id": request.request_id,
+            },
+        )
+
+    def fail_control_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("preflight must not submit")
+
+    monkeypatch.setattr(jobs_cli, "_supervisor", lambda args: object())
+    monkeypatch.setattr(jobs_cli, "_worker_config", lambda args: object())
+    monkeypatch.setattr(
+        jobs_cli,
+        "preflight_scheduled_submission_sync",
+        fake_preflight,
+    )
+    monkeypatch.setattr(
+        jobs_cli, "submit_control_job_sync", fail_control_submit
+    )
+
+    exit_code = jobs_cli.jobs_main(
+        [
+            "--json",
+            "preflight",
+            "--request-json",
+            str(request_path),
+            "--no-overlap",
+            "--schedule-key",
+            "eurusd-cache",
+            "--offline",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    request = captured["request"]
+
+    assert exit_code == 0
+    assert payload["state"] == "allowed"
+    assert isinstance(request, RunRequest)
+    assert request.pairs == ("eurusd",)
+    assert request.validate_urls
+    assert request.download_data_archives
+    assert request.metadata["no_overlap"] is True
+    assert request.metadata["schedule_key"] == "eurusd-cache"
+    assert captured["kwargs"]["offline"] is True
 
 
 @pytest.mark.parametrize(

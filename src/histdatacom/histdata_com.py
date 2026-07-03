@@ -59,7 +59,12 @@ from histdatacom.repository_output import (
 from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.publication_safety import publish_safe_path
 from histdatacom.records import Record
-from histdatacom.runtime_contracts import FailureInfo, RunRequest, WorkStatus
+from histdatacom.runtime_contracts import (
+    FailureInfo,
+    JSONValue,
+    RunRequest,
+    WorkStatus,
+)
 from histdatacom.orchestration.client import (
     JobResult,
     OrchestrationOverlapError,
@@ -124,6 +129,7 @@ class RuntimeContext:
     update_remote_data: bool
     import_to_influxdb: bool
     verbosity: int
+    request_json_out: str
 
 
 class _HistDataCom:  # noqa:R701
@@ -180,10 +186,19 @@ class _HistDataCom:  # noqa:R701
                 print(histdatacom.__version__)  # noqa:T201
             return histdatacom.__version__
 
+        if self.context.request_json_out:
+            return self._export_run_request_json()
+
         if self.context.quality_preflight:
             return self._run_quality_preflight()
 
         return self._run_orchestration_job()
+
+    def _export_run_request_json(self) -> dict[str, JSONValue]:
+        """Write the resolved RunRequest payload without submitting work."""
+        payload: dict[str, JSONValue] = self.context.request.to_dict()
+        _write_run_request_json(payload, self.context.request_json_out)
+        return payload
 
     def _run_quality_preflight(self) -> dict[str, Any]:
         """Run local cache-scale quality preflight without Temporal submit."""
@@ -523,7 +538,23 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         update_remote_data=bool(args["update_remote_data"]),
         import_to_influxdb=bool(args["import_to_influxdb"]),
         verbosity=int(args["verbosity"]),
+        request_json_out=str(args.get("request_json_out") or ""),
     )
+
+
+def _write_run_request_json(
+    payload: Mapping[str, Any],
+    destination: str,
+) -> None:
+    """Write a deterministic JSON RunRequest payload to stdout or a file."""
+    content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    if destination == "-":
+        print(content, end="")  # noqa:T201
+        return
+    path = Path(destination).expanduser()
+    if path.parent != Path("."):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
 
 
 def _attach_influx_config_metadata(

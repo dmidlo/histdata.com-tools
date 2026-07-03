@@ -52,6 +52,7 @@ class Options:
         "quality_report_path",
         "repo_quality_columns",
         "repo_quality_refresh",
+        "request_json_out",
         "schedule_key",
         "start_yearmonth",
         "timeframes",
@@ -114,6 +115,7 @@ class Options:
         self.quality_profile: dict = {}
         self.repo_quality_refresh: bool = False
         self.repo_quality_columns: bool = False
+        self.request_json_out: str | None = None
         self.use_orchestration: bool = True
         self.orchestration_start: bool = True
         self.orchestration_keep_runtime: bool = False

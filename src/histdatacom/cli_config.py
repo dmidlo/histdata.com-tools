@@ -64,6 +64,9 @@ _KEY_ALIASES = {
         "quality_preflight_evidence_max_age_seconds"
     ),
     "quality_preflight_evidence_path": "quality_preflight_evidence_path",
+    "request_out": "request_json_out",
+    "request_json_output": "request_json_out",
+    "run_request_json": "request_json_out",
     "quality_preflight_evidence_stale_ok": (
         "quality_preflight_evidence_allow_stale"
     ),
@@ -146,6 +149,7 @@ _SCALAR_ARGS = {
     "quality_preflight_evidence_max_age_seconds": (
         "--quality-preflight-evidence-max-age-seconds"
     ),
+    "request_json_out": "--request-json-out",
     "schedule_key": "--schedule-key",
 }
 _LIST_ARGS = {
