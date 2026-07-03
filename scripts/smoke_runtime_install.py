@@ -116,24 +116,37 @@ def _runtime_log_diagnostics(
 ) -> str:
     """Return bounded runtime log excerpts for failed runtime commands."""
     log_dirs = _runtime_log_dirs(command, stdout=stdout)
-    excerpts: list[str] = []
+    diagnostics: list[str] = []
+    inspected_logs = 0
     for log_dir in log_dirs:
-        if not log_dir.is_dir():
+        if not log_dir.exists():
+            diagnostics.append(f"\n--- runtime log dir missing: {log_dir} ---")
             continue
-        for log_path in sorted(log_dir.glob("*.log")):
-            if len(excerpts) >= MAX_DIAGNOSTIC_LOGS:
+        if not log_dir.is_dir():
+            diagnostics.append(
+                f"\n--- runtime log path is not a directory: {log_dir} ---"
+            )
+            continue
+        log_paths = sorted(log_dir.glob("*.log"))
+        if not log_paths:
+            diagnostics.append(f"\n--- runtime log dir empty: {log_dir} ---")
+            continue
+        for log_path in log_paths:
+            if inspected_logs >= MAX_DIAGNOSTIC_LOGS:
                 break
+            inspected_logs += 1
             excerpt = _tail_text(log_path, limit=MAX_DIAGNOSTIC_LOG_CHARS)
             if not excerpt:
+                diagnostics.append(f"\n--- runtime log empty: {log_path} ---")
                 continue
-            excerpts.append(
+            diagnostics.append(
                 f"\n--- runtime log: {log_path} ---\n{excerpt}"
             )
-        if len(excerpts) >= MAX_DIAGNOSTIC_LOGS:
+        if inspected_logs >= MAX_DIAGNOSTIC_LOGS:
             break
-    if not excerpts:
+    if not diagnostics:
         return ""
-    return "\nruntime log diagnostics:" + "".join(excerpts)
+    return "\nruntime log diagnostics:" + "".join(diagnostics)
 
 
 def _runtime_log_dirs(

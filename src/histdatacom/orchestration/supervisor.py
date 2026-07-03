@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import shlex
 import shutil
 import socket
 import subprocess
@@ -803,8 +804,14 @@ class OrchestrationSupervisor:
                 )
                 if not self._process_running(worker_process):
                     raise RuntimeError(
-                        f"Temporal worker lane {lane.value!r} exited during "
-                        f"startup. See log: {log_path}"
+                        self._worker_exit_message(
+                            lane,
+                            int(worker_process.pid),
+                            worker_process,
+                            worker_command,
+                            log_path,
+                            phase="startup",
+                        )
                     )
                 pids[component] = int(worker_process.pid)
                 processes[component] = worker_process
@@ -814,6 +821,7 @@ class OrchestrationSupervisor:
                     lane,
                     int(worker_process.pid),
                     worker_process,
+                    worker_command,
                     deadline,
                     log_path,
                 )
@@ -1256,6 +1264,17 @@ class OrchestrationSupervisor:
         poll = getattr(process, "poll", lambda: None)
         return poll() is None
 
+    def _process_returncode(self, process: Any) -> int | None:
+        """Return a process return code when it can be observed."""
+        returncode = getattr(process, "returncode", None)
+        if isinstance(returncode, int):
+            return returncode
+        poll = getattr(process, "poll", None)
+        if not callable(poll):
+            return None
+        observed = poll()
+        return observed if isinstance(observed, int) else None
+
     def _ensure_namespace(
         self,
         executable: Path,
@@ -1327,6 +1346,7 @@ class OrchestrationSupervisor:
         lane: TaskQueueLane,
         pid: int,
         worker_process: Any,
+        worker_command: Sequence[str],
         deadline: float,
         log_path: Path,
     ) -> dict[str, Any]:
@@ -1334,8 +1354,14 @@ class OrchestrationSupervisor:
         while time.monotonic() < deadline:
             if not self._process_running(worker_process):
                 raise RuntimeError(
-                    f"Temporal worker lane {lane.value!r} exited before "
-                    f"readiness. See log: {log_path}"
+                    self._worker_exit_message(
+                        lane,
+                        pid,
+                        worker_process,
+                        worker_command,
+                        log_path,
+                        phase="readiness",
+                    )
                 )
             readiness = self._worker_readiness_state(lane, pid)
             if readiness["state"] == "ready":
@@ -1343,12 +1369,42 @@ class OrchestrationSupervisor:
             self._sleep(0.05)
         if not self._process_running(worker_process):
             raise RuntimeError(
-                f"Temporal worker lane {lane.value!r} exited before "
-                f"readiness. See log: {log_path}"
+                self._worker_exit_message(
+                    lane,
+                    pid,
+                    worker_process,
+                    worker_command,
+                    log_path,
+                    phase="readiness",
+                )
             )
         raise RuntimeError(
             f"Temporal worker lane {lane.value!r} did not report readiness "
             f"before startup timeout. See log: {log_path}"
+        )
+
+    def _worker_exit_message(
+        self,
+        lane: TaskQueueLane,
+        pid: int,
+        worker_process: Any,
+        command: Sequence[str],
+        log_path: Path,
+        *,
+        phase: str,
+    ) -> str:
+        """Return an actionable worker process exit diagnostic."""
+        returncode = self._process_returncode(worker_process)
+        exit_detail = (
+            f"exit code {returncode}"
+            if returncode is not None
+            else "exit code unavailable"
+        )
+        timing = "during startup" if phase == "startup" else "before readiness"
+        return (
+            f"Temporal worker lane {lane.value!r} exited {timing} "
+            f"(pid {pid}, {exit_detail}). Command: {shlex.join(command)}. "
+            f"See log: {log_path}"
         )
 
     def _required_components(self) -> tuple[str, ...]:

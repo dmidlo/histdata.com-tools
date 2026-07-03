@@ -711,12 +711,16 @@ def test_start_fails_when_worker_crashes_before_ready(
         worker_lanes=(TaskQueueLane.NETWORK,),
     )
 
-    with pytest.raises(
-        RuntimeError,
-        match="worker lane 'network' exited before readiness",
-    ):
+    with pytest.raises(RuntimeError) as raised:
         supervisor.start(executable=executable, startup_timeout=0.1)
 
+    message = str(raised.value)
+    assert "worker lane 'network' exited before readiness" in message
+    assert "pid 501" in message
+    assert "exit code 1" in message
+    assert "Command:" in message
+    assert "histdatacom.orchestration.worker" in message
+    assert "temporal-worker-network.log" in message
     assert calls == 2
 
 
