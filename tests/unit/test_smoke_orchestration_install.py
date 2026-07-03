@@ -254,7 +254,10 @@ def test_windows_runtime_diagnostic_separates_startup_layers(
                 "stdout": json.dumps(
                     {
                         "state": "error",
-                        "message": "worker exited before readiness",
+                        "message": (
+                            "worker exited before readiness "
+                            "with exit code 3221225794"
+                        ),
                     }
                 ),
                 "stderr": "",
@@ -284,7 +287,7 @@ def test_windows_runtime_diagnostic_separates_startup_layers(
     )
 
     assert report["summary"] == {
-        "layer": "runtime_worker_startup",
+        "layer": "temporalio_nexus_native_worker_initialization",
         "phase": "runtime_worker_start",
         "status": "failed",
     }

@@ -217,6 +217,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _write_config(config, as_json=args.json)
             return 0
         if args.command == "run":
+            _configure_worker_logging()
             asyncio.run(run_temporal_worker(config=config))
             return 0
         parser.error(f"unsupported worker command: {args.command}")
@@ -273,17 +274,30 @@ def _write_worker_ready(config: OrchestrationWorkerConfig) -> None:
     )
 
 
+def _configure_worker_logging() -> None:
+    """Ensure subprocess worker logs include early startup phases."""
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        return
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        stream=sys.stdout,
+    )
+
+
 def _worker_log_context(
     config: OrchestrationWorkerConfig,
     **values: Any,
 ) -> dict[str, object]:
-    return safe_log_extra(
+    context: dict[str, object] = safe_log_extra(
         namespace=config.namespace,
         lane=config.lane.value,
         task_queue=config.task_queue,
         target_host=config.target_host,
         **values,
     )
+    return context
 
 
 def _add_common_args(

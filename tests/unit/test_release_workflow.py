@@ -131,6 +131,12 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
         smoke_platform,
         "Smoke bundled runtime install hermetically",
     )
+    hermetic_step = next(
+        step
+        for step in smoke_platform["steps"]
+        if step.get("name") == "Smoke bundled runtime install hermetically"
+    )
+    assert hermetic_step["if"] == "matrix.platform_key != 'windows-x86_64'"
     assert "--require-bundled-current-platform" in smoke_command
     assert "--check-executable-version" in smoke_command
     assert "--start-runtime" in smoke_command
@@ -143,6 +149,23 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
     assert "--live-startup-timeout 45" in smoke_command
     assert "--live-completion-timeout 240" in smoke_command
     assert "--live-stop-timeout 45" in smoke_command
+    windows_smoke_step = next(
+        step
+        for step in smoke_platform["steps"]
+        if step.get("name") == "Smoke Windows bundled runtime install"
+    )
+    assert windows_smoke_step["if"] == (
+        "matrix.platform_key == 'windows-x86_64'"
+    )
+    windows_smoke_command = _step_run(
+        smoke_platform,
+        "Smoke Windows bundled runtime install",
+    )
+    assert "--require-bundled-current-platform" in windows_smoke_command
+    assert "--check-executable-version" in windows_smoke_command
+    assert "--start-runtime" not in windows_smoke_command
+    assert "--hermetic-runtime-smoke" not in windows_smoke_command
+    assert "--default-routing-runtime-smoke" not in windows_smoke_command
 
     assemble = jobs["assemble-release-artifacts"]
     assert isinstance(assemble, dict)

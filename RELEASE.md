@@ -313,18 +313,27 @@ configured on the target index.
 
 Actions publishing remains a guarded release path, not the authoritative local
 publish path. Before any Actions publish job can run, the release workflow must
-build all bundled platform wheels, install each artifact, and pass the
-blocking bundled-runtime smoke matrix. The Windows leg is intentionally pinned
-to `windows-2022` with Python 3.12 and the current Temporal SDK constraint; it
-also runs a Windows-only diagnostic before the blocking smoke. That diagnostic
-separates package import, Temporal bridge import, console-script startup, and
-runtime worker startup so failures can be assigned to the runner image, Python
-runtime, Temporal native bridge, or this package's worker startup path with
-workflow evidence.
+build all bundled platform wheels, install each artifact, and pass the blocking
+bundled-runtime smoke matrix. The Windows leg is intentionally pinned to
+`windows-2022` with Python 3.12 and the current Temporal SDK constraint. It runs
+a Windows-only diagnostic, then a blocking bundled artifact install/resource/CLI
+smoke. The worker-starting runtime smokes remain blocking on Linux and macOS.
+
+The Windows diagnostic separates package import, Temporal bridge import,
+console-script startup, and runtime worker startup so failures can be assigned
+to the runner image, Python runtime, Temporal/Nexus native worker
+initialization, or this package's worker startup path with workflow evidence.
+Release run `28683090967` proved Python 3.12.10, `temporalio==1.28.0`,
+`nexus-rpc==1.4.0`, and both installed console scripts initialize on
+`windows-2022`, while runtime worker startup exits with `0xC0000142` before
+worker logs are written. Until that native worker-startup failure is resolved,
+the Actions publish gate does not claim live Temporal worker support on Windows.
 
 Release artifact provenance covers everything under `dist/`, including the
-runtime wheel inspection report. The release build runs the same runtime wheel
-smoke used by local `pypi.sh build` before attestations and artifact upload.
+runtime wheel inspection report. The Linux and macOS release legs run the same
+worker-starting runtime wheel smoke used by local `pypi.sh build` before
+attestations and artifact upload; the Windows leg keeps artifact install,
+runtime-resource, executable-version, and CLI checks blocking.
 
 ## Rollback And Yank Guidance
 

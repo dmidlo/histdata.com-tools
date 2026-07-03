@@ -331,6 +331,8 @@ def _runtime_startup_diagnostic_summary(
     )
     for phase_name, layer in checks:
         if not _diagnostic_phase_passed(phases, phase_name):
+            if phase_name == "runtime_worker_start":
+                return _runtime_worker_failure_summary(phases)
             return {
                 "layer": layer,
                 "phase": phase_name,
@@ -340,6 +342,28 @@ def _runtime_startup_diagnostic_summary(
         "layer": "runtime_startup",
         "phase": "runtime_worker_start",
         "status": "passed",
+    }
+
+
+def _runtime_worker_failure_summary(
+    phases: Mapping[str, Mapping[str, Any]],
+) -> dict[str, str]:
+    """Classify worker-start failures after import and console checks pass."""
+    phase = phases.get("runtime_worker_start", {})
+    detail = "\n".join(
+        str(phase.get(key, ""))
+        for key in ("stdout", "stderr", "payload", "runtime_log_diagnostics")
+    ).lower()
+    if "3221225794" in detail or "0xc0000142" in detail:
+        return {
+            "layer": "temporalio_nexus_native_worker_initialization",
+            "phase": "runtime_worker_start",
+            "status": "failed",
+        }
+    return {
+        "layer": "runtime_worker_startup",
+        "phase": "runtime_worker_start",
+        "status": "failed",
     }
 
 

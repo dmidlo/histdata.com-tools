@@ -232,6 +232,7 @@ jobs:
           --live-stop-timeout 45
 
       - name: Smoke bundled runtime install hermetically
+        if: matrix.platform_key != 'windows-x86_64'
         run: >
           python scripts/smoke_runtime_install.py
           --wheel-dir dist-platform
@@ -247,6 +248,15 @@ jobs:
           --live-startup-timeout 45
           --live-completion-timeout 240
           --live-stop-timeout 45
+
+      - name: Smoke Windows bundled runtime install
+        if: matrix.platform_key == 'windows-x86_64'
+        run: >
+          python scripts/smoke_runtime_install.py
+          --wheel-dir dist-platform
+          --state-dir .runtime-smoke
+          --require-bundled-current-platform
+          --check-executable-version
 
   assemble-release-artifacts:
     name: Assemble release artifacts
