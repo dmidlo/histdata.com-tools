@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+from contextlib import suppress
 from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 from inspect import isawaitable
@@ -41,6 +42,17 @@ from histdatacom.orchestration.runtime import (
 from histdatacom.verbosity import safe_log_extra
 
 LOGGER = logging.getLogger(__name__)
+WORKER_STARTUP_DIAGNOSTIC_SCHEMA_VERSION = 1
+WORKER_STARTUP_DIAGNOSTIC_STOP_CHOICES = (
+    "client-connect",
+    "worker-construct",
+    "worker-run",
+)
+_DIAGNOSTIC_STOP_PHASES = {
+    "client-connect": "client_connect",
+    "worker-construct": "worker_construct",
+    "worker-run": "worker_run",
+}
 
 
 def build_temporal_worker(
@@ -73,8 +85,7 @@ def build_temporal_worker(
             resolved_worker_options
         )
     LOGGER.debug(
-        "Building Temporal worker lane=%s task_queue=%s workflows=%d "
-        "activities=%d",
+        "Building Temporal worker lane=%s task_queue=%s workflows=%d activities=%d",
         resolved_config.lane.value,
         resolved_config.task_queue,
         len(workflow_classes),
@@ -179,6 +190,105 @@ async def run_temporal_worker(
     return worker
 
 
+async def diagnose_temporal_worker_startup(
+    *,
+    config: OrchestrationWorkerConfig | None = None,
+    client: Any | None = None,
+    client_class: Any | None = None,
+    worker_class: Any | None = None,
+    workflows: Sequence[Any] = (),
+    activities: Sequence[Any] = (),
+    stop_after: str = "worker-run",
+    run_probe_seconds: float = 0.5,
+    **worker_options: Any,
+) -> dict[str, Any]:
+    """Run phase-separated worker startup diagnostics."""
+    if stop_after not in _DIAGNOSTIC_STOP_PHASES:
+        allowed = ", ".join(WORKER_STARTUP_DIAGNOSTIC_STOP_CHOICES)
+        raise ValueError(f"stop_after must be one of: {allowed}")
+    resolved_config = config or build_orchestration_worker_config()
+    stop_phase = _DIAGNOSTIC_STOP_PHASES[stop_after]
+    phases: dict[str, dict[str, Any]] = {}
+    report: dict[str, Any] = {
+        "schema_version": WORKER_STARTUP_DIAGNOSTIC_SCHEMA_VERSION,
+        "stop_after": stop_after,
+        "config": {
+            "namespace": resolved_config.namespace,
+            "target_host": resolved_config.target_host,
+            "lane": resolved_config.lane.value,
+            "task_queue": resolved_config.task_queue,
+        },
+        "phases": phases,
+    }
+
+    try:
+        temporal_client = client or await connect_temporal_client(
+            config=resolved_config,
+            client_class=client_class,
+        )
+    except Exception as err:
+        phases["client_connect"] = _diagnostic_phase_failed(
+            "client_connect",
+            err,
+        )
+        report["summary"] = _diagnostic_summary(phases)
+        return report
+
+    phases["client_connect"] = _diagnostic_phase_passed(
+        "client_connect",
+        "Temporal client connection completed.",
+        target_host=resolved_config.target_host,
+        namespace=resolved_config.namespace,
+    )
+    if stop_phase == "client_connect":
+        report["summary"] = _diagnostic_summary(phases)
+        return report
+
+    try:
+        worker = build_temporal_worker(
+            temporal_client,
+            config=resolved_config,
+            worker_class=worker_class,
+            workflows=workflows,
+            activities=activities,
+            **worker_options,
+        )
+    except Exception as err:
+        phases["worker_construct"] = _diagnostic_phase_failed(
+            "worker_construct",
+            err,
+        )
+        report["summary"] = _diagnostic_summary(phases)
+        return report
+
+    phases["worker_construct"] = _diagnostic_phase_passed(
+        "worker_construct",
+        "Temporal worker construction completed.",
+        task_queue=resolved_config.task_queue,
+    )
+    if stop_phase == "worker_construct":
+        report["summary"] = _diagnostic_summary(phases)
+        return report
+
+    try:
+        run_probe = await _probe_worker_run(
+            worker,
+            probe_seconds=max(0.0, float(run_probe_seconds)),
+        )
+    except Exception as err:
+        phases["worker_run"] = _diagnostic_phase_failed("worker_run", err)
+        report["summary"] = _diagnostic_summary(phases)
+        return report
+
+    phases["worker_run"] = _diagnostic_phase_passed(
+        "worker_run",
+        "Temporal worker run loop survived startup probe.",
+        **run_probe,
+    )
+    report["summary"] = _diagnostic_summary(phases)
+    return report
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the orchestration worker argument parser."""
     parser = argparse.ArgumentParser(prog="histdatacom-orchestration-worker")
@@ -198,6 +308,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_common_args(run, include_defaults=False)
     _add_worker_args(run)
+
+    diagnose = subparsers.add_parser(
+        "diagnose-startup",
+        help="diagnose Temporal worker startup phases",
+    )
+    _add_common_args(diagnose, include_defaults=False)
+    _add_worker_args(diagnose)
+    diagnose.add_argument(
+        "--stop-after",
+        choices=WORKER_STARTUP_DIAGNOSTIC_STOP_CHOICES,
+        default="worker-run",
+        help="last startup phase to execute",
+    )
+    diagnose.add_argument(
+        "--run-probe-seconds",
+        type=float,
+        default=0.5,
+        help="seconds to let worker.run() prove startup before cancellation",
+    )
     return parser
 
 
@@ -220,6 +349,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             _configure_worker_logging()
             asyncio.run(run_temporal_worker(config=config))
             return 0
+        if args.command == "diagnose-startup":
+            _configure_worker_logging()
+            report = asyncio.run(
+                diagnose_temporal_worker_startup(
+                    config=config,
+                    stop_after=args.stop_after,
+                    run_probe_seconds=args.run_probe_seconds,
+                )
+            )
+            _write_diagnostic(report, as_json=args.json)
+            return 0 if report["summary"]["status"] == "passed" else 1
         parser.error(f"unsupported worker command: {args.command}")
     except KeyboardInterrupt:
         return 130
@@ -272,6 +412,93 @@ def _write_worker_ready(config: OrchestrationWorkerConfig) -> None:
         os.getpid(),
         extra=_worker_log_context(config, pid=os.getpid(), state="ready"),
     )
+
+
+async def _probe_worker_run(
+    worker: Any,
+    *,
+    probe_seconds: float,
+) -> dict[str, Any]:
+    run = getattr(worker, "run", None)
+    if run is None:
+        raise TypeError("Temporal worker object must define run()")
+    run_result = run()
+    if isawaitable(run_result):
+        run_task = asyncio.ensure_future(run_result)
+        await asyncio.sleep(probe_seconds)
+        if run_task.done():
+            await run_task
+            return {
+                "run_state": "completed",
+                "probe_seconds": probe_seconds,
+            }
+        run_task.cancel()
+        with suppress(asyncio.CancelledError, TimeoutError):
+            await asyncio.wait_for(
+                run_task,
+                timeout=max(1.0, probe_seconds),
+            )
+        return {
+            "run_state": "started",
+            "probe_seconds": probe_seconds,
+        }
+    await _maybe_await(run_result)
+    return {
+        "run_state": "completed",
+        "probe_seconds": probe_seconds,
+    }
+
+
+def _diagnostic_phase_passed(
+    phase: str,
+    message: str,
+    **values: Any,
+) -> dict[str, Any]:
+    return {
+        "phase": phase,
+        "status": "passed",
+        "message": message,
+        **values,
+    }
+
+
+def _diagnostic_phase_failed(phase: str, err: Exception) -> dict[str, Any]:
+    return {
+        "phase": phase,
+        "status": "failed",
+        "error_type": type(err).__name__,
+        "message": str(err),
+    }
+
+
+def _diagnostic_summary(
+    phases: Mapping[str, Mapping[str, Any]],
+) -> dict[str, str]:
+    for phase in ("client_connect", "worker_construct", "worker_run"):
+        if phase not in phases:
+            break
+        if phases[phase].get("status") != "passed":
+            return {"status": "failed", "phase": phase}
+    completed_phase = ""
+    for completed_phase in phases:
+        pass
+    return {"status": "passed", "phase": completed_phase}
+
+
+def _write_diagnostic(
+    report: Mapping[str, Any],
+    *,
+    as_json: bool,
+) -> None:
+    if as_json:
+        print(json.dumps(report, indent=2, sort_keys=True))  # noqa:T201
+        return
+    summary = report["summary"]
+    print(f"{summary['status']}: {summary['phase']}")  # noqa:T201
+    phases = cast(Mapping[str, Mapping[str, Any]], report["phases"])
+    for phase, payload in phases.items():
+        message = str(payload.get("message", ""))
+        print(f"{phase}: {payload.get('status')} - {message}")  # noqa:T201
 
 
 def _configure_worker_logging() -> None:

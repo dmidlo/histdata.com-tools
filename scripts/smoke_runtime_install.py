@@ -18,6 +18,13 @@ DEFAULT_COMMAND_TIMEOUT_SECONDS = 120.0
 MAX_DIAGNOSTIC_LOG_CHARS = 12000
 MAX_DIAGNOSTIC_LOGS = 8
 MAX_DIAGNOSTIC_STREAM_CHARS = 4000
+WORKER_STARTUP_DIAGNOSTIC_LANES = (
+    "orchestration",
+    "network",
+    "cpu-file",
+    "influx",
+)
+WORKER_STARTUP_RUN_PROBE_SECONDS = 0.5
 EXPECTED_ASSETS = (
     "README.md",
     "manifest.json",
@@ -28,9 +35,7 @@ EXPECTED_ASSETS = (
 )
 EXPECTED_CONSOLE_SCRIPTS = {
     "histdatacom": "histdatacom.histdata_com:main",
-    "histdatacom-orchestration-worker": (
-        "histdatacom.orchestration.worker:main"
-    ),
+    "histdatacom-orchestration-worker": ("histdatacom.orchestration.worker:main"),
 }
 QUALITY_REPORT_SCHEMA_VERSION = "histdatacom.quality-report.v1"
 QUALITY_SMOKE_CLEAN_ROWS = (
@@ -143,9 +148,7 @@ def _runtime_log_diagnostics(
             if not excerpt:
                 diagnostics.append(f"\n--- runtime log empty: {log_path} ---")
                 continue
-            diagnostics.append(
-                f"\n--- runtime log: {log_path} ---\n{excerpt}"
-            )
+            diagnostics.append(f"\n--- runtime log: {log_path} ---\n{excerpt}")
         if inspected_logs >= MAX_DIAGNOSTIC_LOGS:
             break
     if not diagnostics:
@@ -247,9 +250,7 @@ def _run_json(
             f"stdout:\n{completed.stdout}"
         ) from err
     if not isinstance(payload, dict):
-        raise SystemExit(
-            f"command emitted non-object JSON: {' '.join(command)}"
-        )
+        raise SystemExit(f"command emitted non-object JSON: {' '.join(command)}")
     return payload
 
 
@@ -311,6 +312,122 @@ def _run_diagnostic_command(
     }
 
 
+def _start_server_only_runtime(
+    state_dir: Path,
+    *,
+    startup_timeout: float,
+) -> tuple[dict[str, Any], Any | None]:
+    """Start only the Temporal server for worker startup diagnostics."""
+    try:
+        from histdatacom.orchestration.runtime import (
+            OrchestrationPaths,
+            build_orchestration_runtime_policy,
+        )
+        from histdatacom.orchestration.supervisor import (
+            OrchestrationSupervisor,
+        )
+
+        runtime_policy = build_orchestration_runtime_policy(
+            paths=OrchestrationPaths.from_state_dir(state_dir),
+        )
+        supervisor = OrchestrationSupervisor(
+            runtime_policy=runtime_policy,
+            worker_lanes=(),
+        )
+        status = supervisor.start(startup_timeout=startup_timeout)
+    except Exception as err:
+        return (
+            {
+                "phase": "server_only_start",
+                "status": "failed",
+                "error_type": type(err).__name__,
+                "message": str(err),
+            },
+            None,
+        )
+
+    payload = status.to_dict()
+    phase = {
+        "phase": "server_only_start",
+        "status": "passed" if status.state == "running" else "failed",
+        "payload": payload,
+    }
+    if status.state != "running":
+        phase["message"] = status.message
+    return phase, supervisor
+
+
+def _stop_server_only_runtime(
+    supervisor: Any,
+    *,
+    stop_timeout: float,
+) -> dict[str, Any]:
+    """Stop a server-only diagnostic runtime."""
+    try:
+        status = supervisor.stop(stop_timeout=stop_timeout)
+    except Exception as err:
+        return {
+            "phase": "server_only_stop",
+            "status": "failed",
+            "error_type": type(err).__name__,
+            "message": str(err),
+        }
+
+    payload = status.to_dict()
+    phase = {
+        "phase": "server_only_stop",
+        "status": "passed" if status.state == "stopped" else "failed",
+        "payload": payload,
+    }
+    if status.state != "stopped":
+        phase["message"] = status.message
+    return phase
+
+
+def _server_only_runtime_env(supervisor: Any) -> dict[str, str]:
+    """Return an environment that points worker diagnostics at the live server."""
+    ports = supervisor.runtime_policy.ports
+    env = dict(os.environ)
+    env["HISTDATACOM_RUNTIME_IP"] = str(ports.bind_ip)
+    env["HISTDATACOM_RUNTIME_PORT"] = str(ports.grpc)
+    env["HISTDATACOM_RUNTIME_UI_PORT"] = str(ports.ui)
+    return env
+
+
+def _worker_startup_phase_name(prefix: str, lane: str) -> str:
+    return f"{prefix}_{lane.replace('-', '_')}"
+
+
+def _worker_startup_diagnostic_command(
+    state_dir: Path,
+    *,
+    stop_after: str,
+    lane: str | None = None,
+) -> list[str]:
+    """Build a phase-limited worker startup diagnostic command."""
+    command = [
+        sys.executable,
+        "-m",
+        "histdatacom.orchestration.worker",
+        "--state-dir",
+        str(state_dir),
+        "--json",
+        "diagnose-startup",
+        "--stop-after",
+        stop_after,
+    ]
+    if lane is not None:
+        command.extend(["--lane", lane])
+    if stop_after == "worker-run":
+        command.extend(
+            [
+                "--run-probe-seconds",
+                str(WORKER_STARTUP_RUN_PROBE_SECONDS),
+            ]
+        )
+    return command
+
+
 def _diagnostic_phase_passed(
     phases: Mapping[str, Mapping[str, Any]],
     name: str,
@@ -318,26 +435,46 @@ def _diagnostic_phase_passed(
     return phases.get(name, {}).get("status") == "passed"
 
 
-def _runtime_startup_diagnostic_summary(
-    phases: Mapping[str, Mapping[str, Any]],
-) -> dict[str, str]:
-    """Return the first failing startup layer for release-run triage."""
-    checks = (
+def _runtime_startup_diagnostic_checks() -> tuple[tuple[str, str], ...]:
+    checks = [
         ("python_import", "python_import"),
         ("temporalio_bridge", "temporalio_bridge"),
         ("histdatacom_console", "console_script_startup"),
         ("worker_console", "console_script_startup"),
-        ("runtime_worker_start", "runtime_worker_startup"),
+        ("server_only_start", "temporal_server_startup"),
+        ("worker_client_connect", "temporal_client_connect"),
+    ]
+    for lane in WORKER_STARTUP_DIAGNOSTIC_LANES:
+        checks.append(
+            (
+                _worker_startup_phase_name("worker_construct", lane),
+                "temporal_worker_construction",
+            )
+        )
+        checks.append(
+            (
+                _worker_startup_phase_name("worker_run_probe", lane),
+                "temporal_worker_run_start",
+            )
+        )
+    checks.extend(
+        [
+            ("server_only_stop", "temporal_server_shutdown"),
+            ("runtime_worker_start", "runtime_worker_startup"),
+        ]
     )
-    for phase_name, layer in checks:
+    return tuple(checks)
+
+
+def _runtime_startup_diagnostic_summary(
+    phases: Mapping[str, Mapping[str, Any]],
+) -> dict[str, str]:
+    """Return the first failing startup layer for release-run triage."""
+    for phase_name, layer in _runtime_startup_diagnostic_checks():
         if not _diagnostic_phase_passed(phases, phase_name):
             if phase_name == "runtime_worker_start":
                 return _runtime_worker_failure_summary(phases)
-            return {
-                "layer": layer,
-                "phase": phase_name,
-                "status": "failed",
-            }
+            return _diagnostic_failure_summary(phases, phase_name, layer)
     return {
         "layer": "runtime_startup",
         "phase": "runtime_worker_start",
@@ -345,25 +482,69 @@ def _runtime_startup_diagnostic_summary(
     }
 
 
+def _diagnostic_failure_summary(
+    phases: Mapping[str, Mapping[str, Any]],
+    phase_name: str,
+    layer: str,
+) -> dict[str, str]:
+    phase = phases.get(phase_name, {})
+    summary = {
+        "layer": layer,
+        "phase": phase_name,
+        "status": str(phase.get("status", "failed")),
+    }
+    lane = _diagnostic_lane_from_phase(phase_name)
+    if lane:
+        summary["lane"] = lane
+    if _phase_has_windows_native_startup_crash(phase) and phase_name.startswith(
+        ("worker_construct_", "worker_run_probe_")
+    ):
+        summary["layer"] = "temporalio_nexus_native_worker_initialization"
+    return summary
+
+
+def _diagnostic_lane_from_phase(phase_name: str) -> str:
+    for lane in WORKER_STARTUP_DIAGNOSTIC_LANES:
+        if phase_name in {
+            _worker_startup_phase_name("worker_construct", lane),
+            _worker_startup_phase_name("worker_run_probe", lane),
+        }:
+            return lane
+    return ""
+
+
+def _phase_has_windows_native_startup_crash(
+    phase: Mapping[str, Any],
+) -> bool:
+    detail = "\n".join(
+        str(phase.get(key, ""))
+        for key in (
+            "returncode",
+            "stdout",
+            "stderr",
+            "payload",
+            "runtime_log_diagnostics",
+            "message",
+        )
+    ).lower()
+    return "3221225794" in detail or "0xc0000142" in detail
+
+
 def _runtime_worker_failure_summary(
     phases: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, str]:
     """Classify worker-start failures after import and console checks pass."""
     phase = phases.get("runtime_worker_start", {})
-    detail = "\n".join(
-        str(phase.get(key, ""))
-        for key in ("stdout", "stderr", "payload", "runtime_log_diagnostics")
-    ).lower()
-    if "3221225794" in detail or "0xc0000142" in detail:
+    if _phase_has_windows_native_startup_crash(phase):
         return {
-            "layer": "temporalio_nexus_native_worker_initialization",
+            "layer": "supervised_worker_process_boundary",
             "phase": "runtime_worker_start",
-            "status": "failed",
+            "status": str(phase.get("status", "failed")),
         }
     return {
         "layer": "runtime_worker_startup",
         "phase": "runtime_worker_start",
-        "status": "failed",
+        "status": str(phase.get("status", "failed")),
     }
 
 
@@ -390,9 +571,7 @@ def check_windows_runtime_diagnostic(
     stop_timeout: float,
 ) -> dict[str, Any]:
     """Collect a Windows release-smoke startup diagnostic by layer."""
-    diagnostic_state_dir = (
-        state_dir.parent / f"{state_dir.name}-windows-diagnostic"
-    )
+    diagnostic_state_dir = state_dir.parent / f"{state_dir.name}-windows-diagnostic"
     diagnostic_state_dir.mkdir(parents=True, exist_ok=True)
     histdatacom = _script_path("histdatacom")
     worker = _script_path("histdatacom-orchestration-worker")
@@ -441,40 +620,102 @@ def check_windows_runtime_diagnostic(
         [worker, "--help"],
     )
 
-    start_command = [
-        histdatacom,
-        "runtime",
-        "--state-dir",
-        str(diagnostic_state_dir),
-        "--json",
-        "start",
-        "--startup-timeout",
-        str(startup_timeout),
-    ]
-    runtime_start = _run_diagnostic_command(
-        "runtime_worker_start",
-        start_command,
-        timeout=startup_timeout + 60.0,
+    server_start, server_supervisor = _start_server_only_runtime(
+        diagnostic_state_dir,
+        startup_timeout=startup_timeout,
     )
-    start_payload = _mark_runtime_start_payload(runtime_start)
-    phases["runtime_worker_start"] = runtime_start
+    phases["server_only_start"] = server_start
+    try:
+        if (
+            _diagnostic_phase_passed(phases, "server_only_start")
+            and server_supervisor is not None
+        ):
+            worker_env = _server_only_runtime_env(server_supervisor)
+            phases["worker_client_connect"] = _run_diagnostic_command(
+                "worker_client_connect",
+                _worker_startup_diagnostic_command(
+                    diagnostic_state_dir,
+                    stop_after="client-connect",
+                ),
+                env=worker_env,
+                timeout=startup_timeout + 60.0,
+            )
+            for lane in WORKER_STARTUP_DIAGNOSTIC_LANES:
+                construct_phase = _worker_startup_phase_name(
+                    "worker_construct",
+                    lane,
+                )
+                phases[construct_phase] = _run_diagnostic_command(
+                    construct_phase,
+                    _worker_startup_diagnostic_command(
+                        diagnostic_state_dir,
+                        stop_after="worker-construct",
+                        lane=lane,
+                    ),
+                    env=worker_env,
+                    timeout=startup_timeout + 60.0,
+                )
+                run_phase = _worker_startup_phase_name(
+                    "worker_run_probe",
+                    lane,
+                )
+                phases[run_phase] = _run_diagnostic_command(
+                    run_phase,
+                    _worker_startup_diagnostic_command(
+                        diagnostic_state_dir,
+                        stop_after="worker-run",
+                        lane=lane,
+                    ),
+                    env=worker_env,
+                    timeout=startup_timeout + 60.0,
+                )
+    finally:
+        if server_supervisor is not None:
+            phases["server_only_stop"] = _stop_server_only_runtime(
+                server_supervisor,
+                stop_timeout=stop_timeout,
+            )
 
-    if (
-        start_payload is not None
-        and start_payload.get("state") == "running"
+    preflight_phase_names = [
+        phase_name
+        for phase_name, _layer in _runtime_startup_diagnostic_checks()
+        if phase_name != "runtime_worker_start"
+    ]
+    if all(
+        _diagnostic_phase_passed(phases, phase_name)
+        for phase_name in preflight_phase_names
     ):
-        phases["runtime_stop"] = _run_diagnostic_command(
-            "runtime_stop",
-            [
-                histdatacom,
-                "runtime",
-                "--state-dir",
-                str(diagnostic_state_dir),
-                "--json",
-                "stop",
-            ],
-            timeout=stop_timeout + 60.0,
+        start_command = [
+            histdatacom,
+            "runtime",
+            "--state-dir",
+            str(diagnostic_state_dir),
+            "--json",
+            "start",
+            "--startup-timeout",
+            str(startup_timeout),
+        ]
+        runtime_start = _run_diagnostic_command(
+            "runtime_worker_start",
+            start_command,
+            timeout=startup_timeout + 60.0,
         )
+        start_payload = _mark_runtime_start_payload(runtime_start)
+        phases["runtime_worker_start"] = runtime_start
+
+        if start_payload is not None and start_payload.get("state") == "running":
+            phases["runtime_stop"] = _run_diagnostic_command(
+                "runtime_stop",
+                [
+                    histdatacom,
+                    "runtime",
+                    "--state-dir",
+                    str(diagnostic_state_dir),
+                    "--json",
+                    "stop",
+                ],
+                timeout=stop_timeout + 60.0,
+            )
 
     report = {
         "os_name": os.name,
@@ -489,8 +730,7 @@ def check_windows_runtime_diagnostic(
         "phases": phases,
     }
     print(  # noqa:T201
-        "windows runtime diagnostic: "
-        f"{json.dumps(report, sort_keys=True)}",
+        f"windows runtime diagnostic: {json.dumps(report, sort_keys=True)}",
         flush=True,
     )
     return report
@@ -506,12 +746,8 @@ def install_wheel(
     resolved_wheel = wheel_path or _single_wheel(wheel_dir or Path("dist"))
     install_target = str(resolved_wheel)
     if install_temporal_extra:
-        install_target = (
-            "histdatacom[temporal] @ " f"{resolved_wheel.resolve().as_uri()}"
-        )
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", install_target]
-    )
+        install_target = f"histdatacom[temporal] @ {resolved_wheel.resolve().as_uri()}"
+    subprocess.check_call([sys.executable, "-m", "pip", "install", install_target])
     return resolved_wheel
 
 
@@ -636,9 +872,7 @@ def check_runtime_resources(
             )
         try:
             with packaged_temporal_executable_path(platform_key):
-                raise SystemExit(
-                    "metadata-only runtime resource exposed an executable"
-                )
+                raise SystemExit("metadata-only runtime resource exposed an executable")
         except TemporalExecutableUnavailable as err:
             if "not bundled in this distribution" not in str(err):
                 raise
@@ -1080,16 +1314,12 @@ def _validate_quality_report(
     if not isinstance(payload, dict):
         raise SystemExit(f"quality report is not a JSON object: {path}")
     if payload.get("schema_version") != QUALITY_REPORT_SCHEMA_VERSION:
-        raise SystemExit(
-            f"quality report has unexpected schema version: {path}"
-        )
+        raise SystemExit(f"quality report has unexpected schema version: {path}")
     summary = payload.get("summary")
     if not isinstance(summary, dict):
         raise SystemExit(f"quality report missing summary: {path}")
     if summary.get("target_count") != 1:
-        raise SystemExit(
-            f"quality report expected one target: {path} {summary}"
-        )
+        raise SystemExit(f"quality report expected one target: {path} {summary}")
     if summary.get("status") != expected_status:
         raise SystemExit(
             "quality report had unexpected status: "
@@ -1098,20 +1328,16 @@ def _validate_quality_report(
     error_count = int(summary.get("error_count", 0) or 0)
     if error_count < min_errors:
         raise SystemExit(
-            f"quality report expected at least {min_errors} errors: "
-            f"{path} {summary}"
+            f"quality report expected at least {min_errors} errors: {path} {summary}"
         )
     if max_errors is not None and error_count > max_errors:
         raise SystemExit(
-            f"quality report expected at most {max_errors} errors: "
-            f"{path} {summary}"
+            f"quality report expected at most {max_errors} errors: {path} {summary}"
         )
     if not payload.get("target_summaries"):
         raise SystemExit(f"quality report missing target summaries: {path}")
     metadata = payload.get("metadata")
-    if not isinstance(metadata, dict) or metadata.get("operation") != (
-        "data-quality"
-    ):
+    if not isinstance(metadata, dict) or metadata.get("operation") != ("data-quality"):
         raise SystemExit(f"quality report missing operation metadata: {path}")
     return payload
 
@@ -1186,7 +1412,7 @@ def _find_quality_job(
             continue
         return job
     raise SystemExit(
-        "runtime jobs did not include quality request for " f"{expected_target}"
+        f"runtime jobs did not include quality request for {expected_target}"
     )
 
 
@@ -1202,13 +1428,10 @@ def _validate_quality_job(
         )
     artifacts = job.get("artifacts")
     if not isinstance(artifacts, list) or not any(
-        isinstance(artifact, Mapping)
-        and artifact.get("kind") == "quality-report"
+        isinstance(artifact, Mapping) and artifact.get("kind") == "quality-report"
         for artifact in artifacts
     ):
-        raise SystemExit(
-            f"runtime quality job missing quality-report artifact: {job}"
-        )
+        raise SystemExit(f"runtime quality job missing quality-report artifact: {job}")
 
 
 def _normalized_quality_job_status(job: Mapping[str, Any]) -> str:
@@ -1245,9 +1468,7 @@ def _validate_quality_runtime_stop(payload: Mapping[str, Any]) -> None:
         raise SystemExit(f"quality runtime did not stop cleanly: {payload}")
     pids = payload.get("pids")
     if isinstance(pids, Mapping) and pids:
-        raise SystemExit(
-            f"quality runtime stop left running processes: {payload}"
-        )
+        raise SystemExit(f"quality runtime stop left running processes: {payload}")
 
 
 def _quality_smoke_case_result(
@@ -1261,9 +1482,7 @@ def _quality_smoke_case_result(
         "returncode": completed.returncode,
         "report": str(report_path),
         "status": (
-            str(summary.get("status", ""))
-            if isinstance(summary, Mapping)
-            else ""
+            str(summary.get("status", "")) if isinstance(summary, Mapping) else ""
         ),
     }
 
@@ -1440,12 +1659,10 @@ def main() -> None:
             "live_runtime": None,
         }
         if args.windows_runtime_diagnostic:
-            report["windows_runtime_diagnostic"] = (
-                check_windows_runtime_diagnostic(
-                    state_dir,
-                    startup_timeout=args.live_startup_timeout,
-                    stop_timeout=args.live_stop_timeout,
-                )
+            report["windows_runtime_diagnostic"] = check_windows_runtime_diagnostic(
+                state_dir,
+                startup_timeout=args.live_startup_timeout,
+                stop_timeout=args.live_stop_timeout,
             )
         if not args.skip_cli:
             report["cli"] = check_cli_smoke(
@@ -1464,9 +1681,7 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
-                "live-data"
-            )
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
             report["hermetic_runtime"] = check_hermetic_runtime_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,
@@ -1483,19 +1698,15 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
-                "live-data"
-            )
-            report["default_routing_runtime"] = (
-                check_default_routing_runtime_smoke(
-                    workspace=live_workspace,
-                    runtime_home=live_runtime_home,
-                    data_directory=live_data_dir,
-                    temporal_executable=args.temporal_executable,
-                    startup_timeout=args.live_startup_timeout,
-                    completion_timeout=args.live_completion_timeout,
-                    stop_timeout=args.live_stop_timeout,
-                )
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
+            report["default_routing_runtime"] = check_default_routing_runtime_smoke(
+                workspace=live_workspace,
+                runtime_home=live_runtime_home,
+                data_directory=live_data_dir,
+                temporal_executable=args.temporal_executable,
+                startup_timeout=args.live_startup_timeout,
+                completion_timeout=args.live_completion_timeout,
+                stop_timeout=args.live_stop_timeout,
             )
         if args.quality_runtime_smoke:
             live_workspace = args.live_workspace or Path(temporary_dir) / (
@@ -1504,9 +1715,7 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
-                "live-data"
-            )
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
             report["quality_runtime"] = check_quality_runtime_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,
@@ -1522,9 +1731,7 @@ def main() -> None:
             live_runtime_home = (
                 args.live_runtime_home or Path(temporary_dir) / "live-runtime"
             )
-            live_data_dir = args.live_data_dir or Path(temporary_dir) / (
-                "live-data"
-            )
+            live_data_dir = args.live_data_dir or Path(temporary_dir) / ("live-data")
             report["live_runtime"] = check_live_runtime_smoke(
                 workspace=live_workspace,
                 runtime_home=live_runtime_home,

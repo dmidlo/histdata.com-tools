@@ -234,17 +234,51 @@ def test_windows_runtime_diagnostic_separates_startup_layers(
 ) -> None:
     """Windows diagnostic should identify worker startup after earlier passes."""
     module = _module()
-    calls: list[tuple[str, list[str]]] = []
+    calls: list[tuple[str, list[str], dict[str, object]]] = []
+    supervisor = SimpleNamespace(
+        runtime_policy=SimpleNamespace(
+            ports=SimpleNamespace(bind_ip="127.0.0.1", grpc=17233, ui=18233)
+        )
+    )
 
     def fake_script_path(name: str) -> str:
         return f"/venv/bin/{name}"
+
+    def fake_start_server_only_runtime(
+        state_dir: Path,
+        *,
+        startup_timeout: float,
+    ) -> tuple[dict[str, Any], object]:
+        assert state_dir == tmp_path / "state-windows-diagnostic"
+        assert startup_timeout == 3.0
+        return (
+            {
+                "phase": "server_only_start",
+                "status": "passed",
+                "payload": {"state": "running"},
+            },
+            supervisor,
+        )
+
+    def fake_stop_server_only_runtime(
+        supervisor_arg: object,
+        *,
+        stop_timeout: float,
+    ) -> dict[str, Any]:
+        assert supervisor_arg is supervisor
+        assert stop_timeout == 5.0
+        return {
+            "phase": "server_only_stop",
+            "status": "passed",
+            "payload": {"state": "stopped"},
+        }
 
     def fake_run_diagnostic_command(
         phase: str,
         command: list[str],
         **kwargs: object,
     ) -> dict[str, Any]:
-        calls.append((phase, command))
+        calls.append((phase, command, kwargs))
         if phase == "runtime_worker_start":
             return {
                 "phase": phase,
@@ -255,8 +289,7 @@ def test_windows_runtime_diagnostic_separates_startup_layers(
                     {
                         "state": "error",
                         "message": (
-                            "worker exited before readiness "
-                            "with exit code 3221225794"
+                            "worker exited before readiness with exit code 3221225794"
                         ),
                     }
                 ),
@@ -276,6 +309,132 @@ def test_windows_runtime_diagnostic_separates_startup_layers(
     monkeypatch.setattr(module, "_script_path", fake_script_path)
     monkeypatch.setattr(
         module,
+        "_start_server_only_runtime",
+        fake_start_server_only_runtime,
+    )
+    monkeypatch.setattr(
+        module,
+        "_stop_server_only_runtime",
+        fake_stop_server_only_runtime,
+    )
+    monkeypatch.setattr(
+        module,
+        "_run_diagnostic_command",
+        fake_run_diagnostic_command,
+    )
+
+    report = module.check_windows_runtime_diagnostic(
+        tmp_path / "state",
+        startup_timeout=3.0,
+        stop_timeout=5.0,
+    )
+
+    assert report["summary"] == {
+        "layer": "supervised_worker_process_boundary",
+        "phase": "runtime_worker_start",
+        "status": "failed",
+    }
+    assert report["phases"]["python_import"]["status"] == "passed"
+    assert report["phases"]["temporalio_bridge"]["status"] == "passed"
+    assert report["phases"]["histdatacom_console"]["status"] == "passed"
+    assert report["phases"]["worker_console"]["status"] == "passed"
+    assert report["phases"]["server_only_start"]["status"] == "passed"
+    assert report["phases"]["worker_client_connect"]["status"] == "passed"
+    assert report["phases"]["worker_construct_cpu_file"]["status"] == "passed"
+    assert report["phases"]["worker_run_probe_cpu_file"]["status"] == "passed"
+    assert report["phases"]["server_only_stop"]["status"] == "passed"
+    assert "runtime_stop" not in report["phases"]
+    assert (tmp_path / "state-windows-diagnostic").as_posix() in calls[-1][1]
+    assert any(
+        phase == "worker_run_probe_cpu_file"
+        and "--lane" in command
+        and "cpu-file" in command
+        and kwargs["env"]["HISTDATACOM_RUNTIME_PORT"] == "17233"
+        for phase, command, kwargs in calls
+    )
+    assert "windows runtime diagnostic:" in capsys.readouterr().out
+
+
+def test_windows_runtime_diagnostic_classifies_direct_worker_native_crash(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """A direct per-lane worker probe crash should stop before full runtime."""
+    module = _module()
+    calls: list[str] = []
+    supervisor = SimpleNamespace(
+        runtime_policy=SimpleNamespace(
+            ports=SimpleNamespace(bind_ip="127.0.0.1", grpc=17233, ui=18233)
+        )
+    )
+
+    def fake_script_path(name: str) -> str:
+        return f"/venv/bin/{name}"
+
+    def fake_start_server_only_runtime(
+        state_dir: Path,
+        *,
+        startup_timeout: float,
+    ) -> tuple[dict[str, Any], object]:
+        return (
+            {
+                "phase": "server_only_start",
+                "status": "passed",
+                "payload": {"state": "running"},
+            },
+            supervisor,
+        )
+
+    def fake_stop_server_only_runtime(
+        supervisor_arg: object,
+        *,
+        stop_timeout: float,
+    ) -> dict[str, Any]:
+        return {
+            "phase": "server_only_stop",
+            "status": "passed",
+            "payload": {"state": "stopped"},
+        }
+
+    def fake_run_diagnostic_command(
+        phase: str,
+        command: list[str],
+        **kwargs: object,
+    ) -> dict[str, Any]:
+        calls.append(phase)
+        if phase == "worker_run_probe_network":
+            return {
+                "phase": phase,
+                "status": "failed",
+                "command": command,
+                "returncode": 3221225794,
+                "stdout": "",
+                "stderr": "",
+                "runtime_log_diagnostics": "",
+            }
+        return {
+            "phase": phase,
+            "status": "passed",
+            "command": command,
+            "returncode": 0,
+            "stdout": "{}",
+            "stderr": "",
+            "runtime_log_diagnostics": "",
+        }
+
+    monkeypatch.setattr(module, "_script_path", fake_script_path)
+    monkeypatch.setattr(
+        module,
+        "_start_server_only_runtime",
+        fake_start_server_only_runtime,
+    )
+    monkeypatch.setattr(
+        module,
+        "_stop_server_only_runtime",
+        fake_stop_server_only_runtime,
+    )
+    monkeypatch.setattr(
+        module,
         "_run_diagnostic_command",
         fake_run_diagnostic_command,
     )
@@ -288,16 +447,11 @@ def test_windows_runtime_diagnostic_separates_startup_layers(
 
     assert report["summary"] == {
         "layer": "temporalio_nexus_native_worker_initialization",
-        "phase": "runtime_worker_start",
+        "phase": "worker_run_probe_network",
         "status": "failed",
+        "lane": "network",
     }
-    assert report["phases"]["python_import"]["status"] == "passed"
-    assert report["phases"]["temporalio_bridge"]["status"] == "passed"
-    assert report["phases"]["histdatacom_console"]["status"] == "passed"
-    assert report["phases"]["worker_console"]["status"] == "passed"
-    assert "runtime_stop" not in report["phases"]
-    assert (tmp_path / "state-windows-diagnostic").as_posix() in calls[-1][1]
-    assert "windows runtime diagnostic:" in capsys.readouterr().out
+    assert "runtime_worker_start" not in calls
 
 
 def test_windows_runtime_diagnostic_stops_running_runtime(
@@ -307,9 +461,40 @@ def test_windows_runtime_diagnostic_stops_running_runtime(
     """A successful diagnostic start should not leak a runtime process."""
     module = _module()
     calls: list[tuple[str, list[str]]] = []
+    supervisor = SimpleNamespace(
+        runtime_policy=SimpleNamespace(
+            ports=SimpleNamespace(bind_ip="127.0.0.1", grpc=17233, ui=18233)
+        )
+    )
 
     def fake_script_path(name: str) -> str:
         return f"/venv/bin/{name}"
+
+    def fake_start_server_only_runtime(
+        state_dir: Path,
+        *,
+        startup_timeout: float,
+    ) -> tuple[dict[str, Any], object]:
+        return (
+            {
+                "phase": "server_only_start",
+                "status": "passed",
+                "payload": {"state": "running"},
+            },
+            supervisor,
+        )
+
+    def fake_stop_server_only_runtime(
+        supervisor_arg: object,
+        *,
+        stop_timeout: float,
+    ) -> dict[str, Any]:
+        assert supervisor_arg is supervisor
+        return {
+            "phase": "server_only_stop",
+            "status": "passed",
+            "payload": {"state": "stopped"},
+        }
 
     def fake_run_diagnostic_command(
         phase: str,
@@ -335,6 +520,16 @@ def test_windows_runtime_diagnostic_stops_running_runtime(
     monkeypatch.setattr(module, "_script_path", fake_script_path)
     monkeypatch.setattr(
         module,
+        "_start_server_only_runtime",
+        fake_start_server_only_runtime,
+    )
+    monkeypatch.setattr(
+        module,
+        "_stop_server_only_runtime",
+        fake_stop_server_only_runtime,
+    )
+    monkeypatch.setattr(
+        module,
         "_run_diagnostic_command",
         fake_run_diagnostic_command,
     )
@@ -346,6 +541,7 @@ def test_windows_runtime_diagnostic_stops_running_runtime(
     )
 
     assert report["summary"]["status"] == "passed"
+    assert report["phases"]["server_only_stop"]["status"] == "passed"
     assert report["phases"]["runtime_stop"]["status"] == "passed"
     assert calls[-1] == (
         "runtime_stop",

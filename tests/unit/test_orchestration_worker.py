@@ -47,6 +47,13 @@ class _FakeWorker:
         await asyncio.sleep(0)
 
 
+class _BrokenWorker:
+    """Worker double that fails during construction."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        raise RuntimeError("worker construction failed")
+
+
 class _FakeClient:
     """Test double for temporalio.client.Client."""
 
@@ -229,6 +236,108 @@ def test_run_temporal_worker_logs_start_and_readiness(
     assert ready_record.lane == config.lane.value
     assert ready_record.task_queue == config.task_queue
     assert ready_record.state == "ready"
+
+
+def test_diagnose_temporal_worker_startup_reports_phases(
+    tmp_path: Path,
+) -> None:
+    """Startup diagnostics should separate connect, construct, and run."""
+    _FakeClient.connected.clear()
+    _FakeWorker.instances.clear()
+    config = _config(tmp_path)
+
+    report = asyncio.run(
+        worker.diagnose_temporal_worker_startup(
+            config=config,
+            client_class=_FakeClient,
+            worker_class=_FakeWorker,
+            run_probe_seconds=0,
+        )
+    )
+
+    assert report["summary"] == {"status": "passed", "phase": "worker_run"}
+    assert report["config"]["lane"] == "cpu-file"
+    assert report["phases"]["client_connect"]["status"] == "passed"
+    assert report["phases"]["worker_construct"]["status"] == "passed"
+    assert report["phases"]["worker_run"]["status"] == "passed"
+    assert report["phases"]["worker_run"]["run_state"] == "started"
+    assert _FakeWorker.instances[0].ran is True
+    assert _FakeClient.connected == [
+        {"target_host": config.target_host, "namespace": "default"}
+    ]
+    assert (
+        read_worker_readiness(
+            config.runtime_policy.paths.state_dir,
+            config.lane,
+        )
+        is None
+    )
+
+
+def test_diagnose_temporal_worker_startup_reports_construct_failure(
+    tmp_path: Path,
+) -> None:
+    """A construction failure should not be collapsed into worker.run."""
+    _FakeClient.connected.clear()
+    config = _config(tmp_path)
+
+    report = asyncio.run(
+        worker.diagnose_temporal_worker_startup(
+            config=config,
+            client_class=_FakeClient,
+            worker_class=_BrokenWorker,
+        )
+    )
+
+    assert report["summary"] == {
+        "status": "failed",
+        "phase": "worker_construct",
+    }
+    assert report["phases"]["client_connect"]["status"] == "passed"
+    assert report["phases"]["worker_construct"]["status"] == "failed"
+    assert report["phases"]["worker_construct"]["error_type"] == (
+        "RuntimeError"
+    )
+
+
+def test_worker_diagnose_startup_cli_emits_json(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """The worker CLI should expose startup diagnostics to release smoke."""
+
+    async def fake_diagnose_temporal_worker_startup(**kwargs: object):
+        return {
+            "summary": {"status": "passed", "phase": "client_connect"},
+            "phases": {
+                "client_connect": {
+                    "status": "passed",
+                    "phase": "client_connect",
+                }
+            },
+        }
+
+    monkeypatch.setattr(
+        worker,
+        "diagnose_temporal_worker_startup",
+        fake_diagnose_temporal_worker_startup,
+    )
+
+    exit_code = worker.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "--json",
+            "diagnose-startup",
+            "--stop-after",
+            "client-connect",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["summary"]["phase"] == "client_connect"
 
 
 def test_default_workflows_include_topology_classes() -> None:
