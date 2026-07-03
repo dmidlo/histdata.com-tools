@@ -165,8 +165,10 @@ def test_help_advertises_orchestration_jobs_not_orchestration() -> None:
 
     assert "Orchestration:" in help_text
     assert "analytics   Run offline data analytics operations" in help_text
+    assert "groups      List instrument groups and major triangles" in help_text
     assert "quality     Inspect local data quality evidence" in help_text
     assert "histdatacom analytics --help" in help_text
+    assert "histdatacom groups --help" in help_text
     assert "histdatacom jobs --help" in help_text
     assert "histdatacom quality --help" in help_text
     assert "--config PATH" in help_text

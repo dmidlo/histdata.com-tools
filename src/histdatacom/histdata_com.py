@@ -680,7 +680,7 @@ def main(
     cli_args = sys.argv[1:] if not options else []
     routed_command = routed_command_from_cli_args(
         cli_args,
-        {"analytics", "cleanup", "jobs", "quality", "runtime"},
+        {"analytics", "cleanup", "groups", "jobs", "quality", "runtime"},
     )
     if not options and routed_command == "cleanup":
         from histdatacom.cleanup_cli import main as cleanup_main
@@ -692,6 +692,12 @@ def main(
         from histdatacom.orchestration.cli import jobs_main
 
         return jobs_main(remove_routed_command_from_cli_args(cli_args, "jobs"))
+    if not options and routed_command == "groups":
+        from histdatacom.groups_cli import main as groups_main
+
+        return groups_main(
+            remove_routed_command_from_cli_args(cli_args, "groups")
+        )
     if not options and routed_command == "quality":
         from histdatacom.quality_cli import main as quality_main
 

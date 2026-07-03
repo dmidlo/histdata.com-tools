@@ -280,12 +280,14 @@ Info:
 Commands:
   analytics   Run offline data analytics operations
   cleanup     Remove transient source artifacts
+  groups      List instrument groups and major triangles
   jobs        Inspect and control orchestrated work
   quality     Inspect local data quality evidence
   runtime     Inspect and manage the orchestration runtime
 
 Run `histdatacom analytics --help` for analytics commands.
 Run `histdatacom cleanup --help` for cleanup commands.
+Run `histdatacom groups --help` for group discovery commands.
 Run `histdatacom jobs --help` for job telemetry commands.
 Run `histdatacom quality --help` for quality commands.
 ```
@@ -630,6 +632,20 @@ Individual triangle group names use the pattern
 `triangle-{direct}-{numerator}-{denominator}`. For example,
 `triangle-eurgbp-eurusd-gbpusd` downloads `eurgbp`, `eurusd`, and `gbpusd`
 for the rule `EURUSD / GBPUSD ~= EURGBP`.
+
+Discover available groups without inspecting the source:
+
+```txt
+histdatacom groups list
+histdatacom groups list --triangles
+histdatacom groups show major-triangles
+histdatacom groups show triangle-eurgbp-eurusd-gbpusd
+histdatacom groups list --triangles --json
+```
+
+`histdatacom groups list` shows broad baskets such as `majors` and
+`major-triangles`. Add `--triangles` to list each individual major triangle
+group with its readable relationship rule.
 
 ##### to fetch a single month's data, include a month, but do not use the `-e, --end_yearmonth` flag
 

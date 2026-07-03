@@ -20,6 +20,7 @@ _SECTION_ALIASES = {"orchestration_worker": "worker"}
 _COMMAND_SECTION_KEYS = {
     "analytics",
     "cleanup",
+    "groups",
     "jobs",
     "quality",
     "runtime",
@@ -202,6 +203,19 @@ _ANALYTICS_ALLOWED_KEYS = (
     | set(_ANALYTICS_SCALAR_ARGS)
     | set(_ANALYTICS_LIST_ARGS)
 )
+_GROUPS_COMMANDS = {"list", "show"}
+_GROUPS_ALIASES = {
+    **_COMMAND_KEY_ALIASES,
+    "instrument_group": "group",
+    "pair_group": "group",
+    "symbol_group": "group",
+}
+_GROUPS_TRUE_FLAG_ARGS = {
+    "all": "--all",
+    "json": "--json",
+    "triangles": "--triangles",
+}
+_GROUPS_ALLOWED_KEYS = {"command", "group"} | set(_GROUPS_TRUE_FLAG_ARGS)
 _CLEANUP_COMMANDS = {"sources", "status", "transient-sources"}
 _CLEANUP_ALIASES = {
     **_COMMAND_KEY_ALIASES,
@@ -555,6 +569,39 @@ def configured_cleanup_argv(args: Sequence[str]) -> list[str]:
         command_scalar_args=_CLEANUP_SCALAR_ARGS,
         command_list_args=_CLEANUP_LIST_ARGS,
     )
+
+
+def configured_groups_argv(args: Sequence[str]) -> list[str]:
+    """Return groups argv with YAML defaults injected."""
+    config_path = config_path_from_cli_args(args)
+    explicit_args = strip_config_option(args)
+    if not config_path:
+        return explicit_args
+    config = _normalized_section_mapping(
+        _section_mapping(config_path, "groups"),
+        allowed_keys=_GROUPS_ALLOWED_KEYS,
+        aliases=_GROUPS_ALIASES,
+        section_name="groups",
+    )
+    prefix, explicit_command, suffix = _split_at_command(
+        explicit_args,
+        _GROUPS_COMMANDS,
+    )
+    configured_command = _command_from_config(
+        config,
+        section_name="groups",
+        commands=_GROUPS_COMMANDS,
+    )
+    command = explicit_command or configured_command
+    global_args: list[str] = []
+    command_args = (
+        _groups_command_args(config, command, suffix)
+        if _include_command_defaults(configured_command, command)
+        else []
+    )
+    if command:
+        return [*global_args, *prefix, command, *command_args, *suffix]
+    return [*global_args, *explicit_args]
 
 
 def configured_quality_argv(args: Sequence[str]) -> list[str]:
@@ -912,6 +959,37 @@ def _jobs_command_args(
             list_args={},
         )
     )
+    return args
+
+
+def _groups_command_args(
+    config: Mapping[str, Any],
+    command: str,
+    explicit_suffix: Sequence[str],
+) -> list[str]:
+    if command == "list":
+        return _mapped_args(
+            config,
+            true_flags={
+                "all": _GROUPS_TRUE_FLAG_ARGS["all"],
+                "json": _GROUPS_TRUE_FLAG_ARGS["json"],
+                "triangles": _GROUPS_TRUE_FLAG_ARGS["triangles"],
+            },
+            scalar_args={},
+            list_args={},
+        )
+    args = _mapped_args(
+        config,
+        true_flags={"json": _GROUPS_TRUE_FLAG_ARGS["json"]},
+        scalar_args={},
+        list_args={},
+    )
+    if (
+        command == "show"
+        and "group" in config
+        and not _contains_positional(explicit_suffix, value_flags=set())
+    ):
+        args.append(str(config["group"]))
     return args
 
 
