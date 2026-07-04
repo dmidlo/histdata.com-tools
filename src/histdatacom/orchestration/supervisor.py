@@ -1244,7 +1244,7 @@ class OrchestrationSupervisor:
                     processes.pop(component, None)
                     self._sleep(retry_delay)
                     continue
-                raise
+                raise last_error
             return worker_process, worker_command, log_path, readiness
 
         if last_error is not None:

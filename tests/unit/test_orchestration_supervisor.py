@@ -994,6 +994,84 @@ def test_start_retries_delayed_windows_native_worker_startup_exit(
     assert state["worker_readiness"]["network"]["pid"] == 2402
 
 
+def test_start_reports_exhausted_delayed_windows_native_worker_startup_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Exhausted readiness-time native exits should report every attempt."""
+    executable = _executable(tmp_path)
+    policy = _policy(tmp_path)
+    events: list[tuple[str, str]] = []
+    live_pids = {2500}
+    next_pid = iter(range(2500, 2503))
+
+    def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
+        pid = next(next_pid)
+        if "histdatacom.orchestration.worker" not in command:
+            events.append(("process", "server"))
+            return _FakeProcess(pid)
+
+        lane = command[command.index("--lane") + 1]
+        events.append(("process", f"worker:{lane}:{pid}"))
+        return _LateCrashingProcess(
+            pid,
+            live_polls=1,
+            crash_returncode=(
+                supervisor_module.WINDOWS_NATIVE_WORKER_STARTUP_EXIT_CODE
+            ),
+        )
+
+    def sleep(seconds: float) -> None:
+        events.append(("sleep", str(seconds)))
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "_worker_launch_settle_seconds",
+        lambda: 0.0,
+    )
+    monkeypatch.setattr(supervisor_module, "_worker_launch_attempts", lambda: 2)
+    monkeypatch.setattr(
+        supervisor_module,
+        "_worker_launch_retry_delay_seconds",
+        lambda returncode: (
+            supervisor_module.DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_DELAY_SECONDS
+            if supervisor_module._unsigned_windows_returncode(returncode)
+            == supervisor_module.WINDOWS_NATIVE_WORKER_STARTUP_EXIT_CODE
+            else 0.0
+        ),
+    )
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: pid in live_pids,
+        process_factory=process_factory,
+        sleep=sleep,
+        worker_lanes=(TaskQueueLane.NETWORK,),
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        supervisor.start(executable=executable, startup_timeout=10.0)
+
+    message = str(raised.value)
+    assert "worker lane 'network' exited before readiness" in message
+    assert "Worker launch attempts:" in message
+    assert '"attempt": 1' in message
+    assert '"attempt": 2' in message
+    assert '"pid": 2501' in message
+    assert '"pid": 2502' in message
+    assert "0xC0000142" in message
+    assert events == [
+        ("process", "server"),
+        ("process", "worker:network:2501"),
+        (
+            "sleep",
+            str(
+                supervisor_module.DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_DELAY_SECONDS
+            ),
+        ),
+        ("process", "worker:network:2502"),
+    ]
+
+
 def test_worker_launch_retry_delay_accepts_signed_windows_native_exit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
