@@ -15,6 +15,7 @@ from histdatacom.data_quality import (
     QualityTargetKind,
     audit_remediation_catalog,
     audit_remediation_catalog_report_paths,
+    discover_known_quality_findings,
     format_remediation_catalog_audit,
     remediation_catalog_audit_has_warning_error_gaps,
     remediation_catalog_audit_to_json,
@@ -133,6 +134,178 @@ def test_remediation_catalog_audit_truncates_deterministically() -> None:
     assert len(payload["known_code_counts"]["rule_id_counts"]) == 1
 
 
+def test_remediation_catalog_audit_ranks_report_observed_gaps(
+    tmp_path: Path,
+) -> None:
+    """Report frequency should move otherwise similar gaps up the backlog."""
+    report = _report_with_findings(
+        tmp_path,
+        (
+            _finding(
+                tmp_path,
+                "rule.a",
+                "A_CODE",
+                QualitySeverity.ERROR,
+            ),
+            _finding(
+                tmp_path,
+                "rule.b",
+                "B_CODE",
+                QualitySeverity.ERROR,
+            ),
+            _finding(
+                tmp_path,
+                "rule.b",
+                "B_CODE",
+                QualitySeverity.ERROR,
+            ),
+        ),
+    )
+
+    payload = audit_remediation_catalog(
+        known_findings=(
+            _known(
+                "rule.a",
+                "A_CODE",
+                QualitySeverity.ERROR,
+                source_family="bars",
+            ),
+            _known(
+                "rule.b",
+                "B_CODE",
+                QualitySeverity.ERROR,
+                source_family="ticks",
+            ),
+        ),
+        reports=(("reports/quality.json", report),),
+    )
+
+    ranked = payload["ranked_gaps"]
+
+    assert ranked[0]["rank"] == 1
+    assert ranked[0]["finding_code"] == "B_CODE"
+    assert ranked[0]["report_occurrence_count"] == 2
+    assert ranked[0]["source_family"] == "ticks"
+    assert "report_occurrences=2" in ranked[0]["rank_reasons"]
+    assert "Ranked remediation gaps" in format_remediation_catalog_audit(
+        payload
+    )
+
+
+def test_remediation_catalog_audit_ranks_report_only_gaps(
+    tmp_path: Path,
+) -> None:
+    """Report-only gaps should appear in the prioritized backlog."""
+    report = _report_with_findings(
+        tmp_path,
+        (
+            _finding(
+                tmp_path,
+                "time.ascii.sequence",
+                "ASCII_M1_GRANULARITY_DRIFT",
+                QualitySeverity.ERROR,
+            ),
+            _finding(
+                tmp_path,
+                "time.ascii.sequence",
+                "ASCII_M1_GRANULARITY_DRIFT",
+                QualitySeverity.ERROR,
+            ),
+        ),
+    )
+
+    payload = audit_remediation_catalog(
+        known_findings=(),
+        reports=(("reports/quality.json", report),),
+        source_limit=1,
+    )
+    ranked = payload["ranked_gaps"]
+
+    assert payload["summary"]["unmapped_warning_error_gap_count"] == 1
+    assert ranked[0]["rank"] == 1
+    assert ranked[0]["finding_code"] == "ASCII_M1_GRANULARITY_DRIFT"
+    assert ranked[0]["rule_id"] == "time.ascii.sequence"
+    assert ranked[0]["source_family"] == "time"
+    assert ranked[0]["known_source_occurrence_count"] == 0
+    assert ranked[0]["report_occurrence_count"] == 2
+    assert ranked[0]["reports"] == [
+        {
+            "count": 1,
+            "source": "reports/quality.json",
+        }
+    ]
+    assert "report_occurrences=2" in ranked[0]["rank_reasons"]
+
+
+def test_discover_known_quality_findings_resolves_source_attribution(
+    tmp_path: Path,
+) -> None:
+    """Static discovery should avoid placeholder rule IDs where possible."""
+    source = tmp_path / "ticks.py"
+    source.write_text(
+        """
+ASCII_TICK_SPREAD_RULE_ID = "ticks.ascii.spread"
+
+
+class HistDataAsciiTickSpreadRule:
+    rule_id: str = ASCII_TICK_SPREAD_RULE_ID
+
+    def evaluate(self, target):
+        return _finding(
+            target,
+            code="ASCII_TICK_NEGATIVE_SPREAD",
+            rule_id=self.rule_id,
+            severity=QualitySeverity.ERROR,
+        )
+
+
+def bundled(target, rules):
+    spread_rule = rules[0]
+    assert isinstance(spread_rule, HistDataAsciiTickSpreadRule)
+    return _finding(
+        target,
+        code="ASCII_TICK_SPREAD_METADATA_UNSUPPORTED",
+        rule_id=spread_rule.rule_id,
+    )
+
+
+def helper(target, rule_id: str):
+    return _finding(
+        target,
+        code="ASCII_TICK_BID_ASK_INVALID",
+        rule_id=rule_id,
+    )
+
+
+def source_error():
+    raise _SourceReadError(
+        code="ASCII_TICK_CACHE_SCHEMA_UNSUPPORTED",
+        message="cache missing",
+    )
+""",
+        encoding="utf-8",
+    )
+
+    findings = {
+        item.finding_code: item
+        for item in discover_known_quality_findings(tmp_path)
+    }
+
+    assert findings["ASCII_TICK_NEGATIVE_SPREAD"].rule_id == (
+        "ticks.ascii.spread"
+    )
+    assert findings["ASCII_TICK_SPREAD_METADATA_UNSUPPORTED"].rule_id == (
+        "ticks.ascii.spread"
+    )
+    assert findings["ASCII_TICK_BID_ASK_INVALID"].rule_id == (
+        "ticks.unresolved"
+    )
+    assert findings["ASCII_TICK_CACHE_SCHEMA_UNSUPPORTED"].rule_id == (
+        "ticks.unresolved"
+    )
+    assert {item.source_family for item in findings.values()} == {"ticks"}
+
+
 def test_remediation_catalog_audit_uses_report_coverage_and_sanitizes_paths(
     tmp_path: Path,
 ) -> None:
@@ -211,12 +384,14 @@ def _known(
     severity: QualitySeverity,
     *,
     source: str = "",
+    source_family: str = "",
 ) -> KnownQualityFindingCode:
     return KnownQualityFindingCode(
         rule_id=rule_id,
         finding_code=finding_code,
         severity=severity,
         source=source or f"data_quality/{rule_id}.py:1",
+        source_family=source_family or rule_id.split(".", 1)[0],
     )
 
 
