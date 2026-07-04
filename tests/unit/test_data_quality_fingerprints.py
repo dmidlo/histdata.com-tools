@@ -23,6 +23,7 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
+    HistDataFingerprintProfile,
     HistDataSeriesFingerprintRule,
     QualityFinding,
     QualitySeverity,
@@ -109,6 +110,35 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
     assert topology["computed_from"] == "text_scan"
     assert topology["timestamp_projection"] == "text_scan"
     assert topology["cache_source"] is None
+    distribution = _mapping(payload["m1_bar_distribution"])
+    assert distribution["row_count"] == 3
+    assert distribution["sampled_row_count"] == 3
+    assert distribution["usable_row_count"] == 3
+    assert distribution["invalid_row_count"] == 0
+    assert distribution["truncated"] is False
+    prices = _mapping(distribution["price"])
+    open_summary = _mapping(prices["open"])
+    assert open_summary["count"] == 3
+    assert open_summary["min"] == 1.30652
+    assert open_summary["max"] == 1.3066
+    assert open_summary["mean"] == 1.306563333333
+    assert open_summary["median"] == 1.30657
+    assert _mapping(open_summary["quantiles"])["0.5"] == 1.30657
+    shape = _mapping(distribution["ohlc_shape"])
+    body_summary = _mapping(shape["body_ratio"])
+    assert body_summary["count"] == 3
+    assert body_summary["min"] == 0.1
+    assert body_summary["median"] == 1.0
+    range_ratio = _mapping(distribution["range_ratio"])
+    assert range_ratio["count"] == 3
+    assert range_ratio["median"] == 0.000030615213
+    assert _mapping(distribution["precision"])["precision_source"] == "text"
+    assert _mapping(distribution["precision"])["decimal_place_counts"] == {
+        "6": 12,
+    }
+    assert _mapping(
+        _mapping(distribution["precision"])["column_decimal_place_counts"]
+    )["open"] == {"6": 3}
     assert _mapping(payload["source"])["kind"] == "csv_text"
 
 
@@ -126,7 +156,121 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
         "end_timestamp_utc_ms": batch.summary.end,
         "duration_ms": 11_330,
     }
+    distribution = _mapping(payload["tick_distribution"])
+    assert distribution["row_count"] == 3
+    assert distribution["sampled_row_count"] == 3
+    assert distribution["usable_row_count"] == 3
+    assert distribution["invalid_row_count"] == 0
+    assert distribution["truncated"] is False
+    spread_summary = _mapping(distribution["spread"])
+    assert spread_summary["count"] == 3
+    assert spread_summary["min"] == 0.00017
+    assert spread_summary["max"] == 0.00017
+    assert spread_summary["median"] == 0.00017
+    assert _mapping(spread_summary["quantiles"])["0.5"] == 0.00017
+    assert distribution["zero_spread_count"] == 0
+    assert distribution["negative_spread_count"] == 0
+    assert distribution["zero_spread_rate"] == 0.0
+    assert distribution["negative_spread_rate"] == 0.0
     assert _mapping(payload["source"])["kind"] == "csv_text"
+
+
+def test_fingerprint_tick_distribution_counts_zero_and_negative_spreads(
+    tmp_path: Path,
+) -> None:
+    """Tick fingerprints should expose spread-defect rates descriptively."""
+    case = HistDataAsciiCase(
+        name="tick_spread_mix",
+        timeframe=TICK,
+        filename="DAT_ASCII_EURUSD_T_201202_SPREAD_MIX.csv",
+        rows=(
+            "20120201 000003660,1.000000,1.000000,0",
+            "20120201 000003973,1.000200,1.000100,0",
+            "20120201 000004990,1.000000,1.000300,0",
+        ),
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    distribution = _mapping(payload["tick_distribution"])
+
+    assert distribution["usable_row_count"] == 3
+    assert distribution["zero_spread_count"] == 1
+    assert distribution["negative_spread_count"] == 1
+    assert distribution["zero_spread_rate"] == 0.333333333333
+    assert distribution["negative_spread_rate"] == 0.333333333333
+    spread_summary = _mapping(distribution["spread"])
+    assert spread_summary["min"] == -0.0001
+    assert spread_summary["max"] == 0.0003
+
+
+def test_fingerprint_distribution_handles_invalid_partial_and_empty_m1_rows(
+    tmp_path: Path,
+) -> None:
+    """Distribution summaries should be bounded even for sparse bad input."""
+    invalid_target = _discovered_target(
+        write_ascii_case(tmp_path / "invalid", case_by_name("m1_bad_numeric"))
+    )
+    invalid_payload = _fingerprint_payload(_fingerprint_finding(invalid_target))
+    invalid_distribution = _mapping(invalid_payload["m1_bar_distribution"])
+
+    assert invalid_distribution["row_count"] == 2
+    assert invalid_distribution["sampled_row_count"] == 1
+    assert invalid_distribution["usable_row_count"] == 1
+    assert invalid_distribution["invalid_row_count"] == 1
+    close_summary = _mapping(_mapping(invalid_distribution["price"])["close"])
+    assert close_summary["count"] == 1
+    assert close_summary["median"] == 1.30656
+
+    partial_target = _discovered_target(
+        write_ascii_case(tmp_path / "partial", case_by_name("m1_malformed_row"))
+    )
+    partial_payload = _fingerprint_payload(_fingerprint_finding(partial_target))
+    partial_distribution = _mapping(partial_payload["m1_bar_distribution"])
+
+    assert partial_distribution["row_count"] == 2
+    assert partial_distribution["sampled_row_count"] == 1
+    assert partial_distribution["usable_row_count"] == 1
+    assert partial_distribution["invalid_row_count"] == 1
+
+    empty_target = _discovered_target(
+        write_ascii_case(tmp_path / "empty", case_by_name("m1_empty_file"))
+    )
+    empty_payload = _fingerprint_payload(_fingerprint_finding(empty_target))
+    empty_distribution = _mapping(empty_payload["m1_bar_distribution"])
+    empty_summary = _mapping(_mapping(empty_distribution["price"])["open"])
+
+    assert empty_distribution["row_count"] == 0
+    assert empty_distribution["sampled_row_count"] == 0
+    assert empty_distribution["usable_row_count"] == 0
+    assert empty_distribution["invalid_row_count"] == 0
+    assert empty_summary["count"] == 0
+    assert empty_summary["median"] is None
+
+
+def test_fingerprint_distribution_uses_profile_quantiles_and_rounding(
+    tmp_path: Path,
+) -> None:
+    """Fingerprint profile knobs should shape distribution payloads."""
+    target = _discovered_target(write_ascii_case(tmp_path, CLEAN_M1_CASE))
+    profile = HistDataFingerprintProfile(
+        quantiles=(0.0, 0.5, 1.0),
+        max_rows=2,
+        rounding_digits=5,
+    )
+    payload = _fingerprint_payload(_fingerprint_finding(target, profile))
+    distribution = _mapping(payload["m1_bar_distribution"])
+    open_summary = _mapping(_mapping(distribution["price"])["open"])
+
+    assert distribution["row_count"] == 3
+    assert distribution["sampled_row_count"] == 2
+    assert distribution["usable_row_count"] == 3
+    assert distribution["truncated"] is True
+    assert open_summary["mean"] == 1.30658
+    assert _mapping(open_summary["quantiles"]) == {
+        "0.0": 1.30657,
+        "0.5": 1.30658,
+        "1.0": 1.3066,
+    }
 
 
 def test_fingerprint_rule_emits_zip_member_payload(tmp_path: Path) -> None:
@@ -176,6 +320,12 @@ def test_fingerprint_rule_prefers_direct_cache_payload(
         "end_timestamp_utc_ms": batch.summary.end,
         "duration_ms": 120_000,
     }
+    distribution = _mapping(payload["m1_bar_distribution"])
+    assert distribution["row_count"] == 3
+    assert _mapping(_mapping(distribution["price"])["close"])["count"] == 3
+    assert _mapping(distribution["precision"])["precision_source"] == (
+        "cache_float"
+    )
     topology = _mapping(payload["temporal_topology"])
     assert topology["computed_from"] == "direct_cache"
     assert topology["timestamp_projection"] == "polars_cache"
@@ -207,6 +357,7 @@ def test_fingerprint_rule_prefers_fresh_sibling_cache(
         "path": ".data",
     }
     assert _mapping(payload["coverage"])["row_count"] == 3
+    assert _mapping(payload["m1_bar_distribution"])["row_count"] == 3
     topology = _mapping(payload["temporal_topology"])
     assert topology["computed_from"] == "fresh_sibling_cache"
     assert topology["timestamp_projection"] == "polars_cache"
@@ -923,8 +1074,13 @@ def _discovered_target(path: Path) -> QualityTarget:
     return target
 
 
-def _fingerprint_finding(target: QualityTarget) -> QualityFinding:
-    rule = HistDataSeriesFingerprintRule()
+def _fingerprint_finding(
+    target: QualityTarget,
+    profile: HistDataFingerprintProfile | None = None,
+) -> QualityFinding:
+    rule = HistDataSeriesFingerprintRule(
+        profile=profile or HistDataFingerprintProfile()
+    )
     findings = tuple(rule.evaluate(target))
     assert len(findings) == 1
     finding = findings[0]

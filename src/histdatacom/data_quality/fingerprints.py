@@ -5,10 +5,12 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 import zipfile
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from typing import Any, cast
 
@@ -131,7 +133,7 @@ class HistDataSeriesFingerprintRule:
 
     def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
         """Return one bounded fingerprint finding for one target."""
-        payload = _series_fingerprint_payload(target)
+        payload = _series_fingerprint_payload(target, self.profile)
         source = cast(dict[str, JSONValue], payload["source"])
         unavailable = source.get("kind") == "unavailable"
         code = (
@@ -339,7 +341,10 @@ def series_fingerprint_topology_attention_summary(
     )
 
 
-def _series_fingerprint_payload(target: QualityTarget) -> dict[str, JSONValue]:
+def _series_fingerprint_payload(
+    target: QualityTarget,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
     payload: dict[str, JSONValue] = {
         "schema_version": TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
         "target_axis": _target_axis(target),
@@ -358,6 +363,15 @@ def _series_fingerprint_payload(target: QualityTarget) -> dict[str, JSONValue]:
     cache = read_quality_polars_cache(target, required_columns=columns)
     if cache is not None:
         payload["coverage"] = _coverage_from_frame(cache.frame)
+        _add_distribution_payload(
+            payload,
+            timeframe=target.timeframe,
+            distribution=_distribution_from_frame(
+                cache.frame,
+                timeframe=target.timeframe,
+                profile=profile,
+            ),
+        )
         payload["source"] = {
             "kind": "cache",
             "cache_source": cache.source,
@@ -396,6 +410,15 @@ def _series_fingerprint_payload(target: QualityTarget) -> dict[str, JSONValue]:
     payload["coverage"] = _coverage_from_text(
         text_payload.text,
         timeframe=target.timeframe,
+    )
+    _add_distribution_payload(
+        payload,
+        timeframe=target.timeframe,
+        distribution=_distribution_from_text(
+            text_payload.text,
+            timeframe=target.timeframe,
+            profile=profile,
+        ),
     )
     if target.kind is QualityTargetKind.ZIP:
         payload["source"] = {
@@ -839,6 +862,540 @@ def _coverage_from_text(
             scan.start_timestamp_utc_ms = timestamp
         scan.end_timestamp_utc_ms = timestamp
     return scan.to_payload()
+
+
+def _add_distribution_payload(
+    payload: dict[str, JSONValue],
+    *,
+    timeframe: str,
+    distribution: dict[str, JSONValue],
+) -> None:
+    if timeframe == M1:
+        payload["m1_bar_distribution"] = distribution
+    elif timeframe == TICK:
+        payload["tick_distribution"] = distribution
+
+
+def _distribution_from_frame(
+    frame: Any,
+    *,
+    timeframe: str,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    if timeframe == M1:
+        return _m1_bar_distribution_from_frame(frame, profile)
+    if timeframe == TICK:
+        return _tick_distribution_from_frame(frame, profile)
+    return {}
+
+
+def _distribution_from_text(
+    text: str,
+    *,
+    timeframe: str,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    if timeframe == M1:
+        return _m1_bar_distribution_from_text(text, profile)
+    if timeframe == TICK:
+        return _tick_distribution_from_text(text, profile)
+    return {}
+
+
+def _m1_bar_distribution_from_frame(
+    frame: Any,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    row_count = int(getattr(frame, "height", 0) or 0)
+    sample_limit = min(row_count, _profile_max_rows(profile))
+    columns = {
+        name: _frame_column_values(frame, name, sample_limit)
+        for name in ("open", "high", "low", "close")
+    }
+    return _m1_bar_distribution_from_column_values(
+        columns,
+        row_count=row_count,
+        sample_limit=sample_limit,
+        profile=profile,
+        precision_source="cache_float",
+    )
+
+
+def _m1_bar_distribution_from_text(
+    text: str,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    row_count = 0
+    invalid_row_count = 0
+    usable_row_count = 0
+    sample_limit = _profile_max_rows(profile)
+    sampled_rows: list[tuple[float, float, float, float]] = []
+    precision_counts: Counter[str] = Counter()
+    column_precision_counts: dict[str, Counter[str]] = {
+        "open": Counter(),
+        "high": Counter(),
+        "low": Counter(),
+        "close": Counter(),
+    }
+    reader = csv.reader(
+        text.splitlines(), delimiter=delimiter_for_timeframe(M1)
+    )
+    for row in reader:
+        if not row or not any(cell.strip() for cell in row):
+            continue
+        row_count += 1
+        try:
+            parsed = normalize_ascii_row(M1, row)
+        except (TypeError, ValueError, OverflowError):
+            invalid_row_count += 1
+            continue
+        prices = tuple(float(parsed[index]) for index in range(1, 5))
+        if not all(_is_finite(value) for value in prices):
+            invalid_row_count += 1
+            continue
+        usable_row_count += 1
+        if len(sampled_rows) >= sample_limit:
+            continue
+        sampled_rows.append(cast(tuple[float, float, float, float], prices))
+        for column_name, raw_value in zip(
+            ("open", "high", "low", "close"),
+            row[1:5],
+            strict=True,
+        ):
+            places = _decimal_places_from_text(raw_value)
+            key = str(places)
+            precision_counts[key] += 1
+            column_precision_counts[column_name][key] += 1
+
+    payload = _m1_bar_distribution_from_rows(
+        sampled_rows,
+        row_count=row_count,
+        usable_row_count=usable_row_count,
+        invalid_row_count=invalid_row_count,
+        truncated=usable_row_count > len(sampled_rows),
+        profile=profile,
+    )
+    precision = cast(dict[str, JSONValue], payload["precision"])
+    precision["precision_source"] = "text"
+    precision["decimal_place_counts"] = _counter_payload(precision_counts)
+    precision["column_decimal_place_counts"] = {
+        column: _counter_payload(counts)
+        for column, counts in column_precision_counts.items()
+    }
+    return payload
+
+
+def _m1_bar_distribution_from_column_values(
+    columns: Mapping[str, list[Any]],
+    *,
+    row_count: int,
+    sample_limit: int,
+    profile: HistDataFingerprintProfile,
+    precision_source: str,
+) -> dict[str, JSONValue]:
+    sampled_rows: list[tuple[float, float, float, float]] = []
+    invalid_row_count = 0
+    sampled_count = min(
+        sample_limit,
+        *(
+            len(columns.get(name, ()))
+            for name in ("open", "high", "low", "close")
+        ),
+    )
+    precision_counts: Counter[str] = Counter()
+    column_precision_counts: dict[str, Counter[str]] = {
+        "open": Counter(),
+        "high": Counter(),
+        "low": Counter(),
+        "close": Counter(),
+    }
+    for index in range(sampled_count):
+        prices: list[float] = []
+        for column_name in ("open", "high", "low", "close"):
+            value = _finite_float(columns[column_name][index])
+            if value is None:
+                prices = []
+                break
+            prices.append(value)
+        if len(prices) != 4:
+            invalid_row_count += 1
+            continue
+        sampled_rows.append((prices[0], prices[1], prices[2], prices[3]))
+        for column_name, value in zip(
+            ("open", "high", "low", "close"),
+            prices,
+            strict=True,
+        ):
+            key = str(_decimal_places_from_float(value, profile))
+            precision_counts[key] += 1
+            column_precision_counts[column_name][key] += 1
+
+    payload = _m1_bar_distribution_from_rows(
+        sampled_rows,
+        row_count=row_count,
+        usable_row_count=len(sampled_rows),
+        invalid_row_count=invalid_row_count,
+        truncated=row_count > sampled_count,
+        profile=profile,
+    )
+    precision = cast(dict[str, JSONValue], payload["precision"])
+    precision["precision_source"] = precision_source
+    precision["decimal_place_counts"] = _counter_payload(precision_counts)
+    precision["column_decimal_place_counts"] = {
+        column: _counter_payload(counts)
+        for column, counts in column_precision_counts.items()
+    }
+    return payload
+
+
+def _m1_bar_distribution_from_rows(
+    rows: list[tuple[float, float, float, float]],
+    *,
+    row_count: int,
+    usable_row_count: int,
+    invalid_row_count: int,
+    truncated: bool,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    open_values = [row[0] for row in rows]
+    high_values = [row[1] for row in rows]
+    low_values = [row[2] for row in rows]
+    close_values = [row[3] for row in rows]
+    range_ratios: list[float] = []
+    body_ratios: list[float] = []
+    upper_wick_ratios: list[float] = []
+    lower_wick_ratios: list[float] = []
+    for open_value, high_value, low_value, close_value in rows:
+        decimal_values = tuple(
+            Decimal(str(value))
+            for value in (open_value, high_value, low_value, close_value)
+        )
+        open_decimal, high_decimal, low_decimal, close_decimal = decimal_values
+        range_decimal = high_decimal - low_decimal
+        midpoint_decimal = (high_decimal + low_decimal) / Decimal("2")
+        if midpoint_decimal:
+            range_ratios.append(float(range_decimal / midpoint_decimal))
+        if range_decimal <= 0:
+            body_ratios.append(0.0)
+            upper_wick_ratios.append(0.0)
+            lower_wick_ratios.append(0.0)
+            continue
+        body_ratios.append(
+            float(abs(close_decimal - open_decimal) / range_decimal)
+        )
+        upper_wick_ratios.append(
+            float(
+                (high_decimal - max(open_decimal, close_decimal))
+                / range_decimal
+            )
+        )
+        lower_wick_ratios.append(
+            float(
+                (min(open_decimal, close_decimal) - low_decimal) / range_decimal
+            )
+        )
+    return {
+        "row_count": row_count,
+        "sampled_row_count": len(rows),
+        "usable_row_count": usable_row_count,
+        "invalid_row_count": invalid_row_count,
+        "truncated": truncated,
+        "price": {
+            "open": _numeric_summary(open_values, profile),
+            "high": _numeric_summary(high_values, profile),
+            "low": _numeric_summary(low_values, profile),
+            "close": _numeric_summary(close_values, profile),
+        },
+        "range_ratio": _numeric_summary(range_ratios, profile),
+        "ohlc_shape": {
+            "body_ratio": _numeric_summary(body_ratios, profile),
+            "upper_wick_ratio": _numeric_summary(
+                upper_wick_ratios,
+                profile,
+            ),
+            "lower_wick_ratio": _numeric_summary(
+                lower_wick_ratios,
+                profile,
+            ),
+        },
+        "precision": {
+            "precision_source": "unknown",
+            "decimal_place_counts": {},
+            "column_decimal_place_counts": {
+                "open": {},
+                "high": {},
+                "low": {},
+                "close": {},
+            },
+        },
+    }
+
+
+def _tick_distribution_from_frame(
+    frame: Any,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    row_count = int(getattr(frame, "height", 0) or 0)
+    sample_limit = min(row_count, _profile_max_rows(profile))
+    bids = _frame_column_values(frame, "bid", sample_limit)
+    asks = _frame_column_values(frame, "ask", sample_limit)
+    return _tick_distribution_from_column_values(
+        bids,
+        asks,
+        row_count=row_count,
+        sample_limit=sample_limit,
+        profile=profile,
+    )
+
+
+def _tick_distribution_from_text(
+    text: str,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    row_count = 0
+    invalid_row_count = 0
+    usable_row_count = 0
+    sample_limit = _profile_max_rows(profile)
+    bids: list[float] = []
+    asks: list[float] = []
+    reader = csv.reader(
+        text.splitlines(), delimiter=delimiter_for_timeframe(TICK)
+    )
+    for row in reader:
+        if not row or not any(cell.strip() for cell in row):
+            continue
+        row_count += 1
+        try:
+            parsed = normalize_ascii_row(TICK, row)
+        except (TypeError, ValueError, OverflowError):
+            invalid_row_count += 1
+            continue
+        bid = _finite_float(parsed[1])
+        ask = _finite_float(parsed[2])
+        if bid is None or ask is None:
+            invalid_row_count += 1
+            continue
+        usable_row_count += 1
+        if len(bids) >= sample_limit:
+            continue
+        bids.append(bid)
+        asks.append(ask)
+    return _tick_distribution_payload(
+        bids,
+        asks,
+        row_count=row_count,
+        sampled_row_count=len(bids),
+        usable_row_count=usable_row_count,
+        invalid_row_count=invalid_row_count,
+        truncated=usable_row_count > len(bids),
+        profile=profile,
+    )
+
+
+def _tick_distribution_from_column_values(
+    bids: list[Any],
+    asks: list[Any],
+    *,
+    row_count: int,
+    sample_limit: int,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    sampled_bids: list[float] = []
+    sampled_asks: list[float] = []
+    invalid_row_count = 0
+    sampled_count = min(sample_limit, len(bids), len(asks))
+    for index in range(sampled_count):
+        bid = _finite_float(bids[index])
+        ask = _finite_float(asks[index])
+        if bid is None or ask is None:
+            invalid_row_count += 1
+            continue
+        sampled_bids.append(bid)
+        sampled_asks.append(ask)
+    return _tick_distribution_payload(
+        sampled_bids,
+        sampled_asks,
+        row_count=row_count,
+        sampled_row_count=len(sampled_bids),
+        usable_row_count=len(sampled_bids),
+        invalid_row_count=invalid_row_count,
+        truncated=row_count > sampled_count,
+        profile=profile,
+    )
+
+
+def _tick_distribution_payload(
+    bids: list[float],
+    asks: list[float],
+    *,
+    row_count: int,
+    sampled_row_count: int,
+    usable_row_count: int,
+    invalid_row_count: int,
+    truncated: bool,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    spreads = [ask - bid for bid, ask in zip(bids, asks, strict=True)]
+    zero_spread_count = sum(1 for spread in spreads if spread == 0.0)
+    negative_spread_count = sum(1 for spread in spreads if spread < 0.0)
+    return {
+        "row_count": row_count,
+        "sampled_row_count": sampled_row_count,
+        "usable_row_count": usable_row_count,
+        "invalid_row_count": invalid_row_count,
+        "truncated": truncated,
+        "bid": _numeric_summary(bids, profile),
+        "ask": _numeric_summary(asks, profile),
+        "spread": _numeric_summary(spreads, profile),
+        "zero_spread_count": zero_spread_count,
+        "negative_spread_count": negative_spread_count,
+        "zero_spread_rate": _rate(
+            zero_spread_count, sampled_row_count, profile
+        ),
+        "negative_spread_rate": _rate(
+            negative_spread_count,
+            sampled_row_count,
+            profile,
+        ),
+    }
+
+
+def _numeric_summary(
+    values: Iterable[float],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    finite_values = sorted(value for value in values if _is_finite(value))
+    count = len(finite_values)
+    if count == 0:
+        return {
+            "count": 0,
+            "min": None,
+            "max": None,
+            "mean": None,
+            "median": None,
+            "mad": None,
+            "quantiles": {
+                _quantile_label(quantile): None
+                for quantile in profile.quantiles
+            },
+        }
+    median = _quantile(finite_values, 0.5)
+    mad = _quantile(
+        sorted(abs(value - median) for value in finite_values),
+        0.5,
+    )
+    return {
+        "count": count,
+        "min": _rounded(finite_values[0], profile),
+        "max": _rounded(finite_values[-1], profile),
+        "mean": _rounded(sum(finite_values) / count, profile),
+        "median": _rounded(median, profile),
+        "mad": _rounded(mad, profile),
+        "quantiles": {
+            _quantile_label(quantile): _rounded(
+                _quantile(finite_values, quantile),
+                profile,
+            )
+            for quantile in profile.quantiles
+        },
+    }
+
+
+def _quantile(values: list[float], quantile: float) -> float:
+    if not values:
+        return math.nan
+    clipped = min(max(float(quantile), 0.0), 1.0)
+    index = (len(values) - 1) * clipped
+    lower = math.floor(index)
+    upper = math.ceil(index)
+    if lower == upper:
+        return values[lower]
+    lower_value = values[lower]
+    upper_value = values[upper]
+    return lower_value + (upper_value - lower_value) * (index - lower)
+
+
+def _quantile_label(quantile: float) -> str:
+    return str(float(quantile))
+
+
+def _rate(
+    numerator: int,
+    denominator: int,
+    profile: HistDataFingerprintProfile,
+) -> float | None:
+    if denominator <= 0:
+        return None
+    return _rounded(numerator / denominator, profile)
+
+
+def _rounded(
+    value: float,
+    profile: HistDataFingerprintProfile,
+) -> float:
+    digits = max(0, int(profile.rounding_digits))
+    try:
+        with localcontext() as context:
+            context.prec = max(28, digits + 20)
+            rounded_decimal = Decimal(str(float(value))).quantize(
+                Decimal(1).scaleb(-digits)
+            )
+        rounded = float(rounded_decimal)
+    except (InvalidOperation, ValueError, OverflowError):
+        rounded = round(float(value), digits)
+    return 0.0 if rounded == 0 else rounded
+
+
+def _finite_float(value: object) -> float | None:
+    try:
+        normalized = float(cast(Any, value))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not _is_finite(normalized):
+        return None
+    return normalized
+
+
+def _is_finite(value: float) -> bool:
+    return math.isfinite(float(value))
+
+
+def _frame_column_values(
+    frame: Any,
+    column: str,
+    limit: int,
+) -> list[Any]:
+    try:
+        series = frame.get_column(column)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return []
+    try:
+        return cast(list[Any], series.head(limit).to_list())
+    except AttributeError:
+        return list(series)[:limit]
+
+
+def _profile_max_rows(profile: HistDataFingerprintProfile) -> int:
+    return max(1, int(profile.max_rows))
+
+
+def _decimal_places_from_text(value: str) -> int:
+    normalized = value.strip().lower()
+    mantissa = normalized.split("e", 1)[0]
+    if "." not in mantissa:
+        return 0
+    return len(mantissa.split(".", 1)[1])
+
+
+def _decimal_places_from_float(
+    value: float,
+    profile: HistDataFingerprintProfile,
+) -> int:
+    digits = max(0, int(profile.rounding_digits))
+    text = f"{value:.{digits}f}".rstrip("0").rstrip(".")
+    if "." not in text:
+        return 0
+    return len(text.split(".", 1)[1])
 
 
 def _cache_timestamp_at(frame: Any, row_index: int) -> int | None:

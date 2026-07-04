@@ -8,7 +8,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from histdatacom.data_quality.contracts import (
     QualityReport,
@@ -168,7 +168,7 @@ def audit_remediation_catalog(
             )
             for aggregate in included_unmapped_known
         ],
-        "report_coverage": report_payloads,
+        "report_coverage": cast(JSONValue, report_payloads),
         "payload_limits": {
             "known_unmapped_codes": _payload_limit_metadata(
                 len(unmapped_known),
@@ -214,7 +214,7 @@ def audit_remediation_catalog_report_paths(
 ) -> dict[str, JSONValue]:
     """Audit the catalog with optional saved quality-report evidence."""
     reports = tuple(
-        (publish_safe_path(path), load_quality_report(path))
+        (publish_safe_path(str(path)), load_quality_report(path))
         for path in report_paths
     )
     return audit_remediation_catalog(
