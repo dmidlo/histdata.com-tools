@@ -105,6 +105,13 @@
       "total_count": 0,
       "truncated": false
     },
+    "next_actions": {
+      "included_count": 0,
+      "limit": 16,
+      "omitted_count": 0,
+      "total_count": 0,
+      "truncated": false
+    },
     "target_summaries": {
       "included_count": 1,
       "limit": 128,

@@ -12,6 +12,8 @@ import pytest
 
 from histdatacom.data_quality import (
     QUALITY_REPORT_SCHEMA_VERSION,
+    QUALITY_NEXT_ACTIONS_METADATA_KEY,
+    QUALITY_NEXT_ACTIONS_SCHEMA_VERSION,
     QualityExitPolicy,
     QualityFinding,
     QualityLocation,
@@ -645,6 +647,10 @@ def _assert_report_contract(payload: dict[str, JSONValue]) -> None:
                 ]
             )
         )
+    if QUALITY_NEXT_ACTIONS_METADATA_KEY in metadata:
+        _assert_quality_next_actions(
+            _mapping(metadata[QUALITY_NEXT_ACTIONS_METADATA_KEY])
+        )
     summary = _mapping(payload["summary"])
     _assert_summary(summary)
 
@@ -682,6 +688,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "fingerprint_coverage",
         "fingerprint_topology",
         "fingerprint_topology_attention",
+        "next_actions",
     }
     assert expected_keys <= set(payload)
     assert set(payload) <= expected_keys | optional_keys
@@ -699,6 +706,8 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         _assert_fingerprint_topology_attention(
             _mapping(payload["fingerprint_topology_attention"])
         )
+    if "next_actions" in payload:
+        _assert_quality_next_actions(_mapping(payload["next_actions"]))
 
     for target_summary in _list(payload["target_summaries"]):
         _assert_target_summary(_mapping(target_summary))
@@ -964,6 +973,103 @@ def _assert_fingerprint_remediation_hint(
     assert payload["message"]
     assert isinstance(payload["rule_id"], str)
     assert payload["rule_id"]
+
+
+def _assert_quality_next_actions(payload: dict[str, JSONValue]) -> None:
+    assert set(payload) == {
+        "action_count",
+        "actions",
+        "included_action_count",
+        "omitted_action_count",
+        "schema_version",
+        "source_counts",
+        "truncated",
+    }
+    assert payload["schema_version"] == QUALITY_NEXT_ACTIONS_SCHEMA_VERSION
+    assert isinstance(payload["action_count"], int)
+    assert isinstance(payload["included_action_count"], int)
+    assert isinstance(payload["omitted_action_count"], int)
+    assert isinstance(payload["truncated"], bool)
+    assert isinstance(payload["source_counts"], dict)
+    for action in _list(payload["actions"]):
+        _assert_quality_next_action(_mapping(action))
+
+
+def _assert_quality_next_action(payload: dict[str, JSONValue]) -> None:
+    assert set(payload) == {
+        "action_kind",
+        "affected_target_count",
+        "attention_level_counts",
+        "code",
+        "finding_code_counts",
+        "flag_counts",
+        "included_target_axis_count",
+        "max_attention_level",
+        "max_severity",
+        "message",
+        "occurrence_count",
+        "omitted_target_axis_count",
+        "rule_id",
+        "severity_counts",
+        "source_counts",
+        "target_axis_count",
+        "target_axis_counts",
+        "target_axis_truncated",
+        "urgency",
+    }
+    assert payload["urgency"] in {"high", "medium", "low"}
+    assert payload["action_kind"] in {
+        "configure",
+        "inspect",
+        "rebuild",
+        "repair",
+        "verify",
+    }
+    assert isinstance(payload["code"], str)
+    assert payload["code"]
+    assert isinstance(payload["message"], str)
+    assert payload["message"]
+    assert isinstance(payload["rule_id"], str)
+    assert payload["rule_id"]
+    for key in (
+        "affected_target_count",
+        "included_target_axis_count",
+        "occurrence_count",
+        "omitted_target_axis_count",
+        "target_axis_count",
+    ):
+        assert isinstance(payload[key], int)
+        assert payload[key] >= 0
+    assert isinstance(payload["target_axis_truncated"], bool)
+    for key in (
+        "attention_level_counts",
+        "finding_code_counts",
+        "flag_counts",
+        "severity_counts",
+        "source_counts",
+    ):
+        assert isinstance(payload[key], dict)
+    for item in _list(payload["target_axis_counts"]):
+        _assert_quality_next_action_axis_count(_mapping(item))
+
+
+def _assert_quality_next_action_axis_count(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {"count", "target_axis"}
+    assert isinstance(payload["count"], int)
+    assert payload["count"] > 0
+    axis = _mapping(payload["target_axis"])
+    assert set(axis) == {
+        "data_format",
+        "kind",
+        "period",
+        "symbol",
+        "timeframe",
+    }
+    for value in axis.values():
+        assert isinstance(value, str)
+        assert value
 
 
 def _assert_summary(summary: dict[str, Any]) -> None:

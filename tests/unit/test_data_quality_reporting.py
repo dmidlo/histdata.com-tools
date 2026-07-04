@@ -7,6 +7,8 @@ from pathlib import Path
 
 from histdatacom.data_quality import (
     QUALITY_REPORT_SCHEMA_VERSION,
+    QUALITY_NEXT_ACTIONS_METADATA_KEY,
+    QUALITY_NEXT_ACTIONS_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
@@ -23,6 +25,7 @@ from histdatacom.data_quality import (
     format_quality_console_summary,
     publish_safe_json_value,
     publish_safe_path,
+    quality_next_actions_summary,
     quality_report_payload,
     quality_report_to_json,
     write_quality_report,
@@ -389,6 +392,91 @@ def test_quality_report_payload_adds_fingerprint_topology_attention_metadata(
     assert target_summaries[0]["computed_from"] == "unavailable"
 
 
+def test_quality_report_payload_adds_mixed_next_actions(
+    tmp_path: Path,
+) -> None:
+    """Report metadata should aggregate topology and finding remediation."""
+    report = _next_action_report(tmp_path)
+
+    payload = quality_report_payload(report)
+    next_actions = payload["metadata"][QUALITY_NEXT_ACTIONS_METADATA_KEY]
+    encoded = json.dumps(next_actions, sort_keys=True)
+
+    assert str(tmp_path) not in encoded
+    assert next_actions["schema_version"] == QUALITY_NEXT_ACTIONS_SCHEMA_VERSION
+    assert next_actions["action_count"] == 2
+    assert next_actions["included_action_count"] == 2
+    assert next_actions["omitted_action_count"] == 0
+    assert next_actions["source_counts"] == {
+        "fingerprint_topology_attention": 1,
+        "quality_finding": 1,
+    }
+    actions = next_actions["actions"]
+    assert [action["code"] for action in actions] == [
+        "verify_fingerprint_source",
+        "inspect_duplicate_timestamp_rows",
+    ]
+    assert actions[0]["urgency"] == "high"
+    assert actions[0]["max_attention_level"] == "unavailable"
+    assert actions[0]["flag_counts"] == {"unavailable_topology": 1}
+    assert actions[1]["urgency"] == "medium"
+    assert actions[1]["max_severity"] == "warning"
+    assert actions[1]["severity_counts"] == {"warning": 1}
+    assert actions[1]["finding_code_counts"] == {
+        "ASCII_M1_DUPLICATE_TIMESTAMP": 1,
+    }
+    assert actions[1]["target_axis_counts"] == [
+        {
+            "target_axis": {
+                "data_format": "ascii",
+                "timeframe": "M1",
+                "symbol": "EURUSD",
+                "period": "201202",
+                "kind": "csv",
+            },
+            "count": 1,
+        }
+    ]
+
+
+def test_quality_next_actions_are_bounded_and_stably_ordered(
+    tmp_path: Path,
+) -> None:
+    """Next-action output should truncate actions and target axes explicitly."""
+    action_summary = quality_next_actions_summary(
+        _next_action_report(tmp_path),
+        action_limit=1,
+    )
+
+    assert action_summary is not None
+    assert action_summary["action_count"] == 2
+    assert action_summary["included_action_count"] == 1
+    assert action_summary["omitted_action_count"] == 1
+    assert action_summary["truncated"] is True
+    assert action_summary["actions"][0]["code"] == "verify_fingerprint_source"
+
+    axis_summary = quality_next_actions_summary(
+        _many_duplicate_next_action_report(tmp_path),
+        action_limit=1,
+        target_axis_limit=1,
+    )
+
+    assert axis_summary is not None
+    assert axis_summary["action_count"] == 1
+    assert axis_summary["included_action_count"] == 1
+    assert axis_summary["omitted_action_count"] == 0
+    action = axis_summary["actions"][0]
+    assert action["code"] == "inspect_duplicate_timestamp_rows"
+    assert action["occurrence_count"] == 3
+    assert action["affected_target_count"] == 2
+    assert action["target_axis_count"] == 2
+    assert action["included_target_axis_count"] == 1
+    assert action["omitted_target_axis_count"] == 1
+    assert action["target_axis_truncated"] is True
+    assert action["target_axis_counts"][0]["target_axis"]["symbol"] == "EURUSD"
+    assert action["target_axis_counts"][0]["count"] == 2
+
+
 def test_fingerprint_console_summary_reports_coverage_counts(
     tmp_path: Path,
 ) -> None:
@@ -447,6 +535,29 @@ def test_fingerprint_console_summary_reports_topology_lines(
         "computed_from=unavailable"
     ) in output
     assert "cache=unknown" not in output
+
+
+def test_quality_console_summary_renders_next_actions(
+    tmp_path: Path,
+) -> None:
+    """Human quality output should list run-level next actions."""
+    output = format_quality_console_summary(
+        _next_action_report(tmp_path),
+        check_groups=("fingerprint", "time"),
+    )
+
+    assert "Next actions" in output
+    assert "- actions: 2 included: 2 omitted: 0" in output
+    assert (
+        "- high rebuild: rebuild or choose a readable fingerprint source "
+        "(verify_fingerprint_source, rule=fingerprint.series, targets=1, "
+        "attention=unavailable)"
+    ) in output
+    assert (
+        "- medium inspect: inspect duplicate timestamp rows "
+        "(inspect_duplicate_timestamp_rows, rule=time.ascii.sequence, "
+        "targets=1, severity=warning)"
+    ) in output
 
 
 def test_fingerprint_console_summary_reports_skipped_targets(
@@ -558,6 +669,59 @@ def test_bounded_quality_payload_includes_fingerprint_topology_attention(
             "flag": "unavailable_topology",
         }
     ]
+
+
+def test_bounded_quality_payload_includes_next_actions(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration payloads should expose next-action metadata."""
+    report = _next_action_report(tmp_path)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("fingerprint", "time"),
+        discovery={"roots": [str(tmp_path)], "target_count": 3},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+
+    assert "rule_results" not in payload
+    assert payload["next_actions"]["action_count"] == 2
+    assert payload["payload_limits"]["next_actions"] == {
+        "limit": 16,
+        "total_count": 2,
+        "included_count": 2,
+        "omitted_count": 0,
+        "truncated": False,
+    }
+
+    prebounded_actions = quality_next_actions_summary(report, action_limit=1)
+    assert prebounded_actions is not None
+    metadata_report = QualityReport(
+        targets=report.targets,
+        rule_results=report.rule_results,
+        metadata={QUALITY_NEXT_ACTIONS_METADATA_KEY: prebounded_actions},
+    )
+
+    prebounded_payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("fingerprint", "time"),
+        discovery={"roots": [str(tmp_path)], "target_count": 3},
+        report=metadata_report,
+        decision=QualityExitPolicy.from_values().evaluate(
+            metadata_report.summary()
+        ),
+        artifact=None,
+    )
+
+    assert len(prebounded_payload["next_actions"]["actions"]) == 1
+    assert prebounded_payload["payload_limits"]["next_actions"] == {
+        "limit": 16,
+        "total_count": 2,
+        "included_count": 1,
+        "omitted_count": 1,
+        "truncated": True,
+    }
 
 
 def test_quality_exit_policy_applies_error_warning_and_never_modes(
@@ -738,6 +902,68 @@ def _fingerprint_report(tmp_path: Path) -> QualityReport:
                 rule_id=SERIES_FINGERPRINT_RULE_ID,
                 target=unavailable,
                 findings=(unavailable_finding,),
+            ),
+        ),
+    )
+
+
+def _next_action_report(tmp_path: Path) -> QualityReport:
+    base_report = _fingerprint_report(tmp_path)
+    duplicate = _target(tmp_path / "duplicate.csv")
+    duplicate_finding = QualityFinding(
+        severity=QualitySeverity.WARNING,
+        code="ASCII_M1_DUPLICATE_TIMESTAMP",
+        message="M1 file contains duplicate normalized timestamps.",
+        rule_id="time.ascii.sequence",
+        target=duplicate,
+        location=QualityLocation(path=duplicate.path),
+    )
+    return QualityReport(
+        targets=(*base_report.targets, duplicate),
+        rule_results=(
+            *base_report.rule_results,
+            QualityRuleResult(
+                rule_id="time.ascii.sequence",
+                target=duplicate,
+                findings=(duplicate_finding,),
+            ),
+        ),
+    )
+
+
+def _many_duplicate_next_action_report(tmp_path: Path) -> QualityReport:
+    first = _target(tmp_path / "first.csv")
+    second = QualityTarget(
+        path=str(tmp_path / "second.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="GBPUSD",
+        period="201202",
+    )
+
+    def finding(target: QualityTarget) -> QualityFinding:
+        return QualityFinding(
+            severity=QualitySeverity.WARNING,
+            code="ASCII_M1_DUPLICATE_TIMESTAMP",
+            message="M1 file contains duplicate normalized timestamps.",
+            rule_id="time.ascii.sequence",
+            target=target,
+            location=QualityLocation(path=target.path),
+        )
+
+    return QualityReport(
+        targets=(first, second),
+        rule_results=(
+            QualityRuleResult(
+                rule_id="time.ascii.sequence",
+                target=first,
+                findings=(finding(first), finding(first)),
+            ),
+            QualityRuleResult(
+                rule_id="time.ascii.sequence",
+                target=second,
+                findings=(finding(second),),
             ),
         ),
     )

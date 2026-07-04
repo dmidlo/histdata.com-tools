@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import hashlib
 import json
@@ -25,6 +26,9 @@ from histdatacom.data_quality.fingerprints import (
     series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
+from histdatacom.data_quality.remediation import (
+    remediation_hint_payloads_for_finding,
+)
 from histdatacom.publication_safety import (
     publish_safe_json_mapping,
     publish_safe_path,
@@ -32,9 +36,47 @@ from histdatacom.publication_safety import (
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 
 QUALITY_REPORT_SCHEMA_VERSION = "histdatacom.quality-report.v1"
+QUALITY_NEXT_ACTIONS_SCHEMA_VERSION = "histdatacom.quality-next-actions.v1"
+QUALITY_NEXT_ACTIONS_METADATA_KEY = "quality_next_actions"
 QUALITY_PAYLOAD_DISCOVERY_TARGET_LIMIT = 128
 QUALITY_PAYLOAD_TARGET_SUMMARY_LIMIT = 128
 QUALITY_PAYLOAD_CROSS_TARGET_SUMMARY_LIMIT = 128
+QUALITY_PAYLOAD_NEXT_ACTION_LIMIT = 16
+QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT = 8
+
+_NEXT_ACTION_SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
+_NEXT_ACTION_ATTENTION_RANK = {
+    "session": 1,
+    "sequence": 2,
+    "unavailable": 3,
+    "structural": 3,
+}
+_NEXT_ACTION_KIND_RANK = {
+    "verify": 1,
+    "configure": 2,
+    "inspect": 2,
+    "rebuild": 3,
+    "repair": 3,
+}
+_NEXT_ACTION_URGENCY_SORT = {"high": 0, "medium": 1, "low": 2}
+_TARGET_AXIS_FIELDS = ("data_format", "timeframe", "symbol", "period", "kind")
+
+
+@dataclass(slots=True)
+class _NextActionAggregate:
+    code: str
+    message: str
+    action_kind: str
+    rule_id: str
+    occurrence_count: int = 0
+    severity_counts: Counter[str] = field(default_factory=Counter)
+    attention_level_counts: Counter[str] = field(default_factory=Counter)
+    source_counts: Counter[str] = field(default_factory=Counter)
+    finding_code_counts: Counter[str] = field(default_factory=Counter)
+    flag_counts: Counter[str] = field(default_factory=Counter)
+    target_axis_counts: Counter[tuple[str, str, str, str, str]] = field(
+        default_factory=Counter
+    )
 
 
 class QualityExitTrigger(str, Enum):
@@ -192,6 +234,11 @@ def quality_report_payload(
             fingerprint_topology_attention
         )
         payload["metadata"] = metadata
+    next_actions = quality_next_actions_summary(report)
+    if next_actions is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[QUALITY_NEXT_ACTIONS_METADATA_KEY] = next_actions
+        payload["metadata"] = metadata
     payload["schema_version"] = QUALITY_REPORT_SCHEMA_VERSION
     if not publish_safe:
         return payload
@@ -278,6 +325,9 @@ def format_quality_console_summary(
         lines.append(f"report: {report_path}")
     if summary.target_count == 0:
         lines.append("No data quality targets discovered.")
+    lines.extend(
+        format_quality_next_action_lines(quality_next_actions_summary(report))
+    )
     if _fingerprint_group_selected(check_groups):
         lines.extend(
             _format_fingerprint_coverage_lines(
@@ -335,6 +385,7 @@ def bounded_quality_payload(
     fingerprint_topology_attention = _fingerprint_topology_attention_summary(
         report
     )
+    next_actions = quality_next_actions_summary(report)
     payload: dict[str, JSONValue] = {
         "operation": operation,
         "check_groups": list(check_groups),
@@ -369,6 +420,7 @@ def bounded_quality_payload(
                 len(cross_target_summaries),
                 cross_target_summary_limit,
             ),
+            "next_actions": _next_action_payload_limit_metadata(next_actions),
         },
     }
     if fingerprint_coverage is not None:
@@ -379,6 +431,8 @@ def bounded_quality_payload(
         payload["fingerprint_topology_attention"] = (
             fingerprint_topology_attention
         )
+    if next_actions is not None:
+        payload["next_actions"] = next_actions
     if not publish_safe:
         return payload
     return _publish_safe_mapping(payload)
@@ -459,6 +513,26 @@ def _payload_limit_metadata(
     }
 
 
+def _next_action_payload_limit_metadata(
+    summary: Mapping[str, JSONValue] | None,
+) -> dict[str, JSONValue]:
+    if summary is None:
+        return _payload_limit_metadata(0, QUALITY_PAYLOAD_NEXT_ACTION_LIMIT)
+    total_count = _int_metadata(summary, "action_count")
+    included_count = _int_metadata(summary, "included_action_count")
+    omitted_count = _int_metadata(summary, "omitted_action_count")
+    truncated = summary.get("truncated")
+    return {
+        "limit": QUALITY_PAYLOAD_NEXT_ACTION_LIMIT,
+        "total_count": total_count,
+        "included_count": included_count,
+        "omitted_count": omitted_count,
+        "truncated": (
+            truncated if isinstance(truncated, bool) else omitted_count > 0
+        ),
+    }
+
+
 def _sequence_count(value: object) -> int:
     return len(value) if isinstance(value, list) else 0
 
@@ -524,6 +598,360 @@ def _quality_profile_metadata(report: QualityReport) -> dict[str, JSONValue]:
     return {}
 
 
+def quality_next_actions_summary(
+    report: QualityReport,
+    *,
+    action_limit: int = QUALITY_PAYLOAD_NEXT_ACTION_LIMIT,
+    target_axis_limit: int = QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT,
+) -> dict[str, JSONValue] | None:
+    """Return bounded run-level next actions from remediation hints."""
+    summary = report.metadata.get(QUALITY_NEXT_ACTIONS_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+
+    aggregates = _next_action_aggregates(report)
+    if not aggregates:
+        return None
+
+    actions = sorted(
+        (
+            _next_action_payload(
+                aggregate,
+                target_axis_limit=target_axis_limit,
+            )
+            for aggregate in aggregates.values()
+        ),
+        key=_next_action_sort_key,
+    )
+    included = actions if action_limit < 0 else actions[:action_limit]
+    included_actions: list[JSONValue] = [action for action in included]
+    omitted_count = max(0, len(actions) - len(included))
+    source_counts: Counter[str] = Counter()
+    for aggregate in aggregates.values():
+        source_counts.update(aggregate.source_counts)
+    return {
+        "schema_version": QUALITY_NEXT_ACTIONS_SCHEMA_VERSION,
+        "action_count": len(actions),
+        "included_action_count": len(included),
+        "omitted_action_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "source_counts": _counter_payload(source_counts),
+        "actions": included_actions,
+    }
+
+
+def format_quality_next_action_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable lines for quality next actions."""
+    if not summary:
+        return []
+    actions = summary.get("actions")
+    if not isinstance(actions, list) or not actions:
+        return []
+    lines = [
+        "",
+        "Next actions",
+        (
+            "- actions: "
+            f"{_int_metadata(summary, 'action_count')} "
+            f"included: {_int_metadata(summary, 'included_action_count')} "
+            f"omitted: {_int_metadata(summary, 'omitted_action_count')}"
+        ),
+    ]
+    for item in actions:
+        if isinstance(item, Mapping):
+            lines.append(f"- {_format_quality_next_action_line(item)}")
+    return lines
+
+
+def _next_action_aggregates(
+    report: QualityReport,
+) -> dict[tuple[str, str, str], _NextActionAggregate]:
+    aggregates: dict[tuple[str, str, str], _NextActionAggregate] = {}
+    _collect_fingerprint_topology_next_actions(report, aggregates)
+    _collect_finding_next_actions(report, aggregates)
+    return aggregates
+
+
+def _collect_fingerprint_topology_next_actions(
+    report: QualityReport,
+    aggregates: dict[tuple[str, str, str], _NextActionAggregate],
+) -> None:
+    summary = _fingerprint_topology_attention_summary(report)
+    if not summary:
+        return
+    target_summaries = summary.get("target_summaries")
+    if not isinstance(target_summaries, list):
+        return
+    for target_summary in target_summaries:
+        if not isinstance(target_summary, Mapping):
+            continue
+        target_axis = _mapping_payload(target_summary.get("target_axis"))
+        attention_level = _optional_string_metadata(
+            target_summary,
+            "attention_level",
+        )
+        hints = target_summary.get("remediation_hints")
+        if not isinstance(hints, list):
+            continue
+        for hint in hints:
+            if isinstance(hint, Mapping):
+                _add_next_action_hint(
+                    aggregates,
+                    hint,
+                    source="fingerprint_topology_attention",
+                    target_axis=target_axis,
+                    attention_level=attention_level,
+                )
+
+
+def _collect_finding_next_actions(
+    report: QualityReport,
+    aggregates: dict[tuple[str, str, str], _NextActionAggregate],
+) -> None:
+    for finding in report.findings:
+        for hint in remediation_hint_payloads_for_finding(finding):
+            if not isinstance(hint, Mapping):
+                continue
+            _add_next_action_hint(
+                aggregates,
+                hint,
+                source="quality_finding",
+                target_axis=_target_axis_from_finding(finding),
+                severity=finding.severity.value,
+                fallback_rule_id=finding.rule_id,
+                fallback_finding_code=finding.code,
+            )
+
+
+def _add_next_action_hint(
+    aggregates: dict[tuple[str, str, str], _NextActionAggregate],
+    hint: Mapping[str, JSONValue],
+    *,
+    source: str,
+    target_axis: Mapping[str, JSONValue],
+    severity: str = "",
+    attention_level: str = "",
+    fallback_rule_id: str = "",
+    fallback_finding_code: str = "",
+) -> None:
+    code = _optional_string_metadata(hint, "code")
+    message = _optional_string_metadata(hint, "message")
+    if not code or not message:
+        return
+    action_kind = _optional_string_metadata(hint, "action_kind") or "inspect"
+    rule_id = _optional_string_metadata(hint, "rule_id") or fallback_rule_id
+    rule_id = rule_id or "unknown"
+    aggregate = aggregates.setdefault(
+        (code, action_kind, rule_id),
+        _NextActionAggregate(
+            code=code,
+            message=message,
+            action_kind=action_kind,
+            rule_id=rule_id,
+        ),
+    )
+    aggregate.occurrence_count += 1
+    aggregate.source_counts[source] += 1
+    aggregate.target_axis_counts[_target_axis_key(target_axis)] += 1
+    if severity:
+        aggregate.severity_counts[severity] += 1
+    if attention_level:
+        aggregate.attention_level_counts[attention_level] += 1
+    finding_code = (
+        _optional_string_metadata(hint, "finding_code") or fallback_finding_code
+    )
+    if finding_code:
+        aggregate.finding_code_counts[finding_code] += 1
+    flag = _optional_string_metadata(hint, "flag")
+    if flag:
+        aggregate.flag_counts[flag] += 1
+
+
+def _next_action_payload(
+    aggregate: _NextActionAggregate,
+    *,
+    target_axis_limit: int,
+) -> dict[str, JSONValue]:
+    target_axis_counts = _target_axis_count_payloads(
+        aggregate.target_axis_counts,
+        limit=target_axis_limit,
+    )
+    target_axis_count = len(aggregate.target_axis_counts)
+    included_target_axis_count = len(target_axis_counts)
+    omitted_target_axis_count = max(
+        0,
+        target_axis_count - included_target_axis_count,
+    )
+    max_severity = _ranked_counter_max(
+        aggregate.severity_counts,
+        _NEXT_ACTION_SEVERITY_RANK,
+    )
+    max_attention_level = _ranked_counter_max(
+        aggregate.attention_level_counts,
+        _NEXT_ACTION_ATTENTION_RANK,
+    )
+    return {
+        "code": aggregate.code,
+        "message": aggregate.message,
+        "action_kind": aggregate.action_kind,
+        "rule_id": aggregate.rule_id,
+        "urgency": _next_action_urgency(
+            aggregate.action_kind,
+            max_severity=max_severity,
+            max_attention_level=max_attention_level,
+        ),
+        "max_severity": max_severity,
+        "max_attention_level": max_attention_level,
+        "occurrence_count": aggregate.occurrence_count,
+        "affected_target_count": target_axis_count,
+        "target_axis_count": target_axis_count,
+        "included_target_axis_count": included_target_axis_count,
+        "omitted_target_axis_count": omitted_target_axis_count,
+        "target_axis_truncated": omitted_target_axis_count > 0,
+        "severity_counts": _counter_payload(aggregate.severity_counts),
+        "attention_level_counts": _counter_payload(
+            aggregate.attention_level_counts
+        ),
+        "source_counts": _counter_payload(aggregate.source_counts),
+        "finding_code_counts": _counter_payload(aggregate.finding_code_counts),
+        "flag_counts": _counter_payload(aggregate.flag_counts),
+        "target_axis_counts": target_axis_counts,
+    }
+
+
+def _next_action_sort_key(
+    action: Mapping[str, JSONValue],
+) -> tuple[int, int, int, int, str, str, str]:
+    urgency = _optional_string_metadata(action, "urgency")
+    max_severity = _optional_string_metadata(action, "max_severity")
+    max_attention_level = _optional_string_metadata(
+        action,
+        "max_attention_level",
+    )
+    return (
+        _NEXT_ACTION_URGENCY_SORT.get(urgency, 99),
+        -_NEXT_ACTION_SEVERITY_RANK.get(max_severity, 0),
+        -_NEXT_ACTION_ATTENTION_RANK.get(max_attention_level, 0),
+        -_int_metadata(action, "affected_target_count"),
+        _optional_string_metadata(action, "code"),
+        _optional_string_metadata(action, "action_kind"),
+        _optional_string_metadata(action, "rule_id"),
+    )
+
+
+def _next_action_urgency(
+    action_kind: str,
+    *,
+    max_severity: str | None,
+    max_attention_level: str | None,
+) -> str:
+    rank = max(
+        _NEXT_ACTION_KIND_RANK.get(action_kind, 0),
+        _NEXT_ACTION_SEVERITY_RANK.get(max_severity or "", 0),
+        _NEXT_ACTION_ATTENTION_RANK.get(max_attention_level or "", 0),
+    )
+    if rank >= 3:
+        return "high"
+    if rank >= 2:
+        return "medium"
+    return "low"
+
+
+def _ranked_counter_max(
+    counter: Counter[str],
+    ranks: Mapping[str, int],
+) -> str | None:
+    if not counter:
+        return None
+    return sorted(
+        counter,
+        key=lambda key: (-ranks.get(key, 0), key),
+    )[0]
+
+
+def _target_axis_count_payloads(
+    counter: Counter[tuple[str, str, str, str, str]],
+    *,
+    limit: int,
+) -> list[JSONValue]:
+    ordered = sorted(
+        counter.items(),
+        key=lambda item: (-item[1], item[0]),
+    )
+    included = ordered if limit < 0 else ordered[:limit]
+    return [
+        {
+            "target_axis": _target_axis_payload_from_key(axis),
+            "count": count,
+        }
+        for axis, count in included
+    ]
+
+
+def _target_axis_from_finding(finding: QualityFinding) -> dict[str, JSONValue]:
+    target = finding.target
+    return {
+        "data_format": target.data_format,
+        "timeframe": target.timeframe,
+        "symbol": target.symbol,
+        "period": target.period,
+        "kind": target.kind.value,
+    }
+
+
+def _target_axis_key(
+    target_axis: Mapping[str, JSONValue],
+) -> tuple[str, str, str, str, str]:
+    return (
+        _target_axis_value(target_axis.get("data_format")),
+        _target_axis_value(target_axis.get("timeframe")),
+        _target_axis_value(target_axis.get("symbol")),
+        _target_axis_value(target_axis.get("period")),
+        _target_axis_value(target_axis.get("kind")),
+    )
+
+
+def _target_axis_value(value: JSONValue) -> str:
+    if isinstance(value, bool) or value is None:
+        return "unknown"
+    text = str(value).strip()
+    return text or "unknown"
+
+
+def _target_axis_payload_from_key(
+    key: tuple[str, str, str, str, str],
+) -> dict[str, JSONValue]:
+    return dict(zip(_TARGET_AXIS_FIELDS, key, strict=True))
+
+
+def _counter_payload(counter: Counter[str]) -> dict[str, JSONValue]:
+    return {key: count for key, count in sorted(counter.items()) if count > 0}
+
+
+def _format_quality_next_action_line(
+    action: Mapping[str, JSONValue],
+) -> str:
+    severity = _optional_string_metadata(action, "max_severity")
+    attention = _optional_string_metadata(action, "max_attention_level")
+    qualifiers = []
+    if severity:
+        qualifiers.append(f"severity={severity}")
+    if attention:
+        qualifiers.append(f"attention={attention}")
+    qualifier_text = f", {', '.join(qualifiers)}" if qualifiers else ""
+    return (
+        f"{_optional_string_metadata(action, 'urgency')} "
+        f"{_optional_string_metadata(action, 'action_kind')}: "
+        f"{_optional_string_metadata(action, 'message')} "
+        f"({_optional_string_metadata(action, 'code')}, "
+        f"rule={_optional_string_metadata(action, 'rule_id')}, "
+        f"targets={_int_metadata(action, 'affected_target_count')}"
+        f"{qualifier_text})"
+    )
+
+
 def _fingerprint_coverage_summary(
     report: QualityReport,
 ) -> dict[str, JSONValue] | None:
@@ -531,7 +959,9 @@ def _fingerprint_coverage_summary(
     summary = report.metadata.get(TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY)
     if isinstance(summary, Mapping):
         return dict(summary)
-    return series_fingerprint_coverage_summary(report.findings)
+    return _optional_mapping_payload(
+        series_fingerprint_coverage_summary(report.findings)
+    )
 
 
 def _fingerprint_topology_summary(
@@ -543,7 +973,9 @@ def _fingerprint_topology_summary(
     )
     if isinstance(summary, Mapping):
         return dict(summary)
-    return series_fingerprint_topology_summary(report.findings)
+    return _optional_mapping_payload(
+        series_fingerprint_topology_summary(report.findings)
+    )
 
 
 def _fingerprint_topology_attention_summary(
@@ -555,7 +987,9 @@ def _fingerprint_topology_attention_summary(
     )
     if isinstance(summary, Mapping):
         return dict(summary)
-    return series_fingerprint_topology_attention_summary(report.findings)
+    return _optional_mapping_payload(
+        series_fingerprint_topology_attention_summary(report.findings)
+    )
 
 
 def _fingerprint_group_selected(check_groups: tuple[str, ...]) -> bool:
@@ -837,6 +1271,12 @@ def _mapping_payload(value: JSONValue) -> dict[str, JSONValue]:
     if isinstance(value, Mapping):
         return dict(value)
     return {}
+
+
+def _optional_mapping_payload(value: JSONValue) -> dict[str, JSONValue] | None:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return None
 
 
 def _finding_symbol_targets(

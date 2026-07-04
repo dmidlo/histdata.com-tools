@@ -130,6 +130,7 @@ def _orchestration_quality_result(
     report_path: str = "/tmp/quality.json",
     error: str = "",
     check_groups: list[str] | None = None,
+    next_actions: dict[str, object] | None = None,
     fingerprint_topology: dict[str, object] | None = None,
     fingerprint_topology_attention: dict[str, object] | None = None,
 ) -> JobResult:
@@ -201,6 +202,8 @@ def _orchestration_quality_result(
             },
         },
     }
+    if next_actions is not None:
+        quality["next_actions"] = next_actions
     if fingerprint_topology is not None:
         quality["fingerprint_topology"] = fingerprint_topology
     if fingerprint_topology_attention is not None:
@@ -875,6 +878,48 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
     def fake_submit(request, **kwargs: object) -> JobResult:
         return _orchestration_quality_result(
             check_groups=["fingerprint"],
+            next_actions={
+                "schema_version": "histdatacom.quality-next-actions.v1",
+                "action_count": 1,
+                "included_action_count": 1,
+                "omitted_action_count": 0,
+                "truncated": False,
+                "source_counts": {"fingerprint_topology_attention": 1},
+                "actions": [
+                    {
+                        "code": "inspect_duplicate_timestamp_rows",
+                        "message": "inspect duplicate timestamp rows",
+                        "action_kind": "inspect",
+                        "rule_id": "fingerprint.series",
+                        "urgency": "medium",
+                        "max_severity": None,
+                        "max_attention_level": "sequence",
+                        "occurrence_count": 1,
+                        "affected_target_count": 1,
+                        "target_axis_count": 1,
+                        "included_target_axis_count": 1,
+                        "omitted_target_axis_count": 0,
+                        "target_axis_truncated": False,
+                        "severity_counts": {},
+                        "attention_level_counts": {"sequence": 1},
+                        "source_counts": {"fingerprint_topology_attention": 1},
+                        "finding_code_counts": {},
+                        "flag_counts": {"duplicate_timestamps": 1},
+                        "target_axis_counts": [
+                            {
+                                "target_axis": {
+                                    "data_format": "ascii",
+                                    "timeframe": "M1",
+                                    "symbol": "EURUSD",
+                                    "period": "201202",
+                                    "kind": "csv",
+                                },
+                                "count": 1,
+                            }
+                        ],
+                    }
+                ],
+            },
             fingerprint_topology={
                 "target_count": 1,
                 "included_target_count": 1,
@@ -968,6 +1013,12 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
     assert histdata_com.main() is None
 
     output = capsys.readouterr().out
+    assert "Next actions" in output
+    assert (
+        "- medium inspect: inspect duplicate timestamp rows "
+        "(inspect_duplicate_timestamp_rows, rule=fingerprint.series, "
+        "targets=1, attention=sequence)"
+    ) in output
     assert "Fingerprint topology attention" in output
     assert "- targets needing attention: 1 included: 1 omitted: 0" in output
     assert (
