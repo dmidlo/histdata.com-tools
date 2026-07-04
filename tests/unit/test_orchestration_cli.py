@@ -496,10 +496,17 @@ def test_histdatacom_main_reexecs_windows_runtime_launcher(
         captured["command"] = tuple(command)
         captured["env"] = dict(kwargs["env"])
         captured["check"] = kwargs["check"]
+        captured["creationflags"] = kwargs["creationflags"]
         return histdata_com.subprocess.CompletedProcess(command, 17)
 
     monkeypatch.setattr(histdata_com.os, "name", "nt")
     monkeypatch.setattr(histdata_com.sys, "executable", str(launcher))
+    monkeypatch.setattr(
+        histdata_com.subprocess,
+        "CREATE_NEW_PROCESS_GROUP",
+        512,
+        raising=False,
+    )
     monkeypatch.delenv(histdata_com.WINDOWS_RUNTIME_REEXEC_ENV, raising=False)
     monkeypatch.setattr(histdata_com.subprocess, "run", fake_run)
     monkeypatch.setattr(orchestration_cli, "main", fake_runtime_main)
@@ -528,6 +535,7 @@ def test_histdatacom_main_reexecs_windows_runtime_launcher(
         "--json",
     )
     assert captured["check"] is False
+    assert captured["creationflags"] == 512
     env = captured["env"]
     assert isinstance(env, dict)
     assert env[histdata_com.WINDOWS_RUNTIME_REEXEC_ENV] == "1"
@@ -553,10 +561,17 @@ def test_histdatacom_main_reexecs_windows_runtime_launcher_python_child(
     def fake_run(command: list[str], **kwargs: object):
         captured["command"] = tuple(command)
         captured["env"] = dict(kwargs["env"])
+        captured["creationflags"] = kwargs["creationflags"]
         return histdata_com.subprocess.CompletedProcess(command, 23)
 
     monkeypatch.setattr(histdata_com.os, "name", "nt")
     monkeypatch.setattr(histdata_com.sys, "executable", str(python))
+    monkeypatch.setattr(
+        histdata_com.subprocess,
+        "CREATE_NEW_PROCESS_GROUP",
+        512,
+        raising=False,
+    )
     monkeypatch.delenv(histdata_com.WINDOWS_RUNTIME_REEXEC_ENV, raising=False)
     monkeypatch.setattr(histdata_com.subprocess, "run", fake_run)
     monkeypatch.setattr(orchestration_cli, "main", fake_runtime_main)
@@ -583,6 +598,7 @@ def test_histdatacom_main_reexecs_windows_runtime_launcher_python_child(
     env = captured["env"]
     assert isinstance(env, dict)
     assert env[histdata_com.WINDOWS_RUNTIME_REEXEC_ENV] == "1"
+    assert captured["creationflags"] == 512
 
 
 def test_histdatacom_main_skips_windows_runtime_reexec_under_python(

@@ -252,9 +252,23 @@ def _worker_launch_attempts() -> int:
 
 def _worker_launch_retry_delay_seconds(returncode: int | None) -> float:
     """Return the retry delay for transient native worker startup exits."""
-    if os.name != "nt" or returncode != WINDOWS_NATIVE_WORKER_STARTUP_EXIT_CODE:
+    if os.name != "nt":
+        return 0.0
+    if (
+        _unsigned_windows_returncode(returncode)
+        != WINDOWS_NATIVE_WORKER_STARTUP_EXIT_CODE
+    ):
         return 0.0
     return DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_DELAY_SECONDS
+
+
+def _unsigned_windows_returncode(returncode: int | None) -> int | None:
+    """Return a Windows process return code as an unsigned DWORD."""
+    if returncode is None:
+        return None
+    if returncode < 0:
+        return returncode + (1 << 32)
+    return returncode
 
 
 def _namespace_already_exists(
@@ -1154,6 +1168,7 @@ class OrchestrationSupervisor:
         attempts = _worker_launch_attempts()
         attempt = 0
         last_error: RuntimeError | None = None
+        attempt_diagnostics: list[dict[str, int | str | None]] = []
 
         while attempt < attempts:
             attempt += 1
@@ -1166,14 +1181,22 @@ class OrchestrationSupervisor:
             pids[component] = pid
             processes[component] = worker_process
             if not self._process_running(worker_process):
+                attempt_diagnostics.append(
+                    self._worker_launch_attempt_diagnostic(
+                        attempt,
+                        pid,
+                        worker_process,
+                    )
+                )
                 last_error = RuntimeError(
-                    self._worker_exit_message(
+                    self._worker_exit_message_with_attempts(
                         lane,
                         pid,
                         worker_process,
                         worker_command,
                         log_path,
                         phase="startup",
+                        attempts=attempt_diagnostics,
                     )
                 )
                 retry_delay = self._worker_launch_retry_delay(
@@ -1199,7 +1222,17 @@ class OrchestrationSupervisor:
                     log_path,
                 )
             except RuntimeError as err:
-                last_error = err
+                attempt_diagnostics.append(
+                    self._worker_launch_attempt_diagnostic(
+                        attempt,
+                        pid,
+                        worker_process,
+                    )
+                )
+                last_error = RuntimeError(
+                    f"{err} "
+                    f"{self._worker_launch_attempts_suffix(attempt_diagnostics)}"
+                )
                 retry_delay = self._worker_launch_retry_delay(
                     worker_process,
                     deadline,
@@ -1240,6 +1273,24 @@ class OrchestrationSupervisor:
         if time.monotonic() + delay >= deadline:
             return 0.0
         return delay
+
+    def _worker_launch_attempt_diagnostic(
+        self,
+        attempt: int,
+        pid: int,
+        worker_process: Any,
+    ) -> dict[str, int | str | None]:
+        """Return compact diagnostics for one failed worker launch attempt."""
+        returncode = self._process_returncode(worker_process)
+        normalized = _unsigned_windows_returncode(returncode)
+        return {
+            "attempt": attempt,
+            "pid": pid,
+            "returncode": returncode,
+            "returncode_hex": (
+                f"0x{normalized:08X}" if normalized is not None else None
+            ),
+        }
 
     def _client_worker_config_from_running_state(
         self,
@@ -1634,6 +1685,41 @@ class OrchestrationSupervisor:
             f"Temporal worker lane {lane.value!r} exited {timing} "
             f"(pid {pid}, {exit_detail}). Command: {shlex.join(command)}. "
             f"See log: {log_path}"
+        )
+
+    def _worker_exit_message_with_attempts(
+        self,
+        lane: TaskQueueLane,
+        pid: int,
+        worker_process: Any,
+        command: Sequence[str],
+        log_path: Path,
+        *,
+        phase: str,
+        attempts: Sequence[Mapping[str, int | str | None]],
+    ) -> str:
+        """Return a worker exit diagnostic with launch attempt metadata."""
+        return (
+            self._worker_exit_message(
+                lane,
+                pid,
+                worker_process,
+                command,
+                log_path,
+                phase=phase,
+            )
+            + " "
+            + self._worker_launch_attempts_suffix(attempts)
+        )
+
+    def _worker_launch_attempts_suffix(
+        self,
+        attempts: Sequence[Mapping[str, int | str | None]],
+    ) -> str:
+        """Return a JSON launch-attempt diagnostic suffix."""
+        return (
+            "Worker launch attempts: "
+            f"{json.dumps(list(attempts), sort_keys=True)}."
         )
 
     def _required_components(self) -> tuple[str, ...]:

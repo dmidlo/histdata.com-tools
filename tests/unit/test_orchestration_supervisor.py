@@ -47,15 +47,25 @@ class _FakeProcess:
 class _LateCrashingProcess(_FakeProcess):
     """Fake process that survives the launch check and then exits."""
 
-    def __init__(self, pid: int, *, live_polls: int = 1) -> None:
+    def __init__(
+        self,
+        pid: int,
+        *,
+        live_polls: int = 1,
+        crash_returncode: int = 1,
+    ) -> None:
         super().__init__(pid)
         self.live_polls = live_polls
+        self.crash_returncode = crash_returncode
         self.polls = 0
 
     def poll(self) -> int | None:
         """Return running for a bounded number of polls, then exited."""
         self.polls += 1
-        return None if self.polls <= self.live_polls else 1
+        if self.polls <= self.live_polls:
+            return None
+        self.returncode = self.crash_returncode
+        return self.returncode
 
 
 def _executable(tmp_path: Path) -> Path:
@@ -903,6 +913,100 @@ def test_start_retries_windows_native_worker_startup_exit(
     ]
     assert state["pids"] == {"server": 2300, "worker:network": 2302}
     assert state["worker_readiness"]["network"]["pid"] == 2302
+
+
+def test_start_retries_delayed_windows_native_worker_startup_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Native exits observed while waiting for readiness should be retried."""
+    executable = _executable(tmp_path)
+    policy = _policy(tmp_path)
+    events: list[tuple[str, str]] = []
+    live_pids: set[int] = set()
+    next_pid = iter(range(2400, 2404))
+    worker_attempts = 0
+
+    def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
+        nonlocal worker_attempts
+        pid = next(next_pid)
+        if "histdatacom.orchestration.worker" not in command:
+            live_pids.add(pid)
+            events.append(("process", "server"))
+            return _FakeProcess(pid)
+
+        worker_attempts += 1
+        lane = command[command.index("--lane") + 1]
+        events.append(("process", f"worker:{lane}:{worker_attempts}"))
+        if worker_attempts == 1:
+            return _LateCrashingProcess(
+                pid,
+                live_polls=1,
+                crash_returncode=(
+                    supervisor_module.WINDOWS_NATIVE_WORKER_STARTUP_EXIT_CODE
+                ),
+            )
+
+        live_pids.add(pid)
+        _write_ready_marker_from_command(command, pid)
+        return _FakeProcess(pid)
+
+    def sleep(seconds: float) -> None:
+        events.append(("sleep", str(seconds)))
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "_worker_launch_settle_seconds",
+        lambda: 0.0,
+    )
+    monkeypatch.setattr(supervisor_module, "_worker_launch_attempts", lambda: 3)
+    monkeypatch.setattr(
+        supervisor_module,
+        "_worker_launch_retry_delay_seconds",
+        lambda returncode: (
+            supervisor_module.DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_DELAY_SECONDS
+            if supervisor_module._unsigned_windows_returncode(returncode)
+            == supervisor_module.WINDOWS_NATIVE_WORKER_STARTUP_EXIT_CODE
+            else 0.0
+        ),
+    )
+    supervisor = _supervisor(
+        runtime_policy=policy,
+        process_exists=lambda pid: pid in live_pids,
+        process_factory=process_factory,
+        sleep=sleep,
+        worker_lanes=(TaskQueueLane.NETWORK,),
+    )
+
+    status = supervisor.start(executable=executable)
+    state = json.loads(policy.paths.pid_file.read_text(encoding="utf-8"))
+
+    assert status.state == "running"
+    assert ("process", "worker:network:1") in events
+    assert (
+        "sleep",
+        str(
+            supervisor_module.DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_DELAY_SECONDS
+        ),
+    ) in events
+    assert ("process", "worker:network:2") in events
+    assert state["pids"] == {"server": 2400, "worker:network": 2402}
+    assert state["worker_readiness"]["network"]["pid"] == 2402
+
+
+def test_worker_launch_retry_delay_accepts_signed_windows_native_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows native exit codes may be observed as signed process codes."""
+    monkeypatch.setattr(supervisor_module.os, "name", "nt")
+    signed_returncode = (
+        supervisor_module.WINDOWS_NATIVE_WORKER_STARTUP_EXIT_CODE - (1 << 32)
+    )
+
+    assert (
+        supervisor_module._worker_launch_retry_delay_seconds(signed_returncode)
+        == supervisor_module.DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_DELAY_SECONDS
+    )
 
 
 def test_start_repairs_stale_pid_and_lock_files(tmp_path: Path) -> None:

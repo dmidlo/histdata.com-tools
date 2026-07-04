@@ -752,8 +752,16 @@ def _maybe_reexec_windows_runtime_cli(
         [python, "-m", "histdatacom", *cli_args],
         check=False,
         env=env,
+        creationflags=_windows_runtime_reexec_creationflags(),
     )
     return int(completed.returncode)
+
+
+def _windows_runtime_reexec_creationflags() -> int:
+    """Return Windows process-group flags for the runtime CLI trampoline."""
+    if os.name != "nt":
+        return 0
+    return int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
 
 
 def _windows_runtime_reexec_python() -> str | None:
