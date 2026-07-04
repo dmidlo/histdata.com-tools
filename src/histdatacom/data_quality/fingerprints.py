@@ -89,6 +89,32 @@ ACTIONABLE_TOPOLOGY_FLAGS = (
     "suspicious_gaps",
     "weekend_activity",
 )
+TOPOLOGY_REMEDIATION_HINTS: Mapping[str, Mapping[str, str]] = {
+    "unavailable_topology": {
+        "code": "verify_fingerprint_source",
+        "message": "rebuild or choose a readable fingerprint source",
+    },
+    "invalid_timestamps": {
+        "code": "inspect_invalid_timestamp_rows",
+        "message": "inspect invalid timestamp rows",
+    },
+    "non_monotonic_timestamps": {
+        "code": "repair_timestamp_order",
+        "message": "repair non-monotonic timestamp order",
+    },
+    "duplicate_timestamps": {
+        "code": "inspect_duplicate_timestamp_rows",
+        "message": "inspect duplicate timestamp rows",
+    },
+    "suspicious_gaps": {
+        "code": "inspect_gap_boundaries",
+        "message": "inspect largest gap boundaries",
+    },
+    "weekend_activity": {
+        "code": "verify_weekend_session_policy",
+        "message": "verify weekend-session policy",
+    },
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -628,6 +654,7 @@ def _topology_attention_target_summary(
         "target_axis": _topology_attention_axis(target),
         "attention_level": attention_level,
         "attention_flags": list(attention_flags),
+        "remediation_hints": _topology_remediation_hints(attention_flags),
         "flags": list(flags),
         "status": _summary_key(target.get("status")),
         "invalid_timestamp_count": _int_payload(
@@ -650,6 +677,22 @@ def _topology_attention_target_summary(
         "computed_from": _summary_key(target.get("computed_from")),
         "cache_source": _optional_summary_key(target.get("cache_source")),
     }
+
+
+def _topology_remediation_hints(flags: Iterable[str]) -> list[JSONValue]:
+    hints: list[JSONValue] = []
+    for flag in flags:
+        hint = TOPOLOGY_REMEDIATION_HINTS.get(flag)
+        if hint is None:
+            continue
+        hints.append(
+            {
+                "flag": flag,
+                "code": hint["code"],
+                "message": hint["message"],
+            }
+        )
+    return hints
 
 
 def _topology_attention_axis(

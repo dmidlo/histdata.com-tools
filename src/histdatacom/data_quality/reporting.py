@@ -642,6 +642,8 @@ def _format_fingerprint_topology_attention_target_line(
     flag_text = ", ".join(flags) if flags else "no actionable flags"
     cache_source = _optional_string_metadata(summary, "cache_source")
     cache_text = f", cache={cache_source}" if cache_source else ""
+    hints = _remediation_hint_messages(summary.get("remediation_hints"))
+    hint_text = f", next={'; '.join(hints)}" if hints else ""
     return (
         f"{data_format} {symbol} {timeframe} {period} {kind}: "
         f"{_string_metadata(summary, 'attention_level')}, "
@@ -655,6 +657,7 @@ def _format_fingerprint_topology_attention_target_line(
         f"{_format_duration_ms(summary.get('max_gap_ms'))}, "
         f"computed_from={_string_metadata(summary, 'computed_from')}"
         f"{cache_text}"
+        f"{hint_text}"
     )
 
 
@@ -783,6 +786,19 @@ def _string_list_metadata(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _remediation_hint_messages(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    messages: list[str] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        message = _optional_string_metadata(item, "message")
+        if message:
+            messages.append(message)
+    return messages
 
 
 def _format_duration_ms(value: object) -> str:

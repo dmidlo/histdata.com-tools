@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -488,10 +489,22 @@ def test_series_fingerprint_topology_summary_reports_actionable_targets(
     suspicious_target = _discovered_target(
         write_ascii_case(tmp_path / "gap", _suspicious_gap_case())
     )
+    invalid_target = _discovered_target(
+        write_ascii_case(
+            tmp_path / "invalid",
+            case_by_name("m1_bad_timestamp"),
+        )
+    )
     non_monotonic_target = _discovered_target(
         write_ascii_case(
             tmp_path / "non-monotonic",
             case_by_name("m1_non_monotonic_timestamp"),
+        )
+    )
+    weekend_activity_target = _discovered_target(
+        write_ascii_case(
+            tmp_path / "weekend-activity",
+            _weekend_activity_case(),
         )
     )
     expected_closure_target = _discovered_target(
@@ -525,7 +538,9 @@ def test_series_fingerprint_topology_summary_reports_actionable_targets(
             clean_target,
             duplicate_target,
             suspicious_target,
+            invalid_target,
             non_monotonic_target,
+            weekend_activity_target,
             expected_closure_target,
             cache_target,
             unsupported_target,
@@ -542,32 +557,34 @@ def test_series_fingerprint_topology_summary_reports_actionable_targets(
         TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION
     )
     assert summary["rule_id"] == SERIES_FINGERPRINT_RULE_ID
-    assert summary["target_count"] == 7
-    assert summary["included_target_count"] == 7
+    assert summary["target_count"] == 9
+    assert summary["included_target_count"] == 9
     assert summary["omitted_target_count"] == 0
     assert summary["truncated"] is False
     assert summary["status_counts"] == {
-        "irregular": 3,
+        "irregular": 5,
         "regular": 3,
         "unavailable": 1,
     }
     assert summary["computed_from_counts"] == {
         "direct_cache": 1,
-        "text_scan": 5,
+        "text_scan": 7,
         "unavailable": 1,
     }
     assert summary["cache_source_counts"] == {"direct": 1}
     assert summary["sampling_basis_counts"] == {
-        "observed_sequence": 6,
+        "observed_sequence": 8,
         "unavailable": 1,
     }
     assert summary["flag_counts"] == {
         "cache_backed": 1,
         "duplicate_timestamps": 1,
         "expected_session_closures": 1,
+        "invalid_timestamps": 1,
         "non_monotonic_timestamps": 1,
         "suspicious_gaps": 1,
         "unavailable_topology": 1,
+        "weekend_activity": 1,
     }
 
     targets = _list(summary["target_summaries"])
@@ -597,12 +614,20 @@ def test_series_fingerprint_topology_summary_reports_actionable_targets(
     assert suspicious["suspicious_gap_count"] == 1
     assert suspicious["max_gap_ms"] == 600_000
 
+    invalid = _target_summary_with_flag(targets, "invalid_timestamps")
+    assert invalid["status"] == "irregular"
+    assert invalid["invalid_timestamp_count"] == 1
+
     non_monotonic = _target_summary_with_flag(
         targets,
         "non_monotonic_timestamps",
     )
     assert non_monotonic["status"] == "irregular"
     assert non_monotonic["non_monotonic_count"] == 1
+
+    weekend = _target_summary_with_flag(targets, "weekend_activity")
+    assert weekend["status"] == "irregular"
+    assert weekend["weekend_activity_count"] == 1
 
     expected = _target_summary_with_flag(
         targets,
@@ -627,53 +652,83 @@ def test_series_fingerprint_topology_summary_reports_actionable_targets(
         TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION
     )
     assert attention["rule_id"] == SERIES_FINGERPRINT_RULE_ID
-    assert attention["topology_target_count"] == 7
-    assert attention["attention_target_count"] == 4
-    assert attention["included_attention_target_count"] == 4
+    assert attention["topology_target_count"] == 9
+    assert attention["attention_target_count"] == 6
+    assert attention["included_attention_target_count"] == 6
     assert attention["omitted_attention_target_count"] == 0
     assert attention["truncated"] is False
     assert attention["attention_level_counts"] == {
         "sequence": 2,
-        "structural": 1,
+        "session": 1,
+        "structural": 2,
         "unavailable": 1,
     }
     assert attention["attention_flag_counts"] == {
         "duplicate_timestamps": 1,
+        "invalid_timestamps": 1,
         "non_monotonic_timestamps": 1,
         "suspicious_gaps": 1,
         "unavailable_topology": 1,
+        "weekend_activity": 1,
     }
     attention_targets = _list(attention["target_summaries"])
     assert [
         _mapping(target)["attention_level"] for target in attention_targets
-    ] == ["unavailable", "structural", "sequence", "sequence"]
-    assert (
-        _target_summary_with_flag(
-            attention_targets,
-            "unavailable_topology",
-        )["status"]
-        == "unavailable"
+    ] == [
+        "unavailable",
+        "structural",
+        "structural",
+        "sequence",
+        "sequence",
+        "session",
+    ]
+    unavailable_attention = _target_summary_with_flag(
+        attention_targets,
+        "unavailable_topology",
     )
-    assert (
-        _target_summary_with_flag(
-            attention_targets,
-            "non_monotonic_timestamps",
-        )["non_monotonic_count"]
-        == 1
+    assert unavailable_attention["status"] == "unavailable"
+    assert _remediation_hint_codes(unavailable_attention) == (
+        "verify_fingerprint_source",
     )
-    assert (
-        _target_summary_with_flag(
-            attention_targets,
-            "duplicate_timestamps",
-        )["duplicate_timestamp_count"]
-        == 1
+    invalid_attention = _target_summary_with_flag(
+        attention_targets,
+        "invalid_timestamps",
     )
-    assert (
-        _target_summary_with_flag(
-            attention_targets,
-            "suspicious_gaps",
-        )["suspicious_gap_count"]
-        == 1
+    assert invalid_attention["invalid_timestamp_count"] == 1
+    assert _remediation_hint_codes(invalid_attention) == (
+        "inspect_invalid_timestamp_rows",
+    )
+    non_monotonic_attention = _target_summary_with_flag(
+        attention_targets,
+        "non_monotonic_timestamps",
+    )
+    assert non_monotonic_attention["non_monotonic_count"] == 1
+    assert _remediation_hint_codes(non_monotonic_attention) == (
+        "repair_timestamp_order",
+    )
+    duplicate_attention = _target_summary_with_flag(
+        attention_targets,
+        "duplicate_timestamps",
+    )
+    assert duplicate_attention["duplicate_timestamp_count"] == 1
+    assert _remediation_hint_codes(duplicate_attention) == (
+        "inspect_duplicate_timestamp_rows",
+    )
+    suspicious_attention = _target_summary_with_flag(
+        attention_targets,
+        "suspicious_gaps",
+    )
+    assert suspicious_attention["suspicious_gap_count"] == 1
+    assert _remediation_hint_codes(suspicious_attention) == (
+        "inspect_gap_boundaries",
+    )
+    weekend_attention = _target_summary_with_flag(
+        attention_targets,
+        "weekend_activity",
+    )
+    assert weekend_attention["weekend_activity_count"] == 1
+    assert _remediation_hint_codes(weekend_attention) == (
+        "verify_weekend_session_policy",
     )
     assert not any(
         "expected_session_closures" in _list(_mapping(target)["flags"])
@@ -685,6 +740,74 @@ def test_series_fingerprint_topology_summary_reports_actionable_targets(
     )
     assert json_safe_path_strings(attention)
     assert json_safe_path_strings(summary)
+
+
+def test_series_fingerprint_topology_attention_orders_mixed_remediation_hints(
+    tmp_path: Path,
+) -> None:
+    """Mixed flags should carry stable hint codes in attention-flag order."""
+    target = QualityTarget(
+        path=str(tmp_path / "DAT_ASCII_EURUSD_M1_201202_MIXED.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    finding = QualityFinding(
+        severity=QualitySeverity.INFO,
+        code="FINGERPRINT_SERIES_SUMMARY",
+        message="Canonical target time-series fingerprint.",
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        target=target,
+        metadata={
+            TIME_SERIES_FINGERPRINT_METADATA_KEY: {
+                "target_axis": {
+                    "data_format": "ascii",
+                    "timeframe": "M1",
+                    "symbol": "EURUSD",
+                    "period": "201202",
+                    "kind": "csv",
+                },
+                "temporal_topology": {
+                    "row_count": 4,
+                    "parsed_row_count": 4,
+                    "invalid_timestamp_count": 1,
+                    "duplicate_timestamp_count": 1,
+                    "non_monotonic_count": 1,
+                    "median_interval_ms": 60_000,
+                    "max_gap_ms": 600_000,
+                    "suspicious_gap_count": 1,
+                    "expected_session_closure_count": 1,
+                    "weekend_activity_count": 1,
+                    "sampling_basis": "observed_sequence",
+                    "computed_from": "text_scan",
+                    "cache_source": None,
+                },
+            }
+        },
+    )
+
+    attention = _mapping(
+        series_fingerprint_topology_attention_summary((finding,))
+    )
+    target_summary = _mapping(_list(attention["target_summaries"])[0])
+
+    assert target_summary["attention_flags"] == [
+        "invalid_timestamps",
+        "non_monotonic_timestamps",
+        "duplicate_timestamps",
+        "suspicious_gaps",
+        "weekend_activity",
+    ]
+    assert _remediation_hint_codes(target_summary) == (
+        "inspect_invalid_timestamp_rows",
+        "repair_timestamp_order",
+        "inspect_duplicate_timestamp_rows",
+        "inspect_gap_boundaries",
+        "verify_weekend_session_policy",
+    )
+    assert "expected_session_closures" in _list(target_summary["flags"])
 
 
 def test_series_fingerprint_topology_attention_ignores_context_only_targets(
@@ -876,6 +999,22 @@ def _suspicious_gap_case() -> HistDataAsciiCase:
             "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
             "20120201 001000;1.306570;1.306570;1.306470;1.306560;17",
         ),
+    )
+
+
+def _weekend_activity_case() -> HistDataAsciiCase:
+    return HistDataAsciiCase(
+        name="m1_weekend_activity",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202_WEEKEND_ACTIVITY.csv",
+        rows=("20120204 120000;1.306600;1.306600;1.306560;1.306560;0",),
+    )
+
+
+def _remediation_hint_codes(target: Mapping[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        str(_mapping(hint)["code"])
+        for hint in _list(_mapping(target)["remediation_hints"])
     )
 
 

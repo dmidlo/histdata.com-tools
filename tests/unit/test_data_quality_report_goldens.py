@@ -904,6 +904,7 @@ def _assert_fingerprint_topology_attention_target(
         "invalid_timestamp_count",
         "max_gap_ms",
         "non_monotonic_count",
+        "remediation_hints",
         "status",
         "suspicious_gap_count",
         "target_axis",
@@ -925,6 +926,8 @@ def _assert_fingerprint_topology_attention_target(
     }
     assert isinstance(payload["attention_flags"], list)
     assert isinstance(payload["flags"], list)
+    for hint in _list(payload["remediation_hints"]):
+        _assert_fingerprint_remediation_hint(_mapping(hint))
     assert payload["status"] in {"regular", "irregular", "unavailable"}
     for key in (
         "duplicate_timestamp_count",
@@ -939,6 +942,18 @@ def _assert_fingerprint_topology_attention_target(
         payload["max_gap_ms"],
         int,
     )
+
+
+def _assert_fingerprint_remediation_hint(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {"code", "flag", "message"}
+    assert isinstance(payload["code"], str)
+    assert payload["code"]
+    assert isinstance(payload["flag"], str)
+    assert payload["flag"]
+    assert isinstance(payload["message"], str)
+    assert payload["message"]
 
 
 def _assert_summary(summary: dict[str, Any]) -> None:

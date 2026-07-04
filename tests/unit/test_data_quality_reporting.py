@@ -376,6 +376,13 @@ def test_quality_report_payload_adds_fingerprint_topology_attention_metadata(
     assert target_summaries[0]["attention_flags"] == [
         "unavailable_topology",
     ]
+    assert target_summaries[0]["remediation_hints"] == [
+        {
+            "flag": "unavailable_topology",
+            "code": "verify_fingerprint_source",
+            "message": "rebuild or choose a readable fingerprint source",
+        }
+    ]
     assert target_summaries[0]["status"] == "unavailable"
     assert target_summaries[0]["computed_from"] == "unavailable"
 
@@ -417,7 +424,8 @@ def test_fingerprint_console_summary_reports_topology_lines(
         "- ascii EURUSD M1 201202 spreadsheet: unavailable, "
         "unavailable_topology, invalid=0, duplicates=0, non-monotonic=0, "
         "suspicious gaps=0, weekend activity=0, max gap unavailable, "
-        "computed_from=unavailable"
+        "computed_from=unavailable, "
+        "next=rebuild or choose a readable fingerprint source"
     ) in output
     assert (
         "- targets: 2 included: 2 regular: 1 irregular: 0 unavailable: 1"
@@ -537,6 +545,15 @@ def test_bounded_quality_payload_includes_fingerprint_topology_attention(
         ]
         == "unavailable"
     )
+    assert payload["fingerprint_topology_attention"]["target_summaries"][0][
+        "remediation_hints"
+    ] == [
+        {
+            "flag": "unavailable_topology",
+            "code": "verify_fingerprint_source",
+            "message": "rebuild or choose a readable fingerprint source",
+        }
+    ]
 
 
 def test_quality_exit_policy_applies_error_warning_and_never_modes(

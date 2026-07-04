@@ -922,6 +922,13 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                         },
                         "attention_level": "sequence",
                         "attention_flags": ["duplicate_timestamps"],
+                        "remediation_hints": [
+                            {
+                                "flag": "duplicate_timestamps",
+                                "code": "inspect_duplicate_timestamp_rows",
+                                "message": "inspect duplicate timestamp rows",
+                            }
+                        ],
                         "flags": ["duplicate_timestamps"],
                         "status": "irregular",
                         "invalid_timestamp_count": 0,
@@ -965,7 +972,8 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
         "- ascii EURUSD M1 201202 csv: sequence, "
         "duplicate_timestamps, invalid=0, duplicates=1, "
         "non-monotonic=0, suspicious gaps=0, weekend activity=0, "
-        "max gap 60s, computed_from=text_scan"
+        "max gap 60s, computed_from=text_scan, "
+        "next=inspect duplicate timestamp rows"
     ) in output
     assert "Fingerprint topology" in output
     assert (
