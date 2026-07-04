@@ -1,8 +1,9 @@
-"""Tests for release workflow platform-wheel coverage."""
+"""Tests for release workflow artifact policy."""
 
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -38,6 +39,13 @@ def _release_workflow() -> dict[str, object]:
     return loaded
 
 
+def _workflow_triggers(workflow: dict[str, object]) -> dict[str, object]:
+    """Return workflow triggers, accounting for YAML 1.1 boolean keys."""
+    triggers = workflow.get("on", workflow.get(True))
+    assert isinstance(triggers, dict)
+    return triggers
+
+
 def _pyproject_config() -> dict[str, object]:
     """Return parsed pyproject metadata through setuptools' TOML reader."""
     pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
@@ -66,13 +74,39 @@ def _step_run(job: dict[str, object], step_name: str) -> str:
     raise AssertionError(f"missing workflow step: {step_name}")
 
 
-def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
-    """Release CI should build and smoke every bundled runtime platform."""
+def _step(job: dict[str, object], step_name: str) -> dict[str, object]:
+    """Return the full workflow step mapping for a named workflow step."""
+    steps = job["steps"]
+    assert isinstance(steps, list)
+    for step in steps:
+        assert isinstance(step, dict)
+        if step.get("name") == step_name:
+            return step
+    raise AssertionError(f"missing workflow step: {step_name}")
+
+
+def test_release_workflow_builds_platform_wheels_only_when_opted_in() -> None:
+    """Bundled runtime wheels should be an explicit build-only dry-run path."""
     workflow = _release_workflow()
     fetch_script = _load_fetch_script()
+    triggers = _workflow_triggers(workflow)
+    dispatch = triggers["workflow_dispatch"]
+    assert isinstance(dispatch, dict)
+    inputs = dispatch["inputs"]
+    assert isinstance(inputs, dict)
     jobs = workflow["jobs"]
     assert isinstance(jobs, dict)
     expected_platforms = set(fetch_script.TEMPORAL_CLI_ASSETS)
+
+    include_input = inputs["include_bundled_platform_wheels"]
+    assert isinstance(include_input, dict)
+    assert include_input["default"] is False
+    assert "private/offline" in str(include_input["description"])
+    assert "build-only" in str(include_input["description"])
+    size_confirm = inputs["bundled_platform_wheel_size_confirmed"]
+    assert isinstance(size_confirm, dict)
+    assert size_confirm["default"] is False
+    assert "size policy" in str(size_confirm["description"])
 
     env = workflow["env"]
     assert isinstance(env, dict)
@@ -80,8 +114,24 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
         fetch_script.DEFAULT_TEMPORAL_CLI_VERSION
     )
 
+    validation = jobs["validate-release-inputs"]
+    assert isinstance(validation, dict)
+    validation_command = _step_run(validation, "Validate bundled wheel opt-in")
+    assert "include_bundled_platform_wheels" in validation_command
+    assert "release_target" in validation_command
+    assert "build-only" in validation_command
+    assert "bundled_platform_wheel_size_confirmed" in validation_command
+    assert "private/offline" in validation_command
+
     build_platform = jobs["build-platform-wheels"]
     assert isinstance(build_platform, dict)
+    assert build_platform["needs"] == "validate-release-inputs"
+    assert build_platform["if"] == (
+        "github.event_name == 'workflow_dispatch' && "
+        "inputs.release_target == 'build-only' && "
+        "inputs.include_bundled_platform_wheels == true && "
+        "inputs.bundled_platform_wheel_size_confirmed == true"
+    )
     build_strategy = build_platform["strategy"]
     assert isinstance(build_strategy, dict)
     build_matrix = build_strategy["matrix"]
@@ -171,11 +221,7 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
 
     assemble = jobs["assemble-release-artifacts"]
     assert isinstance(assemble, dict)
-    assert set(assemble["needs"]) == {
-        "build-metadata",
-        "build-platform-wheels",
-        "smoke-platform-wheels",
-    }
+    assert assemble["needs"] == "build-metadata"
     assert jobs["publish-testpypi"]["needs"] == "assemble-release-artifacts"
     assert jobs["publish-pypi"]["needs"] == "assemble-release-artifacts"
     assert jobs["publish-testpypi"]["if"] == (
@@ -188,6 +234,48 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
         "inputs.release_target == 'pypi' && "
         "github.ref == 'refs/heads/main'"
     )
+
+
+def test_release_workflow_publishes_metadata_only_dist_artifact() -> None:
+    """Trusted Publishing artifact scope should match normal PyPI policy."""
+    workflow = _release_workflow()
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+
+    build_metadata = jobs["build-metadata"]
+    assert isinstance(build_metadata, dict)
+    assert build_metadata["needs"] == "validate-release-inputs"
+
+    assemble = jobs["assemble-release-artifacts"]
+    assert isinstance(assemble, dict)
+    assert assemble["needs"] == "build-metadata"
+    step_names = [
+        step.get("name") for step in assemble["steps"] if isinstance(step, dict)
+    ]
+    assert "Download metadata distributions" in step_names
+    assert "Download bundled platform wheels" not in step_names
+
+    reports_step = _step(assemble, "Download release reports")
+    assert reports_step["with"] == {
+        "name": "histdatacom-metadata-reports",
+        "path": "release-reports",
+    }
+    verify_command = _step_run(
+        assemble, "Verify assembled release distributions"
+    )
+    assert "expected 1 metadata wheel" in verify_command
+    assert "expected 6 wheels" not in verify_command
+    assert "expected 1 sdist" in verify_command
+
+    upload_step = _step(assemble, "Upload release distributions")
+    assert upload_step["with"] == {
+        "name": "histdatacom-dist",
+        "path": "dist/*",
+        "if-no-files-found": "error",
+    }
+
+    assert jobs["publish-testpypi"]["needs"] == "assemble-release-artifacts"
+    assert jobs["publish-pypi"]["needs"] == "assemble-release-artifacts"
 
 
 def test_package_metadata_advertises_platform_wheel_support() -> None:
@@ -286,6 +374,7 @@ def test_local_pypi_install_smoke_uses_exact_version_verifier() -> None:
 def test_release_docs_mark_local_publishing_as_current_path() -> None:
     """Release docs should not imply Actions deployment is active today."""
     release_docs = _project_text("RELEASE.md")
+    readme = _project_text("README.md")
 
     assert (
         "Local publishing is the authoritative release path today."
@@ -318,3 +407,19 @@ def test_release_docs_mark_local_publishing_as_current_path() -> None:
     assert "python -m twine check dist/*.whl dist/*.tar.gz" in release_docs
     assert "scripts/fetch_temporal_cli.py" in release_docs
     assert "external Temporal runtime resolver" in release_docs
+    assert "metadata-only universal" in readme
+    assert "wheel and source distribution" in readme
+    assert "include_bundled_platform_wheels=true" in readme
+    assert "bundled_platform_wheel_size_confirmed=true" in readme
+    assert re.search(
+        r"not\s+consumed by TestPyPI/PyPI publish jobs",
+        readme,
+    )
+    assert "histdatacom-dist" in release_docs
+    assert (
+        "metadata-only universal wheel and source distribution" in release_docs
+    )
+    assert "include_bundled_platform_wheels=true" in release_docs
+    assert "bundled_platform_wheel_size_confirmed=true" in release_docs
+    assert re.search(r"not\s+consumed by\s+the\s+publish jobs", release_docs)
+    assert "must build all bundled platform wheels" not in release_docs

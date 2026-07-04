@@ -318,9 +318,14 @@ requires a matching protected environment approval and OIDC Trusted Publishing
 configured on the target index.
 
 Actions publishing remains a guarded release path, not the authoritative local
-publish path. Before any Actions publish job can run, the release workflow must
-build all bundled platform wheels, install each artifact, and pass the blocking
-bundled-runtime smoke matrix. The Windows leg is intentionally pinned to
+publish path. The publish jobs consume `histdatacom-dist`, which is assembled
+only from the metadata-only universal wheel and source distribution. Bundled
+platform wheels are an explicit private/offline dry-run path: set
+`include_bundled_platform_wheels=true` only with `release_target=build-only`,
+and set `bundled_platform_wheel_size_confirmed=true` only after confirming the
+private/offline purpose and artifact-size policy.
+
+For those opt-in bundled dry runs, the Windows leg is intentionally pinned to
 `windows-2022` with Python 3.12 and the current Temporal SDK constraint. It runs
 a Windows-only diagnostic, then a blocking bundled artifact install/resource/CLI
 smoke. The worker-starting runtime smokes remain blocking on Linux and macOS.
@@ -335,11 +340,11 @@ Release run `28683090967` proved Python 3.12.10, `temporalio==1.28.0`,
 worker logs are written. Until that native worker-startup failure is resolved,
 the Actions publish gate does not claim live Temporal worker support on Windows.
 
-Release artifact provenance covers everything under `dist/`, including the
-runtime wheel inspection report. The Linux and macOS release legs run the same
-worker-starting runtime wheel smoke used by local `pypi.sh build` before
-attestations and artifact upload; the Windows leg keeps artifact install,
-runtime-resource, executable-version, and CLI checks blocking.
+Metadata release provenance covers everything under the assembled `dist/`
+artifact that can be published to PyPI/TestPyPI. Opt-in bundled platform-wheel
+dry runs generate separate per-platform attestations and artifacts; those
+artifacts are not downloaded into `histdatacom-dist` and are not consumed by the
+publish jobs.
 
 ## Rollback And Yank Guidance
 

@@ -1953,9 +1953,11 @@ or locate the pinned runtime through the resolver.
 
 The existing bundled platform-wheel tooling remains useful for offline/private
 artifacts and emergency operator recovery, but those artifacts are not the
-default PyPI path. They should be uploaded to the normal PyPI project only after
-the project-specific size limit is confirmed and the release operator explicitly
-opts in.
+default PyPI path. The GitHub Release workflow builds them only for explicit
+build-only dry runs: set `include_bundled_platform_wheels=true` with
+`release_target=build-only`, and set
+`bundled_platform_wheel_size_confirmed=true` only after confirming the
+private/offline purpose and artifact-size policy.
 
 For bundled platform-wheel release dry runs, Linux and macOS remain
 worker-starting runtime smoke gates. Windows currently verifies installability,
@@ -1963,11 +1965,14 @@ bundled runtime metadata, Temporal executable version, and CLI entry points, and
 collects layered startup diagnostics. Until #314's native Windows worker-start
 blocker is fixed, the Windows bundled runtime gate is install/CLI-only.
 
-Use `release_target=build-only` for dry runs, `release_target=testpypi` for the
-first publish rehearsal, and `release_target=pypi` only after setting
-`testpypi_dry_run_confirmed=true`. The final `histdatacom-dist` artifact
-contains only publishable sdists and wheels; JSON build and checksum reports are
-uploaded separately as release reports.
+Use `release_target=build-only` for metadata-only dry runs,
+`release_target=testpypi` for the first publish rehearsal, and
+`release_target=pypi` only after setting `testpypi_dry_run_confirmed=true`. The
+final `histdatacom-dist` artifact contains only the metadata-only universal
+wheel and source distribution; JSON build and checksum reports are uploaded
+separately as release reports. Bundled platform-wheel artifacts are uploaded
+separately only for the explicit private/offline build-only path and are not
+consumed by TestPyPI/PyPI publish jobs.
 
 If runtime provisioning fails after release, prefer yanking the affected package
 only when the Python artifact itself is wrong. Bad or unreachable Temporal
