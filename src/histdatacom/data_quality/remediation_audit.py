@@ -73,6 +73,31 @@ class _CodeAggregate:
         )
 
 
+@dataclass(slots=True)
+class _ReportGapAggregate:
+    rule_id: str
+    finding_code: str
+    occurrence_count: int = 0
+    group_count: int = 0
+    severity_counts: Counter[str] = field(default_factory=Counter)
+    report_source_counts: Counter[str] = field(default_factory=Counter)
+
+    @property
+    def max_severity(self) -> str:
+        return _max_severity(self.severity_counts)
+
+
+@dataclass(slots=True)
+class _ReportGapEvidence:
+    exact_counts: Counter[str] = field(default_factory=Counter)
+    finding_code_counts: Counter[str] = field(default_factory=Counter)
+    group_counts: Counter[str] = field(default_factory=Counter)
+    severity_counts: Counter[str] = field(default_factory=Counter)
+    aggregates: dict[tuple[str, str], _ReportGapAggregate] = field(
+        default_factory=dict
+    )
+
+
 def discover_known_quality_findings(
     source_root: str | Path | None = None,
 ) -> tuple[KnownQualityFindingCode, ...]:
@@ -195,6 +220,10 @@ def audit_remediation_catalog(
                 "applies_per_code": True,
             },
             "ranked_gap_sources": {
+                "limit": source_limit,
+                "applies_per_gap": True,
+            },
+            "ranked_gap_report_sources": {
                 "limit": source_limit,
                 "applies_per_gap": True,
             },
@@ -466,12 +495,10 @@ def _report_coverage_summary(
 
 def _report_gap_evidence(
     report_payloads: Sequence[Mapping[str, JSONValue]],
-) -> dict[str, Counter[str]]:
-    exact_counts: Counter[str] = Counter()
-    finding_code_counts: Counter[str] = Counter()
-    group_counts: Counter[str] = Counter()
-    severity_counts: Counter[str] = Counter()
+) -> _ReportGapEvidence:
+    evidence = _ReportGapEvidence()
     for payload in report_payloads:
+        source = _optional_string(payload, "source") or "report"
         coverage = _mapping_payload(payload.get("remediation_coverage"))
         for group in _list_payload(coverage.get("unmapped_groups")):
             finding_code = _optional_string(group, "finding_code")
@@ -479,22 +506,36 @@ def _report_gap_evidence(
                 continue
             rule_id = _optional_string(group, "rule_id") or "unknown"
             key = _rule_code_key(rule_id, finding_code)
+            aggregate_key = (rule_id, finding_code)
+            aggregate = evidence.aggregates.setdefault(
+                aggregate_key,
+                _ReportGapAggregate(
+                    rule_id=rule_id,
+                    finding_code=finding_code,
+                ),
+            )
             occurrence_count = _int_value(group, "occurrence_count")
-            exact_counts[key] += occurrence_count
-            finding_code_counts[finding_code] += occurrence_count
-            group_counts[finding_code] += 1
+            evidence.exact_counts[key] += occurrence_count
+            evidence.finding_code_counts[finding_code] += occurrence_count
+            evidence.group_counts[finding_code] += 1
+            aggregate.occurrence_count += occurrence_count
+            aggregate.group_count += 1
+            aggregate.report_source_counts[source] += 1
             group_severity_counts = _mapping_payload(
                 group.get("severity_counts")
             )
             for severity, count in group_severity_counts.items():
                 if isinstance(count, (int, float)):
-                    severity_counts[f"{finding_code}\0{severity}"] += int(count)
-    return {
-        "exact_counts": exact_counts,
-        "finding_code_counts": finding_code_counts,
-        "group_counts": group_counts,
-        "severity_counts": severity_counts,
-    }
+                    int_count = int(count)
+                    evidence.severity_counts[
+                        f"{finding_code}\0{severity}"
+                    ] += int_count
+                    aggregate.severity_counts[severity] += int_count
+            if not aggregate.severity_counts:
+                max_severity = _optional_string(group, "max_severity")
+                if max_severity:
+                    aggregate.severity_counts[max_severity] += occurrence_count
+    return evidence
 
 
 def _audit_summary(
@@ -549,18 +590,29 @@ def _audit_summary(
 def _ranked_gap_payloads(
     aggregates: Sequence[_CodeAggregate],
     *,
-    report_gap_evidence: Mapping[str, Counter[str]],
+    report_gap_evidence: _ReportGapEvidence,
     source_limit: int,
 ) -> list[JSONValue]:
+    known_keys = {
+        (aggregate.rule_id, aggregate.finding_code) for aggregate in aggregates
+    }
     ranked = sorted(
-        (
+        [
             _ranked_gap_payload(
                 aggregate,
                 report_gap_evidence=report_gap_evidence,
                 source_limit=source_limit,
             )
             for aggregate in aggregates
-        ),
+        ]
+        + [
+            _report_gap_payload(
+                aggregate,
+                source_limit=source_limit,
+            )
+            for key, aggregate in report_gap_evidence.aggregates.items()
+            if key not in known_keys
+        ],
         key=_ranked_gap_sort_key,
     )
     return [{**gap, "rank": index} for index, gap in enumerate(ranked, start=1)]
@@ -569,19 +621,15 @@ def _ranked_gap_payloads(
 def _ranked_gap_payload(
     aggregate: _CodeAggregate,
     *,
-    report_gap_evidence: Mapping[str, Counter[str]],
+    report_gap_evidence: _ReportGapEvidence,
     source_limit: int,
 ) -> dict[str, JSONValue]:
-    exact_counts = report_gap_evidence.get("exact_counts", Counter())
-    finding_code_counts = report_gap_evidence.get(
-        "finding_code_counts",
-        Counter(),
-    )
-    group_counts = report_gap_evidence.get("group_counts", Counter())
     severity_counts = _counter_payload(aggregate.severity_counts)
     report_occurrence_count = (
-        exact_counts[_rule_code_key(aggregate.rule_id, aggregate.finding_code)]
-        or finding_code_counts[aggregate.finding_code]
+        report_gap_evidence.exact_counts[
+            _rule_code_key(aggregate.rule_id, aggregate.finding_code)
+        ]
+        or report_gap_evidence.finding_code_counts[aggregate.finding_code]
     )
     sources = _named_counter_payloads(
         aggregate.source_counts,
@@ -611,7 +659,9 @@ def _ranked_gap_payload(
         ),
         "sources": sources,
         "report_occurrence_count": report_occurrence_count,
-        "report_group_count": group_counts[aggregate.finding_code],
+        "report_group_count": report_gap_evidence.group_counts[
+            aggregate.finding_code
+        ],
         "rank_reasons": _rank_reasons(
             aggregate,
             report_occurrence_count=report_occurrence_count,
@@ -619,6 +669,46 @@ def _ranked_gap_payload(
         ),
     }
     return payload
+
+
+def _report_gap_payload(
+    aggregate: _ReportGapAggregate,
+    *,
+    source_limit: int,
+) -> dict[str, JSONValue]:
+    report_sources = _named_counter_payloads(
+        aggregate.report_source_counts,
+        key_name="source",
+        limit=source_limit,
+    )
+    source_family = _source_family_from_rule_id(aggregate.rule_id)
+    return {
+        "finding_code": aggregate.finding_code,
+        "rule_id": aggregate.rule_id,
+        "mapped": False,
+        "max_severity": aggregate.max_severity,
+        "severity_counts": _counter_payload(aggregate.severity_counts),
+        "source_family": source_family,
+        "source_family_counts": [],
+        "known_source_occurrence_count": 0,
+        "source_count": 0,
+        "included_source_count": 0,
+        "omitted_source_count": 0,
+        "sources": [],
+        "report_occurrence_count": aggregate.occurrence_count,
+        "report_group_count": aggregate.group_count,
+        "report_source_count": len(aggregate.report_source_counts),
+        "included_report_source_count": len(report_sources),
+        "omitted_report_source_count": max(
+            0,
+            len(aggregate.report_source_counts) - len(report_sources),
+        ),
+        "reports": report_sources,
+        "rank_reasons": _report_rank_reasons(
+            aggregate,
+            source_family=source_family,
+        ),
+    }
 
 
 def _ranked_gap_sort_key(
@@ -653,6 +743,19 @@ def _rank_reasons(
     if report_occurrence_count:
         reasons.insert(2, f"report_occurrences={report_occurrence_count}")
     return reasons
+
+
+def _report_rank_reasons(
+    aggregate: _ReportGapAggregate,
+    *,
+    source_family: str,
+) -> list[JSONValue]:
+    return [
+        f"severity={aggregate.max_severity}",
+        f"source_family={source_family or 'unknown'}",
+        f"report_occurrences={aggregate.occurrence_count}",
+        "known_sources=0",
+    ]
 
 
 def _known_code_counts(
@@ -1032,10 +1135,26 @@ def _source_family_from_source(source: str) -> str:
     return _source_family_for_path(Path(source_path))
 
 
+def _source_family_from_rule_id(rule_id: str) -> str:
+    if rule_id.startswith("domain.calendar."):
+        return "domain/calendar"
+    if not rule_id or rule_id == "unknown":
+        return ""
+    return rule_id.split(".", 1)[0]
+
+
 def _primary_source_family(counter: Counter[str]) -> str:
     if not counter:
         return ""
     return sorted(counter, key=lambda item: (-counter[item], item))[0]
+
+
+def _max_severity(counter: Counter[str]) -> str:
+    return max(
+        counter,
+        key=lambda severity: _SEVERITY_RANK.get(severity, 0),
+        default=QualitySeverity.INFO.value,
+    )
 
 
 def _unresolved_rule_id(source_family: str) -> str:

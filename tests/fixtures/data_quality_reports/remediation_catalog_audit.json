@@ -150,6 +150,10 @@
       "total_count": 2,
       "truncated": false
     },
+    "ranked_gap_report_sources": {
+      "applies_per_gap": true,
+      "limit": 2
+    },
     "ranked_gap_sources": {
       "applies_per_gap": true,
       "limit": 2

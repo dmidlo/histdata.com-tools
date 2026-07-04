@@ -192,6 +192,51 @@ def test_remediation_catalog_audit_ranks_report_observed_gaps(
     )
 
 
+def test_remediation_catalog_audit_ranks_report_only_gaps(
+    tmp_path: Path,
+) -> None:
+    """Report-only gaps should appear in the prioritized backlog."""
+    report = _report_with_findings(
+        tmp_path,
+        (
+            _finding(
+                tmp_path,
+                "time.ascii.sequence",
+                "ASCII_M1_GRANULARITY_DRIFT",
+                QualitySeverity.ERROR,
+            ),
+            _finding(
+                tmp_path,
+                "time.ascii.sequence",
+                "ASCII_M1_GRANULARITY_DRIFT",
+                QualitySeverity.ERROR,
+            ),
+        ),
+    )
+
+    payload = audit_remediation_catalog(
+        known_findings=(),
+        reports=(("reports/quality.json", report),),
+        source_limit=1,
+    )
+    ranked = payload["ranked_gaps"]
+
+    assert payload["summary"]["unmapped_warning_error_gap_count"] == 1
+    assert ranked[0]["rank"] == 1
+    assert ranked[0]["finding_code"] == "ASCII_M1_GRANULARITY_DRIFT"
+    assert ranked[0]["rule_id"] == "time.ascii.sequence"
+    assert ranked[0]["source_family"] == "time"
+    assert ranked[0]["known_source_occurrence_count"] == 0
+    assert ranked[0]["report_occurrence_count"] == 2
+    assert ranked[0]["reports"] == [
+        {
+            "count": 1,
+            "source": "reports/quality.json",
+        }
+    ]
+    assert "report_occurrences=2" in ranked[0]["rank_reasons"]
+
+
 def test_discover_known_quality_findings_resolves_source_attribution(
     tmp_path: Path,
 ) -> None:

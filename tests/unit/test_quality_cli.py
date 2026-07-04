@@ -205,6 +205,32 @@ def test_quality_remediation_catalog_cli_reports_json(
     assert captured["target_axis_limit"] == 4
 
 
+def test_quality_remediation_catalog_cli_reports_ranked_human_output(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The text command should expose the ranked remediation backlog."""
+
+    def fake_audit(
+        report_paths: list[str], **kwargs: object
+    ) -> dict[str, object]:
+        return _catalog_payload(gap_count=1, ranked_gap=True)
+
+    monkeypatch.setattr(
+        quality_cli,
+        "audit_remediation_catalog_report_paths",
+        fake_audit,
+    )
+
+    exit_code = main(["remediation-catalog"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "Ranked remediation gaps" in output
+    assert "#1 warning CLI_GAP family=time" in output
+    assert "report_occurrences=3" in output
+
+
 def test_quality_remediation_catalog_cli_applies_yaml_defaults(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -306,7 +332,31 @@ def _write_tick_cache(
     return cache_path
 
 
-def _catalog_payload(*, gap_count: int) -> dict[str, object]:
+def _catalog_payload(
+    *,
+    gap_count: int,
+    ranked_gap: bool = False,
+) -> dict[str, object]:
+    ranked_gaps: list[dict[str, object]] = []
+    if ranked_gap:
+        ranked_gaps.append(
+            {
+                "finding_code": "CLI_GAP",
+                "known_source_occurrence_count": 0,
+                "mapped": False,
+                "max_severity": "warning",
+                "rank": 1,
+                "rank_reasons": [
+                    "severity=warning",
+                    "source_family=time",
+                    "report_occurrences=3",
+                    "known_sources=0",
+                ],
+                "report_occurrence_count": 3,
+                "rule_id": "time.ascii.sequence",
+                "source_family": "time",
+            }
+        )
     return {
         "schema_version": "histdatacom.quality-remediation-catalog-audit.v1",
         "status": ("needs-remediation-guidance" if gap_count else "covered"),
@@ -327,6 +377,7 @@ def _catalog_payload(*, gap_count: int) -> dict[str, object]:
         },
         "known_code_counts": {},
         "known_unmapped_codes": [],
+        "ranked_gaps": ranked_gaps,
         "report_coverage": [],
         "payload_limits": {},
     }
