@@ -142,6 +142,13 @@ from histdatacom.data_quality.provenance import (
     provenance_manifest_metadata,
     provenance_quality_run_rules,
 )
+from histdatacom.data_quality.remediation import (
+    QualityRemediationHint,
+    remediation_hint_payloads_for_finding,
+    remediation_hint_payloads_for_flags,
+    remediation_hints_for_finding_code,
+    remediation_hints_for_flags,
+)
 from histdatacom.data_quality.reporting import (
     QUALITY_EXIT_TRIGGERS,
     QUALITY_REPORT_SCHEMA_VERSION,
@@ -354,6 +361,7 @@ __all__ = [
     "QualityProfile",
     "QualityProfileError",
     "QualityReport",
+    "QualityRemediationHint",
     "QualityRule",
     "QualityRuleResult",
     "QualityRunRule",
@@ -413,6 +421,10 @@ __all__ = [
     "quality_support_for_target",
     "quality_support_from_metadata",
     "quality_target_from_path",
+    "remediation_hint_payloads_for_finding",
+    "remediation_hint_payloads_for_flags",
+    "remediation_hints_for_finding_code",
+    "remediation_hints_for_flags",
     "run_quality_assessment",
     "series_fingerprint_coverage_summary",
     "series_fingerprint_topology_attention_summary",

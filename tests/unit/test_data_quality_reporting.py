@@ -378,9 +378,11 @@ def test_quality_report_payload_adds_fingerprint_topology_attention_metadata(
     ]
     assert target_summaries[0]["remediation_hints"] == [
         {
-            "flag": "unavailable_topology",
             "code": "verify_fingerprint_source",
             "message": "rebuild or choose a readable fingerprint source",
+            "action_kind": "rebuild",
+            "rule_id": SERIES_FINGERPRINT_RULE_ID,
+            "flag": "unavailable_topology",
         }
     ]
     assert target_summaries[0]["status"] == "unavailable"
@@ -549,9 +551,11 @@ def test_bounded_quality_payload_includes_fingerprint_topology_attention(
         "remediation_hints"
     ] == [
         {
-            "flag": "unavailable_topology",
             "code": "verify_fingerprint_source",
             "message": "rebuild or choose a readable fingerprint source",
+            "action_kind": "rebuild",
+            "rule_id": SERIES_FINGERPRINT_RULE_ID,
+            "flag": "unavailable_topology",
         }
     ]
 

@@ -924,9 +924,11 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                         "attention_flags": ["duplicate_timestamps"],
                         "remediation_hints": [
                             {
-                                "flag": "duplicate_timestamps",
                                 "code": "inspect_duplicate_timestamp_rows",
                                 "message": "inspect duplicate timestamp rows",
+                                "action_kind": "inspect",
+                                "rule_id": "fingerprint.series",
+                                "flag": "duplicate_timestamps",
                             }
                         ],
                         "flags": ["duplicate_timestamps"],

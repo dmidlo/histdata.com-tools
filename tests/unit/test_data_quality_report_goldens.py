@@ -947,13 +947,23 @@ def _assert_fingerprint_topology_attention_target(
 def _assert_fingerprint_remediation_hint(
     payload: dict[str, JSONValue],
 ) -> None:
-    assert set(payload) == {"code", "flag", "message"}
+    assert set(payload) == {"action_kind", "code", "flag", "message", "rule_id"}
+    assert isinstance(payload["action_kind"], str)
+    assert payload["action_kind"] in {
+        "configure",
+        "inspect",
+        "rebuild",
+        "repair",
+        "verify",
+    }
     assert isinstance(payload["code"], str)
     assert payload["code"]
     assert isinstance(payload["flag"], str)
     assert payload["flag"]
     assert isinstance(payload["message"], str)
     assert payload["message"]
+    assert isinstance(payload["rule_id"], str)
+    assert payload["rule_id"]
 
 
 def _assert_summary(summary: dict[str, Any]) -> None:
