@@ -387,7 +387,7 @@ def test_windows_runtime_diagnostic_separates_startup_layers(
         phase == "worker_run_probe_cpu_file"
         and "--lane" in command
         and "cpu-file" in command
-        and (tmp_path / "state-windows-diagnostic").as_posix() in command
+        and str(tmp_path / "state-windows-diagnostic") in command
         and kwargs["env"]["HISTDATACOM_RUNTIME_PORT"] == "17233"
         for phase, command, kwargs in calls
     )
