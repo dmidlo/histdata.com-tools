@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 
 from histdatacom.data_quality.contracts import (
@@ -12,6 +13,7 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
 )
 from histdatacom.data_quality.fingerprints import (
+    SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     series_fingerprint_coverage_summary,
 )
@@ -51,6 +53,7 @@ def run_quality_assessment(
     base_metadata = dict(metadata or {})
     csv_dimensions = _csv_target_dimensions(target_tuple)
     skipped_duplicate_archive_rule_count = 0
+    skipped_duplicate_archive_rule_counts: Counter[str] = Counter()
     evaluation_plan: list[
         tuple[int, QualityTarget, tuple[tuple[int, QualityRule], ...]]
     ] = []
@@ -65,6 +68,7 @@ def run_quality_assessment(
                 csv_dimensions,
             ):
                 skipped_duplicate_archive_rule_count += 1
+                skipped_duplicate_archive_rule_counts[str(rule.rule_id)] += 1
                 rule_offset += 1
                 continue
             bundle_candidates = rule_tuple[rule_offset : rule_offset + 3]
@@ -203,8 +207,22 @@ def run_quality_assessment(
             ),
         }
     rule_results = tuple(rule_results_list)
+    skipped_fingerprint_target_count = skipped_duplicate_archive_rule_counts[
+        SERIES_FINGERPRINT_RULE_ID
+    ]
     fingerprint_coverage_summary = series_fingerprint_coverage_summary(
-        finding for result in rule_results for finding in result.findings
+        (finding for result in rule_results for finding in result.findings),
+        discovered_target_count=len(target_tuple),
+        skipped_fingerprint_target_count=skipped_fingerprint_target_count,
+        skipped_reason_counts=(
+            {
+                "duplicate_archive_preferred_csv": (
+                    skipped_fingerprint_target_count
+                )
+            }
+            if skipped_fingerprint_target_count
+            else None
+        ),
     )
     if fingerprint_coverage_summary is not None:
         base_metadata[TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY] = (

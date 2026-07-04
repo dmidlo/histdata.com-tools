@@ -280,10 +280,14 @@ def test_quality_report_payload_adds_fingerprint_coverage_metadata(
 
     summary = payload["metadata"][TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY]
 
+    assert summary["discovered_target_count"] == 2
+    assert summary["evaluated_fingerprint_target_count"] == 2
     assert summary["fingerprint_target_count"] == 2
+    assert summary["skipped_fingerprint_target_count"] == 0
     assert summary["supported_readable_count"] == 1
     assert summary["unavailable_count"] == 1
     assert summary["parsed_non_empty_coverage_count"] == 1
+    assert summary["skipped_reason_counts"] == {}
     assert summary["source_kind_counts"] == {"cache": 1, "unavailable": 1}
     assert summary["cache_source_counts"] == {"direct": 1}
     assert summary["unavailable_reason_counts"] == {
@@ -310,6 +314,37 @@ def test_fingerprint_console_summary_reports_coverage_counts(
     assert "- unavailable reasons: unsupported_target_kind=1" in output
     assert "- target kinds: cache=1, spreadsheet=1" in output
     assert "- timeframes: M1=2" in output
+
+
+def test_fingerprint_console_summary_reports_skipped_targets(
+    tmp_path: Path,
+) -> None:
+    """Human output should expose skipped fingerprint targets when present."""
+    base_report = _fingerprint_report(tmp_path)
+    payload = quality_report_payload(base_report)
+    metadata = payload["metadata"]
+    assert isinstance(metadata, dict)
+    coverage = metadata[TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY]
+    assert isinstance(coverage, dict)
+    coverage = dict(coverage)
+    coverage["discovered_target_count"] = 3
+    coverage["skipped_fingerprint_target_count"] = 1
+    coverage["skipped_reason_counts"] = {
+        "duplicate_archive_preferred_csv": 1,
+    }
+    report = QualityReport(
+        targets=base_report.targets,
+        rule_results=base_report.rule_results,
+        metadata={TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY: coverage},
+    )
+
+    output = format_quality_console_summary(
+        report,
+        check_groups=("fingerprint",),
+    )
+
+    assert "- skipped: 1" in output
+    assert ("- skipped reasons: duplicate_archive_preferred_csv=1") in output
 
 
 def test_bounded_quality_payload_includes_fingerprint_coverage(

@@ -146,6 +146,10 @@ def fingerprint_quality_rules(
 
 def series_fingerprint_coverage_summary(
     findings: Iterable[QualityFinding],
+    *,
+    discovered_target_count: int | None = None,
+    skipped_fingerprint_target_count: int = 0,
+    skipped_reason_counts: Mapping[str, int] | None = None,
 ) -> dict[str, JSONValue] | None:
     """Return a bounded run summary for emitted series fingerprints."""
     source_kind_counts: Counter[str] = Counter()
@@ -197,13 +201,36 @@ def series_fingerprint_coverage_summary(
     if not fingerprint_target_count:
         return None
 
+    normalized_skipped_reason_counts = Counter(
+        {
+            _summary_key(reason): int(count)
+            for reason, count in (skipped_reason_counts or {}).items()
+            if int(count) > 0
+        }
+    )
+    skipped_fingerprint_target_count = max(
+        int(skipped_fingerprint_target_count),
+        sum(normalized_skipped_reason_counts.values()),
+    )
+    normalized_discovered_target_count = (
+        fingerprint_target_count + skipped_fingerprint_target_count
+        if discovered_target_count is None
+        else max(int(discovered_target_count), fingerprint_target_count)
+    )
+
     return {
         "schema_version": TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
         "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "discovered_target_count": normalized_discovered_target_count,
+        "evaluated_fingerprint_target_count": fingerprint_target_count,
         "fingerprint_target_count": fingerprint_target_count,
+        "skipped_fingerprint_target_count": skipped_fingerprint_target_count,
         "supported_readable_count": supported_readable_count,
         "unavailable_count": unavailable_count,
         "parsed_non_empty_coverage_count": parsed_non_empty_coverage_count,
+        "skipped_reason_counts": _counter_payload(
+            normalized_skipped_reason_counts
+        ),
         "source_kind_counts": _counter_payload(source_kind_counts),
         "cache_source_counts": _counter_payload(cache_source_counts),
         "unavailable_reason_counts": _counter_payload(

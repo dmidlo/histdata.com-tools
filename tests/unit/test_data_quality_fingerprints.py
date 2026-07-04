@@ -274,10 +274,14 @@ def test_series_fingerprint_coverage_summary_counts_mixed_sources(
         TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION
     )
     assert summary["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    assert summary["discovered_target_count"] == 5
+    assert summary["evaluated_fingerprint_target_count"] == 5
     assert summary["fingerprint_target_count"] == 5
+    assert summary["skipped_fingerprint_target_count"] == 0
     assert summary["supported_readable_count"] == 4
     assert summary["unavailable_count"] == 1
     assert summary["parsed_non_empty_coverage_count"] == 4
+    assert summary["skipped_reason_counts"] == {}
     assert summary["source_kind_counts"] == {
         "cache": 2,
         "csv_text": 1,
@@ -299,6 +303,51 @@ def test_series_fingerprint_coverage_summary_counts_mixed_sources(
     }
     assert summary["timeframe_counts"] == {"M1": 4, "T": 1}
     assert json_safe_path_strings(summary)
+
+
+def test_fingerprint_coverage_summary_reports_duplicate_archive_skip(
+    tmp_path: Path,
+) -> None:
+    """Skipped duplicate ZIP fingerprint targets should be visible."""
+    csv_target = _discovered_target(write_ascii_case(tmp_path, CLEAN_M1_CASE))
+    archive_target = _discovered_target(
+        write_zip_case(
+            tmp_path,
+            CLEAN_M1_CASE,
+            zip_filename="DAT_ASCII_EURUSD_M1_201202.zip",
+        )
+    )
+
+    report = run_quality_assessment(
+        (archive_target, csv_target),
+        quality_rules_for_groups(("fingerprint",)),
+    )
+
+    summary = _mapping(
+        report.metadata[TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY]
+    )
+
+    assert [result.target.kind for result in report.rule_results] == [
+        QualityTargetKind.CSV,
+    ]
+    assert summary["discovered_target_count"] == 2
+    assert summary["evaluated_fingerprint_target_count"] == 1
+    assert summary["fingerprint_target_count"] == 1
+    assert summary["skipped_fingerprint_target_count"] == 1
+    assert summary["skipped_reason_counts"] == {
+        "duplicate_archive_preferred_csv": 1,
+    }
+    assert summary["source_kind_counts"] == {"csv_text": 1}
+    assert summary["target_kind_counts"] == {"csv": 1}
+    assert report.metadata["quality_engine"] == {
+        "target_count": 2,
+        "rule_count": 1,
+        "target_rule_evaluation_count": 1,
+        "skipped_duplicate_archive_rule_evaluation_count": 1,
+        "duplicate_archive_scan_policy": (
+            "prefer_extracted_csv_for_non_inventory_rules"
+        ),
+    }
 
 
 def test_fingerprint_id_excludes_source_path_volatility(

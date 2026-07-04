@@ -27,10 +27,14 @@
   },
   "fingerprint_coverage": {
     "cache_source_counts": {},
+    "discovered_target_count": 1,
+    "evaluated_fingerprint_target_count": 1,
     "fingerprint_target_count": 1,
     "parsed_non_empty_coverage_count": 1,
     "rule_id": "fingerprint.series",
     "schema_version": "histdatacom.time-series-fingerprint-coverage.v1",
+    "skipped_fingerprint_target_count": 0,
+    "skipped_reason_counts": {},
     "source_kind_counts": {
       "csv_text": 1
     },

@@ -519,10 +519,14 @@ def _format_fingerprint_coverage_lines(
             f"{_int_metadata(summary, 'parsed_non_empty_coverage_count')}"
         ),
     ]
+    skipped_count = _int_metadata(summary, "skipped_fingerprint_target_count")
+    if skipped_count:
+        lines.append(f"- skipped: {skipped_count}")
     count_lines = (
         ("source kinds", "source_kind_counts"),
         ("cache sources", "cache_source_counts"),
         ("unavailable reasons", "unavailable_reason_counts"),
+        ("skipped reasons", "skipped_reason_counts"),
         ("target kinds", "target_kind_counts"),
         ("timeframes", "timeframe_counts"),
     )

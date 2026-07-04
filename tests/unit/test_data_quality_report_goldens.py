@@ -661,10 +661,14 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
 def _assert_fingerprint_coverage(payload: dict[str, JSONValue]) -> None:
     assert set(payload) == {
         "cache_source_counts",
+        "discovered_target_count",
+        "evaluated_fingerprint_target_count",
         "fingerprint_target_count",
         "parsed_non_empty_coverage_count",
         "rule_id",
         "schema_version",
+        "skipped_fingerprint_target_count",
+        "skipped_reason_counts",
         "source_kind_counts",
         "supported_readable_count",
         "target_kind_counts",
@@ -678,13 +682,17 @@ def _assert_fingerprint_coverage(payload: dict[str, JSONValue]) -> None:
     assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
     for key in (
         "fingerprint_target_count",
+        "discovered_target_count",
+        "evaluated_fingerprint_target_count",
         "parsed_non_empty_coverage_count",
+        "skipped_fingerprint_target_count",
         "supported_readable_count",
         "unavailable_count",
     ):
         assert isinstance(payload[key], int)
     for key in (
         "cache_source_counts",
+        "skipped_reason_counts",
         "source_kind_counts",
         "target_kind_counts",
         "timeframe_counts",
