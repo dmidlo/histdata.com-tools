@@ -247,9 +247,17 @@ _CLEANUP_ALLOWED_KEYS = (
     | set(_CLEANUP_SCALAR_ARGS)
     | set(_CLEANUP_LIST_ARGS)
 )
-_QUALITY_COMMANDS = {"doctor-evidence", "evidence", "inspect-evidence"}
+_QUALITY_COMMANDS = {
+    "catalog",
+    "doctor-evidence",
+    "evidence",
+    "inspect-evidence",
+    "remediation-audit",
+    "remediation-catalog",
+}
 _QUALITY_ALIASES = {
     **_COMMAND_KEY_ALIASES,
+    "code_limit": "code_limit",
     "data_directory": "target_root",
     "evidence": "evidence_path",
     "instrument_group": "pair_groups",
@@ -266,26 +274,37 @@ _QUALITY_ALIASES = {
     "quality_preflight_evidence_path": "evidence_path",
     "quality_preflight_evidence_stale_ok": "allow_stale_evidence",
     "quality_target": "target_root",
+    "remediation_catalog_report": "report_paths",
+    "report": "report_paths",
+    "reports": "report_paths",
+    "rule_limit": "rule_limit",
+    "source_limit": "source_limit",
     "symbol_group": "pair_groups",
     "symbol_groups": "pair_groups",
     "target": "target_root",
+    "target_axis_limit": "target_axis_limit",
 }
 _QUALITY_TRUE_FLAG_ARGS = {
     "allow_stale_evidence": "--quality-preflight-evidence-stale-ok",
     "json": "--json",
 }
 _QUALITY_SCALAR_ARGS = {
+    "code_limit": "--code-limit",
     "evidence_max_age_seconds": (
         "--quality-preflight-evidence-max-age-seconds"
     ),
     "evidence_path": "--evidence",
+    "rule_limit": "--rule-limit",
+    "source_limit": "--source-limit",
     "target_root": "--target",
+    "target_axis_limit": "--target-axis-limit",
 }
 _QUALITY_LIST_ARGS = {
     "formats": "--formats",
     "pair_groups": "--pair-groups",
     "pairs": "--pairs",
     "quality_check_groups": "--quality-checks",
+    "report_paths": "--report",
     "timeframes": "--timeframes",
 }
 _QUALITY_ALLOWED_KEYS = (

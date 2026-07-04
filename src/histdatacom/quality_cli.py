@@ -18,6 +18,16 @@ from histdatacom.data_quality.preflight import (
     format_quality_preflight_evidence_inspection,
     inspect_quality_preflight_evidence,
 )
+from histdatacom.data_quality.remediation_audit import (
+    DEFAULT_REMEDIATION_CATALOG_AUDIT_CODE_LIMIT,
+    DEFAULT_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+    DEFAULT_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
+    DEFAULT_REMEDIATION_CATALOG_AUDIT_TARGET_AXIS_LIMIT,
+    audit_remediation_catalog_report_paths,
+    format_remediation_catalog_audit,
+    remediation_catalog_audit_has_warning_error_gaps,
+    remediation_catalog_audit_to_json,
+)
 from histdatacom.fx_enums import (
     Format,
     Pairs,
@@ -137,6 +147,68 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit the machine-readable inspection payload",
     )
+    catalog = subparsers.add_parser(
+        "remediation-catalog",
+        aliases=("catalog", "remediation-audit"),
+        help="audit remediation catalog completeness",
+    )
+    catalog.add_argument(
+        "--report",
+        dest="report_paths",
+        action="extend",
+        nargs="+",
+        default=[],
+        metavar="PATH",
+        help=(
+            "saved quality JSON report to include as representative "
+            "remediation-coverage evidence; repeat for multiple reports"
+        ),
+    )
+    catalog.add_argument(
+        "--code-limit",
+        dest="code_limit",
+        type=_integer_limit,
+        default=DEFAULT_REMEDIATION_CATALOG_AUDIT_CODE_LIMIT,
+        metavar="N",
+        help=(
+            "maximum unmapped finding-code groups to include; use -1 for all"
+        ),
+    )
+    catalog.add_argument(
+        "--rule-limit",
+        dest="rule_limit",
+        type=_integer_limit,
+        default=DEFAULT_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+        metavar="N",
+        help="maximum rule-id count groups to include; use -1 for all",
+    )
+    catalog.add_argument(
+        "--source-limit",
+        dest="source_limit",
+        type=_integer_limit,
+        default=DEFAULT_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
+        metavar="N",
+        help=(
+            "maximum source examples to include per finding code; "
+            "use -1 for all"
+        ),
+    )
+    catalog.add_argument(
+        "--target-axis-limit",
+        dest="target_axis_limit",
+        type=_integer_limit,
+        default=DEFAULT_REMEDIATION_CATALOG_AUDIT_TARGET_AXIS_LIMIT,
+        metavar="N",
+        help=(
+            "maximum target-axis samples to keep from report coverage; "
+            "use -1 for all"
+        ),
+    )
+    catalog.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the machine-readable audit payload",
+    )
     return parser
 
 
@@ -150,31 +222,56 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
         return 1
     configure_logging(args.verbosity)
-    if args.quality_command not in {
+    if args.quality_command in {
         "evidence",
         "inspect-evidence",
         "doctor-evidence",
     }:
-        parser.error(f"unsupported quality command: {args.quality_command}")
+        payload = inspect_quality_preflight_evidence(
+            args.target_root,
+            args.evidence_path,
+            pairs=args.pairs,
+            pair_groups=args.pair_groups,
+            formats=args.formats,
+            timeframes=args.timeframes,
+            quality_check_groups=args.quality_check_groups,
+            evidence_max_age_seconds=args.evidence_max_age_seconds,
+            allow_stale_evidence=args.allow_stale_evidence,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+        else:
+            print(
+                format_quality_preflight_evidence_inspection(payload)
+            )  # noqa:T201
+        return 0 if payload.get("accepted") is True else 1
 
-    payload = inspect_quality_preflight_evidence(
-        args.target_root,
-        args.evidence_path,
-        pairs=args.pairs,
-        pair_groups=args.pair_groups,
-        formats=args.formats,
-        timeframes=args.timeframes,
-        quality_check_groups=args.quality_check_groups,
-        evidence_max_age_seconds=args.evidence_max_age_seconds,
-        allow_stale_evidence=args.allow_stale_evidence,
-    )
-    if args.json:
-        print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
-    else:
-        print(
-            format_quality_preflight_evidence_inspection(payload)
-        )  # noqa:T201
-    return 0 if payload.get("accepted") is True else 1
+    if args.quality_command in {
+        "remediation-catalog",
+        "catalog",
+        "remediation-audit",
+    }:
+        payload = audit_remediation_catalog_report_paths(
+            args.report_paths,
+            code_limit=args.code_limit,
+            rule_limit=args.rule_limit,
+            source_limit=args.source_limit,
+            target_axis_limit=args.target_axis_limit,
+        )
+        if args.json:
+            print(  # noqa:T201
+                remediation_catalog_audit_to_json(payload),
+                end="",
+            )
+        else:
+            print(format_remediation_catalog_audit(payload))  # noqa:T201
+        return (
+            1
+            if remediation_catalog_audit_has_warning_error_gaps(payload)
+            else 0
+        )
+
+    parser.error(f"unsupported quality command: {args.quality_command}")
 
 
 def _non_negative_int(value: str) -> int:
@@ -186,4 +283,16 @@ def _non_negative_int(value: str) -> int:
         ) from exc
     if parsed < 0:
         raise argparse.ArgumentTypeError("value must be non-negative")
+    return parsed
+
+
+def _integer_limit(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} is not an integer"
+        ) from exc
+    if parsed < -1:
+        raise argparse.ArgumentTypeError("value must be -1 or greater")
     return parsed
