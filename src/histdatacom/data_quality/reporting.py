@@ -19,7 +19,9 @@ from histdatacom.data_quality.contracts import (
 )
 from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     series_fingerprint_coverage_summary,
+    series_fingerprint_topology_summary,
 )
 from histdatacom.publication_safety import (
     publish_safe_json_mapping,
@@ -172,6 +174,13 @@ def quality_report_payload(
             fingerprint_coverage
         )
         payload["metadata"] = metadata
+    fingerprint_topology = _fingerprint_topology_summary(report)
+    if fingerprint_topology is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY] = (
+            fingerprint_topology
+        )
+        payload["metadata"] = metadata
     payload["schema_version"] = QUALITY_REPORT_SCHEMA_VERSION
     if not publish_safe:
         return payload
@@ -264,6 +273,11 @@ def format_quality_console_summary(
                 _fingerprint_coverage_summary(report)
             )
         )
+        lines.extend(
+            format_fingerprint_topology_summary_lines(
+                _fingerprint_topology_summary(report)
+            )
+        )
 
     sections = (
         (QualityStatus.CLEAN, "Clean files"),
@@ -301,6 +315,7 @@ def bounded_quality_payload(
     target_summaries = report.target_summaries
     cross_target_summaries = _cross_target_summaries(report)
     fingerprint_coverage = _fingerprint_coverage_summary(report)
+    fingerprint_topology = _fingerprint_topology_summary(report)
     payload: dict[str, JSONValue] = {
         "operation": operation,
         "check_groups": list(check_groups),
@@ -339,6 +354,8 @@ def bounded_quality_payload(
     }
     if fingerprint_coverage is not None:
         payload["fingerprint_coverage"] = fingerprint_coverage
+    if fingerprint_topology is not None:
+        payload["fingerprint_topology"] = fingerprint_topology
     if not publish_safe:
         return payload
     return _publish_safe_mapping(payload)
@@ -494,6 +511,18 @@ def _fingerprint_coverage_summary(
     return series_fingerprint_coverage_summary(report.findings)
 
 
+def _fingerprint_topology_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return fingerprint topology metadata from the report or findings."""
+    summary = report.metadata.get(
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY
+    )
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return series_fingerprint_topology_summary(report.findings)
+
+
 def _fingerprint_group_selected(check_groups: tuple[str, ...]) -> bool:
     normalized = {group.strip().lower() for group in check_groups if group}
     if not normalized:
@@ -537,6 +566,91 @@ def _format_fingerprint_coverage_lines(
     return lines
 
 
+def format_fingerprint_topology_summary_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable lines for fingerprint topology."""
+    if summary is None:
+        return []
+    lines = [
+        "",
+        "Fingerprint topology",
+        (
+            "- targets: "
+            f"{_int_metadata(summary, 'target_count')} "
+            f"included: {_int_metadata(summary, 'included_target_count')} "
+            "regular: "
+            f"{_count_metadata(summary.get('status_counts'), 'regular')} "
+            "irregular: "
+            f"{_count_metadata(summary.get('status_counts'), 'irregular')} "
+            "unavailable: "
+            f"{_count_metadata(summary.get('status_counts'), 'unavailable')}"
+        ),
+    ]
+    omitted_count = _int_metadata(summary, "omitted_target_count")
+    if omitted_count:
+        lines.append(f"- omitted: {omitted_count}")
+    target_summaries = summary.get("target_summaries")
+    if isinstance(target_summaries, list):
+        for item in target_summaries:
+            if isinstance(item, Mapping):
+                lines.append(
+                    f"- {_format_fingerprint_topology_target_line(item)}"
+                )
+    return lines
+
+
+def _format_fingerprint_topology_target_line(
+    summary: Mapping[str, JSONValue],
+) -> str:
+    axis = _mapping_payload(summary.get("target_axis"))
+    data_format = _string_metadata(axis, "data_format")
+    symbol = _string_metadata(axis, "symbol")
+    timeframe = _string_metadata(axis, "timeframe")
+    period = _string_metadata(axis, "period")
+    kind = _string_metadata(axis, "kind")
+    duplicate_count = _int_metadata(summary, "duplicate_timestamp_count")
+    duplicate_text = (
+        "no duplicates"
+        if duplicate_count == 0
+        else f"duplicates={duplicate_count}"
+    )
+    cache_source = _optional_string_metadata(summary, "cache_source")
+    cache_text = f", cache={cache_source}" if cache_source else ""
+    return (
+        f"{data_format} {symbol} {timeframe} {period} {kind}: "
+        f"{_string_metadata(summary, 'status')}, "
+        f"{_string_metadata(summary, 'sampling_basis')}, "
+        f"{_int_metadata(summary, 'row_count')} rows, "
+        f"{_optional_int_text(summary.get('parsed_row_count'))} parsed, "
+        f"{duplicate_text}, "
+        f"non-monotonic={_int_metadata(summary, 'non_monotonic_count')}, "
+        "median interval "
+        f"{_format_duration_ms(summary.get('median_interval_ms'))}, "
+        f"max gap {_format_duration_ms(summary.get('max_gap_ms'))}, "
+        f"{_int_metadata(summary, 'expected_session_closure_count')} "
+        "expected closures, "
+        f"{_int_metadata(summary, 'suspicious_gap_count')} suspicious gaps, "
+        f"weekend activity={_int_metadata(summary, 'weekend_activity_count')}, "
+        f"computed_from={_string_metadata(summary, 'computed_from')}"
+        f"{cache_text}"
+    )
+
+
+def _count_metadata(value: JSONValue, key: str) -> int:
+    if not isinstance(value, Mapping):
+        return 0
+    item = value.get(key)
+    if isinstance(item, bool) or item is None:
+        return 0
+    if isinstance(item, (int, float)):
+        return int(item)
+    try:
+        return int(str(item))
+    except ValueError:
+        return 0
+
+
 def _int_metadata(value: Mapping[str, JSONValue], key: str) -> int:
     item = value.get(key)
     if isinstance(item, bool) or item is None:
@@ -547,6 +661,50 @@ def _int_metadata(value: Mapping[str, JSONValue], key: str) -> int:
         return int(str(item))
     except ValueError:
         return 0
+
+
+def _string_metadata(value: Mapping[str, JSONValue], key: str) -> str:
+    text = str(value.get(key, "") or "").strip()
+    return text or "unknown"
+
+
+def _optional_string_metadata(
+    value: Mapping[str, JSONValue],
+    key: str,
+) -> str:
+    item = value.get(key)
+    if item is None or isinstance(item, bool):
+        return ""
+    return str(item).strip()
+
+
+def _optional_int_text(value: object) -> str:
+    if isinstance(value, bool) or value is None:
+        return "unknown"
+    if isinstance(value, (int, float)):
+        return str(int(value))
+    text = str(value).strip()
+    return text or "unknown"
+
+
+def _format_duration_ms(value: object) -> str:
+    if isinstance(value, bool) or value is None:
+        return "unavailable"
+    if isinstance(value, (int, float)):
+        milliseconds = int(value)
+    else:
+        try:
+            milliseconds = int(str(value))
+        except ValueError:
+            return "unavailable"
+    absolute = abs(milliseconds)
+    if absolute >= 86_400_000 and milliseconds % 86_400_000 == 0:
+        return f"{milliseconds // 86_400_000}d"
+    if absolute >= 3_600_000 and milliseconds % 3_600_000 == 0:
+        return f"{milliseconds // 3_600_000}h"
+    if absolute >= 1_000 and milliseconds % 1_000 == 0:
+        return f"{milliseconds // 1_000}s"
+    return f"{milliseconds}ms"
 
 
 def _format_count_metadata(value: JSONValue) -> str:

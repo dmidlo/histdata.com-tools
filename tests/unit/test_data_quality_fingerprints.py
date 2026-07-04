@@ -18,6 +18,8 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
     HistDataSeriesFingerprintRule,
     QualityFinding,
     QualitySeverity,
@@ -28,6 +30,7 @@ from histdatacom.data_quality import (
     quality_run_rules_for_groups,
     run_quality_assessment,
     series_fingerprint_coverage_summary,
+    series_fingerprint_topology_summary,
 )
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
@@ -466,6 +469,121 @@ def test_fingerprint_coverage_summary_reports_duplicate_archive_skip(
     }
 
 
+def test_series_fingerprint_topology_summary_reports_actionable_targets(
+    tmp_path: Path,
+) -> None:
+    """Run metadata should summarize topology without requiring JSON spelunking."""
+    clean_target = _discovered_target(
+        write_ascii_case(tmp_path / "clean", CLEAN_M1_CASE)
+    )
+    duplicate_target = _discovered_target(
+        write_ascii_case(
+            tmp_path / "duplicate",
+            case_by_name("m1_duplicate_timestamp"),
+        )
+    )
+    suspicious_target = _discovered_target(
+        write_ascii_case(tmp_path / "gap", _suspicious_gap_case())
+    )
+    expected_closure_target = _discovered_target(
+        write_ascii_case(
+            tmp_path / "expected-closure",
+            _expected_weekend_closure_case(),
+        )
+    )
+    cache_path = tmp_path / "direct-cache" / CACHE_FILENAME
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    m1_batch = parse_ascii_lines(M1, CLEAN_M1_ROWS)
+    write_polars_cache(to_polars_frame(m1_batch), cache_path)
+    cache_target = QualityTarget(
+        path=str(cache_path),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    report = run_quality_assessment(
+        (
+            clean_target,
+            duplicate_target,
+            suspicious_target,
+            expected_closure_target,
+            cache_target,
+        ),
+        quality_rules_for_groups(("fingerprint",)),
+    )
+
+    summary = _mapping(
+        report.metadata[TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY]
+    )
+
+    assert summary == series_fingerprint_topology_summary(report.findings)
+    assert summary["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION
+    )
+    assert summary["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    assert summary["target_count"] == 5
+    assert summary["included_target_count"] == 5
+    assert summary["omitted_target_count"] == 0
+    assert summary["truncated"] is False
+    assert summary["status_counts"] == {"irregular": 2, "regular": 3}
+    assert summary["computed_from_counts"] == {
+        "direct_cache": 1,
+        "text_scan": 4,
+    }
+    assert summary["cache_source_counts"] == {"direct": 1}
+    assert summary["sampling_basis_counts"] == {"observed_sequence": 5}
+    assert summary["flag_counts"] == {
+        "cache_backed": 1,
+        "duplicate_timestamps": 1,
+        "expected_session_closures": 1,
+        "suspicious_gaps": 1,
+    }
+
+    targets = _list(summary["target_summaries"])
+    clean = _target_summary_with_status(
+        targets,
+        "regular",
+        excluded_flags=("cache_backed", "expected_session_closures"),
+    )
+    assert clean["row_count"] == 3
+    assert clean["parsed_row_count"] == 3
+    assert clean["duplicate_timestamp_count"] == 0
+    assert clean["non_monotonic_count"] == 0
+    assert clean["median_interval_ms"] == 60_000
+    assert clean["max_gap_ms"] == 60_000
+    assert clean["suspicious_gap_count"] == 0
+    assert clean["expected_session_closure_count"] == 0
+    assert clean["weekend_activity_count"] == 0
+    assert clean["sampling_basis"] == "observed_sequence"
+    assert clean["computed_from"] == "text_scan"
+
+    duplicate = _target_summary_with_flag(targets, "duplicate_timestamps")
+    assert duplicate["status"] == "irregular"
+    assert duplicate["duplicate_timestamp_count"] == 1
+
+    suspicious = _target_summary_with_flag(targets, "suspicious_gaps")
+    assert suspicious["status"] == "irregular"
+    assert suspicious["suspicious_gap_count"] == 1
+    assert suspicious["max_gap_ms"] == 600_000
+
+    expected = _target_summary_with_flag(
+        targets,
+        "expected_session_closures",
+    )
+    assert expected["status"] == "regular"
+    assert expected["expected_session_closure_count"] == 1
+    assert expected["max_gap_ms"] == 172_800_000
+
+    cache = _target_summary_with_flag(targets, "cache_backed")
+    assert cache["status"] == "regular"
+    assert cache["computed_from"] == "direct_cache"
+    assert cache["cache_source"] == "direct"
+
+    assert json_safe_path_strings(summary)
+
+
 def test_fingerprint_id_excludes_source_path_volatility(
     tmp_path: Path,
 ) -> None:
@@ -510,6 +628,14 @@ def test_fingerprint_constants_are_stable() -> None:
         == "histdatacom.time-series-fingerprint.v1"
     )
     assert TIME_SERIES_FINGERPRINT_METADATA_KEY == "time_series_fingerprint"
+    assert (
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-topology-summary.v1"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY
+        == "time_series_fingerprint_topology_summary"
+    )
     assert DEFAULT_FINGERPRINT_QUANTILES == (
         0.01,
         0.05,
@@ -553,6 +679,62 @@ def _fingerprint_payload(
 def _mapping(value: Any) -> dict[str, Any]:
     assert isinstance(value, dict)
     return value
+
+
+def _list(value: Any) -> list[Any]:
+    assert isinstance(value, list)
+    return value
+
+
+def _target_summary_with_flag(
+    targets: list[Any],
+    flag: str,
+) -> dict[str, Any]:
+    matches = [
+        _mapping(target)
+        for target in targets
+        if flag in _list(_mapping(target)["flags"])
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _target_summary_with_status(
+    targets: list[Any],
+    status: str,
+    *,
+    excluded_flags: tuple[str, ...],
+) -> dict[str, Any]:
+    for target in targets:
+        item = _mapping(target)
+        flags = set(_list(item["flags"]))
+        if item["status"] == status and flags.isdisjoint(excluded_flags):
+            return item
+    raise AssertionError(f"missing topology target status {status!r}")
+
+
+def _expected_weekend_closure_case() -> HistDataAsciiCase:
+    return HistDataAsciiCase(
+        name="m1_expected_weekend_closure",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202_WEEKEND.csv",
+        rows=(
+            "20120203 170000;1.306600;1.306600;1.306560;1.306560;0",
+            "20120205 170000;1.306570;1.306570;1.306470;1.306560;17",
+        ),
+    )
+
+
+def _suspicious_gap_case() -> HistDataAsciiCase:
+    return HistDataAsciiCase(
+        name="m1_suspicious_gap",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202_GAP.csv",
+        rows=(
+            "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
+            "20120201 001000;1.306570;1.306570;1.306470;1.306560;17",
+        ),
+    )
 
 
 def json_safe_path_strings(value: Any) -> bool:

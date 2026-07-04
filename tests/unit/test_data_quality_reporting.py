@@ -9,6 +9,7 @@ from histdatacom.data_quality import (
     QUALITY_REPORT_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     QualityExitPolicy,
     QualityFinding,
     QualityLocation,
@@ -295,6 +296,54 @@ def test_quality_report_payload_adds_fingerprint_coverage_metadata(
     }
 
 
+def test_quality_report_payload_adds_fingerprint_topology_metadata(
+    tmp_path: Path,
+) -> None:
+    """Fingerprint reports should serialize human-readable topology metadata."""
+    payload = quality_report_payload(_fingerprint_report(tmp_path))
+
+    summary = payload["metadata"][
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY
+    ]
+    target_summaries = summary["target_summaries"]
+
+    assert summary["target_count"] == 2
+    assert summary["included_target_count"] == 2
+    assert summary["omitted_target_count"] == 0
+    assert summary["status_counts"] == {
+        "regular": 1,
+        "unavailable": 1,
+    }
+    assert summary["computed_from_counts"] == {
+        "direct_cache": 1,
+        "unavailable": 1,
+    }
+    assert summary["cache_source_counts"] == {"direct": 1}
+    assert summary["flag_counts"] == {
+        "cache_backed": 1,
+        "unavailable_topology": 1,
+    }
+    assert target_summaries[0]["target_axis"] == {
+        "data_format": "ascii",
+        "timeframe": "M1",
+        "symbol": "EURUSD",
+        "period": "201202",
+        "kind": "cache",
+    }
+    assert target_summaries[0]["row_count"] == 3
+    assert target_summaries[0]["parsed_row_count"] == 3
+    assert target_summaries[0]["duplicate_timestamp_count"] == 0
+    assert target_summaries[0]["non_monotonic_count"] == 0
+    assert target_summaries[0]["median_interval_ms"] == 60_000
+    assert target_summaries[0]["max_gap_ms"] == 60_000
+    assert target_summaries[0]["suspicious_gap_count"] == 0
+    assert target_summaries[0]["expected_session_closure_count"] == 0
+    assert target_summaries[0]["weekend_activity_count"] == 0
+    assert target_summaries[0]["sampling_basis"] == "observed_sequence"
+    assert target_summaries[0]["computed_from"] == "direct_cache"
+    assert target_summaries[0]["cache_source"] == "direct"
+
+
 def test_fingerprint_console_summary_reports_coverage_counts(
     tmp_path: Path,
 ) -> None:
@@ -314,6 +363,36 @@ def test_fingerprint_console_summary_reports_coverage_counts(
     assert "- unavailable reasons: unsupported_target_kind=1" in output
     assert "- target kinds: cache=1, spreadsheet=1" in output
     assert "- timeframes: M1=2" in output
+
+
+def test_fingerprint_console_summary_reports_topology_lines(
+    tmp_path: Path,
+) -> None:
+    """Human output should summarize per-target topology for operators."""
+    output = format_quality_console_summary(
+        _fingerprint_report(tmp_path),
+        check_groups=("fingerprint",),
+    )
+
+    assert "Fingerprint topology" in output
+    assert (
+        "- targets: 2 included: 2 regular: 1 irregular: 0 unavailable: 1"
+    ) in output
+    assert (
+        "- ascii EURUSD M1 201202 cache: regular, observed_sequence, "
+        "3 rows, 3 parsed, no duplicates, non-monotonic=0, "
+        "median interval 60s, max gap 60s, 0 expected closures, "
+        "0 suspicious gaps, weekend activity=0, "
+        "computed_from=direct_cache, cache=direct"
+    ) in output
+    assert (
+        "- ascii EURUSD M1 201202 spreadsheet: unavailable, unavailable, "
+        "0 rows, unknown parsed, no duplicates, non-monotonic=0, "
+        "median interval unavailable, max gap unavailable, "
+        "0 expected closures, 0 suspicious gaps, weekend activity=0, "
+        "computed_from=unavailable"
+    ) in output
+    assert "cache=unknown" not in output
 
 
 def test_fingerprint_console_summary_reports_skipped_targets(
@@ -365,6 +444,30 @@ def test_bounded_quality_payload_includes_fingerprint_coverage(
         "cache": 1,
         "unavailable": 1,
     }
+
+
+def test_bounded_quality_payload_includes_fingerprint_topology(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration payloads should expose topology summaries."""
+    report = _fingerprint_report(tmp_path)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("fingerprint",),
+        discovery={"roots": [str(tmp_path)], "target_count": 2},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+
+    assert payload["fingerprint_topology"]["status_counts"] == {
+        "regular": 1,
+        "unavailable": 1,
+    }
+    assert (
+        payload["fingerprint_topology"]["target_summaries"][0]["computed_from"]
+        == "direct_cache"
+    )
 
 
 def test_quality_exit_policy_applies_error_warning_and_never_modes(
@@ -473,6 +576,21 @@ def _fingerprint_report(tmp_path: Path) -> QualityReport:
                     "row_count": 3,
                     "parsed_row_count": 3,
                 },
+                "temporal_topology": {
+                    "row_count": 3,
+                    "parsed_row_count": 3,
+                    "invalid_timestamp_count": 0,
+                    "duplicate_timestamp_count": 0,
+                    "non_monotonic_count": 0,
+                    "median_interval_ms": 60_000,
+                    "max_gap_ms": 60_000,
+                    "suspicious_gap_count": 0,
+                    "expected_session_closure_count": 0,
+                    "weekend_activity_count": 0,
+                    "sampling_basis": "observed_sequence",
+                    "computed_from": "direct_cache",
+                    "cache_source": "direct",
+                },
                 "source": {
                     "kind": "cache",
                     "cache_source": "direct",
@@ -495,6 +613,21 @@ def _fingerprint_report(tmp_path: Path) -> QualityReport:
                 "coverage": {
                     "row_count": 0,
                     "parsed_row_count": None,
+                },
+                "temporal_topology": {
+                    "row_count": 0,
+                    "parsed_row_count": None,
+                    "invalid_timestamp_count": 0,
+                    "duplicate_timestamp_count": 0,
+                    "non_monotonic_count": 0,
+                    "median_interval_ms": None,
+                    "max_gap_ms": None,
+                    "suspicious_gap_count": 0,
+                    "expected_session_closure_count": 0,
+                    "weekend_activity_count": 0,
+                    "sampling_basis": "unavailable",
+                    "computed_from": "unavailable",
+                    "cache_source": None,
                 },
                 "source": {
                     "kind": "unavailable",

@@ -26,6 +26,51 @@
       },
       "unavailable_count": 0,
       "unavailable_reason_counts": {}
+    },
+    "time_series_fingerprint_topology_summary": {
+      "cache_source_counts": {},
+      "computed_from_counts": {
+        "text_scan": 1
+      },
+      "flag_counts": {},
+      "included_target_count": 1,
+      "omitted_target_count": 0,
+      "rule_id": "fingerprint.series",
+      "sampling_basis_counts": {
+        "observed_sequence": 1
+      },
+      "schema_version": "histdatacom.time-series-fingerprint-topology-summary.v1",
+      "status_counts": {
+        "regular": 1
+      },
+      "target_count": 1,
+      "target_summaries": [
+        {
+          "cache_source": null,
+          "computed_from": "text_scan",
+          "duplicate_timestamp_count": 0,
+          "expected_session_closure_count": 0,
+          "flags": [],
+          "invalid_timestamp_count": 0,
+          "max_gap_ms": 60000,
+          "median_interval_ms": 60000,
+          "non_monotonic_count": 0,
+          "parsed_row_count": 3,
+          "row_count": 3,
+          "sampling_basis": "observed_sequence",
+          "status": "regular",
+          "suspicious_gap_count": 0,
+          "target_axis": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "M1"
+          },
+          "weekend_activity_count": 0
+        }
+      ],
+      "truncated": false
     }
   },
   "rule_results": [

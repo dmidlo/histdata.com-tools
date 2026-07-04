@@ -52,6 +52,9 @@ from histdatacom.data_quality.preflight import (
     write_quality_preflight_markdown_report,
     write_quality_preflight_report,
 )
+from histdatacom.data_quality.reporting import (
+    format_fingerprint_topology_summary_lines,
+)
 from histdatacom.fx_enums import expand_pair_selection
 from histdatacom.repository_output import (
     print_repository_failure,
@@ -1034,6 +1037,11 @@ def _format_orchestration_quality_console_summary(
         lines.append(f"decision: {decision['reason']}")
     if int(summary.get("target_count", 0) or 0) == 0:
         lines.append("No data quality targets discovered.")
+    lines.extend(
+        format_fingerprint_topology_summary_lines(
+            _mapping_from_payload(quality_payload.get("fingerprint_topology"))
+        )
+    )
     lines.extend(_format_quality_target_sections(quality_payload))
     return "\n".join(lines)
 

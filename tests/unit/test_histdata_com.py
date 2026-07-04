@@ -129,6 +129,8 @@ def _orchestration_quality_result(
     exit_code: int = 0,
     report_path: str = "/tmp/quality.json",
     error: str = "",
+    check_groups: list[str] | None = None,
+    fingerprint_topology: dict[str, object] | None = None,
 ) -> JobResult:
     """Return an orchestration result containing bounded quality metadata."""
     quality_status = (
@@ -139,7 +141,7 @@ def _orchestration_quality_result(
     )
     quality = {
         "operation": "data-quality",
-        "check_groups": ["inventory"],
+        "check_groups": check_groups or ["inventory"],
         "summary": {
             "target_count": target_count,
             "rule_count": 0,
@@ -198,6 +200,8 @@ def _orchestration_quality_result(
             },
         },
     }
+    if fingerprint_topology is not None:
+        quality["fingerprint_topology"] = fingerprint_topology
     if error:
         quality = {
             "operation": "data-quality",
@@ -849,6 +853,87 @@ def test_data_quality_cli_submits_quality_request_to_orchestration(
     }
     assert "Data quality assessment" in output
     assert f"targets: {expected_count}" in output
+
+
+def test_data_quality_cli_renders_fingerprint_topology_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Quality CLI should render bounded fingerprint topology summaries."""
+    import histdatacom.histdata_com as histdata_com
+
+    root = tmp_path / "quality"
+    root.mkdir()
+    write_ascii_case(root, CLEAN_M1_CASE)
+
+    def fake_submit(request, **kwargs: object) -> JobResult:
+        return _orchestration_quality_result(
+            check_groups=["fingerprint"],
+            fingerprint_topology={
+                "target_count": 1,
+                "included_target_count": 1,
+                "omitted_target_count": 0,
+                "status_counts": {"regular": 1},
+                "target_summaries": [
+                    {
+                        "target_axis": {
+                            "data_format": "ascii",
+                            "timeframe": "M1",
+                            "symbol": "EURUSD",
+                            "period": "201202",
+                            "kind": "csv",
+                        },
+                        "row_count": 3,
+                        "parsed_row_count": 3,
+                        "duplicate_timestamp_count": 0,
+                        "non_monotonic_count": 0,
+                        "median_interval_ms": 60_000,
+                        "max_gap_ms": 60_000,
+                        "suspicious_gap_count": 0,
+                        "expected_session_closure_count": 0,
+                        "weekend_activity_count": 0,
+                        "sampling_basis": "observed_sequence",
+                        "computed_from": "text_scan",
+                        "cache_source": None,
+                        "status": "regular",
+                        "flags": [],
+                    }
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-checks",
+            "fingerprint",
+            "--quality-target",
+            str(root),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert "Fingerprint topology" in output
+    assert (
+        "- targets: 1 included: 1 regular: 1 irregular: 0 unavailable: 0"
+    ) in output
+    assert (
+        "- ascii EURUSD M1 201202 csv: regular, observed_sequence, "
+        "3 rows, 3 parsed, no duplicates, non-monotonic=0, "
+        "median interval 60s, max gap 60s, 0 expected closures, "
+        "0 suspicious gaps, weekend activity=0, computed_from=text_scan"
+    ) in output
 
 
 def test_data_quality_cli_missing_path_reports_orchestration_failure(

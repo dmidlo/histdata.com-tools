@@ -38,9 +38,15 @@ TIME_SERIES_FINGERPRINT_SCHEMA_VERSION = (
 TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-coverage.v1"
 )
+TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-topology-summary.v1"
+)
 TIME_SERIES_FINGERPRINT_METADATA_KEY = "time_series_fingerprint"
 TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY = (
     "time_series_fingerprint_coverage"
+)
+TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY = (
+    "time_series_fingerprint_topology_summary"
 )
 SERIES_FINGERPRINT_RULE_ID = "fingerprint.series"
 CROSS_SERIES_FINGERPRINT_RULE_ID = "fingerprint.cross_series"
@@ -61,6 +67,7 @@ DEFAULT_FINGERPRINT_ROLLING_WINDOWS = (60, 240, 1440)
 DEFAULT_FINGERPRINT_HISTOGRAM_BINS = 32
 DEFAULT_FINGERPRINT_MAX_ROWS = 1_000_000
 DEFAULT_FINGERPRINT_ROUNDING_DIGITS = 12
+DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT = 128
 SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES = (M1, TICK)
 SUPPORTED_SERIES_FINGERPRINT_KINDS = (
     QualityTargetKind.CSV,
@@ -242,6 +249,77 @@ def series_fingerprint_coverage_summary(
     }
 
 
+def series_fingerprint_topology_summary(
+    findings: Iterable[QualityFinding],
+    *,
+    target_limit: int = DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
+) -> dict[str, JSONValue] | None:
+    """Return bounded target summaries for fingerprint timestamp topology."""
+    target_summaries: list[dict[str, JSONValue]] = []
+
+    for finding in findings:
+        if finding.rule_id != SERIES_FINGERPRINT_RULE_ID:
+            continue
+        payload = finding.metadata.get(TIME_SERIES_FINGERPRINT_METADATA_KEY)
+        if not isinstance(payload, Mapping):
+            continue
+        topology = _payload_mapping(payload.get("temporal_topology"))
+        if not topology:
+            continue
+        target_axis = _payload_mapping(payload.get("target_axis"))
+        target_summaries.append(
+            _topology_target_summary(finding, target_axis, topology)
+        )
+
+    if not target_summaries:
+        return None
+
+    status_counts = Counter(
+        _summary_key(item.get("status")) for item in target_summaries
+    )
+    computed_from_counts = Counter(
+        _summary_key(item.get("computed_from")) for item in target_summaries
+    )
+    sampling_basis_counts = Counter(
+        _summary_key(item.get("sampling_basis")) for item in target_summaries
+    )
+    cache_source_counts = Counter(
+        _summary_key(item.get("cache_source"))
+        for item in target_summaries
+        if item.get("cache_source") is not None
+    )
+    flag_counts: Counter[str] = Counter()
+    for item in target_summaries:
+        flags = item.get("flags")
+        if isinstance(flags, list):
+            flag_counts.update(_summary_key(flag) for flag in flags)
+
+    included_source = (
+        target_summaries
+        if target_limit < 0
+        else target_summaries[:target_limit]
+    )
+    included: list[JSONValue] = [dict(item) for item in included_source]
+    omitted_count = max(0, len(target_summaries) - len(included))
+
+    return {
+        "schema_version": (
+            TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION
+        ),
+        "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "target_count": len(target_summaries),
+        "included_target_count": len(included),
+        "omitted_target_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "status_counts": _counter_payload(status_counts),
+        "computed_from_counts": _counter_payload(computed_from_counts),
+        "cache_source_counts": _counter_payload(cache_source_counts),
+        "sampling_basis_counts": _counter_payload(sampling_basis_counts),
+        "flag_counts": _counter_payload(flag_counts),
+        "target_summaries": included,
+    }
+
+
 def _series_fingerprint_payload(target: QualityTarget) -> dict[str, JSONValue]:
     payload: dict[str, JSONValue] = {
         "schema_version": TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
@@ -348,6 +426,136 @@ def _positive_count(value: object) -> bool:
         return int(str(value)) > 0
     except ValueError:
         return False
+
+
+def _topology_target_summary(
+    finding: QualityFinding,
+    target_axis: Mapping[str, JSONValue],
+    topology: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    flags = _topology_flags(topology)
+    return {
+        "target_axis": _topology_target_axis(finding, target_axis),
+        "row_count": _int_payload(topology.get("row_count")),
+        "parsed_row_count": _optional_int_payload(
+            topology.get("parsed_row_count")
+        ),
+        "invalid_timestamp_count": _int_payload(
+            topology.get("invalid_timestamp_count")
+        ),
+        "duplicate_timestamp_count": _int_payload(
+            topology.get("duplicate_timestamp_count")
+        ),
+        "non_monotonic_count": _int_payload(
+            topology.get("non_monotonic_count")
+        ),
+        "median_interval_ms": _optional_int_payload(
+            topology.get("median_interval_ms")
+        ),
+        "max_gap_ms": _optional_int_payload(topology.get("max_gap_ms")),
+        "suspicious_gap_count": _int_payload(
+            topology.get("suspicious_gap_count")
+        ),
+        "expected_session_closure_count": _int_payload(
+            topology.get("expected_session_closure_count")
+        ),
+        "weekend_activity_count": _int_payload(
+            topology.get("weekend_activity_count")
+        ),
+        "sampling_basis": _summary_key(topology.get("sampling_basis")),
+        "computed_from": _summary_key(topology.get("computed_from")),
+        "cache_source": _optional_summary_key(topology.get("cache_source")),
+        "status": _topology_status(topology),
+        "flags": flags,
+    }
+
+
+def _topology_target_axis(
+    finding: QualityFinding,
+    target_axis: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    return {
+        "data_format": _summary_key(
+            target_axis.get("data_format") or finding.target.data_format
+        ),
+        "timeframe": _summary_key(
+            target_axis.get("timeframe") or finding.target.timeframe
+        ),
+        "symbol": _summary_key(
+            target_axis.get("symbol") or finding.target.symbol
+        ),
+        "period": _summary_key(
+            target_axis.get("period") or finding.target.period
+        ),
+        "kind": _summary_key(
+            target_axis.get("kind") or finding.target.kind.value
+        ),
+    }
+
+
+def _topology_status(topology: Mapping[str, JSONValue]) -> str:
+    if _summary_key(topology.get("sampling_basis")) == "unavailable":
+        return "unavailable"
+    if _summary_key(topology.get("computed_from")) == "unavailable":
+        return "unavailable"
+    if (
+        _int_payload(topology.get("invalid_timestamp_count"))
+        or _int_payload(topology.get("duplicate_timestamp_count"))
+        or _int_payload(topology.get("non_monotonic_count"))
+        or _int_payload(topology.get("suspicious_gap_count"))
+        or _int_payload(topology.get("weekend_activity_count"))
+    ):
+        return "irregular"
+    return "regular"
+
+
+def _topology_flags(topology: Mapping[str, JSONValue]) -> list[JSONValue]:
+    flags: list[JSONValue] = []
+    computed_from = _summary_key(topology.get("computed_from"))
+    if _summary_key(topology.get("sampling_basis")) == "unavailable":
+        flags.append("unavailable_topology")
+    if computed_from in {"direct_cache", "fresh_sibling_cache"}:
+        flags.append("cache_backed")
+    if _int_payload(topology.get("invalid_timestamp_count")):
+        flags.append("invalid_timestamps")
+    if _int_payload(topology.get("duplicate_timestamp_count")):
+        flags.append("duplicate_timestamps")
+    if _int_payload(topology.get("non_monotonic_count")):
+        flags.append("non_monotonic_timestamps")
+    if _int_payload(topology.get("suspicious_gap_count")):
+        flags.append("suspicious_gaps")
+    if _int_payload(topology.get("expected_session_closure_count")):
+        flags.append("expected_session_closures")
+    if _int_payload(topology.get("weekend_activity_count")):
+        flags.append("weekend_activity")
+    return flags
+
+
+def _optional_summary_key(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _int_payload(value: object) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    try:
+        return int(str(value))
+    except ValueError:
+        return 0
+
+
+def _optional_int_payload(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    try:
+        return int(str(value))
+    except ValueError:
+        return None
 
 
 @dataclass(frozen=True, slots=True)
