@@ -19,8 +19,10 @@ from histdatacom.data_quality.contracts import (
 )
 from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     series_fingerprint_coverage_summary,
+    series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
 from histdatacom.publication_safety import (
@@ -181,6 +183,15 @@ def quality_report_payload(
             fingerprint_topology
         )
         payload["metadata"] = metadata
+    fingerprint_topology_attention = _fingerprint_topology_attention_summary(
+        report
+    )
+    if fingerprint_topology_attention is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY] = (
+            fingerprint_topology_attention
+        )
+        payload["metadata"] = metadata
     payload["schema_version"] = QUALITY_REPORT_SCHEMA_VERSION
     if not publish_safe:
         return payload
@@ -274,6 +285,11 @@ def format_quality_console_summary(
             )
         )
         lines.extend(
+            format_fingerprint_topology_attention_lines(
+                _fingerprint_topology_attention_summary(report)
+            )
+        )
+        lines.extend(
             format_fingerprint_topology_summary_lines(
                 _fingerprint_topology_summary(report)
             )
@@ -316,6 +332,9 @@ def bounded_quality_payload(
     cross_target_summaries = _cross_target_summaries(report)
     fingerprint_coverage = _fingerprint_coverage_summary(report)
     fingerprint_topology = _fingerprint_topology_summary(report)
+    fingerprint_topology_attention = _fingerprint_topology_attention_summary(
+        report
+    )
     payload: dict[str, JSONValue] = {
         "operation": operation,
         "check_groups": list(check_groups),
@@ -356,6 +375,10 @@ def bounded_quality_payload(
         payload["fingerprint_coverage"] = fingerprint_coverage
     if fingerprint_topology is not None:
         payload["fingerprint_topology"] = fingerprint_topology
+    if fingerprint_topology_attention is not None:
+        payload["fingerprint_topology_attention"] = (
+            fingerprint_topology_attention
+        )
     if not publish_safe:
         return payload
     return _publish_safe_mapping(payload)
@@ -523,6 +546,18 @@ def _fingerprint_topology_summary(
     return series_fingerprint_topology_summary(report.findings)
 
 
+def _fingerprint_topology_attention_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return fingerprint topology attention metadata."""
+    summary = report.metadata.get(
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY
+    )
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return series_fingerprint_topology_attention_summary(report.findings)
+
+
 def _fingerprint_group_selected(check_groups: tuple[str, ...]) -> bool:
     normalized = {group.strip().lower() for group in check_groups if group}
     if not normalized:
@@ -566,11 +601,68 @@ def _format_fingerprint_coverage_lines(
     return lines
 
 
+def format_fingerprint_topology_attention_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable lines for topology attention."""
+    if not summary:
+        return []
+    lines = [
+        "",
+        "Fingerprint topology attention",
+        (
+            "- targets needing attention: "
+            f"{_int_metadata(summary, 'attention_target_count')} "
+            "included: "
+            f"{_int_metadata(summary, 'included_attention_target_count')} "
+            "omitted: "
+            f"{_int_metadata(summary, 'omitted_attention_target_count')}"
+        ),
+    ]
+    target_summaries = summary.get("target_summaries")
+    if isinstance(target_summaries, list):
+        for item in target_summaries:
+            if isinstance(item, Mapping):
+                lines.append(
+                    f"- {_format_fingerprint_topology_attention_target_line(item)}"
+                )
+    return lines
+
+
+def _format_fingerprint_topology_attention_target_line(
+    summary: Mapping[str, JSONValue],
+) -> str:
+    axis = _mapping_payload(summary.get("target_axis"))
+    data_format = _string_metadata(axis, "data_format")
+    symbol = _string_metadata(axis, "symbol")
+    timeframe = _string_metadata(axis, "timeframe")
+    period = _string_metadata(axis, "period")
+    kind = _string_metadata(axis, "kind")
+    flags = _string_list_metadata(summary.get("attention_flags"))
+    flag_text = ", ".join(flags) if flags else "no actionable flags"
+    cache_source = _optional_string_metadata(summary, "cache_source")
+    cache_text = f", cache={cache_source}" if cache_source else ""
+    return (
+        f"{data_format} {symbol} {timeframe} {period} {kind}: "
+        f"{_string_metadata(summary, 'attention_level')}, "
+        f"{flag_text}, "
+        f"invalid={_int_metadata(summary, 'invalid_timestamp_count')}, "
+        f"duplicates={_int_metadata(summary, 'duplicate_timestamp_count')}, "
+        f"non-monotonic={_int_metadata(summary, 'non_monotonic_count')}, "
+        f"suspicious gaps={_int_metadata(summary, 'suspicious_gap_count')}, "
+        f"weekend activity={_int_metadata(summary, 'weekend_activity_count')}, "
+        "max gap "
+        f"{_format_duration_ms(summary.get('max_gap_ms'))}, "
+        f"computed_from={_string_metadata(summary, 'computed_from')}"
+        f"{cache_text}"
+    )
+
+
 def format_fingerprint_topology_summary_lines(
     summary: Mapping[str, JSONValue] | None,
 ) -> list[str]:
     """Return concise human-readable lines for fingerprint topology."""
-    if summary is None:
+    if not summary:
         return []
     lines = [
         "",
@@ -685,6 +777,12 @@ def _optional_int_text(value: object) -> str:
         return str(int(value))
     text = str(value).strip()
     return text or "unknown"
+
+
+def _string_list_metadata(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def _format_duration_ms(value: object) -> str:

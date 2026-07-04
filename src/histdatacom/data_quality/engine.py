@@ -15,8 +15,10 @@ from histdatacom.data_quality.contracts import (
 from histdatacom.data_quality.fingerprints import (
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     series_fingerprint_coverage_summary,
+    series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
 from histdatacom.data_quality.ticks import (
@@ -237,6 +239,15 @@ def run_quality_assessment(
         base_metadata[TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY] = (
             fingerprint_topology_summary
         )
+    fingerprint_topology_attention = (
+        series_fingerprint_topology_attention_summary(
+            (finding for result in rule_results for finding in result.findings)
+        )
+    )
+    if fingerprint_topology_attention is not None:
+        base_metadata[
+            TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY
+        ] = fingerprint_topology_attention
     run_reports_list: list[QualityReport] = []
     for run_rule_index, run_rule in enumerate(run_rule_tuple, start=1):
         _emit_quality_progress(

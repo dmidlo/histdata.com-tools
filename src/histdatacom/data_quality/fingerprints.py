@@ -41,12 +41,18 @@ TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION = (
 TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-topology-summary.v1"
 )
+TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-topology-attention.v1"
+)
 TIME_SERIES_FINGERPRINT_METADATA_KEY = "time_series_fingerprint"
 TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY = (
     "time_series_fingerprint_coverage"
 )
 TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY = (
     "time_series_fingerprint_topology_summary"
+)
+TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY = (
+    "time_series_fingerprint_topology_attention"
 )
 SERIES_FINGERPRINT_RULE_ID = "fingerprint.series"
 CROSS_SERIES_FINGERPRINT_RULE_ID = "fingerprint.cross_series"
@@ -68,11 +74,20 @@ DEFAULT_FINGERPRINT_HISTOGRAM_BINS = 32
 DEFAULT_FINGERPRINT_MAX_ROWS = 1_000_000
 DEFAULT_FINGERPRINT_ROUNDING_DIGITS = 12
 DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT = 128
+DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT = 32
 SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES = (M1, TICK)
 SUPPORTED_SERIES_FINGERPRINT_KINDS = (
     QualityTargetKind.CSV,
     QualityTargetKind.ZIP,
     QualityTargetKind.CACHE,
+)
+ACTIONABLE_TOPOLOGY_FLAGS = (
+    "unavailable_topology",
+    "invalid_timestamps",
+    "non_monotonic_timestamps",
+    "duplicate_timestamps",
+    "suspicious_gaps",
+    "weekend_activity",
 )
 
 
@@ -255,21 +270,7 @@ def series_fingerprint_topology_summary(
     target_limit: int = DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
 ) -> dict[str, JSONValue] | None:
     """Return bounded target summaries for fingerprint timestamp topology."""
-    target_summaries: list[dict[str, JSONValue]] = []
-
-    for finding in findings:
-        if finding.rule_id != SERIES_FINGERPRINT_RULE_ID:
-            continue
-        payload = finding.metadata.get(TIME_SERIES_FINGERPRINT_METADATA_KEY)
-        if not isinstance(payload, Mapping):
-            continue
-        topology = _payload_mapping(payload.get("temporal_topology"))
-        if not topology:
-            continue
-        target_axis = _payload_mapping(payload.get("target_axis"))
-        target_summaries.append(
-            _topology_target_summary(finding, target_axis, topology)
-        )
+    target_summaries = _series_fingerprint_topology_target_summaries(findings)
 
     if not target_summaries:
         return None
@@ -318,6 +319,21 @@ def series_fingerprint_topology_summary(
         "flag_counts": _counter_payload(flag_counts),
         "target_summaries": included,
     }
+
+
+def series_fingerprint_topology_attention_summary(
+    findings: Iterable[QualityFinding],
+    *,
+    target_limit: int = DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT,
+) -> dict[str, JSONValue] | None:
+    """Return bounded attention-first summaries for topology findings."""
+    target_summaries = _series_fingerprint_topology_target_summaries(findings)
+    if not target_summaries:
+        return None
+    return _topology_attention_summary_from_targets(
+        target_summaries,
+        target_limit=target_limit,
+    )
 
 
 def _series_fingerprint_payload(target: QualityTarget) -> dict[str, JSONValue]:
@@ -428,6 +444,26 @@ def _positive_count(value: object) -> bool:
         return False
 
 
+def _series_fingerprint_topology_target_summaries(
+    findings: Iterable[QualityFinding],
+) -> list[dict[str, JSONValue]]:
+    target_summaries: list[dict[str, JSONValue]] = []
+    for finding in findings:
+        if finding.rule_id != SERIES_FINGERPRINT_RULE_ID:
+            continue
+        payload = finding.metadata.get(TIME_SERIES_FINGERPRINT_METADATA_KEY)
+        if not isinstance(payload, Mapping):
+            continue
+        topology = _payload_mapping(payload.get("temporal_topology"))
+        if not topology:
+            continue
+        target_axis = _payload_mapping(payload.get("target_axis"))
+        target_summaries.append(
+            _topology_target_summary(finding, target_axis, topology)
+        )
+    return target_summaries
+
+
 def _topology_target_summary(
     finding: QualityFinding,
     target_axis: Mapping[str, JSONValue],
@@ -529,6 +565,158 @@ def _topology_flags(topology: Mapping[str, JSONValue]) -> list[JSONValue]:
     if _int_payload(topology.get("weekend_activity_count")):
         flags.append("weekend_activity")
     return flags
+
+
+def _topology_attention_summary_from_targets(
+    target_summaries: list[dict[str, JSONValue]],
+    *,
+    target_limit: int,
+) -> dict[str, JSONValue]:
+    attention_targets = [
+        attention
+        for target in target_summaries
+        if (attention := _topology_attention_target_summary(target)) is not None
+    ]
+    attention_targets.sort(key=_topology_attention_sort_key)
+
+    priority_counts = Counter(
+        _summary_key(target.get("attention_level"))
+        for target in attention_targets
+    )
+    flag_counts: Counter[str] = Counter()
+    for target in attention_targets:
+        flags = target.get("attention_flags")
+        if isinstance(flags, list):
+            flag_counts.update(_summary_key(flag) for flag in flags)
+
+    included_source = (
+        attention_targets
+        if target_limit < 0
+        else attention_targets[:target_limit]
+    )
+    included: list[JSONValue] = [dict(item) for item in included_source]
+    omitted_count = max(0, len(attention_targets) - len(included))
+
+    return {
+        "schema_version": (
+            TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION
+        ),
+        "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "topology_target_count": len(target_summaries),
+        "attention_target_count": len(attention_targets),
+        "included_attention_target_count": len(included),
+        "omitted_attention_target_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "attention_level_counts": _counter_payload(priority_counts),
+        "attention_flag_counts": _counter_payload(flag_counts),
+        "target_summaries": included,
+    }
+
+
+def _topology_attention_target_summary(
+    target: Mapping[str, JSONValue],
+) -> dict[str, JSONValue] | None:
+    flags = _topology_summary_flags(target.get("flags"))
+    flag_set = set(flags)
+    attention_flags = [
+        flag for flag in ACTIONABLE_TOPOLOGY_FLAGS if flag in flag_set
+    ]
+    if not attention_flags:
+        return None
+    attention_level = _topology_attention_level(attention_flags)
+    return {
+        "target_axis": _topology_attention_axis(target),
+        "attention_level": attention_level,
+        "attention_flags": list(attention_flags),
+        "flags": list(flags),
+        "status": _summary_key(target.get("status")),
+        "invalid_timestamp_count": _int_payload(
+            target.get("invalid_timestamp_count")
+        ),
+        "duplicate_timestamp_count": _int_payload(
+            target.get("duplicate_timestamp_count")
+        ),
+        "non_monotonic_count": _int_payload(target.get("non_monotonic_count")),
+        "suspicious_gap_count": _int_payload(
+            target.get("suspicious_gap_count")
+        ),
+        "weekend_activity_count": _int_payload(
+            target.get("weekend_activity_count")
+        ),
+        "expected_session_closure_count": _int_payload(
+            target.get("expected_session_closure_count")
+        ),
+        "max_gap_ms": _optional_int_payload(target.get("max_gap_ms")),
+        "computed_from": _summary_key(target.get("computed_from")),
+        "cache_source": _optional_summary_key(target.get("cache_source")),
+    }
+
+
+def _topology_attention_axis(
+    target: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    axis = _payload_mapping(target.get("target_axis"))
+    return {
+        "data_format": _summary_key(axis.get("data_format")),
+        "timeframe": _summary_key(axis.get("timeframe")),
+        "symbol": _summary_key(axis.get("symbol")),
+        "period": _summary_key(axis.get("period")),
+        "kind": _summary_key(axis.get("kind")),
+    }
+
+
+def _topology_summary_flags(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    flags: list[str] = []
+    for flag in value:
+        text = str(flag or "").strip()
+        if text:
+            flags.append(text)
+    return tuple(flags)
+
+
+def _topology_attention_level(flags: list[str]) -> str:
+    flag_set = set(flags)
+    if "unavailable_topology" in flag_set:
+        return "unavailable"
+    if flag_set & {"invalid_timestamps", "non_monotonic_timestamps"}:
+        return "structural"
+    if flag_set & {"duplicate_timestamps", "suspicious_gaps"}:
+        return "sequence"
+    return "session"
+
+
+def _topology_attention_sort_key(
+    target: Mapping[str, JSONValue],
+) -> tuple[object, ...]:
+    axis = _payload_mapping(target.get("target_axis"))
+    return (
+        _topology_attention_level_rank(
+            _summary_key(target.get("attention_level"))
+        ),
+        _summary_key(axis.get("data_format")),
+        _summary_key(axis.get("timeframe")),
+        _summary_key(axis.get("symbol")),
+        _summary_key(axis.get("period")),
+        _summary_key(axis.get("kind")),
+        -_int_payload(target.get("invalid_timestamp_count")),
+        -_int_payload(target.get("non_monotonic_count")),
+        -_int_payload(target.get("duplicate_timestamp_count")),
+        -_int_payload(target.get("suspicious_gap_count")),
+        -_int_payload(target.get("weekend_activity_count")),
+        _summary_key(target.get("computed_from")),
+    )
+
+
+def _topology_attention_level_rank(level: str) -> int:
+    ranks = {
+        "unavailable": 0,
+        "structural": 1,
+        "sequence": 2,
+        "session": 3,
+    }
+    return ranks.get(level, 99)
 
 
 def _optional_summary_key(value: object) -> str | None:

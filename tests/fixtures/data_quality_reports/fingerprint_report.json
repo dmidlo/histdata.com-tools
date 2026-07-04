@@ -27,6 +27,18 @@
       "unavailable_count": 0,
       "unavailable_reason_counts": {}
     },
+    "time_series_fingerprint_topology_attention": {
+      "attention_flag_counts": {},
+      "attention_level_counts": {},
+      "attention_target_count": 0,
+      "included_attention_target_count": 0,
+      "omitted_attention_target_count": 0,
+      "rule_id": "fingerprint.series",
+      "schema_version": "histdatacom.time-series-fingerprint-topology-attention.v1",
+      "target_summaries": [],
+      "topology_target_count": 1,
+      "truncated": false
+    },
     "time_series_fingerprint_topology_summary": {
       "cache_source_counts": {},
       "computed_from_counts": {

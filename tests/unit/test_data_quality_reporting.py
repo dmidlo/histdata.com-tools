@@ -9,6 +9,7 @@ from histdatacom.data_quality import (
     QUALITY_REPORT_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     QualityExitPolicy,
     QualityFinding,
@@ -344,6 +345,41 @@ def test_quality_report_payload_adds_fingerprint_topology_metadata(
     assert target_summaries[0]["cache_source"] == "direct"
 
 
+def test_quality_report_payload_adds_fingerprint_topology_attention_metadata(
+    tmp_path: Path,
+) -> None:
+    """Fingerprint reports should serialize attention-first topology metadata."""
+    payload = quality_report_payload(_fingerprint_report(tmp_path))
+
+    summary = payload["metadata"][
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY
+    ]
+    target_summaries = summary["target_summaries"]
+
+    assert summary["topology_target_count"] == 2
+    assert summary["attention_target_count"] == 1
+    assert summary["included_attention_target_count"] == 1
+    assert summary["omitted_attention_target_count"] == 0
+    assert summary["truncated"] is False
+    assert summary["attention_level_counts"] == {"unavailable": 1}
+    assert summary["attention_flag_counts"] == {
+        "unavailable_topology": 1,
+    }
+    assert target_summaries[0]["target_axis"] == {
+        "data_format": "ascii",
+        "timeframe": "M1",
+        "symbol": "EURUSD",
+        "period": "201202",
+        "kind": "spreadsheet",
+    }
+    assert target_summaries[0]["attention_level"] == "unavailable"
+    assert target_summaries[0]["attention_flags"] == [
+        "unavailable_topology",
+    ]
+    assert target_summaries[0]["status"] == "unavailable"
+    assert target_summaries[0]["computed_from"] == "unavailable"
+
+
 def test_fingerprint_console_summary_reports_coverage_counts(
     tmp_path: Path,
 ) -> None:
@@ -375,6 +411,14 @@ def test_fingerprint_console_summary_reports_topology_lines(
     )
 
     assert "Fingerprint topology" in output
+    assert "Fingerprint topology attention" in output
+    assert "- targets needing attention: 1 included: 1 omitted: 0" in output
+    assert (
+        "- ascii EURUSD M1 201202 spreadsheet: unavailable, "
+        "unavailable_topology, invalid=0, duplicates=0, non-monotonic=0, "
+        "suspicious gaps=0, weekend activity=0, max gap unavailable, "
+        "computed_from=unavailable"
+    ) in output
     assert (
         "- targets: 2 included: 2 regular: 1 irregular: 0 unavailable: 1"
     ) in output
@@ -467,6 +511,31 @@ def test_bounded_quality_payload_includes_fingerprint_topology(
     assert (
         payload["fingerprint_topology"]["target_summaries"][0]["computed_from"]
         == "direct_cache"
+    )
+
+
+def test_bounded_quality_payload_includes_fingerprint_topology_attention(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration payloads should expose topology attention."""
+    report = _fingerprint_report(tmp_path)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("fingerprint",),
+        discovery={"roots": [str(tmp_path)], "target_count": 2},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+
+    assert payload["fingerprint_topology_attention"][
+        "attention_flag_counts"
+    ] == {"unavailable_topology": 1}
+    assert (
+        payload["fingerprint_topology_attention"]["target_summaries"][0][
+            "attention_level"
+        ]
+        == "unavailable"
     )
 
 

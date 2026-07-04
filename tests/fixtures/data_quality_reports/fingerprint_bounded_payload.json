@@ -93,6 +93,18 @@
     ],
     "truncated": false
   },
+  "fingerprint_topology_attention": {
+    "attention_flag_counts": {},
+    "attention_level_counts": {},
+    "attention_target_count": 0,
+    "included_attention_target_count": 0,
+    "omitted_attention_target_count": 0,
+    "rule_id": "fingerprint.series",
+    "schema_version": "histdatacom.time-series-fingerprint-topology-attention.v1",
+    "target_summaries": [],
+    "topology_target_count": 1,
+    "truncated": false
+  },
   "operation": "data-quality",
   "payload_limits": {
     "cross_target_summaries": {

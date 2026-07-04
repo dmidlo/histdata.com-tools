@@ -18,6 +18,8 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
     HistDataSeriesFingerprintRule,
@@ -30,6 +32,7 @@ from histdatacom.data_quality import (
     quality_run_rules_for_groups,
     run_quality_assessment,
     series_fingerprint_coverage_summary,
+    series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
 from histdatacom.histdata_ascii import (
@@ -485,6 +488,12 @@ def test_series_fingerprint_topology_summary_reports_actionable_targets(
     suspicious_target = _discovered_target(
         write_ascii_case(tmp_path / "gap", _suspicious_gap_case())
     )
+    non_monotonic_target = _discovered_target(
+        write_ascii_case(
+            tmp_path / "non-monotonic",
+            case_by_name("m1_non_monotonic_timestamp"),
+        )
+    )
     expected_closure_target = _discovered_target(
         write_ascii_case(
             tmp_path / "expected-closure",
@@ -503,13 +512,23 @@ def test_series_fingerprint_topology_summary_reports_actionable_targets(
         symbol="EURUSD",
         period="201202",
     )
+    unsupported_target = QualityTarget(
+        path=str(tmp_path / "unsupported.xlsx"),
+        kind=QualityTargetKind.SPREADSHEET,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
     report = run_quality_assessment(
         (
             clean_target,
             duplicate_target,
             suspicious_target,
+            non_monotonic_target,
             expected_closure_target,
             cache_target,
+            unsupported_target,
         ),
         quality_rules_for_groups(("fingerprint",)),
     )
@@ -523,22 +542,32 @@ def test_series_fingerprint_topology_summary_reports_actionable_targets(
         TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION
     )
     assert summary["rule_id"] == SERIES_FINGERPRINT_RULE_ID
-    assert summary["target_count"] == 5
-    assert summary["included_target_count"] == 5
+    assert summary["target_count"] == 7
+    assert summary["included_target_count"] == 7
     assert summary["omitted_target_count"] == 0
     assert summary["truncated"] is False
-    assert summary["status_counts"] == {"irregular": 2, "regular": 3}
+    assert summary["status_counts"] == {
+        "irregular": 3,
+        "regular": 3,
+        "unavailable": 1,
+    }
     assert summary["computed_from_counts"] == {
         "direct_cache": 1,
-        "text_scan": 4,
+        "text_scan": 5,
+        "unavailable": 1,
     }
     assert summary["cache_source_counts"] == {"direct": 1}
-    assert summary["sampling_basis_counts"] == {"observed_sequence": 5}
+    assert summary["sampling_basis_counts"] == {
+        "observed_sequence": 6,
+        "unavailable": 1,
+    }
     assert summary["flag_counts"] == {
         "cache_backed": 1,
         "duplicate_timestamps": 1,
         "expected_session_closures": 1,
+        "non_monotonic_timestamps": 1,
         "suspicious_gaps": 1,
+        "unavailable_topology": 1,
     }
 
     targets = _list(summary["target_summaries"])
@@ -568,6 +597,13 @@ def test_series_fingerprint_topology_summary_reports_actionable_targets(
     assert suspicious["suspicious_gap_count"] == 1
     assert suspicious["max_gap_ms"] == 600_000
 
+    non_monotonic = _target_summary_with_flag(
+        targets,
+        "non_monotonic_timestamps",
+    )
+    assert non_monotonic["status"] == "irregular"
+    assert non_monotonic["non_monotonic_count"] == 1
+
     expected = _target_summary_with_flag(
         targets,
         "expected_session_closures",
@@ -581,7 +617,105 @@ def test_series_fingerprint_topology_summary_reports_actionable_targets(
     assert cache["computed_from"] == "direct_cache"
     assert cache["cache_source"] == "direct"
 
+    attention = _mapping(
+        report.metadata[TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY]
+    )
+    assert attention == series_fingerprint_topology_attention_summary(
+        report.findings
+    )
+    assert attention["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION
+    )
+    assert attention["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    assert attention["topology_target_count"] == 7
+    assert attention["attention_target_count"] == 4
+    assert attention["included_attention_target_count"] == 4
+    assert attention["omitted_attention_target_count"] == 0
+    assert attention["truncated"] is False
+    assert attention["attention_level_counts"] == {
+        "sequence": 2,
+        "structural": 1,
+        "unavailable": 1,
+    }
+    assert attention["attention_flag_counts"] == {
+        "duplicate_timestamps": 1,
+        "non_monotonic_timestamps": 1,
+        "suspicious_gaps": 1,
+        "unavailable_topology": 1,
+    }
+    attention_targets = _list(attention["target_summaries"])
+    assert [
+        _mapping(target)["attention_level"] for target in attention_targets
+    ] == ["unavailable", "structural", "sequence", "sequence"]
+    assert (
+        _target_summary_with_flag(
+            attention_targets,
+            "unavailable_topology",
+        )["status"]
+        == "unavailable"
+    )
+    assert (
+        _target_summary_with_flag(
+            attention_targets,
+            "non_monotonic_timestamps",
+        )["non_monotonic_count"]
+        == 1
+    )
+    assert (
+        _target_summary_with_flag(
+            attention_targets,
+            "duplicate_timestamps",
+        )["duplicate_timestamp_count"]
+        == 1
+    )
+    assert (
+        _target_summary_with_flag(
+            attention_targets,
+            "suspicious_gaps",
+        )["suspicious_gap_count"]
+        == 1
+    )
+    assert not any(
+        "expected_session_closures" in _list(_mapping(target)["flags"])
+        for target in attention_targets
+    )
+    assert not any(
+        "cache_backed" in _list(_mapping(target)["flags"])
+        for target in attention_targets
+    )
+    assert json_safe_path_strings(attention)
     assert json_safe_path_strings(summary)
+
+
+def test_series_fingerprint_topology_attention_ignores_context_only_targets(
+    tmp_path: Path,
+) -> None:
+    """Expected closures alone should not create attention targets."""
+    clean_target = _discovered_target(
+        write_ascii_case(tmp_path / "clean", CLEAN_M1_CASE)
+    )
+    expected_closure_target = _discovered_target(
+        write_ascii_case(
+            tmp_path / "expected-closure",
+            _expected_weekend_closure_case(),
+        )
+    )
+    report = run_quality_assessment(
+        (clean_target, expected_closure_target),
+        quality_rules_for_groups(("fingerprint",)),
+    )
+
+    attention = _mapping(
+        report.metadata[TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY]
+    )
+
+    assert attention["topology_target_count"] == 2
+    assert attention["attention_target_count"] == 0
+    assert attention["included_attention_target_count"] == 0
+    assert attention["omitted_attention_target_count"] == 0
+    assert attention["attention_level_counts"] == {}
+    assert attention["attention_flag_counts"] == {}
+    assert attention["target_summaries"] == []
 
 
 def test_fingerprint_id_excludes_source_path_volatility(
@@ -635,6 +769,14 @@ def test_fingerprint_constants_are_stable() -> None:
     assert (
         TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY
         == "time_series_fingerprint_topology_summary"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-topology-attention.v1"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY
+        == "time_series_fingerprint_topology_attention"
     )
     assert DEFAULT_FINGERPRINT_QUANTILES == (
         0.01,

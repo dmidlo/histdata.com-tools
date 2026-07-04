@@ -131,6 +131,7 @@ def _orchestration_quality_result(
     error: str = "",
     check_groups: list[str] | None = None,
     fingerprint_topology: dict[str, object] | None = None,
+    fingerprint_topology_attention: dict[str, object] | None = None,
 ) -> JobResult:
     """Return an orchestration result containing bounded quality metadata."""
     quality_status = (
@@ -202,6 +203,10 @@ def _orchestration_quality_result(
     }
     if fingerprint_topology is not None:
         quality["fingerprint_topology"] = fingerprint_topology
+    if fingerprint_topology_attention is not None:
+        quality["fingerprint_topology_attention"] = (
+            fingerprint_topology_attention
+        )
     if error:
         quality = {
             "operation": "data-quality",
@@ -874,7 +879,7 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                 "target_count": 1,
                 "included_target_count": 1,
                 "omitted_target_count": 0,
-                "status_counts": {"regular": 1},
+                "status_counts": {"irregular": 1},
                 "target_summaries": [
                     {
                         "target_axis": {
@@ -886,7 +891,7 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                         },
                         "row_count": 3,
                         "parsed_row_count": 3,
-                        "duplicate_timestamp_count": 0,
+                        "duplicate_timestamp_count": 1,
                         "non_monotonic_count": 0,
                         "median_interval_ms": 60_000,
                         "max_gap_ms": 60_000,
@@ -896,8 +901,38 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                         "sampling_basis": "observed_sequence",
                         "computed_from": "text_scan",
                         "cache_source": None,
-                        "status": "regular",
-                        "flags": [],
+                        "status": "irregular",
+                        "flags": ["duplicate_timestamps"],
+                    }
+                ],
+            },
+            fingerprint_topology_attention={
+                "topology_target_count": 1,
+                "attention_target_count": 1,
+                "included_attention_target_count": 1,
+                "omitted_attention_target_count": 0,
+                "target_summaries": [
+                    {
+                        "target_axis": {
+                            "data_format": "ascii",
+                            "timeframe": "M1",
+                            "symbol": "EURUSD",
+                            "period": "201202",
+                            "kind": "csv",
+                        },
+                        "attention_level": "sequence",
+                        "attention_flags": ["duplicate_timestamps"],
+                        "flags": ["duplicate_timestamps"],
+                        "status": "irregular",
+                        "invalid_timestamp_count": 0,
+                        "duplicate_timestamp_count": 1,
+                        "non_monotonic_count": 0,
+                        "suspicious_gap_count": 0,
+                        "weekend_activity_count": 0,
+                        "expected_session_closure_count": 0,
+                        "max_gap_ms": 60_000,
+                        "computed_from": "text_scan",
+                        "cache_source": None,
                     }
                 ],
             },
@@ -924,13 +959,21 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
     assert histdata_com.main() is None
 
     output = capsys.readouterr().out
+    assert "Fingerprint topology attention" in output
+    assert "- targets needing attention: 1 included: 1 omitted: 0" in output
+    assert (
+        "- ascii EURUSD M1 201202 csv: sequence, "
+        "duplicate_timestamps, invalid=0, duplicates=1, "
+        "non-monotonic=0, suspicious gaps=0, weekend activity=0, "
+        "max gap 60s, computed_from=text_scan"
+    ) in output
     assert "Fingerprint topology" in output
     assert (
-        "- targets: 1 included: 1 regular: 1 irregular: 0 unavailable: 0"
+        "- targets: 1 included: 1 regular: 0 irregular: 1 unavailable: 0"
     ) in output
     assert (
-        "- ascii EURUSD M1 201202 csv: regular, observed_sequence, "
-        "3 rows, 3 parsed, no duplicates, non-monotonic=0, "
+        "- ascii EURUSD M1 201202 csv: irregular, observed_sequence, "
+        "3 rows, 3 parsed, duplicates=1, non-monotonic=0, "
         "median interval 60s, max gap 60s, 0 expected closures, "
         "0 suspicious gaps, weekend activity=0, computed_from=text_scan"
     ) in output

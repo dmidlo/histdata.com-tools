@@ -26,6 +26,8 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
     bounded_quality_payload,
@@ -635,6 +637,14 @@ def _assert_report_contract(payload: dict[str, JSONValue]) -> None:
                 metadata[TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY]
             )
         )
+    if TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY in metadata:
+        _assert_fingerprint_topology_attention(
+            _mapping(
+                metadata[
+                    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY
+                ]
+            )
+        )
     summary = _mapping(payload["summary"])
     _assert_summary(summary)
 
@@ -668,7 +678,11 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "target_status_counts",
         "target_summaries",
     }
-    optional_keys = {"fingerprint_coverage", "fingerprint_topology"}
+    optional_keys = {
+        "fingerprint_coverage",
+        "fingerprint_topology",
+        "fingerprint_topology_attention",
+    }
     assert expected_keys <= set(payload)
     assert set(payload) <= expected_keys | optional_keys
     assert payload["operation"] == "data-quality"
@@ -681,6 +695,10 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         _assert_fingerprint_coverage(_mapping(payload["fingerprint_coverage"]))
     if "fingerprint_topology" in payload:
         _assert_fingerprint_topology(_mapping(payload["fingerprint_topology"]))
+    if "fingerprint_topology_attention" in payload:
+        _assert_fingerprint_topology_attention(
+            _mapping(payload["fingerprint_topology_attention"])
+        )
 
     for target_summary in _list(payload["target_summaries"]):
         _assert_target_summary(_mapping(target_summary))
@@ -836,6 +854,91 @@ def _assert_fingerprint_topology_target(
         "weekend_activity_count",
     ):
         assert isinstance(payload[key], int)
+
+
+def _assert_fingerprint_topology_attention(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "attention_flag_counts",
+        "attention_level_counts",
+        "attention_target_count",
+        "included_attention_target_count",
+        "omitted_attention_target_count",
+        "rule_id",
+        "schema_version",
+        "target_summaries",
+        "topology_target_count",
+        "truncated",
+    }
+    assert payload["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION
+    )
+    assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    for key in (
+        "topology_target_count",
+        "attention_target_count",
+        "included_attention_target_count",
+        "omitted_attention_target_count",
+    ):
+        assert isinstance(payload[key], int)
+        assert payload[key] >= 0
+    assert isinstance(payload["truncated"], bool)
+    assert isinstance(payload["attention_flag_counts"], dict)
+    assert isinstance(payload["attention_level_counts"], dict)
+    for target_summary in _list(payload["target_summaries"]):
+        _assert_fingerprint_topology_attention_target(_mapping(target_summary))
+
+
+def _assert_fingerprint_topology_attention_target(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "attention_flags",
+        "attention_level",
+        "cache_source",
+        "computed_from",
+        "duplicate_timestamp_count",
+        "expected_session_closure_count",
+        "flags",
+        "invalid_timestamp_count",
+        "max_gap_ms",
+        "non_monotonic_count",
+        "status",
+        "suspicious_gap_count",
+        "target_axis",
+        "weekend_activity_count",
+    }
+    axis = _mapping(payload["target_axis"])
+    assert set(axis) == {
+        "data_format",
+        "kind",
+        "period",
+        "symbol",
+        "timeframe",
+    }
+    assert payload["attention_level"] in {
+        "unavailable",
+        "structural",
+        "sequence",
+        "session",
+    }
+    assert isinstance(payload["attention_flags"], list)
+    assert isinstance(payload["flags"], list)
+    assert payload["status"] in {"regular", "irregular", "unavailable"}
+    for key in (
+        "duplicate_timestamp_count",
+        "expected_session_closure_count",
+        "invalid_timestamp_count",
+        "non_monotonic_count",
+        "suspicious_gap_count",
+        "weekend_activity_count",
+    ):
+        assert isinstance(payload[key], int)
+    assert payload["max_gap_ms"] is None or isinstance(
+        payload["max_gap_ms"],
+        int,
+    )
 
 
 def _assert_summary(summary: dict[str, Any]) -> None:
