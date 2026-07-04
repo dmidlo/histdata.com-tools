@@ -1,0 +1,143 @@
+{
+  "known_code_counts": {
+    "finding_code_counts": [
+      {
+        "count": 1,
+        "finding_code": "ASCII_M1_DUPLICATE_TIMESTAMP"
+      },
+      {
+        "count": 1,
+        "finding_code": "ASCII_M1_GRANULARITY_DRIFT"
+      },
+      {
+        "count": 1,
+        "finding_code": "FINGERPRINT_SERIES_SUMMARY"
+      }
+    ],
+    "rule_id_counts": [
+      {
+        "count": 2,
+        "rule_id": "time.ascii.sequence"
+      },
+      {
+        "count": 1,
+        "rule_id": "fingerprint.series"
+      }
+    ],
+    "severity_counts": {
+      "error": 1,
+      "info": 1,
+      "warning": 1
+    },
+    "unmapped_finding_code_counts": [
+      {
+        "count": 1,
+        "finding_code": "ASCII_M1_GRANULARITY_DRIFT"
+      },
+      {
+        "count": 1,
+        "finding_code": "FINGERPRINT_SERIES_SUMMARY"
+      }
+    ],
+    "unmapped_rule_id_counts": [
+      {
+        "count": 1,
+        "rule_id": "fingerprint.series"
+      },
+      {
+        "count": 1,
+        "rule_id": "time.ascii.sequence"
+      }
+    ]
+  },
+  "known_unmapped_codes": [
+    {
+      "finding_code": "ASCII_M1_GRANULARITY_DRIFT",
+      "included_source_count": 1,
+      "mapped": false,
+      "max_severity": "error",
+      "occurrence_count": 1,
+      "omitted_source_count": 0,
+      "rule_id": "time.ascii.sequence",
+      "severity_counts": {
+        "error": 1
+      },
+      "source_count": 1,
+      "sources": [
+        {
+          "count": 1,
+          "source": "data_quality/time.ascii.sequence.py:1"
+        }
+      ]
+    },
+    {
+      "finding_code": "FINGERPRINT_SERIES_SUMMARY",
+      "included_source_count": 1,
+      "mapped": false,
+      "max_severity": "info",
+      "occurrence_count": 1,
+      "omitted_source_count": 0,
+      "rule_id": "fingerprint.series",
+      "severity_counts": {
+        "info": 1
+      },
+      "source_count": 1,
+      "sources": [
+        {
+          "count": 1,
+          "source": "data_quality/fingerprint.series.py:1"
+        }
+      ]
+    }
+  ],
+  "payload_limits": {
+    "known_code_sources": {
+      "applies_per_code": true,
+      "limit": 2
+    },
+    "known_finding_code_counts": {
+      "included_count": 3,
+      "limit": 4,
+      "omitted_count": 0,
+      "total_count": 3,
+      "truncated": false
+    },
+    "known_rule_id_counts": {
+      "included_count": 2,
+      "limit": 4,
+      "omitted_count": 0,
+      "total_count": 2,
+      "truncated": false
+    },
+    "known_unmapped_codes": {
+      "included_count": 2,
+      "limit": 4,
+      "omitted_count": 0,
+      "total_count": 2,
+      "truncated": false
+    },
+    "report_unmapped_groups": {
+      "applies_per_report": true,
+      "limit": 4,
+      "target_axis_limit": 8
+    }
+  },
+  "report_coverage": [],
+  "schema_version": "histdatacom.quality-remediation-catalog-audit.v1",
+  "status": "needs-remediation-guidance",
+  "summary": {
+    "known_code_count": 3,
+    "known_finding_occurrence_count": 3,
+    "known_warning_error_code_count": 2,
+    "mapped_known_code_count": 1,
+    "report_count": 0,
+    "report_finding_count": 0,
+    "report_mapped_finding_count": 0,
+    "report_unmapped_finding_count": 0,
+    "report_unmapped_warning_error_group_count": 0,
+    "unmapped_info_only_code_count": 1,
+    "unmapped_known_code_count": 2,
+    "unmapped_warning_error_code_count": 1,
+    "unmapped_warning_error_gap_count": 1
+  }
+}

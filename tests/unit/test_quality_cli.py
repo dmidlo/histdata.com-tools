@@ -157,6 +157,108 @@ histdatacom:
     assert payload["status"] == "accepted"
 
 
+def test_quality_remediation_catalog_cli_reports_json(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The remediation-catalog command should expose JSON audit output."""
+    captured: dict[str, object] = {}
+
+    def fake_audit(
+        report_paths: list[str], **kwargs: object
+    ) -> dict[str, object]:
+        captured["report_paths"] = report_paths
+        captured.update(kwargs)
+        return _catalog_payload(gap_count=1)
+
+    monkeypatch.setattr(
+        quality_cli,
+        "audit_remediation_catalog_report_paths",
+        fake_audit,
+    )
+
+    exit_code = main(
+        [
+            "remediation-catalog",
+            "--report",
+            "reports/quality.json",
+            "--code-limit",
+            "2",
+            "--rule-limit",
+            "3",
+            "--source-limit",
+            "1",
+            "--target-axis-limit",
+            "4",
+            "--json",
+        ]
+    )
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 1
+    assert payload["status"] == "needs-remediation-guidance"
+    assert captured["report_paths"] == ["reports/quality.json"]
+    assert captured["code_limit"] == 2
+    assert captured["rule_limit"] == 3
+    assert captured["source_limit"] == 1
+    assert captured["target_axis_limit"] == 4
+
+
+def test_quality_remediation_catalog_cli_applies_yaml_defaults(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """YAML defaults should support remediation-catalog audit options."""
+    captured: dict[str, object] = {}
+
+    def fake_audit(
+        report_paths: list[str], **kwargs: object
+    ) -> dict[str, object]:
+        captured["report_paths"] = report_paths
+        captured.update(kwargs)
+        return _catalog_payload(gap_count=0)
+
+    monkeypatch.setattr(
+        quality_cli,
+        "audit_remediation_catalog_report_paths",
+        fake_audit,
+    )
+    config_path = tmp_path / "quality.yaml"
+    config_path.write_text(
+        """
+histdatacom:
+  quality:
+    command: remediation-catalog
+    reports:
+      - reports/one.json
+      - reports/two.json
+    code_limit: 5
+    rule_limit: 6
+    source_limit: 7
+    target_axis_limit: 8
+    json: true
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["--config", str(config_path)])
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["status"] == "covered"
+    assert captured["report_paths"] == [
+        "reports/one.json",
+        "reports/two.json",
+    ]
+    assert captured["code_limit"] == 5
+    assert captured["rule_limit"] == 6
+    assert captured["source_limit"] == 7
+    assert captured["target_axis_limit"] == 8
+
+
 def _write_preflight_evidence(
     data_dir: Path,
     *,
@@ -202,3 +304,29 @@ def _write_tick_cache(
         cache_path,
     )
     return cache_path
+
+
+def _catalog_payload(*, gap_count: int) -> dict[str, object]:
+    return {
+        "schema_version": "histdatacom.quality-remediation-catalog-audit.v1",
+        "status": ("needs-remediation-guidance" if gap_count else "covered"),
+        "summary": {
+            "known_code_count": 1,
+            "known_finding_occurrence_count": 1,
+            "known_warning_error_code_count": 1,
+            "mapped_known_code_count": 0 if gap_count else 1,
+            "report_count": 0,
+            "report_finding_count": 0,
+            "report_mapped_finding_count": 0,
+            "report_unmapped_finding_count": 0,
+            "report_unmapped_warning_error_group_count": 0,
+            "unmapped_info_only_code_count": 0,
+            "unmapped_known_code_count": 1 if gap_count else 0,
+            "unmapped_warning_error_code_count": gap_count,
+            "unmapped_warning_error_gap_count": gap_count,
+        },
+        "known_code_counts": {},
+        "known_unmapped_codes": [],
+        "report_coverage": [],
+        "payload_limits": {},
+    }
