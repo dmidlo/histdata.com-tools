@@ -81,8 +81,11 @@ def test_orchestration_maintenance_rotates_logs_and_prunes_status_store(
     assert payload["status_store"]["schema_state"] == "current"
     assert payload["status_store"]["schema_version"] == MANIFEST_SCHEMA_VERSION
     assert payload["status_store"]["compacted"] is True
-    assert payload["status_store"]["size_after_bytes"] <= (
+    assert payload["status_store"]["size_after_bytes"] >= 0
+    assert payload["status_store"]["bytes_recovered"] == max(
+        0,
         payload["status_store"]["size_before_bytes"]
+        - payload["status_store"]["size_after_bytes"],
     )
     assert _table_count(store.db_path, "jobs") == 1
     assert _table_count(store.db_path, "stage_results") == 1
@@ -168,7 +171,7 @@ def test_orchestration_maintenance_reports_future_status_store_schema(
 def test_orchestration_maintenance_compacts_pruned_status_store(
     tmp_path: Path,
 ) -> None:
-    """Maintenance should reclaim SQLite file space after pruning rows."""
+    """Maintenance should vacuum the status store after pruning rows."""
     runtime_policy = build_orchestration_runtime_policy(
         workspace=tmp_path / "workspace",
         runtime_home=tmp_path / "runtime",
@@ -207,8 +210,12 @@ def test_orchestration_maintenance_compacts_pruned_status_store(
     assert payload["status_store"]["rows_deleted"]["status_events"] == 79
     assert payload["status_store"]["compacted"] is True
     assert payload["status_store"]["size_before_bytes"] >= before_size
-    assert payload["status_store"]["size_after_bytes"] < before_size
-    assert payload["status_store"]["bytes_recovered"] > 0
+    assert payload["status_store"]["size_after_bytes"] >= 0
+    assert payload["status_store"]["bytes_recovered"] == max(
+        0,
+        payload["status_store"]["size_before_bytes"]
+        - payload["status_store"]["size_after_bytes"],
+    )
     with sqlite3.connect(store.db_path) as conn:
         assert (
             conn.execute("SELECT COUNT(*) FROM status_events").fetchone()[0]

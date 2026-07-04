@@ -8,8 +8,15 @@ import shlex
 import subprocess
 import textwrap
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PYPI_SCRIPT = PROJECT_ROOT / "pypi.sh"
+
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="release signing guardrails exercise the POSIX pypi.sh shell flow",
+)
 
 
 def _bash_quote(path: Path) -> str:

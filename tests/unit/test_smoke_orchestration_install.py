@@ -382,7 +382,7 @@ def test_windows_runtime_diagnostic_separates_startup_layers(
     assert report["phases"]["runtime_stop"]["status"] == "passed"
     assert calls[4][0] == "runtime_worker_start"
     assert calls[5][0] == "runtime_stop"
-    assert (tmp_path / "state-windows-runtime").as_posix() in calls[4][1]
+    assert str(tmp_path / "state-windows-runtime") in calls[4][1]
     assert any(
         phase == "worker_run_probe_cpu_file"
         and "--lane" in command

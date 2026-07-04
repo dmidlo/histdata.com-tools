@@ -128,7 +128,9 @@ sign_dist_artifacts()
     local gpg_args=(--batch --yes)
     local gpg_key="${HISTDATACOM_GPG_KEY:-}"
 
-    mapfile -t artifacts < <(dist_artifacts)
+    while IFS= read -r artifact; do
+        artifacts+=("${artifact}")
+    done < <(dist_artifacts)
     clear_dist_signatures
     if [[ "${HISTDATACOM_SKIP_GPG_SIGNING:-}" == "1" ]]; then
         echo "pypi.sh: skipping GPG signing because HISTDATACOM_SKIP_GPG_SIGNING=1." >&2
@@ -169,7 +171,9 @@ clear_dist_signatures()
 {
     local -a signatures=()
 
-    mapfile -t signatures < <(dist_signatures)
+    while IFS= read -r signature; do
+        signatures+=("${signature}")
+    done < <(dist_signatures)
     if ((${#signatures[@]} > 0)); then
         rm -f "${signatures[@]}"
     fi
@@ -236,10 +240,14 @@ upload_dist_artifacts()
     local -a artifacts=()
     local -a signatures=()
 
-    mapfile -t artifacts < <(dist_artifacts)
+    while IFS= read -r artifact; do
+        artifacts+=("${artifact}")
+    done < <(dist_artifacts)
     require_dist_artifacts "${artifacts[@]}"
     validate_dist_artifact_sizes
-    mapfile -t signatures < <(dist_signatures)
+    while IFS= read -r signature; do
+        signatures+=("${signature}")
+    done < <(dist_signatures)
 
     if ((${#signatures[@]} > 0)); then
         artifacts+=("${signatures[@]}")

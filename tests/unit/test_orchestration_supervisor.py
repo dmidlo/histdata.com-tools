@@ -532,7 +532,18 @@ def test_start_writes_state_and_is_idempotent_for_running_orchestration(
         kwargs["start_new_session"] is (supervisor_module.os.name != "nt")
         for kwargs in launch_kwargs
     )
-    assert all("creationflags" not in kwargs for kwargs in launch_kwargs)
+    if supervisor_module.os.name == "nt":
+        assert all(
+            kwargs["creationflags"]
+            == getattr(
+                supervisor_module.subprocess,
+                "CREATE_NEW_PROCESS_GROUP",
+                0,
+            )
+            for kwargs in launch_kwargs
+        )
+    else:
+        assert all("creationflags" not in kwargs for kwargs in launch_kwargs)
     assert state["schema_version"] == ORCHESTRATION_STATE_SCHEMA_VERSION
     assert state["pids"] == {
         "server": 1234,

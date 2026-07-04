@@ -29,6 +29,7 @@ def generated_main_help(
     """Return deterministic main command help for README snapshots."""
     with _fixed_columns(columns):
         parser = ArgParser(Options())
+        parser.formatter_class = _ReadmeHelpFormatter
         parser._set_args()
         return _normalized_help(parser.format_help())
 
@@ -143,6 +144,22 @@ def _main_help_bounds(markdown: str) -> tuple[int, int]:
 
 def _normalized_help(value: str) -> str:
     return value.replace("\r\n", "\n").rstrip("\n") + "\n"
+
+
+class _ReadmeHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    """Stable formatter for README snapshots across supported Python versions."""
+
+    def _format_action_invocation(self, action: argparse.Action) -> str:
+        if not action.option_strings:
+            default = self._get_default_metavar_for_positional(action)
+            return " ".join(self._metavar_formatter(action, default)(1))
+
+        if action.nargs == 0:
+            return ", ".join(action.option_strings)
+
+        default = self._get_default_metavar_for_optional(action)
+        args_string = self._format_args(action, default)
+        return ", ".join(action.option_strings) + " " + args_string
 
 
 def _positive_int(value: str) -> int:
