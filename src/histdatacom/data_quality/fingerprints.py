@@ -908,6 +908,10 @@ def _m1_bar_distribution_from_frame(
 ) -> dict[str, JSONValue]:
     row_count = int(getattr(frame, "height", 0) or 0)
     sample_limit = min(row_count, _profile_max_rows(profile))
+    usable_row_count = _frame_numeric_usable_row_count(
+        frame,
+        ("open", "high", "low", "close"),
+    )
     columns = {
         name: _frame_column_values(frame, name, sample_limit)
         for name in ("open", "high", "low", "close")
@@ -915,6 +919,7 @@ def _m1_bar_distribution_from_frame(
     return _m1_bar_distribution_from_column_values(
         columns,
         row_count=row_count,
+        usable_row_count=usable_row_count,
         sample_limit=sample_limit,
         profile=profile,
         precision_source="cache_float",
@@ -989,12 +994,13 @@ def _m1_bar_distribution_from_column_values(
     columns: Mapping[str, list[Any]],
     *,
     row_count: int,
+    usable_row_count: int,
     sample_limit: int,
     profile: HistDataFingerprintProfile,
     precision_source: str,
 ) -> dict[str, JSONValue]:
     sampled_rows: list[tuple[float, float, float, float]] = []
-    invalid_row_count = 0
+    sampled_invalid_row_count = 0
     sampled_count = min(
         sample_limit,
         *(
@@ -1018,7 +1024,7 @@ def _m1_bar_distribution_from_column_values(
                 break
             prices.append(value)
         if len(prices) != 4:
-            invalid_row_count += 1
+            sampled_invalid_row_count += 1
             continue
         sampled_rows.append((prices[0], prices[1], prices[2], prices[3]))
         for column_name, value in zip(
@@ -1034,10 +1040,12 @@ def _m1_bar_distribution_from_column_values(
         sampled_rows,
         row_count=row_count,
         usable_row_count=len(sampled_rows),
-        invalid_row_count=invalid_row_count,
-        truncated=row_count > sampled_count,
+        invalid_row_count=sampled_invalid_row_count,
+        truncated=usable_row_count > len(sampled_rows),
         profile=profile,
     )
+    payload["usable_row_count"] = usable_row_count
+    payload["invalid_row_count"] = max(0, row_count - usable_row_count)
     precision = cast(dict[str, JSONValue], payload["precision"])
     precision["precision_source"] = precision_source
     precision["decimal_place_counts"] = _counter_payload(precision_counts)
@@ -1137,12 +1145,14 @@ def _tick_distribution_from_frame(
 ) -> dict[str, JSONValue]:
     row_count = int(getattr(frame, "height", 0) or 0)
     sample_limit = min(row_count, _profile_max_rows(profile))
+    usable_row_count = _frame_numeric_usable_row_count(frame, ("bid", "ask"))
     bids = _frame_column_values(frame, "bid", sample_limit)
     asks = _frame_column_values(frame, "ask", sample_limit)
     return _tick_distribution_from_column_values(
         bids,
         asks,
         row_count=row_count,
+        usable_row_count=usable_row_count,
         sample_limit=sample_limit,
         profile=profile,
     )
@@ -1197,18 +1207,19 @@ def _tick_distribution_from_column_values(
     asks: list[Any],
     *,
     row_count: int,
+    usable_row_count: int,
     sample_limit: int,
     profile: HistDataFingerprintProfile,
 ) -> dict[str, JSONValue]:
     sampled_bids: list[float] = []
     sampled_asks: list[float] = []
-    invalid_row_count = 0
+    sampled_invalid_row_count = 0
     sampled_count = min(sample_limit, len(bids), len(asks))
     for index in range(sampled_count):
         bid = _finite_float(bids[index])
         ask = _finite_float(asks[index])
         if bid is None or ask is None:
-            invalid_row_count += 1
+            sampled_invalid_row_count += 1
             continue
         sampled_bids.append(bid)
         sampled_asks.append(ask)
@@ -1217,9 +1228,9 @@ def _tick_distribution_from_column_values(
         sampled_asks,
         row_count=row_count,
         sampled_row_count=len(sampled_bids),
-        usable_row_count=len(sampled_bids),
-        invalid_row_count=invalid_row_count,
-        truncated=row_count > sampled_count,
+        usable_row_count=usable_row_count,
+        invalid_row_count=max(0, row_count - usable_row_count),
+        truncated=usable_row_count > len(sampled_bids),
         profile=profile,
     )
 
@@ -1373,6 +1384,58 @@ def _frame_column_values(
         return cast(list[Any], series.head(limit).to_list())
     except AttributeError:
         return list(series)[:limit]
+
+
+def _frame_numeric_usable_row_count(
+    frame: Any,
+    columns: tuple[str, ...],
+) -> int:
+    try:
+        import polars as pl
+        from polars.exceptions import PolarsError
+    except ImportError:
+        return _frame_numeric_usable_row_count_fallback(frame, columns)
+
+    try:
+        expressions = [
+            pl.col(column).is_not_null() & pl.col(column).is_finite()
+            for column in columns
+        ]
+        value = frame.select(
+            pl.all_horizontal(*expressions).sum().alias("__usable_row_count")
+        ).item()
+    except (AttributeError, TypeError, ValueError, PolarsError):
+        return _frame_numeric_usable_row_count_fallback(frame, columns)
+    if isinstance(value, bool) or value is None:
+        return 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _frame_numeric_usable_row_count_fallback(
+    frame: Any,
+    columns: tuple[str, ...],
+) -> int:
+    row_count = int(getattr(frame, "height", 0) or 0)
+    if row_count <= 0:
+        return 0
+    column_values = {
+        column: _frame_column_values(frame, column, row_count)
+        for column in columns
+    }
+    scanned_count = min(
+        row_count, *(len(values) for values in column_values.values())
+    )
+    usable_count = 0
+    for index in range(scanned_count):
+        if all(
+            _finite_float(column_values[column][index]) is not None
+            for column in columns
+        ):
+            usable_count += 1
+    return usable_count
 
 
 def _profile_max_rows(profile: HistDataFingerprintProfile) -> int:

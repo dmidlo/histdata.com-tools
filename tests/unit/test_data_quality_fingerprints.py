@@ -364,6 +364,92 @@ def test_fingerprint_rule_prefers_fresh_sibling_cache(
     assert topology["cache_source"] == "sibling"
 
 
+def test_fingerprint_cache_distribution_counts_unsampled_invalid_rows(
+    tmp_path: Path,
+) -> None:
+    """Cache distributions should count all usable rows while sampling summaries."""
+    import polars as pl
+
+    profile = HistDataFingerprintProfile(max_rows=1)
+    m1_cache_path = tmp_path / "m1-cache" / CACHE_FILENAME
+    m1_cache_path.parent.mkdir(parents=True, exist_ok=True)
+    m1_frame = pl.DataFrame(
+        {
+            "datetime": [1, 2, 3],
+            "open": [1.0, None, 1.2],
+            "high": [1.1, 1.2, 1.3],
+            "low": [0.9, 1.0, 1.1],
+            "close": [1.05, 1.1, 1.25],
+            "vol": [0, 0, 0],
+        },
+        schema={
+            "datetime": pl.Int64,
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "vol": pl.Int32,
+        },
+    )
+    write_polars_cache(m1_frame, m1_cache_path)
+    m1_target = QualityTarget(
+        path=str(m1_cache_path),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+
+    m1_payload = _fingerprint_payload(_fingerprint_finding(m1_target, profile))
+    m1_distribution = _mapping(m1_payload["m1_bar_distribution"])
+
+    assert m1_distribution["row_count"] == 3
+    assert m1_distribution["sampled_row_count"] == 1
+    assert m1_distribution["usable_row_count"] == 2
+    assert m1_distribution["invalid_row_count"] == 1
+    assert m1_distribution["truncated"] is True
+    assert _mapping(_mapping(m1_distribution["price"])["open"])["count"] == 1
+
+    tick_cache_path = tmp_path / "tick-cache" / CACHE_FILENAME
+    tick_cache_path.parent.mkdir(parents=True, exist_ok=True)
+    tick_frame = pl.DataFrame(
+        {
+            "datetime": [1, 2, 3],
+            "bid": [1.0, 1.1, None],
+            "ask": [1.0001, 1.1002, 1.2],
+            "vol": [0, 0, 0],
+        },
+        schema={
+            "datetime": pl.Int64,
+            "bid": pl.Float64,
+            "ask": pl.Float64,
+            "vol": pl.Int32,
+        },
+    )
+    write_polars_cache(tick_frame, tick_cache_path)
+    tick_target = QualityTarget(
+        path=str(tick_cache_path),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe="T",
+        symbol="EURUSD",
+        period="201202",
+    )
+
+    tick_payload = _fingerprint_payload(
+        _fingerprint_finding(tick_target, profile)
+    )
+    tick_distribution = _mapping(tick_payload["tick_distribution"])
+
+    assert tick_distribution["row_count"] == 3
+    assert tick_distribution["sampled_row_count"] == 1
+    assert tick_distribution["usable_row_count"] == 2
+    assert tick_distribution["invalid_row_count"] == 1
+    assert tick_distribution["truncated"] is True
+    assert _mapping(tick_distribution["spread"])["count"] == 1
+
+
 def test_fingerprint_temporal_topology_reports_m1_duplicate_timestamp(
     tmp_path: Path,
 ) -> None:
