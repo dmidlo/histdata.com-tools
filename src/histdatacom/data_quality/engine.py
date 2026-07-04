@@ -11,6 +11,10 @@ from histdatacom.data_quality.contracts import (
     QualityRunRule,
     QualityTarget,
 )
+from histdatacom.data_quality.fingerprints import (
+    TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    series_fingerprint_coverage_summary,
+)
 from histdatacom.data_quality.ticks import (
     can_evaluate_tick_quality_bundle,
     evaluate_tick_quality_bundle,
@@ -199,6 +203,13 @@ def run_quality_assessment(
             ),
         }
     rule_results = tuple(rule_results_list)
+    fingerprint_coverage_summary = series_fingerprint_coverage_summary(
+        finding for result in rule_results for finding in result.findings
+    )
+    if fingerprint_coverage_summary is not None:
+        base_metadata[TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY] = (
+            fingerprint_coverage_summary
+        )
     run_reports_list: list[QualityReport] = []
     for run_rule_index, run_rule in enumerate(run_rule_tuple, start=1):
         _emit_quality_progress(

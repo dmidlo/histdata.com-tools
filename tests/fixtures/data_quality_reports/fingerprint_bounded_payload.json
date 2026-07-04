@@ -1,0 +1,125 @@
+{
+  "check_groups": [
+    "fingerprint"
+  ],
+  "cross_target_summaries": [],
+  "discovery": {
+    "metadata": {
+      "supported_kinds": [
+        "zip",
+        "csv",
+        "cache"
+      ]
+    },
+    "roots": [
+      "data/ASCII/M1"
+    ],
+    "target_count": 1
+  },
+  "exit_decision": {
+    "exit_code": 0,
+    "policy": {
+      "fail_on": "error",
+      "max_errors": 0,
+      "max_warnings": 0
+    },
+    "reason": "quality report is within configured exit policy"
+  },
+  "fingerprint_coverage": {
+    "cache_source_counts": {},
+    "fingerprint_target_count": 1,
+    "parsed_non_empty_coverage_count": 1,
+    "rule_id": "fingerprint.series",
+    "schema_version": "histdatacom.time-series-fingerprint-coverage.v1",
+    "source_kind_counts": {
+      "csv_text": 1
+    },
+    "supported_readable_count": 1,
+    "target_kind_counts": {
+      "csv": 1
+    },
+    "timeframe_counts": {
+      "M1": 1
+    },
+    "unavailable_count": 0,
+    "unavailable_reason_counts": {}
+  },
+  "operation": "data-quality",
+  "payload_limits": {
+    "cross_target_summaries": {
+      "included_count": 0,
+      "limit": 128,
+      "omitted_count": 0,
+      "total_count": 0,
+      "truncated": false
+    },
+    "discovery_targets": {
+      "included_count": 0,
+      "limit": 128,
+      "omitted_count": 0,
+      "total_count": 0,
+      "truncated": false
+    },
+    "target_summaries": {
+      "included_count": 1,
+      "limit": 128,
+      "omitted_count": 0,
+      "total_count": 1,
+      "truncated": false
+    }
+  },
+  "quality_profile": {},
+  "report_artifact": {
+    "kind": "quality-report",
+    "metadata": {
+      "error_count": 0,
+      "finding_count": 1,
+      "max_severity": "info",
+      "schema_version": "histdatacom.quality-report.v1",
+      "status": "clean",
+      "target_count": 1,
+      "warning_count": 0
+    },
+    "path": "quality-fixtures/reports/fingerprint-report.json",
+    "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "size_bytes": 4096
+  },
+  "report_schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 0,
+    "finding_count": 1,
+    "info_count": 1,
+    "max_severity": "info",
+    "rule_count": 1,
+    "status": "clean",
+    "target_count": 1,
+    "warning_count": 0
+  },
+  "target_status_counts": {
+    "clean": 1,
+    "failed": 0,
+    "warning": 0
+  },
+  "target_summaries": [
+    {
+      "error_count": 0,
+      "finding_count": 1,
+      "info_count": 1,
+      "max_severity": "info",
+      "rule_count": 1,
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {
+          "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+        },
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "M1"
+      },
+      "warning_count": 0
+    }
+  ]
+}

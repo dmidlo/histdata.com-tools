@@ -6,6 +6,8 @@ import csv
 import hashlib
 import json
 import zipfile
+from collections import Counter
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -32,7 +34,13 @@ from histdatacom.runtime_contracts import JSONValue
 TIME_SERIES_FINGERPRINT_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint.v1"
 )
+TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-coverage.v1"
+)
 TIME_SERIES_FINGERPRINT_METADATA_KEY = "time_series_fingerprint"
+TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY = (
+    "time_series_fingerprint_coverage"
+)
 SERIES_FINGERPRINT_RULE_ID = "fingerprint.series"
 CROSS_SERIES_FINGERPRINT_RULE_ID = "fingerprint.cross_series"
 SERIES_FINGERPRINT_SUMMARY_CODE = "FINGERPRINT_SERIES_SUMMARY"
@@ -136,6 +144,76 @@ def fingerprint_quality_rules(
     return (rule,)
 
 
+def series_fingerprint_coverage_summary(
+    findings: Iterable[QualityFinding],
+) -> dict[str, JSONValue] | None:
+    """Return a bounded run summary for emitted series fingerprints."""
+    source_kind_counts: Counter[str] = Counter()
+    cache_source_counts: Counter[str] = Counter()
+    unavailable_reason_counts: Counter[str] = Counter()
+    target_kind_counts: Counter[str] = Counter()
+    timeframe_counts: Counter[str] = Counter()
+    fingerprint_target_count = 0
+    supported_readable_count = 0
+    unavailable_count = 0
+    parsed_non_empty_coverage_count = 0
+
+    for finding in findings:
+        if finding.rule_id != SERIES_FINGERPRINT_RULE_ID:
+            continue
+        payload = finding.metadata.get(TIME_SERIES_FINGERPRINT_METADATA_KEY)
+        if not isinstance(payload, Mapping):
+            continue
+
+        target_axis = _payload_mapping(payload.get("target_axis"))
+        coverage = _payload_mapping(payload.get("coverage"))
+        source = _payload_mapping(payload.get("source"))
+
+        source_kind = _summary_key(source.get("kind"))
+        target_kind = _summary_key(
+            target_axis.get("kind") or finding.target.kind.value
+        )
+        timeframe = _summary_key(
+            target_axis.get("timeframe") or finding.target.timeframe
+        )
+
+        fingerprint_target_count += 1
+        source_kind_counts[source_kind] += 1
+        target_kind_counts[target_kind] += 1
+        timeframe_counts[timeframe] += 1
+
+        if source_kind == "unavailable":
+            unavailable_count += 1
+            unavailable_reason_counts[_summary_key(source.get("reason"))] += 1
+        else:
+            supported_readable_count += 1
+
+        if source_kind == "cache":
+            cache_source_counts[_summary_key(source.get("cache_source"))] += 1
+
+        if _has_parsed_non_empty_coverage(coverage):
+            parsed_non_empty_coverage_count += 1
+
+    if not fingerprint_target_count:
+        return None
+
+    return {
+        "schema_version": TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
+        "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "fingerprint_target_count": fingerprint_target_count,
+        "supported_readable_count": supported_readable_count,
+        "unavailable_count": unavailable_count,
+        "parsed_non_empty_coverage_count": parsed_non_empty_coverage_count,
+        "source_kind_counts": _counter_payload(source_kind_counts),
+        "cache_source_counts": _counter_payload(cache_source_counts),
+        "unavailable_reason_counts": _counter_payload(
+            unavailable_reason_counts
+        ),
+        "target_kind_counts": _counter_payload(target_kind_counts),
+        "timeframe_counts": _counter_payload(timeframe_counts),
+    }
+
+
 def _series_fingerprint_payload(target: QualityTarget) -> dict[str, JSONValue]:
     payload: dict[str, JSONValue] = {
         "schema_version": TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
@@ -206,6 +284,41 @@ def _series_fingerprint_payload(target: QualityTarget) -> dict[str, JSONValue]:
         }
     payload["fingerprint_id"] = _fingerprint_id(payload)
     return payload
+
+
+def _payload_mapping(value: object) -> Mapping[str, JSONValue]:
+    if isinstance(value, Mapping):
+        return cast(Mapping[str, JSONValue], value)
+    return {}
+
+
+def _summary_key(value: object) -> str:
+    text = str(value or "").strip()
+    return text or "unknown"
+
+
+def _counter_payload(counter: Counter[str]) -> dict[str, JSONValue]:
+    return {key: counter[key] for key in sorted(counter)}
+
+
+def _has_parsed_non_empty_coverage(
+    coverage: Mapping[str, JSONValue],
+) -> bool:
+    parsed_row_count = coverage.get("parsed_row_count")
+    if parsed_row_count is not None:
+        return _positive_count(parsed_row_count)
+    return _positive_count(coverage.get("row_count"))
+
+
+def _positive_count(value: object) -> bool:
+    if isinstance(value, bool) or value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value > 0
+    try:
+        return int(str(value)) > 0
+    except ValueError:
+        return False
 
 
 @dataclass(frozen=True, slots=True)

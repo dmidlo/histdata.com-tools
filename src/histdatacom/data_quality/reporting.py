@@ -17,6 +17,10 @@ from histdatacom.data_quality.contracts import (
     QualityStatus,
     QualityTargetSummary,
 )
+from histdatacom.data_quality.fingerprints import (
+    TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    series_fingerprint_coverage_summary,
+)
 from histdatacom.publication_safety import (
     publish_safe_json_mapping,
     publish_safe_path,
@@ -161,6 +165,13 @@ def quality_report_payload(
 ) -> dict[str, JSONValue]:
     """Return the stable JSON report payload for a quality report."""
     payload: dict[str, JSONValue] = dict(report.to_dict())
+    fingerprint_coverage = _fingerprint_coverage_summary(report)
+    if fingerprint_coverage is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY] = (
+            fingerprint_coverage
+        )
+        payload["metadata"] = metadata
     payload["schema_version"] = QUALITY_REPORT_SCHEMA_VERSION
     if not publish_safe:
         return payload
@@ -247,6 +258,12 @@ def format_quality_console_summary(
         lines.append(f"report: {report_path}")
     if summary.target_count == 0:
         lines.append("No data quality targets discovered.")
+    if _fingerprint_group_selected(check_groups):
+        lines.extend(
+            _format_fingerprint_coverage_lines(
+                _fingerprint_coverage_summary(report)
+            )
+        )
 
     sections = (
         (QualityStatus.CLEAN, "Clean files"),
@@ -283,6 +300,7 @@ def bounded_quality_payload(
     """Return a bounded result payload without detailed findings."""
     target_summaries = report.target_summaries
     cross_target_summaries = _cross_target_summaries(report)
+    fingerprint_coverage = _fingerprint_coverage_summary(report)
     payload: dict[str, JSONValue] = {
         "operation": operation,
         "check_groups": list(check_groups),
@@ -319,6 +337,8 @@ def bounded_quality_payload(
             ),
         },
     }
+    if fingerprint_coverage is not None:
+        payload["fingerprint_coverage"] = fingerprint_coverage
     if not publish_safe:
         return payload
     return _publish_safe_mapping(payload)
@@ -461,6 +481,85 @@ def _quality_profile_metadata(report: QualityReport) -> dict[str, JSONValue]:
     profile = report.metadata.get("quality_profile")
     if isinstance(profile, dict):
         return dict(profile)
+    return {}
+
+
+def _fingerprint_coverage_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return fingerprint coverage metadata from the report or findings."""
+    summary = report.metadata.get(TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return series_fingerprint_coverage_summary(report.findings)
+
+
+def _fingerprint_group_selected(check_groups: tuple[str, ...]) -> bool:
+    normalized = {group.strip().lower() for group in check_groups if group}
+    if not normalized:
+        normalized = {"all"}
+    return "all" in normalized or "fingerprint" in normalized
+
+
+def _format_fingerprint_coverage_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    if summary is None:
+        return []
+    lines = [
+        "",
+        "Fingerprint coverage",
+        (
+            "- targets: "
+            f"{_int_metadata(summary, 'fingerprint_target_count')} "
+            "supported/readable: "
+            f"{_int_metadata(summary, 'supported_readable_count')} "
+            f"unavailable: {_int_metadata(summary, 'unavailable_count')} "
+            "parsed/non-empty: "
+            f"{_int_metadata(summary, 'parsed_non_empty_coverage_count')}"
+        ),
+    ]
+    count_lines = (
+        ("source kinds", "source_kind_counts"),
+        ("cache sources", "cache_source_counts"),
+        ("unavailable reasons", "unavailable_reason_counts"),
+        ("target kinds", "target_kind_counts"),
+        ("timeframes", "timeframe_counts"),
+    )
+    for label, key in count_lines:
+        counts = _format_count_metadata(summary.get(key))
+        if counts:
+            lines.append(f"- {label}: {counts}")
+    return lines
+
+
+def _int_metadata(value: Mapping[str, JSONValue], key: str) -> int:
+    item = value.get(key)
+    if isinstance(item, bool) or item is None:
+        return 0
+    if isinstance(item, (int, float)):
+        return int(item)
+    try:
+        return int(str(item))
+    except ValueError:
+        return 0
+
+
+def _format_count_metadata(value: JSONValue) -> str:
+    if not isinstance(value, Mapping):
+        return ""
+    parts = []
+    for key in sorted(value):
+        count = value[key]
+        if isinstance(count, bool) or not isinstance(count, (int, float)):
+            continue
+        parts.append(f"{key}={int(count)}")
+    return ", ".join(parts)
+
+
+def _mapping_payload(value: JSONValue) -> dict[str, JSONValue]:
+    if isinstance(value, Mapping):
+        return dict(value)
     return {}
 
 

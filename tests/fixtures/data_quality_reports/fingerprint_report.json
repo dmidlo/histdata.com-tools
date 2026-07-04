@@ -3,7 +3,26 @@
     "check_groups": [
       "fingerprint"
     ],
-    "operation": "data-quality"
+    "operation": "data-quality",
+    "time_series_fingerprint_coverage": {
+      "cache_source_counts": {},
+      "fingerprint_target_count": 1,
+      "parsed_non_empty_coverage_count": 1,
+      "rule_id": "fingerprint.series",
+      "schema_version": "histdatacom.time-series-fingerprint-coverage.v1",
+      "source_kind_counts": {
+        "csv_text": 1
+      },
+      "supported_readable_count": 1,
+      "target_kind_counts": {
+        "csv": 1
+      },
+      "timeframe_counts": {
+        "M1": 1
+      },
+      "unavailable_count": 0,
+      "unavailable_reason_counts": {}
+    }
   },
   "rule_results": [
     {

@@ -22,6 +22,8 @@ from histdatacom.data_quality import (
     QualityTarget,
     QualityTargetKind,
     SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
     bounded_quality_payload,
@@ -48,6 +50,11 @@ GOLDEN_CASES: tuple[tuple[str, str, str], ...] = (
     ),
     ("cache_target_report", "report", "_cache_target_report_payload"),
     ("fingerprint_report", "report", "_fingerprint_report_payload"),
+    (
+        "fingerprint_bounded_payload",
+        "bounded",
+        "_fingerprint_bounded_payload",
+    ),
     ("run_scoped_report", "report", "_run_scoped_report_payload"),
     (
         "orchestration_bounded_payload",
@@ -334,6 +341,41 @@ def _cache_target_report_payload() -> dict[str, JSONValue]:
 
 
 def _fingerprint_report_payload() -> dict[str, JSONValue]:
+    return quality_report_payload(_fingerprint_report())
+
+
+def _fingerprint_bounded_payload() -> dict[str, JSONValue]:
+    report = _fingerprint_report()
+    artifact = ArtifactRef(
+        kind="quality-report",
+        path="/quality-fixtures/reports/fingerprint-report.json",
+        size_bytes=4096,
+        sha256="1" * 64,
+        metadata={
+            "schema_version": QUALITY_REPORT_SCHEMA_VERSION,
+            "status": report.status.value,
+            "max_severity": report.max_severity.value,
+            "target_count": report.summary().target_count,
+            "finding_count": report.summary().finding_count,
+            "warning_count": report.summary().warning_count,
+            "error_count": report.summary().error_count,
+        },
+    )
+    return bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("fingerprint",),
+        discovery={
+            "roots": ["/quality-fixtures/data/ASCII/M1"],
+            "target_count": 1,
+            "metadata": {"supported_kinds": ["zip", "csv", "cache"]},
+        },
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=artifact,
+    )
+
+
+def _fingerprint_report() -> QualityReport:
     target = _target(
         path="/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
         kind=QualityTargetKind.CSV,
@@ -374,21 +416,19 @@ def _fingerprint_report_payload() -> dict[str, JSONValue]:
         ),
         metadata={TIME_SERIES_FINGERPRINT_METADATA_KEY: fingerprint},
     )
-    return quality_report_payload(
-        QualityReport(
-            targets=(target,),
-            rule_results=(
-                QualityRuleResult(
-                    rule_id=SERIES_FINGERPRINT_RULE_ID,
-                    target=target,
-                    findings=(finding,),
-                ),
+    return QualityReport(
+        targets=(target,),
+        rule_results=(
+            QualityRuleResult(
+                rule_id=SERIES_FINGERPRINT_RULE_ID,
+                target=target,
+                findings=(finding,),
             ),
-            metadata={
-                "operation": "data-quality",
-                "check_groups": ["fingerprint"],
-            },
-        )
+        ),
+        metadata={
+            "operation": "data-quality",
+            "check_groups": ["fingerprint"],
+        },
     )
 
 
@@ -535,6 +575,11 @@ def _assert_report_contract(payload: dict[str, JSONValue]) -> None:
         "targets",
     }
     assert payload["schema_version"] == QUALITY_REPORT_SCHEMA_VERSION
+    metadata = _mapping(payload["metadata"])
+    if TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY in metadata:
+        _assert_fingerprint_coverage(
+            _mapping(metadata[TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY])
+        )
     summary = _mapping(payload["summary"])
     _assert_summary(summary)
 
@@ -554,7 +599,7 @@ def _assert_report_contract(payload: dict[str, JSONValue]) -> None:
 
 
 def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
-    assert set(payload) == {
+    expected_keys = {
         "check_groups",
         "cross_target_summaries",
         "discovery",
@@ -568,12 +613,18 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "target_status_counts",
         "target_summaries",
     }
+    assert set(payload) in (
+        expected_keys,
+        expected_keys | {"fingerprint_coverage"},
+    )
     assert payload["operation"] == "data-quality"
     assert payload["report_schema_version"] == QUALITY_REPORT_SCHEMA_VERSION
     assert "rule_results" not in payload
     assert "findings" not in payload
     assert isinstance(payload["quality_profile"], dict)
     _assert_summary(_mapping(payload["summary"]))
+    if "fingerprint_coverage" in payload:
+        _assert_fingerprint_coverage(_mapping(payload["fingerprint_coverage"]))
 
     for target_summary in _list(payload["target_summaries"]):
         _assert_target_summary(_mapping(target_summary))
@@ -592,7 +643,10 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "size_bytes",
     }
     assert artifact["kind"] == "quality-report"
-    assert artifact["path"] == "quality-fixtures/reports/run-scoped-report.json"
+    assert artifact["path"] in {
+        "quality-fixtures/reports/fingerprint-report.json",
+        "quality-fixtures/reports/run-scoped-report.json",
+    }
     assert len(str(artifact["sha256"])) == 64
     artifact_metadata = _mapping(artifact["metadata"])
     assert artifact_metadata["schema_version"] == QUALITY_REPORT_SCHEMA_VERSION
@@ -602,6 +656,41 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     assert set(decision) == {"exit_code", "policy", "reason"}
     policy = _mapping(decision["policy"])
     assert set(policy) == {"fail_on", "max_errors", "max_warnings"}
+
+
+def _assert_fingerprint_coverage(payload: dict[str, JSONValue]) -> None:
+    assert set(payload) == {
+        "cache_source_counts",
+        "fingerprint_target_count",
+        "parsed_non_empty_coverage_count",
+        "rule_id",
+        "schema_version",
+        "source_kind_counts",
+        "supported_readable_count",
+        "target_kind_counts",
+        "timeframe_counts",
+        "unavailable_count",
+        "unavailable_reason_counts",
+    }
+    assert payload["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION
+    )
+    assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    for key in (
+        "fingerprint_target_count",
+        "parsed_non_empty_coverage_count",
+        "supported_readable_count",
+        "unavailable_count",
+    ):
+        assert isinstance(payload[key], int)
+    for key in (
+        "cache_source_counts",
+        "source_kind_counts",
+        "target_kind_counts",
+        "timeframe_counts",
+        "unavailable_reason_counts",
+    ):
+        assert isinstance(payload[key], dict)
 
 
 def _assert_summary(summary: dict[str, Any]) -> None:

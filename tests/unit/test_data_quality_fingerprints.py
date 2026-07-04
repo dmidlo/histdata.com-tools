@@ -14,6 +14,8 @@ from histdatacom.data_quality import (
     DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
     DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
     SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
     HistDataSeriesFingerprintRule,
@@ -24,6 +26,8 @@ from histdatacom.data_quality import (
     quality_target_from_path,
     quality_rules_for_groups,
     quality_run_rules_for_groups,
+    run_quality_assessment,
+    series_fingerprint_coverage_summary,
 )
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
@@ -203,6 +207,100 @@ def test_fingerprint_rule_reports_unsupported_target(
     assert _mapping(payload["source"])["reason"] == "unsupported_target_kind"
 
 
+def test_series_fingerprint_coverage_summary_counts_mixed_sources(
+    tmp_path: Path,
+) -> None:
+    """Run metadata should summarize fingerprint coverage without path data."""
+    csv_target = _discovered_target(
+        write_ascii_case(tmp_path / "csv", CLEAN_M1_CASE)
+    )
+    archive_target = _discovered_target(
+        write_zip_case(
+            tmp_path / "zip",
+            CLEAN_M1_CASE,
+            zip_filename="HISTDATA_COM_ASCII_GBPUSD_M1201202.zip",
+        )
+    )
+    direct_cache_path = tmp_path / "direct-cache" / CACHE_FILENAME
+    direct_cache_path.parent.mkdir(parents=True, exist_ok=True)
+    tick_batch = parse_ascii_lines(TICK, CLEAN_TICK_ROWS)
+    write_polars_cache(to_polars_frame(tick_batch), direct_cache_path)
+    direct_cache_target = QualityTarget(
+        path=str(direct_cache_path),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe="T",
+        symbol="EURUSD",
+        period="201202",
+    )
+    sibling_csv_path = write_ascii_case(
+        tmp_path / "sibling-cache",
+        CLEAN_M1_CASE,
+    )
+    sibling_cache_path = sibling_csv_path.with_name(CACHE_FILENAME)
+    m1_batch = parse_ascii_lines(M1, CLEAN_M1_ROWS)
+    write_polars_cache(to_polars_frame(m1_batch), sibling_cache_path)
+    csv_mtime_ns = sibling_csv_path.stat().st_mtime_ns
+    os.utime(
+        sibling_cache_path,
+        ns=(csv_mtime_ns + 1_000_000, csv_mtime_ns + 1_000_000),
+    )
+    sibling_cache_target = _discovered_target(sibling_csv_path)
+    unsupported_target = QualityTarget(
+        path=str(tmp_path / "unsupported.xlsx"),
+        kind=QualityTargetKind.SPREADSHEET,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    report = run_quality_assessment(
+        (
+            csv_target,
+            archive_target,
+            direct_cache_target,
+            sibling_cache_target,
+            unsupported_target,
+        ),
+        quality_rules_for_groups(("fingerprint",)),
+    )
+
+    summary = _mapping(
+        report.metadata[TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY]
+    )
+
+    assert summary == series_fingerprint_coverage_summary(report.findings)
+    assert summary["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION
+    )
+    assert summary["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    assert summary["fingerprint_target_count"] == 5
+    assert summary["supported_readable_count"] == 4
+    assert summary["unavailable_count"] == 1
+    assert summary["parsed_non_empty_coverage_count"] == 4
+    assert summary["source_kind_counts"] == {
+        "cache": 2,
+        "csv_text": 1,
+        "unavailable": 1,
+        "zip_member": 1,
+    }
+    assert summary["cache_source_counts"] == {
+        "direct": 1,
+        "sibling": 1,
+    }
+    assert summary["unavailable_reason_counts"] == {
+        "unsupported_target_kind": 1,
+    }
+    assert summary["target_kind_counts"] == {
+        "cache": 1,
+        "csv": 2,
+        "spreadsheet": 1,
+        "zip": 1,
+    }
+    assert summary["timeframe_counts"] == {"M1": 4, "T": 1}
+    assert json_safe_path_strings(summary)
+
+
 def test_fingerprint_id_excludes_source_path_volatility(
     tmp_path: Path,
 ) -> None:
@@ -290,3 +388,8 @@ def _fingerprint_payload(
 def _mapping(value: Any) -> dict[str, Any]:
     assert isinstance(value, dict)
     return value
+
+
+def json_safe_path_strings(value: Any) -> bool:
+    encoded = str(value)
+    return "/Users/" not in encoded and str(Path.home()) not in encoded

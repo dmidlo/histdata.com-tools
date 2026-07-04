@@ -7,6 +7,8 @@ from pathlib import Path
 
 from histdatacom.data_quality import (
     QUALITY_REPORT_SCHEMA_VERSION,
+    SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     QualityExitPolicy,
     QualityFinding,
     QualityLocation,
@@ -270,6 +272,66 @@ def test_quality_console_summary_separates_target_statuses(
     assert "Failed files\n- csv:" in output
 
 
+def test_quality_report_payload_adds_fingerprint_coverage_metadata(
+    tmp_path: Path,
+) -> None:
+    """Fingerprint reports should serialize run coverage metadata."""
+    payload = quality_report_payload(_fingerprint_report(tmp_path))
+
+    summary = payload["metadata"][TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY]
+
+    assert summary["fingerprint_target_count"] == 2
+    assert summary["supported_readable_count"] == 1
+    assert summary["unavailable_count"] == 1
+    assert summary["parsed_non_empty_coverage_count"] == 1
+    assert summary["source_kind_counts"] == {"cache": 1, "unavailable": 1}
+    assert summary["cache_source_counts"] == {"direct": 1}
+    assert summary["unavailable_reason_counts"] == {
+        "unsupported_target_kind": 1,
+    }
+
+
+def test_fingerprint_console_summary_reports_coverage_counts(
+    tmp_path: Path,
+) -> None:
+    """Human output should summarize fingerprint coverage for operators."""
+    output = format_quality_console_summary(
+        _fingerprint_report(tmp_path),
+        check_groups=("fingerprint",),
+    )
+
+    assert "Fingerprint coverage" in output
+    assert (
+        "- targets: 2 supported/readable: 1 unavailable: 1 "
+        "parsed/non-empty: 1"
+    ) in output
+    assert "- source kinds: cache=1, unavailable=1" in output
+    assert "- cache sources: direct=1" in output
+    assert "- unavailable reasons: unsupported_target_kind=1" in output
+    assert "- target kinds: cache=1, spreadsheet=1" in output
+    assert "- timeframes: M1=2" in output
+
+
+def test_bounded_quality_payload_includes_fingerprint_coverage(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration payloads should expose fingerprint coverage."""
+    report = _fingerprint_report(tmp_path)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("fingerprint",),
+        discovery={"roots": [str(tmp_path)], "target_count": 2},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+
+    assert payload["fingerprint_coverage"]["source_kind_counts"] == {
+        "cache": 1,
+        "unavailable": 1,
+    }
+
+
 def test_quality_exit_policy_applies_error_warning_and_never_modes(
     tmp_path: Path,
 ) -> None:
@@ -338,6 +400,86 @@ def _mixed_report(tmp_path: Path) -> QualityReport:
                 rule_id="file.exists",
                 target=failed,
                 findings=(error_finding,),
+            ),
+        ),
+    )
+
+
+def _fingerprint_report(tmp_path: Path) -> QualityReport:
+    cache = QualityTarget(
+        path=str(tmp_path / ".data"),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    unavailable = QualityTarget(
+        path=str(tmp_path / "unsupported.xlsx"),
+        kind=QualityTargetKind.SPREADSHEET,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    cache_finding = QualityFinding(
+        severity=QualitySeverity.INFO,
+        code="FINGERPRINT_SERIES_SUMMARY",
+        message="Canonical target time-series fingerprint.",
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        target=cache,
+        metadata={
+            "time_series_fingerprint": {
+                "target_axis": {
+                    "kind": "cache",
+                    "timeframe": "M1",
+                },
+                "coverage": {
+                    "row_count": 3,
+                    "parsed_row_count": 3,
+                },
+                "source": {
+                    "kind": "cache",
+                    "cache_source": "direct",
+                },
+            }
+        },
+    )
+    unavailable_finding = QualityFinding(
+        severity=QualitySeverity.INFO,
+        code="FINGERPRINT_SOURCE_UNAVAILABLE",
+        message="Target source is unavailable for canonical fingerprinting.",
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        target=unavailable,
+        metadata={
+            "time_series_fingerprint": {
+                "target_axis": {
+                    "kind": "spreadsheet",
+                    "timeframe": "M1",
+                },
+                "coverage": {
+                    "row_count": 0,
+                    "parsed_row_count": None,
+                },
+                "source": {
+                    "kind": "unavailable",
+                    "reason": "unsupported_target_kind",
+                },
+            }
+        },
+    )
+    return QualityReport(
+        targets=(cache, unavailable),
+        rule_results=(
+            QualityRuleResult(
+                rule_id=SERIES_FINGERPRINT_RULE_ID,
+                target=cache,
+                findings=(cache_finding,),
+            ),
+            QualityRuleResult(
+                rule_id=SERIES_FINGERPRINT_RULE_ID,
+                target=unavailable,
+                findings=(unavailable_finding,),
             ),
         ),
     )
