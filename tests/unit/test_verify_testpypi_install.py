@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -60,6 +61,7 @@ def test_download_testpypi_wheel_uses_no_deps(
             "-m",
             "pip",
             "download",
+            "--no-cache-dir",
             "--only-binary=:all:",
             "--no-deps",
             "--index-url",
@@ -103,6 +105,71 @@ def test_install_wheel_resolves_dependencies_from_pypi(
             str(tmp_path / "downloads" / "histdatacom-0.79.0-py3-none-any.whl"),
         ]
     ]
+
+
+def test_verify_report_records_source_index_and_installed_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The verifier report should expose the resolved index and CLI version."""
+    module = _module()
+    report_path = tmp_path / "report.json"
+
+    def fake_create_environment(**kwargs: Any) -> Path:
+        return kwargs["venv_dir"] / "bin" / "python"
+
+    def fake_download_wheel(**kwargs: Any) -> Path:
+        assert kwargs["index_url"] == "https://pypi.org/simple/"
+        wheel = (
+            kwargs["download_dir"]
+            / f"histdatacom-{kwargs['version']}-py3-none-any.whl"
+        )
+        wheel.parent.mkdir(parents=True, exist_ok=True)
+        wheel.write_bytes(b"wheel")
+        return wheel
+
+    monkeypatch.setattr(module, "_create_environment", fake_create_environment)
+    monkeypatch.setattr(module, "_download_testpypi_wheel", fake_download_wheel)
+    monkeypatch.setattr(module, "_install_wheel", lambda **_: None)
+    monkeypatch.setattr(
+        module,
+        "_metadata_probe",
+        lambda **_: {"version": "1.3.4"},
+    )
+    monkeypatch.setattr(
+        module,
+        "_cli_parity_probe",
+        lambda **_: {"version": "1.3.4"},
+    )
+    monkeypatch.setattr(
+        module,
+        "_smoke_runtime_install_probe",
+        lambda **_: {"ok": True},
+    )
+
+    report = module.verify(
+        SimpleNamespace(
+            version="1.3.4",
+            work_dir=tmp_path / "work",
+            python="python",
+            timeout=30.0,
+            index_url="https://pypi.org/simple/",
+            dependency_index_url="https://pypi.org/simple/",
+            require_bundled_current_platform=False,
+            download_smoke=False,
+            download_timeout=30.0,
+            report=report_path,
+            keep_env=False,
+        )
+    )
+
+    assert report["version"] == "1.3.4"
+    assert report["package_index"]["index_url"] == "https://pypi.org/simple/"
+    assert report["cli"]["version"] == "1.3.4"
+    assert report["testpypi"] == report["package_index"]
+    written = json.loads(report_path.read_text(encoding="utf-8"))
+    assert written["package_index"]["index_url"] == "https://pypi.org/simple/"
+    assert written["cli"]["version"] == "1.3.4"
 
 
 def test_download_smoke_uses_bounded_historical_m1_download(
@@ -315,6 +382,32 @@ def test_cli_parity_probe_fails_on_stale_help(
         module._cli_parity_probe(
             venv_dir=tmp_path / "venv",
             version="0.79.0",
+            timeout=30.0,
+        )
+
+
+def test_cli_parity_probe_fails_on_version_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The verifier should reject a resolved artifact for another version."""
+    module = _module()
+
+    def fake_run(command: list[str], **_: Any) -> SimpleNamespace:
+        executable = Path(command[0]).stem
+        if executable == "histdatacom" and "--version" in command:
+            return SimpleNamespace(returncode=0, stdout="1.1.0\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(module, "_run", fake_run)
+
+    with pytest.raises(
+        SystemExit,
+        match="histdatacom --version returned '1\\.1\\.0', expected '1\\.3\\.4'",
+    ):
+        module._cli_parity_probe(
+            venv_dir=tmp_path / "venv",
+            version="1.3.4",
             timeout=30.0,
         )
 

@@ -262,6 +262,12 @@ After a production publish, verify the PyPI install path:
 bash pypi.sh pypi_install
 ```
 
+This uses the same installed-package verifier against `https://pypi.org/simple/`,
+writes `dist/pypi-install-report.json`, downloads
+`histdatacom==$(current_package_version)` with pip's cache disabled, and fails
+if the installed `histdatacom --version` output does not exactly match the
+current package version.
+
 ## GitHub Actions
 
 The CI workflow builds and tests the package on pull requests, pushes to

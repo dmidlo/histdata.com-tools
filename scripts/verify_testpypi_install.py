@@ -1,4 +1,4 @@
-"""Verify a TestPyPI histdatacom artifact from a fresh virtual environment."""
+"""Verify a histdatacom package-index artifact from a fresh virtual environment."""
 
 from __future__ import annotations
 
@@ -297,7 +297,7 @@ def _download_testpypi_wheel(
     index_url: str,
     timeout: float,
 ) -> Path:
-    """Download exactly one compatible histdatacom wheel from TestPyPI."""
+    """Download exactly one compatible histdatacom wheel from a package index."""
     download_dir.mkdir(parents=True, exist_ok=True)
     _run(
         [
@@ -305,6 +305,7 @@ def _download_testpypi_wheel(
             "-m",
             "pip",
             "download",
+            "--no-cache-dir",
             "--only-binary=:all:",
             "--no-deps",
             "--index-url",
@@ -318,7 +319,7 @@ def _download_testpypi_wheel(
     wheels = sorted(download_dir.glob(f"histdatacom-{version}-*.whl"))
     if len(wheels) != 1:
         raise SystemExit(
-            f"expected exactly one TestPyPI wheel for {version}, found {wheels}"
+            f"expected exactly one histdatacom wheel for {version}, found {wheels}"
         )
     return wheels[0]
 
@@ -647,7 +648,7 @@ def _root_context(work_dir: Path | None) -> ContextManager[Path]:
 
 
 def verify(args: argparse.Namespace) -> dict[str, Any]:
-    """Run the full TestPyPI installed-package verification harness."""
+    """Run the full installed-package verification harness."""
     version = args.version or _project_version()
     with _root_context(args.work_dir) as root_value:
         root = Path(root_value)
@@ -670,15 +671,17 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             dependency_index_url=args.dependency_index_url,
             timeout=args.timeout,
         )
+        package_index = {
+            "index_url": args.index_url,
+            "wheel": str(wheel),
+            "wheel_sha256": _sha256(wheel),
+            "wheel_size": wheel.stat().st_size,
+        }
         report: dict[str, Any] = {
             "version": version,
             "root": str(root),
-            "testpypi": {
-                "index_url": args.index_url,
-                "wheel": str(wheel),
-                "wheel_sha256": _sha256(wheel),
-                "wheel_size": wheel.stat().st_size,
-            },
+            "package_index": package_index,
+            "testpypi": package_index,
             "metadata": _metadata_probe(
                 venv_python=venv_python,
                 version=version,
@@ -714,7 +717,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             )
         if args.keep_env:
             print(
-                f"kept TestPyPI verification environment: {root}",
+                f"kept package verification environment: {root}",
                 file=sys.stderr,
             )
         return report
@@ -723,7 +726,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Download histdatacom from TestPyPI, install it into a fresh "
+            "Download histdatacom from a package index, install it into a fresh "
             "virtual environment, and verify parity with the current package "
             "surface."
         )
@@ -792,7 +795,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--require-bundled-current-platform",
         action="store_true",
-        help="require TestPyPI to install a bundled wheel for this platform",
+        help="require the package index to install a bundled wheel for this platform",
     )
     parser.add_argument(
         "--require-external-runtime-provisioning",

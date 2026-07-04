@@ -255,27 +255,31 @@ def test_local_publishing_script_enforces_branch_contract() -> None:
     assert "dist/testpypi-preflight-report.json" in script
     assert "verify_release_install" in script
     assert "scripts/verify_testpypi_install.py" in script
+    assert '--version "$(current_package_version)"' in script
     assert "--require-external-runtime-provisioning" in script
     assert "--live-stop-timeout 90" in script
     assert "--download-smoke" in script
     assert 'python -m twine upload -r "${repository}"' in script
 
 
-def test_local_pypi_install_smoke_stops_runtime_workspace() -> None:
-    """PyPI install smoke should stop the runtime started by its download test."""
+def test_local_pypi_install_smoke_uses_exact_version_verifier() -> None:
+    """PyPI install smoke should verify the exact release version from PyPI."""
     script = _project_text("pypi.sh")
 
-    assert "stop_release_smoke_runtime()" in script
-    assert (
-        'stop_timeout="${HISTDATACOM_RELEASE_SMOKE_STOP_TIMEOUT:-90}"' in script
-    )
-    assert "histdatacom runtime stop \\" in script
-    assert '--workspace "${workspace}"' in script
-    assert '--stop-timeout "${stop_timeout}"' in script
-    assert "workspace=$(pwd -P)" in script
-    assert 'stop_release_smoke_runtime "${workspace}"' in script
     assert "pypi_install()" in script
-    assert "destroyenv" in script
+    assert (
+        'echo "${bold}verifying histdatacom from pypi: '
+        'https://pypi.org/simple/${normal}"'
+    ) in script
+    assert (
+        "verify_release_install \\\n"
+        '        "https://pypi.org/simple/" \\\n'
+        '        "dist/pypi-install-report.json"'
+    ) in script
+    assert "python -m pip install histdatacom" not in script
+    assert "histdatacom_test()" not in script
+    assert "buildenv()" not in script
+    assert "destroyenv()" not in script
     assert "pypi_install)\n            pypi_install\n            ;;" in script
 
 
@@ -296,6 +300,9 @@ def test_release_docs_mark_local_publishing_as_current_path() -> None:
     )
     assert "bash pypi.sh testpypi_preflight" in release_docs
     assert "dist/testpypi-preflight-report.json" in release_docs
+    assert "dist/pypi-install-report.json" in release_docs
+    assert "`histdatacom==$(current_package_version)`" in release_docs
+    assert "pip's cache disabled" in release_docs
     assert "dist/local-simple-index-report.json" in release_docs
     assert "`bash pypi.sh pypi` is guarded to run from `main`" in release_docs
     assert "HISTDATACOM_FETCH_REPORT" in release_docs
