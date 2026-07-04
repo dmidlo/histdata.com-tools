@@ -1,5 +1,34 @@
 ## Unreleased
 
+## 1.3.2 (2026-07-03)
+
+### Added
+
+- **workflow**: add reusable issue closure/readiness tooling with acceptance
+  coverage, pre-mutation gates, slow-phase summaries, no-mutation checks, and
+  compact closeout reports.
+- **data-quality**: add cache-scale preflight evidence, freshness policy,
+  latest validation discovery, and operator-facing quality guidance.
+- **orchestration**: add scheduled submission preflight, overlap guards,
+  schedule identity filters, run request export, and scheduled run bundles.
+- **instruments**: add individual triangle pair groups and group discovery CLI
+  coverage.
+
+### Changed
+
+- **runtime**: keep Linux and macOS worker-starting bundled-runtime release
+  smokes blocking while documenting the Windows install/CLI-only release gate
+  until the native Temporal/Nexus worker startup blocker is resolved.
+
+### Fixed
+
+- **runtime**: improve Windows worker startup diagnostics, retry reporting,
+  process isolation, startup cleanup, and Temporal SDK compatibility bounds.
+- **release**: strengthen signing preflight, bundled runtime smoke gates, and
+  Windows runner diagnostics.
+- **data-quality**: make cache-scale quality checks viable and ensure quality
+  preflight artifacts remain disposable.
+
 ### Added
 
 - **data-quality**: add cache-scale preflight decisions, no-target diagnostics,
