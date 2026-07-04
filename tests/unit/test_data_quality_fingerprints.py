@@ -364,10 +364,10 @@ def test_fingerprint_rule_prefers_fresh_sibling_cache(
     assert topology["cache_source"] == "sibling"
 
 
-def test_fingerprint_cache_distribution_counts_unsampled_invalid_rows(
+def test_fingerprint_cache_distribution_counts_full_rows_and_fills_sample(
     tmp_path: Path,
 ) -> None:
-    """Cache distributions should count all usable rows while sampling summaries."""
+    """Cache distributions should count all rows and fill samples from usable rows."""
     import polars as pl
 
     profile = HistDataFingerprintProfile(max_rows=1)
@@ -376,10 +376,10 @@ def test_fingerprint_cache_distribution_counts_unsampled_invalid_rows(
     m1_frame = pl.DataFrame(
         {
             "datetime": [1, 2, 3],
-            "open": [1.0, None, 1.2],
+            "open": [None, 1.1, 1.2],
             "high": [1.1, 1.2, 1.3],
             "low": [0.9, 1.0, 1.1],
-            "close": [1.05, 1.1, 1.25],
+            "close": [1.05, 1.15, 1.25],
             "vol": [0, 0, 0],
         },
         schema={
@@ -409,15 +409,17 @@ def test_fingerprint_cache_distribution_counts_unsampled_invalid_rows(
     assert m1_distribution["usable_row_count"] == 2
     assert m1_distribution["invalid_row_count"] == 1
     assert m1_distribution["truncated"] is True
-    assert _mapping(_mapping(m1_distribution["price"])["open"])["count"] == 1
+    open_summary = _mapping(_mapping(m1_distribution["price"])["open"])
+    assert open_summary["count"] == 1
+    assert open_summary["median"] == 1.1
 
     tick_cache_path = tmp_path / "tick-cache" / CACHE_FILENAME
     tick_cache_path.parent.mkdir(parents=True, exist_ok=True)
     tick_frame = pl.DataFrame(
         {
             "datetime": [1, 2, 3],
-            "bid": [1.0, 1.1, None],
-            "ask": [1.0001, 1.1002, 1.2],
+            "bid": [None, 1.1, 1.2],
+            "ask": [1.0001, 1.1002, 1.2003],
             "vol": [0, 0, 0],
         },
         schema={
@@ -447,7 +449,9 @@ def test_fingerprint_cache_distribution_counts_unsampled_invalid_rows(
     assert tick_distribution["usable_row_count"] == 2
     assert tick_distribution["invalid_row_count"] == 1
     assert tick_distribution["truncated"] is True
-    assert _mapping(tick_distribution["spread"])["count"] == 1
+    spread_summary = _mapping(tick_distribution["spread"])
+    assert spread_summary["count"] == 1
+    assert spread_summary["median"] == 0.0002
 
 
 def test_fingerprint_temporal_topology_reports_m1_duplicate_timestamp(

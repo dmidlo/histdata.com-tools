@@ -912,10 +912,11 @@ def _m1_bar_distribution_from_frame(
         frame,
         ("open", "high", "low", "close"),
     )
-    columns = {
-        name: _frame_column_values(frame, name, sample_limit)
-        for name in ("open", "high", "low", "close")
-    }
+    columns = _frame_sampled_valid_column_values(
+        frame,
+        ("open", "high", "low", "close"),
+        sample_limit,
+    )
     return _m1_bar_distribution_from_column_values(
         columns,
         row_count=row_count,
@@ -1146,11 +1147,14 @@ def _tick_distribution_from_frame(
     row_count = int(getattr(frame, "height", 0) or 0)
     sample_limit = min(row_count, _profile_max_rows(profile))
     usable_row_count = _frame_numeric_usable_row_count(frame, ("bid", "ask"))
-    bids = _frame_column_values(frame, "bid", sample_limit)
-    asks = _frame_column_values(frame, "ask", sample_limit)
+    columns = _frame_sampled_valid_column_values(
+        frame,
+        ("bid", "ask"),
+        sample_limit,
+    )
     return _tick_distribution_from_column_values(
-        bids,
-        asks,
+        columns["bid"],
+        columns["ask"],
         row_count=row_count,
         usable_row_count=usable_row_count,
         sample_limit=sample_limit,
@@ -1384,6 +1388,75 @@ def _frame_column_values(
         return cast(list[Any], series.head(limit).to_list())
     except AttributeError:
         return list(series)[:limit]
+
+
+def _frame_sampled_valid_column_values(
+    frame: Any,
+    columns: tuple[str, ...],
+    limit: int,
+) -> dict[str, list[Any]]:
+    empty: dict[str, list[Any]] = {column: [] for column in columns}
+    if not columns or limit <= 0:
+        return empty
+    try:
+        import polars as pl
+        from polars.exceptions import PolarsError
+    except ImportError:
+        return _frame_sampled_valid_column_values_fallback(
+            frame, columns, limit
+        )
+
+    try:
+        expressions = [
+            pl.col(column).is_not_null() & pl.col(column).is_finite()
+            for column in columns
+        ]
+        sample = (
+            frame.select([pl.col(column) for column in columns])
+            .filter(pl.all_horizontal(*expressions))
+            .head(limit)
+        )
+        return {
+            column: cast(list[Any], sample.get_column(column).to_list())
+            for column in columns
+        }
+    except (AttributeError, TypeError, ValueError, PolarsError):
+        return _frame_sampled_valid_column_values_fallback(
+            frame, columns, limit
+        )
+
+
+def _frame_sampled_valid_column_values_fallback(
+    frame: Any,
+    columns: tuple[str, ...],
+    limit: int,
+) -> dict[str, list[Any]]:
+    sampled: dict[str, list[Any]] = {column: [] for column in columns}
+    row_count = int(getattr(frame, "height", 0) or 0)
+    if not columns or row_count <= 0 or limit <= 0:
+        return sampled
+    column_values = {
+        column: _frame_column_values(frame, column, row_count)
+        for column in columns
+    }
+    scanned_count = min(
+        row_count, *(len(values) for values in column_values.values())
+    )
+    for index in range(scanned_count):
+        row_values: dict[str, Any] = {}
+        for column in columns:
+            value = column_values[column][index]
+            if _finite_float(value) is None:
+                row_values = {}
+                break
+            row_values[column] = value
+        if not row_values:
+            continue
+        for column, value in row_values.items():
+            sampled[column].append(value)
+        if len(sampled[columns[0]]) >= limit:
+            break
+    return sampled
 
 
 def _frame_numeric_usable_row_count(
