@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 
 from histdatacom.data_quality import (
-    QUALITY_REPORT_SCHEMA_VERSION,
     QUALITY_NEXT_ACTIONS_METADATA_KEY,
     QUALITY_NEXT_ACTIONS_SCHEMA_VERSION,
+    QUALITY_REMEDIATION_COVERAGE_METADATA_KEY,
+    QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION,
+    QUALITY_REPORT_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
@@ -23,9 +25,11 @@ from histdatacom.data_quality import (
     QualityTargetKind,
     bounded_quality_payload,
     format_quality_console_summary,
+    format_quality_remediation_coverage_lines,
     publish_safe_json_value,
     publish_safe_path,
     quality_next_actions_summary,
+    quality_remediation_coverage_summary,
     quality_report_payload,
     quality_report_to_json,
     write_quality_report,
@@ -477,6 +481,137 @@ def test_quality_next_actions_are_bounded_and_stably_ordered(
     assert action["target_axis_counts"][0]["count"] == 2
 
 
+def test_quality_report_payload_adds_remediation_coverage_metadata(
+    tmp_path: Path,
+) -> None:
+    """Report metadata should expose remediation catalog coverage gaps."""
+    report = _remediation_coverage_report(tmp_path)
+
+    payload = quality_report_payload(report)
+    coverage = payload["metadata"][QUALITY_REMEDIATION_COVERAGE_METADATA_KEY]
+    encoded = json.dumps(coverage, sort_keys=True)
+
+    assert str(tmp_path) not in encoded
+    assert (
+        coverage["schema_version"]
+        == QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION
+    )
+    assert coverage["finding_count"] == 5
+    assert coverage["mapped_finding_count"] == 1
+    assert coverage["unmapped_finding_count"] == 4
+    assert coverage["unmapped_warning_error_finding_count"] == 3
+    assert coverage["severity_counts"] == {
+        "error": 2,
+        "info": 1,
+        "warning": 2,
+    }
+    assert coverage["mapped_severity_counts"] == {"warning": 1}
+    assert coverage["unmapped_severity_counts"] == {
+        "error": 2,
+        "info": 1,
+        "warning": 1,
+    }
+    assert coverage["unmapped_warning_error_group_count"] == 2
+    assert coverage["included_unmapped_warning_error_group_count"] == 2
+    assert coverage["omitted_unmapped_warning_error_group_count"] == 0
+
+    groups = coverage["unmapped_groups"]
+    assert [group["max_severity"] for group in groups] == [
+        "error",
+        "warning",
+        "info",
+    ]
+    assert groups[0]["rule_id"] == "file.exists"
+    assert groups[0]["finding_code"] == "FILE_MISSING"
+    assert groups[0]["occurrence_count"] == 2
+    assert groups[0]["target_axis_count"] == 2
+
+
+def test_quality_report_payload_adds_all_mapped_remediation_coverage(
+    tmp_path: Path,
+) -> None:
+    """All-mapped runs should still report catalog coverage counts."""
+    report = _many_duplicate_next_action_report(tmp_path)
+
+    payload = quality_report_payload(report)
+    coverage = payload["metadata"][QUALITY_REMEDIATION_COVERAGE_METADATA_KEY]
+
+    assert coverage["finding_count"] == 3
+    assert coverage["mapped_finding_count"] == 3
+    assert coverage["unmapped_finding_count"] == 0
+    assert coverage["mapped_finding_code_counts"] == [
+        {"finding_code": "ASCII_M1_DUPLICATE_TIMESTAMP", "count": 3},
+    ]
+    assert coverage["unmapped_groups"] == []
+
+    output = format_quality_console_summary(
+        report,
+        check_groups=("time",),
+    )
+    assert "Remediation coverage" not in output
+    assert format_quality_remediation_coverage_lines(coverage) == []
+
+
+def test_quality_remediation_coverage_is_bounded_and_stably_ordered(
+    tmp_path: Path,
+) -> None:
+    """Coverage output should truncate code/rule and target-axis lists."""
+    coverage = quality_remediation_coverage_summary(
+        _remediation_coverage_report(tmp_path),
+        group_limit=1,
+        target_axis_limit=1,
+    )
+
+    assert coverage is not None
+    assert coverage["unmapped_group_count"] == 3
+    assert coverage["included_unmapped_group_count"] == 1
+    assert coverage["omitted_unmapped_group_count"] == 2
+    assert coverage["unmapped_truncated"] is True
+    assert coverage["count_limits"]["rule_id_counts"] == {
+        "limit": 1,
+        "total_count": 4,
+        "included_count": 1,
+        "omitted_count": 3,
+        "truncated": True,
+    }
+    assert coverage["count_limits"]["finding_code_counts"] == {
+        "limit": 1,
+        "total_count": 4,
+        "included_count": 1,
+        "omitted_count": 3,
+        "truncated": True,
+    }
+
+    groups = coverage["unmapped_groups"]
+    assert len(groups) == 1
+    group = groups[0]
+    assert group["max_severity"] == "error"
+    assert group["target_axis_count"] == 2
+    assert group["included_target_axis_count"] == 1
+    assert group["omitted_target_axis_count"] == 1
+    assert group["target_axis_truncated"] is True
+    assert group["target_axis_counts"][0]["count"] == 1
+
+
+def test_quality_console_summary_renders_remediation_coverage_gaps(
+    tmp_path: Path,
+) -> None:
+    """Human quality output should highlight unmapped warning/error findings."""
+    output = format_quality_console_summary(
+        _remediation_coverage_report(tmp_path),
+        check_groups=("time",),
+    )
+
+    assert "Remediation coverage" in output
+    assert "- findings: 5 mapped: 1 unmapped: 4" in output
+    assert "- unmapped warning/error groups: 2 included: 2 omitted: 0" in output
+    assert "- error file.exists:FILE_MISSING findings=2 targets=2" in output
+    assert (
+        "- warning ticks.spread:NEGATIVE_SPREAD findings=1 targets=1" in output
+    )
+    assert "ingestion.ascii.schema:ASCII_SCHEMA_SUMMARY" not in output
+
+
 def test_fingerprint_console_summary_reports_coverage_counts(
     tmp_path: Path,
 ) -> None:
@@ -724,6 +859,35 @@ def test_bounded_quality_payload_includes_next_actions(
     }
 
 
+def test_bounded_quality_payload_includes_remediation_coverage(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration payloads should expose coverage gap metadata."""
+    report = _remediation_coverage_report(tmp_path)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("time",),
+        discovery={"roots": [str(tmp_path)], "target_count": 5},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+    encoded = json.dumps(payload["remediation_coverage"], sort_keys=True)
+
+    assert str(tmp_path) not in encoded
+    assert "rule_results" not in payload
+    assert payload["remediation_coverage"]["finding_count"] == 5
+    assert payload["remediation_coverage"]["unmapped_finding_count"] == 4
+    assert payload["payload_limits"]["remediation_coverage"] == {
+        "limit": 16,
+        "target_axis_limit": 8,
+        "total_count": 3,
+        "included_count": 3,
+        "omitted_count": 0,
+        "truncated": False,
+    }
+
+
 def test_quality_exit_policy_applies_error_warning_and_never_modes(
     tmp_path: Path,
 ) -> None:
@@ -964,6 +1128,97 @@ def _many_duplicate_next_action_report(tmp_path: Path) -> QualityReport:
                 rule_id="time.ascii.sequence",
                 target=second,
                 findings=(finding(second),),
+            ),
+        ),
+    )
+
+
+def _remediation_coverage_report(tmp_path: Path) -> QualityReport:
+    mapped = _target(tmp_path / "mapped.csv")
+    missing_eur = _target(tmp_path / "missing-eur.csv")
+    missing_gbp = QualityTarget(
+        path=str(tmp_path / "missing-gbp.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="GBPUSD",
+        period="201202",
+    )
+    negative_spread = _target(tmp_path / "negative-spread.csv")
+    schema_summary = _target(tmp_path / "schema-summary.csv")
+    mapped_finding = QualityFinding(
+        severity=QualitySeverity.WARNING,
+        code="ASCII_M1_DUPLICATE_TIMESTAMP",
+        message="M1 file contains duplicate normalized timestamps.",
+        rule_id="time.ascii.sequence",
+        target=mapped,
+        location=QualityLocation(path=mapped.path),
+    )
+    missing_eur_finding = QualityFinding(
+        severity=QualitySeverity.ERROR,
+        code="FILE_MISSING",
+        message="expected local file is missing",
+        rule_id="file.exists",
+        target=missing_eur,
+        location=QualityLocation(path=missing_eur.path),
+    )
+    missing_gbp_finding = QualityFinding(
+        severity=QualitySeverity.ERROR,
+        code="FILE_MISSING",
+        message="expected local file is missing",
+        rule_id="file.exists",
+        target=missing_gbp,
+        location=QualityLocation(path=missing_gbp.path),
+    )
+    negative_spread_finding = QualityFinding(
+        severity=QualitySeverity.WARNING,
+        code="NEGATIVE_SPREAD",
+        message="tick ask is below bid",
+        rule_id="ticks.spread",
+        target=negative_spread,
+        location=QualityLocation(path=negative_spread.path),
+    )
+    schema_summary_finding = QualityFinding(
+        severity=QualitySeverity.INFO,
+        code="ASCII_SCHEMA_SUMMARY",
+        message="ASCII M1 schema profile.",
+        rule_id="ingestion.ascii.schema",
+        target=schema_summary,
+        location=QualityLocation(path=schema_summary.path),
+    )
+    return QualityReport(
+        targets=(
+            mapped,
+            missing_eur,
+            missing_gbp,
+            negative_spread,
+            schema_summary,
+        ),
+        rule_results=(
+            QualityRuleResult(
+                rule_id="time.ascii.sequence",
+                target=mapped,
+                findings=(mapped_finding,),
+            ),
+            QualityRuleResult(
+                rule_id="file.exists",
+                target=missing_eur,
+                findings=(missing_eur_finding,),
+            ),
+            QualityRuleResult(
+                rule_id="file.exists",
+                target=missing_gbp,
+                findings=(missing_gbp_finding,),
+            ),
+            QualityRuleResult(
+                rule_id="ticks.spread",
+                target=negative_spread,
+                findings=(negative_spread_finding,),
+            ),
+            QualityRuleResult(
+                rule_id="ingestion.ascii.schema",
+                target=schema_summary,
+                findings=(schema_summary_finding,),
             ),
         ),
     )

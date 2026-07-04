@@ -11,9 +11,11 @@ from typing import Any
 import pytest
 
 from histdatacom.data_quality import (
-    QUALITY_REPORT_SCHEMA_VERSION,
     QUALITY_NEXT_ACTIONS_METADATA_KEY,
     QUALITY_NEXT_ACTIONS_SCHEMA_VERSION,
+    QUALITY_REMEDIATION_COVERAGE_METADATA_KEY,
+    QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION,
+    QUALITY_REPORT_SCHEMA_VERSION,
     QualityExitPolicy,
     QualityFinding,
     QualityLocation,
@@ -651,6 +653,10 @@ def _assert_report_contract(payload: dict[str, JSONValue]) -> None:
         _assert_quality_next_actions(
             _mapping(metadata[QUALITY_NEXT_ACTIONS_METADATA_KEY])
         )
+    if QUALITY_REMEDIATION_COVERAGE_METADATA_KEY in metadata:
+        _assert_quality_remediation_coverage(
+            _mapping(metadata[QUALITY_REMEDIATION_COVERAGE_METADATA_KEY])
+        )
     summary = _mapping(payload["summary"])
     _assert_summary(summary)
 
@@ -689,6 +695,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "fingerprint_topology",
         "fingerprint_topology_attention",
         "next_actions",
+        "remediation_coverage",
     }
     assert expected_keys <= set(payload)
     assert set(payload) <= expected_keys | optional_keys
@@ -708,6 +715,10 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         )
     if "next_actions" in payload:
         _assert_quality_next_actions(_mapping(payload["next_actions"]))
+    if "remediation_coverage" in payload:
+        _assert_quality_remediation_coverage(
+            _mapping(payload["remediation_coverage"])
+        )
 
     for target_summary in _list(payload["target_summaries"]):
         _assert_target_summary(_mapping(target_summary))
@@ -1070,6 +1081,146 @@ def _assert_quality_next_action_axis_count(
     for value in axis.values():
         assert isinstance(value, str)
         assert value
+
+
+def _assert_quality_remediation_coverage(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "count_limits",
+        "finding_code_counts",
+        "finding_count",
+        "included_unmapped_group_count",
+        "included_unmapped_warning_error_group_count",
+        "mapped_finding_code_counts",
+        "mapped_finding_count",
+        "mapped_rule_id_counts",
+        "mapped_severity_counts",
+        "omitted_unmapped_group_count",
+        "omitted_unmapped_warning_error_group_count",
+        "rule_id_counts",
+        "schema_version",
+        "severity_counts",
+        "unmapped_finding_code_counts",
+        "unmapped_finding_count",
+        "unmapped_group_count",
+        "unmapped_groups",
+        "unmapped_rule_id_counts",
+        "unmapped_severity_counts",
+        "unmapped_truncated",
+        "unmapped_warning_error_finding_count",
+        "unmapped_warning_error_group_count",
+    }
+    assert payload["schema_version"] == (
+        QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION
+    )
+    for key in (
+        "finding_count",
+        "included_unmapped_group_count",
+        "included_unmapped_warning_error_group_count",
+        "mapped_finding_count",
+        "omitted_unmapped_group_count",
+        "omitted_unmapped_warning_error_group_count",
+        "unmapped_finding_count",
+        "unmapped_group_count",
+        "unmapped_warning_error_finding_count",
+        "unmapped_warning_error_group_count",
+    ):
+        assert isinstance(payload[key], int)
+        assert payload[key] >= 0
+    assert isinstance(payload["unmapped_truncated"], bool)
+    for key in (
+        "mapped_severity_counts",
+        "severity_counts",
+        "unmapped_severity_counts",
+    ):
+        assert isinstance(payload[key], dict)
+    for key in (
+        "finding_code_counts",
+        "mapped_finding_code_counts",
+        "mapped_rule_id_counts",
+        "rule_id_counts",
+        "unmapped_finding_code_counts",
+        "unmapped_rule_id_counts",
+    ):
+        assert isinstance(payload[key], list)
+    count_limits = _mapping(payload["count_limits"])
+    assert set(count_limits) == {
+        "finding_code_counts",
+        "mapped_finding_code_counts",
+        "mapped_rule_id_counts",
+        "rule_id_counts",
+        "unmapped_finding_code_counts",
+        "unmapped_rule_id_counts",
+    }
+    for limit in count_limits.values():
+        _assert_payload_limit(_mapping(limit))
+    for item in _list(payload["rule_id_counts"]):
+        _assert_named_count(_mapping(item), "rule_id")
+    for item in _list(payload["finding_code_counts"]):
+        _assert_named_count(_mapping(item), "finding_code")
+    for group in _list(payload["unmapped_groups"]):
+        _assert_quality_remediation_coverage_group(_mapping(group))
+
+
+def _assert_quality_remediation_coverage_group(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "finding_code",
+        "included_target_axis_count",
+        "mapped",
+        "max_severity",
+        "occurrence_count",
+        "omitted_target_axis_count",
+        "rule_id",
+        "severity_counts",
+        "target_axis_count",
+        "target_axis_counts",
+        "target_axis_truncated",
+    }
+    assert payload["mapped"] is False
+    assert payload["max_severity"] in SEVERITY_VALUES
+    assert isinstance(payload["finding_code"], str)
+    assert payload["finding_code"]
+    assert isinstance(payload["rule_id"], str)
+    assert payload["rule_id"]
+    for key in (
+        "included_target_axis_count",
+        "occurrence_count",
+        "omitted_target_axis_count",
+        "target_axis_count",
+    ):
+        assert isinstance(payload[key], int)
+        assert payload[key] >= 0
+    assert isinstance(payload["severity_counts"], dict)
+    assert isinstance(payload["target_axis_truncated"], bool)
+    for item in _list(payload["target_axis_counts"]):
+        _assert_quality_next_action_axis_count(_mapping(item))
+
+
+def _assert_named_count(
+    payload: dict[str, JSONValue],
+    key_name: str,
+) -> None:
+    assert set(payload) == {key_name, "count"}
+    assert isinstance(payload[key_name], str)
+    assert payload[key_name]
+    assert isinstance(payload["count"], int)
+    assert payload["count"] > 0
+
+
+def _assert_payload_limit(payload: dict[str, JSONValue]) -> None:
+    assert set(payload) == {
+        "included_count",
+        "limit",
+        "omitted_count",
+        "total_count",
+        "truncated",
+    }
+    for key in ("included_count", "limit", "omitted_count", "total_count"):
+        assert isinstance(payload[key], int)
+    assert isinstance(payload["truncated"], bool)
 
 
 def _assert_summary(summary: dict[str, Any]) -> None:

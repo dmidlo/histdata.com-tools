@@ -56,6 +56,7 @@ from histdatacom.data_quality.reporting import (
     format_fingerprint_topology_attention_lines,
     format_fingerprint_topology_summary_lines,
     format_quality_next_action_lines,
+    format_quality_remediation_coverage_lines,
 )
 from histdatacom.fx_enums import expand_pair_selection
 from histdatacom.repository_output import (
@@ -1042,6 +1043,11 @@ def _format_orchestration_quality_console_summary(
     lines.extend(
         format_quality_next_action_lines(
             _mapping_from_payload(quality_payload.get("next_actions"))
+        )
+    )
+    lines.extend(
+        format_quality_remediation_coverage_lines(
+            _mapping_from_payload(quality_payload.get("remediation_coverage"))
         )
     )
     lines.extend(

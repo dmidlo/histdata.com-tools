@@ -131,6 +131,7 @@ def _orchestration_quality_result(
     error: str = "",
     check_groups: list[str] | None = None,
     next_actions: dict[str, object] | None = None,
+    remediation_coverage: dict[str, object] | None = None,
     fingerprint_topology: dict[str, object] | None = None,
     fingerprint_topology_attention: dict[str, object] | None = None,
 ) -> JobResult:
@@ -204,6 +205,8 @@ def _orchestration_quality_result(
     }
     if next_actions is not None:
         quality["next_actions"] = next_actions
+    if remediation_coverage is not None:
+        quality["remediation_coverage"] = remediation_coverage
     if fingerprint_topology is not None:
         quality["fingerprint_topology"] = fingerprint_topology
     if fingerprint_topology_attention is not None:
@@ -1393,6 +1396,67 @@ def test_data_quality_console_summary_reports_scratch_and_sources() -> None:
 
     assert "quality report: scratch report deleted after validation" in output
     assert "source artifacts: dirty (2 transient ZIP/CSV/XLS/XLSX)" in output
+
+
+def test_data_quality_console_summary_reports_remediation_coverage() -> None:
+    """Quality console output should surface remediation coverage gaps."""
+    import histdatacom.histdata_com as histdata_com
+
+    output = histdata_com._format_orchestration_quality_console_summary(
+        {
+            "operation": "data-quality",
+            "check_groups": ["time"],
+            "summary": {
+                "target_count": 1,
+                "finding_count": 2,
+                "info_count": 0,
+                "warning_count": 1,
+                "error_count": 1,
+                "status": "failed",
+            },
+            "target_status_counts": {
+                "clean": 0,
+                "warning": 0,
+                "failed": 1,
+            },
+            "target_summaries": [],
+            "remediation_coverage": {
+                "schema_version": (
+                    "histdatacom.quality-remediation-coverage.v1"
+                ),
+                "finding_count": 2,
+                "mapped_finding_count": 0,
+                "unmapped_finding_count": 2,
+                "unmapped_warning_error_group_count": 2,
+                "included_unmapped_warning_error_group_count": 2,
+                "omitted_unmapped_warning_error_group_count": 0,
+                "unmapped_groups": [
+                    {
+                        "rule_id": "file.exists",
+                        "finding_code": "FILE_MISSING",
+                        "max_severity": "error",
+                        "occurrence_count": 1,
+                        "target_axis_count": 1,
+                    },
+                    {
+                        "rule_id": "ticks.spread",
+                        "finding_code": "NEGATIVE_SPREAD",
+                        "max_severity": "warning",
+                        "occurrence_count": 1,
+                        "target_axis_count": 1,
+                    },
+                ],
+            },
+            "exit_decision": {"exit_code": 1, "reason": "quality failed"},
+        }
+    )
+
+    assert "Remediation coverage" in output
+    assert "- findings: 2 mapped: 0 unmapped: 2" in output
+    assert "- error file.exists:FILE_MISSING findings=1 targets=1" in output
+    assert (
+        "- warning ticks.spread:NEGATIVE_SPREAD findings=1 targets=1" in output
+    )
 
 
 def test_data_quality_cli_exit_policy_fails_on_errors(

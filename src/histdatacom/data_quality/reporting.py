@@ -38,13 +38,20 @@ from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 QUALITY_REPORT_SCHEMA_VERSION = "histdatacom.quality-report.v1"
 QUALITY_NEXT_ACTIONS_SCHEMA_VERSION = "histdatacom.quality-next-actions.v1"
 QUALITY_NEXT_ACTIONS_METADATA_KEY = "quality_next_actions"
+QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION = (
+    "histdatacom.quality-remediation-coverage.v1"
+)
+QUALITY_REMEDIATION_COVERAGE_METADATA_KEY = "remediation_coverage"
 QUALITY_PAYLOAD_DISCOVERY_TARGET_LIMIT = 128
 QUALITY_PAYLOAD_TARGET_SUMMARY_LIMIT = 128
 QUALITY_PAYLOAD_CROSS_TARGET_SUMMARY_LIMIT = 128
 QUALITY_PAYLOAD_NEXT_ACTION_LIMIT = 16
 QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT = 8
+QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT = 16
+QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT = 8
 
 _NEXT_ACTION_SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
+_REMEDIATION_COVERAGE_SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
 _NEXT_ACTION_ATTENTION_RANK = {
     "session": 1,
     "sequence": 2,
@@ -74,6 +81,18 @@ class _NextActionAggregate:
     source_counts: Counter[str] = field(default_factory=Counter)
     finding_code_counts: Counter[str] = field(default_factory=Counter)
     flag_counts: Counter[str] = field(default_factory=Counter)
+    target_axis_counts: Counter[tuple[str, str, str, str, str]] = field(
+        default_factory=Counter
+    )
+
+
+@dataclass(slots=True)
+class _RemediationCoverageAggregate:
+    rule_id: str
+    finding_code: str
+    mapped: bool
+    occurrence_count: int = 0
+    severity_counts: Counter[str] = field(default_factory=Counter)
     target_axis_counts: Counter[tuple[str, str, str, str, str]] = field(
         default_factory=Counter
     )
@@ -239,6 +258,13 @@ def quality_report_payload(
         metadata = _mapping_payload(payload.get("metadata"))
         metadata[QUALITY_NEXT_ACTIONS_METADATA_KEY] = next_actions
         payload["metadata"] = metadata
+    remediation_coverage = quality_remediation_coverage_summary(report)
+    if remediation_coverage is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[QUALITY_REMEDIATION_COVERAGE_METADATA_KEY] = (
+            remediation_coverage
+        )
+        payload["metadata"] = metadata
     payload["schema_version"] = QUALITY_REPORT_SCHEMA_VERSION
     if not publish_safe:
         return payload
@@ -328,6 +354,11 @@ def format_quality_console_summary(
     lines.extend(
         format_quality_next_action_lines(quality_next_actions_summary(report))
     )
+    lines.extend(
+        format_quality_remediation_coverage_lines(
+            quality_remediation_coverage_summary(report)
+        )
+    )
     if _fingerprint_group_selected(check_groups):
         lines.extend(
             _format_fingerprint_coverage_lines(
@@ -386,6 +417,7 @@ def bounded_quality_payload(
         report
     )
     next_actions = quality_next_actions_summary(report)
+    remediation_coverage = quality_remediation_coverage_summary(report)
     payload: dict[str, JSONValue] = {
         "operation": operation,
         "check_groups": list(check_groups),
@@ -421,6 +453,11 @@ def bounded_quality_payload(
                 cross_target_summary_limit,
             ),
             "next_actions": _next_action_payload_limit_metadata(next_actions),
+            "remediation_coverage": (
+                _remediation_coverage_payload_limit_metadata(
+                    remediation_coverage
+                )
+            ),
         },
     }
     if fingerprint_coverage is not None:
@@ -433,6 +470,8 @@ def bounded_quality_payload(
         )
     if next_actions is not None:
         payload["next_actions"] = next_actions
+    if remediation_coverage is not None:
+        payload["remediation_coverage"] = remediation_coverage
     if not publish_safe:
         return payload
     return _publish_safe_mapping(payload)
@@ -533,6 +572,32 @@ def _next_action_payload_limit_metadata(
     }
 
 
+def _remediation_coverage_payload_limit_metadata(
+    summary: Mapping[str, JSONValue] | None,
+) -> dict[str, JSONValue]:
+    if summary is None:
+        return _payload_limit_metadata(
+            0,
+            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
+        )
+    total_count = _int_metadata(summary, "unmapped_group_count")
+    included_count = _int_metadata(summary, "included_unmapped_group_count")
+    omitted_count = _int_metadata(summary, "omitted_unmapped_group_count")
+    truncated = summary.get("unmapped_truncated")
+    return {
+        "limit": QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
+        "target_axis_limit": (
+            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT
+        ),
+        "total_count": total_count,
+        "included_count": included_count,
+        "omitted_count": omitted_count,
+        "truncated": (
+            truncated if isinstance(truncated, bool) else omitted_count > 0
+        ),
+    }
+
+
 def _sequence_count(value: object) -> int:
     return len(value) if isinstance(value, list) else 0
 
@@ -596,6 +661,202 @@ def _quality_profile_metadata(report: QualityReport) -> dict[str, JSONValue]:
     if isinstance(profile, dict):
         return dict(profile)
     return {}
+
+
+def quality_remediation_coverage_summary(
+    report: QualityReport,
+    *,
+    group_limit: int = QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
+    target_axis_limit: int = QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+) -> dict[str, JSONValue] | None:
+    """Return bounded remediation-catalog coverage for quality findings."""
+    summary = report.metadata.get(QUALITY_REMEDIATION_COVERAGE_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+
+    aggregates = _remediation_coverage_aggregates(report)
+    if not aggregates:
+        return None
+
+    severity_counts: Counter[str] = Counter()
+    mapped_severity_counts: Counter[str] = Counter()
+    unmapped_severity_counts: Counter[str] = Counter()
+    rule_id_counts: Counter[str] = Counter()
+    mapped_rule_id_counts: Counter[str] = Counter()
+    unmapped_rule_id_counts: Counter[str] = Counter()
+    finding_code_counts: Counter[str] = Counter()
+    mapped_finding_code_counts: Counter[str] = Counter()
+    unmapped_finding_code_counts: Counter[str] = Counter()
+    mapped_finding_count = 0
+    unmapped_finding_count = 0
+
+    for aggregate in aggregates.values():
+        severity_counts.update(aggregate.severity_counts)
+        rule_id_counts[aggregate.rule_id] += aggregate.occurrence_count
+        finding_code_counts[
+            aggregate.finding_code
+        ] += aggregate.occurrence_count
+        if aggregate.mapped:
+            mapped_finding_count += aggregate.occurrence_count
+            mapped_severity_counts.update(aggregate.severity_counts)
+            mapped_rule_id_counts[
+                aggregate.rule_id
+            ] += aggregate.occurrence_count
+            mapped_finding_code_counts[
+                aggregate.finding_code
+            ] += aggregate.occurrence_count
+        else:
+            unmapped_finding_count += aggregate.occurrence_count
+            unmapped_severity_counts.update(aggregate.severity_counts)
+            unmapped_rule_id_counts[
+                aggregate.rule_id
+            ] += aggregate.occurrence_count
+            unmapped_finding_code_counts[
+                aggregate.finding_code
+            ] += aggregate.occurrence_count
+
+    unmapped_groups = sorted(
+        (
+            aggregate
+            for aggregate in aggregates.values()
+            if not aggregate.mapped
+        ),
+        key=_remediation_coverage_group_sort_key,
+    )
+    included_unmapped_groups = (
+        unmapped_groups if group_limit < 0 else unmapped_groups[:group_limit]
+    )
+    unmapped_warning_error_group_count = sum(
+        1
+        for aggregate in unmapped_groups
+        if _remediation_coverage_group_is_warning_or_error(aggregate)
+    )
+    included_unmapped_warning_error_group_count = sum(
+        1
+        for aggregate in included_unmapped_groups
+        if _remediation_coverage_group_is_warning_or_error(aggregate)
+    )
+    count_limits = _remediation_coverage_count_limits(
+        rule_id_counts=rule_id_counts,
+        mapped_rule_id_counts=mapped_rule_id_counts,
+        unmapped_rule_id_counts=unmapped_rule_id_counts,
+        finding_code_counts=finding_code_counts,
+        mapped_finding_code_counts=mapped_finding_code_counts,
+        unmapped_finding_code_counts=unmapped_finding_code_counts,
+        limit=group_limit,
+    )
+    omitted_unmapped_group_count = max(
+        0,
+        len(unmapped_groups) - len(included_unmapped_groups),
+    )
+    return {
+        "schema_version": QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION,
+        "finding_count": mapped_finding_count + unmapped_finding_count,
+        "mapped_finding_count": mapped_finding_count,
+        "unmapped_finding_count": unmapped_finding_count,
+        "unmapped_warning_error_finding_count": sum(
+            count
+            for severity, count in unmapped_severity_counts.items()
+            if severity in {"error", "warning"}
+        ),
+        "severity_counts": _counter_payload(severity_counts),
+        "mapped_severity_counts": _counter_payload(mapped_severity_counts),
+        "unmapped_severity_counts": _counter_payload(unmapped_severity_counts),
+        "rule_id_counts": _named_counter_payloads(
+            rule_id_counts,
+            key_name="rule_id",
+            limit=group_limit,
+        ),
+        "mapped_rule_id_counts": _named_counter_payloads(
+            mapped_rule_id_counts,
+            key_name="rule_id",
+            limit=group_limit,
+        ),
+        "unmapped_rule_id_counts": _named_counter_payloads(
+            unmapped_rule_id_counts,
+            key_name="rule_id",
+            limit=group_limit,
+        ),
+        "finding_code_counts": _named_counter_payloads(
+            finding_code_counts,
+            key_name="finding_code",
+            limit=group_limit,
+        ),
+        "mapped_finding_code_counts": _named_counter_payloads(
+            mapped_finding_code_counts,
+            key_name="finding_code",
+            limit=group_limit,
+        ),
+        "unmapped_finding_code_counts": _named_counter_payloads(
+            unmapped_finding_code_counts,
+            key_name="finding_code",
+            limit=group_limit,
+        ),
+        "count_limits": count_limits,
+        "unmapped_group_count": len(unmapped_groups),
+        "included_unmapped_group_count": len(included_unmapped_groups),
+        "omitted_unmapped_group_count": omitted_unmapped_group_count,
+        "unmapped_truncated": omitted_unmapped_group_count > 0,
+        "unmapped_warning_error_group_count": (
+            unmapped_warning_error_group_count
+        ),
+        "included_unmapped_warning_error_group_count": (
+            included_unmapped_warning_error_group_count
+        ),
+        "omitted_unmapped_warning_error_group_count": max(
+            0,
+            unmapped_warning_error_group_count
+            - included_unmapped_warning_error_group_count,
+        ),
+        "unmapped_groups": [
+            _remediation_coverage_group_payload(
+                aggregate,
+                target_axis_limit=target_axis_limit,
+            )
+            for aggregate in included_unmapped_groups
+        ],
+    }
+
+
+def format_quality_remediation_coverage_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable lines for remediation coverage gaps."""
+    if not summary:
+        return []
+    warning_error_group_count = _int_metadata(
+        summary,
+        "unmapped_warning_error_group_count",
+    )
+    if not warning_error_group_count:
+        return []
+    groups = [
+        item
+        for item in _list_metadata(summary.get("unmapped_groups"))
+        if _optional_string_metadata(item, "max_severity")
+        in {"error", "warning"}
+    ]
+    lines = [
+        "",
+        "Remediation coverage",
+        (
+            "- findings: "
+            f"{_int_metadata(summary, 'finding_count')} "
+            f"mapped: {_int_metadata(summary, 'mapped_finding_count')} "
+            f"unmapped: {_int_metadata(summary, 'unmapped_finding_count')}"
+        ),
+        (
+            "- unmapped warning/error groups: "
+            f"{warning_error_group_count} "
+            "included: "
+            f"{_int_metadata(summary, 'included_unmapped_warning_error_group_count')} "
+            "omitted: "
+            f"{_int_metadata(summary, 'omitted_unmapped_warning_error_group_count')}"
+        ),
+    ]
+    for group in groups:
+        lines.append(f"- {_format_quality_remediation_coverage_group(group)}")
+    return lines
 
 
 def quality_next_actions_summary(
@@ -952,6 +1213,157 @@ def _format_quality_next_action_line(
     )
 
 
+def _remediation_coverage_aggregates(
+    report: QualityReport,
+) -> dict[tuple[bool, str, str], _RemediationCoverageAggregate]:
+    aggregates: dict[tuple[bool, str, str], _RemediationCoverageAggregate] = {}
+    for finding in report.findings:
+        mapped = bool(remediation_hint_payloads_for_finding(finding))
+        rule_id = finding.rule_id or "unknown"
+        finding_code = finding.code or "unknown"
+        aggregate = aggregates.setdefault(
+            (mapped, rule_id, finding_code),
+            _RemediationCoverageAggregate(
+                rule_id=rule_id,
+                finding_code=finding_code,
+                mapped=mapped,
+            ),
+        )
+        aggregate.occurrence_count += 1
+        aggregate.severity_counts[finding.severity.value] += 1
+        aggregate.target_axis_counts[
+            _target_axis_key(_target_axis_from_finding(finding))
+        ] += 1
+    return aggregates
+
+
+def _remediation_coverage_group_payload(
+    aggregate: _RemediationCoverageAggregate,
+    *,
+    target_axis_limit: int,
+) -> dict[str, JSONValue]:
+    target_axis_counts = _target_axis_count_payloads(
+        aggregate.target_axis_counts,
+        limit=target_axis_limit,
+    )
+    target_axis_count = len(aggregate.target_axis_counts)
+    included_target_axis_count = len(target_axis_counts)
+    omitted_target_axis_count = max(
+        0,
+        target_axis_count - included_target_axis_count,
+    )
+    return {
+        "rule_id": aggregate.rule_id,
+        "finding_code": aggregate.finding_code,
+        "mapped": aggregate.mapped,
+        "max_severity": _ranked_counter_max(
+            aggregate.severity_counts,
+            _REMEDIATION_COVERAGE_SEVERITY_RANK,
+        ),
+        "occurrence_count": aggregate.occurrence_count,
+        "target_axis_count": target_axis_count,
+        "included_target_axis_count": included_target_axis_count,
+        "omitted_target_axis_count": omitted_target_axis_count,
+        "target_axis_truncated": omitted_target_axis_count > 0,
+        "severity_counts": _counter_payload(aggregate.severity_counts),
+        "target_axis_counts": target_axis_counts,
+    }
+
+
+def _remediation_coverage_group_sort_key(
+    aggregate: _RemediationCoverageAggregate,
+) -> tuple[int, int, int, str, str]:
+    max_severity = _ranked_counter_max(
+        aggregate.severity_counts,
+        _REMEDIATION_COVERAGE_SEVERITY_RANK,
+    )
+    return (
+        -_REMEDIATION_COVERAGE_SEVERITY_RANK.get(max_severity or "", 0),
+        -aggregate.occurrence_count,
+        -len(aggregate.target_axis_counts),
+        aggregate.rule_id,
+        aggregate.finding_code,
+    )
+
+
+def _remediation_coverage_group_is_warning_or_error(
+    aggregate: _RemediationCoverageAggregate,
+) -> bool:
+    max_severity = _ranked_counter_max(
+        aggregate.severity_counts,
+        _REMEDIATION_COVERAGE_SEVERITY_RANK,
+    )
+    return max_severity in {"error", "warning"}
+
+
+def _remediation_coverage_count_limits(
+    *,
+    rule_id_counts: Counter[str],
+    mapped_rule_id_counts: Counter[str],
+    unmapped_rule_id_counts: Counter[str],
+    finding_code_counts: Counter[str],
+    mapped_finding_code_counts: Counter[str],
+    unmapped_finding_code_counts: Counter[str],
+    limit: int,
+) -> dict[str, JSONValue]:
+    return {
+        "rule_id_counts": _payload_limit_metadata(len(rule_id_counts), limit),
+        "mapped_rule_id_counts": _payload_limit_metadata(
+            len(mapped_rule_id_counts),
+            limit,
+        ),
+        "unmapped_rule_id_counts": _payload_limit_metadata(
+            len(unmapped_rule_id_counts),
+            limit,
+        ),
+        "finding_code_counts": _payload_limit_metadata(
+            len(finding_code_counts),
+            limit,
+        ),
+        "mapped_finding_code_counts": _payload_limit_metadata(
+            len(mapped_finding_code_counts),
+            limit,
+        ),
+        "unmapped_finding_code_counts": _payload_limit_metadata(
+            len(unmapped_finding_code_counts),
+            limit,
+        ),
+    }
+
+
+def _named_counter_payloads(
+    counter: Counter[str],
+    *,
+    key_name: str,
+    limit: int,
+) -> list[JSONValue]:
+    ordered = sorted(
+        counter.items(),
+        key=lambda item: (-item[1], item[0]),
+    )
+    included = ordered if limit < 0 else ordered[:limit]
+    return [
+        {
+            key_name: key,
+            "count": count,
+        }
+        for key, count in included
+        if count > 0
+    ]
+
+
+def _format_quality_remediation_coverage_group(
+    group: Mapping[str, JSONValue],
+) -> str:
+    return (
+        f"{_optional_string_metadata(group, 'max_severity')} "
+        f"{_optional_string_metadata(group, 'rule_id')}:"
+        f"{_optional_string_metadata(group, 'finding_code')} "
+        f"findings={_int_metadata(group, 'occurrence_count')} "
+        f"targets={_int_metadata(group, 'target_axis_count')}"
+    )
+
+
 def _fingerprint_coverage_summary(
     report: QualityReport,
 ) -> dict[str, JSONValue] | None:
@@ -1220,6 +1632,12 @@ def _string_list_metadata(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _list_metadata(value: object) -> list[Mapping[str, JSONValue]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
 
 
 def _remediation_hint_messages(value: object) -> list[str]:

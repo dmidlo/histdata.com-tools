@@ -20,7 +20,126 @@
       "schema_version": "histdatacom.coverage-manifest.v1",
       "unexpected": []
     },
-    "operation": "data-quality"
+    "operation": "data-quality",
+    "remediation_coverage": {
+      "count_limits": {
+        "finding_code_counts": {
+          "included_count": 1,
+          "limit": 16,
+          "omitted_count": 0,
+          "total_count": 1,
+          "truncated": false
+        },
+        "mapped_finding_code_counts": {
+          "included_count": 0,
+          "limit": 16,
+          "omitted_count": 0,
+          "total_count": 0,
+          "truncated": false
+        },
+        "mapped_rule_id_counts": {
+          "included_count": 0,
+          "limit": 16,
+          "omitted_count": 0,
+          "total_count": 0,
+          "truncated": false
+        },
+        "rule_id_counts": {
+          "included_count": 1,
+          "limit": 16,
+          "omitted_count": 0,
+          "total_count": 1,
+          "truncated": false
+        },
+        "unmapped_finding_code_counts": {
+          "included_count": 1,
+          "limit": 16,
+          "omitted_count": 0,
+          "total_count": 1,
+          "truncated": false
+        },
+        "unmapped_rule_id_counts": {
+          "included_count": 1,
+          "limit": 16,
+          "omitted_count": 0,
+          "total_count": 1,
+          "truncated": false
+        }
+      },
+      "finding_code_counts": [
+        {
+          "count": 1,
+          "finding_code": "COVERAGE_PERIOD_MISSING"
+        }
+      ],
+      "finding_count": 1,
+      "included_unmapped_group_count": 1,
+      "included_unmapped_warning_error_group_count": 1,
+      "mapped_finding_code_counts": [],
+      "mapped_finding_count": 0,
+      "mapped_rule_id_counts": [],
+      "mapped_severity_counts": {},
+      "omitted_unmapped_group_count": 0,
+      "omitted_unmapped_warning_error_group_count": 0,
+      "rule_id_counts": [
+        {
+          "count": 1,
+          "rule_id": "inventory.coverage_manifest"
+        }
+      ],
+      "schema_version": "histdatacom.quality-remediation-coverage.v1",
+      "severity_counts": {
+        "error": 1
+      },
+      "unmapped_finding_code_counts": [
+        {
+          "count": 1,
+          "finding_code": "COVERAGE_PERIOD_MISSING"
+        }
+      ],
+      "unmapped_finding_count": 1,
+      "unmapped_group_count": 1,
+      "unmapped_groups": [
+        {
+          "finding_code": "COVERAGE_PERIOD_MISSING",
+          "included_target_axis_count": 1,
+          "mapped": false,
+          "max_severity": "error",
+          "occurrence_count": 1,
+          "omitted_target_axis_count": 0,
+          "rule_id": "inventory.coverage_manifest",
+          "severity_counts": {
+            "error": 1
+          },
+          "target_axis_count": 1,
+          "target_axis_counts": [
+            {
+              "count": 1,
+              "target_axis": {
+                "data_format": "ascii",
+                "kind": "directory",
+                "period": "unknown",
+                "symbol": "unknown",
+                "timeframe": "M1"
+              }
+            }
+          ],
+          "target_axis_truncated": false
+        }
+      ],
+      "unmapped_rule_id_counts": [
+        {
+          "count": 1,
+          "rule_id": "inventory.coverage_manifest"
+        }
+      ],
+      "unmapped_severity_counts": {
+        "error": 1
+      },
+      "unmapped_truncated": false,
+      "unmapped_warning_error_finding_count": 1,
+      "unmapped_warning_error_group_count": 1
+    }
   },
   "rule_results": [
     {
