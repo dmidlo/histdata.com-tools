@@ -29,6 +29,16 @@
       "info": 1,
       "warning": 1
     },
+    "source_family_counts": [
+      {
+        "count": 2,
+        "source_family": "time"
+      },
+      {
+        "count": 1,
+        "source_family": "fingerprint"
+      }
+    ],
     "unmapped_finding_code_counts": [
       {
         "count": 1,
@@ -48,6 +58,16 @@
         "count": 1,
         "rule_id": "time.ascii.sequence"
       }
+    ],
+    "unmapped_source_family_counts": [
+      {
+        "count": 1,
+        "source_family": "fingerprint"
+      },
+      {
+        "count": 1,
+        "source_family": "time"
+      }
     ]
   },
   "known_unmapped_codes": [
@@ -63,6 +83,13 @@
         "error": 1
       },
       "source_count": 1,
+      "source_family": "time",
+      "source_family_counts": [
+        {
+          "count": 1,
+          "source_family": "time"
+        }
+      ],
       "sources": [
         {
           "count": 1,
@@ -82,6 +109,13 @@
         "info": 1
       },
       "source_count": 1,
+      "source_family": "fingerprint",
+      "source_family_counts": [
+        {
+          "count": 1,
+          "source_family": "fingerprint"
+        }
+      ],
       "sources": [
         {
           "count": 1,
@@ -116,12 +150,93 @@
       "total_count": 2,
       "truncated": false
     },
+    "ranked_gap_sources": {
+      "applies_per_gap": true,
+      "limit": 2
+    },
+    "ranked_gaps": {
+      "included_count": 2,
+      "limit": 4,
+      "omitted_count": 0,
+      "total_count": 2,
+      "truncated": false
+    },
     "report_unmapped_groups": {
       "applies_per_report": true,
       "limit": 4,
       "target_axis_limit": 8
     }
   },
+  "ranked_gaps": [
+    {
+      "finding_code": "ASCII_M1_GRANULARITY_DRIFT",
+      "included_source_count": 1,
+      "known_source_occurrence_count": 1,
+      "mapped": false,
+      "max_severity": "error",
+      "omitted_source_count": 0,
+      "rank": 1,
+      "rank_reasons": [
+        "severity=error",
+        "source_family=time",
+        "known_sources=1"
+      ],
+      "report_group_count": 0,
+      "report_occurrence_count": 0,
+      "rule_id": "time.ascii.sequence",
+      "severity_counts": {
+        "error": 1
+      },
+      "source_count": 1,
+      "source_family": "time",
+      "source_family_counts": [
+        {
+          "count": 1,
+          "source_family": "time"
+        }
+      ],
+      "sources": [
+        {
+          "count": 1,
+          "source": "data_quality/time.ascii.sequence.py:1"
+        }
+      ]
+    },
+    {
+      "finding_code": "FINGERPRINT_SERIES_SUMMARY",
+      "included_source_count": 1,
+      "known_source_occurrence_count": 1,
+      "mapped": false,
+      "max_severity": "info",
+      "omitted_source_count": 0,
+      "rank": 2,
+      "rank_reasons": [
+        "severity=info",
+        "source_family=fingerprint",
+        "known_sources=1"
+      ],
+      "report_group_count": 0,
+      "report_occurrence_count": 0,
+      "rule_id": "fingerprint.series",
+      "severity_counts": {
+        "info": 1
+      },
+      "source_count": 1,
+      "source_family": "fingerprint",
+      "source_family_counts": [
+        {
+          "count": 1,
+          "source_family": "fingerprint"
+        }
+      ],
+      "sources": [
+        {
+          "count": 1,
+          "source": "data_quality/fingerprint.series.py:1"
+        }
+      ]
+    }
+  ],
   "report_coverage": [],
   "schema_version": "histdatacom.quality-remediation-catalog-audit.v1",
   "status": "needs-remediation-guidance",

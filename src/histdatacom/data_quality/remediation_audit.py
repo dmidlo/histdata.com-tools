@@ -51,6 +51,7 @@ class KnownQualityFindingCode:
     severity: QualitySeverity = QualitySeverity.ERROR
     source: str = ""
     severity_source: str = ""
+    source_family: str = ""
 
 
 @dataclass(slots=True)
@@ -61,6 +62,7 @@ class _CodeAggregate:
     occurrence_count: int = 0
     severity_counts: Counter[str] = field(default_factory=Counter)
     source_counts: Counter[str] = field(default_factory=Counter)
+    source_family_counts: Counter[str] = field(default_factory=Counter)
 
     @property
     def max_severity(self) -> str:
@@ -131,6 +133,7 @@ def audit_remediation_catalog(
         )
         for source, report in _normalized_reports(reports)
     ]
+    report_gap_evidence = _report_gap_evidence(report_payloads)
     unmapped_known = sorted(
         (
             aggregate
@@ -138,6 +141,14 @@ def audit_remediation_catalog(
             if not aggregate.mapped
         ),
         key=_code_aggregate_sort_key,
+    )
+    ranked_gaps = _ranked_gap_payloads(
+        unmapped_known,
+        report_gap_evidence=report_gap_evidence,
+        source_limit=source_limit,
+    )
+    included_ranked_gaps = list(
+        _bounded_sequence(ranked_gaps, limit=code_limit)
     )
     included_unmapped_known = _bounded_sequence(
         unmapped_known,
@@ -168,8 +179,13 @@ def audit_remediation_catalog(
             )
             for aggregate in included_unmapped_known
         ],
+        "ranked_gaps": cast(JSONValue, included_ranked_gaps),
         "report_coverage": cast(JSONValue, report_payloads),
         "payload_limits": {
+            "ranked_gaps": _payload_limit_metadata(
+                len(ranked_gaps),
+                code_limit,
+            ),
             "known_unmapped_codes": _payload_limit_metadata(
                 len(unmapped_known),
                 code_limit,
@@ -177,6 +193,10 @@ def audit_remediation_catalog(
             "known_code_sources": {
                 "limit": source_limit,
                 "applies_per_code": True,
+            },
+            "ranked_gap_sources": {
+                "limit": source_limit,
+                "applies_per_gap": True,
             },
             "known_rule_id_counts": _payload_limit_metadata(
                 _counter_distinct_count(
@@ -271,6 +291,17 @@ def format_remediation_catalog_audit(
             "unmapped warning/error groups: "
             f"{_int_value(summary, 'report_unmapped_warning_error_group_count')}"
         )
+    ranked_groups = [
+        item
+        for item in _list_payload(payload.get("ranked_gaps"))
+        if _optional_string(item, "max_severity") in {"error", "warning"}
+    ]
+    lines.extend(("", "Ranked remediation gaps"))
+    if not ranked_groups:
+        lines.append("- none")
+    else:
+        lines.extend(f"- {_format_ranked_gap(item)}" for item in ranked_groups)
+
     groups = [
         item
         for item in _list_payload(payload.get("known_unmapped_codes"))
@@ -316,6 +347,9 @@ def _known_findings_from_source(
     except (OSError, SyntaxError):
         return ()
     constants = _module_string_constants(tree)
+    class_rule_ids = _class_rule_ids(tree, constants)
+    parents = _parent_map(tree)
+    source_family = _source_family_for_path(path)
     findings: list[KnownQualityFindingCode] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -324,7 +358,13 @@ def _known_findings_from_source(
         if not code or not _looks_like_finding_code(code):
             continue
         severity, severity_source = _severity_from_call(node)
-        rule_id = _rule_id_from_call(node, constants)
+        rule_id = _rule_id_from_call(
+            node,
+            constants,
+            class_rule_ids=class_rule_ids,
+            parents=parents,
+            source_family=source_family,
+        )
         source = _relative_source(path, root=root, line_number=node.lineno)
         findings.append(
             KnownQualityFindingCode(
@@ -333,6 +373,7 @@ def _known_findings_from_source(
                 severity=severity,
                 source=source,
                 severity_source=severity_source,
+                source_family=source_family,
             )
         )
     return tuple(findings)
@@ -356,6 +397,9 @@ def _known_code_aggregates(
         aggregate.severity_counts[known.severity.value] += 1
         if known.source:
             aggregate.source_counts[known.source] += 1
+        family = known.source_family or _source_family_from_source(known.source)
+        if family:
+            aggregate.source_family_counts[family] += 1
         aggregate.mapped = aggregate.mapped or _known_code_is_mapped(known)
     return aggregates
 
@@ -420,6 +464,39 @@ def _report_coverage_summary(
     }
 
 
+def _report_gap_evidence(
+    report_payloads: Sequence[Mapping[str, JSONValue]],
+) -> dict[str, Counter[str]]:
+    exact_counts: Counter[str] = Counter()
+    finding_code_counts: Counter[str] = Counter()
+    group_counts: Counter[str] = Counter()
+    severity_counts: Counter[str] = Counter()
+    for payload in report_payloads:
+        coverage = _mapping_payload(payload.get("remediation_coverage"))
+        for group in _list_payload(coverage.get("unmapped_groups")):
+            finding_code = _optional_string(group, "finding_code")
+            if not finding_code:
+                continue
+            rule_id = _optional_string(group, "rule_id") or "unknown"
+            key = _rule_code_key(rule_id, finding_code)
+            occurrence_count = _int_value(group, "occurrence_count")
+            exact_counts[key] += occurrence_count
+            finding_code_counts[finding_code] += occurrence_count
+            group_counts[finding_code] += 1
+            group_severity_counts = _mapping_payload(
+                group.get("severity_counts")
+            )
+            for severity, count in group_severity_counts.items():
+                if isinstance(count, (int, float)):
+                    severity_counts[f"{finding_code}\0{severity}"] += int(count)
+    return {
+        "exact_counts": exact_counts,
+        "finding_code_counts": finding_code_counts,
+        "group_counts": group_counts,
+        "severity_counts": severity_counts,
+    }
+
+
 def _audit_summary(
     aggregates: Mapping[tuple[str, str], _CodeAggregate],
     *,
@@ -469,6 +546,115 @@ def _audit_summary(
     }
 
 
+def _ranked_gap_payloads(
+    aggregates: Sequence[_CodeAggregate],
+    *,
+    report_gap_evidence: Mapping[str, Counter[str]],
+    source_limit: int,
+) -> list[JSONValue]:
+    ranked = sorted(
+        (
+            _ranked_gap_payload(
+                aggregate,
+                report_gap_evidence=report_gap_evidence,
+                source_limit=source_limit,
+            )
+            for aggregate in aggregates
+        ),
+        key=_ranked_gap_sort_key,
+    )
+    return [{**gap, "rank": index} for index, gap in enumerate(ranked, start=1)]
+
+
+def _ranked_gap_payload(
+    aggregate: _CodeAggregate,
+    *,
+    report_gap_evidence: Mapping[str, Counter[str]],
+    source_limit: int,
+) -> dict[str, JSONValue]:
+    exact_counts = report_gap_evidence.get("exact_counts", Counter())
+    finding_code_counts = report_gap_evidence.get(
+        "finding_code_counts",
+        Counter(),
+    )
+    group_counts = report_gap_evidence.get("group_counts", Counter())
+    severity_counts = _counter_payload(aggregate.severity_counts)
+    report_occurrence_count = (
+        exact_counts[_rule_code_key(aggregate.rule_id, aggregate.finding_code)]
+        or finding_code_counts[aggregate.finding_code]
+    )
+    sources = _named_counter_payloads(
+        aggregate.source_counts,
+        key_name="source",
+        limit=source_limit,
+    )
+    source_family_counts = _named_counter_payloads(
+        aggregate.source_family_counts,
+        key_name="source_family",
+        limit=source_limit,
+    )
+    source_family = _primary_source_family(aggregate.source_family_counts)
+    payload: dict[str, JSONValue] = {
+        "finding_code": aggregate.finding_code,
+        "rule_id": aggregate.rule_id,
+        "mapped": aggregate.mapped,
+        "max_severity": aggregate.max_severity,
+        "severity_counts": severity_counts,
+        "source_family": source_family,
+        "source_family_counts": source_family_counts,
+        "known_source_occurrence_count": aggregate.occurrence_count,
+        "source_count": len(aggregate.source_counts),
+        "included_source_count": len(sources),
+        "omitted_source_count": max(
+            0,
+            len(aggregate.source_counts) - len(sources),
+        ),
+        "sources": sources,
+        "report_occurrence_count": report_occurrence_count,
+        "report_group_count": group_counts[aggregate.finding_code],
+        "rank_reasons": _rank_reasons(
+            aggregate,
+            report_occurrence_count=report_occurrence_count,
+            source_family=source_family,
+        ),
+    }
+    return payload
+
+
+def _ranked_gap_sort_key(
+    gap: Mapping[str, JSONValue],
+) -> tuple[int, int, int, int, int, int, str, str, str]:
+    severity_counts = _mapping_payload(gap.get("severity_counts"))
+    max_severity = _optional_string(gap, "max_severity")
+    return (
+        0 if max_severity in {"error", "warning"} else 1,
+        _SEVERITY_SORT.get(max_severity, 9),
+        -_int_value(severity_counts, "error"),
+        -_int_value(severity_counts, "warning"),
+        -_int_value(gap, "report_occurrence_count"),
+        -_int_value(gap, "known_source_occurrence_count"),
+        _optional_string(gap, "source_family"),
+        _optional_string(gap, "finding_code"),
+        _optional_string(gap, "rule_id"),
+    )
+
+
+def _rank_reasons(
+    aggregate: _CodeAggregate,
+    *,
+    report_occurrence_count: int,
+    source_family: str,
+) -> list[JSONValue]:
+    reasons: list[JSONValue] = [
+        f"severity={aggregate.max_severity}",
+        f"source_family={source_family or 'unknown'}",
+        f"known_sources={aggregate.occurrence_count}",
+    ]
+    if report_occurrence_count:
+        reasons.insert(2, f"report_occurrences={report_occurrence_count}")
+    return reasons
+
+
 def _known_code_counts(
     aggregates: Mapping[tuple[str, str], _CodeAggregate],
     *,
@@ -477,12 +663,15 @@ def _known_code_counts(
 ) -> dict[str, JSONValue]:
     severity_counts: Counter[str] = Counter()
     rule_id_counts: Counter[str] = Counter()
+    source_family_counts: Counter[str] = Counter()
     finding_code_counts: Counter[str] = Counter()
     unmapped_rule_id_counts: Counter[str] = Counter()
+    unmapped_source_family_counts: Counter[str] = Counter()
     unmapped_finding_code_counts: Counter[str] = Counter()
     for aggregate in aggregates.values():
         severity_counts.update(aggregate.severity_counts)
         rule_id_counts[aggregate.rule_id] += aggregate.occurrence_count
+        source_family_counts.update(aggregate.source_family_counts)
         finding_code_counts[
             aggregate.finding_code
         ] += aggregate.occurrence_count
@@ -490,6 +679,7 @@ def _known_code_counts(
             unmapped_rule_id_counts[
                 aggregate.rule_id
             ] += aggregate.occurrence_count
+            unmapped_source_family_counts.update(aggregate.source_family_counts)
             unmapped_finding_code_counts[
                 aggregate.finding_code
             ] += aggregate.occurrence_count
@@ -500,6 +690,11 @@ def _known_code_counts(
             key_name="rule_id",
             limit=rule_limit,
         ),
+        "source_family_counts": _named_counter_payloads(
+            source_family_counts,
+            key_name="source_family",
+            limit=rule_limit,
+        ),
         "finding_code_counts": _named_counter_payloads(
             finding_code_counts,
             key_name="finding_code",
@@ -508,6 +703,11 @@ def _known_code_counts(
         "unmapped_rule_id_counts": _named_counter_payloads(
             unmapped_rule_id_counts,
             key_name="rule_id",
+            limit=rule_limit,
+        ),
+        "unmapped_source_family_counts": _named_counter_payloads(
+            unmapped_source_family_counts,
+            key_name="source_family",
             limit=rule_limit,
         ),
         "unmapped_finding_code_counts": _named_counter_payloads(
@@ -528,6 +728,11 @@ def _code_aggregate_payload(
         key_name="source",
         limit=source_limit,
     )
+    source_family_counts = _named_counter_payloads(
+        aggregate.source_family_counts,
+        key_name="source_family",
+        limit=source_limit,
+    )
     return {
         "rule_id": aggregate.rule_id,
         "finding_code": aggregate.finding_code,
@@ -535,6 +740,8 @@ def _code_aggregate_payload(
         "occurrence_count": aggregate.occurrence_count,
         "max_severity": aggregate.max_severity,
         "severity_counts": _counter_payload(aggregate.severity_counts),
+        "source_family": _primary_source_family(aggregate.source_family_counts),
+        "source_family_counts": source_family_counts,
         "source_count": len(aggregate.source_counts),
         "included_source_count": len(sources),
         "omitted_source_count": max(
@@ -573,6 +780,43 @@ def _module_string_constants(tree: ast.AST) -> dict[str, str]:
     return constants
 
 
+def _parent_map(tree: ast.AST) -> dict[ast.AST, ast.AST]:
+    return {
+        child: parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
+
+
+def _class_rule_ids(
+    tree: ast.AST,
+    constants: Mapping[str, str],
+) -> dict[str, str]:
+    rule_ids: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for child in node.body:
+            value: ast.AST | None = None
+            if isinstance(child, ast.AnnAssign):
+                if isinstance(child.target, ast.Name):
+                    if child.target.id == "rule_id":
+                        value = child.value
+            elif isinstance(child, ast.Assign):
+                if any(
+                    isinstance(target, ast.Name) and target.id == "rule_id"
+                    for target in child.targets
+                ):
+                    value = child.value
+            if value is None:
+                continue
+            rule_id = _rule_id_literal(value, constants)
+            if rule_id:
+                rule_ids[node.name] = rule_id
+                break
+    return rule_ids
+
+
 def _string_keyword(node: ast.Call, name: str) -> str:
     for keyword in node.keywords:
         if keyword.arg != name:
@@ -586,6 +830,10 @@ def _string_keyword(node: ast.Call, name: str) -> str:
 def _rule_id_from_call(
     node: ast.Call,
     constants: Mapping[str, str],
+    *,
+    class_rule_ids: Mapping[str, str],
+    parents: Mapping[ast.AST, ast.AST],
+    source_family: str,
 ) -> str:
     for keyword in node.keywords:
         if keyword.arg != "rule_id":
@@ -594,21 +842,209 @@ def _rule_id_from_call(
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
             return value.value
         if isinstance(value, ast.Name):
-            return constants.get(value.id, value.id)
-        return _rule_id_from_expression(value, constants)
-    return "unknown"
+            return constants.get(
+                value.id,
+                _unresolved_rule_id(source_family),
+            )
+        return _rule_id_from_expression(
+            value,
+            constants,
+            class_rule_ids=class_rule_ids,
+            parents=parents,
+            source_family=source_family,
+        )
+    return _unresolved_rule_id(source_family)
 
 
 def _rule_id_from_expression(
     value: ast.AST,
     constants: Mapping[str, str],
+    *,
+    class_rule_ids: Mapping[str, str],
+    parents: Mapping[ast.AST, ast.AST],
+    source_family: str,
 ) -> str:
     expression = ast.unparse(value)
     if expression in constants:
         return constants[expression]
-    if expression.endswith(".rule_id"):
-        return expression
-    return "unknown"
+    literal = _rule_id_literal(value, constants)
+    if literal:
+        return literal
+    if isinstance(value, ast.Attribute) and value.attr == "rule_id":
+        owner = value.value
+        if isinstance(owner, ast.Name):
+            if owner.id == "self":
+                class_rule_id = _nearest_class_rule_id(
+                    value,
+                    parents=parents,
+                    class_rule_ids=class_rule_ids,
+                )
+                if class_rule_id:
+                    return class_rule_id
+            function_rule_id = _function_rule_id_for_name(
+                value,
+                owner.id,
+                parents=parents,
+                class_rule_ids=class_rule_ids,
+            )
+            if function_rule_id:
+                return function_rule_id
+    return _unresolved_rule_id(source_family)
+
+
+def _rule_id_literal(
+    value: ast.AST | None,
+    constants: Mapping[str, str],
+) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+        return value.value
+    if isinstance(value, ast.Name):
+        return constants.get(value.id, "")
+    if isinstance(value, ast.Call):
+        for keyword in value.keywords:
+            if keyword.arg == "default":
+                return _rule_id_literal(keyword.value, constants)
+    return ""
+
+
+def _nearest_class_rule_id(
+    node: ast.AST,
+    *,
+    parents: Mapping[ast.AST, ast.AST],
+    class_rule_ids: Mapping[str, str],
+) -> str:
+    parent = parents.get(node)
+    while parent is not None:
+        if isinstance(parent, ast.ClassDef):
+            return class_rule_ids.get(parent.name, "")
+        parent = parents.get(parent)
+    return ""
+
+
+def _function_rule_id_for_name(
+    node: ast.AST,
+    name: str,
+    *,
+    parents: Mapping[ast.AST, ast.AST],
+    class_rule_ids: Mapping[str, str],
+) -> str:
+    function = _nearest_function(node, parents)
+    if function is None:
+        return ""
+    annotations = _function_rule_id_annotations(function, class_rule_ids)
+    if name in annotations:
+        return annotations[name]
+    asserted = _function_rule_id_assertions(function, class_rule_ids)
+    return asserted.get(name, "")
+
+
+def _nearest_function(
+    node: ast.AST,
+    parents: Mapping[ast.AST, ast.AST],
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    parent = parents.get(node)
+    while parent is not None:
+        if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return parent
+        parent = parents.get(parent)
+    return None
+
+
+def _function_rule_id_annotations(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    class_rule_ids: Mapping[str, str],
+) -> dict[str, str]:
+    annotated: dict[str, str] = {}
+    args = (
+        list(function.args.args)
+        + list(function.args.kwonlyargs)
+        + list(function.args.posonlyargs)
+    )
+    for arg in args:
+        class_name = _annotation_name(arg.annotation)
+        if class_name in class_rule_ids:
+            annotated[arg.arg] = class_rule_ids[class_name]
+    return annotated
+
+
+def _function_rule_id_assertions(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    class_rule_ids: Mapping[str, str],
+) -> dict[str, str]:
+    asserted: dict[str, str] = {}
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Assert):
+            continue
+        test = node.test
+        if not isinstance(test, ast.Call):
+            continue
+        if not _call_name_is(test.func, "isinstance"):
+            continue
+        if len(test.args) < 2:
+            continue
+        target, class_expr = test.args[0], test.args[1]
+        if not isinstance(target, ast.Name):
+            continue
+        class_name = _annotation_name(class_expr)
+        if class_name in class_rule_ids:
+            asserted[target.id] = class_rule_ids[class_name]
+    return asserted
+
+
+def _annotation_name(node: ast.AST | None) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _call_name_is(node: ast.AST, name: str) -> bool:
+    return isinstance(node, ast.Name) and node.id == name
+
+
+def _source_family_for_path(path: Path) -> str:
+    name = path.name
+    if name in {"calendar.py"}:
+        return "domain/calendar"
+    if name in {"symbols.py"}:
+        return "domain"
+    if name in {"format_support.py", "inventory.py", "manifest.py"}:
+        return "inventory"
+    family_by_name = {
+        "bars.py": "bars",
+        "fingerprints.py": "fingerprint",
+        "ingestion.py": "ingestion",
+        "modeling.py": "modeling",
+        "provenance.py": "provenance",
+        "ticks.py": "ticks",
+        "time.py": "time",
+    }
+    return family_by_name.get(name, path.stem)
+
+
+def _source_family_from_source(source: str) -> str:
+    if not source.startswith("data_quality/"):
+        return ""
+    source_path = source.removeprefix("data_quality/").split(":", 1)[0]
+    return _source_family_for_path(Path(source_path))
+
+
+def _primary_source_family(counter: Counter[str]) -> str:
+    if not counter:
+        return ""
+    return sorted(counter, key=lambda item: (-counter[item], item))[0]
+
+
+def _unresolved_rule_id(source_family: str) -> str:
+    normalized = source_family.replace("/", ".") or "unknown"
+    return f"{normalized}.unresolved"
+
+
+def _rule_code_key(rule_id: str, finding_code: str) -> str:
+    return f"{rule_id}\0{finding_code}"
 
 
 def _severity_from_call(
@@ -687,6 +1123,21 @@ def _format_code_group(group: Mapping[str, JSONValue]) -> str:
     )
 
 
+def _format_ranked_gap(group: Mapping[str, JSONValue]) -> str:
+    reasons = _string_list(group.get("rank_reasons"))
+    reason_text = f" reasons={'; '.join(reasons)}" if reasons else ""
+    return (
+        f"#{_int_value(group, 'rank')} "
+        f"{_optional_string(group, 'max_severity') or 'info'} "
+        f"{_optional_string(group, 'finding_code')} "
+        f"family={_optional_string(group, 'source_family') or 'unknown'} "
+        f"rule={_optional_string(group, 'rule_id') or 'unknown'} "
+        f"reports={_int_value(group, 'report_occurrence_count')} "
+        f"known_sources={_int_value(group, 'known_source_occurrence_count')}"
+        f"{reason_text}"
+    )
+
+
 def _payload_limit_metadata(
     total_count: int,
     limit: int,
@@ -738,6 +1189,12 @@ def _list_payload(value: object) -> list[Mapping[str, JSONValue]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, Mapping)]
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
 
 
 def _optional_string(
