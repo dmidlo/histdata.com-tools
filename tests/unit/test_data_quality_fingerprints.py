@@ -43,6 +43,7 @@ from tests.fixtures.histdata_ascii.quality_cases import (
     CLEAN_TICK_CASE,
     CLEAN_TICK_ROWS,
     HistDataAsciiCase,
+    case_by_name,
     write_ascii_case,
     write_zip_case,
 )
@@ -85,6 +86,22 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
         "end_timestamp_utc_ms": batch.summary.end,
         "duration_ms": 120_000,
     }
+    topology = _mapping(payload["temporal_topology"])
+    assert topology["row_count"] == 3
+    assert topology["parsed_row_count"] == 3
+    assert topology["invalid_timestamp_count"] == 0
+    assert topology["non_monotonic_count"] == 0
+    assert topology["duplicate_timestamp_count"] == 0
+    assert topology["min_interval_ms"] == 60_000
+    assert topology["median_interval_ms"] == 60_000
+    assert topology["max_gap_ms"] == 60_000
+    assert topology["suspicious_gap_count"] == 0
+    assert topology["expected_session_closure_count"] == 0
+    assert topology["weekend_activity_count"] == 0
+    assert topology["sampling_basis"] == "observed_sequence"
+    assert topology["computed_from"] == "text_scan"
+    assert topology["timestamp_projection"] == "text_scan"
+    assert topology["cache_source"] is None
     assert _mapping(payload["source"])["kind"] == "csv_text"
 
 
@@ -152,6 +169,12 @@ def test_fingerprint_rule_prefers_direct_cache_payload(
         "end_timestamp_utc_ms": batch.summary.end,
         "duration_ms": 120_000,
     }
+    topology = _mapping(payload["temporal_topology"])
+    assert topology["computed_from"] == "direct_cache"
+    assert topology["timestamp_projection"] == "polars_cache"
+    assert topology["cache_source"] == "direct"
+    assert topology["row_count"] == 3
+    assert topology["min_interval_ms"] == 60_000
 
 
 def test_fingerprint_rule_prefers_fresh_sibling_cache(
@@ -177,6 +200,99 @@ def test_fingerprint_rule_prefers_fresh_sibling_cache(
         "path": ".data",
     }
     assert _mapping(payload["coverage"])["row_count"] == 3
+    topology = _mapping(payload["temporal_topology"])
+    assert topology["computed_from"] == "fresh_sibling_cache"
+    assert topology["timestamp_projection"] == "polars_cache"
+    assert topology["cache_source"] == "sibling"
+
+
+def test_fingerprint_temporal_topology_reports_m1_duplicate_timestamp(
+    tmp_path: Path,
+) -> None:
+    """M1 duplicate timestamps should be descriptive fingerprint metadata."""
+    target = _discovered_target(
+        write_ascii_case(tmp_path, case_by_name("m1_duplicate_timestamp"))
+    )
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    topology = _mapping(payload["temporal_topology"])
+
+    assert topology["duplicate_timestamp_count"] == 1
+    assert topology["m1_duplicate_timestamp_count"] == 1
+    assert topology["tick_duplicate_row_count"] == 0
+    assert _mapping(topology["duplicate_timestamp_source_counts"]) == {
+        "m1_duplicate_timestamp": 1,
+        "tick_duplicate_row": 0,
+    }
+    assert topology["min_interval_ms"] == 0
+
+
+def test_fingerprint_temporal_topology_reports_tick_duplicate_row(
+    tmp_path: Path,
+) -> None:
+    """Tick duplicate rows should be counted separately from M1 duplicates."""
+    target = _discovered_target(
+        write_ascii_case(tmp_path, case_by_name("tick_duplicate_row"))
+    )
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    topology = _mapping(payload["temporal_topology"])
+
+    assert topology["duplicate_timestamp_count"] == 1
+    assert topology["m1_duplicate_timestamp_count"] == 0
+    assert topology["tick_duplicate_row_count"] == 1
+    assert _mapping(topology["duplicate_timestamp_source_counts"]) == {
+        "m1_duplicate_timestamp": 0,
+        "tick_duplicate_row": 1,
+    }
+    assert topology["min_interval_ms"] == 0
+
+
+def test_fingerprint_temporal_topology_reports_expected_weekend_closure(
+    tmp_path: Path,
+) -> None:
+    """Expected FX weekend closures should be topology, not defects."""
+    case = HistDataAsciiCase(
+        name="m1_expected_weekend_closure",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202_WEEKEND.csv",
+        rows=(
+            "20120203 170000;1.306600;1.306600;1.306560;1.306560;0",
+            "20120205 170000;1.306570;1.306570;1.306470;1.306560;17",
+        ),
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    topology = _mapping(payload["temporal_topology"])
+
+    assert topology["expected_session_closure_count"] == 1
+    assert topology["suspicious_gap_count"] == 0
+    assert topology["max_gap_ms"] == 172_800_000
+    assert _mapping(topology["gap_bucket_counts"])["gt_1d"] == 1
+
+
+def test_fingerprint_temporal_topology_reports_suspicious_gap(
+    tmp_path: Path,
+) -> None:
+    """Unexpected large gaps should be summarized without changing severity."""
+    case = HistDataAsciiCase(
+        name="m1_suspicious_gap",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202_GAP.csv",
+        rows=(
+            "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
+            "20120201 001000;1.306570;1.306570;1.306470;1.306560;17",
+        ),
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    finding = _fingerprint_finding(target)
+    payload = _fingerprint_payload(finding)
+    topology = _mapping(payload["temporal_topology"])
+
+    assert finding.severity is QualitySeverity.INFO
+    assert topology["suspicious_gap_count"] == 1
+    assert topology["expected_session_closure_count"] == 0
+    assert topology["max_gap_ms"] == 600_000
+    assert _mapping(topology["gap_bucket_counts"])["gt_1m"] == 1
+    assert _mapping(topology["gap_bucket_counts"])["gt_5m"] == 1
 
 
 def test_fingerprint_rule_reports_unsupported_target(

@@ -211,6 +211,7 @@ from histdatacom.data_quality.time import (
     HistDataGapTolerance,
     time_quality_run_rules,
     time_quality_rules,
+    timestamp_topology_payload_for_target,
 )
 from histdatacom.data_quality.ticks import (
     ASCII_TICK_MICROSTRUCTURE_RULE_ID,
@@ -403,6 +404,7 @@ __all__ = [
     "symbol_metadata_for",
     "time_quality_run_rules",
     "time_quality_rules",
+    "timestamp_topology_payload_for_target",
     "ticks_quality_rules",
     "validate_quality_profile",
     "write_quality_report",

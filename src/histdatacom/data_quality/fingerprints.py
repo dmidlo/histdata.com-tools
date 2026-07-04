@@ -21,6 +21,7 @@ from histdatacom.data_quality.contracts import (
     QualityTargetKind,
 )
 from histdatacom.data_quality.polars_cache import read_quality_polars_cache
+from histdatacom.data_quality.time import timestamp_topology_payload_for_target
 from histdatacom.histdata_ascii import (
     M1,
     TICK,
@@ -246,6 +247,7 @@ def _series_fingerprint_payload(target: QualityTarget) -> dict[str, JSONValue]:
         "schema_version": TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
         "target_axis": _target_axis(target),
         "coverage": _empty_coverage(parsed_row_count=None),
+        "temporal_topology": timestamp_topology_payload_for_target(target),
         "source": _unavailable_source(
             target,
             reason=_unsupported_reason(target),

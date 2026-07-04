@@ -157,6 +157,9 @@ class _TimestampScan:
         default_factory=dict
     )
     polars_frame: Any | None = None
+    topology_source: str = "text_scan"
+    cache_source: str = ""
+    used_timestamp_projection: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -676,6 +679,80 @@ def time_quality_run_rules() -> tuple[QualityRunRule, ...]:
     return (continuity_rule,)
 
 
+def timestamp_topology_payload_for_target(
+    target: QualityTarget,
+    *,
+    tolerance: HistDataGapTolerance | None = None,
+) -> dict[str, JSONValue]:
+    """Return a bounded timestamp topology payload for one quality target."""
+    resolved_tolerance = tolerance or HistDataGapTolerance()
+    if not _is_ascii_text_target(target):
+        return _empty_timestamp_topology_payload(
+            reason="unsupported_target",
+            tolerance=resolved_tolerance,
+        )
+
+    try:
+        scan = _timestamp_scan_for_target(target)
+    except ValueError as exc:
+        return _empty_timestamp_topology_payload(
+            reason="unsupported_timeframe",
+            tolerance=resolved_tolerance,
+            error=str(exc),
+        )
+    except _SourceReadError as exc:
+        return _empty_timestamp_topology_payload(
+            reason=exc.code,
+            tolerance=resolved_tolerance,
+            error=exc.message,
+        )
+
+    sequence = scan.sequence_scan or _scan_timestamp_sequence(
+        target,
+        scan.valid_rows,
+    )
+    scan.sequence_scan = sequence
+    gap_scan = _gap_scan_for_timestamp_scan(
+        target,
+        scan,
+        tolerance=resolved_tolerance,
+    )
+    interval_summary = _timestamp_interval_summary(scan)
+    m1_duplicate_count = sequence.m1_duplicate_timestamp_count
+    tick_duplicate_count = sequence.tick_duplicate_row_count
+
+    return {
+        "row_count": scan.row_count,
+        "parsed_row_count": scan.parsed_row_count,
+        "invalid_timestamp_count": scan.invalid_timestamp_count,
+        "non_monotonic_count": sequence.non_monotonic_count,
+        "duplicate_timestamp_count": m1_duplicate_count + tick_duplicate_count,
+        "duplicate_timestamp_source_counts": {
+            "m1_duplicate_timestamp": m1_duplicate_count,
+            "tick_duplicate_row": tick_duplicate_count,
+        },
+        "m1_duplicate_timestamp_count": m1_duplicate_count,
+        "tick_duplicate_row_count": tick_duplicate_count,
+        "min_interval_ms": interval_summary["min_interval_ms"],
+        "median_interval_ms": interval_summary["median_interval_ms"],
+        "interval_count": interval_summary["interval_count"],
+        "max_gap_ms": gap_scan.max_gap_ms,
+        "gap_bucket_counts": dict(gap_scan.bucket_counts),
+        "suspicious_gap_count": gap_scan.suspicious_gap_count,
+        "expected_session_closure_count": (
+            gap_scan.expected_session_closure_count
+        ),
+        "weekend_activity_count": gap_scan.weekend_activity_count,
+        "sampling_basis": "observed_sequence",
+        "computed_from": scan.topology_source,
+        "timestamp_projection": (
+            "polars_cache" if scan.used_timestamp_projection else "text_scan"
+        ),
+        "cache_source": scan.cache_source or None,
+        "gap_tolerance": resolved_tolerance.to_metadata(),
+    }
+
+
 def _is_ascii_text_target(target: QualityTarget) -> bool:
     return target.data_format == "ascii" and target.kind in {
         QualityTargetKind.CSV,
@@ -833,6 +910,13 @@ def _timestamp_scan_from_polars_cache(
         row_count=projected.height,
         parsed_row_count=projected.height,
         polars_frame=projected,
+        topology_source=(
+            "direct_cache"
+            if cache.source == "direct"
+            else "fresh_sibling_cache"
+        ),
+        cache_source=cache.source,
+        used_timestamp_projection=True,
     )
     if projected.is_empty():
         return scan
@@ -1578,7 +1662,102 @@ def _gap_scan_for_timestamp_scan(
         )
         timestamp_scan.gap_scans[key] = gap_scan
         return gap_scan
-    return _scan_timestamp_gaps(timestamp_scan.valid_rows, tolerance=tolerance)
+    gap_scan = _scan_timestamp_gaps(
+        timestamp_scan.valid_rows,
+        tolerance=tolerance,
+    )
+    timestamp_scan.gap_scans[key] = gap_scan
+    return gap_scan
+
+
+def _empty_timestamp_topology_payload(
+    *,
+    reason: str,
+    tolerance: HistDataGapTolerance,
+    error: str = "",
+) -> dict[str, JSONValue]:
+    gap_bucket_counts: dict[str, JSONValue] = {
+        key: value for key, value in _empty_gap_bucket_counts(tolerance).items()
+    }
+    payload: dict[str, JSONValue] = {
+        "row_count": 0,
+        "parsed_row_count": 0,
+        "invalid_timestamp_count": 0,
+        "non_monotonic_count": 0,
+        "duplicate_timestamp_count": 0,
+        "duplicate_timestamp_source_counts": {
+            "m1_duplicate_timestamp": 0,
+            "tick_duplicate_row": 0,
+        },
+        "m1_duplicate_timestamp_count": 0,
+        "tick_duplicate_row_count": 0,
+        "min_interval_ms": None,
+        "median_interval_ms": None,
+        "interval_count": 0,
+        "max_gap_ms": 0,
+        "gap_bucket_counts": gap_bucket_counts,
+        "suspicious_gap_count": 0,
+        "expected_session_closure_count": 0,
+        "weekend_activity_count": 0,
+        "sampling_basis": "unavailable",
+        "computed_from": "unavailable",
+        "timestamp_projection": "unavailable",
+        "cache_source": None,
+        "gap_tolerance": tolerance.to_metadata(),
+        "unavailable_reason": reason,
+    }
+    if error:
+        payload["error"] = error[:240]
+    return payload
+
+
+def _timestamp_interval_summary(
+    scan: _TimestampScan,
+) -> dict[str, JSONValue]:
+    intervals = _timestamp_intervals(scan)
+    if not intervals:
+        return {
+            "interval_count": 0,
+            "min_interval_ms": None,
+            "median_interval_ms": None,
+        }
+    sorted_intervals = sorted(intervals)
+    return {
+        "interval_count": len(intervals),
+        "min_interval_ms": sorted_intervals[0],
+        "median_interval_ms": _median_interval_ms(sorted_intervals),
+    }
+
+
+def _timestamp_intervals(scan: _TimestampScan) -> list[int]:
+    timestamps = _timestamp_values(scan)
+    return [
+        current - previous
+        for previous, current in zip(timestamps, timestamps[1:], strict=False)
+    ]
+
+
+def _timestamp_values(scan: _TimestampScan) -> list[int]:
+    if scan.polars_frame is not None:
+        try:
+            return [
+                int(value)
+                for value in scan.polars_frame.get_column("datetime").to_list()
+            ]
+        except (AttributeError, TypeError, ValueError):
+            return []
+    return [row.timestamp_utc_ms for row in scan.valid_rows]
+
+
+def _median_interval_ms(sorted_intervals: list[int]) -> int | float:
+    count = len(sorted_intervals)
+    midpoint = count // 2
+    if count % 2:
+        return sorted_intervals[midpoint]
+    numerator = sorted_intervals[midpoint - 1] + sorted_intervals[midpoint]
+    if numerator % 2 == 0:
+        return numerator // 2
+    return numerator / 2
 
 
 def _gap_tolerance_key(

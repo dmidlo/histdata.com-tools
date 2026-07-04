@@ -51,7 +51,7 @@
                 "row_count": 3,
                 "start_timestamp_utc_ms": 1328072400000
               },
-              "fingerprint_id": "sha256:3763510de912fba9b5fe933b73568de310365d06869c8e472eda94c545c5e0fe",
+              "fingerprint_id": "sha256:d57c69b869ae3d849ca29b935a5ee8fbb5961f8a9a1a1eb9593070eb61d7b2f4",
               "schema_version": "histdatacom.time-series-fingerprint.v1",
               "source": {
                 "kind": "csv_text",
@@ -63,6 +63,53 @@
                 "period": "201202",
                 "symbol": "EURUSD",
                 "timeframe": "M1"
+              },
+              "temporal_topology": {
+                "cache_source": null,
+                "computed_from": "text_scan",
+                "duplicate_timestamp_count": 0,
+                "duplicate_timestamp_source_counts": {
+                  "m1_duplicate_timestamp": 0,
+                  "tick_duplicate_row": 0
+                },
+                "expected_session_closure_count": 0,
+                "gap_bucket_counts": {
+                  "gt_1d": 0,
+                  "gt_1h": 0,
+                  "gt_1m": 0,
+                  "gt_30m": 0,
+                  "gt_5m": 0
+                },
+                "gap_tolerance": {
+                  "bucket_thresholds_ms": [
+                    60000,
+                    300000,
+                    1800000,
+                    3600000,
+                    86400000
+                  ],
+                  "dynamic_window_growth_factor": 2.0,
+                  "dynamic_window_initial_ms": 300000,
+                  "dynamic_window_max_ms": 3600000,
+                  "dynamic_window_shrink_factor": 0.5,
+                  "expected_interval_ms": 60000,
+                  "session_boundary_grace_ms": 3600000,
+                  "suspicious_gap_ms": 300000
+                },
+                "interval_count": 2,
+                "invalid_timestamp_count": 0,
+                "m1_duplicate_timestamp_count": 0,
+                "max_gap_ms": 60000,
+                "median_interval_ms": 60000,
+                "min_interval_ms": 60000,
+                "non_monotonic_count": 0,
+                "parsed_row_count": 3,
+                "row_count": 3,
+                "sampling_basis": "observed_sequence",
+                "suspicious_gap_count": 0,
+                "tick_duplicate_row_count": 0,
+                "timestamp_projection": "text_scan",
+                "weekend_activity_count": 0
               }
             }
           },
