@@ -31,6 +31,7 @@ QUALITY_CHECK_GROUPS = (
     "domain",
     "modeling",
     "provenance",
+    "fingerprint",
 )
 
 _FORMAT_CODE_PATTERN = "|".join(known_histdata_format_codes())

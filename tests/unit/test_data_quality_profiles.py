@@ -11,7 +11,9 @@ from histdatacom.data_quality import (
     ASSET_CLASS_METAL,
     DEFAULT_QUALITY_PROFILE_SOURCE,
     QUALITY_PROFILE_SCHEMA_VERSION,
+    SERIES_FINGERPRINT_RULE_ID,
     HistDataAsciiM1OutlierRule,
+    HistDataSeriesFingerprintRule,
     QualityFinding,
     QualityProfileError,
     QualityReport,
@@ -228,6 +230,38 @@ def test_profile_modeling_assumptions_are_reported_in_metadata(
     assert summary.metadata["target_horizon"]["status"] == "feasible"
 
 
+def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
+    """Fingerprint controls should validate and flow through rule factories."""
+    rules = quality_rules_for_groups(
+        ("fingerprint",),
+        profile={
+            "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+            "name": "fingerprint-profile",
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "quantiles": [0.1, 0.5, 0.9],
+                    "lags": [1, 5, 30],
+                    "rolling_windows": [60, 240],
+                    "histogram_bins": 16,
+                    "max_rows": 1000,
+                    "rounding_digits": 8,
+                }
+            },
+        },
+    )
+
+    assert len(rules) == 1
+    assert isinstance(rules[0], HistDataSeriesFingerprintRule)
+    assert rules[0].profile.to_metadata() == {
+        "quantiles": [0.1, 0.5, 0.9],
+        "lags": [1, 5, 30],
+        "rolling_windows": [60, 240],
+        "histogram_bins": 16,
+        "max_rows": 1000,
+        "rounding_digits": 8,
+    }
+
+
 @pytest.mark.parametrize(
     "profile",
     (
@@ -244,6 +278,10 @@ def test_profile_modeling_assumptions_are_reported_in_metadata(
                 }
             }
         },
+        {"rules": {SERIES_FINGERPRINT_RULE_ID: {"quantiles": [0.5, 0.1]}}},
+        {"rules": {SERIES_FINGERPRINT_RULE_ID: {"lags": [1, 1]}}},
+        {"rules": {SERIES_FINGERPRINT_RULE_ID: {"histogram_bins": 0}}},
+        {"rules": {SERIES_FINGERPRINT_RULE_ID: {"unknown": True}}},
     ),
 )
 def test_invalid_profiles_fail_with_clear_errors(profile: dict) -> None:

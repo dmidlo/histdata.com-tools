@@ -218,7 +218,7 @@ Data quality:
   --quality-checks GROUP [GROUP ...]
                         quality check groups to run; defaults to all.
                         Supported: all, inventory, ingestion, time, bars,
-                        ticks, domain, modeling, provenance
+                        ticks, domain, modeling, provenance, fingerprint
   --quality-report PATH
                         write the full machine-readable JSON quality report to
                         PATH

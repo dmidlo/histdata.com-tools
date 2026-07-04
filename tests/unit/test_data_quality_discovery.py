@@ -215,8 +215,11 @@ def test_quality_check_groups_normalize_and_validate_operator_selection() -> (
         "inventory",
         "time",
     )
+    assert normalize_quality_check_groups(("fingerprint", "fingerprint")) == (
+        "fingerprint",
+    )
 
     with pytest.raises(QualityDiscoveryError, match="cannot be combined"):
-        normalize_quality_check_groups(("all", "inventory"))
+        normalize_quality_check_groups(("all", "fingerprint"))
     with pytest.raises(QualityDiscoveryError, match="unsupported"):
         normalize_quality_check_groups(("bad-group",))

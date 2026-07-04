@@ -23,6 +23,16 @@ from histdatacom.data_quality.calendar_profiles import (
     calendar_profile_from_mapping,
 )
 from histdatacom.data_quality.contracts import QualitySeverity
+from histdatacom.data_quality.fingerprints import (
+    DEFAULT_FINGERPRINT_HISTOGRAM_BINS,
+    DEFAULT_FINGERPRINT_LAGS,
+    DEFAULT_FINGERPRINT_MAX_ROWS,
+    DEFAULT_FINGERPRINT_QUANTILES,
+    DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
+    DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
+    SERIES_FINGERPRINT_RULE_ID,
+    HistDataFingerprintProfile,
+)
 from histdatacom.data_quality.ingestion import (
     ASCII_ROW_COUNT_INGESTION_RULE_ID,
     DEFAULT_MIN_ROW_COUNT,
@@ -76,6 +86,7 @@ CONFIGURABLE_QUALITY_RULE_IDS = frozenset(
         DOMAIN_CROSS_INSTRUMENT_RULE_ID,
         DOMAIN_CALENDAR_SESSION_RULE_ID,
         MODELING_READINESS_RULE_ID,
+        SERIES_FINGERPRINT_RULE_ID,
     }
 )
 
@@ -558,6 +569,63 @@ class QualityProfile:
         )
         return assumptions
 
+    def fingerprint_profile(self) -> HistDataFingerprintProfile:
+        """Return configured deterministic fingerprint controls."""
+        config = self.rule_config(SERIES_FINGERPRINT_RULE_ID)
+        _reject_unknown_keys(
+            config,
+            {
+                "quantiles",
+                "lags",
+                "rolling_windows",
+                "histogram_bins",
+                "max_rows",
+                "rounding_digits",
+            },
+            SERIES_FINGERPRINT_RULE_ID,
+        )
+        return HistDataFingerprintProfile(
+            quantiles=_fingerprint_quantiles(
+                config,
+                "quantiles",
+                DEFAULT_FINGERPRINT_QUANTILES,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            lags=_fingerprint_int_sequence(
+                config,
+                "lags",
+                DEFAULT_FINGERPRINT_LAGS,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            rolling_windows=_fingerprint_int_sequence(
+                config,
+                "rolling_windows",
+                DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            histogram_bins=_int_field(
+                config,
+                "histogram_bins",
+                DEFAULT_FINGERPRINT_HISTOGRAM_BINS,
+                minimum=1,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            max_rows=_int_field(
+                config,
+                "max_rows",
+                DEFAULT_FINGERPRINT_MAX_ROWS,
+                minimum=1,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            rounding_digits=_int_field(
+                config,
+                "rounding_digits",
+                DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
+                minimum=0,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+        )
+
     def to_request_payload(self) -> dict[str, JSONValue]:
         """Return a JSON-safe profile payload for runtime requests."""
         return {
@@ -682,6 +750,7 @@ def validate_quality_profile(profile: QualityProfile) -> None:
     profile.cross_instrument_tolerance()
     profile.calendar_profile()
     profile.modeling_profile_assumptions()
+    profile.fingerprint_profile()
     _validate_configured_severities(profile)
 
 
@@ -1314,6 +1383,64 @@ def _int_tuple_field(
             raise QualityProfileError(msg)
         parsed.append(int_item)
     return tuple(parsed)
+
+
+def _fingerprint_int_sequence(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: tuple[int, ...],
+    *,
+    path: str,
+) -> tuple[int, ...]:
+    values = _int_tuple_field(mapping, key, default, minimum=1, path=path)
+    if key not in mapping:
+        return values
+    if not values:
+        msg = f"{path}.{key} must not be empty"
+        raise QualityProfileError(msg)
+    if tuple(sorted(values)) != values or len(set(values)) != len(values):
+        msg = f"{path}.{key} must be a strictly increasing list"
+        raise QualityProfileError(msg)
+    return values
+
+
+def _fingerprint_quantiles(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: tuple[float, ...],
+    *,
+    path: str,
+) -> tuple[float, ...]:
+    if key not in mapping:
+        return default
+    value = mapping[key]
+    if not isinstance(value, list):
+        msg = f"{path}.{key} must be a list of numbers"
+        raise QualityProfileError(msg)
+    parsed: list[float] = []
+    for index, item in enumerate(value):
+        if isinstance(item, bool):
+            msg = f"{path}.{key}[{index}] must be a number"
+            raise QualityProfileError(msg)
+        try:
+            float_item = float(item)  # type: ignore[arg-type]
+        except (TypeError, ValueError) as exc:
+            msg = f"{path}.{key}[{index}] must be a number"
+            raise QualityProfileError(msg) from exc
+        if float_item <= 0.0 or float_item >= 1.0:
+            msg = f"{path}.{key}[{index}] must be > 0.0 and < 1.0"
+            raise QualityProfileError(msg)
+        parsed.append(float_item)
+    quantiles = tuple(parsed)
+    if not quantiles:
+        msg = f"{path}.{key} must not be empty"
+        raise QualityProfileError(msg)
+    if tuple(sorted(quantiles)) != quantiles or len(set(quantiles)) != len(
+        quantiles
+    ):
+        msg = f"{path}.{key} must be a strictly increasing list"
+        raise QualityProfileError(msg)
+    return quantiles
 
 
 def _float_field(

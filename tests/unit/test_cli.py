@@ -1033,6 +1033,30 @@ def test_data_quality_cli_defaults_to_data_directory(
     assert not options.validate_urls
 
 
+def test_data_quality_cli_accepts_fingerprint_check_group(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The fingerprint quality group should be a first-class CLI choice."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-checks",
+            "fingerprint",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.data_quality
+    assert options.quality_check_groups == ["fingerprint"]
+
+
 def test_repo_quality_cli_refresh_defaults_to_data_directory(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

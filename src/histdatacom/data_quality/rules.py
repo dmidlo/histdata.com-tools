@@ -19,6 +19,7 @@ from histdatacom.data_quality.bars import (
 )
 from histdatacom.data_quality.calendar import calendar_quality_rules
 from histdatacom.data_quality.discovery import normalize_quality_check_groups
+from histdatacom.data_quality.fingerprints import HistDataSeriesFingerprintRule
 from histdatacom.data_quality.ingestion import (
     HistDataAsciiRowCountIngestionRule,
     HistDataAsciiSchemaIngestionRule,
@@ -79,6 +80,8 @@ def quality_rules_for_groups(
         rules.extend(_calendar_quality_rules(quality_profile))
     if "all" in normalized or "modeling" in normalized:
         rules.extend(_modeling_quality_rules(quality_profile))
+    if "all" in normalized or "fingerprint" in normalized:
+        rules.extend(_fingerprint_quality_rules(quality_profile))
     return tuple(rules)
 
 
@@ -162,7 +165,7 @@ def _time_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
 
 
 def _calendar_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
-    return calendar_quality_rules(
+    rules: tuple[QualityRule, ...] = calendar_quality_rules(
         profile.calendar_profile(),
         profile_missing_severity=profile.severity(
             "domain.calendar_sessions",
@@ -170,6 +173,7 @@ def _calendar_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
             QualitySeverity.INFO,
         ),
     )
+    return rules
 
 
 def _time_quality_run_rules(
@@ -342,5 +346,15 @@ def _modeling_quality_rules(
                 "warning_severity",
                 QualitySeverity.WARNING,
             ),
+        ),
+    )
+
+
+def _fingerprint_quality_rules(
+    profile: QualityProfile,
+) -> tuple[QualityRule, ...]:
+    return (
+        HistDataSeriesFingerprintRule(
+            profile=profile.fingerprint_profile(),
         ),
     )
