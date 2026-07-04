@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,9 @@ from histdatacom.data_quality import (
     QualityStatus,
     QualityTarget,
     QualityTargetKind,
+    SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
     bounded_quality_payload,
     quality_report_payload,
 )
@@ -43,6 +47,7 @@ GOLDEN_CASES: tuple[tuple[str, str, str], ...] = (
         "_coverage_manifest_failure_report_payload",
     ),
     ("cache_target_report", "report", "_cache_target_report_payload"),
+    ("fingerprint_report", "report", "_fingerprint_report_payload"),
     ("run_scoped_report", "report", "_run_scoped_report_payload"),
     (
         "orchestration_bounded_payload",
@@ -323,6 +328,65 @@ def _cache_target_report_payload() -> dict[str, JSONValue]:
             metadata={
                 "operation": "data-quality",
                 "check_groups": ["ingestion"],
+            },
+        )
+    )
+
+
+def _fingerprint_report_payload() -> dict[str, JSONValue]:
+    target = _target(
+        path="/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+        kind=QualityTargetKind.CSV,
+        metadata={"filename": "DAT_ASCII_EURUSD_M1_201202.csv"},
+    )
+    fingerprint = _fingerprint_payload(
+        {
+            "schema_version": TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+            "target_axis": {
+                "data_format": "ascii",
+                "timeframe": "M1",
+                "symbol": "EURUSD",
+                "period": "201202",
+                "kind": "csv",
+            },
+            "coverage": {
+                "row_count": 3,
+                "parsed_row_count": 3,
+                "start_timestamp_utc_ms": 1328072400000,
+                "end_timestamp_utc_ms": 1328072520000,
+                "duration_ms": 120000,
+            },
+            "source": {
+                "kind": "csv_text",
+                "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+            },
+        }
+    )
+    finding = _finding(
+        target,
+        severity=QualitySeverity.INFO,
+        code="FINGERPRINT_SERIES_SUMMARY",
+        message="Canonical target time-series fingerprint.",
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        location=QualityLocation(
+            path=target.path,
+            column=TIME_SERIES_FINGERPRINT_METADATA_KEY,
+        ),
+        metadata={TIME_SERIES_FINGERPRINT_METADATA_KEY: fingerprint},
+    )
+    return quality_report_payload(
+        QualityReport(
+            targets=(target,),
+            rule_results=(
+                QualityRuleResult(
+                    rule_id=SERIES_FINGERPRINT_RULE_ID,
+                    target=target,
+                    findings=(finding,),
+                ),
+            ),
+            metadata={
+                "operation": "data-quality",
+                "check_groups": ["fingerprint"],
             },
         )
     )
@@ -685,6 +749,27 @@ def _list(value: JSONValue) -> list[JSONValue]:
 
 def _canonical_json(payload: dict[str, JSONValue]) -> str:
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def _fingerprint_payload(
+    payload: dict[str, JSONValue],
+) -> dict[str, JSONValue]:
+    payload["fingerprint_id"] = _fingerprint_id(payload)
+    return payload
+
+
+def _fingerprint_id(payload: dict[str, JSONValue]) -> str:
+    material = dict(payload)
+    material.pop("fingerprint_id", None)
+    source = dict(_mapping(material.get("source") or {}))
+    source.pop("path", None)
+    material["source"] = source
+    encoded = json.dumps(
+        material,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
 def _updating_goldens() -> bool:

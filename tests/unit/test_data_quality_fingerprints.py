@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+from typing import Any
+
 from histdatacom.data_quality import (
     DEFAULT_FINGERPRINT_HISTOGRAM_BINS,
     DEFAULT_FINGERPRINT_LAGS,
@@ -13,10 +17,30 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
     HistDataSeriesFingerprintRule,
+    QualityFinding,
+    QualitySeverity,
     QualityTarget,
     QualityTargetKind,
+    quality_target_from_path,
     quality_rules_for_groups,
     quality_run_rules_for_groups,
+)
+from histdatacom.histdata_ascii import (
+    CACHE_FILENAME,
+    M1,
+    TICK,
+    parse_ascii_lines,
+    to_polars_frame,
+    write_polars_cache,
+)
+from tests.fixtures.histdata_ascii.quality_cases import (
+    CLEAN_M1_CASE,
+    CLEAN_M1_ROWS,
+    CLEAN_TICK_CASE,
+    CLEAN_TICK_ROWS,
+    HistDataAsciiCase,
+    write_ascii_case,
+    write_zip_case,
 )
 
 
@@ -32,19 +56,188 @@ def test_fingerprint_group_registers_series_rule_surface() -> None:
     assert quality_run_rules_for_groups(("fingerprint",)) == ()
 
 
-def test_fingerprint_rule_is_noop_until_payload_issue() -> None:
-    """The structural rule should not emit synthetic placeholder payloads."""
-    rule = quality_rules_for_groups(("fingerprint",))[0]
+def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
+    """Clean M1 CSV files should produce canonical coverage metadata."""
+    target = _discovered_target(write_ascii_case(tmp_path, CLEAN_M1_CASE))
+    finding = _fingerprint_finding(target)
+    payload = _fingerprint_payload(finding)
+    batch = parse_ascii_lines(M1, CLEAN_M1_ROWS)
+
+    assert finding.code == "FINGERPRINT_SERIES_SUMMARY"
+    assert finding.severity is QualitySeverity.INFO
+    assert payload["schema_version"] == TIME_SERIES_FINGERPRINT_SCHEMA_VERSION
+    assert str(payload["fingerprint_id"]).startswith("sha256:")
+    assert _mapping(payload["target_axis"]) == {
+        "data_format": "ascii",
+        "timeframe": "M1",
+        "symbol": "EURUSD",
+        "period": "201202",
+        "kind": "csv",
+    }
+    assert _mapping(payload["coverage"]) == {
+        "row_count": 3,
+        "parsed_row_count": 3,
+        "start_timestamp_utc_ms": batch.summary.start,
+        "end_timestamp_utc_ms": batch.summary.end,
+        "duration_ms": 120_000,
+    }
+    assert _mapping(payload["source"])["kind"] == "csv_text"
+
+
+def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
+    """Clean tick CSV files should produce millisecond coverage metadata."""
+    target = _discovered_target(write_ascii_case(tmp_path, CLEAN_TICK_CASE))
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    batch = parse_ascii_lines(TICK, CLEAN_TICK_ROWS)
+
+    assert _mapping(payload["target_axis"])["timeframe"] == "T"
+    assert _mapping(payload["coverage"]) == {
+        "row_count": 3,
+        "parsed_row_count": 3,
+        "start_timestamp_utc_ms": batch.summary.start,
+        "end_timestamp_utc_ms": batch.summary.end,
+        "duration_ms": 11_330,
+    }
+    assert _mapping(payload["source"])["kind"] == "csv_text"
+
+
+def test_fingerprint_rule_emits_zip_member_payload(tmp_path: Path) -> None:
+    """ZIP artifacts should name the member used for coverage."""
+    archive = write_zip_case(
+        tmp_path,
+        CLEAN_M1_CASE,
+        zip_filename="HISTDATA_COM_ASCII_EURUSD_M1201202.zip",
+    )
+    target = _discovered_target(archive)
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+
+    assert _mapping(payload["source"]) == {
+        "kind": "zip_member",
+        "path": "HISTDATA_COM_ASCII_EURUSD_M1201202.zip",
+        "member": CLEAN_M1_CASE.filename,
+    }
+    assert _mapping(payload["coverage"])["row_count"] == 3
+
+
+def test_fingerprint_rule_prefers_direct_cache_payload(
+    tmp_path: Path,
+) -> None:
+    """Direct cache targets should be fingerprinted without text fallback."""
+    cache_path = tmp_path / CACHE_FILENAME
+    batch = parse_ascii_lines(M1, CLEAN_M1_ROWS)
+    write_polars_cache(to_polars_frame(batch), cache_path)
     target = QualityTarget(
-        path="DAT_ASCII_EURUSD_M1_201202.csv",
-        kind=QualityTargetKind.CSV,
+        path=str(cache_path),
+        kind=QualityTargetKind.CACHE,
         data_format="ascii",
         timeframe="M1",
         symbol="EURUSD",
         period="201202",
     )
+    payload = _fingerprint_payload(_fingerprint_finding(target))
 
-    assert tuple(rule.evaluate(target)) == ()
+    assert _mapping(payload["source"]) == {
+        "kind": "cache",
+        "cache_source": "direct",
+        "path": ".data",
+    }
+    assert _mapping(payload["coverage"]) == {
+        "row_count": 3,
+        "parsed_row_count": 3,
+        "start_timestamp_utc_ms": batch.summary.start,
+        "end_timestamp_utc_ms": batch.summary.end,
+        "duration_ms": 120_000,
+    }
+
+
+def test_fingerprint_rule_prefers_fresh_sibling_cache(
+    tmp_path: Path,
+) -> None:
+    """CSV targets should reuse fresh sibling cache data when available."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    cache_path = csv_path.with_name(CACHE_FILENAME)
+    batch = parse_ascii_lines(M1, CLEAN_M1_ROWS)
+    write_polars_cache(to_polars_frame(batch), cache_path)
+    csv_mtime_ns = csv_path.stat().st_mtime_ns
+    os.utime(
+        cache_path,
+        ns=(csv_mtime_ns + 1_000_000, csv_mtime_ns + 1_000_000),
+    )
+    target = _discovered_target(csv_path)
+
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+
+    assert _mapping(payload["source"]) == {
+        "kind": "cache",
+        "cache_source": "sibling",
+        "path": ".data",
+    }
+    assert _mapping(payload["coverage"])["row_count"] == 3
+
+
+def test_fingerprint_rule_reports_unsupported_target(
+    tmp_path: Path,
+) -> None:
+    """Unsupported targets should emit bounded source metadata, not crash."""
+    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202.xlsx"
+    path.write_text("not a supported fingerprint source", encoding="utf-8")
+    target = QualityTarget(
+        path=str(path),
+        kind=QualityTargetKind.SPREADSHEET,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    finding = _fingerprint_finding(target)
+    payload = _fingerprint_payload(finding)
+
+    assert finding.code == "FINGERPRINT_SOURCE_UNAVAILABLE"
+    assert _mapping(payload["coverage"]) == {
+        "row_count": 0,
+        "parsed_row_count": None,
+        "start_timestamp_utc_ms": None,
+        "end_timestamp_utc_ms": None,
+        "duration_ms": None,
+    }
+    assert _mapping(payload["source"])["reason"] == "unsupported_target_kind"
+
+
+def test_fingerprint_id_excludes_source_path_volatility(
+    tmp_path: Path,
+) -> None:
+    """Identical content and target axis should hash the same across paths."""
+    first = write_ascii_case(
+        tmp_path / "first",
+        HistDataAsciiCase(
+            name="first_copy",
+            timeframe=M1,
+            filename="DAT_ASCII_EURUSD_M1_201202_FIRST.csv",
+            rows=CLEAN_M1_ROWS,
+        ),
+    )
+    second = write_ascii_case(
+        tmp_path / "second",
+        HistDataAsciiCase(
+            name="second_copy",
+            timeframe=M1,
+            filename="DAT_ASCII_EURUSD_M1_201202_SECOND.csv",
+            rows=CLEAN_M1_ROWS,
+        ),
+    )
+
+    first_payload = _fingerprint_payload(
+        _fingerprint_finding(_discovered_target(first))
+    )
+    second_payload = _fingerprint_payload(
+        _fingerprint_finding(_discovered_target(second))
+    )
+
+    assert (
+        _mapping(first_payload["source"])["path"]
+        != _mapping(second_payload["source"])["path"]
+    )
+    assert first_payload["fingerprint_id"] == second_payload["fingerprint_id"]
 
 
 def test_fingerprint_constants_are_stable() -> None:
@@ -68,3 +261,32 @@ def test_fingerprint_constants_are_stable() -> None:
     assert DEFAULT_FINGERPRINT_HISTOGRAM_BINS == 32
     assert DEFAULT_FINGERPRINT_MAX_ROWS == 1_000_000
     assert DEFAULT_FINGERPRINT_ROUNDING_DIGITS == 12
+
+
+def _discovered_target(path: Path) -> QualityTarget:
+    target = quality_target_from_path(path)
+    assert target is not None
+    return target
+
+
+def _fingerprint_finding(target: QualityTarget) -> QualityFinding:
+    rule = HistDataSeriesFingerprintRule()
+    findings = tuple(rule.evaluate(target))
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.rule_id == SERIES_FINGERPRINT_RULE_ID
+    assert finding.location.column == TIME_SERIES_FINGERPRINT_METADATA_KEY
+    return finding
+
+
+def _fingerprint_payload(
+    finding: QualityFinding,
+) -> dict[str, Any]:
+    payload = finding.metadata[TIME_SERIES_FINGERPRINT_METADATA_KEY]
+    assert isinstance(payload, dict)
+    return payload
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    assert isinstance(value, dict)
+    return value

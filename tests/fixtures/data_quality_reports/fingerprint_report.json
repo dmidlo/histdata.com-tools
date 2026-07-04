@@ -1,0 +1,123 @@
+{
+  "metadata": {
+    "check_groups": [
+      "fingerprint"
+    ],
+    "operation": "data-quality"
+  },
+  "rule_results": [
+    {
+      "findings": [
+        {
+          "code": "FINGERPRINT_SERIES_SUMMARY",
+          "location": {
+            "column": "time_series_fingerprint",
+            "metadata": {},
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+            "row_number": null,
+            "timestamp_source": "",
+            "timestamp_utc_ms": null
+          },
+          "message": "Canonical target time-series fingerprint.",
+          "metadata": {
+            "time_series_fingerprint": {
+              "coverage": {
+                "duration_ms": 120000,
+                "end_timestamp_utc_ms": 1328072520000,
+                "parsed_row_count": 3,
+                "row_count": 3,
+                "start_timestamp_utc_ms": 1328072400000
+              },
+              "fingerprint_id": "sha256:3763510de912fba9b5fe933b73568de310365d06869c8e472eda94c545c5e0fe",
+              "schema_version": "histdatacom.time-series-fingerprint.v1",
+              "source": {
+                "kind": "csv_text",
+                "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv"
+              },
+              "target_axis": {
+                "data_format": "ascii",
+                "kind": "csv",
+                "period": "201202",
+                "symbol": "EURUSD",
+                "timeframe": "M1"
+              }
+            }
+          },
+          "rule_id": "fingerprint.series",
+          "severity": "info",
+          "target": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "metadata": {
+              "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+            },
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "M1"
+          }
+        }
+      ],
+      "max_severity": "info",
+      "rule_id": "fingerprint.series",
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {
+          "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+        },
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "M1"
+      }
+    }
+  ],
+  "schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 0,
+    "finding_count": 1,
+    "info_count": 1,
+    "max_severity": "info",
+    "rule_count": 1,
+    "status": "clean",
+    "target_count": 1,
+    "warning_count": 0
+  },
+  "target_summaries": [
+    {
+      "error_count": 0,
+      "finding_count": 1,
+      "info_count": 1,
+      "max_severity": "info",
+      "rule_count": 1,
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {
+          "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+        },
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "M1"
+      },
+      "warning_count": 0
+    }
+  ],
+  "targets": [
+    {
+      "data_format": "ascii",
+      "kind": "csv",
+      "metadata": {
+        "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+      },
+      "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+      "period": "201202",
+      "symbol": "EURUSD",
+      "timeframe": "M1"
+    }
+  ]
+}
