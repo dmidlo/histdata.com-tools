@@ -1957,6 +1957,12 @@ default PyPI path. They should be uploaded to the normal PyPI project only after
 the project-specific size limit is confirmed and the release operator explicitly
 opts in.
 
+For bundled platform-wheel release dry runs, Linux and macOS remain
+worker-starting runtime smoke gates. Windows currently verifies installability,
+bundled runtime metadata, Temporal executable version, and CLI entry points, and
+collects layered startup diagnostics. Until #314's native Windows worker-start
+blocker is fixed, the Windows bundled runtime gate is install/CLI-only.
+
 Use `release_target=build-only` for dry runs, `release_target=testpypi` for the
 first publish rehearsal, and `release_target=pypi` only after setting
 `testpypi_dry_run_confirmed=true`. The final `histdatacom-dist` artifact

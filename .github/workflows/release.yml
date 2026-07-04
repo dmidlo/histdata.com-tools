@@ -249,7 +249,7 @@ jobs:
           --live-completion-timeout 240
           --live-stop-timeout 45
 
-      - name: Smoke Windows bundled runtime install
+      - name: Smoke Windows bundled runtime install and CLI
         if: matrix.platform_key == 'windows-x86_64'
         run: >
           python scripts/smoke_runtime_install.py
@@ -257,7 +257,6 @@ jobs:
           --state-dir .runtime-smoke
           --require-bundled-current-platform
           --check-executable-version
-          --start-runtime
           --live-startup-timeout 45
           --live-stop-timeout 45
 

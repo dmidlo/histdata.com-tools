@@ -105,8 +105,10 @@ artifacts, SHA-256 verification, `temporal-cli-provenance.json`, and Temporal CL
 notice/license resources, but those wheels require an explicit operator decision.
 Bundled wheels must pass `scripts/inspect_wheel.py --require-bundled-platform`,
 install on a matching runner, run `histdatacom runtime doctor --json` with
-`platform.executable_bundled == true`, probe the executable version, start the
-runtime without `--executable`, and run the installed-wheel hermetic smoke job.
+`platform.executable_bundled == true`, and probe the executable version.
+
+Linux and macOS bundled wheels are worker-starting release gates: they start the
+runtime without `--executable` and run the installed-wheel hermetic smoke job.
 The hermetic smoke uses a local-only dataset-planning request:
 `available_remote_data`, `update_remote_data`, `validate_urls`, download,
 extract, and import flags are all false. It still starts the packaged Temporal
@@ -123,6 +125,19 @@ Stop exceptions, missing stop status, persistent `stopping` status, and known
 remaining runtime PIDs are treated as smoke failures. These release gates are
 not default pytest tests, so missing Temporal executables fail the explicit
 smoke command instead of appearing as skipped tests in the normal suite.
+
+Windows bundled wheels are currently install/CLI-only for the release gate. The
+Windows job still verifies installability, bundled resource metadata, the
+Temporal executable version, and console entry points, then runs
+`scripts/smoke_runtime_install.py --windows-runtime-diagnostic` to collect the
+worker-start boundary evidence. Issue #314 records the supported matrix and
+blocker: on GitHub-hosted `windows-2022` with CPython `3.12.10`,
+`temporalio==1.28.0`, `nexus-rpc==1.4.0`, Temporal CLI `1.7.2`, Temporal Server
+`1.31.1`, and UI `2.49.1`, direct `Client.connect`, `Worker(...)`, lane
+`worker.run()` probes, and foreground/supervised single-worker probes pass, but
+the full supervised worker fleet exits before Python logging with
+`3221225794` / `0xC0000142`. Restore the Windows worker-starting smoke only
+after that native startup path is fixed upstream or isolated locally.
 
 The external HistData.com smoke remains available as an operator gate through
 `scripts/smoke_runtime_install.py --live-runtime-smoke`. That command uses a

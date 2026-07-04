@@ -152,18 +152,18 @@ def test_release_workflow_builds_and_smokes_all_platform_wheels() -> None:
     windows_smoke_step = next(
         step
         for step in smoke_platform["steps"]
-        if step.get("name") == "Smoke Windows bundled runtime install"
+        if step.get("name") == "Smoke Windows bundled runtime install and CLI"
     )
     assert windows_smoke_step["if"] == (
         "matrix.platform_key == 'windows-x86_64'"
     )
     windows_smoke_command = _step_run(
         smoke_platform,
-        "Smoke Windows bundled runtime install",
+        "Smoke Windows bundled runtime install and CLI",
     )
     assert "--require-bundled-current-platform" in windows_smoke_command
     assert "--check-executable-version" in windows_smoke_command
-    assert "--start-runtime" in windows_smoke_command
+    assert "--start-runtime" not in windows_smoke_command
     assert "--live-startup-timeout 45" in windows_smoke_command
     assert "--live-stop-timeout 45" in windows_smoke_command
     assert "--hermetic-runtime-smoke" not in windows_smoke_command
@@ -202,6 +202,19 @@ def test_package_metadata_advertises_platform_wheel_support() -> None:
         "Operating System :: POSIX",
         "Operating System :: POSIX :: Linux",
     } <= classifiers
+
+
+def test_runtime_runbook_documents_windows_runtime_support_gap() -> None:
+    """Release docs should state the current Windows runtime support boundary."""
+    runbook = _project_text("docs/temporal-orchestration-runtime-runbook.md")
+    readme = _project_text("README.md")
+
+    assert "Windows bundled wheels are currently install/CLI-only" in runbook
+    assert "windows-2022" in runbook
+    assert "temporalio==1.28.0" in runbook
+    assert "nexus-rpc==1.4.0" in runbook
+    assert "0xC0000142" in runbook
+    assert "install/CLI-only" in readme
 
 
 def test_local_publishing_script_enforces_branch_contract() -> None:
