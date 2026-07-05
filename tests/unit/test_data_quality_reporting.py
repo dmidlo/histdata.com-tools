@@ -8,8 +8,10 @@ from pathlib import Path
 from histdatacom.data_quality import (
     QUALITY_NEXT_ACTIONS_METADATA_KEY,
     QUALITY_NEXT_ACTIONS_SCHEMA_VERSION,
+    QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY,
     QUALITY_REMEDIATION_COVERAGE_METADATA_KEY,
     QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION,
+    QUALITY_REPORTING_METADATA_KEY,
     QUALITY_REPORT_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
@@ -27,10 +29,12 @@ from histdatacom.data_quality import (
     QualityTargetKind,
     bounded_quality_payload,
     format_quality_console_summary,
+    format_quality_remediation_catalog_audit_lines,
     format_quality_remediation_coverage_lines,
     publish_safe_json_value,
     publish_safe_path,
     quality_next_actions_summary,
+    quality_remediation_catalog_audit_summary,
     quality_remediation_coverage_summary,
     quality_report_payload,
     quality_report_to_json,
@@ -640,6 +644,61 @@ def test_quality_report_surfaces_inventory_zip_remediation_actions(
     assert "Remediation coverage" not in output
 
 
+def test_quality_report_omits_remediation_catalog_audit_by_default(
+    tmp_path: Path,
+) -> None:
+    """Catalog audits should remain opt-in for report compatibility."""
+    report = _remediation_catalog_audit_report(tmp_path)
+
+    assert quality_remediation_catalog_audit_summary(report) is None
+
+    payload = quality_report_payload(report)
+    assert (
+        QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY
+        not in payload["metadata"]
+    )
+
+
+def test_quality_report_embeds_enabled_remediation_catalog_audit(
+    tmp_path: Path,
+) -> None:
+    """Enabled reports should carry current-run catalog audit evidence."""
+    report = _remediation_catalog_audit_report(tmp_path, enabled=True)
+
+    payload = quality_report_payload(report)
+    audit = payload["metadata"][QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY]
+    encoded = json.dumps(audit, sort_keys=True)
+
+    assert audit["report_coverage"][0]["source"] == "current-report"
+    assert audit["summary"]["report_count"] == 1
+    assert audit["summary"]["report_finding_count"] == 2
+    assert audit["summary"]["report_unmapped_warning_error_group_count"] == 1
+    observed_groups = audit["report_coverage"][0]["remediation_coverage"][
+        "unmapped_groups"
+    ]
+    assert observed_groups[0]["finding_code"] == ("CUSTOM_REPORT_ONLY_GAP")
+    assert observed_groups[0]["occurrence_count"] == 1
+    assert str(tmp_path) not in encoded
+
+
+def test_quality_console_summary_renders_remediation_catalog_audit(
+    tmp_path: Path,
+) -> None:
+    """Human quality output should expose report-publication audit gaps."""
+    report = _remediation_catalog_audit_report(tmp_path, enabled=True)
+    audit = quality_remediation_catalog_audit_summary(report)
+
+    lines = format_quality_remediation_catalog_audit_lines(audit)
+    output = format_quality_console_summary(report, check_groups=("time",))
+
+    assert audit is not None
+    assert "Remediation catalog audit" in output
+    assert "- observed report: reports=1 findings=2" in output
+    assert "- observed error custom.report:CUSTOM_REPORT_ONLY_GAP" in output
+    assert lines[0] == ""
+    assert "CUSTOM_REPORT_ONLY_GAP" in "\n".join(lines)
+
+
 def test_quality_remediation_coverage_is_bounded_and_stably_ordered(
     tmp_path: Path,
 ) -> None:
@@ -1040,6 +1099,37 @@ def test_bounded_quality_payload_includes_remediation_coverage(
     }
 
 
+def test_bounded_quality_payload_includes_enabled_remediation_catalog_audit(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration payloads should expose enabled catalog audits."""
+    report = _remediation_catalog_audit_report(tmp_path, enabled=True)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("time",),
+        discovery={"roots": [str(tmp_path)], "target_count": 2},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+    audit = payload["remediation_catalog_audit"]
+    encoded = json.dumps(audit, sort_keys=True)
+
+    assert "rule_results" not in payload
+    assert audit["summary"]["report_count"] == 1
+    assert audit["summary"]["report_unmapped_warning_error_group_count"] == 1
+    assert audit["report_coverage"][0]["remediation_coverage"][
+        "unmapped_groups"
+    ][0]["finding_code"] == ("CUSTOM_REPORT_ONLY_GAP")
+    assert (
+        payload["payload_limits"]["remediation_catalog_audit"][
+            "target_axis_limit"
+        ]
+        == 8
+    )
+    assert str(tmp_path) not in encoded
+
+
 def test_quality_exit_policy_applies_error_warning_and_never_modes(
     tmp_path: Path,
 ) -> None:
@@ -1110,6 +1200,55 @@ def _mixed_report(tmp_path: Path) -> QualityReport:
                 findings=(error_finding,),
             ),
         ),
+    )
+
+
+def _remediation_catalog_audit_report(
+    tmp_path: Path,
+    *,
+    enabled: bool = False,
+) -> QualityReport:
+    target = _target(tmp_path / "catalog-audit.csv")
+    mapped = QualityFinding(
+        severity=QualitySeverity.WARNING,
+        code="ASCII_M1_DUPLICATE_TIMESTAMP",
+        message="duplicate minute bar timestamp",
+        rule_id="time.ascii.sequence",
+        target=target,
+    )
+    unmapped = QualityFinding(
+        severity=QualitySeverity.ERROR,
+        code="CUSTOM_REPORT_ONLY_GAP",
+        message="custom report-only finding without remediation guidance",
+        rule_id="custom.report",
+        target=target,
+    )
+    metadata = (
+        {
+            QUALITY_REPORTING_METADATA_KEY: {
+                QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY: {
+                    "enabled": True,
+                }
+            }
+        }
+        if enabled
+        else {}
+    )
+    return QualityReport(
+        targets=(target,),
+        rule_results=(
+            QualityRuleResult(
+                rule_id="time.ascii.sequence",
+                target=target,
+                findings=(mapped,),
+            ),
+            QualityRuleResult(
+                rule_id="custom.report",
+                target=target,
+                findings=(unmapped,),
+            ),
+        ),
+        metadata=metadata,
     )
 
 

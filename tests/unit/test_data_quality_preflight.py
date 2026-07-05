@@ -139,6 +139,44 @@ def test_quality_preflight_accepts_individual_triangle_group(
     )
 
 
+def test_quality_preflight_embeds_enabled_remediation_catalog_audit(
+    tmp_path: Path,
+) -> None:
+    """Preflight evidence should include opt-in catalog audit summaries."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        quality_profile={
+            "schema_version": "histdatacom.quality-profile.v1",
+            "name": "catalog-audit-preflight",
+            "reporting": {
+                "remediation_catalog_audit": {
+                    "enabled": True,
+                }
+            },
+        },
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+    audit = payload["sample_quality"]["remediation_catalog_audit"]
+    encoded = json.dumps(payload, sort_keys=True)
+    console = format_quality_preflight_console_summary(payload)
+    markdown = quality_preflight_to_markdown(payload)
+
+    assert audit["summary"]["report_count"] == 1
+    assert audit["report_coverage"][0]["source"] == "current-report"
+    assert "sample remediation audit:" in console
+    assert "### Sample Remediation Catalog Audit" in markdown
+    assert str(tmp_path) not in encoded
+    assert str(tmp_path) not in markdown
+
+
 def test_quality_preflight_imports_validation_report_status(
     tmp_path: Path,
 ) -> None:

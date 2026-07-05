@@ -33,6 +33,7 @@ from histdatacom.data_quality.fingerprints import (
 from histdatacom.data_quality.remediation import (
     remediation_hint_payloads_for_finding,
 )
+from histdatacom.data_quality.profiles import QUALITY_REPORTING_METADATA_KEY
 from histdatacom.publication_safety import (
     publish_safe_json_mapping,
     publish_safe_path,
@@ -46,6 +47,7 @@ QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION = (
     "histdatacom.quality-remediation-coverage.v1"
 )
 QUALITY_REMEDIATION_COVERAGE_METADATA_KEY = "remediation_coverage"
+QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY = "remediation_catalog_audit"
 QUALITY_PAYLOAD_DISCOVERY_TARGET_LIMIT = 128
 QUALITY_PAYLOAD_TARGET_SUMMARY_LIMIT = 128
 QUALITY_PAYLOAD_CROSS_TARGET_SUMMARY_LIMIT = 128
@@ -53,6 +55,8 @@ QUALITY_PAYLOAD_NEXT_ACTION_LIMIT = 16
 QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT = 8
 QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT = 16
 QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT = 8
+QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT = 16
+QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT = 8
 
 _NEXT_ACTION_SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
 _REMEDIATION_COVERAGE_SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
@@ -285,6 +289,15 @@ def quality_report_payload(
             remediation_coverage
         )
         payload["metadata"] = metadata
+    remediation_catalog_audit = quality_remediation_catalog_audit_summary(
+        report
+    )
+    if remediation_catalog_audit is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY] = (
+            remediation_catalog_audit
+        )
+        payload["metadata"] = metadata
     payload["schema_version"] = QUALITY_REPORT_SCHEMA_VERSION
     if not publish_safe:
         return payload
@@ -379,6 +392,11 @@ def format_quality_console_summary(
             quality_remediation_coverage_summary(report)
         )
     )
+    lines.extend(
+        format_quality_remediation_catalog_audit_lines(
+            quality_remediation_catalog_audit_summary(report)
+        )
+    )
     if _fingerprint_group_selected(check_groups):
         lines.extend(
             _format_fingerprint_coverage_lines(
@@ -452,6 +470,27 @@ def bounded_quality_payload(
     )
     next_actions = quality_next_actions_summary(report)
     remediation_coverage = quality_remediation_coverage_summary(report)
+    remediation_catalog_audit = quality_remediation_catalog_audit_summary(
+        report
+    )
+    payload_limits: dict[str, JSONValue] = {
+        "discovery_targets": _payload_limit_metadata(
+            _sequence_count(discovery.get("targets")),
+            discovery_target_limit,
+        ),
+        "target_summaries": _payload_limit_metadata(
+            len(target_summaries),
+            target_summary_limit,
+        ),
+        "cross_target_summaries": _payload_limit_metadata(
+            len(cross_target_summaries),
+            cross_target_summary_limit,
+        ),
+        "next_actions": _next_action_payload_limit_metadata(next_actions),
+        "remediation_coverage": _remediation_coverage_payload_limit_metadata(
+            remediation_coverage
+        ),
+    }
     payload: dict[str, JSONValue] = {
         "operation": operation,
         "check_groups": list(check_groups),
@@ -473,26 +512,7 @@ def bounded_quality_payload(
         "report_schema_version": QUALITY_REPORT_SCHEMA_VERSION,
         "report_artifact": None if artifact is None else artifact.to_dict(),
         "exit_decision": decision.to_dict(),
-        "payload_limits": {
-            "discovery_targets": _payload_limit_metadata(
-                _sequence_count(discovery.get("targets")),
-                discovery_target_limit,
-            ),
-            "target_summaries": _payload_limit_metadata(
-                len(target_summaries),
-                target_summary_limit,
-            ),
-            "cross_target_summaries": _payload_limit_metadata(
-                len(cross_target_summaries),
-                cross_target_summary_limit,
-            ),
-            "next_actions": _next_action_payload_limit_metadata(next_actions),
-            "remediation_coverage": (
-                _remediation_coverage_payload_limit_metadata(
-                    remediation_coverage
-                )
-            ),
-        },
+        "payload_limits": payload_limits,
     }
     if fingerprint_coverage is not None:
         payload["fingerprint_coverage"] = fingerprint_coverage
@@ -512,6 +532,13 @@ def bounded_quality_payload(
         payload["next_actions"] = next_actions
     if remediation_coverage is not None:
         payload["remediation_coverage"] = remediation_coverage
+    if remediation_catalog_audit is not None:
+        payload["remediation_catalog_audit"] = remediation_catalog_audit
+        payload_limits["remediation_catalog_audit"] = (
+            _remediation_catalog_audit_payload_limit_metadata(
+                remediation_catalog_audit
+            )
+        )
     if not publish_safe:
         return payload
     return _publish_safe_mapping(payload)
@@ -626,6 +653,36 @@ def _remediation_coverage_payload_limit_metadata(
     truncated = summary.get("unmapped_truncated")
     return {
         "limit": QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
+        "target_axis_limit": (
+            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT
+        ),
+        "total_count": total_count,
+        "included_count": included_count,
+        "omitted_count": omitted_count,
+        "truncated": (
+            truncated if isinstance(truncated, bool) else omitted_count > 0
+        ),
+    }
+
+
+def _remediation_catalog_audit_payload_limit_metadata(
+    summary: Mapping[str, JSONValue] | None,
+) -> dict[str, JSONValue]:
+    if summary is None:
+        return _payload_limit_metadata(
+            0,
+            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
+        )
+    limits = _mapping_payload(summary.get("payload_limits"))
+    ranked_gaps = _mapping_payload(limits.get("ranked_gaps"))
+    total_count = _int_metadata(ranked_gaps, "total_count")
+    included_count = _int_metadata(ranked_gaps, "included_count")
+    omitted_count = _int_metadata(ranked_gaps, "omitted_count")
+    truncated = ranked_gaps.get("truncated")
+    return {
+        "limit": QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
+        "rule_limit": QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+        "source_limit": QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
         "target_axis_limit": (
             QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT
         ),
@@ -896,6 +953,89 @@ def format_quality_remediation_coverage_lines(
     ]
     for group in groups:
         lines.append(f"- {_format_quality_remediation_coverage_group(group)}")
+    return lines
+
+
+def quality_remediation_catalog_audit_summary(
+    report: QualityReport,
+    *,
+    enabled: bool | None = None,
+    code_limit: int = QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
+    rule_limit: int = QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+    source_limit: int = QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
+    target_axis_limit: int = QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+) -> dict[str, JSONValue] | None:
+    """Return an opt-in bounded remediation-catalog audit for a report."""
+    summary = report.metadata.get(
+        QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY
+    )
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    if enabled is None:
+        enabled = _remediation_catalog_audit_enabled(report)
+    if not enabled:
+        return None
+
+    from histdatacom.data_quality.remediation_audit import (
+        audit_remediation_catalog,
+    )
+
+    audit_summary: dict[str, JSONValue] = audit_remediation_catalog(
+        reports=(("current-report", report),),
+        code_limit=code_limit,
+        rule_limit=rule_limit,
+        source_limit=source_limit,
+        target_axis_limit=target_axis_limit,
+    )
+    return audit_summary
+
+
+def format_quality_remediation_catalog_audit_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise report lines for remediation-catalog audit gaps."""
+    if not summary:
+        return []
+    audit_summary = _mapping_payload(summary.get("summary"))
+    warning_error_gap_count = _int_metadata(
+        audit_summary,
+        "unmapped_warning_error_gap_count",
+    )
+    report_gap_count = _int_metadata(
+        audit_summary,
+        "report_unmapped_warning_error_group_count",
+    )
+    if not warning_error_gap_count and not report_gap_count:
+        return []
+    lines = [
+        "",
+        "Remediation catalog audit",
+        (
+            "- status: "
+            f"{_optional_string_metadata(summary, 'status') or 'unknown'} "
+            "known warning/error gaps: "
+            f"{warning_error_gap_count}"
+        ),
+        (
+            "- observed report: "
+            f"reports={_int_metadata(audit_summary, 'report_count')} "
+            f"findings={_int_metadata(audit_summary, 'report_finding_count')} "
+            "unmapped warning/error groups="
+            f"{report_gap_count}"
+        ),
+    ]
+    for group in _remediation_catalog_observed_gap_groups(summary):
+        lines.append(
+            "- observed " + _format_quality_remediation_coverage_group(group)
+        )
+    ranked = [
+        item
+        for item in _list_metadata(summary.get("ranked_gaps"))
+        if _optional_string_metadata(item, "max_severity")
+        in {"error", "warning"}
+    ]
+    for gap in ranked:
+        lines.append(f"- {_format_quality_remediation_catalog_gap(gap)}")
     return lines
 
 
@@ -1402,6 +1542,56 @@ def _format_quality_remediation_coverage_group(
         f"findings={_int_metadata(group, 'occurrence_count')} "
         f"targets={_int_metadata(group, 'target_axis_count')}"
     )
+
+
+def _format_quality_remediation_catalog_gap(
+    gap: Mapping[str, JSONValue],
+) -> str:
+    return (
+        f"{_optional_string_metadata(gap, 'max_severity')} "
+        f"rank={_int_metadata(gap, 'rank')} "
+        f"{_optional_string_metadata(gap, 'rule_id')}:"
+        f"{_optional_string_metadata(gap, 'finding_code')} "
+        "known="
+        f"{_int_metadata(gap, 'known_source_occurrence_count')} "
+        "observed="
+        f"{_int_metadata(gap, 'report_occurrence_count')}"
+    )
+
+
+def _remediation_catalog_observed_gap_groups(
+    summary: Mapping[str, JSONValue],
+) -> list[Mapping[str, JSONValue]]:
+    groups: list[Mapping[str, JSONValue]] = []
+    for report_payload in _list_metadata(summary.get("report_coverage")):
+        coverage = _mapping_payload(report_payload.get("remediation_coverage"))
+        for group in _list_metadata(coverage.get("unmapped_groups")):
+            if _optional_string_metadata(group, "max_severity") in {
+                "error",
+                "warning",
+            }:
+                groups.append(group)
+    return groups
+
+
+def _remediation_catalog_audit_enabled(report: QualityReport) -> bool:
+    reporting = _mapping_payload(
+        report.metadata.get(QUALITY_REPORTING_METADATA_KEY)
+    )
+    audit = _mapping_payload(
+        reporting.get(QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY)
+    )
+    enabled = audit.get("enabled")
+    if isinstance(enabled, bool):
+        return enabled
+
+    profile = _mapping_payload(report.metadata.get("quality_profile"))
+    profile_reporting = _mapping_payload(profile.get("reporting"))
+    profile_audit = _mapping_payload(
+        profile_reporting.get(QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY)
+    )
+    profile_enabled = profile_audit.get("enabled")
+    return profile_enabled if isinstance(profile_enabled, bool) else False
 
 
 def _fingerprint_coverage_summary(
