@@ -1661,6 +1661,9 @@ def test_quality_profile_preview_prints_resolved_profile_without_submit(
     )
     assert payload["profile_inputs"]["quality_profile_preview_format"] == "json"
     assert (
+        payload["profile_inputs"]["quality_profile_preview_output_path"] == ""
+    )
+    assert (
         payload["profile_inputs"]["quality_remediation_catalog_audit"] is True
     )
     assert payload["cli_overrides"] == {
@@ -1735,6 +1738,130 @@ def test_quality_profile_preview_prints_resolved_profile_without_submit(
             "/reporting/remediation_catalog_audit/enabled": "cli_override",
         }.items()
     )
+
+
+def test_quality_profile_preview_writes_json_artifact_without_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Preview output paths should write deterministic JSON artifacts."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    preview_path = tmp_path / "reports" / "quality-preview.json"
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile-preview",
+            "--quality-profile-preview-output",
+            str(preview_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    assert capsys.readouterr().out == ""
+    payload = json.loads(preview_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "histdatacom.quality-profile-preview.v1"
+    assert payload["profile_inputs"]["quality_profile_preview_format"] == "json"
+    assert payload["profile_inputs"]["quality_profile_preview_output_path"] == (
+        str(preview_path)
+    )
+
+
+def test_quality_profile_preview_writes_text_artifact_without_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Text preview output should create parent directories."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    preview_path = tmp_path / "reports" / "quality-preview.txt"
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile-preview",
+            "--quality-profile-preview-format",
+            "text",
+            "--quality-profile-preview-output",
+            str(preview_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    assert capsys.readouterr().out == ""
+    output = preview_path.read_text(encoding="utf-8")
+    assert output.startswith("Quality Profile Preview\n")
+    assert '- quality_profile_preview_format: "text"' in output
+    assert "- quality_profile_preview_output_path: " in output
+
+
+def test_quality_profile_preview_output_dash_writes_stdout_once(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The existing '-' output convention should mean stdout, not a file."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile-preview",
+            "--quality-profile-preview-format",
+            "markdown",
+            "--quality-profile-preview-output",
+            "-",
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert output.count("# Quality Profile Preview") == 1
+    assert output.startswith("# Quality Profile Preview\n")
+    assert '| quality_profile_preview_output_path | "-" |' in output
 
 
 def test_quality_profile_preview_text_format_renders_explanation_without_submit(
@@ -1889,6 +2016,7 @@ def test_quality_profile_preview_supports_quality_modes_without_work(
 
 def test_api_quality_profile_preview_returns_payload_without_submit(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """API callers should receive the same resolved profile preview payload."""
     import histdatacom.histdata_com as histdata_com
@@ -1911,12 +2039,17 @@ def test_api_quality_profile_preview_returns_payload_without_submit(
         "name": "api-preview",
         "modeling_assumptions": {"target_horizon_minutes": 15},
     }
+    preview_path = tmp_path / "api-preview.txt"
+    options.quality_profile_preview_output_path = str(preview_path)
 
     payload = histdata_com.main(options)
 
     assert payload["schema_version"] == "histdatacom.quality-profile-preview.v1"
     assert payload["profile_inputs"]["from_api"] is True
     assert payload["profile_inputs"]["quality_profile_preview_format"] == "text"
+    assert payload["profile_inputs"]["quality_profile_preview_output_path"] == (
+        str(preview_path)
+    )
     assert payload["quality_profile"]["source"] == "api-options"
     assert payload["quality_profile"]["configured_modeling_assumptions"] == {
         "target_horizon_minutes": 15
@@ -1942,6 +2075,9 @@ def test_api_quality_profile_preview_returns_payload_without_submit(
     assert (
         value_sources["/reporting/remediation_catalog_audit/enabled"]["source"]
         == "cli_override"
+    )
+    assert preview_path.read_text(encoding="utf-8").startswith(
+        "Quality Profile Preview\n"
     )
 
 
@@ -2087,6 +2223,54 @@ histdatacom:
     assert (
         "| /rules/fingerprint.series/max_rows | profile_file | 50 |" in output
     )
+
+
+def test_config_quality_profile_preview_markdown_writes_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """YAML-configured Markdown preview should write an artifact path."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    preview_path = tmp_path / "reports" / "profile-preview.md"
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality: true
+  quality_target: {tmp_path}
+  quality_profile_preview: true
+  quality_profile_preview_format: markdown
+  quality_profile_preview_output: {preview_path}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    assert capsys.readouterr().out == ""
+    output = preview_path.read_text(encoding="utf-8")
+    assert output.startswith("# Quality Profile Preview\n")
+    assert "| Modes | quality |" in output
+    assert "| quality_profile_preview_output_path | " in output
 
 
 def test_back_to_back_orchestration_api_calls_do_not_leak_global_args(

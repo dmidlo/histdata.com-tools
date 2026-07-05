@@ -31,8 +31,16 @@ _KEY_ALIASES = {
     "quality": "data_quality",
     "quality_profile_explain": "quality_profile_preview",
     "quality_profile_explain_format": "quality_profile_preview_format",
+    "quality_profile_explain_output": "quality_profile_preview_output_path",
+    "quality_profile_explain_output_path": (
+        "quality_profile_preview_output_path"
+    ),
     "quality_profile_preview": "quality_profile_preview",
     "quality_profile_preview_format": "quality_profile_preview_format",
+    "quality_profile_preview_output": "quality_profile_preview_output_path",
+    "quality_profile_preview_output_path": (
+        "quality_profile_preview_output_path"
+    ),
     "quality_profile": "quality_profile_path",
     "quality_path": "quality_paths",
     "quality_paths": "quality_paths",
@@ -159,6 +167,7 @@ _SCALAR_ARGS = {
     "quality_preflight_sample_size": "--quality-preflight-sample-size",
     "quality_profile_path": "--quality-profile",
     "quality_profile_preview_format": "--quality-profile-preview-format",
+    "quality_profile_preview_output_path": "--quality-profile-preview-output",
     "quality_fail_on": "--quality-fail-on",
     "quality_max_errors": "--quality-max-errors",
     "quality_max_warnings": "--quality-max-warnings",

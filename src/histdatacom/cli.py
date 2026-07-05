@@ -313,6 +313,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     "--quality-profile-preview"
                 )
                 raise SystemExit(1)
+            if self.arg_namespace.quality_profile_preview_output_path:
+                print(  # noqa:T201
+                    "--quality-profile-preview-output requires "
+                    "--quality-profile-preview"
+                )
+                raise SystemExit(1)
             if self.arg_namespace.quality_remediation_catalog_audit:
                 print(  # noqa:T201
                     "--quality-remediation-catalog-audit requires --quality, "
@@ -380,6 +386,15 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         ):
             print(  # noqa:T201
                 "--quality-profile-preview-format requires "
+                "--quality-profile-preview"
+            )
+            raise SystemExit(1)
+        if (
+            self.arg_namespace.quality_profile_preview_output_path
+            and not self.arg_namespace.quality_profile_preview
+        ):
+            print(  # noqa:T201
+                "--quality-profile-preview-output requires "
                 "--quality-profile-preview"
             )
             raise SystemExit(1)
@@ -529,6 +544,15 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     [
                         "--quality-profile-preview-format",
                         self.arg_namespace.quality_profile_preview_format,
+                    ]
+                )
+            if self.arg_namespace.quality_profile_preview_output_path:
+                args.extend(
+                    [
+                        "--quality-profile-preview-output",
+                        str(
+                            self.arg_namespace.quality_profile_preview_output_path
+                        ),
                     ]
                 )
             if self.arg_namespace.quality_remediation_catalog_audit:
@@ -1729,6 +1753,17 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "output format for --quality-profile-preview; defaults to "
                 "machine-readable json"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-profile-preview-output",
+            "--quality-profile-explain-output",
+            dest="quality_profile_preview_output_path",
+            type=str,
+            metavar="PATH",
+            help=(
+                "write the selected --quality-profile-preview rendering to "
+                "PATH; use '-' for stdout"
             ),
         )
         quality_args.add_argument(

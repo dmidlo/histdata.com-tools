@@ -214,6 +214,7 @@ def test_help_advertises_quality_preflight_mode() -> None:
     assert "--quality-preflight-sample-size" in help_text
     assert "--quality-profile-preview" in help_text
     assert "--quality-profile-preview-format" in help_text
+    assert "--quality-profile-preview-output" in help_text
     assert "--quality-profile-explain" in help_text
     assert "--quality-remediation-catalog-audit" in help_text
 
@@ -733,6 +734,7 @@ def test_config_file_applies_quality_command_defaults(
     """YAML config should support data-quality command options too."""
     config_path = tmp_path / "quality.yaml"
     report_path = tmp_path / "reports" / "quality.json"
+    preview_path = tmp_path / "reports" / "quality-preview.txt"
     config_path.write_text(
         f"""
 histdatacom:
@@ -745,6 +747,7 @@ histdatacom:
   quality_preflight_evidence_stale_ok: true
   quality_profile_preview: true
   quality_profile_preview_format: text
+  quality_profile_preview_output: {preview_path}
   remediation_catalog_audit: true
   quality_fail_on: never
   quality_max_errors: 2
@@ -771,6 +774,7 @@ histdatacom:
     assert options.quality_preflight_evidence_allow_stale
     assert options.quality_profile_preview
     assert options.quality_profile_preview_format == "text"
+    assert options.quality_profile_preview_output_path == str(preview_path)
     assert options.quality_profile["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
     }
@@ -1014,6 +1018,8 @@ def test_data_quality_cli_loads_quality_profile_file(
             "--quality-profile-preview",
             "--quality-profile-preview-format",
             "text",
+            "--quality-profile-preview-output",
+            str(tmp_path / "preview.txt"),
         ],
     )
 
@@ -1021,6 +1027,9 @@ def test_data_quality_cli_loads_quality_profile_file(
 
     assert options.quality_profile_preview
     assert options.quality_profile_preview_format == "text"
+    assert options.quality_profile_preview_output_path == str(
+        tmp_path / "preview.txt"
+    )
     assert options.quality_profile_path == str(profile_path)
     assert options.quality_profile["name"] == "cli-profile"
     assert options.quality_profile["source"] == "file"
@@ -1244,11 +1253,18 @@ def test_repo_quality_columns_are_display_only_for_repo_table(
         ["histdatacom", "--quality-profile", "quality-profile.json"],
         ["histdatacom", "--quality-profile-preview"],
         ["histdatacom", "--quality-profile-preview-format", "text"],
+        ["histdatacom", "--quality-profile-preview-output", "preview.md"],
         [
             "histdatacom",
             "--quality",
             "--quality-profile-preview-format",
             "text",
+        ],
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-profile-preview-output",
+            "preview.md",
         ],
         ["histdatacom", "--quality-remediation-catalog-audit"],
         ["histdatacom", "--quality-preflight-evidence", "preflight.json"],
@@ -1329,6 +1345,9 @@ def test_api_quality_options_accept_inline_profile(
     options.quality_remediation_catalog_audit = True
     options.quality_profile_preview = True
     options.quality_profile_preview_format = "markdown"
+    options.quality_profile_preview_output_path = str(
+        tmp_path / "api-preview.md"
+    )
     options.quality_profile = {
         "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
         "name": "api-profile",
@@ -1340,6 +1359,9 @@ def test_api_quality_options_accept_inline_profile(
     assert parsed.data_quality is True
     assert parsed.quality_profile_preview is True
     assert parsed.quality_profile_preview_format == "markdown"
+    assert parsed.quality_profile_preview_output_path == str(
+        tmp_path / "api-preview.md"
+    )
     assert parsed.quality_preflight_evidence_path == str(
         tmp_path / "preflight.json"
     )

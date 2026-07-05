@@ -156,6 +156,7 @@ class RuntimeContext:
     quality_profile: Mapping[str, Any]
     quality_profile_preview: bool
     quality_profile_preview_format: str
+    quality_profile_preview_output_path: str
     repo_quality_refresh: bool
     repo_quality_columns: bool
     available_remote_data: bool
@@ -222,13 +223,17 @@ class _HistDataCom:  # noqa:R701
 
         if self.context.quality_profile_preview:
             payload = _quality_profile_preview_payload(self.context)
-            if not self.context.from_api:
-                print(  # noqa:T201
-                    _format_quality_profile_preview(
-                        payload,
-                        output_format=self.context.quality_profile_preview_format,
-                    )
+            rendered = _format_quality_profile_preview(
+                payload,
+                output_format=self.context.quality_profile_preview_format,
+            )
+            if self.context.quality_profile_preview_output_path:
+                _write_text_payload(
+                    rendered,
+                    self.context.quality_profile_preview_output_path,
                 )
+            elif not self.context.from_api:
+                print(rendered)  # noqa:T201
             return payload
 
         if self.context.request_json_out or self.context.request_bundle_out:
@@ -603,6 +608,9 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         quality_profile_preview_format=str(
             args.get("quality_profile_preview_format") or "json"
         ),
+        quality_profile_preview_output_path=str(
+            args.get("quality_profile_preview_output_path") or ""
+        ),
         repo_quality_refresh=bool(args["repo_quality_refresh"]),
         repo_quality_columns=bool(args["repo_quality_columns"]),
         available_remote_data=bool(args["available_remote_data"]),
@@ -635,6 +643,18 @@ def _write_json_payload(
     if path.parent != Path("."):
         path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _write_text_payload(content: str, destination: str) -> None:
+    """Write deterministic text content to stdout or a file."""
+    rendered = content if content.endswith("\n") else f"{content}\n"
+    if destination == "-":
+        print(rendered, end="")  # noqa:T201
+        return
+    path = Path(destination).expanduser()
+    if path.parent != Path("."):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(rendered, encoding="utf-8")
 
 
 def _format_quality_profile_preview(
@@ -945,6 +965,9 @@ def _quality_profile_preview_payload(
         "config_path": str(context.args.get("config_path") or ""),
         "quality_profile_path": context.quality_profile_path,
         "quality_profile_preview_format": context.quality_profile_preview_format,
+        "quality_profile_preview_output_path": (
+            context.quality_profile_preview_output_path
+        ),
         "quality_remediation_catalog_audit": audit_override_enabled,
     }
     return {
