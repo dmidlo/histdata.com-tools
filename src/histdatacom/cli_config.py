@@ -32,6 +32,7 @@ _KEY_ALIASES = {
     "quality_profile": "quality_profile_path",
     "quality_path": "quality_paths",
     "quality_paths": "quality_paths",
+    "quality_remediation_catalog_audit": "quality_remediation_catalog_audit",
     "quality_report": "quality_report_path",
     "quality_preflight_report": "quality_preflight_report_path",
     "quality_preflight_markdown": "quality_preflight_markdown",
@@ -72,6 +73,7 @@ _KEY_ALIASES = {
     "request_json_output": "request_json_out",
     "run_request_json": "request_json_out",
     "scheduled_run_bundle": "request_bundle_out",
+    "remediation_catalog_audit": "quality_remediation_catalog_audit",
     "quality_preflight_evidence_stale_ok": (
         "quality_preflight_evidence_allow_stale"
     ),
@@ -127,6 +129,9 @@ _TRUE_FLAG_ARGS = {
     ),
     "quality_preflight_markdown": "--quality-preflight-markdown",
     "quality_preflight_run_validation": "--quality-preflight-run-validation",
+    "quality_remediation_catalog_audit": (
+        "--quality-remediation-catalog-audit"
+    ),
     "repo_quality_columns": "--repo-quality-columns",
     "no_overlap": "--no-overlap",
 }

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import subprocess
+import sys
 
 import histdatacom
 import pytest
@@ -1038,6 +1039,55 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
     assert options.quality_preflight_validation_report_path == "latest"
     assert options.quality_preflight_run_validation
     assert options.pair_groups == ["majors"]
+
+
+def test_cli_enabled_quality_preflight_embeds_remediation_catalog_audit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """CLI audit opt-in should reach the publish-safe preflight payload."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality-preflight",
+            "--quality-target",
+            str(data_dir),
+            "--quality-checks",
+            "inventory",
+            "--quality-preflight-sample-size",
+            "1",
+            "--quality-remediation-catalog-audit",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+        ],
+    )
+
+    options = ArgParser(Options())()
+    payload = run_cache_quality_preflight(
+        Path(options.quality_paths[0]),
+        pairs=tuple(options.pairs),
+        formats=tuple(options.formats),
+        timeframes=tuple(options.timeframes),
+        quality_check_groups=tuple(options.quality_check_groups),
+        quality_profile=options.quality_profile,
+        sample_size=options.quality_preflight_sample_size,
+        activity_budget_seconds=100,
+    )
+
+    audit = payload["sample_quality"]["remediation_catalog_audit"]
+    assert options.quality_profile["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+    assert audit["summary"]["report_count"] == 1
+    assert audit["report_coverage"][0]["source"] == "current-report"
 
 
 def test_api_quality_preflight_returns_payload_without_temporal_submit(

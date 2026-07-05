@@ -49,6 +49,7 @@ class Options:
         "quality_paths",
         "quality_profile",
         "quality_profile_path",
+        "quality_remediation_catalog_audit",
         "quality_report_path",
         "repo_quality_columns",
         "repo_quality_refresh",
@@ -114,6 +115,7 @@ class Options:
         self.quality_preflight_validation_report_path: str | None = None
         self.quality_profile_path: str | None = None
         self.quality_profile: dict = {}
+        self.quality_remediation_catalog_audit: bool = False
         self.repo_quality_refresh: bool = False
         self.repo_quality_columns: bool = False
         self.request_bundle_out: str | None = None
