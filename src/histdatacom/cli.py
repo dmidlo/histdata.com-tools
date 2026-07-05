@@ -307,6 +307,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     "--repo-quality, or --quality-preflight"
                 )
                 raise SystemExit(1)
+            if self.arg_namespace.quality_profile_preview_format != "json":
+                print(  # noqa:T201
+                    "--quality-profile-preview-format requires "
+                    "--quality-profile-preview"
+                )
+                raise SystemExit(1)
             if self.arg_namespace.quality_remediation_catalog_audit:
                 print(  # noqa:T201
                     "--quality-remediation-catalog-audit requires --quality, "
@@ -366,6 +372,15 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             print(  # noqa:T201
                 "--quality-preflight cannot be combined with --quality or "
                 "--repo-quality"
+            )
+            raise SystemExit(1)
+        if (
+            self.arg_namespace.quality_profile_preview_format != "json"
+            and not self.arg_namespace.quality_profile_preview
+        ):
+            print(  # noqa:T201
+                "--quality-profile-preview-format requires "
+                "--quality-profile-preview"
             )
             raise SystemExit(1)
 
@@ -509,6 +524,13 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 args.append("--quality-preflight")
             if self.arg_namespace.quality_profile_preview:
                 args.append("--quality-profile-preview")
+            if self.arg_namespace.quality_profile_preview_format != "json":
+                args.extend(
+                    [
+                        "--quality-profile-preview-format",
+                        self.arg_namespace.quality_profile_preview_format,
+                    ]
+                )
             if self.arg_namespace.quality_remediation_catalog_audit:
                 args.append("--quality-remediation-catalog-audit")
             if self.arg_namespace.quality_paths:
@@ -1696,6 +1718,17 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "print the resolved quality profile JSON without running "
                 "quality checks, writing reports, or submitting work"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-profile-preview-format",
+            "--quality-profile-explain-format",
+            dest="quality_profile_preview_format",
+            choices=("json", "text", "markdown"),
+            default="json",
+            help=(
+                "output format for --quality-profile-preview; defaults to "
+                "machine-readable json"
             ),
         )
         quality_args.add_argument(

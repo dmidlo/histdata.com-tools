@@ -120,6 +120,7 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--quality-preflight-evidence-stale-ok]
                    [--quality-preflight-sample-size COUNT]
                    [--quality-profile PATH] [--quality-profile-preview]
+                   [--quality-profile-preview-format {json,text,markdown}]
                    [--quality-remediation-catalog-audit]
                    [--quality-fail-on SEVERITY] [--quality-max-errors COUNT]
                    [--quality-max-warnings COUNT]
@@ -260,6 +261,9 @@ Data quality:
                         print the resolved quality profile JSON without
                         running quality checks, writing reports, or submitting
                         work
+  --quality-profile-preview-format, --quality-profile-explain-format {json,text,markdown}
+                        output format for --quality-profile-preview; defaults
+                        to machine-readable json
   --quality-remediation-catalog-audit
                         enable remediation-catalog audit reporting in quality
                         reports, bounded payloads, and preflight evidence
@@ -1041,7 +1045,7 @@ profile still supplies thresholds, severities, and modeling assumptions; the
 CLI flag only sets `reporting.remediation_catalog_audit.enabled` to `true`.
 
 Preview the fully resolved profile before a run with
-`--quality-profile-preview`:
+`--quality-profile-preview`. JSON remains the default output for automation:
 
 ```sh
 histdatacom --quality \
@@ -1050,15 +1054,29 @@ histdatacom --quality \
   --quality-profile-preview
 ```
 
-The preview prints deterministic JSON and exits before target discovery,
-quality checks, report writes, repo metadata writes, or orchestration submit.
-The payload includes the active profile source, source path, configured rule
-IDs, configured modeling assumptions, reporting keys, and the resolved
+For operator review, choose a bounded readable renderer:
+
+```sh
+histdatacom --quality \
+  --quality-profile profiles/strict-ci.json \
+  --quality-remediation-catalog-audit \
+  --quality-profile-preview \
+  --quality-profile-preview-format text
+```
+
+Use `--quality-profile-preview-format markdown` when the explanation should be
+pasted into an issue, PR, or runbook.
+
+The preview exits before target discovery, quality checks, report writes, repo
+metadata writes, or orchestration submit. The JSON payload remains
+deterministic and includes the active profile source, source path, configured
+rule IDs, configured modeling assumptions, reporting keys, and the resolved
 `reporting.remediation_catalog_audit.enabled` value after CLI overrides. It
 also includes a `profile_explanation` section with input channels such as
 built-in defaults, YAML config, profile file, API options, and CLI overrides;
 per-value source rows; and a bounded effective diff from the built-in default
-profile.
+profile. The `text` and `markdown` renderers are presentation layers over that
+same explanation data.
 
 ```sh
 histdatacom --quality \

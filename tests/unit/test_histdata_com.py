@@ -1659,6 +1659,7 @@ def test_quality_profile_preview_prints_resolved_profile_without_submit(
     assert payload["profile_inputs"]["quality_profile_path"] == str(
         profile_path
     )
+    assert payload["profile_inputs"]["quality_profile_preview_format"] == "json"
     assert (
         payload["profile_inputs"]["quality_remediation_catalog_audit"] is True
     )
@@ -1734,6 +1735,82 @@ def test_quality_profile_preview_prints_resolved_profile_without_submit(
             "/reporting/remediation_catalog_audit/enabled": "cli_override",
         }.items()
     )
+
+
+def test_quality_profile_preview_text_format_renders_explanation_without_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Text preview should render bounded explanation rows and stop."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "preview-text",
+                "rules": {"ingestion.ascii.row_count": {"min_row_count": 10}},
+                "reporting": {"remediation_catalog_audit": {"enabled": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile",
+            str(profile_path),
+            "--quality-remediation-catalog-audit",
+            "--quality-profile-preview",
+            "--quality-profile-preview-format",
+            "text",
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert output.startswith("Quality Profile Preview")
+    assert "modes: quality" in output
+    assert (
+        f"profile: profile_file name=preview-text path={profile_path}" in output
+    )
+    assert "Profile Inputs" in output
+    assert '- quality_profile_preview_format: "text"' in output
+    assert "Input Channels" in output
+    assert "- profile_file:" in output
+    assert "- cli_override:" in output
+    assert "Explicit Overrides" in output
+    assert "- reporting.remediation_catalog_audit.enabled: true" in output
+    assert "Effective Diff From Built-In Defaults" in output
+    assert (
+        "- /rules/ingestion.ascii.row_count/min_row_count "
+        "[profile_file]: null -> 10"
+    ) in output
+    assert (
+        "- /reporting/remediation_catalog_audit/enabled "
+        "[cli_override]: false -> true"
+    ) in output
+    assert "Value Sources" in output
+    assert (
+        "- /reporting/remediation_catalog_audit/enabled "
+        "[cli_override override]: true"
+    ) in output
 
 
 @pytest.mark.parametrize(
@@ -1827,6 +1904,7 @@ def test_api_quality_profile_preview_returns_payload_without_submit(
     options = Options()
     options.data_quality = True
     options.quality_profile_preview = True
+    options.quality_profile_preview_format = "text"
     options.quality_remediation_catalog_audit = True
     options.quality_profile = {
         "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
@@ -1838,6 +1916,7 @@ def test_api_quality_profile_preview_returns_payload_without_submit(
 
     assert payload["schema_version"] == "histdatacom.quality-profile-preview.v1"
     assert payload["profile_inputs"]["from_api"] is True
+    assert payload["profile_inputs"]["quality_profile_preview_format"] == "text"
     assert payload["quality_profile"]["source"] == "api-options"
     assert payload["quality_profile"]["configured_modeling_assumptions"] == {
         "target_horizon_minutes": 15
@@ -1935,6 +2014,78 @@ histdatacom:
     assert (
         value_sources["/rules/fingerprint.series/max_rows"]["source"]
         == "profile_file"
+    )
+
+
+def test_config_quality_profile_preview_markdown_renders_tables(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """YAML-configured Markdown preview should render explanation tables."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "markdown-profile",
+                "rules": {"fingerprint.series": {"max_rows": 50}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality: true
+  quality_target: {tmp_path}
+  quality_profile: {profile_path}
+  quality_profile_preview: true
+  quality_profile_preview_format: markdown
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert output.startswith("# Quality Profile Preview")
+    assert "| Field | Value |" in output
+    assert "| Modes | quality |" in output
+    assert "| Profile | profile_file name=markdown-profile" in output
+    assert "## Profile Inputs" in output
+    assert '| quality_profile_preview_format | "markdown" |' in output
+    assert "## Input Channels" in output
+    assert "| yaml_config | path=" in output
+    assert '| profile_file | profile_name="markdown-profile"' in output
+    assert "## Effective Diff From Built-In Defaults" in output
+    assert (
+        "| /rules/fingerprint.series/max_rows | profile_file | null | 50 |"
+        in output
+    )
+    assert "## Value Sources" in output
+    assert (
+        "| /rules/fingerprint.series/max_rows | profile_file | 50 |" in output
     )
 
 
