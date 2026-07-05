@@ -39,6 +39,8 @@ DEFAULT_HELPER_ARGS: dict[str, Any] = {
     "quality_preflight_evidence_path": "",
     "quality_preflight_markdown": False,
     "quality_preflight_markdown_report_path": "",
+    "quality_preflight_profile_preview_format": "json",
+    "quality_preflight_profile_preview_output_path": "",
     "quality_preflight_report_path": "",
     "quality_preflight_run_validation": False,
     "quality_preflight_sample_size": 4,

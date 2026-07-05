@@ -194,6 +194,7 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
     safe_payload = publish_safe_json_mapping(payload)
     evidence = _mapping(safe_payload.get("evidence"))
     commands = _mapping(evidence.get("commands"))
+    profile_preview = _mapping(evidence.get("quality_profile_preview"))
     operational = _mapping(evidence.get("operational"))
     runtime_cleanup = _mapping(evidence.get("runtime_cleanup"))
     release = _mapping(evidence.get("release_preflight"))
@@ -235,6 +236,10 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
             (
                 ("Preflight command", str(commands.get("preflight", ""))),
                 ("Quality command", str(commands.get("quality", ""))),
+                (
+                    "Profile preview artifact",
+                    _profile_preview_artifact_label(profile_preview),
+                ),
                 ("Checks", _join_or_all(filters.get("checks"))),
                 ("Pair groups", _join_or_all(filters.get("pair_groups"))),
                 ("Pairs", _join_or_all(filters.get("pairs"))),
@@ -796,6 +801,8 @@ def format_quality_preflight_console_summary(
     remediation_audit_summary = _mapping(remediation_audit.get("summary"))
     decision = _mapping(payload.get("decision"))
     diagnostics = _mapping(payload.get("diagnostics"))
+    evidence = _mapping(payload.get("evidence"))
+    profile_preview = _mapping(evidence.get("quality_profile_preview"))
     lines = [
         "Data quality cache preflight",
         "status: " + str(payload.get("status", "unknown")),
@@ -847,6 +854,10 @@ def format_quality_preflight_console_summary(
             f"{remediation_audit_summary.get('unmapped_warning_error_gap_count', 0)} "
             "observed_unmapped_warning_error_groups="
             f"{remediation_audit_summary.get('report_unmapped_warning_error_group_count', 0)}"
+        )
+    if profile_preview:
+        lines.append(
+            f"profile preview: {_profile_preview_artifact_label(profile_preview)}"
         )
     if decision.get("reason"):
         lines.append(f"reason: {decision['reason']}")
@@ -2585,6 +2596,20 @@ def _source_artifact_state(operational: Mapping[str, Any]) -> str:
         f"{cleanup.get('state', 'unknown')} "
         f"({cleanup.get('source_artifact_count', 0)} artifacts)"
     )
+
+
+def _profile_preview_artifact_label(
+    profile_preview: Mapping[str, Any],
+) -> str:
+    """Return a compact Markdown/console label for preview artifacts."""
+    if not profile_preview:
+        return "not requested"
+    state = str(profile_preview.get("state", "unknown"))
+    path = str(profile_preview.get("path", ""))
+    output_format = str(profile_preview.get("format", ""))
+    if path:
+        return f"{state}: {path} ({output_format})"
+    return state
 
 
 def _validation_command_rows(

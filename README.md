@@ -113,6 +113,8 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--quality-report PATH] [--quality-preflight-report PATH]
                    [--quality-preflight-markdown]
                    [--quality-preflight-markdown-report PATH]
+                   [--quality-preflight-profile-preview-output PATH]
+                   [--quality-preflight-profile-preview-format {json,text,markdown}]
                    [--quality-preflight-validation-report PATH]
                    [--quality-preflight-run-validation]
                    [--quality-preflight-evidence PATH]
@@ -235,6 +237,12 @@ Data quality:
   --quality-preflight-markdown-report PATH
                         write the publish-safe Markdown quality preflight
                         evidence report to PATH
+  --quality-preflight-profile-preview-output PATH
+                        write the resolved quality-profile preview to PATH and
+                        reference it from quality preflight evidence
+  --quality-preflight-profile-preview-format {json,text,markdown}
+                        output format for --quality-preflight-profile-preview-
+                        output; defaults to machine-readable json
   --quality-preflight-validation-report PATH
                         merge validation command status from a
                         closure/readiness JSON report into quality preflight
@@ -838,7 +846,9 @@ histdatacom --quality-preflight \
   -f ascii -t tick-data-quotes \
   --quality-checks ticks \
   --quality-preflight-report reports/major-triangles-tick-preflight.json \
-  --quality-preflight-markdown-report reports/major-triangles-tick-preflight.md
+  --quality-preflight-markdown-report reports/major-triangles-tick-preflight.md \
+  --quality-preflight-profile-preview-output reports/major-triangles-quality-profile.md \
+  --quality-preflight-profile-preview-format markdown
 ```
 
 The console output is human-readable. The optional
@@ -853,7 +863,12 @@ copy/paste-safe Markdown evidence report for GitHub issue updates, release
 handoffs, or operator notes. That Markdown includes command/config summary,
 package version, cache inventory, benchmark sample, ETA/rate, Temporal budget,
 source-artifact cleanliness, POSIX disk headroom, validation commands, and the
-explicit runtime-cleanup disposition for the local preflight run. Use
+explicit runtime-cleanup disposition for the local preflight run. Pass
+`--quality-preflight-profile-preview-output PATH` when the same evidence bundle
+should include the resolved quality-profile preview used by the preflight. The
+preview artifact can be JSON, text, or Markdown via
+`--quality-preflight-profile-preview-format`, and the preflight evidence records
+its publish-safe path, format, schema version, byte size, and SHA-256 hash. Use
 `--quality-preflight-markdown` when stdout should be the Markdown report instead
 of the compact console summary. Use `--quality-preflight-sample-size COUNT` to
 tune the bounded sample.
@@ -1070,8 +1085,7 @@ histdatacom --quality \
 
 Use `--quality-profile-preview-format markdown` when the explanation should be
 pasted into an issue, PR, or runbook. Keep the default stdout behavior for
-quick inspection, or write the selected rendering to an artifact path when the
-preview is part of preflight evidence:
+quick inspection, or write the selected rendering to a standalone artifact path:
 
 ```sh
 histdatacom --quality \
@@ -1079,6 +1093,18 @@ histdatacom --quality \
   --quality-profile-preview \
   --quality-profile-preview-format markdown \
   --quality-profile-preview-output reports/quality-profile-preview.md
+```
+
+For preflight evidence, prefer the preflight-attached form so the JSON and
+Markdown preflight reports record the preview artifact metadata:
+
+```sh
+histdatacom --quality-preflight \
+  --quality-target data \
+  --quality-profile profiles/strict-ci.json \
+  --quality-preflight-report reports/preflight.json \
+  --quality-preflight-profile-preview-output reports/quality-profile-preview.md \
+  --quality-preflight-profile-preview-format markdown
 ```
 
 Preview artifact parent directories are created automatically. Use
