@@ -117,8 +117,10 @@ QUALITY_PROFILE_PREVIEW_EXPLANATION_SCHEMA_VERSION = (
 QUALITY_PROFILE_PREVIEW_DIFF_SCHEMA_VERSION = (
     "histdatacom.quality-profile-preview-diff.v1"
 )
+QUALITY_PROFILE_PREVIEW_FORMATS = frozenset({"json", "text", "markdown"})
 QUALITY_PROFILE_PREVIEW_SOURCE_LIMIT = 128
 QUALITY_PROFILE_PREVIEW_DIFF_LIMIT = 128
+QUALITY_PROFILE_PREVIEW_DISPLAY_VALUE_LIMIT = 120
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +155,7 @@ class RuntimeContext:
     quality_profile_path: str
     quality_profile: Mapping[str, Any]
     quality_profile_preview: bool
+    quality_profile_preview_format: str
     repo_quality_refresh: bool
     repo_quality_columns: bool
     available_remote_data: bool
@@ -220,9 +223,12 @@ class _HistDataCom:  # noqa:R701
         if self.context.quality_profile_preview:
             payload = _quality_profile_preview_payload(self.context)
             if not self.context.from_api:
-                print(
-                    json.dumps(payload, indent=2, sort_keys=True)
-                )  # noqa:T201
+                print(  # noqa:T201
+                    _format_quality_profile_preview(
+                        payload,
+                        output_format=self.context.quality_profile_preview_format,
+                    )
+                )
             return payload
 
         if self.context.request_json_out or self.context.request_bundle_out:
@@ -594,6 +600,9 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         quality_profile_path=str(args.get("quality_profile_path") or ""),
         quality_profile=dict(args.get("quality_profile") or {}),
         quality_profile_preview=bool(args["quality_profile_preview"]),
+        quality_profile_preview_format=str(
+            args.get("quality_profile_preview_format") or "json"
+        ),
         repo_quality_refresh=bool(args["repo_quality_refresh"]),
         repo_quality_columns=bool(args["repo_quality_columns"]),
         available_remote_data=bool(args["available_remote_data"]),
@@ -628,6 +637,285 @@ def _write_json_payload(
     path.write_text(content, encoding="utf-8")
 
 
+def _format_quality_profile_preview(
+    payload: Mapping[str, JSONValue],
+    *,
+    output_format: str,
+) -> str:
+    """Return a deterministic quality-profile preview rendering."""
+    normalized_format = output_format.strip().lower()
+    if normalized_format not in QUALITY_PROFILE_PREVIEW_FORMATS:
+        raise ValueError(
+            "quality profile preview format must be one of "
+            f"{sorted(QUALITY_PROFILE_PREVIEW_FORMATS)}"
+        )
+    if normalized_format == "json":
+        return json.dumps(payload, indent=2, sort_keys=True)
+    if normalized_format == "markdown":
+        return _format_quality_profile_preview_markdown(payload)
+    return _format_quality_profile_preview_text(payload)
+
+
+def _format_quality_profile_preview_text(
+    payload: Mapping[str, JSONValue],
+) -> str:
+    """Return a bounded text rendering of a quality-profile preview."""
+    explanation = _preview_mapping(payload.get("profile_explanation"))
+    profile_inputs = _preview_mapping(payload.get("profile_inputs"))
+    cli_overrides = _preview_mapping(payload.get("cli_overrides"))
+    lines = [
+        "Quality Profile Preview",
+        f"modes: {_preview_quality_modes_text(payload)}",
+        f"profile: {_preview_profile_source_text(payload)}",
+        "",
+        "Profile Inputs",
+    ]
+    for key, value in sorted(profile_inputs.items()):
+        lines.append(f"- {key}: {_preview_display_value(value)}")
+    lines.extend(["", "Input Channels"])
+    for channel in _preview_mapping_rows(explanation.get("input_channels")):
+        lines.append(f"- {_preview_channel_text(channel)}")
+    lines.extend(["", "Explicit Overrides"])
+    if cli_overrides:
+        for key, value in sorted(cli_overrides.items()):
+            lines.append(f"- {key}: {_preview_display_value(value)}")
+    else:
+        lines.append("- none")
+    lines.extend(["", "Effective Diff From Built-In Defaults"])
+    diff = _preview_mapping(explanation.get("effective_diff"))
+    lines.append(
+        f"- {_preview_bounded_summary_text(diff, row_label='changes')}"
+    )
+    for change in _preview_mapping_rows(diff.get("changes")):
+        lines.append(f"- {_preview_change_text(change)}")
+    lines.extend(["", "Value Sources"])
+    value_sources = _preview_mapping(explanation.get("effective_value_sources"))
+    lines.append(
+        f"- {_preview_bounded_summary_text(value_sources, row_label='values')}"
+    )
+    for row in _preview_mapping_rows(value_sources.get("values")):
+        lines.append(f"- {_preview_value_source_text(row)}")
+    return "\n".join(lines)
+
+
+def _format_quality_profile_preview_markdown(
+    payload: Mapping[str, JSONValue],
+) -> str:
+    """Return a bounded Markdown rendering of a quality-profile preview."""
+    explanation = _preview_mapping(payload.get("profile_explanation"))
+    profile_inputs = _preview_mapping(payload.get("profile_inputs"))
+    cli_overrides = _preview_mapping(payload.get("cli_overrides"))
+    diff = _preview_mapping(explanation.get("effective_diff"))
+    value_sources = _preview_mapping(explanation.get("effective_value_sources"))
+    lines = [
+        "# Quality Profile Preview",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Modes | {_markdown_cell(_preview_quality_modes_text(payload))} |",
+        (
+            "| Profile | "
+            f"{_markdown_cell(_preview_profile_source_text(payload))} |"
+        ),
+        "",
+        "## Profile Inputs",
+        "",
+        "| Input | Value |",
+        "| --- | --- |",
+    ]
+    for key, value in sorted(profile_inputs.items()):
+        lines.append(
+            f"| {_markdown_cell(key)} | "
+            f"{_markdown_cell(_preview_display_value(value))} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Input Channels",
+            "",
+            "| Kind | Details |",
+            "| --- | --- |",
+        ]
+    )
+    for channel in _preview_mapping_rows(explanation.get("input_channels")):
+        lines.append(
+            f"| {_markdown_cell(str(channel.get('kind') or 'unknown'))} | "
+            f"{_markdown_cell(_preview_channel_detail_text(channel))} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Explicit Overrides",
+            "",
+            "| Path | Value |",
+            "| --- | --- |",
+        ]
+    )
+    if cli_overrides:
+        for key, value in sorted(cli_overrides.items()):
+            lines.append(
+                f"| {_markdown_cell(key)} | "
+                f"{_markdown_cell(_preview_display_value(value))} |"
+            )
+    else:
+        lines.append("| none |  |")
+    lines.extend(
+        [
+            "",
+            "## Effective Diff From Built-In Defaults",
+            "",
+            f"{_preview_bounded_summary_text(diff, row_label='changes')}.",
+            "",
+            "| Path | Source | Before | After |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for change in _preview_mapping_rows(diff.get("changes")):
+        lines.append(
+            f"| {_markdown_cell(str(change.get('path') or ''))} | "
+            f"{_markdown_cell(str(change.get('source') or 'unknown'))} | "
+            f"{_markdown_cell(_preview_display_value(change.get('before')))} | "
+            f"{_markdown_cell(_preview_display_value(change.get('after')))} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Value Sources",
+            "",
+            f"{_preview_bounded_summary_text(value_sources, row_label='values')}.",
+            "",
+            "| Path | Source | Value |",
+            "| --- | --- | --- |",
+        ]
+    )
+    for row in _preview_mapping_rows(value_sources.get("values")):
+        lines.append(
+            f"| {_markdown_cell(str(row.get('path') or ''))} | "
+            f"{_markdown_cell(str(row.get('source') or 'unknown'))} | "
+            f"{_markdown_cell(_preview_display_value(row.get('value')))} |"
+        )
+    return "\n".join(lines)
+
+
+def _preview_quality_modes_text(payload: Mapping[str, JSONValue]) -> str:
+    """Return active quality modes for a preview payload."""
+    modes = _preview_mapping(payload.get("quality_modes"))
+    active_modes = [key for key, active in sorted(modes.items()) if active]
+    return ", ".join(active_modes) if active_modes else "none"
+
+
+def _preview_profile_source_text(payload: Mapping[str, JSONValue]) -> str:
+    """Return a compact profile source summary."""
+    explanation = _preview_mapping(payload.get("profile_explanation"))
+    source = _preview_mapping(explanation.get("profile_source"))
+    quality_profile = _preview_mapping(payload.get("quality_profile"))
+    kind = str(source.get("kind") or quality_profile.get("source") or "")
+    name = str(source.get("profile_name") or quality_profile.get("name") or "")
+    source_path = str(
+        source.get("source_path") or quality_profile.get("source_path") or ""
+    )
+    pieces = [kind or "unknown"]
+    if name:
+        pieces.append(f"name={name}")
+    if source_path:
+        pieces.append(f"path={source_path}")
+    return " ".join(pieces)
+
+
+def _preview_channel_text(channel: Mapping[str, JSONValue]) -> str:
+    """Return one text row for an input channel."""
+    kind = str(channel.get("kind") or "unknown")
+    detail = _preview_channel_detail_text(channel)
+    return f"{kind}: {detail}" if detail else kind
+
+
+def _preview_channel_detail_text(channel: Mapping[str, JSONValue]) -> str:
+    """Return compact detail text for an input channel."""
+    parts: list[str] = []
+    for key in (
+        "description",
+        "path",
+        "profile_name",
+        "profile_source",
+        "source_path",
+        "paths",
+    ):
+        value = channel.get(key)
+        if value in (None, "", [], {}):
+            continue
+        parts.append(f"{key}={_preview_display_value(value)}")
+    return "; ".join(parts)
+
+
+def _preview_bounded_summary_text(
+    summary: Mapping[str, JSONValue],
+    *,
+    row_label: str,
+) -> str:
+    """Return a compact bounded-row summary."""
+    total = summary.get("changed_value_count", summary.get("value_count", 0))
+    included = summary.get(
+        "included_change_count", summary.get("included_value_count", 0)
+    )
+    omitted = summary.get(
+        "omitted_change_count", summary.get("omitted_value_count", 0)
+    )
+    return f"{total} {row_label}, {included} shown, {omitted} omitted"
+
+
+def _preview_change_text(change: Mapping[str, JSONValue]) -> str:
+    """Return one text row for a default-profile diff change."""
+    path = str(change.get("path") or "")
+    source = str(change.get("source") or "unknown")
+    before = _preview_display_value(change.get("before"))
+    after = _preview_display_value(change.get("after"))
+    return f"{path} [{source}]: {before} -> {after}"
+
+
+def _preview_value_source_text(row: Mapping[str, JSONValue]) -> str:
+    """Return one text row for a preview value source."""
+    path = str(row.get("path") or "")
+    source = str(row.get("source") or "unknown")
+    value = _preview_display_value(row.get("value"))
+    override = " override" if row.get("override") else ""
+    return f"{path} [{source}{override}]: {value}"
+
+
+def _preview_display_value(
+    value: JSONValue | None,
+    *,
+    limit: int = QUALITY_PROFILE_PREVIEW_DISPLAY_VALUE_LIMIT,
+) -> str:
+    """Return a bounded deterministic display value."""
+    rendered = json.dumps(value, sort_keys=True)
+    if len(rendered) <= limit:
+        return rendered
+    return f"{rendered[: max(0, limit - 3)]}..."
+
+
+def _markdown_cell(value: str) -> str:
+    """Escape minimal Markdown table control characters."""
+    return value.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
+
+
+def _preview_mapping(value: object) -> Mapping[str, JSONValue]:
+    """Return a JSON mapping or an empty mapping."""
+    if isinstance(value, Mapping):
+        return cast(Mapping[str, JSONValue], value)
+    return {}
+
+
+def _preview_mapping_rows(value: object) -> list[Mapping[str, JSONValue]]:
+    """Return mapping rows from a JSON array-like value."""
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [
+            cast(Mapping[str, JSONValue], item)
+            for item in value
+            if isinstance(item, Mapping)
+        ]
+    return []
+
+
 def _quality_profile_preview_payload(
     context: RuntimeContext,
 ) -> dict[str, JSONValue]:
@@ -656,6 +944,7 @@ def _quality_profile_preview_payload(
         "from_api": context.from_api,
         "config_path": str(context.args.get("config_path") or ""),
         "quality_profile_path": context.quality_profile_path,
+        "quality_profile_preview_format": context.quality_profile_preview_format,
         "quality_remediation_catalog_audit": audit_override_enabled,
     }
     return {

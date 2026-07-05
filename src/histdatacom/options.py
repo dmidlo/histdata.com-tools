@@ -50,6 +50,7 @@ class Options:
         "quality_profile",
         "quality_profile_path",
         "quality_profile_preview",
+        "quality_profile_preview_format",
         "quality_remediation_catalog_audit",
         "quality_report_path",
         "repo_quality_columns",
@@ -117,6 +118,7 @@ class Options:
         self.quality_profile_path: str | None = None
         self.quality_profile: dict = {}
         self.quality_profile_preview: bool = False
+        self.quality_profile_preview_format: str = "json"
         self.quality_remediation_catalog_audit: bool = False
         self.repo_quality_refresh: bool = False
         self.repo_quality_columns: bool = False
