@@ -37,6 +37,7 @@ class QualityRemediationHint:
 
 FINGERPRINT_SERIES_RULE_ID = "fingerprint.series"
 ASCII_TIMESTAMP_SEQUENCE_RULE_ID = "time.ascii.sequence"
+ZIP_INVENTORY_RULE_ID = "inventory.zip.integrity"
 
 TOPOLOGY_REMEDIATION_HINTS_BY_FLAG: Mapping[str, QualityRemediationHint] = {
     "unavailable_topology": QualityRemediationHint(
@@ -95,6 +96,86 @@ REMEDIATION_HINTS_BY_FINDING: Mapping[
         action_kind="inspect",
         rule_id=ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
         finding_code="ASCII_M1_DUPLICATE_TIMESTAMP",
+    ),
+    (
+        ZIP_INVENTORY_RULE_ID,
+        "HISTDATA_ZIP_FILENAME_INVALID",
+    ): QualityRemediationHint(
+        code="rename_histdata_zip_archive",
+        message="rename ZIP archive to the expected HistData filename",
+        action_kind="repair",
+        rule_id=ZIP_INVENTORY_RULE_ID,
+        finding_code="HISTDATA_ZIP_FILENAME_INVALID",
+    ),
+    (
+        ZIP_INVENTORY_RULE_ID,
+        "HISTDATA_ZIP_MEMBER_FILENAME_INVALID",
+    ): QualityRemediationHint(
+        code="rename_histdata_zip_member",
+        message="rename ZIP member to the expected HistData member filename",
+        action_kind="repair",
+        rule_id=ZIP_INVENTORY_RULE_ID,
+        finding_code="HISTDATA_ZIP_MEMBER_FILENAME_INVALID",
+    ),
+    (
+        ZIP_INVENTORY_RULE_ID,
+        "ZIP_MEMBER_MISSING",
+    ): QualityRemediationHint(
+        code="restore_expected_zip_member",
+        message="restore the expected HistData data member inside the ZIP",
+        action_kind="rebuild",
+        rule_id=ZIP_INVENTORY_RULE_ID,
+        finding_code="ZIP_MEMBER_MISSING",
+    ),
+    (
+        ZIP_INVENTORY_RULE_ID,
+        "ZIP_MEMBER_UNEXPECTED",
+    ): QualityRemediationHint(
+        code="rebuild_expected_zip_member",
+        message="rebuild ZIP contents so the expected HistData data member is present",
+        action_kind="rebuild",
+        rule_id=ZIP_INVENTORY_RULE_ID,
+        finding_code="ZIP_MEMBER_UNEXPECTED",
+    ),
+    (
+        ZIP_INVENTORY_RULE_ID,
+        "ZIP_EXTRA_MEMBER",
+    ): QualityRemediationHint(
+        code="inspect_unexpected_zip_members",
+        message="inspect unexpected extra ZIP members",
+        action_kind="inspect",
+        rule_id=ZIP_INVENTORY_RULE_ID,
+        finding_code="ZIP_EXTRA_MEMBER",
+    ),
+    (
+        ZIP_INVENTORY_RULE_ID,
+        "ZIP_CRC_ERROR",
+    ): QualityRemediationHint(
+        code="redownload_zip_crc_failure",
+        message="redownload or replace the ZIP archive with CRC failures",
+        action_kind="rebuild",
+        rule_id=ZIP_INVENTORY_RULE_ID,
+        finding_code="ZIP_CRC_ERROR",
+    ),
+    (
+        ZIP_INVENTORY_RULE_ID,
+        "ZIP_CORRUPT",
+    ): QualityRemediationHint(
+        code="redownload_corrupt_zip_archive",
+        message="redownload or replace the corrupt ZIP archive",
+        action_kind="rebuild",
+        rule_id=ZIP_INVENTORY_RULE_ID,
+        finding_code="ZIP_CORRUPT",
+    ),
+    (
+        ZIP_INVENTORY_RULE_ID,
+        "ZIP_UNREADABLE",
+    ): QualityRemediationHint(
+        code="restore_zip_read_access",
+        message="restore ZIP archive read access or replace the archive",
+        action_kind="repair",
+        rule_id=ZIP_INVENTORY_RULE_ID,
+        finding_code="ZIP_UNREADABLE",
     ),
 }
 REMEDIATION_HINTS_BY_FINDING_CODE: Mapping[str, QualityRemediationHint] = {

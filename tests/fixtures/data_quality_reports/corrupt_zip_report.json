@@ -4,95 +4,30 @@
       "inventory"
     ],
     "operation": "data-quality",
-    "remediation_coverage": {
-      "count_limits": {
-        "finding_code_counts": {
-          "included_count": 1,
-          "limit": 16,
-          "omitted_count": 0,
-          "total_count": 1,
-          "truncated": false
-        },
-        "mapped_finding_code_counts": {
-          "included_count": 0,
-          "limit": 16,
-          "omitted_count": 0,
-          "total_count": 0,
-          "truncated": false
-        },
-        "mapped_rule_id_counts": {
-          "included_count": 0,
-          "limit": 16,
-          "omitted_count": 0,
-          "total_count": 0,
-          "truncated": false
-        },
-        "rule_id_counts": {
-          "included_count": 1,
-          "limit": 16,
-          "omitted_count": 0,
-          "total_count": 1,
-          "truncated": false
-        },
-        "unmapped_finding_code_counts": {
-          "included_count": 1,
-          "limit": 16,
-          "omitted_count": 0,
-          "total_count": 1,
-          "truncated": false
-        },
-        "unmapped_rule_id_counts": {
-          "included_count": 1,
-          "limit": 16,
-          "omitted_count": 0,
-          "total_count": 1,
-          "truncated": false
-        }
-      },
-      "finding_code_counts": [
+    "quality_next_actions": {
+      "action_count": 1,
+      "actions": [
         {
-          "count": 1,
-          "finding_code": "ZIP_CORRUPT"
-        }
-      ],
-      "finding_count": 1,
-      "included_unmapped_group_count": 1,
-      "included_unmapped_warning_error_group_count": 1,
-      "mapped_finding_code_counts": [],
-      "mapped_finding_count": 0,
-      "mapped_rule_id_counts": [],
-      "mapped_severity_counts": {},
-      "omitted_unmapped_group_count": 0,
-      "omitted_unmapped_warning_error_group_count": 0,
-      "rule_id_counts": [
-        {
-          "count": 1,
-          "rule_id": "inventory.zip.integrity"
-        }
-      ],
-      "schema_version": "histdatacom.quality-remediation-coverage.v1",
-      "severity_counts": {
-        "error": 1
-      },
-      "unmapped_finding_code_counts": [
-        {
-          "count": 1,
-          "finding_code": "ZIP_CORRUPT"
-        }
-      ],
-      "unmapped_finding_count": 1,
-      "unmapped_group_count": 1,
-      "unmapped_groups": [
-        {
-          "finding_code": "ZIP_CORRUPT",
+          "action_kind": "rebuild",
+          "affected_target_count": 1,
+          "attention_level_counts": {},
+          "code": "redownload_corrupt_zip_archive",
+          "finding_code_counts": {
+            "ZIP_CORRUPT": 1
+          },
+          "flag_counts": {},
           "included_target_axis_count": 1,
-          "mapped": false,
+          "max_attention_level": null,
           "max_severity": "error",
+          "message": "redownload or replace the corrupt ZIP archive",
           "occurrence_count": 1,
           "omitted_target_axis_count": 0,
           "rule_id": "inventory.zip.integrity",
           "severity_counts": {
             "error": 1
+          },
+          "source_counts": {
+            "quality_finding": 1
           },
           "target_axis_count": 1,
           "target_axis_counts": [
@@ -107,21 +42,109 @@
               }
             }
           ],
-          "target_axis_truncated": false
+          "target_axis_truncated": false,
+          "urgency": "high"
         }
       ],
-      "unmapped_rule_id_counts": [
+      "included_action_count": 1,
+      "omitted_action_count": 0,
+      "schema_version": "histdatacom.quality-next-actions.v1",
+      "source_counts": {
+        "quality_finding": 1
+      },
+      "truncated": false
+    },
+    "remediation_coverage": {
+      "count_limits": {
+        "finding_code_counts": {
+          "included_count": 1,
+          "limit": 16,
+          "omitted_count": 0,
+          "total_count": 1,
+          "truncated": false
+        },
+        "mapped_finding_code_counts": {
+          "included_count": 1,
+          "limit": 16,
+          "omitted_count": 0,
+          "total_count": 1,
+          "truncated": false
+        },
+        "mapped_rule_id_counts": {
+          "included_count": 1,
+          "limit": 16,
+          "omitted_count": 0,
+          "total_count": 1,
+          "truncated": false
+        },
+        "rule_id_counts": {
+          "included_count": 1,
+          "limit": 16,
+          "omitted_count": 0,
+          "total_count": 1,
+          "truncated": false
+        },
+        "unmapped_finding_code_counts": {
+          "included_count": 0,
+          "limit": 16,
+          "omitted_count": 0,
+          "total_count": 0,
+          "truncated": false
+        },
+        "unmapped_rule_id_counts": {
+          "included_count": 0,
+          "limit": 16,
+          "omitted_count": 0,
+          "total_count": 0,
+          "truncated": false
+        }
+      },
+      "finding_code_counts": [
+        {
+          "count": 1,
+          "finding_code": "ZIP_CORRUPT"
+        }
+      ],
+      "finding_count": 1,
+      "included_unmapped_group_count": 0,
+      "included_unmapped_warning_error_group_count": 0,
+      "mapped_finding_code_counts": [
+        {
+          "count": 1,
+          "finding_code": "ZIP_CORRUPT"
+        }
+      ],
+      "mapped_finding_count": 1,
+      "mapped_rule_id_counts": [
         {
           "count": 1,
           "rule_id": "inventory.zip.integrity"
         }
       ],
-      "unmapped_severity_counts": {
+      "mapped_severity_counts": {
         "error": 1
       },
+      "omitted_unmapped_group_count": 0,
+      "omitted_unmapped_warning_error_group_count": 0,
+      "rule_id_counts": [
+        {
+          "count": 1,
+          "rule_id": "inventory.zip.integrity"
+        }
+      ],
+      "schema_version": "histdatacom.quality-remediation-coverage.v1",
+      "severity_counts": {
+        "error": 1
+      },
+      "unmapped_finding_code_counts": [],
+      "unmapped_finding_count": 0,
+      "unmapped_group_count": 0,
+      "unmapped_groups": [],
+      "unmapped_rule_id_counts": [],
+      "unmapped_severity_counts": {},
       "unmapped_truncated": false,
-      "unmapped_warning_error_finding_count": 1,
-      "unmapped_warning_error_group_count": 1
+      "unmapped_warning_error_finding_count": 0,
+      "unmapped_warning_error_group_count": 0
     }
   },
   "rule_results": [

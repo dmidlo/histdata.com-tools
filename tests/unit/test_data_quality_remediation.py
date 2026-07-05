@@ -130,10 +130,88 @@ def test_remediation_catalog_maps_representative_time_finding() -> None:
     )
 
 
+def test_remediation_catalog_maps_inventory_zip_findings() -> None:
+    """ZIP inventory findings should expose bounded operator guidance."""
+    expected = {
+        "HISTDATA_ZIP_FILENAME_INVALID": {
+            "code": "rename_histdata_zip_archive",
+            "message": "rename ZIP archive to the expected HistData filename",
+            "action_kind": "repair",
+        },
+        "HISTDATA_ZIP_MEMBER_FILENAME_INVALID": {
+            "code": "rename_histdata_zip_member",
+            "message": (
+                "rename ZIP member to the expected HistData member filename"
+            ),
+            "action_kind": "repair",
+        },
+        "ZIP_MEMBER_MISSING": {
+            "code": "restore_expected_zip_member",
+            "message": (
+                "restore the expected HistData data member inside the ZIP"
+            ),
+            "action_kind": "rebuild",
+        },
+        "ZIP_MEMBER_UNEXPECTED": {
+            "code": "rebuild_expected_zip_member",
+            "message": (
+                "rebuild ZIP contents so the expected HistData data member is present"
+            ),
+            "action_kind": "rebuild",
+        },
+        "ZIP_EXTRA_MEMBER": {
+            "code": "inspect_unexpected_zip_members",
+            "message": "inspect unexpected extra ZIP members",
+            "action_kind": "inspect",
+        },
+        "ZIP_CRC_ERROR": {
+            "code": "redownload_zip_crc_failure",
+            "message": (
+                "redownload or replace the ZIP archive with CRC failures"
+            ),
+            "action_kind": "rebuild",
+        },
+        "ZIP_CORRUPT": {
+            "code": "redownload_corrupt_zip_archive",
+            "message": "redownload or replace the corrupt ZIP archive",
+            "action_kind": "rebuild",
+        },
+        "ZIP_UNREADABLE": {
+            "code": "restore_zip_read_access",
+            "message": "restore ZIP archive read access or replace the archive",
+            "action_kind": "repair",
+        },
+    }
+
+    for finding_code, base_payload in expected.items():
+        finding = QualityFinding(
+            severity=QualitySeverity.ERROR,
+            code=finding_code,
+            message="ZIP inventory finding.",
+            rule_id="inventory.zip.integrity",
+            target=TARGET,
+        )
+
+        assert remediation_hint_payloads_for_finding(finding) == [
+            {
+                **base_payload,
+                "rule_id": "inventory.zip.integrity",
+                "finding_code": finding_code,
+            }
+        ]
+
+
 def test_remediation_catalog_ignores_unknown_finding_codes() -> None:
     assert (
         remediation_hints_for_finding_code(
             "ASCII_M1_DUPLICATE_TIMESTAMP",
+            rule_id="other.rule",
+        )
+        == ()
+    )
+    assert (
+        remediation_hints_for_finding_code(
+            "ZIP_CORRUPT",
             rule_id="other.rule",
         )
         == ()

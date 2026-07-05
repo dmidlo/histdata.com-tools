@@ -76,6 +76,82 @@ def test_remediation_catalog_audit_reports_mixed_mapped_and_unmapped() -> None:
     assert remediation_catalog_audit_has_warning_error_gaps(payload)
 
 
+def test_remediation_catalog_audit_maps_inventory_archive_batch() -> None:
+    """The ZIP inventory remediation batch should reduce audit gaps."""
+    inventory_archive_codes = (
+        "HISTDATA_ZIP_FILENAME_INVALID",
+        "HISTDATA_ZIP_MEMBER_FILENAME_INVALID",
+        "ZIP_MEMBER_MISSING",
+        "ZIP_MEMBER_UNEXPECTED",
+        "ZIP_EXTRA_MEMBER",
+        "ZIP_CRC_ERROR",
+        "ZIP_CORRUPT",
+        "ZIP_UNREADABLE",
+    )
+    payload = audit_remediation_catalog(
+        known_findings=(
+            *(
+                _known(
+                    "inventory.zip.integrity",
+                    code,
+                    (
+                        QualitySeverity.WARNING
+                        if code == "ZIP_EXTRA_MEMBER"
+                        else QualitySeverity.ERROR
+                    ),
+                    source_family="inventory",
+                )
+                for code in inventory_archive_codes
+            ),
+            _known(
+                "inventory.format_support",
+                "HISTDATA_FORMAT_UNSUPPORTED",
+                QualitySeverity.ERROR,
+                source_family="inventory",
+            ),
+        )
+    )
+    encoded = remediation_catalog_audit_to_json(payload)
+
+    assert payload["status"] == "needs-remediation-guidance"
+    assert payload["summary"]["known_code_count"] == 9
+    assert payload["summary"]["mapped_known_code_count"] == 8
+    assert payload["summary"]["unmapped_warning_error_gap_count"] == 1
+    assert payload["known_unmapped_codes"] == [
+        {
+            "finding_code": "HISTDATA_FORMAT_UNSUPPORTED",
+            "included_source_count": 1,
+            "mapped": False,
+            "max_severity": "error",
+            "occurrence_count": 1,
+            "omitted_source_count": 0,
+            "rule_id": "inventory.format_support",
+            "severity_counts": {"error": 1},
+            "source_count": 1,
+            "source_family": "inventory",
+            "source_family_counts": [
+                {"count": 1, "source_family": "inventory"},
+            ],
+            "sources": [
+                {
+                    "count": 1,
+                    "source": "data_quality/inventory.format_support.py:1",
+                },
+            ],
+        },
+    ]
+    assert payload["ranked_gaps"][0]["finding_code"] == (
+        "HISTDATA_FORMAT_UNSUPPORTED"
+    )
+    assert {
+        str(item["finding_code"]) for item in payload["known_unmapped_codes"]
+    }.isdisjoint(inventory_archive_codes)
+    assert {
+        str(item["finding_code"]) for item in payload["ranked_gaps"]
+    }.isdisjoint(inventory_archive_codes)
+    assert encoded == remediation_catalog_audit_to_json(payload)
+
+
 def test_remediation_catalog_audit_keeps_info_only_gaps_advisory() -> None:
     """INFO-only missing guidance should be visible without failing the audit."""
     payload = audit_remediation_catalog(

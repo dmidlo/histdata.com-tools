@@ -552,6 +552,58 @@ def test_quality_report_payload_adds_all_mapped_remediation_coverage(
     assert format_quality_remediation_coverage_lines(coverage) == []
 
 
+def test_quality_report_surfaces_inventory_zip_remediation_actions(
+    tmp_path: Path,
+) -> None:
+    """ZIP inventory hints should feed next actions and mapped coverage."""
+    report = _inventory_archive_remediation_report(tmp_path)
+
+    actions = quality_next_actions_summary(report)
+    assert actions is not None
+    assert actions["action_count"] == 2
+    assert actions["source_counts"] == {"quality_finding": 3}
+    assert actions["actions"][0]["code"] == "redownload_corrupt_zip_archive"
+    assert actions["actions"][0]["occurrence_count"] == 1
+    assert actions["actions"][0]["finding_code_counts"] == {
+        "ZIP_CORRUPT": 1,
+    }
+    assert actions["actions"][1]["code"] == "rename_histdata_zip_archive"
+    assert actions["actions"][1]["occurrence_count"] == 2
+    assert actions["actions"][1]["finding_code_counts"] == {
+        "HISTDATA_ZIP_FILENAME_INVALID": 2,
+    }
+
+    coverage = quality_remediation_coverage_summary(report)
+    assert coverage is not None
+    assert coverage["finding_count"] == 3
+    assert coverage["mapped_finding_count"] == 3
+    assert coverage["unmapped_finding_count"] == 0
+    assert coverage["unmapped_warning_error_group_count"] == 0
+    assert coverage["mapped_finding_code_counts"] == [
+        {"finding_code": "HISTDATA_ZIP_FILENAME_INVALID", "count": 2},
+        {"finding_code": "ZIP_CORRUPT", "count": 1},
+    ]
+
+    payload = quality_report_payload(report)
+    encoded = json.dumps(payload, sort_keys=True)
+    assert str(tmp_path) not in encoded
+    assert (
+        payload["metadata"][QUALITY_NEXT_ACTIONS_METADATA_KEY]["action_count"]
+        == 2
+    )
+
+    output = format_quality_console_summary(
+        report,
+        check_groups=("inventory",),
+    )
+    assert "Next actions" in output
+    assert (
+        "redownload or replace the corrupt ZIP archive "
+        "(redownload_corrupt_zip_archive, rule=inventory.zip.integrity"
+    ) in output
+    assert "Remediation coverage" not in output
+
+
 def test_quality_remediation_coverage_is_bounded_and_stably_ordered(
     tmp_path: Path,
 ) -> None:
@@ -623,8 +675,7 @@ def test_fingerprint_console_summary_reports_coverage_counts(
 
     assert "Fingerprint coverage" in output
     assert (
-        "- targets: 2 supported/readable: 1 unavailable: 1 "
-        "parsed/non-empty: 1"
+        "- targets: 2 supported/readable: 1 unavailable: 1 parsed/non-empty: 1"
     ) in output
     assert "- source kinds: cache=1, unavailable=1" in output
     assert "- cache sources: direct=1" in output
@@ -1128,6 +1179,56 @@ def _many_duplicate_next_action_report(tmp_path: Path) -> QualityReport:
                 rule_id="time.ascii.sequence",
                 target=second,
                 findings=(finding(second),),
+            ),
+        ),
+    )
+
+
+def _inventory_archive_remediation_report(tmp_path: Path) -> QualityReport:
+    first = QualityTarget(
+        path=str(tmp_path / "EURUSD_201202.zip"),
+        kind=QualityTargetKind.ZIP,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    second = QualityTarget(
+        path=str(tmp_path / "BROKEN.zip"),
+        kind=QualityTargetKind.ZIP,
+        data_format="ascii",
+        timeframe="T",
+        symbol="GBPUSD",
+        period="201202",
+    )
+    filename_finding = QualityFinding(
+        severity=QualitySeverity.ERROR,
+        code="HISTDATA_ZIP_FILENAME_INVALID",
+        message="ZIP filename does not match expected HistData metadata.",
+        rule_id="inventory.zip.integrity",
+        target=first,
+        location=QualityLocation(path=first.path),
+    )
+    corrupt_finding = QualityFinding(
+        severity=QualitySeverity.ERROR,
+        code="ZIP_CORRUPT",
+        message="ZIP archive could not be opened.",
+        rule_id="inventory.zip.integrity",
+        target=second,
+        location=QualityLocation(path=second.path),
+    )
+    return QualityReport(
+        targets=(first, second),
+        rule_results=(
+            QualityRuleResult(
+                rule_id="inventory.zip.integrity",
+                target=first,
+                findings=(filename_finding, filename_finding),
+            ),
+            QualityRuleResult(
+                rule_id="inventory.zip.integrity",
+                target=second,
+                findings=(corrupt_finding,),
             ),
         ),
     )
