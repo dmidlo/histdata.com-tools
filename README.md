@@ -1006,6 +1006,26 @@ modeling assumptions without changing global defaults:
 }
 ```
 
+Profiles can also enable report-publication surfaces. To include a bounded
+remediation-catalog audit in normal quality reports, bounded orchestration
+payloads, and quality preflight sample evidence, opt in with:
+
+```json
+{
+  "schema_version": "histdatacom.quality-profile.v1",
+  "name": "reporting-with-catalog-audit",
+  "reporting": {
+    "remediation_catalog_audit": {
+      "enabled": true
+    }
+  }
+}
+```
+
+The embedded audit reuses the standalone remediation-catalog audit schema,
+keeps known source-code coverage separate from observed report coverage, and
+remains advisory; it does not change finding severities or quality exit policy.
+
 ```sh
 histdatacom --quality \
   --quality-target data/ \

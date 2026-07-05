@@ -11,6 +11,7 @@ from histdatacom.data_quality import (
     ASSET_CLASS_METAL,
     DEFAULT_QUALITY_PROFILE_SOURCE,
     QUALITY_PROFILE_SCHEMA_VERSION,
+    QUALITY_REPORTING_METADATA_KEY,
     SERIES_FINGERPRINT_RULE_ID,
     HistDataAsciiM1OutlierRule,
     HistDataSeriesFingerprintRule,
@@ -230,6 +231,34 @@ def test_profile_modeling_assumptions_are_reported_in_metadata(
     assert summary.metadata["target_horizon"]["status"] == "feasible"
 
 
+def test_profile_reporting_enables_remediation_catalog_audit_metadata() -> None:
+    """Reporting profile switches should flow into report metadata."""
+    metadata = quality_profile_report_metadata(
+        {
+            "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+            "name": "catalog-audit-profile",
+            "reporting": {
+                "remediation_catalog_audit": {
+                    "enabled": True,
+                }
+            },
+        }
+    )
+
+    profile_metadata = metadata["quality_profile"]
+
+    assert metadata[QUALITY_REPORTING_METADATA_KEY] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+    assert profile_metadata["is_default"] is False
+    assert profile_metadata["configured_reporting_keys"] == [
+        "remediation_catalog_audit"
+    ]
+    assert profile_metadata["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+
+
 def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
     """Fingerprint controls should validate and flow through rule factories."""
     rules = quality_rules_for_groups(
@@ -329,6 +358,10 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
                 }
             }
         },
+        {"reporting": "enabled"},
+        {"reporting": {"unknown": {}}},
+        {"reporting": {"remediation_catalog_audit": True}},
+        {"reporting": {"remediation_catalog_audit": {"enabled": "yes"}}},
         {"rules": {SERIES_FINGERPRINT_RULE_ID: {"unknown": True}}},
     ),
 )

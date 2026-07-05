@@ -72,6 +72,7 @@ DEFAULT_QUALITY_PROFILE_SOURCE = "default"
 OPERATOR_QUALITY_PROFILE_SOURCE = "operator-config"
 
 QUALITY_PROFILE_METADATA_KEY = "quality_profile"
+QUALITY_REPORTING_METADATA_KEY = "quality_reporting"
 
 CONFIGURABLE_QUALITY_RULE_IDS = frozenset(
     {
@@ -98,6 +99,7 @@ _TOP_LEVEL_KEYS = frozenset(
         "source",
         "source_path",
         "rules",
+        "reporting",
         "modeling_assumptions",
     }
 )
@@ -116,6 +118,34 @@ class HistDataRowCountProfile:
 
 
 @dataclass(frozen=True, slots=True)
+class QualityRemediationCatalogAuditProfile:
+    """Configured publication behavior for remediation-catalog audits."""
+
+    enabled: bool = False
+
+    def to_metadata(self) -> dict[str, JSONValue]:
+        """Return a JSON-compatible representation."""
+        return {"enabled": self.enabled}
+
+
+@dataclass(frozen=True, slots=True)
+class QualityReportingProfile:
+    """Configured quality report publication behavior."""
+
+    remediation_catalog_audit: QualityRemediationCatalogAuditProfile = field(
+        default_factory=QualityRemediationCatalogAuditProfile
+    )
+
+    def to_metadata(self) -> dict[str, JSONValue]:
+        """Return a JSON-compatible representation."""
+        return {
+            "remediation_catalog_audit": (
+                self.remediation_catalog_audit.to_metadata()
+            )
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class QualityProfile:
     """Versioned operator profile for data-quality rule construction."""
 
@@ -124,6 +154,7 @@ class QualityProfile:
     source: str = DEFAULT_QUALITY_PROFILE_SOURCE
     source_path: str = ""
     rules: Mapping[str, Mapping[str, JSONValue]] = field(default_factory=dict)
+    reporting: Mapping[str, JSONValue] = field(default_factory=dict)
     modeling_assumptions: Mapping[str, JSONValue] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -141,6 +172,7 @@ class QualityProfile:
         """Return whether no operator profile settings are configured."""
         return (
             not self.rules
+            and not self.reporting
             and not self.modeling_assumptions
             and self.source == DEFAULT_QUALITY_PROFILE_SOURCE
         )
@@ -632,9 +664,13 @@ class QualityProfile:
             ),
         )
 
+    def reporting_profile(self) -> QualityReportingProfile:
+        """Return configured quality report publication controls."""
+        return _quality_reporting_profile(self.reporting)
+
     def to_request_payload(self) -> dict[str, JSONValue]:
         """Return a JSON-safe profile payload for runtime requests."""
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "name": self.name,
             "source": self.source,
@@ -642,10 +678,13 @@ class QualityProfile:
             "rules": _json_mapping(self.rules),
             "modeling_assumptions": dict(self.modeling_assumptions),
         }
+        if self.reporting:
+            payload["reporting"] = _json_mapping(self.reporting)
+        return payload
 
     def to_metadata(self) -> dict[str, JSONValue]:
         """Return report metadata describing the active quality profile."""
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "name": self.name,
             "source": self.source,
@@ -658,6 +697,13 @@ class QualityProfile:
             "rules": _json_mapping(self.rules),
             "is_default": self.is_default,
         }
+        if self.reporting:
+            payload["configured_reporting_keys"] = cast(
+                JSONValue,
+                sorted(str(key) for key in self.reporting),
+            )
+            payload["reporting"] = self.reporting_profile().to_metadata()
+        return payload
 
 
 def default_quality_profile() -> QualityProfile:
@@ -705,6 +751,11 @@ def quality_profile_from_mapping(
         source=str(payload.get("source") or source),
         source_path=str(payload.get("source_path") or source_path),
         rules=rules,
+        reporting=_mapping_field(
+            payload,
+            "reporting",
+            path="quality_profile",
+        ),
         modeling_assumptions=_mapping_field(
             payload,
             "modeling_assumptions",
@@ -757,6 +808,7 @@ def validate_quality_profile(profile: QualityProfile) -> None:
     profile.calendar_profile()
     profile.modeling_profile_assumptions()
     profile.fingerprint_profile()
+    profile.reporting_profile()
     _validate_configured_severities(profile)
 
 
@@ -1376,6 +1428,36 @@ def _fingerprint_distribution_attention_profile(
             base.flag_cache_float_precision,
             path=path,
         ),
+    )
+
+
+def _quality_reporting_profile(
+    value: Mapping[str, JSONValue],
+) -> QualityReportingProfile:
+    _reject_unknown_keys(
+        value,
+        {"remediation_catalog_audit"},
+        "quality_profile.reporting",
+    )
+    remediation_catalog_audit = _mapping_field(
+        value,
+        "remediation_catalog_audit",
+        path="quality_profile.reporting",
+    )
+    _reject_unknown_keys(
+        remediation_catalog_audit,
+        {"enabled"},
+        "quality_profile.reporting.remediation_catalog_audit",
+    )
+    return QualityReportingProfile(
+        remediation_catalog_audit=QualityRemediationCatalogAuditProfile(
+            enabled=_bool_field(
+                remediation_catalog_audit,
+                "enabled",
+                False,
+                path="quality_profile.reporting.remediation_catalog_audit",
+            )
+        )
     )
 
 

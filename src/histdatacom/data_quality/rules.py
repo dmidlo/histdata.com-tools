@@ -29,6 +29,7 @@ from histdatacom.data_quality.inventory import inventory_quality_rules
 from histdatacom.data_quality.manifest import manifest_quality_run_rules
 from histdatacom.data_quality.modeling import HistDataModelingReadinessRule
 from histdatacom.data_quality.profiles import (
+    QUALITY_REPORTING_METADATA_KEY,
     QualityProfile,
     quality_profile_from_value,
 )
@@ -115,9 +116,16 @@ def quality_profile_report_metadata(
     profile: Mapping[str, Any] | QualityProfile | None,
 ) -> dict[str, JSONValue]:
     """Return report metadata for a normalized quality profile."""
-    return {
-        "quality_profile": quality_profile_from_value(profile).to_metadata()
+    quality_profile = quality_profile_from_value(profile)
+    metadata: dict[str, JSONValue] = {
+        "quality_profile": quality_profile.to_metadata()
     }
+    reporting_profile = quality_profile.reporting_profile()
+    if reporting_profile.remediation_catalog_audit.enabled:
+        metadata[QUALITY_REPORTING_METADATA_KEY] = (
+            reporting_profile.to_metadata()
+        )
+    return metadata
 
 
 def _ingestion_quality_rules(

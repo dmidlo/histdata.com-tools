@@ -34,6 +34,9 @@ from histdatacom.data_quality.rules import (
     quality_rules_for_groups,
     quality_run_rules_for_groups,
 )
+from histdatacom.data_quality.reporting import (
+    quality_remediation_catalog_audit_summary,
+)
 from histdatacom.fx_enums import (
     Format,
     PAIR_GROUP_BASKETS,
@@ -203,6 +206,8 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
     budget = _mapping(safe_payload.get("temporal_budget"))
     quality = _mapping(safe_payload.get("sample_quality"))
     quality_summary = _mapping(quality.get("summary"))
+    remediation_audit = _mapping(quality.get("remediation_catalog_audit"))
+    remediation_audit_summary = _mapping(remediation_audit.get("summary"))
     decision = _mapping(safe_payload.get("decision"))
     cache_inventory = _mapping(safe_payload.get("cache_inventory"))
     lines = [
@@ -364,6 +369,41 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
             "",
         ]
     )
+    if remediation_audit_summary:
+        lines.extend(
+            [
+                "### Sample Remediation Catalog Audit",
+                "",
+                *_markdown_table(
+                    ("Measure", "Value"),
+                    (
+                        (
+                            "Status",
+                            str(remediation_audit.get("status", "unknown")),
+                        ),
+                        (
+                            "Known warning/error gaps",
+                            str(
+                                remediation_audit_summary.get(
+                                    "unmapped_warning_error_gap_count",
+                                    0,
+                                )
+                            ),
+                        ),
+                        (
+                            "Observed report unmapped warning/error groups",
+                            str(
+                                remediation_audit_summary.get(
+                                    "report_unmapped_warning_error_group_count",
+                                    0,
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+                "",
+            ]
+        )
     lines.extend(_operational_markdown_lines(operational, runtime_cleanup))
     lines.extend(
         [
@@ -752,6 +792,8 @@ def format_quality_preflight_console_summary(
     budget = _mapping(payload.get("temporal_budget"))
     quality = _mapping(payload.get("sample_quality"))
     quality_summary = _mapping(quality.get("summary"))
+    remediation_audit = _mapping(quality.get("remediation_catalog_audit"))
+    remediation_audit_summary = _mapping(remediation_audit.get("summary"))
     decision = _mapping(payload.get("decision"))
     diagnostics = _mapping(payload.get("diagnostics"))
     lines = [
@@ -796,6 +838,15 @@ def format_quality_preflight_console_summary(
             f"findings={quality_summary.get('finding_count', 0)} "
             f"warnings={quality_summary.get('warning_count', 0)} "
             f"errors={quality_summary.get('error_count', 0)}"
+        )
+    if remediation_audit_summary:
+        lines.append(
+            "sample remediation audit: "
+            f"{remediation_audit.get('status', 'unknown')} "
+            "known_warning_error_gaps="
+            f"{remediation_audit_summary.get('unmapped_warning_error_gap_count', 0)} "
+            "observed_unmapped_warning_error_groups="
+            f"{remediation_audit_summary.get('report_unmapped_warning_error_group_count', 0)}"
         )
     if decision.get("reason"):
         lines.append(f"reason: {decision['reason']}")
@@ -955,6 +1006,11 @@ def _sample_quality_payload(report: QualityReport) -> dict[str, JSONValue]:
             },
         }
     )
+    remediation_catalog_audit = quality_remediation_catalog_audit_summary(
+        report
+    )
+    if remediation_catalog_audit is not None:
+        payload["remediation_catalog_audit"] = remediation_catalog_audit
     return payload
 
 
