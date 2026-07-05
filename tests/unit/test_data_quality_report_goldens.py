@@ -34,6 +34,8 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
@@ -755,6 +757,12 @@ def _assert_report_contract(payload: dict[str, JSONValue]) -> None:
                 ]
             )
         )
+    if TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY in metadata:
+        _assert_fingerprint_readiness(
+            _mapping(
+                metadata[TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY]
+            )
+        )
     if QUALITY_NEXT_ACTIONS_METADATA_KEY in metadata:
         _assert_quality_next_actions(
             _mapping(metadata[QUALITY_NEXT_ACTIONS_METADATA_KEY])
@@ -800,6 +808,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "fingerprint_coverage",
         "fingerprint_distribution",
         "fingerprint_distribution_attention",
+        "fingerprint_readiness",
         "fingerprint_topology",
         "fingerprint_topology_attention",
         "next_actions",
@@ -828,6 +837,10 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     if "fingerprint_topology_attention" in payload:
         _assert_fingerprint_topology_attention(
             _mapping(payload["fingerprint_topology_attention"])
+        )
+    if "fingerprint_readiness" in payload:
+        _assert_fingerprint_readiness(
+            _mapping(payload["fingerprint_readiness"])
         )
     if "next_actions" in payload:
         _assert_quality_next_actions(_mapping(payload["next_actions"]))
@@ -1319,6 +1332,249 @@ def _assert_fingerprint_topology_attention_target(
         payload["max_gap_ms"],
         int,
     )
+
+
+def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
+    assert set(payload) == {
+        "applicable_dynamics_status_counts",
+        "cache_source_counts",
+        "computed_from_counts",
+        "dynamics_limitation_counts",
+        "dynamics_reason_counts",
+        "dynamics_status_counts",
+        "included_target_count",
+        "omitted_target_count",
+        "profile_completeness",
+        "row_order_counts",
+        "rule_id",
+        "schema_version",
+        "section_skip_reason_counts",
+        "section_status_counts",
+        "target_count",
+        "target_summaries",
+        "tick_spread_conditioning_status_counts",
+        "topology_limitation_counts",
+        "truncated",
+    }
+    assert payload["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION
+    )
+    assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    for key in (
+        "target_count",
+        "included_target_count",
+        "omitted_target_count",
+    ):
+        assert isinstance(payload[key], int)
+        assert payload[key] >= 0
+    assert isinstance(payload["truncated"], bool)
+    for key in (
+        "applicable_dynamics_status_counts",
+        "cache_source_counts",
+        "computed_from_counts",
+        "dynamics_limitation_counts",
+        "dynamics_reason_counts",
+        "dynamics_status_counts",
+        "row_order_counts",
+        "section_skip_reason_counts",
+        "section_status_counts",
+        "tick_spread_conditioning_status_counts",
+        "topology_limitation_counts",
+    ):
+        assert isinstance(payload[key], dict)
+    profile = _mapping(payload["profile_completeness"])
+    assert set(profile) == {
+        "calendar_profile_complete_count",
+        "calendar_profile_incomplete_count",
+        "calendar_profile_static_advisory_count",
+    }
+    for target_summary in _list(payload["target_summaries"]):
+        _assert_fingerprint_readiness_target(_mapping(target_summary))
+
+
+def _assert_fingerprint_readiness_target(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "applicable_dynamics_reason",
+        "applicable_dynamics_section",
+        "applicable_dynamics_status",
+        "microstructure_dynamics",
+        "profile_completeness",
+        "return_dynamics",
+        "section_skip_reasons",
+        "section_statuses",
+        "sections_emitted_count",
+        "sections_expected_count",
+        "sections_skipped_count",
+        "source_kind",
+        "source_reason",
+        "target_axis",
+        "tick_spread_conditioning",
+        "topology",
+        "topology_limitations",
+    }
+    axis = _mapping(payload["target_axis"])
+    assert set(axis) == {
+        "data_format",
+        "kind",
+        "period",
+        "symbol",
+        "timeframe",
+    }
+    assert payload["applicable_dynamics_section"] in {
+        "microstructure_dynamics",
+        "none",
+        "return_dynamics",
+    }
+    assert payload["applicable_dynamics_status"] in {
+        "limited",
+        "skipped",
+        "unavailable",
+        "valid",
+    }
+    assert isinstance(payload["section_skip_reasons"], list)
+    assert isinstance(payload["section_statuses"], dict)
+    assert isinstance(payload["topology_limitations"], list)
+    for key in (
+        "sections_emitted_count",
+        "sections_expected_count",
+        "sections_skipped_count",
+    ):
+        assert isinstance(payload[key], int)
+    _assert_fingerprint_readiness_topology(_mapping(payload["topology"]))
+    _assert_fingerprint_readiness_profile(
+        _mapping(payload["profile_completeness"])
+    )
+    _assert_fingerprint_readiness_tick_spread(
+        _mapping(payload["tick_spread_conditioning"])
+    )
+    _assert_fingerprint_readiness_dynamics(_mapping(payload["return_dynamics"]))
+    _assert_fingerprint_readiness_dynamics(
+        _mapping(payload["microstructure_dynamics"])
+    )
+
+
+def _assert_fingerprint_readiness_topology(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "cache_source",
+        "computed_from",
+        "duplicate_timestamp_count",
+        "expected_session_closure_count",
+        "invalid_timestamp_count",
+        "non_monotonic_count",
+        "parsed_row_count",
+        "row_count",
+        "sampling_basis",
+        "suspicious_gap_count",
+        "weekend_activity_count",
+    }
+    for key in (
+        "duplicate_timestamp_count",
+        "expected_session_closure_count",
+        "invalid_timestamp_count",
+        "non_monotonic_count",
+        "row_count",
+        "suspicious_gap_count",
+        "weekend_activity_count",
+    ):
+        assert isinstance(payload[key], int)
+
+
+def _assert_fingerprint_readiness_profile(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "calendar_profile_complete",
+        "calendar_profile_name",
+        "calendar_profile_source",
+        "calendar_profile_static_advisory",
+        "calendar_profile_version",
+        "missing_optional_calendar_data",
+        "source",
+    }
+    assert isinstance(payload["calendar_profile_complete"], bool)
+    assert isinstance(payload["calendar_profile_static_advisory"], bool)
+    assert isinstance(payload["missing_optional_calendar_data"], bool)
+
+
+def _assert_fingerprint_readiness_tick_spread(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {"eligible", "emitted", "reason", "status"}
+    assert isinstance(payload["eligible"], bool)
+    assert isinstance(payload["emitted"], bool)
+
+
+def _assert_fingerprint_readiness_dynamics(
+    payload: dict[str, JSONValue],
+) -> None:
+    required = {
+        "basis",
+        "cache_source",
+        "computed_from",
+        "invalid_row_count",
+        "limitations",
+        "partial_row_count",
+        "reason",
+        "regular_grid",
+        "row_count",
+        "row_order",
+        "sampled_row_count",
+        "status",
+        "truncated",
+        "usable_row_count",
+    }
+    assert required <= set(payload)
+    assert payload["status"] in {"limited", "skipped", "unavailable", "valid"}
+    assert isinstance(payload["limitations"], list)
+    assert isinstance(payload["regular_grid"], bool)
+    assert isinstance(payload["truncated"], bool)
+    for key in (
+        "invalid_row_count",
+        "partial_row_count",
+        "row_count",
+        "sampled_row_count",
+        "usable_row_count",
+    ):
+        assert isinstance(payload[key], int)
+    for key in (
+        "absolute_return",
+        "absolute_spread_change",
+        "close_log_return",
+        "interarrival_ms",
+        "open_jump",
+        "spread",
+        "spread_change",
+        "squared_return",
+    ):
+        if key in payload:
+            _assert_compact_numeric_summary(_mapping(payload[key]))
+    for key in (
+        "burst",
+        "flatline",
+        "one_sided_movement",
+        "spread_jump",
+        "stale_quote",
+    ):
+        if key in payload:
+            assert isinstance(payload[key], dict)
+
+
+def _assert_compact_numeric_summary(payload: dict[str, JSONValue]) -> None:
+    assert set(payload) == {
+        "count",
+        "mad",
+        "max",
+        "mean",
+        "median",
+        "min",
+        "p95",
+        "p99",
+    }
+    assert isinstance(payload["count"], int)
 
 
 def _assert_fingerprint_remediation_hint(

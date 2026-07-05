@@ -234,6 +234,157 @@
       "truncated_distribution_target_count": 0,
       "unavailable_distribution_target_count": 0
     },
+    "time_series_fingerprint_readiness_summary": {
+      "applicable_dynamics_status_counts": {
+        "skipped": 1
+      },
+      "cache_source_counts": {},
+      "computed_from_counts": {},
+      "dynamics_limitation_counts": {},
+      "dynamics_reason_counts": {
+        "microstructure_dynamics": {
+          "unsupported_timeframe": 1
+        },
+        "return_dynamics": {
+          "not_emitted": 1
+        }
+      },
+      "dynamics_status_counts": {
+        "microstructure_dynamics": {
+          "skipped": 1
+        },
+        "return_dynamics": {
+          "skipped": 1
+        }
+      },
+      "included_target_count": 1,
+      "omitted_target_count": 0,
+      "profile_completeness": {
+        "calendar_profile_complete_count": 0,
+        "calendar_profile_incomplete_count": 1,
+        "calendar_profile_static_advisory_count": 1
+      },
+      "row_order_counts": {},
+      "rule_id": "fingerprint.series",
+      "schema_version": "histdatacom.time-series-fingerprint-readiness-summary.v1",
+      "section_skip_reason_counts": {
+        "not_emitted": 2
+      },
+      "section_status_counts": {
+        "calendar_regimes": {
+          "skipped": 1
+        },
+        "coverage": {
+          "valid": 1
+        },
+        "m1_bar_distribution": {
+          "valid": 1
+        },
+        "return_dynamics": {
+          "skipped": 1
+        },
+        "temporal_topology": {
+          "valid": 1
+        }
+      },
+      "target_count": 1,
+      "target_summaries": [
+        {
+          "applicable_dynamics_reason": "not_emitted",
+          "applicable_dynamics_section": "return_dynamics",
+          "applicable_dynamics_status": "skipped",
+          "microstructure_dynamics": {
+            "basis": "unknown",
+            "cache_source": null,
+            "computed_from": "unknown",
+            "invalid_row_count": 0,
+            "limitations": [],
+            "partial_row_count": 0,
+            "reason": "unsupported_timeframe",
+            "regular_grid": false,
+            "row_count": 0,
+            "row_order": "unknown",
+            "sampled_row_count": 0,
+            "status": "skipped",
+            "truncated": false,
+            "usable_row_count": 0
+          },
+          "profile_completeness": {
+            "calendar_profile_complete": false,
+            "calendar_profile_name": "static-major-holidays",
+            "calendar_profile_source": "static_month_day_major_holidays",
+            "calendar_profile_static_advisory": true,
+            "calendar_profile_version": "1",
+            "missing_optional_calendar_data": true,
+            "source": "quality_profile"
+          },
+          "return_dynamics": {
+            "basis": "unknown",
+            "cache_source": null,
+            "computed_from": "unknown",
+            "invalid_row_count": 0,
+            "limitations": [],
+            "partial_row_count": 0,
+            "reason": "not_emitted",
+            "regular_grid": false,
+            "row_count": 0,
+            "row_order": "unknown",
+            "sampled_row_count": 0,
+            "status": "skipped",
+            "truncated": false,
+            "usable_row_count": 0
+          },
+          "section_skip_reasons": [
+            "not_emitted",
+            "not_emitted"
+          ],
+          "section_statuses": {
+            "calendar_regimes": "skipped",
+            "coverage": "valid",
+            "m1_bar_distribution": "valid",
+            "return_dynamics": "skipped",
+            "temporal_topology": "valid"
+          },
+          "sections_emitted_count": 3,
+          "sections_expected_count": 5,
+          "sections_skipped_count": 2,
+          "source_kind": "csv_text",
+          "source_reason": null,
+          "target_axis": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "M1"
+          },
+          "tick_spread_conditioning": {
+            "eligible": false,
+            "emitted": false,
+            "reason": "unsupported_timeframe",
+            "status": "ineligible"
+          },
+          "topology": {
+            "cache_source": null,
+            "computed_from": "text_scan",
+            "duplicate_timestamp_count": 0,
+            "expected_session_closure_count": 0,
+            "invalid_timestamp_count": 0,
+            "non_monotonic_count": 0,
+            "parsed_row_count": 3,
+            "row_count": 3,
+            "sampling_basis": "observed_sequence",
+            "suspicious_gap_count": 0,
+            "weekend_activity_count": 0
+          },
+          "topology_limitations": []
+        }
+      ],
+      "tick_spread_conditioning_status_counts": {
+        "ineligible": 1
+      },
+      "topology_limitation_counts": {},
+      "truncated": false
+    },
     "time_series_fingerprint_topology_attention": {
       "attention_flag_counts": {},
       "attention_level_counts": {},

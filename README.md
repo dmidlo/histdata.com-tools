@@ -992,6 +992,14 @@ stable skip/eligibility reason codes, calendar-profile completeness, tick-spread
 conditioning eligibility, and dynamics readiness. This is machine-readable
 contract metadata for report consumers; the full fingerprint sections remain the
 source of the detailed statistics.
+Quality JSON reports and CLI summaries also include a bounded
+`time_series_fingerprint_readiness_summary` when fingerprint findings are
+present. Use that report-level summary to scan whether return or microstructure
+dynamics are valid, limited, skipped, or unavailable; which topology limitations
+affect sequence interpretation; and the compact return, jump, flatline, spread,
+stale quote, burst, and one-sided movement facts. Use the raw
+`time_series_fingerprint` payload when downstream tooling needs the complete
+fingerprint sections or full quantile maps.
 
 `provenance` checks are only applied when a local orchestration
 `.histdatacom/manifest-status.sqlite3` store is available. Explicit
