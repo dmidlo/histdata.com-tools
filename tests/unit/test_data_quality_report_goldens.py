@@ -28,6 +28,10 @@ from histdatacom.data_quality import (
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
@@ -406,6 +410,25 @@ def _fingerprint_report() -> QualityReport:
                 "end_timestamp_utc_ms": 1328072520000,
                 "duration_ms": 120000,
             },
+            "m1_bar_distribution": {
+                "row_count": 3,
+                "sampled_row_count": 3,
+                "usable_row_count": 3,
+                "invalid_row_count": 0,
+                "truncated": False,
+                "precision": {
+                    "precision_source": "text",
+                    "decimal_place_counts": {
+                        "6": 12,
+                    },
+                    "column_decimal_place_counts": {
+                        "open": {"6": 3},
+                        "high": {"6": 3},
+                        "low": {"6": 3},
+                        "close": {"6": 3},
+                    },
+                },
+            },
             "temporal_topology": {
                 "row_count": 3,
                 "parsed_row_count": 3,
@@ -635,6 +658,22 @@ def _assert_report_contract(payload: dict[str, JSONValue]) -> None:
         _assert_fingerprint_coverage(
             _mapping(metadata[TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY])
         )
+    if TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY in metadata:
+        _assert_fingerprint_distribution(
+            _mapping(
+                metadata[
+                    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY
+                ]
+            )
+        )
+    if TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY in metadata:
+        _assert_fingerprint_distribution_attention(
+            _mapping(
+                metadata[
+                    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY
+                ]
+            )
+        )
     if TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY in metadata:
         _assert_fingerprint_topology(
             _mapping(
@@ -692,6 +731,8 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     }
     optional_keys = {
         "fingerprint_coverage",
+        "fingerprint_distribution",
+        "fingerprint_distribution_attention",
         "fingerprint_topology",
         "fingerprint_topology_attention",
         "next_actions",
@@ -707,6 +748,14 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     _assert_summary(_mapping(payload["summary"]))
     if "fingerprint_coverage" in payload:
         _assert_fingerprint_coverage(_mapping(payload["fingerprint_coverage"]))
+    if "fingerprint_distribution" in payload:
+        _assert_fingerprint_distribution(
+            _mapping(payload["fingerprint_distribution"])
+        )
+    if "fingerprint_distribution_attention" in payload:
+        _assert_fingerprint_distribution_attention(
+            _mapping(payload["fingerprint_distribution_attention"])
+        )
     if "fingerprint_topology" in payload:
         _assert_fingerprint_topology(_mapping(payload["fingerprint_topology"]))
     if "fingerprint_topology_attention" in payload:
@@ -793,6 +842,212 @@ def _assert_fingerprint_coverage(payload: dict[str, JSONValue]) -> None:
         "unavailable_reason_counts",
     ):
         assert isinstance(payload[key], dict)
+
+
+def _assert_fingerprint_distribution(payload: dict[str, JSONValue]) -> None:
+    assert set(payload) == {
+        "cache_backed_distribution_target_count",
+        "cache_source_counts",
+        "distribution_kind_counts",
+        "distribution_source_counts",
+        "distribution_target_count",
+        "empty_distribution_target_count",
+        "included_target_count",
+        "invalid_row_target_count",
+        "m1_bar_distribution_target_count",
+        "missing_distribution_target_count",
+        "omitted_target_count",
+        "partial_row_target_count",
+        "precision_source_counts",
+        "rule_id",
+        "schema_version",
+        "source_kind_counts",
+        "status_counts",
+        "target_count",
+        "target_summaries",
+        "text_backed_distribution_target_count",
+        "tick_distribution_target_count",
+        "total_invalid_row_count",
+        "total_partial_row_count",
+        "truncated",
+        "truncated_distribution_target_count",
+        "unavailable_distribution_target_count",
+    }
+    assert payload["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION
+    )
+    assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    for key in (
+        "cache_backed_distribution_target_count",
+        "distribution_target_count",
+        "empty_distribution_target_count",
+        "included_target_count",
+        "invalid_row_target_count",
+        "m1_bar_distribution_target_count",
+        "missing_distribution_target_count",
+        "omitted_target_count",
+        "partial_row_target_count",
+        "target_count",
+        "text_backed_distribution_target_count",
+        "tick_distribution_target_count",
+        "total_invalid_row_count",
+        "total_partial_row_count",
+        "truncated_distribution_target_count",
+        "unavailable_distribution_target_count",
+    ):
+        assert isinstance(payload[key], int)
+    assert isinstance(payload["truncated"], bool)
+    for key in (
+        "cache_source_counts",
+        "distribution_kind_counts",
+        "distribution_source_counts",
+        "precision_source_counts",
+        "source_kind_counts",
+        "status_counts",
+    ):
+        assert isinstance(payload[key], dict)
+    for target_summary in _list(payload["target_summaries"]):
+        _assert_fingerprint_distribution_target(_mapping(target_summary))
+
+
+def _assert_fingerprint_distribution_target(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "cache_source",
+        "distribution_kind",
+        "distribution_source",
+        "invalid_row_count",
+        "invalid_row_rate",
+        "negative_spread_count",
+        "negative_spread_rate",
+        "partial_row_count",
+        "precision_decimal_place_count",
+        "precision_source",
+        "row_count",
+        "sampled_row_count",
+        "source_kind",
+        "status",
+        "target_axis",
+        "truncated",
+        "usable_row_count",
+        "zero_spread_count",
+        "zero_spread_rate",
+    }
+    axis = _mapping(payload["target_axis"])
+    assert set(axis) == {
+        "data_format",
+        "kind",
+        "period",
+        "symbol",
+        "timeframe",
+    }
+    assert payload["distribution_kind"] in {"m1_bar", "missing", "tick"}
+    assert payload["status"] in {"available", "missing", "unavailable"}
+    assert isinstance(payload["truncated"], bool)
+    for key in (
+        "invalid_row_count",
+        "negative_spread_count",
+        "partial_row_count",
+        "precision_decimal_place_count",
+        "row_count",
+        "sampled_row_count",
+        "usable_row_count",
+        "zero_spread_count",
+    ):
+        assert isinstance(payload[key], int)
+
+
+def _assert_fingerprint_distribution_attention(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "attention_flag_counts",
+        "attention_level_counts",
+        "attention_target_count",
+        "distribution_target_count",
+        "included_attention_target_count",
+        "omitted_attention_target_count",
+        "rule_id",
+        "schema_version",
+        "target_summaries",
+        "truncated",
+    }
+    assert payload["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION
+    )
+    assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    for key in (
+        "distribution_target_count",
+        "attention_target_count",
+        "included_attention_target_count",
+        "omitted_attention_target_count",
+    ):
+        assert isinstance(payload[key], int)
+        assert payload[key] >= 0
+    assert isinstance(payload["truncated"], bool)
+    assert isinstance(payload["attention_flag_counts"], dict)
+    assert isinstance(payload["attention_level_counts"], dict)
+    for target_summary in _list(payload["target_summaries"]):
+        _assert_fingerprint_distribution_attention_target(
+            _mapping(target_summary)
+        )
+
+
+def _assert_fingerprint_distribution_attention_target(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "attention_flags",
+        "attention_level",
+        "cache_source",
+        "distribution_kind",
+        "distribution_source",
+        "invalid_row_count",
+        "invalid_row_rate",
+        "negative_spread_count",
+        "negative_spread_rate",
+        "partial_row_count",
+        "precision_decimal_place_count",
+        "precision_source",
+        "row_count",
+        "sampled_row_count",
+        "source_kind",
+        "status",
+        "target_axis",
+        "truncated",
+        "usable_row_count",
+        "zero_spread_count",
+        "zero_spread_rate",
+    }
+    axis = _mapping(payload["target_axis"])
+    assert set(axis) == {
+        "data_format",
+        "kind",
+        "period",
+        "symbol",
+        "timeframe",
+    }
+    assert payload["attention_level"] in {
+        "defect",
+        "microstructure",
+        "missing",
+        "precision",
+        "sample",
+    }
+    assert isinstance(payload["attention_flags"], list)
+    assert payload["distribution_kind"] in {"m1_bar", "missing", "tick"}
+    for key in (
+        "invalid_row_count",
+        "negative_spread_count",
+        "partial_row_count",
+        "precision_decimal_place_count",
+        "row_count",
+        "sampled_row_count",
+        "usable_row_count",
+        "zero_spread_count",
+    ):
+        assert isinstance(payload[key], int)
 
 
 def _assert_fingerprint_topology(payload: dict[str, JSONValue]) -> None:

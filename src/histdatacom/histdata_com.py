@@ -53,6 +53,8 @@ from histdatacom.data_quality.preflight import (
     write_quality_preflight_report,
 )
 from histdatacom.data_quality.reporting import (
+    format_fingerprint_distribution_attention_lines,
+    format_fingerprint_distribution_summary_lines,
     format_fingerprint_topology_attention_lines,
     format_fingerprint_topology_summary_lines,
     format_quality_next_action_lines,
@@ -1048,6 +1050,20 @@ def _format_orchestration_quality_console_summary(
     lines.extend(
         format_quality_remediation_coverage_lines(
             _mapping_from_payload(quality_payload.get("remediation_coverage"))
+        )
+    )
+    lines.extend(
+        format_fingerprint_distribution_attention_lines(
+            _mapping_from_payload(
+                quality_payload.get("fingerprint_distribution_attention")
+            )
+        )
+    )
+    lines.extend(
+        format_fingerprint_distribution_summary_lines(
+            _mapping_from_payload(
+                quality_payload.get("fingerprint_distribution")
+            )
         )
     )
     lines.extend(

@@ -48,6 +48,84 @@
     "unavailable_count": 0,
     "unavailable_reason_counts": {}
   },
+  "fingerprint_distribution": {
+    "cache_backed_distribution_target_count": 0,
+    "cache_source_counts": {},
+    "distribution_kind_counts": {
+      "m1_bar": 1
+    },
+    "distribution_source_counts": {
+      "text": 1
+    },
+    "distribution_target_count": 1,
+    "empty_distribution_target_count": 0,
+    "included_target_count": 1,
+    "invalid_row_target_count": 0,
+    "m1_bar_distribution_target_count": 1,
+    "missing_distribution_target_count": 0,
+    "omitted_target_count": 0,
+    "partial_row_target_count": 0,
+    "precision_source_counts": {
+      "text": 1
+    },
+    "rule_id": "fingerprint.series",
+    "schema_version": "histdatacom.time-series-fingerprint-distribution-summary.v1",
+    "source_kind_counts": {
+      "csv_text": 1
+    },
+    "status_counts": {
+      "available": 1
+    },
+    "target_count": 1,
+    "target_summaries": [
+      {
+        "cache_source": null,
+        "distribution_kind": "m1_bar",
+        "distribution_source": "text",
+        "invalid_row_count": 0,
+        "invalid_row_rate": 0.0,
+        "negative_spread_count": 0,
+        "negative_spread_rate": null,
+        "partial_row_count": 0,
+        "precision_decimal_place_count": 1,
+        "precision_source": "text",
+        "row_count": 3,
+        "sampled_row_count": 3,
+        "source_kind": "csv_text",
+        "status": "available",
+        "target_axis": {
+          "data_format": "ascii",
+          "kind": "csv",
+          "period": "201202",
+          "symbol": "EURUSD",
+          "timeframe": "M1"
+        },
+        "truncated": false,
+        "usable_row_count": 3,
+        "zero_spread_count": 0,
+        "zero_spread_rate": null
+      }
+    ],
+    "text_backed_distribution_target_count": 1,
+    "tick_distribution_target_count": 0,
+    "total_invalid_row_count": 0,
+    "total_partial_row_count": 0,
+    "truncated": false,
+    "truncated_distribution_target_count": 0,
+    "unavailable_distribution_target_count": 0
+  },
+  "fingerprint_distribution_attention": {
+    "attention_flag_counts": {},
+    "attention_level_counts": {},
+    "attention_target_count": 0,
+    "distribution_target_count": 1,
+    "included_attention_target_count": 0,
+    "omitted_attention_target_count": 0,
+    "rule_id": "fingerprint.series",
+    "schema_version": "histdatacom.time-series-fingerprint-distribution-attention.v1",
+    "target_summaries": [],
+    "truncated": false
+  },
   "fingerprint_topology": {
     "cache_source_counts": {},
     "computed_from_counts": {

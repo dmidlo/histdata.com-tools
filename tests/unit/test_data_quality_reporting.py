@@ -13,6 +13,8 @@ from histdatacom.data_quality import (
     QUALITY_REPORT_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     QualityExitPolicy,
@@ -396,6 +398,40 @@ def test_quality_report_payload_adds_fingerprint_topology_attention_metadata(
     assert target_summaries[0]["computed_from"] == "unavailable"
 
 
+def test_quality_report_payload_adds_fingerprint_distribution_metadata(
+    tmp_path: Path,
+) -> None:
+    """Fingerprint reports should serialize distribution summaries."""
+    payload = quality_report_payload(_fingerprint_report(tmp_path))
+
+    summary = payload["metadata"][
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY
+    ]
+    attention = payload["metadata"][
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY
+    ]
+
+    assert summary["target_count"] == 2
+    assert summary["distribution_target_count"] == 1
+    assert summary["m1_bar_distribution_target_count"] == 1
+    assert summary["tick_distribution_target_count"] == 0
+    assert summary["missing_distribution_target_count"] == 0
+    assert summary["unavailable_distribution_target_count"] == 1
+    assert summary["cache_backed_distribution_target_count"] == 1
+    assert summary["text_backed_distribution_target_count"] == 0
+    assert summary["distribution_kind_counts"] == {"m1_bar": 1, "missing": 1}
+    assert summary["precision_source_counts"] == {
+        "cache_float": 1,
+        "unavailable": 1,
+    }
+    assert summary["target_summaries"][0]["precision_source"] == "cache_float"
+    assert attention["attention_target_count"] == 1
+    assert attention["attention_flag_counts"] == {
+        "cache_float_precision_basis": 1,
+    }
+    assert attention["target_summaries"][0]["attention_level"] == "precision"
+
+
 def test_quality_report_payload_adds_mixed_next_actions(
     tmp_path: Path,
 ) -> None:
@@ -723,6 +759,36 @@ def test_fingerprint_console_summary_reports_topology_lines(
     assert "cache=unknown" not in output
 
 
+def test_fingerprint_console_summary_reports_distribution_lines(
+    tmp_path: Path,
+) -> None:
+    """Human output should summarize fingerprint distributions."""
+    output = format_quality_console_summary(
+        _fingerprint_report(tmp_path),
+        check_groups=("fingerprint",),
+    )
+
+    assert "Fingerprint distribution attention" in output
+    assert "Fingerprint distributions" in output
+    assert "- targets needing attention: 1 included: 1 omitted: 0" in output
+    assert (
+        "- ascii EURUSD M1 201202 cache: precision, m1_bar, "
+        "cache_float_precision_basis, rows=3, usable=3, invalid=0, "
+        "sampled=3, zero spread=unavailable, negative spread=unavailable, "
+        "precision=cache_float, source=cache, cache=direct"
+    ) in output
+    assert (
+        "- targets: 2 with distributions: 1 m1: 1 tick: 0 missing: 0" in output
+    )
+    assert "- sources: cache=1, unavailable=1" in output
+    assert "- precision sources: cache_float=1, unavailable=1" in output
+    assert (
+        "- ascii EURUSD M1 201202 cache: available, m1_bar, 3 rows, "
+        "3 usable, 0 invalid, 3 sampled, truncated=false, "
+        "precision=cache_float, source=cache, cache=direct"
+    ) in output
+
+
 def test_quality_console_summary_renders_next_actions(
     tmp_path: Path,
 ) -> None:
@@ -795,6 +861,29 @@ def test_bounded_quality_payload_includes_fingerprint_coverage(
         "cache": 1,
         "unavailable": 1,
     }
+
+
+def test_bounded_quality_payload_includes_fingerprint_distribution(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration payloads should expose distributions."""
+    report = _fingerprint_report(tmp_path)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("fingerprint",),
+        discovery={"roots": [str(tmp_path)], "target_count": 2},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+
+    assert payload["fingerprint_distribution"]["distribution_kind_counts"] == {
+        "m1_bar": 1,
+        "missing": 1,
+    }
+    assert payload["fingerprint_distribution_attention"][
+        "attention_flag_counts"
+    ] == {"cache_float_precision_basis": 1}
 
 
 def test_bounded_quality_payload_includes_fingerprint_topology(
@@ -1044,6 +1133,17 @@ def _fingerprint_report(tmp_path: Path) -> QualityReport:
                 "coverage": {
                     "row_count": 3,
                     "parsed_row_count": 3,
+                },
+                "m1_bar_distribution": {
+                    "row_count": 3,
+                    "sampled_row_count": 3,
+                    "usable_row_count": 3,
+                    "invalid_row_count": 0,
+                    "truncated": False,
+                    "precision": {
+                        "precision_source": "cache_float",
+                        "decimal_place_counts": {"6": 12},
+                    },
                 },
                 "temporal_topology": {
                     "row_count": 3,

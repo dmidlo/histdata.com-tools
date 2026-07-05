@@ -132,6 +132,8 @@ def _orchestration_quality_result(
     check_groups: list[str] | None = None,
     next_actions: dict[str, object] | None = None,
     remediation_coverage: dict[str, object] | None = None,
+    fingerprint_distribution: dict[str, object] | None = None,
+    fingerprint_distribution_attention: dict[str, object] | None = None,
     fingerprint_topology: dict[str, object] | None = None,
     fingerprint_topology_attention: dict[str, object] | None = None,
 ) -> JobResult:
@@ -207,6 +209,12 @@ def _orchestration_quality_result(
         quality["next_actions"] = next_actions
     if remediation_coverage is not None:
         quality["remediation_coverage"] = remediation_coverage
+    if fingerprint_distribution is not None:
+        quality["fingerprint_distribution"] = fingerprint_distribution
+    if fingerprint_distribution_attention is not None:
+        quality["fingerprint_distribution_attention"] = (
+            fingerprint_distribution_attention
+        )
     if fingerprint_topology is not None:
         quality["fingerprint_topology"] = fingerprint_topology
     if fingerprint_topology_attention is not None:
@@ -923,6 +931,78 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                     }
                 ],
             },
+            fingerprint_distribution={
+                "schema_version": (
+                    "histdatacom.time-series-fingerprint-distribution-summary.v1"
+                ),
+                "rule_id": "fingerprint.series",
+                "target_count": 1,
+                "included_target_count": 1,
+                "omitted_target_count": 0,
+                "truncated": False,
+                "distribution_target_count": 1,
+                "m1_bar_distribution_target_count": 1,
+                "tick_distribution_target_count": 0,
+                "missing_distribution_target_count": 0,
+                "unavailable_distribution_target_count": 0,
+                "empty_distribution_target_count": 0,
+                "invalid_row_target_count": 0,
+                "partial_row_target_count": 0,
+                "truncated_distribution_target_count": 0,
+                "cache_backed_distribution_target_count": 0,
+                "text_backed_distribution_target_count": 1,
+                "total_invalid_row_count": 0,
+                "total_partial_row_count": 0,
+                "distribution_kind_counts": {"m1_bar": 1},
+                "status_counts": {"available": 1},
+                "source_kind_counts": {"csv_text": 1},
+                "distribution_source_counts": {"text": 1},
+                "cache_source_counts": {},
+                "precision_source_counts": {"text": 1},
+                "target_summaries": [
+                    {
+                        "target_axis": {
+                            "data_format": "ascii",
+                            "timeframe": "M1",
+                            "symbol": "EURUSD",
+                            "period": "201202",
+                            "kind": "csv",
+                        },
+                        "distribution_kind": "m1_bar",
+                        "status": "available",
+                        "row_count": 3,
+                        "sampled_row_count": 3,
+                        "usable_row_count": 3,
+                        "invalid_row_count": 0,
+                        "partial_row_count": 0,
+                        "invalid_row_rate": 0.0,
+                        "truncated": False,
+                        "source_kind": "csv_text",
+                        "distribution_source": "text",
+                        "cache_source": None,
+                        "precision_source": "text",
+                        "precision_decimal_place_count": 1,
+                        "zero_spread_count": 0,
+                        "negative_spread_count": 0,
+                        "zero_spread_rate": None,
+                        "negative_spread_rate": None,
+                    }
+                ],
+            },
+            fingerprint_distribution_attention={
+                "schema_version": (
+                    "histdatacom.time-series-fingerprint-distribution-attention.v1"
+                ),
+                "rule_id": "fingerprint.series",
+                "distribution_target_count": 1,
+                "attention_target_count": 0,
+                "included_attention_target_count": 0,
+                "omitted_attention_target_count": 0,
+                "truncated": False,
+                "attention_level_counts": {},
+                "attention_flag_counts": {},
+                "target_summaries": [],
+            },
             fingerprint_topology={
                 "target_count": 1,
                 "included_target_count": 1,
@@ -1021,6 +1101,17 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
         "- medium inspect: inspect duplicate timestamp rows "
         "(inspect_duplicate_timestamp_rows, rule=fingerprint.series, "
         "targets=1, attention=sequence)"
+    ) in output
+    assert "Fingerprint distribution attention" in output
+    assert "- targets needing attention: 0 included: 0 omitted: 0" in output
+    assert "Fingerprint distributions" in output
+    assert (
+        "- targets: 1 with distributions: 1 m1: 1 tick: 0 missing: 0" in output
+    )
+    assert (
+        "- ascii EURUSD M1 201202 csv: available, m1_bar, 3 rows, "
+        "3 usable, 0 invalid, 3 sampled, truncated=false, "
+        "precision=text, source=text"
     ) in output
     assert "Fingerprint topology attention" in output
     assert "- targets needing attention: 1 included: 1 omitted: 0" in output

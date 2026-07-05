@@ -15,9 +15,13 @@ from histdatacom.data_quality.contracts import (
 from histdatacom.data_quality.fingerprints import (
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     series_fingerprint_coverage_summary,
+    series_fingerprint_distribution_attention_summary,
+    series_fingerprint_distribution_summary,
     series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
@@ -232,6 +236,22 @@ def run_quality_assessment(
         base_metadata[TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY] = (
             fingerprint_coverage_summary
         )
+    fingerprint_distribution_summary = series_fingerprint_distribution_summary(
+        (finding for result in rule_results for finding in result.findings)
+    )
+    if fingerprint_distribution_summary is not None:
+        base_metadata[
+            TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY
+        ] = fingerprint_distribution_summary
+    fingerprint_distribution_attention = (
+        series_fingerprint_distribution_attention_summary(
+            (finding for result in rule_results for finding in result.findings)
+        )
+    )
+    if fingerprint_distribution_attention is not None:
+        base_metadata[
+            TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY
+        ] = fingerprint_distribution_attention
     fingerprint_topology_summary = series_fingerprint_topology_summary(
         (finding for result in rule_results for finding in result.findings)
     )

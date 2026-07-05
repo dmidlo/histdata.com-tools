@@ -20,9 +20,13 @@ from histdatacom.data_quality.contracts import (
 )
 from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     series_fingerprint_coverage_summary,
+    series_fingerprint_distribution_attention_summary,
+    series_fingerprint_distribution_summary,
     series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
@@ -237,6 +241,22 @@ def quality_report_payload(
             fingerprint_coverage
         )
         payload["metadata"] = metadata
+    fingerprint_distribution = _fingerprint_distribution_summary(report)
+    if fingerprint_distribution is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY] = (
+            fingerprint_distribution
+        )
+        payload["metadata"] = metadata
+    fingerprint_distribution_attention = (
+        _fingerprint_distribution_attention_summary(report)
+    )
+    if fingerprint_distribution_attention is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[
+            TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY
+        ] = fingerprint_distribution_attention
+        payload["metadata"] = metadata
     fingerprint_topology = _fingerprint_topology_summary(report)
     if fingerprint_topology is not None:
         metadata = _mapping_payload(payload.get("metadata"))
@@ -366,6 +386,16 @@ def format_quality_console_summary(
             )
         )
         lines.extend(
+            format_fingerprint_distribution_attention_lines(
+                _fingerprint_distribution_attention_summary(report)
+            )
+        )
+        lines.extend(
+            format_fingerprint_distribution_summary_lines(
+                _fingerprint_distribution_summary(report)
+            )
+        )
+        lines.extend(
             format_fingerprint_topology_attention_lines(
                 _fingerprint_topology_attention_summary(report)
             )
@@ -412,6 +442,10 @@ def bounded_quality_payload(
     target_summaries = report.target_summaries
     cross_target_summaries = _cross_target_summaries(report)
     fingerprint_coverage = _fingerprint_coverage_summary(report)
+    fingerprint_distribution = _fingerprint_distribution_summary(report)
+    fingerprint_distribution_attention = (
+        _fingerprint_distribution_attention_summary(report)
+    )
     fingerprint_topology = _fingerprint_topology_summary(report)
     fingerprint_topology_attention = _fingerprint_topology_attention_summary(
         report
@@ -462,6 +496,12 @@ def bounded_quality_payload(
     }
     if fingerprint_coverage is not None:
         payload["fingerprint_coverage"] = fingerprint_coverage
+    if fingerprint_distribution is not None:
+        payload["fingerprint_distribution"] = fingerprint_distribution
+    if fingerprint_distribution_attention is not None:
+        payload["fingerprint_distribution_attention"] = (
+            fingerprint_distribution_attention
+        )
     if fingerprint_topology is not None:
         payload["fingerprint_topology"] = fingerprint_topology
     if fingerprint_topology_attention is not None:
@@ -1376,6 +1416,34 @@ def _fingerprint_coverage_summary(
     )
 
 
+def _fingerprint_distribution_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return fingerprint distribution metadata from report or findings."""
+    summary = report.metadata.get(
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY
+    )
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        series_fingerprint_distribution_summary(report.findings)
+    )
+
+
+def _fingerprint_distribution_attention_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return fingerprint distribution attention metadata."""
+    summary = report.metadata.get(
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY
+    )
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        series_fingerprint_distribution_attention_summary(report.findings)
+    )
+
+
 def _fingerprint_topology_summary(
     report: QualityReport,
 ) -> dict[str, JSONValue] | None:
@@ -1445,6 +1513,139 @@ def _format_fingerprint_coverage_lines(
         if counts:
             lines.append(f"- {label}: {counts}")
     return lines
+
+
+def format_fingerprint_distribution_attention_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable lines for distribution attention."""
+    if not summary:
+        return []
+    lines = [
+        "",
+        "Fingerprint distribution attention",
+        (
+            "- targets needing attention: "
+            f"{_int_metadata(summary, 'attention_target_count')} "
+            "included: "
+            f"{_int_metadata(summary, 'included_attention_target_count')} "
+            "omitted: "
+            f"{_int_metadata(summary, 'omitted_attention_target_count')}"
+        ),
+    ]
+    target_summaries = summary.get("target_summaries")
+    if isinstance(target_summaries, list):
+        for item in target_summaries:
+            if isinstance(item, Mapping):
+                lines.append(
+                    f"- {_format_fingerprint_distribution_attention_target_line(item)}"
+                )
+    return lines
+
+
+def _format_fingerprint_distribution_attention_target_line(
+    summary: Mapping[str, JSONValue],
+) -> str:
+    axis = _mapping_payload(summary.get("target_axis"))
+    data_format = _string_metadata(axis, "data_format")
+    symbol = _string_metadata(axis, "symbol")
+    timeframe = _string_metadata(axis, "timeframe")
+    period = _string_metadata(axis, "period")
+    kind = _string_metadata(axis, "kind")
+    flags = _string_list_metadata(summary.get("attention_flags"))
+    flag_text = ", ".join(flags) if flags else "no advisory flags"
+    cache_source = _optional_string_metadata(summary, "cache_source")
+    cache_text = f", cache={cache_source}" if cache_source else ""
+    return (
+        f"{data_format} {symbol} {timeframe} {period} {kind}: "
+        f"{_string_metadata(summary, 'attention_level')}, "
+        f"{_string_metadata(summary, 'distribution_kind')}, "
+        f"{flag_text}, "
+        f"rows={_int_metadata(summary, 'row_count')}, "
+        f"usable={_int_metadata(summary, 'usable_row_count')}, "
+        f"invalid={_int_metadata(summary, 'invalid_row_count')}, "
+        f"sampled={_int_metadata(summary, 'sampled_row_count')}, "
+        f"zero spread={_format_rate(summary.get('zero_spread_rate'))}, "
+        f"negative spread={_format_rate(summary.get('negative_spread_rate'))}, "
+        f"precision={_string_metadata(summary, 'precision_source')}, "
+        f"source={_string_metadata(summary, 'distribution_source')}"
+        f"{cache_text}"
+    )
+
+
+def format_fingerprint_distribution_summary_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable lines for fingerprint distributions."""
+    if not summary:
+        return []
+    lines = [
+        "",
+        "Fingerprint distributions",
+        (
+            "- targets: "
+            f"{_int_metadata(summary, 'target_count')} "
+            "with distributions: "
+            f"{_int_metadata(summary, 'distribution_target_count')} "
+            f"m1: {_int_metadata(summary, 'm1_bar_distribution_target_count')} "
+            f"tick: {_int_metadata(summary, 'tick_distribution_target_count')} "
+            "missing: "
+            f"{_int_metadata(summary, 'missing_distribution_target_count')}"
+        ),
+        (
+            "- data conditions: "
+            f"empty={_int_metadata(summary, 'empty_distribution_target_count')} "
+            f"invalid={_int_metadata(summary, 'invalid_row_target_count')} "
+            f"partial={_int_metadata(summary, 'partial_row_target_count')} "
+            "truncated="
+            f"{_int_metadata(summary, 'truncated_distribution_target_count')}"
+        ),
+    ]
+    count_lines = (
+        ("distribution kinds", "distribution_kind_counts"),
+        ("sources", "distribution_source_counts"),
+        ("source kinds", "source_kind_counts"),
+        ("cache sources", "cache_source_counts"),
+        ("precision sources", "precision_source_counts"),
+        ("statuses", "status_counts"),
+    )
+    for label, key in count_lines:
+        counts = _format_count_metadata(summary.get(key))
+        if counts:
+            lines.append(f"- {label}: {counts}")
+    target_summaries = summary.get("target_summaries")
+    if isinstance(target_summaries, list):
+        for item in target_summaries:
+            if isinstance(item, Mapping):
+                lines.append(
+                    f"- {_format_fingerprint_distribution_target_line(item)}"
+                )
+    return lines
+
+
+def _format_fingerprint_distribution_target_line(
+    summary: Mapping[str, JSONValue],
+) -> str:
+    axis = _mapping_payload(summary.get("target_axis"))
+    cache_source = _optional_string_metadata(summary, "cache_source")
+    cache_text = f", cache={cache_source}" if cache_source else ""
+    return (
+        f"{_string_metadata(axis, 'data_format')} "
+        f"{_string_metadata(axis, 'symbol')} "
+        f"{_string_metadata(axis, 'timeframe')} "
+        f"{_string_metadata(axis, 'period')} "
+        f"{_string_metadata(axis, 'kind')}: "
+        f"{_string_metadata(summary, 'status')}, "
+        f"{_string_metadata(summary, 'distribution_kind')}, "
+        f"{_int_metadata(summary, 'row_count')} rows, "
+        f"{_int_metadata(summary, 'usable_row_count')} usable, "
+        f"{_int_metadata(summary, 'invalid_row_count')} invalid, "
+        f"{_int_metadata(summary, 'sampled_row_count')} sampled, "
+        f"truncated={_bool_text(summary.get('truncated'))}, "
+        f"precision={_string_metadata(summary, 'precision_source')}, "
+        f"source={_string_metadata(summary, 'distribution_source')}"
+        f"{cache_text}"
+    )
 
 
 def format_fingerprint_topology_attention_lines(
@@ -1671,6 +1872,19 @@ def _format_duration_ms(value: object) -> str:
     if absolute >= 1_000 and milliseconds % 1_000 == 0:
         return f"{milliseconds // 1_000}s"
     return f"{milliseconds}ms"
+
+
+def _format_rate(value: object) -> str:
+    if isinstance(value, bool) or value is None:
+        return "unavailable"
+    if isinstance(value, (int, float)):
+        return f"{float(value):.6g}"
+    text = str(value).strip()
+    return text or "unavailable"
+
+
+def _bool_text(value: object) -> str:
+    return "true" if value is True else "false"
 
 
 def _format_count_metadata(value: JSONValue) -> str:

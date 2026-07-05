@@ -17,6 +17,10 @@ from histdatacom.data_quality import (
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
@@ -34,6 +38,8 @@ from histdatacom.data_quality import (
     quality_run_rules_for_groups,
     run_quality_assessment,
     series_fingerprint_coverage_summary,
+    series_fingerprint_distribution_attention_summary,
+    series_fingerprint_distribution_summary,
     series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
@@ -217,6 +223,7 @@ def test_fingerprint_distribution_handles_invalid_partial_and_empty_m1_rows(
     assert invalid_distribution["sampled_row_count"] == 1
     assert invalid_distribution["usable_row_count"] == 1
     assert invalid_distribution["invalid_row_count"] == 1
+    assert invalid_distribution["partial_row_count"] == 0
     close_summary = _mapping(_mapping(invalid_distribution["price"])["close"])
     assert close_summary["count"] == 1
     assert close_summary["median"] == 1.30656
@@ -231,6 +238,7 @@ def test_fingerprint_distribution_handles_invalid_partial_and_empty_m1_rows(
     assert partial_distribution["sampled_row_count"] == 1
     assert partial_distribution["usable_row_count"] == 1
     assert partial_distribution["invalid_row_count"] == 1
+    assert partial_distribution["partial_row_count"] == 1
 
     empty_target = _discovered_target(
         write_ascii_case(tmp_path / "empty", case_by_name("m1_empty_file"))
@@ -243,6 +251,7 @@ def test_fingerprint_distribution_handles_invalid_partial_and_empty_m1_rows(
     assert empty_distribution["sampled_row_count"] == 0
     assert empty_distribution["usable_row_count"] == 0
     assert empty_distribution["invalid_row_count"] == 0
+    assert empty_distribution["partial_row_count"] == 0
     assert empty_summary["count"] == 0
     assert empty_summary["median"] is None
 
@@ -714,6 +723,179 @@ def test_fingerprint_coverage_summary_reports_duplicate_archive_skip(
     }
 
 
+def test_series_fingerprint_distribution_summary_counts_mixed_payloads(
+    tmp_path: Path,
+) -> None:
+    """Run metadata should summarize distribution payloads and advisories."""
+    profile = HistDataFingerprintProfile(max_rows=1)
+    clean_m1 = _discovered_target(
+        write_ascii_case(tmp_path / "clean-m1", CLEAN_M1_CASE)
+    )
+    invalid_m1 = _discovered_target(
+        write_ascii_case(
+            tmp_path / "invalid-m1", case_by_name("m1_bad_numeric")
+        )
+    )
+    partial_m1 = _discovered_target(
+        write_ascii_case(
+            tmp_path / "partial-m1", case_by_name("m1_malformed_row")
+        )
+    )
+    empty_m1 = _discovered_target(
+        write_ascii_case(tmp_path / "empty-m1", case_by_name("m1_empty_file"))
+    )
+    tick_spread_mix = _discovered_target(
+        write_ascii_case(
+            tmp_path / "tick-spread",
+            HistDataAsciiCase(
+                name="tick_spread_mix",
+                timeframe=TICK,
+                filename="DAT_ASCII_EURUSD_T_201202_SPREAD_MIX.csv",
+                rows=(
+                    "20120201 000003660,1.000000,1.000000,0",
+                    "20120201 000003973,1.000200,1.000100,0",
+                    "20120201 000004990,1.000000,1.000300,0",
+                ),
+            ),
+        )
+    )
+    cache_path = tmp_path / "direct-cache" / CACHE_FILENAME
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    batch = parse_ascii_lines(M1, CLEAN_M1_ROWS)
+    write_polars_cache(to_polars_frame(batch), cache_path)
+    cache_target = QualityTarget(
+        path=str(cache_path),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    missing_target = QualityTarget(
+        path=str(tmp_path / "missing-distribution.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    missing_finding = QualityFinding(
+        severity=QualitySeverity.INFO,
+        code="FINGERPRINT_SERIES_SUMMARY",
+        message="Canonical target time-series fingerprint.",
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        target=missing_target,
+        metadata={
+            TIME_SERIES_FINGERPRINT_METADATA_KEY: {
+                "target_axis": {
+                    "data_format": "ascii",
+                    "timeframe": "M1",
+                    "symbol": "EURUSD",
+                    "period": "201202",
+                    "kind": "csv",
+                },
+                "coverage": {
+                    "row_count": 3,
+                    "parsed_row_count": 3,
+                },
+                "source": {
+                    "kind": "csv_text",
+                    "path": str(missing_target.path),
+                },
+            }
+        },
+    )
+    findings = (
+        _fingerprint_finding(clean_m1, profile),
+        _fingerprint_finding(invalid_m1, profile),
+        _fingerprint_finding(partial_m1, profile),
+        _fingerprint_finding(empty_m1, profile),
+        _fingerprint_finding(tick_spread_mix),
+        _fingerprint_finding(cache_target, profile),
+        missing_finding,
+    )
+
+    summary = _mapping(series_fingerprint_distribution_summary(findings))
+
+    assert summary["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION
+    )
+    assert summary["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    assert summary["target_count"] == 7
+    assert summary["distribution_target_count"] == 6
+    assert summary["m1_bar_distribution_target_count"] == 5
+    assert summary["tick_distribution_target_count"] == 1
+    assert summary["missing_distribution_target_count"] == 1
+    assert summary["unavailable_distribution_target_count"] == 0
+    assert summary["empty_distribution_target_count"] == 1
+    assert summary["invalid_row_target_count"] == 2
+    assert summary["partial_row_target_count"] == 1
+    assert summary["truncated_distribution_target_count"] == 2
+    assert summary["cache_backed_distribution_target_count"] == 1
+    assert summary["text_backed_distribution_target_count"] == 5
+    assert summary["total_invalid_row_count"] == 2
+    assert summary["total_partial_row_count"] == 1
+    assert summary["distribution_kind_counts"] == {
+        "m1_bar": 5,
+        "missing": 1,
+        "tick": 1,
+    }
+    assert summary["distribution_source_counts"] == {
+        "cache": 1,
+        "text": 5,
+        "unavailable": 1,
+    }
+    assert summary["precision_source_counts"] == {
+        "cache_float": 1,
+        "text": 4,
+        "unavailable": 2,
+    }
+    assert summary["status_counts"] == {"available": 6, "missing": 1}
+    assert json_safe_path_strings(summary)
+
+    attention = _mapping(
+        series_fingerprint_distribution_attention_summary(
+            findings,
+            target_limit=3,
+        )
+    )
+    assert attention["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION
+    )
+    assert attention["distribution_target_count"] == 7
+    assert attention["attention_target_count"] == 7
+    assert attention["included_attention_target_count"] == 3
+    assert attention["omitted_attention_target_count"] == 4
+    assert attention["truncated"] is True
+    assert attention["attention_flag_counts"] == {
+        "cache_float_precision_basis": 1,
+        "empty_distribution": 1,
+        "high_invalid_row_rate": 2,
+        "missing_precision_counts": 1,
+        "missing_distribution": 1,
+        "negative_tick_spreads_present": 1,
+        "partial_rows_present": 1,
+        "truncated_distribution": 2,
+        "zero_tick_spread_rate_present": 1,
+    }
+    included = _list(attention["target_summaries"])
+    assert _mapping(included[0])["attention_level"] == "missing"
+    full_attention = _mapping(
+        series_fingerprint_distribution_attention_summary(
+            findings,
+            target_limit=-1,
+        )
+    )
+    assert (
+        _distribution_attention_with_flag(
+            full_attention,
+            "negative_tick_spreads_present",
+        )["negative_spread_count"]
+        == 1
+    )
+    assert json_safe_path_strings(attention)
+
+
 def test_series_fingerprint_topology_summary_reports_actionable_targets(
     tmp_path: Path,
 ) -> None:
@@ -1142,6 +1324,22 @@ def test_fingerprint_constants_are_stable() -> None:
         TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY
         == "time_series_fingerprint_topology_attention"
     )
+    assert (
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-distribution-summary.v1"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY
+        == "time_series_fingerprint_distribution_summary"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-distribution-attention.v1"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY
+        == "time_series_fingerprint_distribution_attention"
+    )
     assert DEFAULT_FINGERPRINT_QUANTILES == (
         0.01,
         0.05,
@@ -1205,6 +1403,19 @@ def _target_summary_with_flag(
         _mapping(target)
         for target in targets
         if flag in _list(_mapping(target)["flags"])
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _distribution_attention_with_flag(
+    attention: Mapping[str, Any],
+    flag: str,
+) -> dict[str, Any]:
+    matches = [
+        _mapping(target)
+        for target in _list(attention["target_summaries"])
+        if flag in _list(_mapping(target)["attention_flags"])
     ]
     assert len(matches) == 1
     return matches[0]

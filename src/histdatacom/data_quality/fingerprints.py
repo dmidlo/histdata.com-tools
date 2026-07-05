@@ -49,6 +49,12 @@ TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION = (
 TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-topology-attention.v1"
 )
+TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-distribution-summary.v1"
+)
+TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-distribution-attention.v1"
+)
 TIME_SERIES_FINGERPRINT_METADATA_KEY = "time_series_fingerprint"
 TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY = (
     "time_series_fingerprint_coverage"
@@ -58,6 +64,12 @@ TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY = (
 )
 TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY = (
     "time_series_fingerprint_topology_attention"
+)
+TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY = (
+    "time_series_fingerprint_distribution_summary"
+)
+TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY = (
+    "time_series_fingerprint_distribution_attention"
 )
 SERIES_FINGERPRINT_RULE_ID = "fingerprint.series"
 CROSS_SERIES_FINGERPRINT_RULE_ID = "fingerprint.cross_series"
@@ -80,6 +92,8 @@ DEFAULT_FINGERPRINT_MAX_ROWS = 1_000_000
 DEFAULT_FINGERPRINT_ROUNDING_DIGITS = 12
 DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT = 128
 DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT = 32
+DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT = 128
+DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT = 32
 SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES = (M1, TICK)
 SUPPORTED_SERIES_FINGERPRINT_KINDS = (
     QualityTargetKind.CSV,
@@ -93,6 +107,17 @@ ACTIONABLE_TOPOLOGY_FLAGS = (
     "duplicate_timestamps",
     "suspicious_gaps",
     "weekend_activity",
+)
+DISTRIBUTION_ATTENTION_FLAGS = (
+    "missing_distribution",
+    "empty_distribution",
+    "high_invalid_row_rate",
+    "partial_rows_present",
+    "negative_tick_spreads_present",
+    "zero_tick_spread_rate_present",
+    "truncated_distribution",
+    "missing_precision_counts",
+    "cache_float_precision_basis",
 )
 
 
@@ -338,6 +363,478 @@ def series_fingerprint_topology_attention_summary(
     return _topology_attention_summary_from_targets(
         target_summaries,
         target_limit=target_limit,
+    )
+
+
+def series_fingerprint_distribution_summary(
+    findings: Iterable[QualityFinding],
+    *,
+    target_limit: int = DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT,
+) -> dict[str, JSONValue] | None:
+    """Return bounded target summaries for fingerprint distributions."""
+    target_summaries = _series_fingerprint_distribution_target_summaries(
+        findings
+    )
+    if not target_summaries:
+        return None
+
+    distribution_kind_counts = Counter(
+        _summary_key(item.get("distribution_kind")) for item in target_summaries
+    )
+    status_counts = Counter(
+        _summary_key(item.get("status")) for item in target_summaries
+    )
+    source_kind_counts = Counter(
+        _summary_key(item.get("source_kind")) for item in target_summaries
+    )
+    distribution_source_counts = Counter(
+        _summary_key(item.get("distribution_source"))
+        for item in target_summaries
+    )
+    precision_source_counts = Counter(
+        _summary_key(item.get("precision_source")) for item in target_summaries
+    )
+    cache_source_counts = Counter(
+        _summary_key(item.get("cache_source"))
+        for item in target_summaries
+        if item.get("cache_source") is not None
+    )
+
+    included_source = (
+        target_summaries
+        if target_limit < 0
+        else target_summaries[:target_limit]
+    )
+    included: list[JSONValue] = [dict(item) for item in included_source]
+    omitted_count = max(0, len(target_summaries) - len(included))
+
+    return {
+        "schema_version": (
+            TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION
+        ),
+        "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "target_count": len(target_summaries),
+        "included_target_count": len(included),
+        "omitted_target_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "distribution_target_count": sum(
+            1
+            for item in target_summaries
+            if item.get("distribution_kind") != "missing"
+        ),
+        "m1_bar_distribution_target_count": distribution_kind_counts["m1_bar"],
+        "tick_distribution_target_count": distribution_kind_counts["tick"],
+        "missing_distribution_target_count": status_counts["missing"],
+        "unavailable_distribution_target_count": status_counts["unavailable"],
+        "empty_distribution_target_count": sum(
+            1
+            for item in target_summaries
+            if item.get("distribution_kind") != "missing"
+            and _int_payload(item.get("row_count")) == 0
+        ),
+        "invalid_row_target_count": sum(
+            1
+            for item in target_summaries
+            if _int_payload(item.get("invalid_row_count")) > 0
+        ),
+        "partial_row_target_count": sum(
+            1
+            for item in target_summaries
+            if _int_payload(item.get("partial_row_count")) > 0
+        ),
+        "truncated_distribution_target_count": sum(
+            1 for item in target_summaries if item.get("truncated") is True
+        ),
+        "cache_backed_distribution_target_count": sum(
+            1
+            for item in target_summaries
+            if item.get("distribution_source") == "cache"
+        ),
+        "text_backed_distribution_target_count": sum(
+            1
+            for item in target_summaries
+            if item.get("distribution_source") == "text"
+        ),
+        "total_invalid_row_count": sum(
+            _int_payload(item.get("invalid_row_count"))
+            for item in target_summaries
+        ),
+        "total_partial_row_count": sum(
+            _int_payload(item.get("partial_row_count"))
+            for item in target_summaries
+        ),
+        "distribution_kind_counts": _counter_payload(distribution_kind_counts),
+        "status_counts": _counter_payload(status_counts),
+        "source_kind_counts": _counter_payload(source_kind_counts),
+        "distribution_source_counts": _counter_payload(
+            distribution_source_counts
+        ),
+        "cache_source_counts": _counter_payload(cache_source_counts),
+        "precision_source_counts": _counter_payload(precision_source_counts),
+        "target_summaries": included,
+    }
+
+
+def series_fingerprint_distribution_attention_summary(
+    findings: Iterable[QualityFinding],
+    *,
+    target_limit: int = DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT,
+) -> dict[str, JSONValue] | None:
+    """Return bounded attention-first summaries for distributions."""
+    target_summaries = _series_fingerprint_distribution_target_summaries(
+        findings
+    )
+    if not target_summaries:
+        return None
+
+    attention_targets = [
+        attention
+        for target in target_summaries
+        if (attention := _distribution_attention_target_summary(target))
+        is not None
+    ]
+    attention_targets.sort(key=_distribution_attention_sort_key)
+
+    attention_level_counts = Counter(
+        _summary_key(item.get("attention_level")) for item in attention_targets
+    )
+    attention_flag_counts: Counter[str] = Counter()
+    for item in attention_targets:
+        flags = item.get("attention_flags")
+        if isinstance(flags, list):
+            attention_flag_counts.update(_summary_key(flag) for flag in flags)
+
+    included_source = (
+        attention_targets
+        if target_limit < 0
+        else attention_targets[:target_limit]
+    )
+    included: list[JSONValue] = [dict(item) for item in included_source]
+    omitted_count = max(0, len(attention_targets) - len(included))
+
+    return {
+        "schema_version": (
+            TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION
+        ),
+        "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "distribution_target_count": len(target_summaries),
+        "attention_target_count": len(attention_targets),
+        "included_attention_target_count": len(included),
+        "omitted_attention_target_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "attention_level_counts": _counter_payload(attention_level_counts),
+        "attention_flag_counts": _counter_payload(attention_flag_counts),
+        "target_summaries": included,
+    }
+
+
+def _series_fingerprint_distribution_target_summaries(
+    findings: Iterable[QualityFinding],
+) -> list[dict[str, JSONValue]]:
+    target_summaries: list[dict[str, JSONValue]] = []
+    for finding in findings:
+        if finding.rule_id != SERIES_FINGERPRINT_RULE_ID:
+            continue
+        payload = finding.metadata.get(TIME_SERIES_FINGERPRINT_METADATA_KEY)
+        if not isinstance(payload, Mapping):
+            continue
+        target_summaries.append(
+            _distribution_target_summary(
+                finding,
+                cast(Mapping[str, JSONValue], payload),
+            )
+        )
+    target_summaries.sort(key=_distribution_target_sort_key)
+    return target_summaries
+
+
+def _distribution_target_summary(
+    finding: QualityFinding,
+    payload: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    target_axis = _payload_mapping(payload.get("target_axis"))
+    source = _payload_mapping(payload.get("source"))
+    m1_distribution = _payload_mapping(payload.get("m1_bar_distribution"))
+    tick_distribution = _payload_mapping(payload.get("tick_distribution"))
+    distribution_kind, distribution = _distribution_kind_and_payload(
+        target_axis,
+        source,
+        m1_distribution=m1_distribution,
+        tick_distribution=tick_distribution,
+    )
+    precision = _payload_mapping(distribution.get("precision"))
+    precision_counts = _payload_mapping(precision.get("decimal_place_counts"))
+    source_kind = _summary_key(source.get("kind"))
+    distribution_source = _distribution_source(source_kind, distribution_kind)
+    zero_spread_count = _int_payload(distribution.get("zero_spread_count"))
+    negative_spread_count = _int_payload(
+        distribution.get("negative_spread_count")
+    )
+    return {
+        "target_axis": _topology_target_axis(finding, target_axis),
+        "distribution_kind": distribution_kind,
+        "status": _distribution_status(
+            target_axis,
+            source,
+            distribution_kind=distribution_kind,
+        ),
+        "row_count": _int_payload(
+            distribution.get("row_count")
+            if distribution
+            else _payload_mapping(payload.get("coverage")).get("row_count")
+        ),
+        "sampled_row_count": _int_payload(
+            distribution.get("sampled_row_count")
+        ),
+        "usable_row_count": _int_payload(distribution.get("usable_row_count")),
+        "invalid_row_count": _int_payload(
+            distribution.get("invalid_row_count")
+        ),
+        "partial_row_count": _int_payload(
+            distribution.get("partial_row_count")
+        ),
+        "invalid_row_rate": _distribution_rate(
+            _int_payload(distribution.get("invalid_row_count")),
+            _int_payload(distribution.get("row_count")),
+        ),
+        "truncated": distribution.get("truncated") is True,
+        "source_kind": source_kind,
+        "distribution_source": distribution_source,
+        "cache_source": _optional_summary_key(source.get("cache_source")),
+        "precision_source": _distribution_precision_source(
+            distribution_kind,
+            precision,
+        ),
+        "precision_decimal_place_count": len(precision_counts),
+        "zero_spread_count": zero_spread_count,
+        "negative_spread_count": negative_spread_count,
+        "zero_spread_rate": _optional_float_payload(
+            distribution.get("zero_spread_rate")
+        ),
+        "negative_spread_rate": _optional_float_payload(
+            distribution.get("negative_spread_rate")
+        ),
+    }
+
+
+def _distribution_kind_and_payload(
+    target_axis: Mapping[str, JSONValue],
+    source: Mapping[str, JSONValue],
+    *,
+    m1_distribution: Mapping[str, JSONValue],
+    tick_distribution: Mapping[str, JSONValue],
+) -> tuple[str, Mapping[str, JSONValue]]:
+    timeframe = _summary_key(target_axis.get("timeframe"))
+    if timeframe == M1 and m1_distribution:
+        return "m1_bar", m1_distribution
+    if timeframe == TICK and tick_distribution:
+        return "tick", tick_distribution
+    if _supported_readable_distribution_axis(target_axis, source):
+        return "missing", {}
+    return "missing", {}
+
+
+def _supported_readable_distribution_axis(
+    target_axis: Mapping[str, JSONValue],
+    source: Mapping[str, JSONValue],
+) -> bool:
+    timeframe = _summary_key(target_axis.get("timeframe"))
+    source_kind = _summary_key(source.get("kind"))
+    return timeframe in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES and (
+        source_kind not in {"unavailable", "unknown"}
+    )
+
+
+def _distribution_status(
+    target_axis: Mapping[str, JSONValue],
+    source: Mapping[str, JSONValue],
+    *,
+    distribution_kind: str,
+) -> str:
+    if distribution_kind != "missing":
+        return "available"
+    if _supported_readable_distribution_axis(target_axis, source):
+        return "missing"
+    return "unavailable"
+
+
+def _distribution_source(source_kind: str, distribution_kind: str) -> str:
+    if distribution_kind == "missing":
+        return "unavailable"
+    if source_kind == "cache":
+        return "cache"
+    if source_kind in {"csv_text", "zip_member"}:
+        return "text"
+    return "unavailable"
+
+
+def _distribution_precision_source(
+    distribution_kind: str,
+    precision: Mapping[str, JSONValue],
+) -> str:
+    if distribution_kind != "m1_bar":
+        return "unavailable"
+    return _summary_key(precision.get("precision_source"))
+
+
+def _distribution_rate(numerator: int, denominator: int) -> float | None:
+    if denominator <= 0:
+        return None
+    return round(numerator / denominator, DEFAULT_FINGERPRINT_ROUNDING_DIGITS)
+
+
+def _optional_float_payload(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value))
+    except ValueError:
+        return None
+
+
+def _distribution_attention_target_summary(
+    target: Mapping[str, JSONValue],
+) -> dict[str, JSONValue] | None:
+    flags = _distribution_attention_flags(target)
+    if not flags:
+        return None
+    return {
+        "target_axis": dict(_payload_mapping(target.get("target_axis"))),
+        "attention_level": _distribution_attention_level(flags),
+        "attention_flags": list(flags),
+        "distribution_kind": _summary_key(target.get("distribution_kind")),
+        "status": _summary_key(target.get("status")),
+        "row_count": _int_payload(target.get("row_count")),
+        "sampled_row_count": _int_payload(target.get("sampled_row_count")),
+        "usable_row_count": _int_payload(target.get("usable_row_count")),
+        "invalid_row_count": _int_payload(target.get("invalid_row_count")),
+        "partial_row_count": _int_payload(target.get("partial_row_count")),
+        "invalid_row_rate": _optional_float_payload(
+            target.get("invalid_row_rate")
+        ),
+        "truncated": target.get("truncated") is True,
+        "source_kind": _summary_key(target.get("source_kind")),
+        "distribution_source": _summary_key(target.get("distribution_source")),
+        "cache_source": _optional_summary_key(target.get("cache_source")),
+        "precision_source": _summary_key(target.get("precision_source")),
+        "precision_decimal_place_count": _int_payload(
+            target.get("precision_decimal_place_count")
+        ),
+        "zero_spread_count": _int_payload(target.get("zero_spread_count")),
+        "negative_spread_count": _int_payload(
+            target.get("negative_spread_count")
+        ),
+        "zero_spread_rate": _optional_float_payload(
+            target.get("zero_spread_rate")
+        ),
+        "negative_spread_rate": _optional_float_payload(
+            target.get("negative_spread_rate")
+        ),
+    }
+
+
+def _distribution_attention_flags(
+    target: Mapping[str, JSONValue],
+) -> tuple[str, ...]:
+    flags: list[str] = []
+    status = _summary_key(target.get("status"))
+    distribution_kind = _summary_key(target.get("distribution_kind"))
+    if status == "missing":
+        flags.append("missing_distribution")
+    if (
+        distribution_kind != "missing"
+        and _int_payload(target.get("row_count")) == 0
+    ):
+        flags.append("empty_distribution")
+    if _int_payload(target.get("invalid_row_count")) > 0:
+        flags.append("high_invalid_row_rate")
+    if _int_payload(target.get("partial_row_count")) > 0:
+        flags.append("partial_rows_present")
+    if distribution_kind == "tick":
+        if _int_payload(target.get("negative_spread_count")) > 0:
+            flags.append("negative_tick_spreads_present")
+        zero_spread_rate = _optional_float_payload(
+            target.get("zero_spread_rate")
+        )
+        if zero_spread_rate is not None and zero_spread_rate > 0:
+            flags.append("zero_tick_spread_rate_present")
+    if target.get("truncated") is True:
+        flags.append("truncated_distribution")
+    if (
+        distribution_kind == "m1_bar"
+        and _int_payload(target.get("precision_decimal_place_count")) == 0
+    ):
+        flags.append("missing_precision_counts")
+    if _summary_key(target.get("precision_source")) == "cache_float":
+        flags.append("cache_float_precision_basis")
+    ordered = [
+        flag for flag in DISTRIBUTION_ATTENTION_FLAGS if flag in set(flags)
+    ]
+    return tuple(ordered)
+
+
+def _distribution_attention_level(flags: tuple[str, ...]) -> str:
+    flag_set = set(flags)
+    if "missing_distribution" in flag_set:
+        return "missing"
+    if flag_set & {
+        "empty_distribution",
+        "high_invalid_row_rate",
+        "partial_rows_present",
+        "negative_tick_spreads_present",
+    }:
+        return "defect"
+    if "zero_tick_spread_rate_present" in flag_set:
+        return "microstructure"
+    if "truncated_distribution" in flag_set:
+        return "sample"
+    return "precision"
+
+
+def _distribution_attention_sort_key(
+    target: Mapping[str, JSONValue],
+) -> tuple[object, ...]:
+    axis = _payload_mapping(target.get("target_axis"))
+    return (
+        _distribution_attention_level_rank(
+            _summary_key(target.get("attention_level"))
+        ),
+        _summary_key(axis.get("data_format")),
+        _summary_key(axis.get("timeframe")),
+        _summary_key(axis.get("symbol")),
+        _summary_key(axis.get("period")),
+        _summary_key(axis.get("kind")),
+        _summary_key(target.get("distribution_kind")),
+        -_int_payload(target.get("invalid_row_count")),
+        -_int_payload(target.get("negative_spread_count")),
+        -_int_payload(target.get("zero_spread_count")),
+    )
+
+
+def _distribution_attention_level_rank(level: str) -> int:
+    ranks = {
+        "missing": 0,
+        "defect": 1,
+        "microstructure": 2,
+        "sample": 3,
+        "precision": 4,
+    }
+    return ranks.get(level, 99)
+
+
+def _distribution_target_sort_key(
+    target: Mapping[str, JSONValue],
+) -> tuple[str, str, str, str, str, str]:
+    axis = _payload_mapping(target.get("target_axis"))
+    return (
+        _summary_key(axis.get("data_format")),
+        _summary_key(axis.get("timeframe")),
+        _summary_key(axis.get("symbol")),
+        _summary_key(axis.get("period")),
+        _summary_key(axis.get("kind")),
+        _summary_key(target.get("distribution_kind")),
     )
 
 
@@ -933,6 +1430,7 @@ def _m1_bar_distribution_from_text(
 ) -> dict[str, JSONValue]:
     row_count = 0
     invalid_row_count = 0
+    partial_row_count = 0
     usable_row_count = 0
     sample_limit = _profile_max_rows(profile)
     sampled_rows: list[tuple[float, float, float, float]] = []
@@ -946,10 +1444,15 @@ def _m1_bar_distribution_from_text(
     reader = csv.reader(
         text.splitlines(), delimiter=delimiter_for_timeframe(M1)
     )
+    expected_field_count = len(columns_for_timeframe(M1))
     for row in reader:
         if not row or not any(cell.strip() for cell in row):
             continue
         row_count += 1
+        if len(row) != expected_field_count:
+            invalid_row_count += 1
+            partial_row_count += 1
+            continue
         try:
             parsed = normalize_ascii_row(M1, row)
         except (TypeError, ValueError, OverflowError):
@@ -978,6 +1481,7 @@ def _m1_bar_distribution_from_text(
         row_count=row_count,
         usable_row_count=usable_row_count,
         invalid_row_count=invalid_row_count,
+        partial_row_count=partial_row_count,
         truncated=usable_row_count > len(sampled_rows),
         profile=profile,
     )
@@ -1063,6 +1567,7 @@ def _m1_bar_distribution_from_rows(
     row_count: int,
     usable_row_count: int,
     invalid_row_count: int,
+    partial_row_count: int = 0,
     truncated: bool,
     profile: HistDataFingerprintProfile,
 ) -> dict[str, JSONValue]:
@@ -1108,6 +1613,7 @@ def _m1_bar_distribution_from_rows(
         "sampled_row_count": len(rows),
         "usable_row_count": usable_row_count,
         "invalid_row_count": invalid_row_count,
+        "partial_row_count": partial_row_count,
         "truncated": truncated,
         "price": {
             "open": _numeric_summary(open_values, profile),
@@ -1168,6 +1674,7 @@ def _tick_distribution_from_text(
 ) -> dict[str, JSONValue]:
     row_count = 0
     invalid_row_count = 0
+    partial_row_count = 0
     usable_row_count = 0
     sample_limit = _profile_max_rows(profile)
     bids: list[float] = []
@@ -1175,10 +1682,15 @@ def _tick_distribution_from_text(
     reader = csv.reader(
         text.splitlines(), delimiter=delimiter_for_timeframe(TICK)
     )
+    expected_field_count = len(columns_for_timeframe(TICK))
     for row in reader:
         if not row or not any(cell.strip() for cell in row):
             continue
         row_count += 1
+        if len(row) != expected_field_count:
+            invalid_row_count += 1
+            partial_row_count += 1
+            continue
         try:
             parsed = normalize_ascii_row(TICK, row)
         except (TypeError, ValueError, OverflowError):
@@ -1201,6 +1713,7 @@ def _tick_distribution_from_text(
         sampled_row_count=len(bids),
         usable_row_count=usable_row_count,
         invalid_row_count=invalid_row_count,
+        partial_row_count=partial_row_count,
         truncated=usable_row_count > len(bids),
         profile=profile,
     )
@@ -1247,6 +1760,7 @@ def _tick_distribution_payload(
     sampled_row_count: int,
     usable_row_count: int,
     invalid_row_count: int,
+    partial_row_count: int = 0,
     truncated: bool,
     profile: HistDataFingerprintProfile,
 ) -> dict[str, JSONValue]:
@@ -1258,6 +1772,7 @@ def _tick_distribution_payload(
         "sampled_row_count": sampled_row_count,
         "usable_row_count": usable_row_count,
         "invalid_row_count": invalid_row_count,
+        "partial_row_count": partial_row_count,
         "truncated": truncated,
         "bid": _numeric_summary(bids, profile),
         "ask": _numeric_summary(asks, profile),
