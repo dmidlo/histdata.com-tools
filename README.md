@@ -119,7 +119,7 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--quality-preflight-evidence-max-age-seconds SECONDS]
                    [--quality-preflight-evidence-stale-ok]
                    [--quality-preflight-sample-size COUNT]
-                   [--quality-profile PATH]
+                   [--quality-profile PATH] [--quality-profile-preview]
                    [--quality-remediation-catalog-audit]
                    [--quality-fail-on SEVERITY] [--quality-max-errors COUNT]
                    [--quality-max-warnings COUNT]
@@ -256,6 +256,10 @@ Data quality:
   --quality-profile PATH
                         read a JSON quality profile with rule thresholds,
                         severities, and modeling assumptions
+  --quality-profile-preview, --quality-profile-explain
+                        print the resolved quality profile JSON without
+                        running quality checks, writing reports, or submitting
+                        work
   --quality-remediation-catalog-audit
                         enable remediation-catalog audit reporting in quality
                         reports, bounded payloads, and preflight evidence
@@ -1035,6 +1039,22 @@ The same reporting surface can be enabled without a profile file by passing
 `--quality-preflight`. When the flag is combined with `--quality-profile`, the
 profile still supplies thresholds, severities, and modeling assumptions; the
 CLI flag only sets `reporting.remediation_catalog_audit.enabled` to `true`.
+
+Preview the fully resolved profile before a run with
+`--quality-profile-preview`:
+
+```sh
+histdatacom --quality \
+  --quality-profile profiles/strict-ci.json \
+  --quality-remediation-catalog-audit \
+  --quality-profile-preview
+```
+
+The preview prints deterministic JSON and exits before target discovery,
+quality checks, report writes, repo metadata writes, or orchestration submit.
+The payload includes the active profile source, source path, configured rule
+IDs, configured modeling assumptions, reporting keys, and the resolved
+`reporting.remediation_catalog_audit.enabled` value after CLI overrides.
 
 ```sh
 histdatacom --quality \

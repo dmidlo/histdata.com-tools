@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 import histdatacom
+from histdatacom.data_quality import QUALITY_PROFILE_SCHEMA_VERSION
 from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.fx_enums import (
     MAJOR_TRIANGLE_PAIR_GROUPS,
@@ -1600,6 +1601,122 @@ def test_data_quality_cli_exit_policy_fails_on_errors(
     assert "status: failed" in output
     assert "findings: 1 info: 0 warning: 0 error: 1" in output
     assert "decision: quality error threshold exceeded" in output
+
+
+def test_quality_profile_preview_prints_resolved_profile_without_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Preview should print JSON and stop before orchestration submission."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "preview-profile",
+                "rules": {"ingestion.ascii.row_count": {"min_row_count": 10}},
+                "reporting": {"remediation_catalog_audit": {"enabled": False}},
+                "modeling_assumptions": {"target_horizon_minutes": 5},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile",
+            str(profile_path),
+            "--quality-remediation-catalog-audit",
+            "--quality-profile-preview",
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema_version"] == "histdatacom.quality-profile-preview.v1"
+    assert payload["quality_modes"] == {
+        "quality": True,
+        "repo_quality": False,
+        "quality_preflight": False,
+    }
+    assert payload["profile_inputs"]["quality_profile_path"] == str(
+        profile_path
+    )
+    assert (
+        payload["profile_inputs"]["quality_remediation_catalog_audit"] is True
+    )
+    assert payload["cli_overrides"] == {
+        "reporting.remediation_catalog_audit.enabled": True
+    }
+    assert payload["quality_profile"]["name"] == "preview-profile"
+    assert payload["quality_profile"]["source"] == "file"
+    assert payload["quality_profile"]["source_path"] == str(profile_path)
+    assert payload["quality_profile"]["configured_rule_ids"] == [
+        "ingestion.ascii.row_count"
+    ]
+    assert payload["quality_profile"]["configured_modeling_assumptions"] == {
+        "target_horizon_minutes": 5
+    }
+    assert payload["quality_profile"]["configured_reporting_keys"] == [
+        "remediation_catalog_audit"
+    ]
+    assert payload["resolved_profile"]["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+
+
+def test_api_quality_profile_preview_returns_payload_without_submit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API callers should receive the same resolved profile preview payload."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    options = Options()
+    options.data_quality = True
+    options.quality_profile_preview = True
+    options.quality_remediation_catalog_audit = True
+    options.quality_profile = {
+        "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+        "name": "api-preview",
+        "modeling_assumptions": {"target_horizon_minutes": 15},
+    }
+
+    payload = histdata_com.main(options)
+
+    assert payload["schema_version"] == "histdatacom.quality-profile-preview.v1"
+    assert payload["profile_inputs"]["from_api"] is True
+    assert payload["quality_profile"]["source"] == "api-options"
+    assert payload["quality_profile"]["configured_modeling_assumptions"] == {
+        "target_horizon_minutes": 15
+    }
+    assert payload["resolved_profile"]["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
 
 
 def test_back_to_back_orchestration_api_calls_do_not_leak_global_args(

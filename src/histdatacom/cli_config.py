@@ -29,6 +29,8 @@ _COMMAND_SECTION_KEYS = {
 _KEY_ALIASES = {
     "data_dir": "data_directory",
     "quality": "data_quality",
+    "quality_profile_explain": "quality_profile_preview",
+    "quality_profile_preview": "quality_profile_preview",
     "quality_profile": "quality_profile_path",
     "quality_path": "quality_paths",
     "quality_paths": "quality_paths",
@@ -129,6 +131,7 @@ _TRUE_FLAG_ARGS = {
     ),
     "quality_preflight_markdown": "--quality-preflight-markdown",
     "quality_preflight_run_validation": "--quality-preflight-run-validation",
+    "quality_profile_preview": "--quality-profile-preview",
     "quality_remediation_catalog_audit": (
         "--quality-remediation-catalog-audit"
     ),

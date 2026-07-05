@@ -43,6 +43,7 @@ DEFAULT_HELPER_ARGS: dict[str, Any] = {
     "quality_preflight_run_validation": False,
     "quality_preflight_sample_size": 4,
     "quality_preflight_validation_report_path": "",
+    "quality_profile_preview": False,
     "repo_quality_refresh": False,
     "repo_quality_columns": False,
 }
