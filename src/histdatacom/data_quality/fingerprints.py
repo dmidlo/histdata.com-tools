@@ -78,6 +78,9 @@ TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION = (
 TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-dynamics.v1"
 )
+TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-audit.v1"
+)
 TIME_SERIES_FINGERPRINT_METADATA_KEY = "time_series_fingerprint"
 TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY = (
     "time_series_fingerprint_coverage"
@@ -149,6 +152,16 @@ DISTRIBUTION_ATTENTION_FLAGS = (
     "truncated_distribution",
     "missing_precision_counts",
     "cache_float_precision_basis",
+)
+FINGERPRINT_AUDIT_SECTIONS = (
+    "coverage",
+    "temporal_topology",
+    "calendar_regimes",
+    "m1_bar_distribution",
+    "tick_distribution",
+    "conditional_distributions",
+    "return_dynamics",
+    "microstructure_dynamics",
 )
 
 
@@ -979,8 +992,11 @@ def _series_fingerprint_payload(
         ),
     }
     if _unsupported_reason(target):
-        payload["fingerprint_id"] = _fingerprint_id(payload)
-        return payload
+        return _finalize_fingerprint_payload(
+            payload,
+            target=target,
+            profile=profile,
+        )
 
     columns = columns_for_timeframe(target.timeframe)
     cache = read_quality_polars_cache(target, required_columns=columns)
@@ -1018,8 +1034,11 @@ def _series_fingerprint_payload(
             "cache_source": cache.source,
             "path": publish_safe_path(str(cache.path)),
         }
-        payload["fingerprint_id"] = _fingerprint_id(payload)
-        return payload
+        return _finalize_fingerprint_payload(
+            payload,
+            target=target,
+            profile=profile,
+        )
 
     if target.kind is QualityTargetKind.CACHE:
         payload["coverage"] = _empty_coverage(parsed_row_count=None)
@@ -1027,8 +1046,11 @@ def _series_fingerprint_payload(
             target,
             reason="cache_unavailable",
         )
-        payload["fingerprint_id"] = _fingerprint_id(payload)
-        return payload
+        return _finalize_fingerprint_payload(
+            payload,
+            target=target,
+            profile=profile,
+        )
 
     try:
         text_payload = _read_text_payload(target)
@@ -1038,15 +1060,21 @@ def _series_fingerprint_payload(
             reason="source_unreadable",
             error=exc,
         )
-        payload["fingerprint_id"] = _fingerprint_id(payload)
-        return payload
+        return _finalize_fingerprint_payload(
+            payload,
+            target=target,
+            profile=profile,
+        )
     except ValueError as exc:
         payload["source"] = _unavailable_source(
             target,
             reason=str(exc),
         )
-        payload["fingerprint_id"] = _fingerprint_id(payload)
-        return payload
+        return _finalize_fingerprint_payload(
+            payload,
+            target=target,
+            profile=profile,
+        )
 
     payload["coverage"] = _coverage_from_text(
         text_payload.text,
@@ -1090,8 +1118,451 @@ def _series_fingerprint_payload(
             "kind": "csv_text",
             "path": publish_safe_path(target.path),
         }
+    return _finalize_fingerprint_payload(
+        payload,
+        target=target,
+        profile=profile,
+    )
+
+
+def _finalize_fingerprint_payload(
+    payload: dict[str, JSONValue],
+    *,
+    target: QualityTarget,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    payload["fingerprint_audit"] = _fingerprint_audit_payload(
+        payload,
+        target=target,
+        profile=profile,
+    )
     payload["fingerprint_id"] = _fingerprint_id(payload)
     return payload
+
+
+def _fingerprint_audit_payload(
+    payload: Mapping[str, JSONValue],
+    *,
+    target: QualityTarget,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    expected = _fingerprint_expected_sections(target)
+    emitted = [
+        section for section in FINGERPRINT_AUDIT_SECTIONS if section in payload
+    ]
+    status_sections = _ordered_unique((*expected, *emitted))
+    skipped: dict[str, JSONValue] = {}
+    for section in expected:
+        if section not in payload:
+            skipped[section] = _fingerprint_section_skip_payload(
+                section,
+                payload,
+                target=target,
+            )
+    section_statuses: dict[str, JSONValue] = {}
+    for section in status_sections:
+        section_statuses[section] = _fingerprint_section_status(
+            section,
+            payload,
+        )
+    unsupported_reason = _unsupported_reason(target)
+    source = _payload_mapping(payload.get("source"))
+    source_reason = _optional_summary_key(source.get("reason"))
+    target_capability: dict[str, JSONValue] = {
+        "supported": unsupported_reason == "",
+        "unsupported_reason": unsupported_reason or None,
+    }
+    source_status: dict[str, JSONValue] = {
+        "kind": _summary_key(source.get("kind")),
+        "readable": source.get("kind") != "unavailable",
+        "reason": source_reason,
+    }
+    conditional_distribution_eligibility: dict[str, JSONValue] = {
+        "tick_spread": _conditional_tick_spread_eligibility(
+            payload,
+            target=target,
+        )
+    }
+    dynamics_readiness: dict[str, JSONValue] = {
+        "return_dynamics": _fingerprint_dynamics_readiness(
+            "return_dynamics",
+            payload,
+            target=target,
+        ),
+        "microstructure_dynamics": _fingerprint_dynamics_readiness(
+            "microstructure_dynamics",
+            payload,
+            target=target,
+        ),
+    }
+    audit_payload: dict[str, JSONValue] = {
+        "schema_version": TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
+        "sections_expected": [section for section in expected],
+        "sections_emitted": [section for section in emitted],
+        "sections_skipped": skipped,
+        "section_statuses": section_statuses,
+        "target_capability": target_capability,
+        "source_status": source_status,
+        "conditional_distribution_eligibility": (
+            conditional_distribution_eligibility
+        ),
+        "profile_completeness": _fingerprint_profile_completeness(
+            payload,
+            profile=profile,
+        ),
+        "dynamics_readiness": dynamics_readiness,
+    }
+    return audit_payload
+
+
+def _fingerprint_expected_sections(
+    target: QualityTarget,
+) -> tuple[str, ...]:
+    sections = ["coverage", "temporal_topology"]
+    if target.timeframe in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES:
+        sections.append("calendar_regimes")
+    if target.timeframe == M1:
+        sections.extend(("m1_bar_distribution", "return_dynamics"))
+    elif target.timeframe == TICK:
+        sections.extend(
+            (
+                "tick_distribution",
+                "conditional_distributions",
+                "microstructure_dynamics",
+            )
+        )
+    return tuple(sections)
+
+
+def _ordered_unique(values: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return tuple(ordered)
+
+
+def _fingerprint_section_skip_payload(
+    section: str,
+    payload: Mapping[str, JSONValue],
+    *,
+    target: QualityTarget,
+) -> dict[str, JSONValue]:
+    reason = _fingerprint_section_skip_reason(
+        section,
+        payload,
+        target=target,
+    )
+    skipped: dict[str, JSONValue] = {"reason": reason}
+    details = _fingerprint_section_skip_details(section, target)
+    if details:
+        skipped["details"] = details
+    return skipped
+
+
+def _fingerprint_section_skip_details(
+    section: str,
+    target: QualityTarget,
+) -> dict[str, JSONValue]:
+    if section == "conditional_distributions":
+        return {
+            "metric": "tick_spread",
+            "grouped_by": ["active_session", "special_tag"],
+        }
+    if section in {
+        "m1_bar_distribution",
+        "tick_distribution",
+        "return_dynamics",
+        "microstructure_dynamics",
+    }:
+        return {"timeframe": target.timeframe}
+    return {}
+
+
+def _fingerprint_section_skip_reason(
+    section: str,
+    payload: Mapping[str, JSONValue],
+    *,
+    target: QualityTarget,
+) -> str:
+    if _section_timeframe_mismatch(section, target):
+        return "unsupported_timeframe"
+    unsupported_reason = _unsupported_reason(target)
+    if unsupported_reason:
+        return unsupported_reason
+    source = _payload_mapping(payload.get("source"))
+    if source.get("kind") == "unavailable":
+        return _summary_key(source.get("reason") or "source_unavailable")
+    if section == "conditional_distributions":
+        eligibility = _conditional_tick_spread_eligibility(
+            payload,
+            target=target,
+        )
+        return _summary_key(eligibility.get("reason") or "not_emitted")
+    if (
+        _int_payload(_payload_mapping(payload.get("coverage")).get("row_count"))
+        <= 0
+    ):
+        return "insufficient_rows"
+    return "not_emitted"
+
+
+def _section_timeframe_mismatch(
+    section: str,
+    target: QualityTarget,
+) -> bool:
+    return (
+        section in {"m1_bar_distribution", "return_dynamics"}
+        and target.timeframe != M1
+    ) or (
+        section
+        in {
+            "tick_distribution",
+            "conditional_distributions",
+            "microstructure_dynamics",
+        }
+        and target.timeframe != TICK
+    )
+
+
+def _fingerprint_section_status(
+    section: str,
+    payload: Mapping[str, JSONValue],
+) -> str:
+    if section not in payload:
+        return "skipped"
+    source = _payload_mapping(payload.get("source"))
+    if source.get("kind") == "unavailable" and section in {
+        "coverage",
+        "temporal_topology",
+    }:
+        return "unavailable"
+    if section == "coverage":
+        return _coverage_section_status(
+            _payload_mapping(payload.get("coverage"))
+        )
+    if section == "temporal_topology":
+        return _topology_section_status(
+            _payload_mapping(payload.get("temporal_topology"))
+        )
+    if section == "calendar_regimes":
+        return _calendar_section_status(
+            _payload_mapping(payload.get("calendar_regimes"))
+        )
+    if section in {"m1_bar_distribution", "tick_distribution"}:
+        return _distribution_section_status(_payload_mapping(payload[section]))
+    if section == "conditional_distributions":
+        return _conditional_distribution_section_status(
+            _payload_mapping(payload.get("conditional_distributions"))
+        )
+    if section in {"return_dynamics", "microstructure_dynamics"}:
+        return _dynamics_section_status(_payload_mapping(payload[section]))
+    return "valid"
+
+
+def _coverage_section_status(
+    coverage: Mapping[str, JSONValue],
+) -> str:
+    parsed = _optional_int_payload(coverage.get("parsed_row_count"))
+    if parsed is None:
+        return "unavailable"
+    if _int_payload(coverage.get("row_count")) <= 0:
+        return "limited"
+    return "valid"
+
+
+def _topology_section_status(
+    topology: Mapping[str, JSONValue],
+) -> str:
+    parsed = _optional_int_payload(topology.get("parsed_row_count"))
+    if parsed is None:
+        return "unavailable"
+    if _sequence_dynamics_limitations(topology):
+        return "limited"
+    return "valid"
+
+
+def _calendar_section_status(
+    calendar: Mapping[str, JSONValue],
+) -> str:
+    status = _summary_key(calendar.get("status"))
+    if status == "ok":
+        return "valid"
+    if status == "unavailable":
+        return "unavailable"
+    return "limited"
+
+
+def _distribution_section_status(
+    distribution: Mapping[str, JSONValue],
+) -> str:
+    if _int_payload(distribution.get("usable_row_count")) <= 0:
+        return "limited"
+    if (
+        _int_payload(distribution.get("invalid_row_count")) > 0
+        or _int_payload(distribution.get("partial_row_count")) > 0
+        or distribution.get("truncated") is True
+    ):
+        return "limited"
+    return "valid"
+
+
+def _conditional_distribution_section_status(
+    conditional: Mapping[str, JSONValue],
+) -> str:
+    if _int_payload(conditional.get("usable_row_count")) <= 0:
+        return "limited"
+    return "valid"
+
+
+def _dynamics_section_status(
+    dynamics: Mapping[str, JSONValue],
+) -> str:
+    status = _summary_key(dynamics.get("sequence_status"))
+    if status == "ok":
+        return "valid"
+    if status in {"limited", "unavailable"}:
+        return status
+    return "limited"
+
+
+def _conditional_tick_spread_eligibility(
+    payload: Mapping[str, JSONValue],
+    *,
+    target: QualityTarget,
+) -> dict[str, JSONValue]:
+    if target.timeframe != TICK:
+        return {
+            "eligible": False,
+            "status": "ineligible",
+            "reason": "unsupported_timeframe",
+        }
+    unsupported_reason = _unsupported_reason(target)
+    if unsupported_reason:
+        return {
+            "eligible": False,
+            "status": "ineligible",
+            "reason": unsupported_reason,
+        }
+    source = _payload_mapping(payload.get("source"))
+    if source.get("kind") == "unavailable":
+        return {
+            "eligible": False,
+            "status": "ineligible",
+            "reason": _summary_key(source.get("reason")),
+        }
+    distribution = _payload_mapping(payload.get("tick_distribution"))
+    if not distribution:
+        return {
+            "eligible": False,
+            "status": "ineligible",
+            "reason": "missing_required_columns",
+        }
+    if _int_payload(distribution.get("row_count")) <= 0:
+        return {
+            "eligible": False,
+            "status": "ineligible",
+            "reason": "insufficient_rows",
+        }
+    if _int_payload(distribution.get("usable_row_count")) <= 0:
+        return {
+            "eligible": False,
+            "status": "ineligible",
+            "reason": "metric_not_available",
+        }
+    return {
+        "eligible": True,
+        "status": "eligible",
+        "metric": "tick_spread",
+        "grouped_by": ["active_session", "special_tag"],
+        "emitted": "conditional_distributions" in payload,
+    }
+
+
+def _fingerprint_profile_completeness(
+    payload: Mapping[str, JSONValue],
+    *,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    calendar = _payload_mapping(payload.get("calendar_regimes"))
+    policy = _payload_mapping(calendar.get("calendar_policy"))
+    profile_metadata = _payload_mapping(policy.get("calendar_profile"))
+    source = "calendar_regimes"
+    if not profile_metadata:
+        profile_metadata = profile.calendar_profile.to_metadata()
+        source = "quality_profile"
+    complete = bool(
+        calendar.get("calendar_profile_complete")
+        if calendar
+        else profile_metadata.get("complete")
+    )
+    missing_optional = bool(
+        calendar.get("missing_optional_calendar_data")
+        if calendar
+        else not profile.calendar_profile.complete
+    )
+    return {
+        "source": source,
+        "calendar_profile_complete": complete,
+        "missing_optional_calendar_data": missing_optional,
+        "calendar_profile_name": _summary_key(profile_metadata.get("name")),
+        "calendar_profile_source": _summary_key(profile_metadata.get("source")),
+        "calendar_profile_version": _summary_key(
+            profile_metadata.get("version")
+        ),
+        "calendar_profile_static_advisory": bool(
+            profile_metadata.get("static_advisory")
+        ),
+    }
+
+
+def _fingerprint_dynamics_readiness(
+    section: str,
+    payload: Mapping[str, JSONValue],
+    *,
+    target: QualityTarget,
+) -> dict[str, JSONValue]:
+    if section not in payload:
+        return {
+            "status": "skipped",
+            "reason": _fingerprint_section_skip_reason(
+                section,
+                payload,
+                target=target,
+            ),
+        }
+    dynamics = _payload_mapping(payload.get(section))
+    readiness: dict[str, JSONValue] = {
+        "status": _dynamics_section_status(dynamics),
+        "basis": _summary_key(dynamics.get("basis")),
+        "row_order": _summary_key(dynamics.get("row_order")),
+        "computed_from": _summary_key(dynamics.get("computed_from")),
+        "cache_source": _optional_summary_key(dynamics.get("cache_source")),
+        "regular_grid": dynamics.get("regular_grid") is True,
+        "limitations": _string_list(dynamics.get("limitations")),
+        "row_count": _int_payload(dynamics.get("row_count")),
+        "sampled_row_count": _int_payload(dynamics.get("sampled_row_count")),
+        "usable_row_count": _int_payload(dynamics.get("usable_row_count")),
+        "invalid_row_count": _int_payload(dynamics.get("invalid_row_count")),
+        "partial_row_count": _int_payload(dynamics.get("partial_row_count")),
+        "truncated": dynamics.get("truncated") is True,
+    }
+    if readiness["status"] in {"limited", "unavailable"}:
+        readiness["reason"] = _summary_key(
+            _string_list(dynamics.get("limitations"))[0]
+            if _string_list(dynamics.get("limitations"))
+            else dynamics.get("sequence_status")
+        )
+    return readiness
+
+
+def _string_list(value: object) -> list[JSONValue]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item or "").strip()]
 
 
 def _payload_mapping(value: object) -> Mapping[str, JSONValue]:

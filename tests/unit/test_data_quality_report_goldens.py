@@ -26,6 +26,7 @@ from histdatacom.data_quality import (
     QualityTarget,
     QualityTargetKind,
     SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
@@ -474,6 +475,72 @@ def _fingerprint_report() -> QualityReport:
                     "dynamic_window_max_ms": 3600000,
                     "dynamic_window_growth_factor": 2.0,
                     "dynamic_window_shrink_factor": 0.5,
+                },
+            },
+            "fingerprint_audit": {
+                "schema_version": TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
+                "sections_expected": [
+                    "coverage",
+                    "temporal_topology",
+                    "calendar_regimes",
+                    "m1_bar_distribution",
+                    "return_dynamics",
+                ],
+                "sections_emitted": [
+                    "coverage",
+                    "temporal_topology",
+                    "m1_bar_distribution",
+                ],
+                "sections_skipped": {
+                    "calendar_regimes": {"reason": "not_emitted"},
+                    "return_dynamics": {
+                        "reason": "not_emitted",
+                        "details": {"timeframe": "M1"},
+                    },
+                },
+                "section_statuses": {
+                    "coverage": "valid",
+                    "temporal_topology": "valid",
+                    "calendar_regimes": "skipped",
+                    "m1_bar_distribution": "valid",
+                    "return_dynamics": "skipped",
+                },
+                "target_capability": {
+                    "supported": True,
+                    "unsupported_reason": None,
+                },
+                "source_status": {
+                    "kind": "csv_text",
+                    "readable": True,
+                    "reason": None,
+                },
+                "conditional_distribution_eligibility": {
+                    "tick_spread": {
+                        "eligible": False,
+                        "status": "ineligible",
+                        "reason": "unsupported_timeframe",
+                    }
+                },
+                "profile_completeness": {
+                    "source": "quality_profile",
+                    "calendar_profile_complete": False,
+                    "missing_optional_calendar_data": True,
+                    "calendar_profile_name": "static-major-holidays",
+                    "calendar_profile_source": (
+                        "static_month_day_major_holidays"
+                    ),
+                    "calendar_profile_version": "1",
+                    "calendar_profile_static_advisory": True,
+                },
+                "dynamics_readiness": {
+                    "return_dynamics": {
+                        "status": "skipped",
+                        "reason": "not_emitted",
+                    },
+                    "microstructure_dynamics": {
+                        "status": "skipped",
+                        "reason": "unsupported_timeframe",
+                    },
                 },
             },
             "source": {

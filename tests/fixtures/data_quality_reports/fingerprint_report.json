@@ -315,7 +315,75 @@
                 "row_count": 3,
                 "start_timestamp_utc_ms": 1328072400000
               },
-              "fingerprint_id": "sha256:ac5fe289ddfde82a1a939635b4904d962e703ea0bc120d07a8142a1c4b82ab77",
+              "fingerprint_audit": {
+                "conditional_distribution_eligibility": {
+                  "tick_spread": {
+                    "eligible": false,
+                    "reason": "unsupported_timeframe",
+                    "status": "ineligible"
+                  }
+                },
+                "dynamics_readiness": {
+                  "microstructure_dynamics": {
+                    "reason": "unsupported_timeframe",
+                    "status": "skipped"
+                  },
+                  "return_dynamics": {
+                    "reason": "not_emitted",
+                    "status": "skipped"
+                  }
+                },
+                "profile_completeness": {
+                  "calendar_profile_complete": false,
+                  "calendar_profile_name": "static-major-holidays",
+                  "calendar_profile_source": "static_month_day_major_holidays",
+                  "calendar_profile_static_advisory": true,
+                  "calendar_profile_version": "1",
+                  "missing_optional_calendar_data": true,
+                  "source": "quality_profile"
+                },
+                "schema_version": "histdatacom.time-series-fingerprint-audit.v1",
+                "section_statuses": {
+                  "calendar_regimes": "skipped",
+                  "coverage": "valid",
+                  "m1_bar_distribution": "valid",
+                  "return_dynamics": "skipped",
+                  "temporal_topology": "valid"
+                },
+                "sections_emitted": [
+                  "coverage",
+                  "temporal_topology",
+                  "m1_bar_distribution"
+                ],
+                "sections_expected": [
+                  "coverage",
+                  "temporal_topology",
+                  "calendar_regimes",
+                  "m1_bar_distribution",
+                  "return_dynamics"
+                ],
+                "sections_skipped": {
+                  "calendar_regimes": {
+                    "reason": "not_emitted"
+                  },
+                  "return_dynamics": {
+                    "details": {
+                      "timeframe": "M1"
+                    },
+                    "reason": "not_emitted"
+                  }
+                },
+                "source_status": {
+                  "kind": "csv_text",
+                  "readable": true,
+                  "reason": null
+                },
+                "target_capability": {
+                  "supported": true,
+                  "unsupported_reason": null
+                }
+              },
+              "fingerprint_id": "sha256:abf3b6bbec2617fe942f87b57c2e894640456b542a88293d801c12b95dc8338f",
               "m1_bar_distribution": {
                 "invalid_row_count": 0,
                 "precision": {
