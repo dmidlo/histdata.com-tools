@@ -121,6 +121,7 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--quality-preflight-sample-size COUNT]
                    [--quality-profile PATH] [--quality-profile-preview]
                    [--quality-profile-preview-format {json,text,markdown}]
+                   [--quality-profile-preview-output PATH]
                    [--quality-remediation-catalog-audit]
                    [--quality-fail-on SEVERITY] [--quality-max-errors COUNT]
                    [--quality-max-warnings COUNT]
@@ -264,6 +265,9 @@ Data quality:
   --quality-profile-preview-format, --quality-profile-explain-format {json,text,markdown}
                         output format for --quality-profile-preview; defaults
                         to machine-readable json
+  --quality-profile-preview-output, --quality-profile-explain-output PATH
+                        write the selected --quality-profile-preview rendering
+                        to PATH; use '-' for stdout
   --quality-remediation-catalog-audit
                         enable remediation-catalog audit reporting in quality
                         reports, bounded payloads, and preflight evidence
@@ -1065,7 +1069,21 @@ histdatacom --quality \
 ```
 
 Use `--quality-profile-preview-format markdown` when the explanation should be
-pasted into an issue, PR, or runbook.
+pasted into an issue, PR, or runbook. Keep the default stdout behavior for
+quick inspection, or write the selected rendering to an artifact path when the
+preview is part of preflight evidence:
+
+```sh
+histdatacom --quality \
+  --quality-profile profiles/strict-ci.json \
+  --quality-profile-preview \
+  --quality-profile-preview-format markdown \
+  --quality-profile-preview-output reports/quality-profile-preview.md
+```
+
+Preview artifact parent directories are created automatically. Use
+`--quality-profile-preview-output -` only when stdout is the intended artifact
+stream.
 
 The preview exits before target discovery, quality checks, report writes, repo
 metadata writes, or orchestration submit. The JSON payload remains
