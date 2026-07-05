@@ -40,6 +40,10 @@ from histdatacom.data_quality.remediation import (
 )
 from histdatacom.data_quality.symbols import symbol_metadata_for
 from histdatacom.data_quality.time import timestamp_topology_payload_for_target
+from histdatacom.data_quality.ticks import (
+    DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS,
+    DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS,
+)
 from histdatacom.histdata_ascii import (
     M1,
     TICK,
@@ -70,6 +74,9 @@ TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION = (
 )
 TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-conditional-distributions.v1"
+)
+TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-dynamics.v1"
 )
 TIME_SERIES_FINGERPRINT_METADATA_KEY = "time_series_fingerprint"
 TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY = (
@@ -992,6 +999,13 @@ def _series_fingerprint_payload(
                 profile=profile,
             ),
         )
+        _add_dynamics_payload(
+            payload,
+            target=target,
+            frame=cache.frame,
+            text=None,
+            profile=profile,
+        )
         _add_conditional_distribution_payload(
             payload,
             target=target,
@@ -1050,6 +1064,13 @@ def _series_fingerprint_payload(
             timeframe=target.timeframe,
             profile=profile,
         ),
+    )
+    _add_dynamics_payload(
+        payload,
+        target=target,
+        frame=None,
+        text=text_payload.text,
+        profile=profile,
     )
     _add_conditional_distribution_payload(
         payload,
@@ -1419,6 +1440,26 @@ class _TextPayload:
     source_member: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class _M1DynamicsRow:
+    timestamp_utc_ms: int
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+@dataclass(frozen=True, slots=True)
+class _TickDynamicsRow:
+    timestamp_utc_ms: int
+    bid: float
+    ask: float
+
+    @property
+    def spread(self) -> float:
+        return self.ask - self.bid
+
+
 @dataclass(slots=True)
 class _CoverageScan:
     row_count: int = 0
@@ -1516,6 +1557,791 @@ def _add_distribution_payload(
         payload["m1_bar_distribution"] = distribution
     elif timeframe == TICK:
         payload["tick_distribution"] = distribution
+
+
+def _add_dynamics_payload(
+    payload: dict[str, JSONValue],
+    *,
+    target: QualityTarget,
+    frame: Any | None,
+    text: str | None,
+    profile: HistDataFingerprintProfile,
+) -> None:
+    if target.timeframe == M1:
+        payload["return_dynamics"] = _m1_return_dynamics(
+            payload,
+            frame=frame,
+            text=text,
+            profile=profile,
+        )
+    elif target.timeframe == TICK:
+        payload["microstructure_dynamics"] = _tick_microstructure_dynamics(
+            payload,
+            frame=frame,
+            text=text,
+            profile=profile,
+        )
+
+
+def _m1_return_dynamics(
+    payload: Mapping[str, JSONValue],
+    *,
+    frame: Any | None,
+    text: str | None,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    if frame is not None:
+        rows, row_count, usable_row_count, invalid_row_count = (
+            _m1_dynamics_rows_from_frame(frame, profile)
+        )
+        row_order = "cache_order"
+        partial_row_count = 0
+    elif text is not None:
+        (
+            rows,
+            row_count,
+            usable_row_count,
+            invalid_row_count,
+            partial_row_count,
+        ) = _m1_dynamics_rows_from_text(text, profile)
+        row_order = "source_text_order"
+    else:
+        rows = []
+        row_count = 0
+        usable_row_count = 0
+        invalid_row_count = 0
+        partial_row_count = 0
+        row_order = "none"
+
+    base = _sequence_dynamics_base(
+        payload,
+        row_order=row_order,
+        row_count=row_count,
+        sampled_row_count=len(rows),
+        usable_row_count=usable_row_count,
+        invalid_row_count=invalid_row_count,
+        partial_row_count=partial_row_count,
+        profile=profile,
+    )
+    return _m1_return_dynamics_payload(rows, base=base, profile=profile)
+
+
+def _tick_microstructure_dynamics(
+    payload: Mapping[str, JSONValue],
+    *,
+    frame: Any | None,
+    text: str | None,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    if frame is not None:
+        rows, row_count, usable_row_count, invalid_row_count = (
+            _tick_dynamics_rows_from_frame(frame, profile)
+        )
+        row_order = "cache_order"
+        partial_row_count = 0
+    elif text is not None:
+        (
+            rows,
+            row_count,
+            usable_row_count,
+            invalid_row_count,
+            partial_row_count,
+        ) = _tick_dynamics_rows_from_text(text, profile)
+        row_order = "source_text_order"
+    else:
+        rows = []
+        row_count = 0
+        usable_row_count = 0
+        invalid_row_count = 0
+        partial_row_count = 0
+        row_order = "none"
+
+    base = _sequence_dynamics_base(
+        payload,
+        row_order=row_order,
+        row_count=row_count,
+        sampled_row_count=len(rows),
+        usable_row_count=usable_row_count,
+        invalid_row_count=invalid_row_count,
+        partial_row_count=partial_row_count,
+        profile=profile,
+    )
+    return _tick_microstructure_dynamics_payload(
+        rows,
+        base=base,
+        profile=profile,
+    )
+
+
+def _sequence_dynamics_base(
+    payload: Mapping[str, JSONValue],
+    *,
+    row_order: str,
+    row_count: int,
+    sampled_row_count: int,
+    usable_row_count: int,
+    invalid_row_count: int,
+    partial_row_count: int,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    topology = _payload_mapping(payload.get("temporal_topology"))
+    limitation_values = list(_sequence_dynamics_limitations(topology))
+    if usable_row_count < 2:
+        limitation_values.append("insufficient_sequence_rows")
+    sequence_status = _sequence_dynamics_status(limitation_values)
+    limitations_payload: list[JSONValue] = [
+        value for value in limitation_values
+    ]
+    return {
+        "schema_version": TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
+        "basis": "observed_sequence",
+        "row_order": row_order,
+        "computed_from": _summary_key(topology.get("computed_from")),
+        "cache_source": _optional_summary_key(topology.get("cache_source")),
+        "regular_grid": False,
+        "sequence_status": sequence_status,
+        "limitations": limitations_payload,
+        "row_count": row_count,
+        "sampled_row_count": sampled_row_count,
+        "usable_row_count": usable_row_count,
+        "invalid_row_count": invalid_row_count,
+        "partial_row_count": partial_row_count,
+        "truncated": usable_row_count > sampled_row_count,
+        "max_rows": _profile_max_rows(profile),
+    }
+
+
+def _sequence_dynamics_limitations(
+    topology: Mapping[str, JSONValue],
+) -> tuple[str, ...]:
+    limitations: list[str] = []
+    row_count = _int_payload(topology.get("row_count"))
+    parsed_row_count = _optional_int_payload(topology.get("parsed_row_count"))
+    if parsed_row_count is None:
+        limitations.append("timestamp_topology_unavailable")
+    elif row_count > 0 and parsed_row_count <= 0:
+        limitations.append("no_parsed_timestamps")
+    if _int_payload(topology.get("invalid_timestamp_count")):
+        limitations.append("invalid_timestamps_skipped")
+    if _int_payload(topology.get("non_monotonic_count")):
+        limitations.append("non_monotonic_timestamp_order")
+    if _int_payload(topology.get("duplicate_timestamp_count")):
+        limitations.append("duplicate_timestamps")
+    if _int_payload(topology.get("suspicious_gap_count")):
+        limitations.append("suspicious_gaps")
+    if _int_payload(topology.get("expected_session_closure_count")):
+        limitations.append("expected_session_closures")
+    if _int_payload(topology.get("weekend_activity_count")):
+        limitations.append("weekend_activity")
+    return tuple(limitations)
+
+
+def _sequence_dynamics_status(limitations: Iterable[str]) -> str:
+    limitation_set = set(limitations)
+    if limitation_set & {
+        "timestamp_topology_unavailable",
+        "no_parsed_timestamps",
+        "insufficient_sequence_rows",
+    }:
+        return "unavailable"
+    if limitation_set:
+        return "limited"
+    return "ok"
+
+
+def _m1_dynamics_rows_from_frame(
+    frame: Any,
+    profile: HistDataFingerprintProfile,
+) -> tuple[list[_M1DynamicsRow], int, int, int]:
+    row_count = int(getattr(frame, "height", 0) or 0)
+    sample_limit = min(row_count, _profile_max_rows(profile))
+    usable_row_count = _frame_numeric_usable_row_count(
+        frame,
+        ("datetime", "open", "high", "low", "close"),
+    )
+    rows: list[_M1DynamicsRow] = []
+    for row in _iter_frame_head_rows(frame, sample_limit):
+        timestamp = _finite_int(row.get("datetime"))
+        open_value = _finite_float(row.get("open"))
+        high_value = _finite_float(row.get("high"))
+        low_value = _finite_float(row.get("low"))
+        close_value = _finite_float(row.get("close"))
+        if (
+            timestamp is None
+            or open_value is None
+            or high_value is None
+            or low_value is None
+            or close_value is None
+        ):
+            continue
+        rows.append(
+            _M1DynamicsRow(
+                timestamp_utc_ms=timestamp,
+                open=open_value,
+                high=high_value,
+                low=low_value,
+                close=close_value,
+            )
+        )
+    return (
+        rows,
+        row_count,
+        usable_row_count,
+        max(0, row_count - usable_row_count),
+    )
+
+
+def _m1_dynamics_rows_from_text(
+    text: str,
+    profile: HistDataFingerprintProfile,
+) -> tuple[list[_M1DynamicsRow], int, int, int, int]:
+    row_count = 0
+    usable_row_count = 0
+    invalid_row_count = 0
+    partial_row_count = 0
+    rows: list[_M1DynamicsRow] = []
+    sample_limit = _profile_max_rows(profile)
+    expected_field_count = len(columns_for_timeframe(M1))
+    reader = csv.reader(
+        text.splitlines(),
+        delimiter=delimiter_for_timeframe(M1),
+    )
+    for row in reader:
+        if not row or not any(cell.strip() for cell in row):
+            continue
+        row_count += 1
+        if len(row) != expected_field_count:
+            invalid_row_count += 1
+            partial_row_count += 1
+            continue
+        try:
+            parsed = normalize_ascii_row(M1, row)
+        except (TypeError, ValueError, OverflowError):
+            invalid_row_count += 1
+            continue
+        timestamp = int(parsed[0])
+        prices = tuple(float(parsed[index]) for index in range(1, 5))
+        if not all(_is_finite(value) for value in prices):
+            invalid_row_count += 1
+            continue
+        usable_row_count += 1
+        if len(rows) >= sample_limit:
+            continue
+        rows.append(
+            _M1DynamicsRow(
+                timestamp_utc_ms=timestamp,
+                open=prices[0],
+                high=prices[1],
+                low=prices[2],
+                close=prices[3],
+            )
+        )
+    return (
+        rows,
+        row_count,
+        usable_row_count,
+        invalid_row_count,
+        partial_row_count,
+    )
+
+
+def _tick_dynamics_rows_from_frame(
+    frame: Any,
+    profile: HistDataFingerprintProfile,
+) -> tuple[list[_TickDynamicsRow], int, int, int]:
+    row_count = int(getattr(frame, "height", 0) or 0)
+    sample_limit = min(row_count, _profile_max_rows(profile))
+    usable_row_count = _frame_numeric_usable_row_count(
+        frame,
+        ("datetime", "bid", "ask"),
+    )
+    rows: list[_TickDynamicsRow] = []
+    for row in _iter_frame_head_rows(frame, sample_limit):
+        timestamp = _finite_int(row.get("datetime"))
+        bid = _finite_float(row.get("bid"))
+        ask = _finite_float(row.get("ask"))
+        if timestamp is None or bid is None or ask is None:
+            continue
+        rows.append(
+            _TickDynamicsRow(
+                timestamp_utc_ms=timestamp,
+                bid=bid,
+                ask=ask,
+            )
+        )
+    return (
+        rows,
+        row_count,
+        usable_row_count,
+        max(0, row_count - usable_row_count),
+    )
+
+
+def _tick_dynamics_rows_from_text(
+    text: str,
+    profile: HistDataFingerprintProfile,
+) -> tuple[list[_TickDynamicsRow], int, int, int, int]:
+    row_count = 0
+    usable_row_count = 0
+    invalid_row_count = 0
+    partial_row_count = 0
+    rows: list[_TickDynamicsRow] = []
+    sample_limit = _profile_max_rows(profile)
+    expected_field_count = len(columns_for_timeframe(TICK))
+    reader = csv.reader(
+        text.splitlines(),
+        delimiter=delimiter_for_timeframe(TICK),
+    )
+    for row in reader:
+        if not row or not any(cell.strip() for cell in row):
+            continue
+        row_count += 1
+        if len(row) != expected_field_count:
+            invalid_row_count += 1
+            partial_row_count += 1
+            continue
+        try:
+            parsed = normalize_ascii_row(TICK, row)
+        except (TypeError, ValueError, OverflowError):
+            invalid_row_count += 1
+            continue
+        timestamp = int(parsed[0])
+        bid = _finite_float(parsed[1])
+        ask = _finite_float(parsed[2])
+        if bid is None or ask is None:
+            invalid_row_count += 1
+            continue
+        usable_row_count += 1
+        if len(rows) >= sample_limit:
+            continue
+        rows.append(_TickDynamicsRow(timestamp, bid, ask))
+    return (
+        rows,
+        row_count,
+        usable_row_count,
+        invalid_row_count,
+        partial_row_count,
+    )
+
+
+def _iter_frame_head_rows(
+    frame: Any,
+    limit: int,
+) -> Iterable[Mapping[str, Any]]:
+    if limit <= 0:
+        return
+    try:
+        for row in frame.head(limit).iter_rows(named=True):
+            if isinstance(row, Mapping):
+                yield row
+        return
+    except (AttributeError, TypeError, ValueError):
+        pass
+    columns = tuple(str(column) for column in getattr(frame, "columns", ()))
+    column_values = {
+        column: _frame_column_values(frame, column, limit) for column in columns
+    }
+    if not column_values:
+        return
+    scanned_count = min(
+        limit, *(len(values) for values in column_values.values())
+    )
+    for index in range(scanned_count):
+        yield {column: column_values[column][index] for column in columns}
+
+
+def _m1_return_dynamics_payload(
+    rows: list[_M1DynamicsRow],
+    *,
+    base: dict[str, JSONValue],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    close_log_returns: list[float] = []
+    absolute_returns: list[float] = []
+    squared_returns: list[float] = []
+    open_jumps: list[float] = []
+    zero_return_count = 0
+    zero_return_run_lengths: list[int] = []
+    ohlc_flatline_row_count = 0
+    ohlc_flatline_run_lengths: list[int] = []
+    same_close_run_length = 1 if rows else 0
+    ohlc_flatline_run_length = 0
+    previous: _M1DynamicsRow | None = None
+
+    for row in rows:
+        if row.open == row.high == row.low == row.close:
+            ohlc_flatline_row_count += 1
+            ohlc_flatline_run_length += 1
+        else:
+            _append_minimum_run(
+                ohlc_flatline_run_lengths,
+                ohlc_flatline_run_length,
+                minimum=2,
+            )
+            ohlc_flatline_run_length = 0
+
+        if previous is None:
+            previous = row
+            continue
+
+        if previous.close > 0.0 and row.close > 0.0:
+            log_return = math.log(row.close / previous.close)
+            close_log_returns.append(log_return)
+            absolute_returns.append(abs(log_return))
+            squared_returns.append(log_return * log_return)
+            if row.close == previous.close:
+                zero_return_count += 1
+                same_close_run_length += 1
+            else:
+                _append_minimum_run(
+                    zero_return_run_lengths,
+                    same_close_run_length,
+                    minimum=2,
+                )
+                same_close_run_length = 1
+        else:
+            _append_minimum_run(
+                zero_return_run_lengths,
+                same_close_run_length,
+                minimum=2,
+            )
+            same_close_run_length = 1
+
+        if previous.close > 0.0:
+            open_jumps.append(abs(row.open - previous.close) / previous.close)
+        previous = row
+
+    _append_minimum_run(
+        zero_return_run_lengths,
+        same_close_run_length,
+        minimum=2,
+    )
+    _append_minimum_run(
+        ohlc_flatline_run_lengths,
+        ohlc_flatline_run_length,
+        minimum=2,
+    )
+
+    result = dict(base)
+    result.update(
+        {
+            "close_log_return": _numeric_summary(close_log_returns, profile),
+            "absolute_return": _numeric_summary(absolute_returns, profile),
+            "squared_return": _numeric_summary(squared_returns, profile),
+            "open_jump": _numeric_summary(open_jumps, profile),
+            "flatline": {
+                "zero_return_count": zero_return_count,
+                "zero_return_rate": _rate(
+                    zero_return_count,
+                    len(close_log_returns),
+                    profile,
+                ),
+                "zero_return_run_count": len(zero_return_run_lengths),
+                "zero_return_run_length_counts": (
+                    _run_length_counts_payload(
+                        zero_return_run_lengths,
+                        profile,
+                    )
+                ),
+                "ohlc_flatline_row_count": ohlc_flatline_row_count,
+                "ohlc_flatline_rate": _rate(
+                    ohlc_flatline_row_count,
+                    len(rows),
+                    profile,
+                ),
+                "ohlc_flatline_run_count": len(ohlc_flatline_run_lengths),
+                "ohlc_flatline_affected_row_count": sum(
+                    ohlc_flatline_run_lengths
+                ),
+                "ohlc_flatline_run_length_counts": (
+                    _run_length_counts_payload(
+                        ohlc_flatline_run_lengths,
+                        profile,
+                    )
+                ),
+            },
+        }
+    )
+    return result
+
+
+def _tick_microstructure_dynamics_payload(
+    rows: list[_TickDynamicsRow],
+    *,
+    base: dict[str, JSONValue],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    thresholds = DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS
+    spread_thresholds = DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS
+    spreads = [row.spread for row in rows]
+    interarrival_ms: list[float] = []
+    spread_changes: list[float] = []
+    absolute_spread_changes: list[float] = []
+    stale_repeat_count = 0
+    stale_run_lengths: list[int] = []
+    stale_run_length = 1 if rows else 0
+    burst_interval_count = 0
+    burst_run_lengths: list[int] = []
+    burst_run_length = 1 if rows else 0
+    one_sided_movement_count = 0
+    bid_only_count = 0
+    ask_only_count = 0
+    one_sided_run_lengths: list[int] = []
+    one_sided_run_length = 0
+    one_sided_run_kind = ""
+    previous: _TickDynamicsRow | None = None
+
+    for row in rows:
+        if previous is None:
+            previous = row
+            continue
+
+        interval_ms = row.timestamp_utc_ms - previous.timestamp_utc_ms
+        interarrival_ms.append(float(interval_ms))
+        spread_change = row.spread - previous.spread
+        spread_changes.append(spread_change)
+        absolute_spread_changes.append(abs(spread_change))
+
+        if (
+            row.bid == previous.bid
+            and row.ask == previous.ask
+            and 0 <= interval_ms <= thresholds.stale_max_gap_ms
+        ):
+            stale_repeat_count += 1
+            stale_run_length += 1
+        else:
+            _append_minimum_run(
+                stale_run_lengths,
+                stale_run_length,
+                minimum=thresholds.stale_quote_run_length,
+            )
+            stale_run_length = 1
+
+        if 0 <= interval_ms <= thresholds.burst_max_interval_ms:
+            burst_interval_count += 1
+            burst_run_length += 1
+        else:
+            _append_minimum_run(
+                burst_run_lengths,
+                burst_run_length,
+                minimum=thresholds.burst_run_length,
+            )
+            burst_run_length = 1
+
+        movement_kind = _one_sided_movement_kind(previous, row)
+        if movement_kind:
+            one_sided_movement_count += 1
+            if movement_kind == "bid_only":
+                bid_only_count += 1
+            elif movement_kind == "ask_only":
+                ask_only_count += 1
+            if movement_kind == one_sided_run_kind:
+                one_sided_run_length += 1
+            else:
+                _append_minimum_run(
+                    one_sided_run_lengths,
+                    one_sided_run_length,
+                    minimum=thresholds.one_sided_run_length,
+                )
+                one_sided_run_kind = movement_kind
+                one_sided_run_length = 1
+        else:
+            _append_minimum_run(
+                one_sided_run_lengths,
+                one_sided_run_length,
+                minimum=thresholds.one_sided_run_length,
+            )
+            one_sided_run_kind = ""
+            one_sided_run_length = 0
+
+        previous = row
+
+    _append_minimum_run(
+        stale_run_lengths,
+        stale_run_length,
+        minimum=thresholds.stale_quote_run_length,
+    )
+    _append_minimum_run(
+        burst_run_lengths,
+        burst_run_length,
+        minimum=thresholds.burst_run_length,
+    )
+    _append_minimum_run(
+        one_sided_run_lengths,
+        one_sided_run_length,
+        minimum=thresholds.one_sided_run_length,
+    )
+
+    spread_jump_threshold = _spread_jump_threshold(spreads)
+    spread_jump_count = (
+        sum(
+            1
+            for change in absolute_spread_changes
+            if spread_jump_threshold is not None
+            and change > spread_jump_threshold
+        )
+        if spread_jump_threshold is not None
+        else 0
+    )
+    zero_spread_count = sum(1 for spread in spreads if spread == 0.0)
+    negative_spread_count = sum(1 for spread in spreads if spread < 0.0)
+
+    result = dict(base)
+    result.update(
+        {
+            "interarrival_ms": _numeric_summary(interarrival_ms, profile),
+            "spread": _numeric_summary(spreads, profile),
+            "spread_change": _numeric_summary(spread_changes, profile),
+            "absolute_spread_change": _numeric_summary(
+                absolute_spread_changes,
+                profile,
+            ),
+            "zero_spread_count": zero_spread_count,
+            "negative_spread_count": negative_spread_count,
+            "zero_spread_rate": _rate(zero_spread_count, len(spreads), profile),
+            "negative_spread_rate": _rate(
+                negative_spread_count,
+                len(spreads),
+                profile,
+            ),
+            "spread_jump": {
+                "threshold": (
+                    _rounded(spread_jump_threshold, profile)
+                    if spread_jump_threshold is not None
+                    else None
+                ),
+                "threshold_basis": (
+                    "median_nonnegative_spread_x_jump_multiplier"
+                ),
+                "jump_spread_multiplier": (
+                    spread_thresholds.jump_spread_multiplier
+                ),
+                "minimum_spread_jump": spread_thresholds.minimum_spread_jump,
+                "count": spread_jump_count,
+                "rate": _rate(
+                    spread_jump_count,
+                    len(absolute_spread_changes),
+                    profile,
+                ),
+            },
+            "stale_quote": {
+                "thresholds": {
+                    "stale_quote_run_length": (
+                        thresholds.stale_quote_run_length
+                    ),
+                    "stale_max_gap_ms": thresholds.stale_max_gap_ms,
+                },
+                "repeat_count": stale_repeat_count,
+                "repeat_rate": _rate(
+                    stale_repeat_count,
+                    len(interarrival_ms),
+                    profile,
+                ),
+                "run_count": len(stale_run_lengths),
+                "affected_row_count": sum(stale_run_lengths),
+                "run_length_counts": _run_length_counts_payload(
+                    stale_run_lengths,
+                    profile,
+                ),
+            },
+            "burst": {
+                "thresholds": {
+                    "burst_max_interval_ms": (thresholds.burst_max_interval_ms),
+                    "burst_run_length": thresholds.burst_run_length,
+                },
+                "interval_count": burst_interval_count,
+                "burst_rate": _rate(
+                    burst_interval_count,
+                    len(interarrival_ms),
+                    profile,
+                ),
+                "run_count": len(burst_run_lengths),
+                "tick_count": sum(burst_run_lengths),
+                "run_length_counts": _run_length_counts_payload(
+                    burst_run_lengths,
+                    profile,
+                ),
+            },
+            "one_sided_movement": {
+                "thresholds": {
+                    "one_sided_run_length": thresholds.one_sided_run_length,
+                },
+                "count": one_sided_movement_count,
+                "rate": _rate(
+                    one_sided_movement_count,
+                    len(interarrival_ms),
+                    profile,
+                ),
+                "bid_only_count": bid_only_count,
+                "ask_only_count": ask_only_count,
+                "run_count": len(one_sided_run_lengths),
+                "run_length_counts": _run_length_counts_payload(
+                    one_sided_run_lengths,
+                    profile,
+                ),
+            },
+        }
+    )
+    return result
+
+
+def _spread_jump_threshold(
+    spreads: Iterable[float],
+) -> float | None:
+    nonnegative_spreads = sorted(
+        spread for spread in spreads if _is_finite(spread) and spread >= 0.0
+    )
+    if not nonnegative_spreads:
+        return None
+    spread_thresholds = DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS
+    jump_multiplier = float(spread_thresholds.jump_spread_multiplier)
+    minimum_spread_jump = float(spread_thresholds.minimum_spread_jump)
+    return float(
+        max(
+            _quantile(nonnegative_spreads, 0.5) * jump_multiplier,
+            minimum_spread_jump,
+        )
+    )
+
+
+def _one_sided_movement_kind(
+    previous: _TickDynamicsRow,
+    current: _TickDynamicsRow,
+) -> str:
+    bid_changed = current.bid != previous.bid
+    ask_changed = current.ask != previous.ask
+    if bid_changed and not ask_changed:
+        return "bid_only"
+    if ask_changed and not bid_changed:
+        return "ask_only"
+    return ""
+
+
+def _append_minimum_run(
+    lengths: list[int],
+    length: int,
+    *,
+    minimum: int,
+) -> None:
+    if length >= minimum:
+        lengths.append(length)
+
+
+def _run_length_counts_payload(
+    lengths: Iterable[int],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    counter = Counter(length for length in lengths if length > 0)
+    limit = max(1, int(profile.histogram_bins))
+    items = sorted(counter.items())
+    included = items[:limit]
+    payload: dict[str, JSONValue] = {
+        str(length): count for length, count in included
+    }
+    overflow = sum(count for _, count in items[limit:])
+    if overflow:
+        payload["__other__"] = overflow
+    return payload
 
 
 def _add_conditional_distribution_payload(

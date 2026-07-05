@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -24,6 +25,7 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
@@ -184,6 +186,164 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
     assert distribution["zero_spread_rate"] == 0.0
     assert distribution["negative_spread_rate"] == 0.0
     assert _mapping(payload["source"])["kind"] == "csv_text"
+
+
+def test_fingerprint_m1_return_dynamics_describe_sequence(
+    tmp_path: Path,
+) -> None:
+    """M1 fingerprints should expose deterministic return dynamics."""
+    case = HistDataAsciiCase(
+        name="m1-dynamics",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202.csv",
+        rows=(
+            "20120201 000000;1.000000;1.000000;1.000000;1.000000;0",
+            "20120201 000100;1.000000;1.000000;1.000000;1.000000;0",
+            "20120201 000200;1.000000;1.000000;1.000000;1.000000;0",
+            "20120201 000300;1.100000;1.200000;1.000000;1.100000;0",
+        ),
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    dynamics = _mapping(payload["return_dynamics"])
+
+    assert dynamics["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION
+    )
+    assert dynamics["basis"] == "observed_sequence"
+    assert dynamics["row_order"] == "source_text_order"
+    assert dynamics["computed_from"] == "text_scan"
+    assert dynamics["regular_grid"] is False
+    assert dynamics["sequence_status"] == "ok"
+    assert _list(dynamics["limitations"]) == []
+    assert dynamics["row_count"] == 4
+    assert dynamics["sampled_row_count"] == 4
+    assert dynamics["usable_row_count"] == 4
+    assert dynamics["invalid_row_count"] == 0
+    assert dynamics["partial_row_count"] == 0
+    assert dynamics["truncated"] is False
+
+    close_returns = _mapping(dynamics["close_log_return"])
+    assert close_returns["count"] == 3
+    assert close_returns["median"] == 0.0
+    assert close_returns["max"] == round(math.log(1.1), 12)
+    absolute_returns = _mapping(dynamics["absolute_return"])
+    assert absolute_returns["count"] == 3
+    assert absolute_returns["max"] == round(math.log(1.1), 12)
+    squared_returns = _mapping(dynamics["squared_return"])
+    assert squared_returns["count"] == 3
+    assert squared_returns["max"] == round(math.log(1.1) ** 2, 12)
+    open_jump = _mapping(dynamics["open_jump"])
+    assert open_jump["count"] == 3
+    assert open_jump["max"] == 0.1
+
+    flatline = _mapping(dynamics["flatline"])
+    assert flatline["zero_return_count"] == 2
+    assert flatline["zero_return_rate"] == 0.666666666667
+    assert flatline["zero_return_run_count"] == 1
+    assert _mapping(flatline["zero_return_run_length_counts"]) == {"3": 1}
+    assert flatline["ohlc_flatline_row_count"] == 3
+    assert flatline["ohlc_flatline_rate"] == 0.75
+    assert flatline["ohlc_flatline_run_count"] == 1
+    assert flatline["ohlc_flatline_affected_row_count"] == 3
+    assert _mapping(flatline["ohlc_flatline_run_length_counts"]) == {"3": 1}
+
+
+def test_fingerprint_tick_microstructure_dynamics_describe_sequence(
+    tmp_path: Path,
+) -> None:
+    """Tick fingerprints should expose interarrival and quote dynamics."""
+    case = HistDataAsciiCase(
+        name="tick-dynamics",
+        timeframe=TICK,
+        filename="DAT_ASCII_EURUSD_T_201202.csv",
+        rows=(
+            "20120201 000000000,1.000000,1.000200,0",
+            "20120201 000000050,1.000000,1.000200,0",
+            "20120201 000000090,1.000000,1.000200,0",
+            "20120201 000000300,1.000100,1.000200,0",
+            "20120201 000000500,1.000200,1.000200,0",
+            "20120201 000001000,1.000200,1.001000,0",
+        ),
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    dynamics = _mapping(payload["microstructure_dynamics"])
+
+    assert dynamics["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION
+    )
+    assert dynamics["basis"] == "observed_sequence"
+    assert dynamics["row_order"] == "source_text_order"
+    assert dynamics["computed_from"] == "text_scan"
+    assert dynamics["sequence_status"] == "ok"
+    assert dynamics["row_count"] == 6
+    assert dynamics["sampled_row_count"] == 6
+    assert dynamics["usable_row_count"] == 6
+
+    interarrival = _mapping(dynamics["interarrival_ms"])
+    assert interarrival["count"] == 5
+    assert interarrival["min"] == 40.0
+    assert interarrival["median"] == 200.0
+    assert interarrival["max"] == 500.0
+    spread_change = _mapping(dynamics["spread_change"])
+    assert spread_change["count"] == 5
+    assert spread_change["min"] == -0.0001
+    assert spread_change["max"] == 0.0008
+
+    spread_jump = _mapping(dynamics["spread_jump"])
+    assert spread_jump["threshold"] == 0.0004
+    assert spread_jump["count"] == 1
+    assert spread_jump["rate"] == 0.2
+    assert dynamics["zero_spread_count"] == 1
+    assert dynamics["negative_spread_count"] == 0
+
+    stale_quote = _mapping(dynamics["stale_quote"])
+    assert stale_quote["repeat_count"] == 2
+    assert stale_quote["repeat_rate"] == 0.4
+    assert stale_quote["run_count"] == 1
+    assert stale_quote["affected_row_count"] == 3
+    assert _mapping(stale_quote["run_length_counts"]) == {"3": 1}
+    burst = _mapping(dynamics["burst"])
+    assert burst["interval_count"] == 2
+    assert burst["burst_rate"] == 0.4
+    assert burst["run_count"] == 1
+    assert burst["tick_count"] == 3
+    assert _mapping(burst["run_length_counts"]) == {"3": 1}
+    one_sided = _mapping(dynamics["one_sided_movement"])
+    assert one_sided["count"] == 3
+    assert one_sided["rate"] == 0.6
+    assert one_sided["bid_only_count"] == 2
+    assert one_sided["ask_only_count"] == 1
+    assert one_sided["run_count"] == 1
+    assert _mapping(one_sided["run_length_counts"]) == {"2": 1}
+
+
+def test_fingerprint_dynamics_mark_non_monotonic_sequences_limited(
+    tmp_path: Path,
+) -> None:
+    """Observed-order dynamics should flag structurally limited sequences."""
+    case = HistDataAsciiCase(
+        name="m1-non-monotonic-dynamics",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202.csv",
+        rows=(
+            "20120201 000200;1.000000;1.000000;1.000000;1.000000;0",
+            "20120201 000100;1.100000;1.100000;1.100000;1.100000;0",
+            "20120201 000300;1.200000;1.200000;1.200000;1.200000;0",
+        ),
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    topology = _mapping(payload["temporal_topology"])
+    dynamics = _mapping(payload["return_dynamics"])
+
+    assert topology["non_monotonic_count"] == 1
+    assert dynamics["basis"] == "observed_sequence"
+    assert dynamics["row_order"] == "source_text_order"
+    assert dynamics["sequence_status"] == "limited"
+    assert "non_monotonic_timestamp_order" in _list(dynamics["limitations"])
+    assert _mapping(dynamics["close_log_return"])["count"] == 2
 
 
 def test_fingerprint_tick_distribution_counts_zero_and_negative_spreads(
@@ -533,6 +693,11 @@ def test_fingerprint_rule_prefers_direct_cache_payload(
     topology = _mapping(payload["temporal_topology"])
     assert topology["computed_from"] == "direct_cache"
     assert topology["timestamp_projection"] == "polars_cache"
+    dynamics = _mapping(payload["return_dynamics"])
+    assert dynamics["row_order"] == "cache_order"
+    assert dynamics["computed_from"] == "direct_cache"
+    assert dynamics["cache_source"] == "direct"
+    assert _mapping(dynamics["close_log_return"])["count"] == 2
     assert topology["cache_source"] == "direct"
     assert topology["row_count"] == 3
     assert topology["min_interval_ms"] == 60_000
@@ -1574,6 +1739,10 @@ def test_fingerprint_constants_are_stable() -> None:
     assert (
         TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION
         == "histdatacom.time-series-fingerprint-conditional-distributions.v1"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-dynamics.v1"
     )
     assert DEFAULT_FINGERPRINT_QUANTILES == (
         0.01,
