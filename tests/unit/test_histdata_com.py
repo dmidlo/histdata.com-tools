@@ -1680,6 +1680,60 @@ def test_quality_profile_preview_prints_resolved_profile_without_submit(
     assert payload["resolved_profile"]["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
     }
+    explanation = payload["profile_explanation"]
+    assert explanation["schema_version"] == (
+        "histdatacom.quality-profile-preview-explanation.v1"
+    )
+    assert explanation["profile_source"] == {
+        "kind": "profile_file",
+        "profile_name": "preview-profile",
+        "profile_source": "file",
+        "source_path": str(profile_path),
+        "is_default": False,
+    }
+    assert [channel["kind"] for channel in explanation["input_channels"]] == [
+        "built_in_default",
+        "profile_file",
+        "cli_override",
+    ]
+    value_sources = {
+        item["path"]: item
+        for item in explanation["effective_value_sources"]["values"]
+    }
+    assert (
+        value_sources["/rules/ingestion.ascii.row_count/min_row_count"][
+            "source"
+        ]
+        == "profile_file"
+    )
+    assert (
+        value_sources["/modeling_assumptions/target_horizon_minutes"]["source"]
+        == "profile_file"
+    )
+    assert value_sources["/reporting/remediation_catalog_audit/enabled"] == {
+        "path": "/reporting/remediation_catalog_audit/enabled",
+        "value": True,
+        "source": "cli_override",
+        "overridden_source": "profile_file",
+        "override": True,
+    }
+    diff = explanation["effective_diff"]
+    assert diff["schema_version"] == (
+        "histdatacom.quality-profile-preview-diff.v1"
+    )
+    assert diff["base"] == "built_in_default"
+    assert diff["truncated"] is False
+    diff_sources = {
+        change["path"]: change["source"] for change in diff["changes"]
+    }
+    assert (
+        diff_sources.items()
+        >= {
+            "/rules/ingestion.ascii.row_count/min_row_count": "profile_file",
+            "/modeling_assumptions/target_horizon_minutes": "profile_file",
+            "/reporting/remediation_catalog_audit/enabled": "cli_override",
+        }.items()
+    )
 
 
 @pytest.mark.parametrize(
@@ -1747,6 +1801,13 @@ def test_quality_profile_preview_supports_quality_modes_without_work(
     assert payload["resolved_profile"]["reporting"] == {
         "remediation_catalog_audit": {"enabled": False}
     }
+    assert payload["profile_explanation"]["profile_source"]["kind"] == (
+        "built_in_default"
+    )
+    assert (
+        payload["profile_explanation"]["effective_diff"]["changed_value_count"]
+        == 0
+    )
 
 
 def test_api_quality_profile_preview_returns_payload_without_submit(
@@ -1784,6 +1845,97 @@ def test_api_quality_profile_preview_returns_payload_without_submit(
     assert payload["resolved_profile"]["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
     }
+    explanation = payload["profile_explanation"]
+    assert explanation["profile_source"]["kind"] == "api_options"
+    assert [channel["kind"] for channel in explanation["input_channels"]] == [
+        "built_in_default",
+        "api_options",
+        "cli_override",
+    ]
+    value_sources = {
+        item["path"]: item
+        for item in explanation["effective_value_sources"]["values"]
+    }
+    assert (
+        value_sources["/modeling_assumptions/target_horizon_minutes"]["source"]
+        == "api_options"
+    )
+    assert (
+        value_sources["/reporting/remediation_catalog_audit/enabled"]["source"]
+        == "cli_override"
+    )
+
+
+def test_config_quality_profile_preview_explains_yaml_and_profile_sources(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Preview should show YAML config and profile-file input channels."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "config-profile",
+                "rules": {
+                    "fingerprint.series": {
+                        "max_rows": 50,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality: true
+  quality_target: {tmp_path}
+  quality_profile: {profile_path}
+  quality_profile_preview: true
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["profile_inputs"]["config_path"] == str(config_path)
+    explanation = payload["profile_explanation"]
+    assert [channel["kind"] for channel in explanation["input_channels"]] == [
+        "built_in_default",
+        "yaml_config",
+        "profile_file",
+    ]
+    value_sources = {
+        item["path"]: item
+        for item in explanation["effective_value_sources"]["values"]
+    }
+    assert (
+        value_sources["/rules/fingerprint.series/max_rows"]["source"]
+        == "profile_file"
+    )
 
 
 def test_back_to_back_orchestration_api_calls_do_not_leak_global_args(

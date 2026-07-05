@@ -1054,7 +1054,11 @@ The preview prints deterministic JSON and exits before target discovery,
 quality checks, report writes, repo metadata writes, or orchestration submit.
 The payload includes the active profile source, source path, configured rule
 IDs, configured modeling assumptions, reporting keys, and the resolved
-`reporting.remediation_catalog_audit.enabled` value after CLI overrides.
+`reporting.remediation_catalog_audit.enabled` value after CLI overrides. It
+also includes a `profile_explanation` section with input channels such as
+built-in defaults, YAML config, profile file, API options, and CLI overrides;
+per-value source rows; and a bounded effective diff from the built-in default
+profile.
 
 ```sh
 histdatacom --quality \
