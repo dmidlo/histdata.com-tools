@@ -212,6 +212,8 @@ def test_help_advertises_quality_preflight_mode() -> None:
     assert "latest" in help_text
     assert "--quality-preflight-run-validation" in help_text
     assert "--quality-preflight-sample-size" in help_text
+    assert "--quality-profile-preview" in help_text
+    assert "--quality-profile-explain" in help_text
     assert "--quality-remediation-catalog-audit" in help_text
 
 
@@ -740,6 +742,7 @@ histdatacom:
   quality_preflight_evidence: {tmp_path / "preflight.json"}
   quality_preflight_evidence_max_age: 120
   quality_preflight_evidence_stale_ok: true
+  quality_profile_preview: true
   remediation_catalog_audit: true
   quality_fail_on: never
   quality_max_errors: 2
@@ -764,6 +767,7 @@ histdatacom:
     )
     assert options.quality_preflight_evidence_max_age_seconds == 120
     assert options.quality_preflight_evidence_allow_stale
+    assert options.quality_profile_preview
     assert options.quality_profile["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
     }
@@ -1004,11 +1008,13 @@ def test_data_quality_cli_loads_quality_profile_file(
             str(tmp_path),
             "--quality-profile",
             str(profile_path),
+            "--quality-profile-preview",
         ],
     )
 
     options = ArgParser(Options())()
 
+    assert options.quality_profile_preview
     assert options.quality_profile_path == str(profile_path)
     assert options.quality_profile["name"] == "cli-profile"
     assert options.quality_profile["source"] == "file"
@@ -1074,12 +1080,14 @@ def test_data_quality_cli_merges_remediation_catalog_audit_with_profile(
             str(tmp_path),
             "--quality-profile",
             str(profile_path),
+            "--quality-profile-preview",
             "--quality-remediation-catalog-audit",
         ],
     )
 
     options = ArgParser(Options())()
 
+    assert options.quality_profile_preview
     assert options.quality_profile["name"] == "audit-merge"
     assert options.quality_profile["source"] == "file"
     assert options.quality_profile["source_path"] == str(profile_path)
@@ -1089,6 +1097,39 @@ def test_data_quality_cli_merges_remediation_catalog_audit_with_profile(
     assert options.quality_profile["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
     }
+
+
+def test_quality_profile_preview_uses_normal_profile_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Preview mode should fail with the same invalid-profile errors."""
+    profile_path = tmp_path / "bad-quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "rules": {"not.a.real.rule": {"warning_severity": "error"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-profile-preview",
+            "--quality-profile",
+            str(profile_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        ArgParser(Options())()
+
+    assert err.value.code == 1
 
 
 def test_data_quality_cli_defaults_to_data_directory(
@@ -1195,6 +1236,7 @@ def test_repo_quality_columns_are_display_only_for_repo_table(
         ["histdatacom", "--quality-max-errors", "1"],
         ["histdatacom", "--quality-max-warnings", "1"],
         ["histdatacom", "--quality-profile", "quality-profile.json"],
+        ["histdatacom", "--quality-profile-preview"],
         ["histdatacom", "--quality-remediation-catalog-audit"],
         ["histdatacom", "--quality-preflight-evidence", "preflight.json"],
         ["histdatacom", "--quality-preflight-evidence-max-age-seconds", "60"],
@@ -1272,6 +1314,7 @@ def test_api_quality_options_accept_inline_profile(
     options.quality_preflight_evidence_max_age_seconds = 120
     options.quality_preflight_evidence_allow_stale = True
     options.quality_remediation_catalog_audit = True
+    options.quality_profile_preview = True
     options.quality_profile = {
         "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
         "name": "api-profile",
@@ -1281,6 +1324,7 @@ def test_api_quality_options_accept_inline_profile(
     parsed = ArgParser(options)()
 
     assert parsed.data_quality is True
+    assert parsed.quality_profile_preview is True
     assert parsed.quality_preflight_evidence_path == str(
         tmp_path / "preflight.json"
     )

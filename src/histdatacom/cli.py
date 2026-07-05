@@ -301,6 +301,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     "or --quality-preflight"
                 )
                 raise SystemExit(1)
+            if self.arg_namespace.quality_profile_preview:
+                print(  # noqa:T201
+                    "--quality-profile-preview requires --quality, "
+                    "--repo-quality, or --quality-preflight"
+                )
+                raise SystemExit(1)
             if self.arg_namespace.quality_remediation_catalog_audit:
                 print(  # noqa:T201
                     "--quality-remediation-catalog-audit requires --quality, "
@@ -501,6 +507,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 args.append("--repo-quality")
             if self.arg_namespace.quality_preflight:
                 args.append("--quality-preflight")
+            if self.arg_namespace.quality_profile_preview:
+                args.append("--quality-profile-preview")
             if self.arg_namespace.quality_remediation_catalog_audit:
                 args.append("--quality-remediation-catalog-audit")
             if self.arg_namespace.quality_paths:
@@ -1678,6 +1686,16 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "read a JSON quality profile with rule thresholds, "
                 "severities, and modeling assumptions"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-profile-preview",
+            "--quality-profile-explain",
+            dest="quality_profile_preview",
+            action="store_true",
+            help=(
+                "print the resolved quality profile JSON without running "
+                "quality checks, writing reports, or submitting work"
             ),
         )
         quality_args.add_argument(

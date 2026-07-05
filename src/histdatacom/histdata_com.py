@@ -52,6 +52,7 @@ from histdatacom.data_quality.preflight import (
     write_quality_preflight_markdown_report,
     write_quality_preflight_report,
 )
+from histdatacom.data_quality.profiles import quality_profile_from_value
 from histdatacom.data_quality.reporting import (
     format_fingerprint_distribution_attention_lines,
     format_fingerprint_distribution_summary_lines,
@@ -104,6 +105,9 @@ if TYPE_CHECKING:
 WINDOWS_RUNTIME_REEXEC_ENV = "HISTDATACOM_WINDOWS_RUNTIME_REEXEC"
 WINDOWS_PYTHON_EXECUTABLE_NAMES = frozenset({"python.exe", "pythonw.exe"})
 WINDOWS_HISTDATACOM_LAUNCHER_NAMES = frozenset({"histdatacom.exe"})
+QUALITY_PROFILE_PREVIEW_SCHEMA_VERSION = (
+    "histdatacom.quality-profile-preview.v1"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +141,7 @@ class RuntimeContext:
     quality_preflight_validation_report_path: str | None
     quality_profile_path: str
     quality_profile: Mapping[str, Any]
+    quality_profile_preview: bool
     repo_quality_refresh: bool
     repo_quality_columns: bool
     available_remote_data: bool
@@ -200,6 +205,14 @@ class _HistDataCom:  # noqa:R701
             if not self.context.from_api:
                 print(histdatacom.__version__)  # noqa:T201
             return histdatacom.__version__
+
+        if self.context.quality_profile_preview:
+            payload = _quality_profile_preview_payload(self.context)
+            if not self.context.from_api:
+                print(
+                    json.dumps(payload, indent=2, sort_keys=True)
+                )  # noqa:T201
+            return payload
 
         if self.context.request_json_out or self.context.request_bundle_out:
             return self._export_run_artifacts()
@@ -570,6 +583,7 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         ),
         quality_profile_path=str(args.get("quality_profile_path") or ""),
         quality_profile=dict(args.get("quality_profile") or {}),
+        quality_profile_preview=bool(args["quality_profile_preview"]),
         repo_quality_refresh=bool(args["repo_quality_refresh"]),
         repo_quality_columns=bool(args["repo_quality_columns"]),
         available_remote_data=bool(args["available_remote_data"]),
@@ -602,6 +616,48 @@ def _write_json_payload(
     if path.parent != Path("."):
         path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _quality_profile_preview_payload(
+    context: RuntimeContext,
+) -> dict[str, JSONValue]:
+    """Return a deterministic preview of the resolved quality profile."""
+    profile = quality_profile_from_value(context.quality_profile)
+    resolved_profile = profile.to_request_payload()
+    if "reporting" not in resolved_profile:
+        resolved_profile["reporting"] = (
+            profile.reporting_profile().to_metadata()
+        )
+
+    profile_metadata = profile.to_metadata()
+    profile_metadata.setdefault("configured_reporting_keys", [])
+    profile_metadata["configured_modeling_assumptions"] = dict(
+        profile.modeling_assumptions
+    )
+    profile_metadata["reporting"] = profile.reporting_profile().to_metadata()
+
+    audit_override_enabled = bool(
+        context.args.get("quality_remediation_catalog_audit")
+    )
+    cli_overrides: dict[str, JSONValue] = {}
+    if audit_override_enabled:
+        cli_overrides["reporting.remediation_catalog_audit.enabled"] = True
+    return {
+        "schema_version": QUALITY_PROFILE_PREVIEW_SCHEMA_VERSION,
+        "quality_modes": {
+            "quality": context.data_quality,
+            "repo_quality": context.repo_quality_refresh,
+            "quality_preflight": context.quality_preflight,
+        },
+        "profile_inputs": {
+            "from_api": context.from_api,
+            "quality_profile_path": context.quality_profile_path,
+            "quality_remediation_catalog_audit": audit_override_enabled,
+        },
+        "cli_overrides": cli_overrides,
+        "quality_profile": profile_metadata,
+        "resolved_profile": resolved_profile,
+    }
 
 
 def _attach_influx_config_metadata(
