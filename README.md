@@ -986,6 +986,12 @@ stale quote runs, bursts, and one-sided movement. These sections record their
 calculation basis and topology limitations, so non-monotonic timestamps,
 duplicates, gaps, or insufficient sequence rows remain advisory metadata rather
 than hidden assumptions.
+Every series fingerprint also includes a bounded `fingerprint_audit` section.
+It records expected, emitted, and intentionally skipped fingerprint sections,
+stable skip/eligibility reason codes, calendar-profile completeness, tick-spread
+conditioning eligibility, and dynamics readiness. This is machine-readable
+contract metadata for report consumers; the full fingerprint sections remain the
+source of the detailed statistics.
 
 `provenance` checks are only applied when a local orchestration
 `.histdatacom/manifest-status.sqlite3` store is available. Explicit

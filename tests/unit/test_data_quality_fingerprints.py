@@ -17,6 +17,7 @@ from histdatacom.data_quality import (
     DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
     QUALITY_PROFILE_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
@@ -153,6 +154,53 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
         _mapping(distribution["precision"])["column_decimal_place_counts"]
     )["open"] == {"6": 3}
     assert _mapping(payload["source"])["kind"] == "csv_text"
+    audit = _mapping(payload["fingerprint_audit"])
+    assert (
+        audit["schema_version"] == TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION
+    )
+    assert _list(audit["sections_expected"]) == [
+        "coverage",
+        "temporal_topology",
+        "calendar_regimes",
+        "m1_bar_distribution",
+        "return_dynamics",
+    ]
+    assert _list(audit["sections_emitted"]) == [
+        "coverage",
+        "temporal_topology",
+        "calendar_regimes",
+        "m1_bar_distribution",
+        "return_dynamics",
+    ]
+    assert _mapping(audit["sections_skipped"]) == {}
+    statuses = _mapping(audit["section_statuses"])
+    assert statuses["coverage"] == "valid"
+    assert statuses["temporal_topology"] == "valid"
+    assert statuses["calendar_regimes"] == "valid"
+    assert statuses["m1_bar_distribution"] == "valid"
+    assert statuses["return_dynamics"] == "valid"
+    eligibility = _mapping(
+        _mapping(audit["conditional_distribution_eligibility"])["tick_spread"]
+    )
+    assert eligibility == {
+        "eligible": False,
+        "status": "ineligible",
+        "reason": "unsupported_timeframe",
+    }
+    completeness = _mapping(audit["profile_completeness"])
+    assert completeness["source"] == "calendar_regimes"
+    assert completeness["calendar_profile_complete"] is False
+    assert completeness["missing_optional_calendar_data"] is True
+    readiness = _mapping(audit["dynamics_readiness"])
+    assert _mapping(readiness["return_dynamics"])["status"] == "valid"
+    assert _mapping(readiness["return_dynamics"])["row_order"] == (
+        "source_text_order"
+    )
+    assert _mapping(readiness["return_dynamics"])["limitations"] == []
+    assert _mapping(readiness["microstructure_dynamics"]) == {
+        "status": "skipped",
+        "reason": "unsupported_timeframe",
+    }
 
 
 def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
@@ -186,6 +234,30 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
     assert distribution["zero_spread_rate"] == 0.0
     assert distribution["negative_spread_rate"] == 0.0
     assert _mapping(payload["source"])["kind"] == "csv_text"
+    audit = _mapping(payload["fingerprint_audit"])
+    assert _list(audit["sections_expected"]) == [
+        "coverage",
+        "temporal_topology",
+        "calendar_regimes",
+        "tick_distribution",
+        "conditional_distributions",
+        "microstructure_dynamics",
+    ]
+    assert _mapping(audit["sections_skipped"]) == {}
+    statuses = _mapping(audit["section_statuses"])
+    assert statuses["tick_distribution"] == "valid"
+    assert statuses["conditional_distributions"] == "valid"
+    assert statuses["microstructure_dynamics"] == "valid"
+    eligibility = _mapping(
+        _mapping(audit["conditional_distribution_eligibility"])["tick_spread"]
+    )
+    assert eligibility == {
+        "eligible": True,
+        "status": "eligible",
+        "metric": "tick_spread",
+        "grouped_by": ["active_session", "special_tag"],
+        "emitted": True,
+    }
 
 
 def test_fingerprint_m1_return_dynamics_describe_sequence(
@@ -520,6 +592,64 @@ def test_fingerprint_tick_conditional_distributions_by_calendar_bucket(
     )
 
 
+def test_fingerprint_audit_marks_absent_conditioning_ineligible(
+    tmp_path: Path,
+) -> None:
+    """Readable tick targets should explain intentionally skipped conditioning."""
+    target = _discovered_target(
+        write_ascii_case(
+            tmp_path,
+            HistDataAsciiCase(
+                name="empty_tick_conditioning",
+                timeframe=TICK,
+                filename="DAT_ASCII_EURUSD_T_201202_EMPTY.csv",
+                rows=(),
+            ),
+        )
+    )
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    audit = _mapping(payload["fingerprint_audit"])
+
+    assert "conditional_distributions" not in payload
+    assert _list(audit["sections_expected"]) == [
+        "coverage",
+        "temporal_topology",
+        "calendar_regimes",
+        "tick_distribution",
+        "conditional_distributions",
+        "microstructure_dynamics",
+    ]
+    assert _mapping(audit["sections_skipped"]) == {
+        "conditional_distributions": {
+            "reason": "insufficient_rows",
+            "details": {
+                "metric": "tick_spread",
+                "grouped_by": ["active_session", "special_tag"],
+            },
+        }
+    }
+    assert _mapping(audit["section_statuses"])["tick_distribution"] == (
+        "limited"
+    )
+    assert _mapping(audit["section_statuses"])["microstructure_dynamics"] == (
+        "unavailable"
+    )
+    eligibility = _mapping(
+        _mapping(audit["conditional_distribution_eligibility"])["tick_spread"]
+    )
+    assert eligibility == {
+        "eligible": False,
+        "status": "ineligible",
+        "reason": "insufficient_rows",
+    }
+    readiness = _mapping(
+        _mapping(audit["dynamics_readiness"])["microstructure_dynamics"]
+    )
+    assert readiness["status"] == "unavailable"
+    assert readiness["reason"] == "insufficient_sequence_rows"
+    assert "insufficient_sequence_rows" in _list(readiness["limitations"])
+
+
 def test_fingerprint_calendar_regimes_use_configured_complete_profile(
     tmp_path: Path,
 ) -> None:
@@ -562,6 +692,12 @@ def test_fingerprint_calendar_regimes_use_configured_complete_profile(
         "crisis:covid_shock": 1,
         "thin_liquidity:christmas_new_year": 1,
     }
+    audit = _mapping(payload["fingerprint_audit"])
+    completeness = _mapping(audit["profile_completeness"])
+    assert completeness["calendar_profile_complete"] is True
+    assert completeness["missing_optional_calendar_data"] is False
+    assert completeness["calendar_profile_source"] == "operator-config"
+    assert completeness["calendar_profile_version"] == "2026.06"
 
 
 def test_fingerprint_distribution_handles_invalid_partial_and_empty_m1_rows(
@@ -635,6 +771,17 @@ def test_fingerprint_distribution_uses_profile_quantiles_and_rounding(
         "0.5": 1.30658,
         "1.0": 1.3066,
     }
+    audit = _mapping(payload["fingerprint_audit"])
+    assert _mapping(audit["section_statuses"])["m1_bar_distribution"] == (
+        "limited"
+    )
+    readiness = _mapping(
+        _mapping(audit["dynamics_readiness"])["return_dynamics"]
+    )
+    assert readiness["status"] == "valid"
+    assert readiness["sampled_row_count"] == 2
+    assert readiness["usable_row_count"] == 3
+    assert readiness["truncated"] is True
 
 
 def test_fingerprint_rule_emits_zip_member_payload(tmp_path: Path) -> None:
@@ -701,6 +848,19 @@ def test_fingerprint_rule_prefers_direct_cache_payload(
     assert topology["cache_source"] == "direct"
     assert topology["row_count"] == 3
     assert topology["min_interval_ms"] == 60_000
+    audit = _mapping(payload["fingerprint_audit"])
+    readiness = _mapping(
+        _mapping(audit["dynamics_readiness"])["return_dynamics"]
+    )
+    assert readiness["status"] == "valid"
+    assert readiness["row_order"] == "cache_order"
+    assert readiness["computed_from"] == "direct_cache"
+    assert readiness["cache_source"] == "direct"
+    assert _mapping(audit["source_status"]) == {
+        "kind": "cache",
+        "readable": True,
+        "reason": None,
+    }
 
 
 def test_fingerprint_rule_prefers_fresh_sibling_cache(
@@ -938,6 +1098,42 @@ def test_fingerprint_rule_reports_unsupported_target(
         "duration_ms": None,
     }
     assert _mapping(payload["source"])["reason"] == "unsupported_target_kind"
+    audit = _mapping(payload["fingerprint_audit"])
+    assert _list(audit["sections_expected"]) == [
+        "coverage",
+        "temporal_topology",
+        "calendar_regimes",
+        "m1_bar_distribution",
+        "return_dynamics",
+    ]
+    assert _list(audit["sections_emitted"]) == [
+        "coverage",
+        "temporal_topology",
+    ]
+    assert _mapping(audit["sections_skipped"]) == {
+        "calendar_regimes": {"reason": "unsupported_target_kind"},
+        "m1_bar_distribution": {
+            "reason": "unsupported_target_kind",
+            "details": {"timeframe": "M1"},
+        },
+        "return_dynamics": {
+            "reason": "unsupported_target_kind",
+            "details": {"timeframe": "M1"},
+        },
+    }
+    assert _mapping(audit["target_capability"]) == {
+        "supported": False,
+        "unsupported_reason": "unsupported_target_kind",
+    }
+    assert _mapping(audit["source_status"]) == {
+        "kind": "unavailable",
+        "readable": False,
+        "reason": "unsupported_target_kind",
+    }
+    statuses = _mapping(audit["section_statuses"])
+    assert statuses["coverage"] == "unavailable"
+    assert statuses["temporal_topology"] == "unavailable"
+    assert statuses["calendar_regimes"] == "skipped"
 
 
 def test_series_fingerprint_coverage_summary_counts_mixed_sources(
@@ -1743,6 +1939,10 @@ def test_fingerprint_constants_are_stable() -> None:
     assert (
         TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION
         == "histdatacom.time-series-fingerprint-dynamics.v1"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-audit.v1"
     )
     assert DEFAULT_FINGERPRINT_QUANTILES == (
         0.01,
