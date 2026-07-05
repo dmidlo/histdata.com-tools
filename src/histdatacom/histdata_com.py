@@ -23,6 +23,7 @@ Returns:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 import subprocess
@@ -71,6 +72,7 @@ from histdatacom.repository_output import (
 )
 from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.publication_safety import publish_safe_path
+from histdatacom.publication_safety import publish_safe_json_mapping
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import (
     FailureInfo,
@@ -148,6 +150,8 @@ class RuntimeContext:
     quality_preflight_evidence_path: str | None
     quality_preflight_markdown: bool
     quality_preflight_markdown_report_path: str | None
+    quality_preflight_profile_preview_format: str
+    quality_preflight_profile_preview_output_path: str
     quality_preflight_report_path: str | None
     quality_preflight_run_validation: bool
     quality_preflight_sample_size: int
@@ -298,6 +302,7 @@ class _HistDataCom:  # noqa:R701
                 run_validation=self.context.quality_preflight_run_validation,
             )
         )
+        _attach_quality_preflight_profile_preview(payload, self.context)
         if self.context.quality_preflight_report_path:
             report_path = Path(
                 self.context.quality_preflight_report_path
@@ -586,6 +591,12 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
             if args.get("quality_preflight_markdown_report_path") is None
             else str(args["quality_preflight_markdown_report_path"])
         ),
+        quality_preflight_profile_preview_format=str(
+            args.get("quality_preflight_profile_preview_format") or "json"
+        ),
+        quality_preflight_profile_preview_output_path=str(
+            args.get("quality_preflight_profile_preview_output_path") or ""
+        ),
         quality_preflight_report_path=(
             None
             if args.get("quality_preflight_report_path") is None
@@ -655,6 +666,67 @@ def _write_text_payload(content: str, destination: str) -> None:
     if path.parent != Path("."):
         path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(rendered, encoding="utf-8")
+
+
+def _attach_quality_preflight_profile_preview(
+    payload: dict[str, Any],
+    context: RuntimeContext,
+) -> None:
+    """Write an optional profile preview artifact into preflight evidence."""
+    destination = context.quality_preflight_profile_preview_output_path.strip()
+    if not destination:
+        return
+    output_format = context.quality_preflight_profile_preview_format
+    preview_payload = publish_safe_json_mapping(
+        _quality_profile_preview_payload(
+            context,
+            preview_format=output_format,
+            preview_output_path=destination,
+        )
+    )
+    rendered = _format_quality_profile_preview(
+        preview_payload,
+        output_format=output_format,
+    )
+    artifact = _write_quality_profile_preview_artifact(
+        rendered,
+        destination,
+        output_format=output_format,
+    )
+    evidence_value = payload.get("evidence")
+    if isinstance(evidence_value, dict):
+        evidence_value["quality_profile_preview"] = artifact
+        return
+    payload["evidence"] = {"quality_profile_preview": artifact}
+
+
+def _write_quality_profile_preview_artifact(
+    content: str,
+    destination: str,
+    *,
+    output_format: str,
+) -> dict[str, JSONValue]:
+    """Write a preflight profile preview artifact and return metadata."""
+    if destination == "-":
+        raise ValueError(
+            "quality preflight profile preview output requires a file path"
+        )
+    rendered = content if content.endswith("\n") else f"{content}\n"
+    encoded = rendered.encode("utf-8")
+    path = Path(destination).expanduser()
+    if path.parent != Path("."):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(encoded)
+    return {
+        "state": "written",
+        "kind": "quality-profile-preview",
+        "path": str(publish_safe_path(str(path.resolve(strict=False)))),
+        "format": output_format,
+        "schema_version": QUALITY_PROFILE_PREVIEW_SCHEMA_VERSION,
+        "hash_algorithm": "sha256",
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "size_bytes": len(encoded),
+    }
 
 
 def _format_quality_profile_preview(
@@ -734,8 +806,7 @@ def _format_quality_profile_preview_markdown(
         "| --- | --- |",
         f"| Modes | {_markdown_cell(_preview_quality_modes_text(payload))} |",
         (
-            "| Profile | "
-            f"{_markdown_cell(_preview_profile_source_text(payload))} |"
+            f"| Profile | {_markdown_cell(_preview_profile_source_text(payload))} |"
         ),
         "",
         "## Profile Inputs",
@@ -938,6 +1009,9 @@ def _preview_mapping_rows(value: object) -> list[Mapping[str, JSONValue]]:
 
 def _quality_profile_preview_payload(
     context: RuntimeContext,
+    *,
+    preview_format: str | None = None,
+    preview_output_path: str | None = None,
 ) -> dict[str, JSONValue]:
     """Return a deterministic preview of the resolved quality profile."""
     profile = quality_profile_from_value(context.quality_profile)
@@ -964,9 +1038,13 @@ def _quality_profile_preview_payload(
         "from_api": context.from_api,
         "config_path": str(context.args.get("config_path") or ""),
         "quality_profile_path": context.quality_profile_path,
-        "quality_profile_preview_format": context.quality_profile_preview_format,
+        "quality_profile_preview_format": (
+            preview_format or context.quality_profile_preview_format
+        ),
         "quality_profile_preview_output_path": (
-            context.quality_profile_preview_output_path
+            preview_output_path
+            if preview_output_path is not None
+            else context.quality_profile_preview_output_path
         ),
         "quality_remediation_catalog_audit": audit_override_enabled,
     }

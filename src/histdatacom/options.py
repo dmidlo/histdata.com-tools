@@ -42,6 +42,8 @@ class Options:
         "quality_preflight_evidence_path",
         "quality_preflight_markdown",
         "quality_preflight_markdown_report_path",
+        "quality_preflight_profile_preview_format",
+        "quality_preflight_profile_preview_output_path",
         "quality_preflight_report_path",
         "quality_preflight_run_validation",
         "quality_preflight_sample_size",
@@ -112,6 +114,8 @@ class Options:
         self.quality_preflight_evidence_path: str | None = None
         self.quality_preflight_markdown: bool = False
         self.quality_preflight_markdown_report_path: str | None = None
+        self.quality_preflight_profile_preview_format: str = "json"
+        self.quality_preflight_profile_preview_output_path: str | None = None
         self.quality_preflight_sample_size: int = 4
         self.quality_preflight_report_path: str | None = None
         self.quality_preflight_run_validation: bool = False

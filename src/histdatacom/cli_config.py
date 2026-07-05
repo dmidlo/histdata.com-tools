@@ -54,6 +54,15 @@ _KEY_ALIASES = {
     "quality_preflight_markdown_report_path": (
         "quality_preflight_markdown_report_path"
     ),
+    "quality_preflight_profile_preview_format": (
+        "quality_preflight_profile_preview_format"
+    ),
+    "quality_preflight_profile_preview_output": (
+        "quality_preflight_profile_preview_output_path"
+    ),
+    "quality_preflight_profile_preview_output_path": (
+        "quality_preflight_profile_preview_output_path"
+    ),
     "quality_preflight_run_validation": "quality_preflight_run_validation",
     "quality_preflight_sample": "quality_preflight_sample_size",
     "quality_preflight_samples": "quality_preflight_sample_size",
@@ -161,6 +170,12 @@ _SCALAR_ARGS = {
         "--quality-preflight-markdown-report"
     ),
     "quality_preflight_report_path": "--quality-preflight-report",
+    "quality_preflight_profile_preview_format": (
+        "--quality-preflight-profile-preview-format"
+    ),
+    "quality_preflight_profile_preview_output_path": (
+        "--quality-preflight-profile-preview-output"
+    ),
     "quality_preflight_validation_report_path": (
         "--quality-preflight-validation-report"
     ),

@@ -791,6 +791,7 @@ def test_config_file_applies_quality_preflight_defaults(
     """YAML config should support cache-scale quality preflight options."""
     config_path = tmp_path / "quality-preflight.yaml"
     report_path = tmp_path / "reports" / "preflight.json"
+    preview_path = tmp_path / "reports" / "preflight-profile.md"
     config_path.write_text(
         f"""
 histdatacom:
@@ -798,6 +799,8 @@ histdatacom:
   data_directory: {tmp_path}
   quality_checks: [ticks]
   quality_preflight_report: {report_path}
+  quality_preflight_profile_preview_output: {preview_path}
+  quality_preflight_profile_preview_format: markdown
   quality_preflight_validation_report: latest
   quality_preflight_run_validation: true
   quality_preflight_sample_size: 2
@@ -819,6 +822,10 @@ histdatacom:
     assert options.quality_paths == (str(tmp_path),)
     assert options.quality_check_groups == ["ticks"]
     assert options.quality_preflight_report_path == str(report_path)
+    assert options.quality_preflight_profile_preview_output_path == str(
+        preview_path
+    )
+    assert options.quality_preflight_profile_preview_format == "markdown"
     assert options.quality_preflight_validation_report_path == "latest"
     assert options.quality_preflight_run_validation
     assert options.quality_preflight_sample_size == 2

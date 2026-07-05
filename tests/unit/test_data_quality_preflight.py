@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -1014,6 +1015,10 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
             "--quality-preflight-markdown",
             "--quality-preflight-markdown-report",
             str(tmp_path / "preflight.md"),
+            "--quality-preflight-profile-preview-output",
+            str(tmp_path / "profile-preview.md"),
+            "--quality-preflight-profile-preview-format",
+            "markdown",
             "--quality-preflight-validation-report",
             "latest",
             "--quality-preflight-run-validation",
@@ -1036,6 +1041,10 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
     assert options.quality_preflight_markdown_report_path == str(
         tmp_path / "preflight.md"
     )
+    assert options.quality_preflight_profile_preview_output_path == str(
+        tmp_path / "profile-preview.md"
+    )
+    assert options.quality_preflight_profile_preview_format == "markdown"
     assert options.quality_preflight_validation_report_path == "latest"
     assert options.quality_preflight_run_validation
     assert options.pair_groups == ["majors"]
@@ -1175,6 +1184,144 @@ def test_api_quality_preflight_writes_markdown_report(
     assert markdown_path.exists()
     assert "Quality Preflight Evidence" in markdown_path.read_text(
         encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    ("preview_format", "filename", "expected_prefix"),
+    (
+        ("json", "profile-preview.json", "{\n"),
+        ("text", "profile-preview.txt", "Quality Profile Preview\n"),
+        ("markdown", "profile-preview.md", "# Quality Profile Preview\n"),
+    ),
+)
+def test_api_quality_preflight_writes_profile_preview_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    preview_format: str,
+    filename: str,
+    expected_prefix: str,
+) -> None:
+    """API preflight should attach a verified profile-preview artifact."""
+    import histdatacom.histdata_com as histdata_com
+
+    data_dir = tmp_path / "data"
+    preview_path = tmp_path / "reports" / filename
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    def fail_submit(*args: object, **kwargs: object) -> None:
+        raise AssertionError("preflight should not submit to Temporal")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    options = Options()
+    options.quality_preflight = True
+    options.quality_paths = (str(data_dir),)
+    options.quality_check_groups = {"inventory"}
+    options.quality_preflight_sample_size = 1
+    options.quality_preflight_profile_preview_output_path = str(preview_path)
+    options.quality_preflight_profile_preview_format = preview_format
+    options.pairs = {"eurusd"}
+    options.formats = {"ascii"}
+    options.timeframes = {"T"}
+
+    payload = histdata_com.main(options)
+
+    artifact = payload["evidence"]["quality_profile_preview"]
+    artifact_bytes = preview_path.read_bytes()
+    artifact_text = artifact_bytes.decode("utf-8")
+    markdown = quality_preflight_to_markdown(payload)
+
+    assert artifact_text.startswith(expected_prefix)
+    assert artifact["state"] == "written"
+    assert artifact["kind"] == "quality-profile-preview"
+    assert artifact["path"] == f"reports/{filename}"
+    assert artifact["format"] == preview_format
+    assert artifact["schema_version"] == (
+        "histdatacom.quality-profile-preview.v1"
+    )
+    assert artifact["size_bytes"] == len(artifact_bytes)
+    assert artifact["sha256"] == hashlib.sha256(artifact_bytes).hexdigest()
+    assert "Profile preview artifact" in markdown
+    assert f"written: reports/{filename} ({preview_format})" in markdown
+    assert str(tmp_path) not in artifact_text
+    assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
+    if preview_format == "json":
+        preview_payload = json.loads(artifact_text)
+        assert (
+            preview_payload["profile_inputs"]["quality_profile_preview_format"]
+            == "json"
+        )
+        assert (
+            preview_payload["profile_inputs"][
+                "quality_profile_preview_output_path"
+            ]
+            == f"reports/{filename}"
+        )
+
+
+def test_config_quality_preflight_profile_preview_writes_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """YAML-configured preflight should write preview evidence artifacts."""
+    import histdatacom.histdata_com as histdata_com
+
+    data_dir = tmp_path / "data"
+    preview_path = tmp_path / "reports" / "yaml-profile-preview.txt"
+    report_path = tmp_path / "reports" / "preflight.json"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality_preflight: true
+  quality_target: {data_dir}
+  quality_checks: [inventory]
+  quality_preflight_report: {report_path}
+  quality_preflight_sample_size: 1
+  quality_preflight_profile_preview_output: {preview_path}
+  quality_preflight_profile_preview_format: text
+  pairs: [eurusd]
+  formats: [ascii]
+  timeframes: [tick-data-quotes]
+""",
+        encoding="utf-8",
+    )
+
+    def fail_submit(*args: object, **kwargs: object) -> None:
+        raise AssertionError("preflight should not submit to Temporal")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    artifact = payload["evidence"]["quality_profile_preview"]
+
+    assert preview_path.read_text(encoding="utf-8").startswith(
+        "Quality Profile Preview\n"
+    )
+    assert artifact["state"] == "written"
+    assert artifact["path"] == "reports/yaml-profile-preview.txt"
+    assert artifact["format"] == "text"
+    assert (
+        "profile preview: written: reports/yaml-profile-preview.txt (text)"
+        in output
     )
 
 

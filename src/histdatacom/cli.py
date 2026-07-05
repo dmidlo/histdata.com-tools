@@ -351,6 +351,21 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     "--quality-preflight-markdown-report requires --quality-preflight"
                 )
                 raise SystemExit(1)
+            if (
+                self.arg_namespace.quality_preflight_profile_preview_format
+                != "json"
+            ):
+                print(  # noqa:T201
+                    "--quality-preflight-profile-preview-format requires "
+                    "--quality-preflight-profile-preview-output"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_preflight_profile_preview_output_path:
+                print(  # noqa:T201
+                    "--quality-preflight-profile-preview-output requires "
+                    "--quality-preflight"
+                )
+                raise SystemExit(1)
             if self.arg_namespace.quality_preflight_validation_report_path:
                 print(  # noqa:T201
                     "--quality-preflight-validation-report requires --quality-preflight"
@@ -385,8 +400,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             and not self.arg_namespace.quality_profile_preview
         ):
             print(  # noqa:T201
-                "--quality-profile-preview-format requires "
-                "--quality-profile-preview"
+                "--quality-profile-preview-format requires --quality-profile-preview"
             )
             raise SystemExit(1)
         if (
@@ -394,8 +408,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             and not self.arg_namespace.quality_profile_preview
         ):
             print(  # noqa:T201
-                "--quality-profile-preview-output requires "
-                "--quality-profile-preview"
+                "--quality-profile-preview-output requires --quality-profile-preview"
             )
             raise SystemExit(1)
 
@@ -446,6 +459,45 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     "--quality-max-warnings requires --quality or --repo-quality"
                 )
                 raise SystemExit(1)
+            if (
+                self.arg_namespace.quality_preflight_profile_preview_format
+                != "json"
+                and not (
+                    self.arg_namespace.quality_preflight_profile_preview_output_path
+                )
+            ):
+                print(  # noqa:T201
+                    "--quality-preflight-profile-preview-format requires "
+                    "--quality-preflight-profile-preview-output"
+                )
+                raise SystemExit(1)
+            if (
+                self.arg_namespace.quality_preflight_profile_preview_output_path
+                == "-"
+            ):
+                print(  # noqa:T201
+                    "--quality-preflight-profile-preview-output requires a "
+                    "file path, not '-'"
+                )
+                raise SystemExit(1)
+            if (
+                self.arg_namespace.quality_profile_preview
+                and self.arg_namespace.quality_preflight_profile_preview_output_path
+            ):
+                print(  # noqa:T201
+                    "--quality-preflight-profile-preview-output cannot be "
+                    "combined with --quality-profile-preview"
+                )
+                raise SystemExit(1)
+        elif (
+            self.arg_namespace.quality_preflight_profile_preview_output_path
+            or self.arg_namespace.quality_preflight_profile_preview_format
+            != "json"
+        ):
+            print(  # noqa:T201
+                "quality preflight profile preview options require --quality-preflight"
+            )
+            raise SystemExit(1)
         elif (
             self.arg_namespace.quality_preflight_validation_report_path
             or self.arg_namespace.quality_preflight_run_validation
@@ -621,6 +673,29 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                             ),
                         ]
                     )
+                if (
+                    self.arg_namespace.quality_preflight_profile_preview_output_path
+                ):
+                    args.extend(
+                        [
+                            "--quality-preflight-profile-preview-output",
+                            (
+                                self.arg_namespace.quality_preflight_profile_preview_output_path
+                            ),
+                        ]
+                    )
+                    if (
+                        self.arg_namespace.quality_preflight_profile_preview_format
+                        != "json"
+                    ):
+                        args.extend(
+                            [
+                                "--quality-preflight-profile-preview-format",
+                                (
+                                    self.arg_namespace.quality_preflight_profile_preview_format
+                                ),
+                            ]
+                        )
                 if self.arg_namespace.quality_preflight_validation_report_path:
                     args.extend(
                         [
@@ -1662,6 +1737,26 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "write the publish-safe Markdown quality preflight evidence "
                 "report to PATH"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-profile-preview-output",
+            dest="quality_preflight_profile_preview_output_path",
+            type=str,
+            metavar="PATH",
+            help=(
+                "write the resolved quality-profile preview to PATH and "
+                "reference it from quality preflight evidence"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-profile-preview-format",
+            dest="quality_preflight_profile_preview_format",
+            choices=("json", "text", "markdown"),
+            default="json",
+            help=(
+                "output format for --quality-preflight-profile-preview-output; "
+                "defaults to machine-readable json"
             ),
         )
         quality_args.add_argument(
