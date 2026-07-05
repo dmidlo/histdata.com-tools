@@ -47,6 +47,9 @@ SOURCE_UTC_OFFSET = "-05:00"
 CANONICAL_TIMEZONE = "UTC"
 MAX_CALENDAR_SAMPLES = 5
 UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-calendar-regimes.v1"
+)
 
 SESSION_ASIA = "asia"
 SESSION_LONDON = "london"
@@ -62,7 +65,17 @@ FX_FRIDAY_CLOSE_WEEKDAY = 4
 FX_SUNDAY_OPEN_WEEKDAY = 6
 FX_CLOSE_OPEN_MINUTE = 17 * 60
 MILLISECONDS_PER_MINUTE = 60_000
+MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE
 MILLISECONDS_PER_DAY = 24 * 60 * MILLISECONDS_PER_MINUTE
+SOURCE_WEEKDAY_NAMES = (
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,6 +265,8 @@ class _CalendarScan:
     holiday_tag_counts: Counter[str] = field(default_factory=Counter)
     event_tag_counts: Counter[str] = field(default_factory=Counter)
     calendar_tag_counts: Counter[str] = field(default_factory=Counter)
+    hour_of_day_counts: Counter[str] = field(default_factory=Counter)
+    day_of_week_counts: Counter[str] = field(default_factory=Counter)
     samples: list[_CalendarSample] = field(default_factory=list)
     invalid_timestamps: list[_InvalidTimestampSample] = field(
         default_factory=list
@@ -438,6 +453,198 @@ def calendar_policy_metadata(
         "month_end_policy": "source_calendar_date",
         "fix_window_policy": "advisory_utc_london_4pm_window",
     }
+
+
+def calendar_regime_payload_for_target(
+    target: QualityTarget,
+    *,
+    calendar_profile: HistDataCalendarProfile | None = None,
+) -> dict[str, JSONValue]:
+    """Return deterministic calendar/session fingerprint metadata."""
+    profile = calendar_profile or default_calendar_profile()
+    if not _is_ascii_text_target(target):
+        return _calendar_regime_unavailable_payload(
+            profile,
+            reason="target_unsupported",
+            detail={"kind": target.kind.value, "timeframe": target.timeframe},
+        )
+
+    try:
+        scan, source_member, computed_from, cache_source = (
+            _calendar_scan_for_target(
+                target,
+                calendar_profile=profile,
+                asset_class=_target_asset_class(target),
+            )
+        )
+    except (
+        ValueError,
+        UnicodeDecodeError,
+        _SourceReadError,
+        _TimestampSourceReadError,
+    ) as exc:
+        detail: dict[str, JSONValue] = {}
+        reason = "source_unavailable"
+        if isinstance(exc, _SourceReadError):
+            reason = exc.code.lower()
+            detail = exc.metadata
+        elif isinstance(exc, _TimestampSourceReadError):
+            reason = exc.code.lower()
+            detail = exc.metadata
+        elif isinstance(exc, UnicodeDecodeError):
+            reason = "text_encoding_invalid"
+            detail = {
+                "encoding": exc.encoding,
+                "error": str(exc),
+                "byte_start": exc.start,
+                "byte_end": exc.end,
+            }
+        else:
+            detail = {"error": str(exc)}
+        return _calendar_regime_unavailable_payload(
+            profile,
+            reason=reason,
+            detail=detail,
+        )
+
+    return _calendar_regime_payload(
+        scan,
+        calendar_profile=profile,
+        source_member=source_member,
+        computed_from=computed_from,
+        cache_source=cache_source,
+    )
+
+
+def _calendar_scan_for_target(
+    target: QualityTarget,
+    *,
+    calendar_profile: HistDataCalendarProfile,
+    asset_class: str,
+) -> tuple[_CalendarScan, str, str, str | None]:
+    timestamp_scan = _timestamp_scan_for_target(target)
+    if _can_use_timestamp_scan_for_calendar(timestamp_scan):
+        source_member = (
+            timestamp_scan.valid_rows[0].source_member
+            if timestamp_scan.valid_rows
+            else ""
+        )
+        scan = _scan_calendar_timestamp_samples(
+            tuple(timestamp_scan.valid_rows),
+            calendar_profile=calendar_profile,
+            asset_class=asset_class,
+        )
+        return (
+            scan,
+            source_member,
+            timestamp_scan.topology_source,
+            timestamp_scan.cache_source or None,
+        )
+    if timestamp_scan.polars_frame is not None:
+        scan = _scan_calendar_projected_frame(
+            timestamp_scan.polars_frame,
+            target=target,
+            calendar_profile=calendar_profile,
+            asset_class=asset_class,
+        )
+        return (
+            scan,
+            "",
+            timestamp_scan.topology_source,
+            timestamp_scan.cache_source or None,
+        )
+    if target.kind is QualityTargetKind.CACHE:
+        raise _SourceReadError(
+            code="DOMAIN_CALENDAR_CACHE_UNAVAILABLE",
+            message="Cache target has no projected timestamp data for "
+            "calendar fingerprinting.",
+            metadata={"kind": target.kind.value, "timeframe": target.timeframe},
+        )
+
+    delimiter = delimiter_for_timeframe(target.timeframe)
+    columns = columns_for_timeframe(target.timeframe)
+    payload = _read_text_payload(target)
+    text = payload.data.decode("utf-8")
+    scan = _scan_calendar_rows(
+        target,
+        text.splitlines(),
+        delimiter=delimiter,
+        timestamp_index=columns.index("datetime"),
+        source_member=payload.source_member,
+        calendar_profile=calendar_profile,
+        asset_class=asset_class,
+    )
+    return scan, payload.source_member, "text_scan", None
+
+
+def _calendar_regime_payload(
+    scan: _CalendarScan,
+    *,
+    calendar_profile: HistDataCalendarProfile,
+    source_member: str,
+    computed_from: str,
+    cache_source: str | None,
+) -> dict[str, JSONValue]:
+    payload: dict[str, JSONValue] = {
+        "schema_version": (
+            TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION
+        ),
+        "status": _calendar_regime_status(scan),
+        "computed_from": computed_from,
+        "cache_source": cache_source,
+        "source_member": source_member,
+        "row_count": scan.row_count,
+        "parsed_row_count": scan.parsed_row_count,
+        "invalid_timestamp_count": scan.invalid_timestamp_count,
+        "calendar_basis": {
+            "hour_of_day": "source_clock",
+            "day_of_week": "source_calendar",
+            "session_windows": "utc_clock",
+            "special_tags": "mixed_source_and_utc_calendar",
+        },
+        "session_state_counts": _counter_metadata(scan.session_state_counts),
+        "active_session_counts": _counter_metadata(scan.active_session_counts),
+        "clock_session_counts": _counter_metadata(scan.clock_session_counts),
+        "overlap_counts": _counter_metadata(scan.overlap_counts),
+        "special_tag_counts": _counter_metadata(scan.special_tag_counts),
+        "holiday_tag_counts": _counter_metadata(scan.holiday_tag_counts),
+        "event_tag_counts": _counter_metadata(scan.event_tag_counts),
+        "calendar_tag_counts": _counter_metadata(scan.calendar_tag_counts),
+        "hour_of_day_counts": _counter_metadata(scan.hour_of_day_counts),
+        "day_of_week_counts": _counter_metadata(scan.day_of_week_counts),
+        "calendar_profile_complete": calendar_profile.complete,
+        "missing_optional_calendar_data": not calendar_profile.complete,
+        "calendar_policy": calendar_policy_metadata(calendar_profile),
+    }
+    return payload
+
+
+def _calendar_regime_unavailable_payload(
+    calendar_profile: HistDataCalendarProfile,
+    *,
+    reason: str,
+    detail: Mapping[str, JSONValue] | None = None,
+) -> dict[str, JSONValue]:
+    payload = _calendar_regime_payload(
+        _CalendarScan(),
+        calendar_profile=calendar_profile,
+        source_member="",
+        computed_from="unavailable",
+        cache_source=None,
+    )
+    payload["status"] = "unavailable"
+    payload["unavailable_reason"] = reason
+    if detail:
+        payload["unavailable_detail"] = dict(detail)
+    return payload
+
+
+def _calendar_regime_status(scan: _CalendarScan) -> str:
+    if scan.row_count == 0:
+        return "empty"
+    if scan.invalid_timestamp_count:
+        return "partial"
+    return "ok"
 
 
 @dataclass(slots=True)
@@ -858,6 +1065,31 @@ def _scan_calendar_projected_frame(
             if count
         },
     )
+    scan.hour_of_day_counts.update(
+        {
+            f"{hour:02d}": count
+            for hour in range(24)
+            if (
+                count := _polars_count(
+                    frame,
+                    (pl.col("_source_time_of_day_ms") // MILLISECONDS_PER_HOUR)
+                    == hour,
+                )
+            )
+        }
+    )
+    scan.day_of_week_counts.update(
+        {
+            SOURCE_WEEKDAY_NAMES[weekday]: count
+            for weekday in range(7)
+            if (
+                count := _polars_count(
+                    frame,
+                    pl.col("_source_weekday") == weekday,
+                )
+            )
+        }
+    )
     special_counts = {
         SESSION_STATE_WEEKEND_CLOSURE: session_counts[
             SESSION_STATE_WEEKEND_CLOSURE
@@ -1099,6 +1331,11 @@ def _record_classification(
     _increment_counts(scan.holiday_tag_counts, classification.holiday_tags)
     _increment_counts(scan.event_tag_counts, classification.event_tags)
     _increment_counts(scan.calendar_tag_counts, classification.calendar_tags)
+    _record_source_calendar_counts(
+        scan,
+        source_hour=classification.source_datetime.hour,
+        source_weekday=classification.source_datetime.weekday(),
+    )
     if len(scan.samples) < MAX_CALENDAR_SAMPLES:
         scan.samples.append(
             _CalendarSample(
@@ -1142,6 +1379,14 @@ def _record_calendar_values(
     _increment_counts(scan.holiday_tag_counts, holiday_tags)
     _increment_counts(scan.event_tag_counts, event_tags)
     _increment_counts(scan.calendar_tag_counts, calendar_tags)
+    if timestamp_sample is not None:
+        _record_source_calendar_counts(
+            scan,
+            source_hour=(
+                timestamp_sample.source_time_of_day_ms // MILLISECONDS_PER_HOUR
+            ),
+            source_weekday=timestamp_sample.source_weekday,
+        )
     if (
         timestamp_sample is not None
         and len(scan.samples) < MAX_CALENDAR_SAMPLES
@@ -1191,6 +1436,8 @@ def _summary_finding(
             "holiday_tag_counts": _counter_metadata(scan.holiday_tag_counts),
             "event_tag_counts": _counter_metadata(scan.event_tag_counts),
             "calendar_tag_counts": _counter_metadata(scan.calendar_tag_counts),
+            "hour_of_day_counts": _counter_metadata(scan.hour_of_day_counts),
+            "day_of_week_counts": _counter_metadata(scan.day_of_week_counts),
             "samples": [sample.to_dict() for sample in scan.samples],
             "calendar_policy": calendar_policy_metadata(calendar_profile),
         },
@@ -1343,7 +1590,13 @@ def _holiday_tags(
     calendar_profile: HistDataCalendarProfile,
     asset_class: str,
 ) -> tuple[str, ...]:
-    return calendar_profile.holiday_tags_for(source, asset_class=asset_class)
+    return tuple(
+        str(tag)
+        for tag in calendar_profile.holiday_tags_for(
+            source,
+            asset_class=asset_class,
+        )
+    )
 
 
 def _event_tags(
@@ -1352,7 +1605,13 @@ def _event_tags(
     calendar_profile: HistDataCalendarProfile,
     asset_class: str,
 ) -> tuple[str, ...]:
-    return calendar_profile.event_tags_for(source, asset_class=asset_class)
+    return tuple(
+        str(tag)
+        for tag in calendar_profile.event_tags_for(
+            source,
+            asset_class=asset_class,
+        )
+    )
 
 
 def _holiday_tags_for_source_fields(
@@ -1363,11 +1622,14 @@ def _holiday_tags_for_source_fields(
     calendar_profile: HistDataCalendarProfile,
     asset_class: str,
 ) -> tuple[str, ...]:
-    return calendar_profile.holiday_tags_for_fields(
-        source_year=source_year,
-        source_month=source_month,
-        source_day=source_day,
-        asset_class=asset_class,
+    return tuple(
+        str(tag)
+        for tag in calendar_profile.holiday_tags_for_fields(
+            source_year=source_year,
+            source_month=source_month,
+            source_day=source_day,
+            asset_class=asset_class,
+        )
     )
 
 
@@ -1379,11 +1641,14 @@ def _event_tags_for_source_fields(
     calendar_profile: HistDataCalendarProfile,
     asset_class: str,
 ) -> tuple[str, ...]:
-    return calendar_profile.event_tags_for_fields(
-        source_month=source_month,
-        source_day=source_day,
-        source_day_number=source_day_number,
-        asset_class=asset_class,
+    return tuple(
+        str(tag)
+        for tag in calendar_profile.event_tags_for_fields(
+            source_month=source_month,
+            source_day=source_day,
+            source_day_number=source_day_number,
+            asset_class=asset_class,
+        )
     )
 
 
@@ -1543,6 +1808,18 @@ def _parse_row(raw: str, delimiter: str) -> list[str]:
 def _increment_counts(counter: Counter[str], values: tuple[str, ...]) -> None:
     for value in values:
         counter[value] += 1
+
+
+def _record_source_calendar_counts(
+    scan: _CalendarScan,
+    *,
+    source_hour: int,
+    source_weekday: int,
+) -> None:
+    if 0 <= source_hour <= 23:
+        scan.hour_of_day_counts[f"{source_hour:02d}"] += 1
+    if 0 <= source_weekday < len(SOURCE_WEEKDAY_NAMES):
+        scan.day_of_week_counts[SOURCE_WEEKDAY_NAMES[source_weekday]] += 1
 
 
 def _counter_metadata(counter: Counter[str]) -> dict[str, JSONValue]:

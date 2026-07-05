@@ -969,6 +969,16 @@ Supported groups:
 | `domain` | symbol metadata, quote conventions, calendar/session tags, cross-instrument consistency |
 | `modeling` | advisory modeling-readiness checks for bid-only bars, leakage risk, spread-cost assumptions, target horizon feasibility |
 | `provenance` | optional orchestration manifest/status lineage checks for artifact paths, sizes, checksums, cache metadata, stale caches, and orphan files |
+| `fingerprint` | deterministic INFO-only time-series fingerprints for target axis, coverage, timestamp topology, M1/tick distributions, calendar regimes, and bounded tick spread conditioning |
+
+`fingerprint.series` payloads include a `calendar_regimes` section for readable
+ASCII M1 and tick targets. It counts session states, active/clock sessions,
+overlaps, special windows, holiday/event tags, calendar tags, source
+hour-of-day, and source day-of-week. The section embeds the calendar policy and
+profile metadata used for classification, so incomplete/static calendar
+profiles remain advisory and visible rather than becoming hidden failures. Tick
+fingerprints also include bounded `conditional_distributions` for spread by
+active session and special tag when spread data is available.
 
 `provenance` checks are only applied when a local orchestration
 `.histdatacom/manifest-status.sqlite3` store is available. Explicit

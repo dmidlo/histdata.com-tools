@@ -14,7 +14,10 @@ from histdatacom.data_quality import (
     DEFAULT_FINGERPRINT_QUANTILES,
     DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
     DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
+    QUALITY_PROFILE_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
@@ -34,6 +37,7 @@ from histdatacom.data_quality import (
     QualitySeverity,
     QualityTarget,
     QualityTargetKind,
+    discover_quality_targets,
     quality_target_from_path,
     quality_rules_for_groups,
     quality_run_rules_for_groups,
@@ -208,6 +212,196 @@ def test_fingerprint_tick_distribution_counts_zero_and_negative_spreads(
     spread_summary = _mapping(distribution["spread"])
     assert spread_summary["min"] == -0.0001
     assert spread_summary["max"] == 0.0003
+
+
+def test_fingerprint_calendar_regimes_reports_session_and_special_counts(
+    tmp_path: Path,
+) -> None:
+    """Fingerprints should expose deterministic calendar/session regimes."""
+    case = HistDataAsciiCase(
+        name="m1_calendar_regimes",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202_REGIMES.csv",
+        rows=(
+            "20120205 170000;1.306600;1.306610;1.306590;1.306600;0",
+            "20120203 165900;1.306600;1.306610;1.306590;1.306600;0",
+            "20120201 110000;1.306600;1.306610;1.306590;1.306600;0",
+            "20120331 110000;1.306600;1.306610;1.306590;1.306600;0",
+            "20221225 120000;1.306600;1.306610;1.306590;1.306600;0",
+            "20221231 110000;1.306600;1.306610;1.306590;1.306600;0",
+        ),
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    regimes = _mapping(payload["calendar_regimes"])
+
+    assert regimes["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION
+    )
+    assert regimes["status"] == "ok"
+    assert regimes["computed_from"] == "text_scan"
+    assert regimes["row_count"] == 6
+    assert regimes["parsed_row_count"] == 6
+    assert regimes["invalid_timestamp_count"] == 0
+    assert _mapping(regimes["session_state_counts"]) == {
+        "friday_close": 1,
+        "market_open": 1,
+        "sunday_open": 1,
+        "weekend_closure": 3,
+    }
+    special = _mapping(regimes["special_tag_counts"])
+    assert special["sunday_open"] == 1
+    assert special["friday_close"] == 1
+    assert special["daily_rollover"] == 2
+    assert special["london_4pm_fix_window"] == 3
+    assert special["month_end"] == 2
+    assert _mapping(regimes["holiday_tag_counts"]) == {
+        "major_holiday:christmas_day": 1
+    }
+    assert _mapping(regimes["hour_of_day_counts"]) == {
+        "11": 3,
+        "12": 1,
+        "16": 1,
+        "17": 1,
+    }
+    assert _mapping(regimes["day_of_week_counts"]) == {
+        "friday": 1,
+        "saturday": 2,
+        "sunday": 2,
+        "wednesday": 1,
+    }
+    assert _mapping(regimes["calendar_basis"])["day_of_week"] == (
+        "source_calendar"
+    )
+    policy = _mapping(regimes["calendar_policy"])
+    assert policy["holiday_calendar_complete"] is False
+    assert regimes["missing_optional_calendar_data"] is True
+    assert "conditional_distributions" not in payload
+
+
+def test_fingerprint_calendar_regimes_use_direct_cache_projection(
+    tmp_path: Path,
+) -> None:
+    """Cache-backed fingerprints should classify calendar regimes from cache."""
+    cache_path = tmp_path / CACHE_FILENAME
+    batch = parse_ascii_lines(M1, CLEAN_M1_ROWS)
+    write_polars_cache(to_polars_frame(batch), cache_path)
+    target = QualityTarget(
+        path=str(cache_path),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    regimes = _mapping(payload["calendar_regimes"])
+
+    assert regimes["status"] == "ok"
+    assert regimes["computed_from"] == "direct_cache"
+    assert regimes["cache_source"] == "direct"
+    assert regimes["row_count"] == 3
+    assert _mapping(regimes["session_state_counts"]) == {"market_open": 3}
+    assert _mapping(regimes["active_session_counts"]) == {"asia": 3}
+    assert _mapping(regimes["hour_of_day_counts"]) == {"00": 3}
+    assert _mapping(regimes["day_of_week_counts"]) == {"wednesday": 3}
+
+
+def test_fingerprint_tick_conditional_distributions_by_calendar_bucket(
+    tmp_path: Path,
+) -> None:
+    """Tick spread summaries should be conditionable by calendar bucket."""
+    case = HistDataAsciiCase(
+        name="tick_calendar_conditioned_spread",
+        timeframe=TICK,
+        filename="DAT_ASCII_EURUSD_T_201202_CONDITIONED.csv",
+        rows=(
+            "20120201 030000000,1.000000,1.000200,0",
+            "20120201 110000000,1.000000,1.000300,0",
+            "20120203 165900000,1.000000,1.000400,0",
+        ),
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    conditional = _mapping(payload["conditional_distributions"])
+
+    assert conditional["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION
+    )
+    assert conditional["basis"] == "text"
+    assert conditional["metric"] == "tick_spread"
+    assert conditional["row_count"] == 3
+    assert conditional["usable_row_count"] == 3
+    by_session = _mapping(conditional["by_active_session"])
+    asia_spread = _mapping(_mapping(by_session["asia"])["spread"])
+    london_spread = _mapping(_mapping(by_session["london"])["spread"])
+    new_york_spread = _mapping(_mapping(by_session["new_york"])["spread"])
+    no_active_spread = _mapping(
+        _mapping(by_session["no_active_session_window"])["spread"]
+    )
+    assert asia_spread["median"] == 0.0002
+    assert london_spread["median"] == 0.0002
+    assert new_york_spread["median"] == 0.0003
+    assert no_active_spread["median"] == 0.0004
+    by_special = _mapping(conditional["by_special_tag"])
+    assert (
+        _mapping(_mapping(by_special["london_4pm_fix_window"])["spread"])[
+            "median"
+        ]
+        == 0.0003
+    )
+    assert (
+        _mapping(_mapping(by_special["daily_rollover"])["spread"])["median"]
+        == 0.0004
+    )
+    assert (
+        _mapping(_mapping(by_special["friday_close"])["spread"])["median"]
+        == 0.0004
+    )
+
+
+def test_fingerprint_calendar_regimes_use_configured_complete_profile(
+    tmp_path: Path,
+) -> None:
+    """Fingerprint calendar regimes should honor resolved profile metadata."""
+    path = write_ascii_case(
+        tmp_path,
+        HistDataAsciiCase(
+            name="m1_configured_calendar_profile",
+            timeframe=M1,
+            filename="DAT_ASCII_EURUSD_M1_202203_PROFILED.csv",
+            rows=(
+                "20220415 120000;1.306600;1.306610;1.306590;1.306600;0",
+                "20221227 120000;1.306600;1.306610;1.306590;1.306600;0",
+                "20200316 120000;1.306600;1.306610;1.306590;1.306600;0",
+            ),
+        ),
+    )
+    discovery = discover_quality_targets((path,))
+    report = run_quality_assessment(
+        discovery.targets,
+        quality_rules_for_groups(
+            ("fingerprint",),
+            profile=_complete_calendar_profile(),
+        ),
+    )
+    payload = _fingerprint_payload(report.findings[0])
+    regimes = _mapping(payload["calendar_regimes"])
+    policy = _mapping(regimes["calendar_policy"])
+
+    assert regimes["status"] == "ok"
+    assert regimes["calendar_profile_complete"] is True
+    assert regimes["missing_optional_calendar_data"] is False
+    assert policy["holiday_calendar_source"] == "operator-config"
+    assert policy["holiday_calendar_complete"] is True
+    assert _mapping(policy["calendar_profile"])["version"] == "2026.06"
+    assert _mapping(regimes["holiday_tag_counts"]) == {
+        "market_holiday:good_friday": 1
+    }
+    assert _mapping(regimes["event_tag_counts"]) == {
+        "crisis:covid_shock": 1,
+        "thin_liquidity:christmas_new_year": 1,
+    }
 
 
 def test_fingerprint_distribution_handles_invalid_partial_and_empty_m1_rows(
@@ -1373,6 +1567,14 @@ def test_fingerprint_constants_are_stable() -> None:
         TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY
         == "time_series_fingerprint_distribution_attention"
     )
+    assert (
+        TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-calendar-regimes.v1"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-conditional-distributions.v1"
+    )
     assert DEFAULT_FINGERPRINT_QUANTILES == (
         0.01,
         0.05,
@@ -1426,6 +1628,52 @@ def _mapping(value: Any) -> dict[str, Any]:
 def _list(value: Any) -> list[Any]:
     assert isinstance(value, list)
     return value
+
+
+def _complete_calendar_profile() -> dict[str, Any]:
+    return {
+        "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+        "name": "complete-calendar",
+        "rules": {
+            "domain.calendar_sessions": {
+                "calendar_profile": {
+                    "name": "operator-complete-calendar",
+                    "source": "operator-config",
+                    "version": "2026.06",
+                    "complete": True,
+                    "date_tags": [
+                        {
+                            "name": "good_friday",
+                            "tag": "market_holiday:good_friday",
+                            "rule": "good_friday",
+                            "asset_classes": ["fx"],
+                            "description": "Movable Good Friday market holiday.",
+                        }
+                    ],
+                    "window_tags": [
+                        {
+                            "name": "christmas_new_year_thin_liquidity",
+                            "tag": "thin_liquidity:christmas_new_year",
+                            "category": "thin_liquidity",
+                            "start_month": 12,
+                            "start_day": 24,
+                            "end_month": 1,
+                            "end_day": 2,
+                            "description": "Christmas/New Year thin liquidity.",
+                        },
+                        {
+                            "name": "covid_shock",
+                            "tag": "crisis:covid_shock",
+                            "category": "crisis",
+                            "start_date": "2020-03-01",
+                            "end_date": "2020-03-31",
+                            "description": "Configured crisis-period tag.",
+                        },
+                    ],
+                }
+            }
+        },
+    }
 
 
 def _target_summary_with_flag(
