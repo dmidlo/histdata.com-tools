@@ -1682,6 +1682,73 @@ def test_quality_profile_preview_prints_resolved_profile_without_submit(
     }
 
 
+@pytest.mark.parametrize(
+    ("mode_flag", "expected_modes"),
+    [
+        (
+            "--repo-quality",
+            {
+                "quality": False,
+                "repo_quality": True,
+                "quality_preflight": False,
+            },
+        ),
+        (
+            "--quality-preflight",
+            {
+                "quality": False,
+                "repo_quality": False,
+                "quality_preflight": True,
+            },
+        ),
+    ],
+)
+def test_quality_profile_preview_supports_quality_modes_without_work(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode_flag: str,
+    expected_modes: dict[str, bool],
+) -> None:
+    """Preview should support every quality mode without running work."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    def fail_preflight(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not run preflight")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "run_cache_quality_preflight",
+        fail_preflight,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            mode_flag,
+            "--quality-profile-preview",
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema_version"] == "histdatacom.quality-profile-preview.v1"
+    assert payload["quality_modes"] == expected_modes
+    assert payload["quality_profile"]["source"] == "default"
+    assert payload["resolved_profile"]["reporting"] == {
+        "remediation_catalog_audit": {"enabled": False}
+    }
+
+
 def test_api_quality_profile_preview_returns_payload_without_submit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
