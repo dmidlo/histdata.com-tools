@@ -1533,6 +1533,11 @@ def format_fingerprint_distribution_attention_lines(
             f"{_int_metadata(summary, 'omitted_attention_target_count')}"
         ),
     ]
+    threshold_text = _format_fingerprint_distribution_attention_thresholds(
+        summary.get("attention_thresholds")
+    )
+    if threshold_text:
+        lines.append(f"- thresholds: {threshold_text}")
     target_summaries = summary.get("target_summaries")
     if isinstance(target_summaries, list):
         for item in target_summaries:
@@ -1541,6 +1546,32 @@ def format_fingerprint_distribution_attention_lines(
                     f"- {_format_fingerprint_distribution_attention_target_line(item)}"
                 )
     return lines
+
+
+def _format_fingerprint_distribution_attention_thresholds(
+    value: JSONValue,
+) -> str:
+    thresholds = _mapping_payload(value)
+    if not thresholds:
+        return ""
+    return (
+        "invalid rows >= "
+        f"{_int_metadata(thresholds, 'invalid_row_min_count')} "
+        "and rate >= "
+        f"{_format_rate(thresholds.get('invalid_row_min_rate'))}; "
+        "zero spreads >= "
+        f"{_int_metadata(thresholds, 'zero_spread_min_count')} "
+        "and rate >= "
+        f"{_format_rate(thresholds.get('zero_spread_min_rate'))}; "
+        "negative spreads >= "
+        f"{_int_metadata(thresholds, 'negative_spread_min_count')} "
+        "and rate >= "
+        f"{_format_rate(thresholds.get('negative_spread_min_rate'))}; "
+        "truncated="
+        f"{_bool_text(thresholds.get('flag_truncated_distribution'))}; "
+        "cache_float_precision="
+        f"{_bool_text(thresholds.get('flag_cache_float_precision'))}"
+    )
 
 
 def _format_fingerprint_distribution_attention_target_line(

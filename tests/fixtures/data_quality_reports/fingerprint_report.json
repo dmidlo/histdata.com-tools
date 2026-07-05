@@ -150,6 +150,16 @@
       "attention_flag_counts": {},
       "attention_level_counts": {},
       "attention_target_count": 0,
+      "attention_thresholds": {
+        "flag_cache_float_precision": true,
+        "flag_truncated_distribution": true,
+        "invalid_row_min_count": 1,
+        "invalid_row_min_rate": 0.0,
+        "negative_spread_min_count": 1,
+        "negative_spread_min_rate": 0.0,
+        "zero_spread_min_count": 1,
+        "zero_spread_min_rate": 0.0
+      },
       "distribution_target_count": 1,
       "included_attention_target_count": 0,
       "omitted_attention_target_count": 0,

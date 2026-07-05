@@ -27,6 +27,7 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
+    HistDataFingerprintDistributionAttentionProfile,
     HistDataFingerprintProfile,
     HistDataSeriesFingerprintRule,
     QualityFinding,
@@ -867,6 +868,9 @@ def test_series_fingerprint_distribution_summary_counts_mixed_payloads(
     assert attention["included_attention_target_count"] == 3
     assert attention["omitted_attention_target_count"] == 4
     assert attention["truncated"] is True
+    assert attention["attention_thresholds"] == (
+        HistDataFingerprintDistributionAttentionProfile().to_metadata()
+    )
     assert attention["attention_flag_counts"] == {
         "cache_float_precision_basis": 1,
         "empty_distribution": 1,
@@ -893,6 +897,35 @@ def test_series_fingerprint_distribution_summary_counts_mixed_payloads(
         )["negative_spread_count"]
         == 1
     )
+    custom_profile = HistDataFingerprintProfile(
+        max_rows=1,
+        distribution_attention=(
+            HistDataFingerprintDistributionAttentionProfile(
+                invalid_row_min_count=2,
+                zero_spread_min_count=2,
+                negative_spread_min_count=2,
+                flag_truncated_distribution=False,
+                flag_cache_float_precision=False,
+            )
+        ),
+    )
+    custom_attention = _mapping(
+        series_fingerprint_distribution_attention_summary(
+            findings,
+            profile=custom_profile,
+            target_limit=-1,
+        )
+    )
+    custom_flag_counts = _mapping(custom_attention["attention_flag_counts"])
+    assert custom_attention["attention_thresholds"] == (
+        custom_profile.distribution_attention.to_metadata()
+    )
+    assert custom_flag_counts == {
+        "empty_distribution": 1,
+        "missing_precision_counts": 1,
+        "missing_distribution": 1,
+        "partial_rows_present": 1,
+    }
     assert json_safe_path_strings(attention)
 
 

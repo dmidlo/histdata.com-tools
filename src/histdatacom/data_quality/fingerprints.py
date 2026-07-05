@@ -94,6 +94,14 @@ DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT = 128
 DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT = 32
 DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT = 128
 DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT = 32
+DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT = 1
+DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_RATE = 0.0
+DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_COUNT = 1
+DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_RATE = 0.0
+DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_COUNT = 1
+DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_RATE = 0.0
+DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_TRUNCATED = True
+DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_CACHE_FLOAT_PRECISION = True
 SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES = (M1, TICK)
 SUPPORTED_SERIES_FINGERPRINT_KINDS = (
     QualityTargetKind.CSV,
@@ -122,6 +130,49 @@ DISTRIBUTION_ATTENTION_FLAGS = (
 
 
 @dataclass(frozen=True, slots=True)
+class HistDataFingerprintDistributionAttentionProfile:
+    """Operator-tunable advisory thresholds for distribution attention."""
+
+    invalid_row_min_count: int = (
+        DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT
+    )
+    invalid_row_min_rate: float = (
+        DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_RATE
+    )
+    zero_spread_min_count: int = (
+        DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_COUNT
+    )
+    zero_spread_min_rate: float = (
+        DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_RATE
+    )
+    negative_spread_min_count: int = (
+        DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_COUNT
+    )
+    negative_spread_min_rate: float = (
+        DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_RATE
+    )
+    flag_truncated_distribution: bool = (
+        DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_TRUNCATED
+    )
+    flag_cache_float_precision: bool = (
+        DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_CACHE_FLOAT_PRECISION
+    )
+
+    def to_metadata(self) -> dict[str, JSONValue]:
+        """Return a JSON-compatible representation."""
+        return {
+            "invalid_row_min_count": self.invalid_row_min_count,
+            "invalid_row_min_rate": self.invalid_row_min_rate,
+            "zero_spread_min_count": self.zero_spread_min_count,
+            "zero_spread_min_rate": self.zero_spread_min_rate,
+            "negative_spread_min_count": self.negative_spread_min_count,
+            "negative_spread_min_rate": self.negative_spread_min_rate,
+            "flag_truncated_distribution": self.flag_truncated_distribution,
+            "flag_cache_float_precision": self.flag_cache_float_precision,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class HistDataFingerprintProfile:
     """Operator-tunable limits for deterministic fingerprint summaries."""
 
@@ -131,6 +182,9 @@ class HistDataFingerprintProfile:
     histogram_bins: int = DEFAULT_FINGERPRINT_HISTOGRAM_BINS
     max_rows: int = DEFAULT_FINGERPRINT_MAX_ROWS
     rounding_digits: int = DEFAULT_FINGERPRINT_ROUNDING_DIGITS
+    distribution_attention: HistDataFingerprintDistributionAttentionProfile = (
+        field(default_factory=HistDataFingerprintDistributionAttentionProfile)
+    )
 
     def to_metadata(self) -> dict[str, JSONValue]:
         """Return a JSON-compatible representation."""
@@ -141,6 +195,9 @@ class HistDataFingerprintProfile:
             "histogram_bins": self.histogram_bins,
             "max_rows": self.max_rows,
             "rounding_digits": self.rounding_digits,
+            "distribution_attention": (
+                self.distribution_attention.to_metadata()
+            ),
         }
 
 
@@ -478,9 +535,13 @@ def series_fingerprint_distribution_summary(
 def series_fingerprint_distribution_attention_summary(
     findings: Iterable[QualityFinding],
     *,
+    profile: HistDataFingerprintProfile | None = None,
     target_limit: int = DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT,
 ) -> dict[str, JSONValue] | None:
     """Return bounded attention-first summaries for distributions."""
+    attention_profile = (
+        profile or HistDataFingerprintProfile()
+    ).distribution_attention
     target_summaries = _series_fingerprint_distribution_target_summaries(
         findings
     )
@@ -490,7 +551,12 @@ def series_fingerprint_distribution_attention_summary(
     attention_targets = [
         attention
         for target in target_summaries
-        if (attention := _distribution_attention_target_summary(target))
+        if (
+            attention := _distribution_attention_target_summary(
+                target,
+                attention_profile,
+            )
+        )
         is not None
     ]
     attention_targets.sort(key=_distribution_attention_sort_key)
@@ -522,6 +588,7 @@ def series_fingerprint_distribution_attention_summary(
         "included_attention_target_count": len(included),
         "omitted_attention_target_count": omitted_count,
         "truncated": omitted_count > 0,
+        "attention_thresholds": attention_profile.to_metadata(),
         "attention_level_counts": _counter_payload(attention_level_counts),
         "attention_flag_counts": _counter_payload(attention_flag_counts),
         "target_summaries": included,
@@ -696,8 +763,9 @@ def _optional_float_payload(value: object) -> float | None:
 
 def _distribution_attention_target_summary(
     target: Mapping[str, JSONValue],
+    profile: HistDataFingerprintDistributionAttentionProfile,
 ) -> dict[str, JSONValue] | None:
-    flags = _distribution_attention_flags(target)
+    flags = _distribution_attention_flags(target, profile)
     if not flags:
         return None
     return {
@@ -737,6 +805,7 @@ def _distribution_attention_target_summary(
 
 def _distribution_attention_flags(
     target: Mapping[str, JSONValue],
+    profile: HistDataFingerprintDistributionAttentionProfile,
 ) -> tuple[str, ...]:
     flags: list[str] = []
     status = _summary_key(target.get("status"))
@@ -748,31 +817,60 @@ def _distribution_attention_flags(
         and _int_payload(target.get("row_count")) == 0
     ):
         flags.append("empty_distribution")
-    if _int_payload(target.get("invalid_row_count")) > 0:
+    if _distribution_threshold_met(
+        _int_payload(target.get("invalid_row_count")),
+        _optional_float_payload(target.get("invalid_row_rate")),
+        min_count=profile.invalid_row_min_count,
+        min_rate=profile.invalid_row_min_rate,
+    ):
         flags.append("high_invalid_row_rate")
     if _int_payload(target.get("partial_row_count")) > 0:
         flags.append("partial_rows_present")
     if distribution_kind == "tick":
-        if _int_payload(target.get("negative_spread_count")) > 0:
+        if _distribution_threshold_met(
+            _int_payload(target.get("negative_spread_count")),
+            _optional_float_payload(target.get("negative_spread_rate")),
+            min_count=profile.negative_spread_min_count,
+            min_rate=profile.negative_spread_min_rate,
+        ):
             flags.append("negative_tick_spreads_present")
-        zero_spread_rate = _optional_float_payload(
-            target.get("zero_spread_rate")
-        )
-        if zero_spread_rate is not None and zero_spread_rate > 0:
+        if _distribution_threshold_met(
+            _int_payload(target.get("zero_spread_count")),
+            _optional_float_payload(target.get("zero_spread_rate")),
+            min_count=profile.zero_spread_min_count,
+            min_rate=profile.zero_spread_min_rate,
+        ):
             flags.append("zero_tick_spread_rate_present")
-    if target.get("truncated") is True:
+    if profile.flag_truncated_distribution and target.get("truncated") is True:
         flags.append("truncated_distribution")
     if (
         distribution_kind == "m1_bar"
         and _int_payload(target.get("precision_decimal_place_count")) == 0
     ):
         flags.append("missing_precision_counts")
-    if _summary_key(target.get("precision_source")) == "cache_float":
+    if (
+        profile.flag_cache_float_precision
+        and _summary_key(target.get("precision_source")) == "cache_float"
+    ):
         flags.append("cache_float_precision_basis")
     ordered = [
         flag for flag in DISTRIBUTION_ATTENTION_FLAGS if flag in set(flags)
     ]
     return tuple(ordered)
+
+
+def _distribution_threshold_met(
+    count: int,
+    rate: float | None,
+    *,
+    min_count: int,
+    min_rate: float,
+) -> bool:
+    if count < min_count:
+        return False
+    if rate is None:
+        return True
+    return rate >= min_rate
 
 
 def _distribution_attention_level(flags: tuple[str, ...]) -> str:

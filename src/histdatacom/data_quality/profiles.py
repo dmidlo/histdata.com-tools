@@ -31,6 +31,7 @@ from histdatacom.data_quality.fingerprints import (
     DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
     DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
     SERIES_FINGERPRINT_RULE_ID,
+    HistDataFingerprintDistributionAttentionProfile,
     HistDataFingerprintProfile,
 )
 from histdatacom.data_quality.ingestion import (
@@ -128,10 +129,7 @@ class QualityProfile:
     def __post_init__(self) -> None:
         """Validate static profile metadata and configured rule IDs."""
         if self.schema_version != QUALITY_PROFILE_SCHEMA_VERSION:
-            msg = (
-                "unsupported quality profile schema_version: "
-                f"{self.schema_version!r}"
-            )
+            msg = f"unsupported quality profile schema_version: {self.schema_version!r}"
             raise QualityProfileError(msg)
         unknown = sorted(set(self.rules) - CONFIGURABLE_QUALITY_RULE_IDS)
         if unknown:
@@ -443,8 +441,7 @@ class QualityProfile:
             ),
             key_normalizer=_lower_key,
             path=(
-                f"{ASCII_TICK_MICROSTRUCTURE_RULE_ID}."
-                "thresholds_by_asset_class"
+                f"{ASCII_TICK_MICROSTRUCTURE_RULE_ID}.thresholds_by_asset_class"
             ),
         )
 
@@ -461,8 +458,7 @@ class QualityProfile:
             ),
             key_normalizer=_symbol_session_key,
             path=(
-                f"{ASCII_TICK_MICROSTRUCTURE_RULE_ID}."
-                "thresholds_by_symbol_session"
+                f"{ASCII_TICK_MICROSTRUCTURE_RULE_ID}.thresholds_by_symbol_session"
             ),
         )
 
@@ -509,8 +505,7 @@ class QualityProfile:
             ),
             key_normalizer=_lower_key,
             path=(
-                f"{ASCII_TICK_SPREAD_REGIME_RULE_ID}."
-                "thresholds_by_asset_class"
+                f"{ASCII_TICK_SPREAD_REGIME_RULE_ID}.thresholds_by_asset_class"
             ),
         )
 
@@ -581,6 +576,7 @@ class QualityProfile:
                 "histogram_bins",
                 "max_rows",
                 "rounding_digits",
+                "distribution_attention",
             },
             SERIES_FINGERPRINT_RULE_ID,
         )
@@ -623,6 +619,16 @@ class QualityProfile:
                 DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
                 minimum=0,
                 path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            distribution_attention=(
+                _fingerprint_distribution_attention_profile(
+                    _mapping_field(
+                        config,
+                        "distribution_attention",
+                        path=SERIES_FINGERPRINT_RULE_ID,
+                    ),
+                    path=f"{SERIES_FINGERPRINT_RULE_ID}.distribution_attention",
+                )
             ),
         )
 
@@ -1185,8 +1191,7 @@ def _gap_tolerance(
     )
     if tolerance.dynamic_window_initial_ms > tolerance.dynamic_window_max_ms:
         msg = (
-            f"{path}.dynamic_window_initial_ms must be <= "
-            "dynamic_window_max_ms"
+            f"{path}.dynamic_window_initial_ms must be <= dynamic_window_max_ms"
         )
         raise QualityProfileError(msg)
     return tolerance
@@ -1290,6 +1295,87 @@ def _precision_rule(
         pip_size=str(value.get("pip_size") or ""),
         tick_size=str(value.get("tick_size") or ""),
         quote_side=str(value.get("quote_side") or "bid"),
+    )
+
+
+def _fingerprint_distribution_attention_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> HistDataFingerprintDistributionAttentionProfile:
+    base = HistDataFingerprintDistributionAttentionProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "invalid_row_min_count",
+            "invalid_row_min_rate",
+            "zero_spread_min_count",
+            "zero_spread_min_rate",
+            "negative_spread_min_count",
+            "negative_spread_min_rate",
+            "flag_truncated_distribution",
+            "flag_cache_float_precision",
+        },
+        path,
+    )
+    return HistDataFingerprintDistributionAttentionProfile(
+        invalid_row_min_count=_int_field(
+            value,
+            "invalid_row_min_count",
+            base.invalid_row_min_count,
+            minimum=1,
+            path=path,
+        ),
+        invalid_row_min_rate=_float_field(
+            value,
+            "invalid_row_min_rate",
+            base.invalid_row_min_rate,
+            minimum=0.0,
+            maximum=1.0,
+            path=path,
+        ),
+        zero_spread_min_count=_int_field(
+            value,
+            "zero_spread_min_count",
+            base.zero_spread_min_count,
+            minimum=1,
+            path=path,
+        ),
+        zero_spread_min_rate=_float_field(
+            value,
+            "zero_spread_min_rate",
+            base.zero_spread_min_rate,
+            minimum=0.0,
+            maximum=1.0,
+            path=path,
+        ),
+        negative_spread_min_count=_int_field(
+            value,
+            "negative_spread_min_count",
+            base.negative_spread_min_count,
+            minimum=1,
+            path=path,
+        ),
+        negative_spread_min_rate=_float_field(
+            value,
+            "negative_spread_min_rate",
+            base.negative_spread_min_rate,
+            minimum=0.0,
+            maximum=1.0,
+            path=path,
+        ),
+        flag_truncated_distribution=_bool_field(
+            value,
+            "flag_truncated_distribution",
+            base.flag_truncated_distribution,
+            path=path,
+        ),
+        flag_cache_float_precision=_bool_field(
+            value,
+            "flag_cache_float_precision",
+            base.flag_cache_float_precision,
+            path=path,
+        ),
     )
 
 
@@ -1474,6 +1560,22 @@ def _float_field(
         msg = f"{path}.{key} must be <= {maximum}"
         raise QualityProfileError(msg)
     return parsed
+
+
+def _bool_field(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: bool,
+    *,
+    path: str,
+) -> bool:
+    if key not in mapping:
+        return default
+    value = mapping[key]
+    if not isinstance(value, bool):
+        msg = f"{path}.{key} must be a boolean"
+        raise QualityProfileError(msg)
+    return value
 
 
 def _reject_unknown_keys(

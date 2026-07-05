@@ -245,6 +245,16 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
                     "histogram_bins": 16,
                     "max_rows": 1000,
                     "rounding_digits": 8,
+                    "distribution_attention": {
+                        "invalid_row_min_count": 2,
+                        "invalid_row_min_rate": 0.5,
+                        "zero_spread_min_count": 3,
+                        "zero_spread_min_rate": 0.25,
+                        "negative_spread_min_count": 4,
+                        "negative_spread_min_rate": 0.1,
+                        "flag_truncated_distribution": False,
+                        "flag_cache_float_precision": False,
+                    },
                 }
             },
         },
@@ -259,6 +269,16 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
         "histogram_bins": 16,
         "max_rows": 1000,
         "rounding_digits": 8,
+        "distribution_attention": {
+            "invalid_row_min_count": 2,
+            "invalid_row_min_rate": 0.5,
+            "zero_spread_min_count": 3,
+            "zero_spread_min_rate": 0.25,
+            "negative_spread_min_count": 4,
+            "negative_spread_min_rate": 0.1,
+            "flag_truncated_distribution": False,
+            "flag_cache_float_precision": False,
+        },
     }
 
 
@@ -281,6 +301,34 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
         {"rules": {SERIES_FINGERPRINT_RULE_ID: {"quantiles": [0.5, 0.1]}}},
         {"rules": {SERIES_FINGERPRINT_RULE_ID: {"lags": [1, 1]}}},
         {"rules": {SERIES_FINGERPRINT_RULE_ID: {"histogram_bins": 0}}},
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {"distribution_attention": "loose"}
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "distribution_attention": {"invalid_row_min_count": 0}
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "distribution_attention": {"zero_spread_min_rate": 1.5}
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "distribution_attention": {
+                        "flag_truncated_distribution": "yes"
+                    }
+                }
+            }
+        },
         {"rules": {SERIES_FINGERPRINT_RULE_ID: {"unknown": True}}},
     ),
 )

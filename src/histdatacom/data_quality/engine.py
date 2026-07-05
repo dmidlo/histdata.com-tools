@@ -13,6 +13,8 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
 )
 from histdatacom.data_quality.fingerprints import (
+    HistDataFingerprintProfile,
+    HistDataSeriesFingerprintRule,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
@@ -245,7 +247,8 @@ def run_quality_assessment(
         ] = fingerprint_distribution_summary
     fingerprint_distribution_attention = (
         series_fingerprint_distribution_attention_summary(
-            (finding for result in rule_results for finding in result.findings)
+            (finding for result in rule_results for finding in result.findings),
+            profile=_fingerprint_profile_for_rules(rule_tuple),
         )
     )
     if fingerprint_distribution_attention is not None:
@@ -347,6 +350,15 @@ def _csv_target_dimensions(
         for target in targets
         if target.kind.value == "csv" and all(_target_dimension(target))
     }
+
+
+def _fingerprint_profile_for_rules(
+    rules: Iterable[QualityRule],
+) -> HistDataFingerprintProfile:
+    for rule in rules:
+        if isinstance(rule, HistDataSeriesFingerprintRule):
+            return rule.profile
+    return HistDataFingerprintProfile()
 
 
 def _should_skip_duplicate_archive_rule(

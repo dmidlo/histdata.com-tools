@@ -965,6 +965,7 @@ def _assert_fingerprint_distribution_attention(
         "attention_flag_counts",
         "attention_level_counts",
         "attention_target_count",
+        "attention_thresholds",
         "distribution_target_count",
         "included_attention_target_count",
         "omitted_attention_target_count",
@@ -988,10 +989,44 @@ def _assert_fingerprint_distribution_attention(
     assert isinstance(payload["truncated"], bool)
     assert isinstance(payload["attention_flag_counts"], dict)
     assert isinstance(payload["attention_level_counts"], dict)
+    _assert_fingerprint_distribution_attention_thresholds(
+        _mapping(payload["attention_thresholds"])
+    )
     for target_summary in _list(payload["target_summaries"]):
         _assert_fingerprint_distribution_attention_target(
             _mapping(target_summary)
         )
+
+
+def _assert_fingerprint_distribution_attention_thresholds(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "flag_cache_float_precision",
+        "flag_truncated_distribution",
+        "invalid_row_min_count",
+        "invalid_row_min_rate",
+        "negative_spread_min_count",
+        "negative_spread_min_rate",
+        "zero_spread_min_count",
+        "zero_spread_min_rate",
+    }
+    for key in (
+        "invalid_row_min_count",
+        "negative_spread_min_count",
+        "zero_spread_min_count",
+    ):
+        assert isinstance(payload[key], int)
+        assert payload[key] >= 1
+    for key in (
+        "invalid_row_min_rate",
+        "negative_spread_min_rate",
+        "zero_spread_min_rate",
+    ):
+        assert isinstance(payload[key], float)
+        assert 0.0 <= payload[key] <= 1.0
+    assert isinstance(payload["flag_cache_float_precision"], bool)
+    assert isinstance(payload["flag_truncated_distribution"], bool)
 
 
 def _assert_fingerprint_distribution_attention_target(

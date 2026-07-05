@@ -772,6 +772,12 @@ def test_fingerprint_console_summary_reports_distribution_lines(
     assert "Fingerprint distributions" in output
     assert "- targets needing attention: 1 included: 1 omitted: 0" in output
     assert (
+        "- thresholds: invalid rows >= 1 and rate >= 0; "
+        "zero spreads >= 1 and rate >= 0; "
+        "negative spreads >= 1 and rate >= 0; truncated=true; "
+        "cache_float_precision=true"
+    ) in output
+    assert (
         "- ascii EURUSD M1 201202 cache: precision, m1_bar, "
         "cache_float_precision_basis, rows=3, usable=3, invalid=0, "
         "sampled=3, zero spread=unavailable, negative spread=unavailable, "
@@ -884,6 +890,12 @@ def test_bounded_quality_payload_includes_fingerprint_distribution(
     assert payload["fingerprint_distribution_attention"][
         "attention_flag_counts"
     ] == {"cache_float_precision_basis": 1}
+    assert (
+        payload["fingerprint_distribution_attention"]["attention_thresholds"][
+            "flag_cache_float_precision"
+        ]
+        is True
+    )
 
 
 def test_bounded_quality_payload_includes_fingerprint_topology(
