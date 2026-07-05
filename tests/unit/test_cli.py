@@ -212,6 +212,7 @@ def test_help_advertises_quality_preflight_mode() -> None:
     assert "latest" in help_text
     assert "--quality-preflight-run-validation" in help_text
     assert "--quality-preflight-sample-size" in help_text
+    assert "--quality-remediation-catalog-audit" in help_text
 
 
 def test_help_advertises_request_json_export() -> None:
@@ -739,6 +740,7 @@ histdatacom:
   quality_preflight_evidence: {tmp_path / "preflight.json"}
   quality_preflight_evidence_max_age: 120
   quality_preflight_evidence_stale_ok: true
+  remediation_catalog_audit: true
   quality_fail_on: never
   quality_max_errors: 2
   quality_max_warnings: 5
@@ -762,6 +764,9 @@ histdatacom:
     )
     assert options.quality_preflight_evidence_max_age_seconds == 120
     assert options.quality_preflight_evidence_allow_stale
+    assert options.quality_profile["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
     assert options.quality_fail_on == "never"
     assert options.quality_max_errors == 2
     assert options.quality_max_warnings == 5
@@ -1010,6 +1015,82 @@ def test_data_quality_cli_loads_quality_profile_file(
     assert options.quality_profile["source_path"] == str(profile_path)
 
 
+def test_data_quality_cli_enables_remediation_catalog_audit_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The audit flag should materialize as validated profile reporting."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-remediation-catalog-audit",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.quality_remediation_catalog_audit
+    assert options.quality_profile["source"] == "cli-options"
+    assert options.quality_profile["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+
+
+def test_data_quality_cli_merges_remediation_catalog_audit_with_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """CLI reporting opt-in should preserve unrelated profile settings."""
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "audit-merge",
+                "reporting": {
+                    "remediation_catalog_audit": {
+                        "enabled": False,
+                    }
+                },
+                "modeling_assumptions": {
+                    "target_horizon_minutes": 5,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile",
+            str(profile_path),
+            "--quality-remediation-catalog-audit",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.quality_profile["name"] == "audit-merge"
+    assert options.quality_profile["source"] == "file"
+    assert options.quality_profile["source_path"] == str(profile_path)
+    assert options.quality_profile["modeling_assumptions"] == {
+        "target_horizon_minutes": 5
+    }
+    assert options.quality_profile["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+
+
 def test_data_quality_cli_defaults_to_data_directory(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1114,6 +1195,7 @@ def test_repo_quality_columns_are_display_only_for_repo_table(
         ["histdatacom", "--quality-max-errors", "1"],
         ["histdatacom", "--quality-max-warnings", "1"],
         ["histdatacom", "--quality-profile", "quality-profile.json"],
+        ["histdatacom", "--quality-remediation-catalog-audit"],
         ["histdatacom", "--quality-preflight-evidence", "preflight.json"],
         ["histdatacom", "--quality-preflight-evidence-max-age-seconds", "60"],
         ["histdatacom", "--quality-preflight-evidence-stale-ok"],
@@ -1189,6 +1271,7 @@ def test_api_quality_options_accept_inline_profile(
     options.quality_preflight_evidence_path = str(tmp_path / "preflight.json")
     options.quality_preflight_evidence_max_age_seconds = 120
     options.quality_preflight_evidence_allow_stale = True
+    options.quality_remediation_catalog_audit = True
     options.quality_profile = {
         "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
         "name": "api-profile",
@@ -1207,6 +1290,9 @@ def test_api_quality_options_accept_inline_profile(
     assert parsed.quality_profile["source"] == "api-options"
     assert parsed.quality_profile["modeling_assumptions"] == {
         "target_horizon_minutes": 5
+    }
+    assert parsed.quality_profile["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
     }
 
 

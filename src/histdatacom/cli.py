@@ -87,6 +87,7 @@ from histdatacom.data_quality.preflight import (
     DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE,
 )
 from histdatacom.data_quality.profiles import (
+    QualityProfile,
     QualityProfileError,
     load_quality_profile_file,
     quality_profile_from_mapping,
@@ -128,6 +129,23 @@ def _positive_int(value: str) -> int:
     if parsed < 1:
         raise argparse.ArgumentTypeError("value must be positive")
     return parsed
+
+
+def _enable_remediation_catalog_audit(
+    profile: QualityProfile,
+) -> QualityProfile:
+    """Return a profile with remediation-catalog audit reporting enabled."""
+    payload = profile.to_request_payload()
+    reporting_value = payload.get("reporting", {})
+    reporting = (
+        dict(reporting_value) if isinstance(reporting_value, dict) else {}
+    )
+    audit_value = reporting.get("remediation_catalog_audit", {})
+    audit = dict(audit_value) if isinstance(audit_value, dict) else {}
+    audit["enabled"] = True
+    reporting["remediation_catalog_audit"] = audit
+    payload["reporting"] = reporting
+    return quality_profile_from_mapping(payload)
 
 
 class ArgParser(argparse.ArgumentParser):  # noqa:H601
@@ -273,12 +291,20 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 raise SystemExit(1)
             if self.arg_namespace.quality_profile_path:
                 print(  # noqa:T201
-                    "--quality-profile requires --quality or --repo-quality"
+                    "--quality-profile requires --quality, --repo-quality, "
+                    "or --quality-preflight"
                 )
                 raise SystemExit(1)
             if self.arg_namespace.quality_profile:
                 print(  # noqa:T201
-                    "quality_profile requires --quality or --repo-quality"
+                    "quality_profile requires --quality, --repo-quality, "
+                    "or --quality-preflight"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_remediation_catalog_audit:
+                print(  # noqa:T201
+                    "--quality-remediation-catalog-audit requires --quality, "
+                    "--repo-quality, or --quality-preflight"
                 )
                 raise SystemExit(1)
             if self.arg_namespace.quality_preflight_evidence_path:
@@ -429,8 +455,25 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     self.arg_namespace.quality_profile,
                     source="api-options",
                 )
+            elif self.arg_namespace.quality_remediation_catalog_audit:
+                profile = quality_profile_from_mapping(
+                    {
+                        "reporting": {
+                            "remediation_catalog_audit": {
+                                "enabled": True,
+                            }
+                        }
+                    },
+                    source=(
+                        "api-options"
+                        if self.arg_namespace.from_api
+                        else "cli-options"
+                    ),
+                )
             else:
                 return
+            if self.arg_namespace.quality_remediation_catalog_audit:
+                profile = _enable_remediation_catalog_audit(profile)
         except QualityProfileError as exc:
             print(f"quality profile error: {exc}")  # noqa:T201
             raise SystemExit(1) from exc
@@ -458,6 +501,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 args.append("--repo-quality")
             if self.arg_namespace.quality_preflight:
                 args.append("--quality-preflight")
+            if self.arg_namespace.quality_remediation_catalog_audit:
+                args.append("--quality-remediation-catalog-audit")
             if self.arg_namespace.quality_paths:
                 args.extend(
                     ["--quality-target", *self.arg_namespace.quality_paths]
@@ -1633,6 +1678,15 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "read a JSON quality profile with rule thresholds, "
                 "severities, and modeling assumptions"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-remediation-catalog-audit",
+            dest="quality_remediation_catalog_audit",
+            action="store_true",
+            help=(
+                "enable remediation-catalog audit reporting in quality "
+                "reports, bounded payloads, and preflight evidence"
             ),
         )
         quality_args.add_argument(

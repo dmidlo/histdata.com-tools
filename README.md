@@ -119,8 +119,10 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--quality-preflight-evidence-max-age-seconds SECONDS]
                    [--quality-preflight-evidence-stale-ok]
                    [--quality-preflight-sample-size COUNT]
-                   [--quality-profile PATH] [--quality-fail-on SEVERITY]
-                   [--quality-max-errors COUNT] [--quality-max-warnings COUNT]
+                   [--quality-profile PATH]
+                   [--quality-remediation-catalog-audit]
+                   [--quality-fail-on SEVERITY] [--quality-max-errors COUNT]
+                   [--quality-max-warnings COUNT]
 
 options:
   -h, --help            show this help message and exit
@@ -254,6 +256,9 @@ Data quality:
   --quality-profile PATH
                         read a JSON quality profile with rule thresholds,
                         severities, and modeling assumptions
+  --quality-remediation-catalog-audit
+                        enable remediation-catalog audit reporting in quality
+                        reports, bounded payloads, and preflight evidence
   --quality-fail-on SEVERITY
                         exit non-zero when configured thresholds are exceeded
                         for error, warning, or never. Defaults to error
@@ -1025,6 +1030,11 @@ payloads, and quality preflight sample evidence, opt in with:
 The embedded audit reuses the standalone remediation-catalog audit schema,
 keeps known source-code coverage separate from observed report coverage, and
 remains advisory; it does not change finding severities or quality exit policy.
+The same reporting surface can be enabled without a profile file by passing
+`--quality-remediation-catalog-audit` with `--quality`, `--repo-quality`, or
+`--quality-preflight`. When the flag is combined with `--quality-profile`, the
+profile still supplies thresholds, severities, and modeling assumptions; the
+CLI flag only sets `reporting.remediation_catalog_audit.enabled` to `true`.
 
 ```sh
 histdatacom --quality \
