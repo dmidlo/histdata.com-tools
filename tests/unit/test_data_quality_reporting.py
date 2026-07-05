@@ -17,6 +17,8 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     QualityExitPolicy,
@@ -38,6 +40,7 @@ from histdatacom.data_quality import (
     quality_remediation_coverage_summary,
     quality_report_payload,
     quality_report_to_json,
+    series_fingerprint_readiness_summary,
     write_quality_report,
 )
 from histdatacom.runtime_contracts import ArtifactRef
@@ -434,6 +437,158 @@ def test_quality_report_payload_adds_fingerprint_distribution_metadata(
         "cache_float_precision_basis": 1,
     }
     assert attention["target_summaries"][0]["attention_level"] == "precision"
+
+
+def test_quality_report_payload_adds_fingerprint_readiness_metadata(
+    tmp_path: Path,
+) -> None:
+    """Fingerprint reports should serialize audit-backed dynamics summaries."""
+    payload = quality_report_payload(_fingerprint_dynamics_report(tmp_path))
+
+    summary = payload["metadata"][
+        TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY
+    ]
+    target_summaries = summary["target_summaries"]
+
+    assert (
+        summary["schema_version"]
+        == TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION
+    )
+    assert summary["target_count"] == 3
+    assert summary["applicable_dynamics_status_counts"] == {
+        "limited": 1,
+        "valid": 2,
+    }
+    assert summary["dynamics_status_counts"]["return_dynamics"] == {
+        "limited": 1,
+        "skipped": 1,
+        "valid": 1,
+    }
+    assert summary["dynamics_status_counts"]["microstructure_dynamics"] == {
+        "skipped": 2,
+        "valid": 1,
+    }
+    assert summary["topology_limitation_counts"] == {
+        "duplicate_timestamps": 1,
+        "expected_session_closures": 1,
+        "invalid_timestamps_skipped": 1,
+        "non_monotonic_timestamp_order": 1,
+        "suspicious_gaps": 1,
+    }
+    assert summary["row_order_counts"] == {
+        "cache_order": 1,
+        "source_text_order": 2,
+    }
+    assert summary["cache_source_counts"] == {"direct": 1}
+    assert summary["tick_spread_conditioning_status_counts"] == {
+        "eligible": 1,
+        "ineligible": 2,
+    }
+    assert [item["target_axis"]["symbol"] for item in target_summaries] == [
+        "GBPUSD",
+        "EURUSD",
+        "EURUSD",
+    ]
+
+    limited = target_summaries[0]
+    assert limited["applicable_dynamics_section"] == "return_dynamics"
+    assert limited["applicable_dynamics_status"] == "limited"
+    assert limited["applicable_dynamics_reason"] == "invalid_timestamps_skipped"
+    assert limited["topology"]["duplicate_timestamp_count"] == 2
+    assert limited["return_dynamics"]["limitations"] == [
+        "invalid_timestamps_skipped",
+        "non_monotonic_timestamp_order",
+        "duplicate_timestamps",
+        "suspicious_gaps",
+        "expected_session_closures",
+    ]
+
+    tick = target_summaries[2]
+    assert tick["applicable_dynamics_section"] == "microstructure_dynamics"
+    assert tick["microstructure_dynamics"]["spread_jump"]["count"] == 1
+    assert tick["microstructure_dynamics"]["stale_quote"]["run_count"] == 1
+    assert tick["microstructure_dynamics"]["burst"]["burst_rate"] == 0.5
+    assert tick["microstructure_dynamics"]["one_sided_movement"] == {
+        "count": 2,
+        "rate": 0.5,
+        "bid_only_count": 1,
+        "ask_only_count": 1,
+        "run_count": 0,
+    }
+
+
+def test_fingerprint_readiness_summary_handles_absent_dynamics_sections(
+    tmp_path: Path,
+) -> None:
+    """Reports should render stable skipped reasons for older fingerprints."""
+    payload = quality_report_payload(_fingerprint_report(tmp_path))
+
+    summary = payload["metadata"][
+        TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY
+    ]
+    target = summary["target_summaries"][0]
+
+    assert summary["applicable_dynamics_status_counts"] == {"skipped": 2}
+    assert summary["dynamics_reason_counts"]["return_dynamics"] == {
+        "not_emitted": 1,
+        "unsupported_target_kind": 1,
+    }
+    assert target["applicable_dynamics_section"] == "return_dynamics"
+    assert target["return_dynamics"] == {
+        "status": "skipped",
+        "reason": "not_emitted",
+        "basis": "unknown",
+        "row_order": "unknown",
+        "computed_from": "unknown",
+        "cache_source": None,
+        "regular_grid": False,
+        "limitations": [],
+        "row_count": 0,
+        "sampled_row_count": 0,
+        "usable_row_count": 0,
+        "invalid_row_count": 0,
+        "partial_row_count": 0,
+        "truncated": False,
+    }
+
+
+def test_fingerprint_console_summary_reports_readiness_lines(
+    tmp_path: Path,
+) -> None:
+    """Human output should summarize fingerprint readiness and dynamics."""
+    output = format_quality_console_summary(
+        _fingerprint_dynamics_report(tmp_path),
+        check_groups=("fingerprint",),
+    )
+
+    assert "Fingerprint readiness" in output
+    assert "- targets: 3 included: 3 omitted: 0" in output
+    assert "- applicable dynamics statuses: limited=1, valid=2" in output
+    assert (
+        "- return dynamics: limited=1, skipped=1, valid=1 "
+        "reasons: invalid_timestamps_skipped=1, unsupported_timeframe=1"
+    ) in output
+    assert (
+        "- topology limitations: duplicate_timestamps=1, "
+        "expected_session_closures=1, invalid_timestamps_skipped=1, "
+        "non_monotonic_timestamp_order=1, suspicious_gaps=1"
+    ) in output
+    assert (
+        "- ascii GBPUSD M1 201202 csv: return_dynamics limited, "
+        "reason=invalid_timestamps_skipped"
+    ) in output
+    assert "row_order=source_text_order" in output
+    assert (
+        "limitations=invalid_timestamps_skipped, non_monotonic_timestamp_order"
+        in output
+    )
+    assert "close_returns=3 median=0.0001" in output
+    assert (
+        "- ascii EURUSD T 201202 csv: microstructure_dynamics valid"
+    ) in output
+    assert "interarrival=4 median=250ms" in output
+    assert "spread_jumps=1 rate=0.25" in output
+    assert "one_sided=2 bid_only=1 ask_only=1" in output
 
 
 def test_quality_report_payload_adds_mixed_next_actions(
@@ -1017,6 +1172,54 @@ def test_bounded_quality_payload_includes_fingerprint_topology_attention(
     ]
 
 
+def test_bounded_quality_payload_includes_fingerprint_readiness(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration payloads should expose readiness summaries."""
+    report = _fingerprint_dynamics_report(tmp_path)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("fingerprint",),
+        discovery={"roots": [str(tmp_path)], "target_count": 3},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+
+    readiness = payload["fingerprint_readiness"]
+
+    assert readiness["applicable_dynamics_status_counts"] == {
+        "limited": 1,
+        "valid": 2,
+    }
+    assert readiness["target_summaries"][0]["target_axis"]["symbol"] == (
+        "GBPUSD"
+    )
+    assert readiness["target_summaries"][0]["return_dynamics"]["truncated"] is (
+        True
+    )
+
+
+def test_fingerprint_readiness_summary_is_bounded_and_issue_first(
+    tmp_path: Path,
+) -> None:
+    """Readiness summaries should truncate after limited targets first."""
+    summary = series_fingerprint_readiness_summary(
+        _fingerprint_dynamics_report(tmp_path).findings,
+        target_limit=1,
+    )
+
+    assert summary is not None
+    assert summary["target_count"] == 3
+    assert summary["included_target_count"] == 1
+    assert summary["omitted_target_count"] == 2
+    assert summary["truncated"] is True
+    assert summary["target_summaries"][0]["target_axis"]["symbol"] == "GBPUSD"
+    assert summary["target_summaries"][0]["applicable_dynamics_status"] == (
+        "limited"
+    )
+
+
 def test_bounded_quality_payload_includes_next_actions(
     tmp_path: Path,
 ) -> None:
@@ -1371,6 +1574,498 @@ def _fingerprint_report(tmp_path: Path) -> QualityReport:
             ),
         ),
     )
+
+
+def _fingerprint_dynamics_report(tmp_path: Path) -> QualityReport:
+    valid_m1 = QualityTarget(
+        path=str(tmp_path / "valid.data"),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    limited_m1 = QualityTarget(
+        path=str(tmp_path / "limited.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="GBPUSD",
+        period="201202",
+    )
+    tick = QualityTarget(
+        path=str(tmp_path / "ticks.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="T",
+        symbol="EURUSD",
+        period="201202",
+    )
+    findings = (
+        _fingerprint_series_finding(
+            valid_m1,
+            _valid_m1_fingerprint_payload(kind="cache"),
+        ),
+        _fingerprint_series_finding(
+            limited_m1,
+            _limited_m1_fingerprint_payload(),
+        ),
+        _fingerprint_series_finding(tick, _tick_fingerprint_payload()),
+    )
+    return QualityReport(
+        targets=(valid_m1, limited_m1, tick),
+        rule_results=tuple(
+            QualityRuleResult(
+                rule_id=SERIES_FINGERPRINT_RULE_ID,
+                target=finding.target,
+                findings=(finding,),
+            )
+            for finding in findings
+        ),
+    )
+
+
+def _fingerprint_series_finding(
+    target: QualityTarget,
+    payload: dict[str, object],
+) -> QualityFinding:
+    return QualityFinding(
+        severity=QualitySeverity.INFO,
+        code="FINGERPRINT_SERIES_SUMMARY",
+        message="Canonical target time-series fingerprint.",
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        target=target,
+        metadata={"time_series_fingerprint": payload},
+    )
+
+
+def _valid_m1_fingerprint_payload(*, kind: str) -> dict[str, object]:
+    return {
+        "target_axis": {
+            "data_format": "ascii",
+            "timeframe": "M1",
+            "symbol": "EURUSD",
+            "period": "201202",
+            "kind": kind,
+        },
+        "coverage": {"row_count": 4, "parsed_row_count": 4},
+        "temporal_topology": _topology_payload(
+            computed_from="direct_cache",
+            cache_source="direct",
+        ),
+        "m1_bar_distribution": {"row_count": 4, "usable_row_count": 4},
+        "return_dynamics": {
+            "basis": "observed_sequence",
+            "row_order": "cache_order",
+            "computed_from": "direct_cache",
+            "cache_source": "direct",
+            "regular_grid": False,
+            "sequence_status": "ok",
+            "limitations": [],
+            "row_count": 4,
+            "sampled_row_count": 4,
+            "usable_row_count": 4,
+            "invalid_row_count": 0,
+            "partial_row_count": 0,
+            "truncated": False,
+            "close_log_return": _numeric(count=3, median=0.0001),
+            "absolute_return": _numeric(count=3, median=0.0001, p95=0.0003),
+            "squared_return": _numeric(count=3, median=0.0),
+            "open_jump": _numeric(count=3, median=0.0, p95=0.0002),
+            "flatline": {
+                "zero_return_count": 1,
+                "zero_return_rate": 0.333333333333,
+                "zero_return_run_count": 1,
+                "ohlc_flatline_row_count": 0,
+                "ohlc_flatline_rate": 0.0,
+                "ohlc_flatline_run_count": 0,
+                "ohlc_flatline_affected_row_count": 0,
+            },
+        },
+        "fingerprint_audit": _audit_payload(
+            expected=(
+                "coverage",
+                "temporal_topology",
+                "calendar_regimes",
+                "m1_bar_distribution",
+                "return_dynamics",
+            ),
+            emitted=(
+                "coverage",
+                "temporal_topology",
+                "m1_bar_distribution",
+                "return_dynamics",
+            ),
+            skipped={"calendar_regimes": "not_emitted"},
+            section_statuses={
+                "coverage": "valid",
+                "temporal_topology": "valid",
+                "calendar_regimes": "skipped",
+                "m1_bar_distribution": "valid",
+                "return_dynamics": "valid",
+            },
+            return_status="valid",
+            micro_status="skipped",
+            micro_reason="unsupported_timeframe",
+        ),
+        "source": {"kind": "cache", "cache_source": "direct"},
+    }
+
+
+def _limited_m1_fingerprint_payload() -> dict[str, object]:
+    limitations = [
+        "invalid_timestamps_skipped",
+        "non_monotonic_timestamp_order",
+        "duplicate_timestamps",
+        "suspicious_gaps",
+        "expected_session_closures",
+    ]
+    return {
+        "target_axis": {
+            "data_format": "ascii",
+            "timeframe": "M1",
+            "symbol": "GBPUSD",
+            "period": "201202",
+            "kind": "csv",
+        },
+        "coverage": {"row_count": 4, "parsed_row_count": 3},
+        "temporal_topology": _topology_payload(
+            invalid_timestamp_count=1,
+            duplicate_timestamp_count=2,
+            non_monotonic_count=1,
+            suspicious_gap_count=1,
+            expected_session_closure_count=1,
+        ),
+        "m1_bar_distribution": {"row_count": 4, "usable_row_count": 3},
+        "return_dynamics": {
+            "basis": "observed_sequence",
+            "row_order": "source_text_order",
+            "computed_from": "text_scan",
+            "cache_source": None,
+            "regular_grid": False,
+            "sequence_status": "limited",
+            "limitations": limitations,
+            "row_count": 4,
+            "sampled_row_count": 3,
+            "usable_row_count": 3,
+            "invalid_row_count": 1,
+            "partial_row_count": 1,
+            "truncated": True,
+            "close_log_return": _numeric(count=3, median=0.0001),
+            "absolute_return": _numeric(count=3, median=0.0002, p95=0.0008),
+            "squared_return": _numeric(count=3, median=0.0),
+            "open_jump": _numeric(count=3, median=0.0001, p95=0.0004),
+            "flatline": {
+                "zero_return_count": 0,
+                "zero_return_rate": 0.0,
+                "zero_return_run_count": 0,
+                "ohlc_flatline_row_count": 2,
+                "ohlc_flatline_rate": 0.5,
+                "ohlc_flatline_run_count": 1,
+                "ohlc_flatline_affected_row_count": 2,
+            },
+        },
+        "fingerprint_audit": _audit_payload(
+            expected=(
+                "coverage",
+                "temporal_topology",
+                "calendar_regimes",
+                "m1_bar_distribution",
+                "return_dynamics",
+            ),
+            emitted=(
+                "coverage",
+                "temporal_topology",
+                "m1_bar_distribution",
+                "return_dynamics",
+            ),
+            skipped={"calendar_regimes": "not_emitted"},
+            section_statuses={
+                "coverage": "valid",
+                "temporal_topology": "limited",
+                "calendar_regimes": "skipped",
+                "m1_bar_distribution": "valid",
+                "return_dynamics": "limited",
+            },
+            return_status="limited",
+            return_reason="invalid_timestamps_skipped",
+            return_limitations=tuple(limitations),
+            micro_status="skipped",
+            micro_reason="unsupported_timeframe",
+        ),
+        "source": {"kind": "csv_text"},
+    }
+
+
+def _tick_fingerprint_payload() -> dict[str, object]:
+    return {
+        "target_axis": {
+            "data_format": "ascii",
+            "timeframe": "T",
+            "symbol": "EURUSD",
+            "period": "201202",
+            "kind": "csv",
+        },
+        "coverage": {"row_count": 5, "parsed_row_count": 5},
+        "temporal_topology": _topology_payload(computed_from="text_scan"),
+        "tick_distribution": {"row_count": 5, "usable_row_count": 5},
+        "conditional_distributions": {"usable_row_count": 5},
+        "microstructure_dynamics": {
+            "basis": "observed_sequence",
+            "row_order": "source_text_order",
+            "computed_from": "text_scan",
+            "cache_source": None,
+            "regular_grid": False,
+            "sequence_status": "ok",
+            "limitations": [],
+            "row_count": 5,
+            "sampled_row_count": 5,
+            "usable_row_count": 5,
+            "invalid_row_count": 0,
+            "partial_row_count": 0,
+            "truncated": False,
+            "interarrival_ms": _numeric(count=4, median=250.0, p95=500.0),
+            "spread": _numeric(count=5, median=0.0001, p95=0.0003),
+            "spread_change": _numeric(count=4, median=0.0, p95=0.0002),
+            "absolute_spread_change": _numeric(
+                count=4,
+                median=0.0001,
+                p95=0.0002,
+            ),
+            "zero_spread_count": 0,
+            "negative_spread_count": 0,
+            "zero_spread_rate": 0.0,
+            "negative_spread_rate": 0.0,
+            "spread_jump": {
+                "threshold": 0.0002,
+                "count": 1,
+                "rate": 0.25,
+            },
+            "stale_quote": {
+                "repeat_count": 1,
+                "repeat_rate": 0.25,
+                "run_count": 1,
+                "affected_row_count": 2,
+            },
+            "burst": {
+                "interval_count": 2,
+                "burst_rate": 0.5,
+                "run_count": 1,
+                "tick_count": 3,
+            },
+            "one_sided_movement": {
+                "count": 2,
+                "rate": 0.5,
+                "bid_only_count": 1,
+                "ask_only_count": 1,
+                "run_count": 0,
+            },
+        },
+        "fingerprint_audit": _audit_payload(
+            expected=(
+                "coverage",
+                "temporal_topology",
+                "calendar_regimes",
+                "tick_distribution",
+                "conditional_distributions",
+                "microstructure_dynamics",
+            ),
+            emitted=(
+                "coverage",
+                "temporal_topology",
+                "tick_distribution",
+                "conditional_distributions",
+                "microstructure_dynamics",
+            ),
+            skipped={"calendar_regimes": "not_emitted"},
+            section_statuses={
+                "coverage": "valid",
+                "temporal_topology": "valid",
+                "calendar_regimes": "skipped",
+                "tick_distribution": "valid",
+                "conditional_distributions": "valid",
+                "microstructure_dynamics": "valid",
+            },
+            return_status="skipped",
+            return_reason="unsupported_timeframe",
+            micro_status="valid",
+            tick_spread_status="eligible",
+            tick_spread_eligible=True,
+            tick_spread_emitted=True,
+        ),
+        "source": {"kind": "csv_text"},
+    }
+
+
+def _topology_payload(
+    *,
+    row_count: int = 4,
+    parsed_row_count: int = 4,
+    invalid_timestamp_count: int = 0,
+    duplicate_timestamp_count: int = 0,
+    non_monotonic_count: int = 0,
+    suspicious_gap_count: int = 0,
+    expected_session_closure_count: int = 0,
+    computed_from: str = "text_scan",
+    cache_source: str | None = None,
+) -> dict[str, object]:
+    return {
+        "row_count": row_count,
+        "parsed_row_count": parsed_row_count,
+        "invalid_timestamp_count": invalid_timestamp_count,
+        "duplicate_timestamp_count": duplicate_timestamp_count,
+        "non_monotonic_count": non_monotonic_count,
+        "median_interval_ms": 60_000,
+        "max_gap_ms": 60_000,
+        "suspicious_gap_count": suspicious_gap_count,
+        "expected_session_closure_count": expected_session_closure_count,
+        "weekend_activity_count": 0,
+        "sampling_basis": "observed_sequence",
+        "computed_from": computed_from,
+        "cache_source": cache_source,
+    }
+
+
+def _audit_payload(
+    *,
+    expected: tuple[str, ...],
+    emitted: tuple[str, ...],
+    skipped: dict[str, str],
+    section_statuses: dict[str, str],
+    return_status: str,
+    micro_status: str,
+    return_reason: str | None = None,
+    micro_reason: str | None = None,
+    return_limitations: tuple[str, ...] = (),
+    tick_spread_status: str = "ineligible",
+    tick_spread_eligible: bool = False,
+    tick_spread_emitted: bool = False,
+) -> dict[str, object]:
+    tick_spread: dict[str, object] = {
+        "eligible": tick_spread_eligible,
+        "status": tick_spread_status,
+        "emitted": tick_spread_emitted,
+    }
+    if not tick_spread_eligible:
+        tick_spread["reason"] = "unsupported_timeframe"
+    return {
+        "sections_expected": list(expected),
+        "sections_emitted": list(emitted),
+        "sections_skipped": {
+            section: {"reason": reason} for section, reason in skipped.items()
+        },
+        "section_statuses": section_statuses,
+        "conditional_distribution_eligibility": {
+            "tick_spread": tick_spread,
+        },
+        "profile_completeness": {
+            "source": "quality_profile",
+            "calendar_profile_complete": False,
+            "missing_optional_calendar_data": True,
+            "calendar_profile_name": "static-major-holidays",
+            "calendar_profile_source": "static_month_day_major_holidays",
+            "calendar_profile_version": "1",
+            "calendar_profile_static_advisory": True,
+        },
+        "dynamics_readiness": {
+            "return_dynamics": _readiness_payload(
+                status=return_status,
+                reason=return_reason,
+                row_order=(
+                    "source_text_order"
+                    if return_status == "limited"
+                    else "cache_order" if return_status == "valid" else None
+                ),
+                computed_from=(
+                    "text_scan"
+                    if return_status == "limited"
+                    else "direct_cache" if return_status == "valid" else None
+                ),
+                cache_source="direct" if return_status == "valid" else None,
+                limitations=return_limitations,
+                row_count=4 if return_status in {"valid", "limited"} else 0,
+                sampled_row_count=(
+                    3
+                    if return_status == "limited"
+                    else 4 if return_status == "valid" else 0
+                ),
+                usable_row_count=(
+                    3
+                    if return_status == "limited"
+                    else 4 if return_status == "valid" else 0
+                ),
+                invalid_row_count=1 if return_status == "limited" else 0,
+                partial_row_count=1 if return_status == "limited" else 0,
+                truncated=return_status == "limited",
+            ),
+            "microstructure_dynamics": _readiness_payload(
+                status=micro_status,
+                reason=micro_reason,
+                row_order=(
+                    "source_text_order" if micro_status == "valid" else None
+                ),
+                computed_from="text_scan" if micro_status == "valid" else None,
+                row_count=5 if micro_status == "valid" else 0,
+                sampled_row_count=5 if micro_status == "valid" else 0,
+                usable_row_count=5 if micro_status == "valid" else 0,
+            ),
+        },
+    }
+
+
+def _readiness_payload(
+    *,
+    status: str,
+    reason: str | None = None,
+    row_order: str | None = None,
+    computed_from: str | None = None,
+    cache_source: str | None = None,
+    limitations: tuple[str, ...] = (),
+    row_count: int = 0,
+    sampled_row_count: int = 0,
+    usable_row_count: int = 0,
+    invalid_row_count: int = 0,
+    partial_row_count: int = 0,
+    truncated: bool = False,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "status": status,
+        "basis": "observed_sequence" if row_order else "unknown",
+        "row_order": row_order or "unknown",
+        "computed_from": computed_from or "unknown",
+        "cache_source": cache_source,
+        "regular_grid": False,
+        "limitations": list(limitations),
+        "row_count": row_count,
+        "sampled_row_count": sampled_row_count,
+        "usable_row_count": usable_row_count,
+        "invalid_row_count": invalid_row_count,
+        "partial_row_count": partial_row_count,
+        "truncated": truncated,
+    }
+    if reason:
+        payload["reason"] = reason
+    return payload
+
+
+def _numeric(
+    *,
+    count: int,
+    median: float,
+    p95: float | None = None,
+) -> dict[str, object]:
+    return {
+        "count": count,
+        "min": 0.0,
+        "max": p95 if p95 is not None else median,
+        "mean": median,
+        "median": median,
+        "mad": 0.0,
+        "quantiles": {
+            "0.95": p95 if p95 is not None else median,
+            "0.99": p95 if p95 is not None else median,
+        },
+    }
 
 
 def _next_action_report(tmp_path: Path) -> QualityReport:

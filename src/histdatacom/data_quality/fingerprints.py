@@ -81,6 +81,9 @@ TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION = (
 TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-audit.v1"
 )
+TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-readiness-summary.v1"
+)
 TIME_SERIES_FINGERPRINT_METADATA_KEY = "time_series_fingerprint"
 TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY = (
     "time_series_fingerprint_coverage"
@@ -96,6 +99,9 @@ TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY = (
 )
 TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY = (
     "time_series_fingerprint_distribution_attention"
+)
+TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY = (
+    "time_series_fingerprint_readiness_summary"
 )
 SERIES_FINGERPRINT_RULE_ID = "fingerprint.series"
 CROSS_SERIES_FINGERPRINT_RULE_ID = "fingerprint.cross_series"
@@ -120,6 +126,7 @@ DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT = 128
 DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT = 32
 DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT = 128
 DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT = 32
+DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT = 16
 DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT = 1
 DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_RATE = 0.0
 DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_COUNT = 1
@@ -163,6 +170,7 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "return_dynamics",
     "microstructure_dynamics",
 )
+FINGERPRINT_DYNAMICS_SECTIONS = ("return_dynamics", "microstructure_dynamics")
 
 
 @dataclass(frozen=True, slots=True)
@@ -634,6 +642,605 @@ def series_fingerprint_distribution_attention_summary(
         "attention_flag_counts": _counter_payload(attention_flag_counts),
         "target_summaries": included,
     }
+
+
+def series_fingerprint_readiness_summary(
+    findings: Iterable[QualityFinding],
+    *,
+    target_limit: int = DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT,
+) -> dict[str, JSONValue] | None:
+    """Return bounded target summaries for fingerprint audit/readiness."""
+    target_summaries = _series_fingerprint_readiness_target_summaries(findings)
+    if not target_summaries:
+        return None
+
+    applicable_status_counts = Counter(
+        _summary_key(item.get("applicable_dynamics_status"))
+        for item in target_summaries
+    )
+    section_status_counts: dict[str, JSONValue] = {}
+    for section in FINGERPRINT_AUDIT_SECTIONS:
+        counts = Counter(
+            _summary_key(
+                _payload_mapping(item.get("section_statuses")).get(section)
+            )
+            for item in target_summaries
+            if section in _payload_mapping(item.get("section_statuses"))
+        )
+        if counts:
+            section_status_counts[section] = _counter_payload(counts)
+
+    dynamics_status_counts: dict[str, JSONValue] = {}
+    dynamics_reason_counts: dict[str, JSONValue] = {}
+    for section in FINGERPRINT_DYNAMICS_SECTIONS:
+        status_counts: Counter[str] = Counter()
+        reason_counts: Counter[str] = Counter()
+        for item in target_summaries:
+            dynamics = _payload_mapping(item.get(section))
+            status_counts[_summary_key(dynamics.get("status"))] += 1
+            reason = _optional_summary_key(dynamics.get("reason"))
+            if reason:
+                reason_counts[reason] += 1
+        dynamics_status_counts[section] = _counter_payload(status_counts)
+        dynamics_reason_counts[section] = _counter_payload(reason_counts)
+
+    topology_limitation_counts: Counter[str] = Counter()
+    dynamics_limitation_counts: Counter[str] = Counter()
+    row_order_counts: Counter[str] = Counter()
+    computed_from_counts: Counter[str] = Counter()
+    cache_source_counts: Counter[str] = Counter()
+    skipped_reason_counts: Counter[str] = Counter()
+    tick_spread_conditioning_status_counts: Counter[str] = Counter()
+    for item in target_summaries:
+        topology_limitation_counts.update(
+            _summary_key(value)
+            for value in _string_list(item.get("topology_limitations"))
+        )
+        skipped_reason_counts.update(
+            _summary_key(value)
+            for value in _string_list(item.get("section_skip_reasons"))
+        )
+        tick_conditioning = _payload_mapping(
+            item.get("tick_spread_conditioning")
+        )
+        tick_spread_conditioning_status_counts[
+            _summary_key(tick_conditioning.get("status"))
+        ] += 1
+        for section in FINGERPRINT_DYNAMICS_SECTIONS:
+            dynamics = _payload_mapping(item.get(section))
+            dynamics_limitation_counts.update(
+                _summary_key(value)
+                for value in _string_list(dynamics.get("limitations"))
+            )
+            row_order = _summary_key(dynamics.get("row_order"))
+            computed_from = _summary_key(dynamics.get("computed_from"))
+            cache_source = _optional_summary_key(dynamics.get("cache_source"))
+            if row_order != "unknown":
+                row_order_counts[row_order] += 1
+            if computed_from != "unknown":
+                computed_from_counts[computed_from] += 1
+            if cache_source:
+                cache_source_counts[cache_source] += 1
+
+    profile_complete_count = sum(
+        1
+        for item in target_summaries
+        if _payload_mapping(item.get("profile_completeness")).get(
+            "calendar_profile_complete"
+        )
+        is True
+    )
+    profile_static_advisory_count = sum(
+        1
+        for item in target_summaries
+        if _payload_mapping(item.get("profile_completeness")).get(
+            "calendar_profile_static_advisory"
+        )
+        is True
+    )
+
+    included_source = (
+        target_summaries
+        if target_limit < 0
+        else target_summaries[:target_limit]
+    )
+    included: list[JSONValue] = [dict(item) for item in included_source]
+    omitted_count = max(0, len(target_summaries) - len(included))
+
+    return {
+        "schema_version": (
+            TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION
+        ),
+        "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "target_count": len(target_summaries),
+        "included_target_count": len(included),
+        "omitted_target_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "applicable_dynamics_status_counts": _counter_payload(
+            applicable_status_counts
+        ),
+        "section_status_counts": section_status_counts,
+        "dynamics_status_counts": dynamics_status_counts,
+        "dynamics_reason_counts": dynamics_reason_counts,
+        "topology_limitation_counts": _counter_payload(
+            topology_limitation_counts
+        ),
+        "dynamics_limitation_counts": _counter_payload(
+            dynamics_limitation_counts
+        ),
+        "row_order_counts": _counter_payload(row_order_counts),
+        "computed_from_counts": _counter_payload(computed_from_counts),
+        "cache_source_counts": _counter_payload(cache_source_counts),
+        "section_skip_reason_counts": _counter_payload(skipped_reason_counts),
+        "tick_spread_conditioning_status_counts": _counter_payload(
+            tick_spread_conditioning_status_counts
+        ),
+        "profile_completeness": {
+            "calendar_profile_complete_count": profile_complete_count,
+            "calendar_profile_incomplete_count": max(
+                0,
+                len(target_summaries) - profile_complete_count,
+            ),
+            "calendar_profile_static_advisory_count": (
+                profile_static_advisory_count
+            ),
+        },
+        "target_summaries": included,
+    }
+
+
+def _series_fingerprint_readiness_target_summaries(
+    findings: Iterable[QualityFinding],
+) -> list[dict[str, JSONValue]]:
+    target_summaries: list[dict[str, JSONValue]] = []
+    for finding in findings:
+        if finding.rule_id != SERIES_FINGERPRINT_RULE_ID:
+            continue
+        payload = finding.metadata.get(TIME_SERIES_FINGERPRINT_METADATA_KEY)
+        if not isinstance(payload, Mapping):
+            continue
+        target_summaries.append(
+            _fingerprint_readiness_target_summary(finding, payload)
+        )
+    target_summaries.sort(key=_fingerprint_readiness_target_sort_key)
+    return target_summaries
+
+
+def _fingerprint_readiness_target_summary(
+    finding: QualityFinding,
+    payload: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    target_axis = _topology_target_axis(
+        finding,
+        _payload_mapping(payload.get("target_axis")),
+    )
+    audit = _payload_mapping(payload.get("fingerprint_audit"))
+    section_statuses = _fingerprint_readiness_section_statuses(
+        finding,
+        payload,
+        audit,
+    )
+    expected_sections = _fingerprint_audit_string_list(
+        audit.get("sections_expected"),
+        fallback=_fingerprint_expected_sections(finding.target),
+    )
+    emitted_sections = _fingerprint_audit_string_list(
+        audit.get("sections_emitted"),
+        fallback=tuple(
+            section
+            for section in FINGERPRINT_AUDIT_SECTIONS
+            if section in payload
+        ),
+    )
+    skipped_sections = _payload_mapping(audit.get("sections_skipped"))
+    section_skip_reasons: list[JSONValue] = [
+        _summary_key(_payload_mapping(value).get("reason"))
+        for value in skipped_sections.values()
+        if isinstance(value, Mapping)
+    ]
+    return_readiness = _fingerprint_readiness_for_section(
+        "return_dynamics",
+        finding,
+        payload,
+        audit,
+    )
+    microstructure_readiness = _fingerprint_readiness_for_section(
+        "microstructure_dynamics",
+        finding,
+        payload,
+        audit,
+    )
+    applicable_section = _applicable_dynamics_section(
+        _summary_key(target_axis.get("timeframe"))
+    )
+    applicable_readiness = (
+        return_readiness
+        if applicable_section == "return_dynamics"
+        else (
+            microstructure_readiness
+            if applicable_section == "microstructure_dynamics"
+            else {
+                "status": "unavailable",
+                "reason": "unsupported_timeframe",
+            }
+        )
+    )
+    topology = _payload_mapping(payload.get("temporal_topology"))
+
+    return {
+        "target_axis": target_axis,
+        "source_kind": _summary_key(
+            _payload_mapping(payload.get("source")).get("kind")
+        ),
+        "source_reason": _optional_summary_key(
+            _payload_mapping(payload.get("source")).get("reason")
+        ),
+        "sections_expected_count": len(expected_sections),
+        "sections_emitted_count": len(emitted_sections),
+        "sections_skipped_count": len(skipped_sections),
+        "section_skip_reasons": section_skip_reasons,
+        "section_statuses": section_statuses,
+        "applicable_dynamics_section": applicable_section or "none",
+        "applicable_dynamics_status": _summary_key(
+            applicable_readiness.get("status")
+        ),
+        "applicable_dynamics_reason": _optional_summary_key(
+            applicable_readiness.get("reason")
+        ),
+        "topology": _fingerprint_readiness_topology_summary(topology),
+        "topology_limitations": [
+            value for value in _sequence_dynamics_limitations(topology)
+        ],
+        "profile_completeness": _fingerprint_readiness_profile_summary(audit),
+        "tick_spread_conditioning": (
+            _fingerprint_readiness_tick_spread_conditioning(audit)
+        ),
+        "return_dynamics": _fingerprint_readiness_return_summary(
+            payload,
+            return_readiness,
+        ),
+        "microstructure_dynamics": (
+            _fingerprint_readiness_microstructure_summary(
+                payload,
+                microstructure_readiness,
+            )
+        ),
+    }
+
+
+def _fingerprint_readiness_section_statuses(
+    finding: QualityFinding,
+    payload: Mapping[str, JSONValue],
+    audit: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    statuses = _payload_mapping(audit.get("section_statuses"))
+    if statuses:
+        return {
+            section: _summary_key(statuses.get(section))
+            for section in FINGERPRINT_AUDIT_SECTIONS
+            if section in statuses
+        }
+    sections = _ordered_unique(
+        (
+            *_fingerprint_expected_sections(finding.target),
+            *(
+                section
+                for section in FINGERPRINT_AUDIT_SECTIONS
+                if section in payload
+            ),
+        )
+    )
+    return {
+        section: _fingerprint_section_status(section, payload)
+        for section in sections
+    }
+
+
+def _fingerprint_audit_string_list(
+    value: JSONValue,
+    *,
+    fallback: tuple[str, ...],
+) -> tuple[str, ...]:
+    values = tuple(str(item) for item in _string_list(value))
+    return values or fallback
+
+
+def _fingerprint_readiness_for_section(
+    section: str,
+    finding: QualityFinding,
+    payload: Mapping[str, JSONValue],
+    audit: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    readiness = _payload_mapping(
+        _payload_mapping(audit.get("dynamics_readiness")).get(section)
+    )
+    if not readiness:
+        readiness = _fingerprint_dynamics_readiness(
+            section,
+            payload,
+            target=finding.target,
+        )
+    return {
+        "status": _summary_key(readiness.get("status")),
+        "reason": _optional_summary_key(readiness.get("reason")),
+        "basis": _summary_key(readiness.get("basis")),
+        "row_order": _summary_key(readiness.get("row_order")),
+        "computed_from": _summary_key(readiness.get("computed_from")),
+        "cache_source": _optional_summary_key(readiness.get("cache_source")),
+        "regular_grid": readiness.get("regular_grid") is True,
+        "limitations": _string_list(readiness.get("limitations")),
+        "row_count": _int_payload(readiness.get("row_count")),
+        "sampled_row_count": _int_payload(readiness.get("sampled_row_count")),
+        "usable_row_count": _int_payload(readiness.get("usable_row_count")),
+        "invalid_row_count": _int_payload(readiness.get("invalid_row_count")),
+        "partial_row_count": _int_payload(readiness.get("partial_row_count")),
+        "truncated": readiness.get("truncated") is True,
+    }
+
+
+def _applicable_dynamics_section(timeframe: str) -> str:
+    if timeframe == M1:
+        return "return_dynamics"
+    if timeframe == TICK:
+        return "microstructure_dynamics"
+    return ""
+
+
+def _fingerprint_readiness_topology_summary(
+    topology: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    return {
+        "row_count": _int_payload(topology.get("row_count")),
+        "parsed_row_count": _optional_int_payload(
+            topology.get("parsed_row_count")
+        ),
+        "invalid_timestamp_count": _int_payload(
+            topology.get("invalid_timestamp_count")
+        ),
+        "duplicate_timestamp_count": _int_payload(
+            topology.get("duplicate_timestamp_count")
+        ),
+        "non_monotonic_count": _int_payload(
+            topology.get("non_monotonic_count")
+        ),
+        "suspicious_gap_count": _int_payload(
+            topology.get("suspicious_gap_count")
+        ),
+        "expected_session_closure_count": _int_payload(
+            topology.get("expected_session_closure_count")
+        ),
+        "weekend_activity_count": _int_payload(
+            topology.get("weekend_activity_count")
+        ),
+        "sampling_basis": _summary_key(topology.get("sampling_basis")),
+        "computed_from": _summary_key(topology.get("computed_from")),
+        "cache_source": _optional_summary_key(topology.get("cache_source")),
+    }
+
+
+def _fingerprint_readiness_profile_summary(
+    audit: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    profile = _payload_mapping(audit.get("profile_completeness"))
+    return {
+        "source": _summary_key(profile.get("source")),
+        "calendar_profile_complete": (
+            profile.get("calendar_profile_complete") is True
+        ),
+        "missing_optional_calendar_data": (
+            profile.get("missing_optional_calendar_data") is True
+        ),
+        "calendar_profile_name": _summary_key(
+            profile.get("calendar_profile_name")
+        ),
+        "calendar_profile_source": _summary_key(
+            profile.get("calendar_profile_source")
+        ),
+        "calendar_profile_version": _summary_key(
+            profile.get("calendar_profile_version")
+        ),
+        "calendar_profile_static_advisory": (
+            profile.get("calendar_profile_static_advisory") is True
+        ),
+    }
+
+
+def _fingerprint_readiness_tick_spread_conditioning(
+    audit: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    eligibility = _payload_mapping(
+        _payload_mapping(audit.get("conditional_distribution_eligibility")).get(
+            "tick_spread"
+        )
+    )
+    return {
+        "eligible": eligibility.get("eligible") is True,
+        "status": _summary_key(eligibility.get("status")),
+        "reason": _optional_summary_key(eligibility.get("reason")),
+        "emitted": eligibility.get("emitted") is True,
+    }
+
+
+def _fingerprint_readiness_return_summary(
+    payload: Mapping[str, JSONValue],
+    readiness: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    summary = dict(readiness)
+    dynamics = _payload_mapping(payload.get("return_dynamics"))
+    if not dynamics:
+        return summary
+    summary.update(
+        {
+            "close_log_return": _compact_numeric_summary(
+                dynamics.get("close_log_return")
+            ),
+            "absolute_return": _compact_numeric_summary(
+                dynamics.get("absolute_return")
+            ),
+            "squared_return": _compact_numeric_summary(
+                dynamics.get("squared_return")
+            ),
+            "open_jump": _compact_numeric_summary(dynamics.get("open_jump")),
+            "flatline": _compact_flatline_summary(dynamics.get("flatline")),
+        }
+    )
+    return summary
+
+
+def _fingerprint_readiness_microstructure_summary(
+    payload: Mapping[str, JSONValue],
+    readiness: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    summary = dict(readiness)
+    dynamics = _payload_mapping(payload.get("microstructure_dynamics"))
+    if not dynamics:
+        return summary
+    summary.update(
+        {
+            "interarrival_ms": _compact_numeric_summary(
+                dynamics.get("interarrival_ms")
+            ),
+            "spread": _compact_numeric_summary(dynamics.get("spread")),
+            "spread_change": _compact_numeric_summary(
+                dynamics.get("spread_change")
+            ),
+            "absolute_spread_change": _compact_numeric_summary(
+                dynamics.get("absolute_spread_change")
+            ),
+            "zero_spread_count": _int_payload(
+                dynamics.get("zero_spread_count")
+            ),
+            "negative_spread_count": _int_payload(
+                dynamics.get("negative_spread_count")
+            ),
+            "zero_spread_rate": _optional_float_payload(
+                dynamics.get("zero_spread_rate")
+            ),
+            "negative_spread_rate": _optional_float_payload(
+                dynamics.get("negative_spread_rate")
+            ),
+            "spread_jump": _compact_event_summary(
+                dynamics.get("spread_jump"),
+                count_key="count",
+                rate_key="rate",
+            ),
+            "stale_quote": _compact_event_summary(
+                dynamics.get("stale_quote"),
+                count_key="repeat_count",
+                rate_key="repeat_rate",
+                extra_count_keys=("run_count", "affected_row_count"),
+            ),
+            "burst": _compact_event_summary(
+                dynamics.get("burst"),
+                count_key="interval_count",
+                rate_key="burst_rate",
+                extra_count_keys=("run_count", "tick_count"),
+            ),
+            "one_sided_movement": _compact_event_summary(
+                dynamics.get("one_sided_movement"),
+                count_key="count",
+                rate_key="rate",
+                extra_count_keys=(
+                    "bid_only_count",
+                    "ask_only_count",
+                    "run_count",
+                ),
+            ),
+        }
+    )
+    return summary
+
+
+def _compact_numeric_summary(value: JSONValue) -> dict[str, JSONValue]:
+    numeric = _payload_mapping(value)
+    if not numeric:
+        return {}
+    quantiles = _payload_mapping(numeric.get("quantiles"))
+    return {
+        "count": _int_payload(numeric.get("count")),
+        "min": _optional_float_payload(numeric.get("min")),
+        "max": _optional_float_payload(numeric.get("max")),
+        "mean": _optional_float_payload(numeric.get("mean")),
+        "median": _optional_float_payload(numeric.get("median")),
+        "mad": _optional_float_payload(numeric.get("mad")),
+        "p95": _optional_float_payload(quantiles.get("0.95")),
+        "p99": _optional_float_payload(quantiles.get("0.99")),
+    }
+
+
+def _compact_flatline_summary(value: JSONValue) -> dict[str, JSONValue]:
+    flatline = _payload_mapping(value)
+    if not flatline:
+        return {}
+    return {
+        "zero_return_count": _int_payload(flatline.get("zero_return_count")),
+        "zero_return_rate": _optional_float_payload(
+            flatline.get("zero_return_rate")
+        ),
+        "zero_return_run_count": _int_payload(
+            flatline.get("zero_return_run_count")
+        ),
+        "ohlc_flatline_row_count": _int_payload(
+            flatline.get("ohlc_flatline_row_count")
+        ),
+        "ohlc_flatline_rate": _optional_float_payload(
+            flatline.get("ohlc_flatline_rate")
+        ),
+        "ohlc_flatline_run_count": _int_payload(
+            flatline.get("ohlc_flatline_run_count")
+        ),
+        "ohlc_flatline_affected_row_count": _int_payload(
+            flatline.get("ohlc_flatline_affected_row_count")
+        ),
+    }
+
+
+def _compact_event_summary(
+    value: JSONValue,
+    *,
+    count_key: str,
+    rate_key: str,
+    extra_count_keys: tuple[str, ...] = (),
+) -> dict[str, JSONValue]:
+    event = _payload_mapping(value)
+    if not event:
+        return {}
+    summary: dict[str, JSONValue] = {
+        count_key: _int_payload(event.get(count_key)),
+        rate_key: _optional_float_payload(event.get(rate_key)),
+    }
+    for key in extra_count_keys:
+        summary[key] = _int_payload(event.get(key))
+    threshold = event.get("threshold")
+    if threshold is not None:
+        summary["threshold"] = _optional_float_payload(threshold)
+    return summary
+
+
+def _fingerprint_readiness_target_sort_key(
+    target: Mapping[str, JSONValue],
+) -> tuple[object, ...]:
+    axis = _payload_mapping(target.get("target_axis"))
+    return (
+        _fingerprint_readiness_status_rank(
+            _summary_key(target.get("applicable_dynamics_status"))
+        ),
+        _summary_key(axis.get("data_format")),
+        _summary_key(axis.get("timeframe")),
+        _summary_key(axis.get("symbol")),
+        _summary_key(axis.get("period")),
+        _summary_key(axis.get("kind")),
+    )
+
+
+def _fingerprint_readiness_status_rank(status: str) -> int:
+    ranks = {
+        "unavailable": 0,
+        "limited": 1,
+        "skipped": 2,
+        "valid": 3,
+    }
+    return ranks.get(status, 99)
 
 
 def _series_fingerprint_distribution_target_summaries(

@@ -22,11 +22,13 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     series_fingerprint_coverage_summary,
     series_fingerprint_distribution_attention_summary,
     series_fingerprint_distribution_summary,
+    series_fingerprint_readiness_summary,
     series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
@@ -277,6 +279,13 @@ def quality_report_payload(
             fingerprint_topology_attention
         )
         payload["metadata"] = metadata
+    fingerprint_readiness = _fingerprint_readiness_summary(report)
+    if fingerprint_readiness is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY] = (
+            fingerprint_readiness
+        )
+        payload["metadata"] = metadata
     next_actions = quality_next_actions_summary(report)
     if next_actions is not None:
         metadata = _mapping_payload(payload.get("metadata"))
@@ -423,6 +432,11 @@ def format_quality_console_summary(
                 _fingerprint_topology_summary(report)
             )
         )
+        lines.extend(
+            format_fingerprint_readiness_summary_lines(
+                _fingerprint_readiness_summary(report)
+            )
+        )
 
     sections = (
         (QualityStatus.CLEAN, "Clean files"),
@@ -468,6 +482,7 @@ def bounded_quality_payload(
     fingerprint_topology_attention = _fingerprint_topology_attention_summary(
         report
     )
+    fingerprint_readiness = _fingerprint_readiness_summary(report)
     next_actions = quality_next_actions_summary(report)
     remediation_coverage = quality_remediation_coverage_summary(report)
     remediation_catalog_audit = quality_remediation_catalog_audit_summary(
@@ -528,6 +543,8 @@ def bounded_quality_payload(
         payload["fingerprint_topology_attention"] = (
             fingerprint_topology_attention
         )
+    if fingerprint_readiness is not None:
+        payload["fingerprint_readiness"] = fingerprint_readiness
     if next_actions is not None:
         payload["next_actions"] = next_actions
     if remediation_coverage is not None:
@@ -1662,6 +1679,20 @@ def _fingerprint_topology_attention_summary(
     )
 
 
+def _fingerprint_readiness_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return fingerprint readiness metadata from the report or findings."""
+    summary = report.metadata.get(
+        TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY
+    )
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        series_fingerprint_readiness_summary(report.findings)
+    )
+
+
 def _fingerprint_group_selected(check_groups: tuple[str, ...]) -> bool:
     normalized = {group.strip().lower() for group in check_groups if group}
     if not normalized:
@@ -1998,6 +2029,195 @@ def _format_fingerprint_topology_target_line(
         f"computed_from={_string_metadata(summary, 'computed_from')}"
         f"{cache_text}"
     )
+
+
+def format_fingerprint_readiness_summary_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable lines for fingerprint readiness."""
+    if not summary:
+        return []
+    lines = [
+        "",
+        "Fingerprint readiness",
+        (
+            "- targets: "
+            f"{_int_metadata(summary, 'target_count')} "
+            f"included: {_int_metadata(summary, 'included_target_count')} "
+            f"omitted: {_int_metadata(summary, 'omitted_target_count')}"
+        ),
+    ]
+    status_counts = _format_count_metadata(
+        summary.get("applicable_dynamics_status_counts")
+    )
+    if status_counts:
+        lines.append(f"- applicable dynamics statuses: {status_counts}")
+    for label, section in (
+        ("return dynamics", "return_dynamics"),
+        ("microstructure dynamics", "microstructure_dynamics"),
+    ):
+        counts = _format_nested_count_metadata(
+            summary.get("dynamics_status_counts"),
+            section,
+        )
+        reasons = _format_nested_count_metadata(
+            summary.get("dynamics_reason_counts"),
+            section,
+        )
+        if counts:
+            line = f"- {label}: {counts}"
+            if reasons:
+                line += f" reasons: {reasons}"
+            lines.append(line)
+    count_lines = (
+        ("topology limitations", "topology_limitation_counts"),
+        ("dynamics limitations", "dynamics_limitation_counts"),
+        ("row order", "row_order_counts"),
+        ("computed from", "computed_from_counts"),
+        ("cache sources", "cache_source_counts"),
+        ("section skips", "section_skip_reason_counts"),
+        (
+            "tick spread conditioning",
+            "tick_spread_conditioning_status_counts",
+        ),
+    )
+    for label, key in count_lines:
+        counts = _format_count_metadata(summary.get(key))
+        if counts:
+            lines.append(f"- {label}: {counts}")
+    profile = _mapping_payload(summary.get("profile_completeness"))
+    if profile:
+        lines.append(
+            "- calendar profile: "
+            f"complete={_int_metadata(profile, 'calendar_profile_complete_count')} "
+            "incomplete="
+            f"{_int_metadata(profile, 'calendar_profile_incomplete_count')} "
+            "static-advisory="
+            f"{_int_metadata(profile, 'calendar_profile_static_advisory_count')}"
+        )
+    target_summaries = summary.get("target_summaries")
+    if isinstance(target_summaries, list):
+        for item in target_summaries:
+            if isinstance(item, Mapping):
+                lines.append(
+                    f"- {_format_fingerprint_readiness_target_line(item)}"
+                )
+    return lines
+
+
+def _format_nested_count_metadata(value: JSONValue, key: str) -> str:
+    return _format_count_metadata(_mapping_payload(value).get(key))
+
+
+def _format_fingerprint_readiness_target_line(
+    summary: Mapping[str, JSONValue],
+) -> str:
+    axis = _mapping_payload(summary.get("target_axis"))
+    section = _string_metadata(summary, "applicable_dynamics_section")
+    dynamics = _mapping_payload(summary.get(section))
+    if not dynamics:
+        dynamics = _mapping_payload(summary.get("return_dynamics"))
+    status = _string_metadata(summary, "applicable_dynamics_status")
+    reason = _optional_string_metadata(summary, "applicable_dynamics_reason")
+    reason_text = f", reason={reason}" if reason else ""
+    limitations = _string_list_metadata(dynamics.get("limitations"))
+    limitation_text = ", ".join(limitations) if limitations else "none"
+    cache_source = _optional_string_metadata(dynamics, "cache_source")
+    cache_text = f", cache={cache_source}" if cache_source else ""
+    details = _format_fingerprint_readiness_dynamics_details(section, dynamics)
+    details_text = f", {details}" if details else ""
+    return (
+        f"{_string_metadata(axis, 'data_format')} "
+        f"{_string_metadata(axis, 'symbol')} "
+        f"{_string_metadata(axis, 'timeframe')} "
+        f"{_string_metadata(axis, 'period')} "
+        f"{_string_metadata(axis, 'kind')}: "
+        f"{section} {status}"
+        f"{reason_text}, "
+        f"sections emitted={_int_metadata(summary, 'sections_emitted_count')} "
+        f"skipped={_int_metadata(summary, 'sections_skipped_count')}, "
+        f"basis={_string_metadata(dynamics, 'basis')}, "
+        f"row_order={_string_metadata(dynamics, 'row_order')}, "
+        f"computed_from={_string_metadata(dynamics, 'computed_from')}"
+        f"{cache_text}, "
+        f"rows={_int_metadata(dynamics, 'row_count')} "
+        f"usable={_int_metadata(dynamics, 'usable_row_count')} "
+        f"invalid={_int_metadata(dynamics, 'invalid_row_count')} "
+        f"sampled={_int_metadata(dynamics, 'sampled_row_count')} "
+        f"truncated={_bool_text(dynamics.get('truncated'))}, "
+        f"limitations={limitation_text}"
+        f"{details_text}"
+    )
+
+
+def _format_fingerprint_readiness_dynamics_details(
+    section: str,
+    dynamics: Mapping[str, JSONValue],
+) -> str:
+    if section == "return_dynamics":
+        close_return = _mapping_payload(dynamics.get("close_log_return"))
+        absolute_return = _mapping_payload(dynamics.get("absolute_return"))
+        open_jump = _mapping_payload(dynamics.get("open_jump"))
+        flatline = _mapping_payload(dynamics.get("flatline"))
+        if not any((close_return, absolute_return, open_jump, flatline)):
+            return ""
+        return (
+            "close_returns="
+            f"{_int_metadata(close_return, 'count')} "
+            f"median={_format_rate(close_return.get('median'))}; "
+            "abs_returns="
+            f"{_int_metadata(absolute_return, 'count')} "
+            f"p95={_format_rate(absolute_return.get('p95'))}; "
+            "open_jumps="
+            f"{_int_metadata(open_jump, 'count')} "
+            f"p95={_format_rate(open_jump.get('p95'))}; "
+            "zero_returns="
+            f"{_int_metadata(flatline, 'zero_return_count')} "
+            f"rate={_format_rate(flatline.get('zero_return_rate'))}; "
+            "flatline_runs="
+            f"{_int_metadata(flatline, 'ohlc_flatline_run_count')}"
+        )
+    if section == "microstructure_dynamics":
+        interarrival = _mapping_payload(dynamics.get("interarrival_ms"))
+        spread = _mapping_payload(dynamics.get("spread"))
+        spread_change = _mapping_payload(dynamics.get("spread_change"))
+        spread_jump = _mapping_payload(dynamics.get("spread_jump"))
+        stale = _mapping_payload(dynamics.get("stale_quote"))
+        burst = _mapping_payload(dynamics.get("burst"))
+        one_sided = _mapping_payload(dynamics.get("one_sided_movement"))
+        if not any(
+            (
+                interarrival,
+                spread,
+                spread_change,
+                spread_jump,
+                stale,
+                burst,
+                one_sided,
+            )
+        ):
+            return ""
+        return (
+            "interarrival="
+            f"{_int_metadata(interarrival, 'count')} "
+            f"median={_format_duration_ms(interarrival.get('median'))}; "
+            f"spread_median={_format_rate(spread.get('median'))}; "
+            "spread_change="
+            f"{_int_metadata(spread_change, 'count')} "
+            f"p95={_format_rate(spread_change.get('p95'))}; "
+            "spread_jumps="
+            f"{_int_metadata(spread_jump, 'count')} "
+            f"rate={_format_rate(spread_jump.get('rate'))}; "
+            "stale_runs="
+            f"{_int_metadata(stale, 'run_count')} "
+            f"repeat_rate={_format_rate(stale.get('repeat_rate'))}; "
+            f"burst_rate={_format_rate(burst.get('burst_rate'))}; "
+            "one_sided="
+            f"{_int_metadata(one_sided, 'count')} "
+            f"bid_only={_int_metadata(one_sided, 'bid_only_count')} "
+            f"ask_only={_int_metadata(one_sided, 'ask_only_count')}"
+        )
+    return ""
 
 
 def _count_metadata(value: JSONValue, key: str) -> int:
