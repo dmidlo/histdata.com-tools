@@ -26,7 +26,9 @@ from histdatacom.data_quality.preflight import (
     inspect_quality_preflight_evidence,
     quality_preflight_to_markdown,
     quality_run_preflight_warning,
+    register_quality_preflight_evidence_artifact,
     run_cache_quality_preflight,
+    write_quality_preflight_evidence_artifact,
     write_quality_preflight_markdown_report,
     write_quality_preflight_report,
 )
@@ -1243,9 +1245,16 @@ def test_api_quality_preflight_writes_profile_preview_artifact(
     assert artifact["schema_version"] == (
         "histdatacom.quality-profile-preview.v1"
     )
+    assert artifact["label"] == "Profile preview"
+    assert artifact["console_label"] == "profile preview"
     assert artifact["size_bytes"] == len(artifact_bytes)
     assert artifact["sha256"] == hashlib.sha256(artifact_bytes).hexdigest()
+    assert payload["evidence"]["artifacts"]["quality_profile_preview"] == (
+        artifact
+    )
     assert "Profile preview artifact" in markdown
+    assert "## Evidence Artifacts" in markdown
+    assert "Profile preview" in markdown
     assert f"written: reports/{filename} ({preview_format})" in markdown
     assert str(tmp_path) not in artifact_text
     assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
@@ -1319,9 +1328,61 @@ histdatacom:
     assert artifact["state"] == "written"
     assert artifact["path"] == "reports/yaml-profile-preview.txt"
     assert artifact["format"] == "text"
+    assert payload["evidence"]["artifacts"]["quality_profile_preview"] == (
+        artifact
+    )
     assert (
         "profile preview: written: reports/yaml-profile-preview.txt (text)"
         in output
+    )
+
+
+def test_quality_preflight_evidence_artifact_registry_writes_and_renders(
+    tmp_path: Path,
+) -> None:
+    """Preflight evidence should render any registered artifact generically."""
+    data_dir = tmp_path / "data"
+    artifact_path = tmp_path / "reports" / "fixture-artifact.txt"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+    )
+
+    artifact = write_quality_preflight_evidence_artifact(
+        "fixture artifact",
+        artifact_path,
+        kind="fixture-artifact",
+        output_format="text",
+        schema_version="histdatacom.fixture-artifact.v1",
+        label="Fixture artifact",
+        console_label="fixture artifact",
+    )
+    registered = register_quality_preflight_evidence_artifact(
+        payload,
+        "fixture_artifact",
+        artifact,
+    )
+    artifact_bytes = artifact_path.read_bytes()
+    markdown = quality_preflight_to_markdown(payload)
+    console = format_quality_preflight_console_summary(payload)
+
+    assert artifact_path.read_text(encoding="utf-8") == "fixture artifact\n"
+    assert registered == artifact
+    assert payload["evidence"]["artifacts"]["fixture_artifact"] == artifact
+    assert payload["evidence"].get("fixture_artifact") is None
+    assert artifact["path"] == "reports/fixture-artifact.txt"
+    assert artifact["size_bytes"] == len(artifact_bytes)
+    assert artifact["sha256"] == hashlib.sha256(artifact_bytes).hexdigest()
+    assert "## Evidence Artifacts" in markdown
+    assert "Fixture artifact" in markdown
+    assert "histdatacom.fixture-artifact.v1" in markdown
+    assert "fixture artifact: written: reports/fixture-artifact.txt (text)" in (
+        console
     )
 
 
