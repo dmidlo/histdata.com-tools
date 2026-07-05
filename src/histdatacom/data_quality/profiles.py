@@ -652,6 +652,7 @@ class QualityProfile:
                 minimum=0,
                 path=SERIES_FINGERPRINT_RULE_ID,
             ),
+            calendar_profile=self.calendar_profile(),
             distribution_attention=(
                 _fingerprint_distribution_attention_profile(
                     _mapping_field(

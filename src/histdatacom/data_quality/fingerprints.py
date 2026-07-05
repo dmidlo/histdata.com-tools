@@ -22,10 +22,23 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
     QualityTargetKind,
 )
+from histdatacom.data_quality.calendar import (
+    SESSION_MARKET_CLOSED,
+    SESSION_NO_ACTIVE_WINDOW,
+    SESSION_STATE_WEEKEND_CLOSURE,
+    calendar_regime_payload_for_target,
+    classify_histdata_source_timestamp,
+    classify_histdata_timestamp,
+)
+from histdatacom.data_quality.calendar_profiles import (
+    HistDataCalendarProfile,
+    default_calendar_profile,
+)
 from histdatacom.data_quality.polars_cache import read_quality_polars_cache
 from histdatacom.data_quality.remediation import (
     remediation_hint_payloads_for_flags,
 )
+from histdatacom.data_quality.symbols import symbol_metadata_for
 from histdatacom.data_quality.time import timestamp_topology_payload_for_target
 from histdatacom.histdata_ascii import (
     M1,
@@ -54,6 +67,9 @@ TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION = (
 )
 TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-distribution-attention.v1"
+)
+TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-conditional-distributions.v1"
 )
 TIME_SERIES_FINGERPRINT_METADATA_KEY = "time_series_fingerprint"
 TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY = (
@@ -182,6 +198,11 @@ class HistDataFingerprintProfile:
     histogram_bins: int = DEFAULT_FINGERPRINT_HISTOGRAM_BINS
     max_rows: int = DEFAULT_FINGERPRINT_MAX_ROWS
     rounding_digits: int = DEFAULT_FINGERPRINT_ROUNDING_DIGITS
+    calendar_profile: HistDataCalendarProfile = field(
+        default_factory=default_calendar_profile,
+        repr=False,
+        compare=False,
+    )
     distribution_attention: HistDataFingerprintDistributionAttentionProfile = (
         field(default_factory=HistDataFingerprintDistributionAttentionProfile)
     )
@@ -958,6 +979,10 @@ def _series_fingerprint_payload(
     cache = read_quality_polars_cache(target, required_columns=columns)
     if cache is not None:
         payload["coverage"] = _coverage_from_frame(cache.frame)
+        payload["calendar_regimes"] = calendar_regime_payload_for_target(
+            target,
+            calendar_profile=profile.calendar_profile,
+        )
         _add_distribution_payload(
             payload,
             timeframe=target.timeframe,
@@ -966,6 +991,13 @@ def _series_fingerprint_payload(
                 timeframe=target.timeframe,
                 profile=profile,
             ),
+        )
+        _add_conditional_distribution_payload(
+            payload,
+            target=target,
+            frame=cache.frame,
+            text=None,
+            profile=profile,
         )
         payload["source"] = {
             "kind": "cache",
@@ -1006,6 +1038,10 @@ def _series_fingerprint_payload(
         text_payload.text,
         timeframe=target.timeframe,
     )
+    payload["calendar_regimes"] = calendar_regime_payload_for_target(
+        target,
+        calendar_profile=profile.calendar_profile,
+    )
     _add_distribution_payload(
         payload,
         timeframe=target.timeframe,
@@ -1014,6 +1050,13 @@ def _series_fingerprint_payload(
             timeframe=target.timeframe,
             profile=profile,
         ),
+    )
+    _add_conditional_distribution_payload(
+        payload,
+        target=target,
+        frame=None,
+        text=text_payload.text,
+        profile=profile,
     )
     if target.kind is QualityTargetKind.ZIP:
         payload["source"] = {
@@ -1407,6 +1450,10 @@ def _target_axis(target: QualityTarget) -> dict[str, JSONValue]:
     }
 
 
+def _target_asset_class(target: QualityTarget) -> str:
+    return str(symbol_metadata_for(target.symbol).asset_class)
+
+
 def _empty_coverage(
     *,
     parsed_row_count: int | None,
@@ -1469,6 +1516,173 @@ def _add_distribution_payload(
         payload["m1_bar_distribution"] = distribution
     elif timeframe == TICK:
         payload["tick_distribution"] = distribution
+
+
+def _add_conditional_distribution_payload(
+    payload: dict[str, JSONValue],
+    *,
+    target: QualityTarget,
+    frame: Any | None,
+    text: str | None,
+    profile: HistDataFingerprintProfile,
+) -> None:
+    conditional = _conditional_distributions(
+        target,
+        frame=frame,
+        text=text,
+        profile=profile,
+    )
+    if conditional:
+        payload["conditional_distributions"] = conditional
+
+
+def _conditional_distributions(
+    target: QualityTarget,
+    *,
+    frame: Any | None,
+    text: str | None,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    if target.timeframe != TICK:
+        return {}
+
+    by_active_session: dict[str, list[float]] = {}
+    by_special_tag: dict[str, list[float]] = {}
+    row_count = 0
+    sampled_row_count = 0
+    usable_row_count = 0
+    invalid_row_count = 0
+    sample_limit = _profile_max_rows(profile)
+    basis = "none"
+
+    if frame is not None:
+        basis = "cache"
+        row_count = int(getattr(frame, "height", 0) or 0)
+        for row in frame.head(min(row_count, sample_limit)).iter_rows(
+            named=True
+        ):
+            sampled_row_count += 1
+            timestamp = _finite_int(row.get("datetime"))
+            bid = _finite_float(row.get("bid"))
+            ask = _finite_float(row.get("ask"))
+            if timestamp is None or bid is None or ask is None:
+                invalid_row_count += 1
+                continue
+            classification = classify_histdata_timestamp(
+                timestamp,
+                calendar_profile=profile.calendar_profile,
+                asset_class=_target_asset_class(target),
+            )
+            _record_conditioned_spread(
+                by_active_session,
+                by_special_tag,
+                classification=classification,
+                spread=ask - bid,
+            )
+            usable_row_count += 1
+    elif text is not None:
+        basis = "text"
+        reader = csv.reader(
+            text.splitlines(),
+            delimiter=delimiter_for_timeframe(target.timeframe),
+        )
+        for row in reader:
+            if not row or not any(cell.strip() for cell in row):
+                continue
+            row_count += 1
+            if sampled_row_count >= sample_limit:
+                continue
+            sampled_row_count += 1
+            try:
+                normalized = normalize_ascii_row(target.timeframe, row)
+                classification = classify_histdata_source_timestamp(
+                    row[0],
+                    target.timeframe,
+                    calendar_profile=profile.calendar_profile,
+                    asset_class=_target_asset_class(target),
+                )
+            except ValueError:
+                invalid_row_count += 1
+                continue
+            bid = _finite_float(normalized[1])
+            ask = _finite_float(normalized[2])
+            if bid is None or ask is None:
+                invalid_row_count += 1
+                continue
+            _record_conditioned_spread(
+                by_active_session,
+                by_special_tag,
+                classification=classification,
+                spread=ask - bid,
+            )
+            usable_row_count += 1
+
+    if row_count == 0:
+        return {}
+
+    return {
+        "schema_version": (
+            TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION
+        ),
+        "basis": basis,
+        "metric": "tick_spread",
+        "row_count": row_count,
+        "sampled_row_count": sampled_row_count,
+        "usable_row_count": usable_row_count,
+        "invalid_row_count": invalid_row_count,
+        "truncated": row_count > sampled_row_count,
+        "by_active_session": _conditioned_numeric_summary(
+            by_active_session,
+            profile,
+        ),
+        "by_special_tag": _conditioned_numeric_summary(
+            by_special_tag,
+            profile,
+        ),
+    }
+
+
+def _record_conditioned_spread(
+    by_active_session: dict[str, list[float]],
+    by_special_tag: dict[str, list[float]],
+    *,
+    classification: Any,
+    spread: float,
+) -> None:
+    active_sessions = tuple(classification.active_sessions) or (
+        (SESSION_MARKET_CLOSED,)
+        if classification.session_state == SESSION_STATE_WEEKEND_CLOSURE
+        else (SESSION_NO_ACTIVE_WINDOW,)
+    )
+    for session in active_sessions:
+        by_active_session.setdefault(str(session), []).append(spread)
+    for tag in tuple(classification.special_tags):
+        by_special_tag.setdefault(str(tag), []).append(spread)
+
+
+def _conditioned_numeric_summary(
+    values_by_bucket: Mapping[str, list[float]],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    return {
+        key: {"spread": _numeric_summary(values_by_bucket[key], profile)}
+        for key in sorted(values_by_bucket)
+    }
+
+
+def _finite_int(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
 
 
 def _distribution_from_frame(
