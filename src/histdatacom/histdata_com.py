@@ -23,7 +23,6 @@ Returns:
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import json
 import os
 import subprocess
@@ -49,7 +48,9 @@ from histdatacom.data_quality.preflight import (
     format_quality_run_preflight_warning,
     quality_preflight_to_markdown,
     quality_run_preflight_warning,
+    register_quality_preflight_evidence_artifact,
     run_cache_quality_preflight,
+    write_quality_preflight_evidence_artifact,
     write_quality_preflight_markdown_report,
     write_quality_preflight_report,
 )
@@ -688,45 +689,21 @@ def _attach_quality_preflight_profile_preview(
         preview_payload,
         output_format=output_format,
     )
-    artifact = _write_quality_profile_preview_artifact(
+    artifact = write_quality_preflight_evidence_artifact(
         rendered,
         destination,
+        kind="quality-profile-preview",
         output_format=output_format,
+        schema_version=QUALITY_PROFILE_PREVIEW_SCHEMA_VERSION,
+        label="Profile preview",
+        console_label="profile preview",
     )
-    evidence_value = payload.get("evidence")
-    if isinstance(evidence_value, dict):
-        evidence_value["quality_profile_preview"] = artifact
-        return
-    payload["evidence"] = {"quality_profile_preview": artifact}
-
-
-def _write_quality_profile_preview_artifact(
-    content: str,
-    destination: str,
-    *,
-    output_format: str,
-) -> dict[str, JSONValue]:
-    """Write a preflight profile preview artifact and return metadata."""
-    if destination == "-":
-        raise ValueError(
-            "quality preflight profile preview output requires a file path"
-        )
-    rendered = content if content.endswith("\n") else f"{content}\n"
-    encoded = rendered.encode("utf-8")
-    path = Path(destination).expanduser()
-    if path.parent != Path("."):
-        path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(encoded)
-    return {
-        "state": "written",
-        "kind": "quality-profile-preview",
-        "path": str(publish_safe_path(str(path.resolve(strict=False)))),
-        "format": output_format,
-        "schema_version": QUALITY_PROFILE_PREVIEW_SCHEMA_VERSION,
-        "hash_algorithm": "sha256",
-        "sha256": hashlib.sha256(encoded).hexdigest(),
-        "size_bytes": len(encoded),
-    }
+    register_quality_preflight_evidence_artifact(
+        payload,
+        "quality_profile_preview",
+        artifact,
+        legacy_key="quality_profile_preview",
+    )
 
 
 def _format_quality_profile_preview(

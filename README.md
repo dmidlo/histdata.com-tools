@@ -1107,6 +1107,11 @@ histdatacom --quality-preflight \
   --quality-preflight-profile-preview-format markdown
 ```
 
+Preflight-attached artifacts are recorded under `evidence.artifacts` with a
+publish-safe path, format, schema version, SHA-256 digest, and byte size. The
+profile preview remains mirrored at `evidence.quality_profile_preview` for
+compatibility with existing reports and runbooks.
+
 Preview artifact parent directories are created automatically. Use
 `--quality-profile-preview-output -` only when stdout is the intended artifact
 stream.

@@ -56,6 +56,7 @@ QUALITY_PREFLIGHT_SCHEMA_VERSION = "histdatacom.quality-preflight.v1"
 QUALITY_PREFLIGHT_EVIDENCE_SCHEMA_VERSION = (
     "histdatacom.quality-preflight-evidence.v1"
 )
+QUALITY_PREFLIGHT_EVIDENCE_ARTIFACTS_METADATA_KEY = "artifacts"
 QUALITY_PREFLIGHT_INSPECTION_SCHEMA_VERSION = (
     "histdatacom.quality-preflight-inspection.v1"
 )
@@ -189,12 +190,84 @@ def write_quality_preflight_report(
     return output.resolve(strict=False)
 
 
+def write_quality_preflight_evidence_artifact(
+    content: str | bytes,
+    destination: str | Path,
+    *,
+    kind: str,
+    output_format: str,
+    schema_version: str,
+    label: str = "",
+    console_label: str = "",
+    ensure_trailing_newline: bool = True,
+) -> dict[str, JSONValue]:
+    """Write one preflight evidence artifact and return stable metadata."""
+    if str(destination) == "-":
+        raise ValueError(
+            "quality preflight evidence artifact requires a file path"
+        )
+    encoded = _artifact_content_bytes(
+        content,
+        ensure_trailing_newline=ensure_trailing_newline,
+    )
+    output = Path(destination).expanduser()
+    if output.parent != Path("."):
+        output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(encoded)
+    metadata: dict[str, JSONValue] = {
+        "state": "written",
+        "kind": kind,
+        "path": str(publish_safe_path(str(output.resolve(strict=False)))),
+        "format": output_format,
+        "schema_version": schema_version,
+        "hash_algorithm": "sha256",
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "size_bytes": len(encoded),
+    }
+    if label:
+        metadata["label"] = label
+    if console_label:
+        metadata["console_label"] = console_label
+    return metadata
+
+
+def register_quality_preflight_evidence_artifact(
+    payload: dict[str, Any],
+    key: str,
+    artifact: Mapping[str, JSONValue],
+    *,
+    legacy_key: str = "",
+) -> dict[str, JSONValue]:
+    """Register one preflight evidence artifact in the shared artifact map."""
+    evidence_value = payload.get("evidence")
+    if not isinstance(evidence_value, dict):
+        evidence_value = {}
+        payload["evidence"] = evidence_value
+    artifact_payload = dict(artifact)
+    artifacts_value = evidence_value.get(
+        QUALITY_PREFLIGHT_EVIDENCE_ARTIFACTS_METADATA_KEY
+    )
+    if not isinstance(artifacts_value, dict):
+        artifacts_value = {}
+        evidence_value[QUALITY_PREFLIGHT_EVIDENCE_ARTIFACTS_METADATA_KEY] = (
+            artifacts_value
+        )
+    artifacts_value[key] = artifact_payload
+    if legacy_key:
+        evidence_value[legacy_key] = artifact_payload
+    return artifact_payload
+
+
 def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
     """Return publish-safe Markdown evidence for a quality preflight payload."""
     safe_payload = publish_safe_json_mapping(payload)
     evidence = _mapping(safe_payload.get("evidence"))
     commands = _mapping(evidence.get("commands"))
-    profile_preview = _mapping(evidence.get("quality_profile_preview"))
+    profile_preview = _evidence_artifact(
+        evidence,
+        "quality_profile_preview",
+        legacy_key="quality_profile_preview",
+    )
     operational = _mapping(evidence.get("operational"))
     runtime_cleanup = _mapping(evidence.get("runtime_cleanup"))
     release = _mapping(evidence.get("release_preflight"))
@@ -302,6 +375,19 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
         ),
         "",
     ]
+    artifact_rows = _evidence_artifact_rows(evidence)
+    if artifact_rows:
+        lines.extend(
+            [
+                "## Evidence Artifacts",
+                "",
+                *_markdown_table(
+                    ("Artifact", "State", "Path", "Format", "Schema"),
+                    artifact_rows,
+                ),
+                "",
+            ]
+        )
     sample_rows = _sample_target_rows(sample)
     if sample_rows:
         lines.extend(
@@ -802,7 +888,6 @@ def format_quality_preflight_console_summary(
     decision = _mapping(payload.get("decision"))
     diagnostics = _mapping(payload.get("diagnostics"))
     evidence = _mapping(payload.get("evidence"))
-    profile_preview = _mapping(evidence.get("quality_profile_preview"))
     lines = [
         "Data quality cache preflight",
         "status: " + str(payload.get("status", "unknown")),
@@ -855,10 +940,7 @@ def format_quality_preflight_console_summary(
             "observed_unmapped_warning_error_groups="
             f"{remediation_audit_summary.get('report_unmapped_warning_error_group_count', 0)}"
         )
-    if profile_preview:
-        lines.append(
-            f"profile preview: {_profile_preview_artifact_label(profile_preview)}"
-        )
+    lines.extend(_evidence_artifact_console_lines(evidence))
     if decision.get("reason"):
         lines.append(f"reason: {decision['reason']}")
     if decision.get("next_command"):
@@ -2429,6 +2511,20 @@ def _rounded_optional(value: float | None) -> float | None:
     return None if value is None else round(value, 6)
 
 
+def _artifact_content_bytes(
+    content: str | bytes,
+    *,
+    ensure_trailing_newline: bool,
+) -> bytes:
+    if isinstance(content, bytes):
+        encoded = content
+    else:
+        encoded = content.encode("utf-8")
+    if ensure_trailing_newline and not encoded.endswith(b"\n"):
+        return encoded + b"\n"
+    return encoded
+
+
 def _mapping(value: object) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
@@ -2598,18 +2694,98 @@ def _source_artifact_state(operational: Mapping[str, Any]) -> str:
     )
 
 
+def _evidence_artifact(
+    evidence: Mapping[str, Any],
+    key: str,
+    *,
+    legacy_key: str = "",
+) -> dict[str, Any]:
+    artifacts = _mapping(
+        evidence.get(QUALITY_PREFLIGHT_EVIDENCE_ARTIFACTS_METADATA_KEY)
+    )
+    artifact = _mapping(artifacts.get(key))
+    if artifact:
+        return artifact
+    if legacy_key:
+        return _mapping(evidence.get(legacy_key))
+    return {}
+
+
+def _iter_evidence_artifacts(
+    evidence: Mapping[str, Any],
+) -> tuple[tuple[str, dict[str, Any]], ...]:
+    artifacts = _mapping(
+        evidence.get(QUALITY_PREFLIGHT_EVIDENCE_ARTIFACTS_METADATA_KEY)
+    )
+    if not artifacts:
+        legacy_preview = _mapping(evidence.get("quality_profile_preview"))
+        if legacy_preview:
+            artifacts = {"quality_profile_preview": legacy_preview}
+    rows: list[tuple[str, dict[str, Any]]] = []
+    for key in sorted(str(item) for item in artifacts):
+        artifact = _mapping(artifacts.get(key))
+        if artifact:
+            rows.append((key, artifact))
+    return tuple(rows)
+
+
+def _evidence_artifact_rows(
+    evidence: Mapping[str, Any],
+) -> tuple[tuple[str, str, str, str, str], ...]:
+    rows: list[tuple[str, str, str, str, str]] = []
+    for key, artifact in _iter_evidence_artifacts(evidence):
+        rows.append(
+            (
+                _evidence_artifact_display_name(key, artifact),
+                str(artifact.get("state", "unknown")),
+                str(artifact.get("path", "")),
+                str(artifact.get("format", "")),
+                str(artifact.get("schema_version", "")),
+            )
+        )
+    return tuple(rows)
+
+
+def _evidence_artifact_console_lines(
+    evidence: Mapping[str, Any],
+) -> list[str]:
+    lines: list[str] = []
+    for key, artifact in _iter_evidence_artifacts(evidence):
+        label = str(
+            artifact.get("console_label")
+            or artifact.get("label")
+            or key.replace("_", " ")
+        )
+        lines.append(f"{label}: {_evidence_artifact_label(artifact)}")
+    return lines
+
+
+def _evidence_artifact_display_name(
+    key: str,
+    artifact: Mapping[str, Any],
+) -> str:
+    return str(artifact.get("label") or key.replace("_", " ").title())
+
+
+def _evidence_artifact_label(
+    artifact: Mapping[str, Any],
+) -> str:
+    """Return a compact Markdown/console label for evidence artifacts."""
+    if not artifact:
+        return "not requested"
+    state = str(artifact.get("state", "unknown"))
+    path = str(artifact.get("path", ""))
+    output_format = str(artifact.get("format", ""))
+    if path:
+        return f"{state}: {path} ({output_format})"
+    return state
+
+
 def _profile_preview_artifact_label(
     profile_preview: Mapping[str, Any],
 ) -> str:
     """Return a compact Markdown/console label for preview artifacts."""
-    if not profile_preview:
-        return "not requested"
-    state = str(profile_preview.get("state", "unknown"))
-    path = str(profile_preview.get("path", ""))
-    output_format = str(profile_preview.get("format", ""))
-    if path:
-        return f"{state}: {path} ({output_format})"
-    return state
+    return _evidence_artifact_label(profile_preview)
 
 
 def _validation_command_rows(
