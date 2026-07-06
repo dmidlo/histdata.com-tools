@@ -381,6 +381,36 @@ def test_quality_fingerprint_schema_cli_verifies_contract_text(
     assert "No contract drift detected." in output
 
 
+def test_quality_bounded_payload_contract_cli_reports_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bounded payload contract command should emit machine-readable audit."""
+    exit_code = main(["bounded-payload-contract", "--json"])
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == (
+        "histdatacom.bounded-payload-contract-audit.v1"
+    )
+    assert payload["status"] == "pass"
+    assert payload["finding_count"] == 0
+    assert payload["payload_source"] == "representative"
+
+
+def test_quality_bounded_payload_contract_cli_reports_human_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bounded payload contract command should render concise text."""
+    exit_code = main(["bounded-payload-contract"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Bounded Payload Contract Audit" in output
+    assert "status: pass" in output
+    assert "No bounded payload contract drift detected." in output
+
+
 def test_quality_fingerprint_schema_cli_applies_yaml_defaults(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,

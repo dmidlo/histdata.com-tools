@@ -134,6 +134,12 @@ from histdatacom.data_quality.fingerprint_discovery import (
     format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
 )
+from histdatacom.data_quality.bounded_payload_contracts import (
+    BOUNDED_PAYLOAD_CONTRACT_AUDIT_SCHEMA_VERSION,
+    bounded_payload_contract_audit,
+    format_bounded_payload_contract_audit,
+    representative_bounded_quality_payload,
+)
 from histdatacom.data_quality.limits import (
     BoundedReportLimit,
     bounded_report_limit,
@@ -465,8 +471,10 @@ __all__ = [
     "QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION",
     "QUALITY_REPORTING_METADATA_KEY",
     "BoundedReportLimit",
+    "BOUNDED_PAYLOAD_CONTRACT_AUDIT_SCHEMA_VERSION",
     "bars_quality_rules",
     "bars_quality_run_rules",
+    "bounded_payload_contract_audit",
     "bounded_quality_payload",
     "bounded_report_limit",
     "build_full_dataset_campaign_report",
@@ -488,6 +496,7 @@ __all__ = [
     "fingerprint_contract_audit",
     "fingerprint_quality_rules",
     "fingerprint_schema_discovery",
+    "format_bounded_payload_contract_audit",
     "format_fingerprint_contract_audit",
     "format_fingerprint_schema_discovery",
     "format_fingerprint_topology_attention_lines",
@@ -524,6 +533,7 @@ __all__ = [
     "quality_remediation_coverage_summary",
     "quality_report_payload",
     "quality_report_to_json",
+    "representative_bounded_quality_payload",
     "quality_profile_from_mapping",
     "quality_profile_from_value",
     "quality_profile_metadata",

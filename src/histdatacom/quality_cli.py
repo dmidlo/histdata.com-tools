@@ -13,6 +13,10 @@ from histdatacom.cli_config import (
     configured_quality_argv,
 )
 from histdatacom.data_quality import QUALITY_CHECK_GROUPS
+from histdatacom.data_quality.bounded_payload_contracts import (
+    bounded_payload_contract_audit,
+    format_bounded_payload_contract_audit,
+)
 from histdatacom.data_quality.fingerprint_discovery import (
     fingerprint_contract_audit,
     fingerprint_schema_discovery,
@@ -244,6 +248,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit a data-free fingerprint contract drift audit",
     )
+    bounded_payload = subparsers.add_parser(
+        "bounded-payload-contract",
+        aliases=("bounded-payload-audit", "report-payload-contract"),
+        help="audit bounded quality-report payload metadata semantics",
+    )
+    bounded_payload.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the machine-readable bounded payload contract audit",
+    )
     return parser
 
 
@@ -338,6 +352,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print(format_fingerprint_schema_discovery(payload))  # noqa:T201
         return 0
+
+    if args.quality_command in {
+        "bounded-payload-contract",
+        "bounded-payload-audit",
+        "report-payload-contract",
+    }:
+        audit_payload = bounded_payload_contract_audit()
+        if args.json:
+            print(  # noqa:T201
+                json.dumps(audit_payload, indent=2, sort_keys=True)
+            )
+        else:
+            print(  # noqa:T201
+                format_bounded_payload_contract_audit(audit_payload)
+            )
+        return 1 if audit_payload.get("status") == "fail" else 0
 
     parser.error(f"unsupported quality command: {args.quality_command}")
 
