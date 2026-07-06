@@ -1003,9 +1003,12 @@ Quality JSON reports and CLI summaries also include a bounded
 present. Use that report-level summary to scan whether return or microstructure
 dynamics are valid, limited, skipped, or unavailable; which topology limitations
 affect sequence interpretation; and the compact return, jump, flatline, spread,
-stale quote, burst, and one-sided movement facts. Use the raw
-`time_series_fingerprint` payload when downstream tooling needs the complete
-fingerprint sections or full quantile maps.
+stale quote, burst, and one-sided movement facts. The same readiness summary
+also includes bounded dependence status, ACF basis, configured lag coverage,
+computed/skipped lag counts, skipped-lag reason counts, and per-series sample
+counts. Use the raw `time_series_fingerprint` payload when downstream tooling
+needs the complete fingerprint sections, full quantile maps, or full ACF lag
+maps.
 
 Discover the active fingerprint contract without scanning target data:
 

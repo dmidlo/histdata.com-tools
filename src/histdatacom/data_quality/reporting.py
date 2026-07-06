@@ -2069,9 +2069,37 @@ def format_fingerprint_readiness_summary_lines(
             if reasons:
                 line += f" reasons: {reasons}"
             lines.append(line)
+    dependence_counts = _format_count_metadata(
+        summary.get("dependence_status_counts")
+    )
+    if dependence_counts:
+        dependence_line = f"- dependence: {dependence_counts}"
+        dependence_reasons = _format_count_metadata(
+            summary.get("dependence_reason_counts")
+        )
+        if dependence_reasons:
+            dependence_line += f" reasons: {dependence_reasons}"
+        skipped_reasons = _format_count_metadata(
+            summary.get("dependence_skipped_lag_reason_counts")
+        )
+        if skipped_reasons:
+            dependence_line += f" skipped-lag reasons: {skipped_reasons}"
+        acf_basis = _format_count_metadata(
+            summary.get("dependence_acf_basis_counts")
+        )
+        if acf_basis:
+            dependence_line += f" acf_basis: {acf_basis}"
+        dependence_line += (
+            " computed_lags="
+            f"{_int_metadata(summary, 'dependence_computed_lag_count')} "
+            "skipped_lags="
+            f"{_int_metadata(summary, 'dependence_skipped_lag_count')}"
+        )
+        lines.append(dependence_line)
     count_lines = (
         ("topology limitations", "topology_limitation_counts"),
         ("dynamics limitations", "dynamics_limitation_counts"),
+        ("dependence limitations", "dependence_limitation_counts"),
         ("row order", "row_order_counts"),
         ("computed from", "computed_from_counts"),
         ("cache sources", "cache_source_counts"),
@@ -2126,6 +2154,10 @@ def _format_fingerprint_readiness_target_line(
     cache_text = f", cache={cache_source}" if cache_source else ""
     details = _format_fingerprint_readiness_dynamics_details(section, dynamics)
     details_text = f", {details}" if details else ""
+    dependence_details = _format_fingerprint_readiness_dependence_details(
+        _mapping_payload(summary.get("dependence"))
+    )
+    dependence_text = f", {dependence_details}" if dependence_details else ""
     return (
         f"{_string_metadata(axis, 'data_format')} "
         f"{_string_metadata(axis, 'symbol')} "
@@ -2147,6 +2179,7 @@ def _format_fingerprint_readiness_target_line(
         f"truncated={_bool_text(dynamics.get('truncated'))}, "
         f"limitations={limitation_text}"
         f"{details_text}"
+        f"{dependence_text}"
     )
 
 
@@ -2220,6 +2253,59 @@ def _format_fingerprint_readiness_dynamics_details(
     return ""
 
 
+def _format_fingerprint_readiness_dependence_details(
+    dependence: Mapping[str, JSONValue],
+) -> str:
+    if not dependence:
+        return ""
+    status = _string_metadata(dependence, "status")
+    reason = _optional_string_metadata(dependence, "reason")
+    reason_text = f" reason={reason}" if reason else ""
+    skipped_reasons = _format_count_metadata(
+        dependence.get("skipped_lag_reason_counts")
+    )
+    skipped_reason_text = (
+        f" skipped_reasons={skipped_reasons}" if skipped_reasons else ""
+    )
+    series = _format_dependence_series_metadata(dependence.get("series"))
+    series_text = f" series={series}" if series else ""
+    return (
+        f"dependence={status}{reason_text} "
+        f"acf_basis={_string_metadata(dependence, 'acf_basis')} "
+        f"lags={_format_lag_metadata(dependence)} "
+        "computed_lags="
+        f"{_int_metadata(dependence, 'computed_lag_count')} "
+        "skipped_lags="
+        f"{_int_metadata(dependence, 'skipped_lag_count')}"
+        f"{skipped_reason_text}"
+        f"{series_text}"
+    )
+
+
+def _format_lag_metadata(dependence: Mapping[str, JSONValue]) -> str:
+    lags = _int_list_metadata(dependence.get("lags"))
+    omitted = _int_metadata(dependence, "omitted_lag_count")
+    lag_text = "[" + ",".join(str(lag) for lag in lags) + "]"
+    if omitted:
+        lag_text += f"+{omitted}"
+    return lag_text
+
+
+def _format_dependence_series_metadata(value: JSONValue) -> str:
+    series = _mapping_payload(value)
+    parts: list[str] = []
+    for name in sorted(series):
+        summary = _mapping_payload(series[name])
+        if not summary:
+            continue
+        parts.append(
+            f"{name}:samples={_int_metadata(summary, 'sample_count')}/"
+            f"computed={_int_metadata(summary, 'computed_lag_count')}/"
+            f"skipped={_int_metadata(summary, 'skipped_lag_count')}"
+        )
+    return ";".join(parts)
+
+
 def _count_metadata(value: JSONValue, key: str) -> int:
     if not isinstance(value, Mapping):
         return 0
@@ -2274,6 +2360,20 @@ def _string_list_metadata(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _int_list_metadata(value: object) -> list[int]:
+    if not isinstance(value, list):
+        return []
+    parsed: list[int] = []
+    for item in value:
+        if isinstance(item, bool):
+            continue
+        try:
+            parsed.append(int(item))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+    return parsed
 
 
 def _list_metadata(value: object) -> list[Mapping[str, JSONValue]]:

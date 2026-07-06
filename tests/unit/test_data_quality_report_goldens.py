@@ -1339,6 +1339,13 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "applicable_dynamics_status_counts",
         "cache_source_counts",
         "computed_from_counts",
+        "dependence_acf_basis_counts",
+        "dependence_computed_lag_count",
+        "dependence_limitation_counts",
+        "dependence_reason_counts",
+        "dependence_skipped_lag_count",
+        "dependence_skipped_lag_reason_counts",
+        "dependence_status_counts",
         "dynamics_limitation_counts",
         "dynamics_reason_counts",
         "dynamics_status_counts",
@@ -1364,6 +1371,8 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "target_count",
         "included_target_count",
         "omitted_target_count",
+        "dependence_computed_lag_count",
+        "dependence_skipped_lag_count",
     ):
         assert isinstance(payload[key], int)
         assert payload[key] >= 0
@@ -1372,6 +1381,11 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "applicable_dynamics_status_counts",
         "cache_source_counts",
         "computed_from_counts",
+        "dependence_acf_basis_counts",
+        "dependence_limitation_counts",
+        "dependence_reason_counts",
+        "dependence_skipped_lag_reason_counts",
+        "dependence_status_counts",
         "dynamics_limitation_counts",
         "dynamics_reason_counts",
         "dynamics_status_counts",
@@ -1399,6 +1413,7 @@ def _assert_fingerprint_readiness_target(
         "applicable_dynamics_reason",
         "applicable_dynamics_section",
         "applicable_dynamics_status",
+        "dependence",
         "microstructure_dynamics",
         "profile_completeness",
         "return_dynamics",
@@ -1453,6 +1468,7 @@ def _assert_fingerprint_readiness_target(
     _assert_fingerprint_readiness_dynamics(
         _mapping(payload["microstructure_dynamics"])
     )
+    _assert_fingerprint_readiness_dependence(_mapping(payload["dependence"]))
 
 
 def _assert_fingerprint_readiness_topology(
@@ -1561,6 +1577,76 @@ def _assert_fingerprint_readiness_dynamics(
     ):
         if key in payload:
             assert isinstance(payload[key], dict)
+
+
+def _assert_fingerprint_readiness_dependence(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "acf_basis",
+        "basis",
+        "cache_source",
+        "computed_from",
+        "computed_lag_count",
+        "included_lag_count",
+        "invalid_row_count",
+        "lag_count",
+        "lags",
+        "lags_truncated",
+        "limitations",
+        "omitted_lag_count",
+        "partial_row_count",
+        "reason",
+        "regular_grid",
+        "row_count",
+        "row_order",
+        "sampled_row_count",
+        "series",
+        "series_count",
+        "skipped_lag_count",
+        "skipped_lag_reason_counts",
+        "status",
+        "truncated",
+        "usable_row_count",
+    }
+    assert payload["status"] in {"limited", "skipped", "unavailable", "valid"}
+    assert isinstance(payload["limitations"], list)
+    assert isinstance(payload["lags"], list)
+    assert isinstance(payload["lags_truncated"], bool)
+    assert isinstance(payload["regular_grid"], bool)
+    assert isinstance(payload["truncated"], bool)
+    assert isinstance(payload["skipped_lag_reason_counts"], dict)
+    for key in (
+        "computed_lag_count",
+        "included_lag_count",
+        "invalid_row_count",
+        "lag_count",
+        "omitted_lag_count",
+        "partial_row_count",
+        "row_count",
+        "sampled_row_count",
+        "series_count",
+        "skipped_lag_count",
+        "usable_row_count",
+    ):
+        assert isinstance(payload[key], int)
+    series = _mapping(payload["series"])
+    for summary in series.values():
+        _assert_fingerprint_readiness_acf_series(_mapping(summary))
+
+
+def _assert_fingerprint_readiness_acf_series(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "computed_lag_count",
+        "sample_count",
+        "skipped_lag_count",
+        "skipped_lag_reason_counts",
+    }
+    assert isinstance(payload["skipped_lag_reason_counts"], dict)
+    for key in ("computed_lag_count", "sample_count", "skipped_lag_count"):
+        assert isinstance(payload[key], int)
 
 
 def _assert_compact_numeric_summary(payload: dict[str, JSONValue]) -> None:

@@ -468,6 +468,19 @@ def test_quality_report_payload_adds_fingerprint_readiness_metadata(
         "skipped": 2,
         "valid": 1,
     }
+    assert summary["dependence_status_counts"] == {
+        "limited": 1,
+        "valid": 2,
+    }
+    assert summary["dependence_reason_counts"] == {
+        "invalid_timestamps_skipped": 1,
+    }
+    assert summary["dependence_skipped_lag_reason_counts"] == {
+        "insufficient_sample_count": 4,
+        "zero_variance": 1,
+    }
+    assert summary["dependence_computed_lag_count"] == 17
+    assert summary["dependence_skipped_lag_count"] == 5
     assert summary["topology_limitation_counts"] == {
         "duplicate_timestamps": 1,
         "expected_session_closures": 1,
@@ -502,6 +515,22 @@ def test_quality_report_payload_adds_fingerprint_readiness_metadata(
         "suspicious_gaps",
         "expected_session_closures",
     ]
+    assert limited["dependence"]["status"] == "limited"
+    assert limited["dependence"]["reason"] == "invalid_timestamps_skipped"
+    assert limited["dependence"]["acf_basis"] == "observed_sequence"
+    assert limited["dependence"]["lags"] == [1, 3]
+    assert limited["dependence"]["computed_lag_count"] == 3
+    assert limited["dependence"]["skipped_lag_count"] == 5
+    assert limited["dependence"]["skipped_lag_reason_counts"] == {
+        "insufficient_sample_count": 4,
+        "zero_variance": 1,
+    }
+    assert limited["dependence"]["series"]["close_log_return_acf"] == {
+        "sample_count": 2,
+        "computed_lag_count": 1,
+        "skipped_lag_count": 1,
+        "skipped_lag_reason_counts": {"insufficient_sample_count": 1},
+    }
 
     tick = target_summaries[2]
     assert tick["applicable_dynamics_section"] == "microstructure_dynamics"
@@ -515,6 +544,8 @@ def test_quality_report_payload_adds_fingerprint_readiness_metadata(
         "ask_only_count": 1,
         "run_count": 0,
     }
+    assert tick["dependence"]["status"] == "valid"
+    assert tick["dependence"]["series"]["spread_acf"]["sample_count"] == 5
 
 
 def test_fingerprint_readiness_summary_handles_absent_dynamics_sections(
@@ -530,6 +561,11 @@ def test_fingerprint_readiness_summary_handles_absent_dynamics_sections(
 
     assert summary["applicable_dynamics_status_counts"] == {"skipped": 2}
     assert summary["dynamics_reason_counts"]["return_dynamics"] == {
+        "not_emitted": 1,
+        "unsupported_target_kind": 1,
+    }
+    assert summary["dependence_status_counts"] == {"skipped": 2}
+    assert summary["dependence_reason_counts"] == {
         "not_emitted": 1,
         "unsupported_target_kind": 1,
     }
@@ -550,6 +586,7 @@ def test_fingerprint_readiness_summary_handles_absent_dynamics_sections(
         "partial_row_count": 0,
         "truncated": False,
     }
+    assert target["dependence"] == _empty_dependence_summary("not_emitted")
 
 
 def test_fingerprint_console_summary_reports_readiness_lines(
@@ -569,7 +606,18 @@ def test_fingerprint_console_summary_reports_readiness_lines(
         "reasons: invalid_timestamps_skipped=1, unsupported_timeframe=1"
     ) in output
     assert (
+        "- dependence: limited=1, valid=2 reasons: "
+        "invalid_timestamps_skipped=1 skipped-lag reasons: "
+        "insufficient_sample_count=4, zero_variance=1 "
+        "acf_basis: observed_sequence=3 computed_lags=17 skipped_lags=5"
+    ) in output
+    assert (
         "- topology limitations: duplicate_timestamps=1, "
+        "expected_session_closures=1, invalid_timestamps_skipped=1, "
+        "non_monotonic_timestamp_order=1, suspicious_gaps=1"
+    ) in output
+    assert (
+        "- dependence limitations: duplicate_timestamps=1, "
         "expected_session_closures=1, invalid_timestamps_skipped=1, "
         "non_monotonic_timestamp_order=1, suspicious_gaps=1"
     ) in output
@@ -583,6 +631,13 @@ def test_fingerprint_console_summary_reports_readiness_lines(
         in output
     )
     assert "close_returns=3 median=0.0001" in output
+    assert (
+        "dependence=limited reason=invalid_timestamps_skipped "
+        "acf_basis=observed_sequence lags=[1,3] computed_lags=3 "
+        "skipped_lags=5 skipped_reasons=insufficient_sample_count=4, "
+        "zero_variance=1"
+    ) in output
+    assert "close_log_return_acf:samples=2/computed=1/skipped=1" in output
     assert (
         "- ascii EURUSD T 201202 csv: microstructure_dynamics valid"
     ) in output
@@ -1220,6 +1275,71 @@ def test_fingerprint_readiness_summary_is_bounded_and_issue_first(
     )
 
 
+def test_fingerprint_readiness_summary_orders_limited_dependence_first(
+    tmp_path: Path,
+) -> None:
+    """Bounded readiness summaries should prioritize dependence limitations."""
+    limited_target = QualityTarget(
+        path=str(tmp_path / "limited-dependence.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="AUDUSD",
+        period="201202",
+    )
+    valid_target = QualityTarget(
+        path=str(tmp_path / "valid-dependence.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    limited_payload = _valid_m1_fingerprint_payload(kind="csv")
+    axis = limited_payload["target_axis"]
+    assert isinstance(axis, dict)
+    axis["symbol"] = "AUDUSD"
+    axis["kind"] = "csv"
+    limited_payload["dependence"] = _dependence_payload(
+        status="limited",
+        reason="skipped_lags",
+        row_count=4,
+        sampled_row_count=4,
+        usable_row_count=4,
+        series={
+            "close_log_return_acf": _acf_payload(
+                sample_count=2,
+                computed=1,
+                skipped={"3": "insufficient_sample_count"},
+            )
+        },
+    )
+    audit = limited_payload["fingerprint_audit"]
+    assert isinstance(audit, dict)
+    section_statuses = audit["section_statuses"]
+    assert isinstance(section_statuses, dict)
+    section_statuses["dependence"] = "limited"
+    valid_payload = _valid_m1_fingerprint_payload(kind="csv")
+
+    summary = series_fingerprint_readiness_summary(
+        (
+            _fingerprint_series_finding(valid_target, valid_payload),
+            _fingerprint_series_finding(limited_target, limited_payload),
+        ),
+        target_limit=1,
+    )
+
+    assert summary is not None
+    assert summary["target_count"] == 2
+    assert summary["included_target_count"] == 1
+    assert summary["omitted_target_count"] == 1
+    assert summary["target_summaries"][0]["target_axis"]["symbol"] == "AUDUSD"
+    assert summary["target_summaries"][0]["applicable_dynamics_status"] == (
+        "valid"
+    )
+    assert summary["target_summaries"][0]["dependence"]["status"] == "limited"
+
+
 def test_bounded_quality_payload_includes_next_actions(
     tmp_path: Path,
 ) -> None:
@@ -1682,6 +1802,24 @@ def _valid_m1_fingerprint_payload(*, kind: str) -> dict[str, object]:
                 "ohlc_flatline_affected_row_count": 0,
             },
         },
+        "dependence": _dependence_payload(
+            status="ok",
+            row_order="cache_order",
+            computed_from="direct_cache",
+            cache_source="direct",
+            row_count=4,
+            sampled_row_count=4,
+            usable_row_count=4,
+            series={
+                "absolute_return_acf": _acf_payload(sample_count=3, computed=2),
+                "close_log_return_acf": _acf_payload(
+                    sample_count=3,
+                    computed=2,
+                ),
+                "range_ratio_acf": _acf_payload(sample_count=4, computed=2),
+                "squared_return_acf": _acf_payload(sample_count=3, computed=2),
+            },
+        ),
         "fingerprint_audit": _audit_payload(
             expected=(
                 "coverage",
@@ -1689,12 +1827,14 @@ def _valid_m1_fingerprint_payload(*, kind: str) -> dict[str, object]:
                 "calendar_regimes",
                 "m1_bar_distribution",
                 "return_dynamics",
+                "dependence",
             ),
             emitted=(
                 "coverage",
                 "temporal_topology",
                 "m1_bar_distribution",
                 "return_dynamics",
+                "dependence",
             ),
             skipped={"calendar_regimes": "not_emitted"},
             section_statuses={
@@ -1703,6 +1843,7 @@ def _valid_m1_fingerprint_payload(*, kind: str) -> dict[str, object]:
                 "calendar_regimes": "skipped",
                 "m1_bar_distribution": "valid",
                 "return_dynamics": "valid",
+                "dependence": "valid",
             },
             return_status="valid",
             micro_status="skipped",
@@ -1765,6 +1906,42 @@ def _limited_m1_fingerprint_payload() -> dict[str, object]:
                 "ohlc_flatline_affected_row_count": 2,
             },
         },
+        "dependence": _dependence_payload(
+            status="limited",
+            reason="invalid_timestamps_skipped",
+            limitations=tuple(limitations),
+            row_count=4,
+            sampled_row_count=3,
+            usable_row_count=3,
+            invalid_row_count=1,
+            partial_row_count=1,
+            truncated=True,
+            series={
+                "absolute_return_acf": _acf_payload(
+                    sample_count=3,
+                    computed=1,
+                    skipped={"3": "insufficient_sample_count"},
+                ),
+                "close_log_return_acf": _acf_payload(
+                    sample_count=2,
+                    computed=1,
+                    skipped={"3": "insufficient_sample_count"},
+                ),
+                "range_ratio_acf": _acf_payload(
+                    sample_count=3,
+                    computed=1,
+                    skipped={"3": "insufficient_sample_count"},
+                ),
+                "squared_return_acf": _acf_payload(
+                    sample_count=3,
+                    computed=0,
+                    skipped={
+                        "1": "zero_variance",
+                        "3": "insufficient_sample_count",
+                    },
+                ),
+            },
+        ),
         "fingerprint_audit": _audit_payload(
             expected=(
                 "coverage",
@@ -1772,12 +1949,14 @@ def _limited_m1_fingerprint_payload() -> dict[str, object]:
                 "calendar_regimes",
                 "m1_bar_distribution",
                 "return_dynamics",
+                "dependence",
             ),
             emitted=(
                 "coverage",
                 "temporal_topology",
                 "m1_bar_distribution",
                 "return_dynamics",
+                "dependence",
             ),
             skipped={"calendar_regimes": "not_emitted"},
             section_statuses={
@@ -1786,6 +1965,7 @@ def _limited_m1_fingerprint_payload() -> dict[str, object]:
                 "calendar_regimes": "skipped",
                 "m1_bar_distribution": "valid",
                 "return_dynamics": "limited",
+                "dependence": "limited",
             },
             return_status="limited",
             return_reason="invalid_timestamps_skipped",
@@ -1861,6 +2041,21 @@ def _tick_fingerprint_payload() -> dict[str, object]:
                 "run_count": 0,
             },
         },
+        "dependence": _dependence_payload(
+            status="ok",
+            lags=(1, 2),
+            row_count=5,
+            sampled_row_count=5,
+            usable_row_count=5,
+            series={
+                "absolute_spread_change_acf": _acf_payload(
+                    sample_count=4,
+                    computed=2,
+                ),
+                "spread_acf": _acf_payload(sample_count=5, computed=2),
+                "spread_change_acf": _acf_payload(sample_count=4, computed=2),
+            },
+        ),
         "fingerprint_audit": _audit_payload(
             expected=(
                 "coverage",
@@ -1869,6 +2064,7 @@ def _tick_fingerprint_payload() -> dict[str, object]:
                 "tick_distribution",
                 "conditional_distributions",
                 "microstructure_dynamics",
+                "dependence",
             ),
             emitted=(
                 "coverage",
@@ -1876,6 +2072,7 @@ def _tick_fingerprint_payload() -> dict[str, object]:
                 "tick_distribution",
                 "conditional_distributions",
                 "microstructure_dynamics",
+                "dependence",
             ),
             skipped={"calendar_regimes": "not_emitted"},
             section_statuses={
@@ -1885,6 +2082,7 @@ def _tick_fingerprint_payload() -> dict[str, object]:
                 "tick_distribution": "valid",
                 "conditional_distributions": "valid",
                 "microstructure_dynamics": "valid",
+                "dependence": "valid",
             },
             return_status="skipped",
             return_reason="unsupported_timeframe",
@@ -2010,6 +2208,103 @@ def _audit_payload(
                 usable_row_count=5 if micro_status == "valid" else 0,
             ),
         },
+    }
+
+
+def _dependence_payload(
+    *,
+    status: str,
+    reason: str | None = None,
+    lags: tuple[int, ...] = (1, 3),
+    row_order: str = "source_text_order",
+    computed_from: str = "text_scan",
+    cache_source: str | None = None,
+    limitations: tuple[str, ...] = (),
+    row_count: int,
+    sampled_row_count: int,
+    usable_row_count: int,
+    invalid_row_count: int = 0,
+    partial_row_count: int = 0,
+    truncated: bool = False,
+    series: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    computed_lag_count = sum(
+        int(item["computed_lag_count"]) for item in series.values()
+    )
+    skipped_lag_count = sum(
+        int(item["skipped_lag_count"]) for item in series.values()
+    )
+    payload: dict[str, object] = {
+        "basis": "observed_sequence",
+        "acf_basis": "observed_sequence",
+        "row_order": row_order,
+        "computed_from": computed_from,
+        "cache_source": cache_source,
+        "regular_grid": False,
+        "dependence_status": status,
+        "limitations": list(limitations),
+        "row_count": row_count,
+        "sampled_row_count": sampled_row_count,
+        "usable_row_count": usable_row_count,
+        "invalid_row_count": invalid_row_count,
+        "partial_row_count": partial_row_count,
+        "truncated": truncated,
+        "lags": list(lags),
+        "computed_lag_count": computed_lag_count,
+        "skipped_lag_count": skipped_lag_count,
+    }
+    if reason:
+        payload["reason"] = reason
+    payload.update(series)
+    return payload
+
+
+def _acf_payload(
+    *,
+    sample_count: int,
+    computed: int,
+    skipped: dict[str, str] | None = None,
+) -> dict[str, object]:
+    skipped = skipped or {}
+    return {
+        "sample_count": sample_count,
+        "lag_acf": {str(index + 1): 0.0 for index in range(computed)},
+        "computed_lag_count": computed,
+        "skipped_lags": {
+            lag: {"reason": reason, "sample_count": sample_count}
+            for lag, reason in skipped.items()
+        },
+        "skipped_lag_count": len(skipped),
+    }
+
+
+def _empty_dependence_summary(reason: str) -> dict[str, object]:
+    return {
+        "status": "skipped",
+        "reason": reason,
+        "basis": "unknown",
+        "acf_basis": "unknown",
+        "row_order": "unknown",
+        "computed_from": "unknown",
+        "cache_source": None,
+        "regular_grid": False,
+        "limitations": [],
+        "row_count": 0,
+        "sampled_row_count": 0,
+        "usable_row_count": 0,
+        "invalid_row_count": 0,
+        "partial_row_count": 0,
+        "truncated": False,
+        "lag_count": 0,
+        "lags": [],
+        "included_lag_count": 0,
+        "omitted_lag_count": 0,
+        "lags_truncated": False,
+        "computed_lag_count": 0,
+        "skipped_lag_count": 0,
+        "skipped_lag_reason_counts": {},
+        "series_count": 0,
+        "series": {},
     }
 
 

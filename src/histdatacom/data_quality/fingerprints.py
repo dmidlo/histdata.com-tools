@@ -130,6 +130,7 @@ DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT = 32
 DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT = 128
 DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT = 32
 DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT = 16
+DEFAULT_FINGERPRINT_READINESS_LAG_LIMIT = 16
 DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT = 1
 DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_RATE = 0.0
 DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_COUNT = 1
@@ -688,6 +689,13 @@ def series_fingerprint_readiness_summary(
         dynamics_status_counts[section] = _counter_payload(status_counts)
         dynamics_reason_counts[section] = _counter_payload(reason_counts)
 
+    dependence_status_counts: Counter[str] = Counter()
+    dependence_reason_counts: Counter[str] = Counter()
+    dependence_acf_basis_counts: Counter[str] = Counter()
+    dependence_limitation_counts: Counter[str] = Counter()
+    dependence_skipped_lag_reason_counts: Counter[str] = Counter()
+    dependence_computed_lag_count = 0
+    dependence_skipped_lag_count = 0
     topology_limitation_counts: Counter[str] = Counter()
     dynamics_limitation_counts: Counter[str] = Counter()
     row_order_counts: Counter[str] = Counter()
@@ -725,6 +733,29 @@ def series_fingerprint_readiness_summary(
                 computed_from_counts[computed_from] += 1
             if cache_source:
                 cache_source_counts[cache_source] += 1
+        dependence = _payload_mapping(item.get("dependence"))
+        dependence_status_counts[_summary_key(dependence.get("status"))] += 1
+        dependence_reason = _optional_summary_key(dependence.get("reason"))
+        if dependence_reason:
+            dependence_reason_counts[dependence_reason] += 1
+        acf_basis = _summary_key(dependence.get("acf_basis"))
+        if acf_basis != "unknown":
+            dependence_acf_basis_counts[acf_basis] += 1
+        dependence_limitation_counts.update(
+            _summary_key(value)
+            for value in _string_list(dependence.get("limitations"))
+        )
+        dependence_skipped_lag_reason_counts.update(
+            _counter_from_mapping(
+                _payload_mapping(dependence.get("skipped_lag_reason_counts"))
+            )
+        )
+        dependence_computed_lag_count += _int_payload(
+            dependence.get("computed_lag_count")
+        )
+        dependence_skipped_lag_count += _int_payload(
+            dependence.get("skipped_lag_count")
+        )
 
     profile_complete_count = sum(
         1
@@ -766,6 +797,19 @@ def series_fingerprint_readiness_summary(
         "section_status_counts": section_status_counts,
         "dynamics_status_counts": dynamics_status_counts,
         "dynamics_reason_counts": dynamics_reason_counts,
+        "dependence_status_counts": _counter_payload(dependence_status_counts),
+        "dependence_reason_counts": _counter_payload(dependence_reason_counts),
+        "dependence_acf_basis_counts": _counter_payload(
+            dependence_acf_basis_counts
+        ),
+        "dependence_limitation_counts": _counter_payload(
+            dependence_limitation_counts
+        ),
+        "dependence_skipped_lag_reason_counts": _counter_payload(
+            dependence_skipped_lag_reason_counts
+        ),
+        "dependence_computed_lag_count": dependence_computed_lag_count,
+        "dependence_skipped_lag_count": dependence_skipped_lag_count,
         "topology_limitation_counts": _counter_payload(
             topology_limitation_counts
         ),
@@ -870,6 +914,12 @@ def _fingerprint_readiness_target_summary(
         )
     )
     topology = _payload_mapping(payload.get("temporal_topology"))
+    dependence_readiness = _fingerprint_readiness_dependence_summary(
+        finding,
+        payload,
+        section_statuses=section_statuses,
+        skipped_sections=skipped_sections,
+    )
 
     return {
         "target_axis": target_axis,
@@ -909,6 +959,7 @@ def _fingerprint_readiness_target_summary(
                 microstructure_readiness,
             )
         ),
+        "dependence": dependence_readiness,
     }
 
 
@@ -1155,6 +1206,147 @@ def _fingerprint_readiness_microstructure_summary(
     return summary
 
 
+def _fingerprint_readiness_dependence_summary(
+    finding: QualityFinding,
+    payload: Mapping[str, JSONValue],
+    *,
+    section_statuses: Mapping[str, JSONValue],
+    skipped_sections: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    dependence = _payload_mapping(payload.get("dependence"))
+    if not dependence:
+        status = _summary_key(section_statuses.get("dependence") or "skipped")
+        if status not in {"skipped", "unavailable"}:
+            status = "skipped"
+        skipped = _payload_mapping(skipped_sections.get("dependence"))
+        reason = _optional_summary_key(skipped.get("reason"))
+        if reason is None:
+            reason = _fingerprint_section_skip_reason(
+                "dependence",
+                payload,
+                target=finding.target,
+            )
+        return _empty_dependence_readiness(status=status, reason=reason)
+
+    series = {
+        name: _compact_acf_series_summary(value)
+        for name, value in sorted(dependence.items())
+        if name.endswith("_acf") and isinstance(value, Mapping)
+    }
+    skipped_reason_counts: Counter[str] = Counter()
+    for summary in series.values():
+        skipped_reason_counts.update(
+            _counter_from_mapping(
+                _payload_mapping(summary.get("skipped_lag_reason_counts"))
+            )
+        )
+    computed_lag_count = _int_payload(dependence.get("computed_lag_count"))
+    if computed_lag_count <= 0:
+        computed_lag_count = sum(
+            _int_payload(summary.get("computed_lag_count"))
+            for summary in series.values()
+        )
+    skipped_lag_count = _int_payload(dependence.get("skipped_lag_count"))
+    if skipped_lag_count <= 0:
+        skipped_lag_count = sum(
+            _int_payload(summary.get("skipped_lag_count"))
+            for summary in series.values()
+        )
+    lags = _int_sequence_payload(dependence.get("lags"))
+    included_lags = lags[:DEFAULT_FINGERPRINT_READINESS_LAG_LIMIT]
+    omitted_lag_count = max(0, len(lags) - len(included_lags))
+    result: dict[str, JSONValue] = {
+        "status": _dependence_section_status(dependence),
+        "reason": _optional_summary_key(dependence.get("reason")),
+        "basis": _summary_key(dependence.get("basis")),
+        "acf_basis": _summary_key(dependence.get("acf_basis")),
+        "row_order": _summary_key(dependence.get("row_order")),
+        "computed_from": _summary_key(dependence.get("computed_from")),
+        "cache_source": _optional_summary_key(dependence.get("cache_source")),
+        "regular_grid": dependence.get("regular_grid") is True,
+        "limitations": _string_list(dependence.get("limitations")),
+        "row_count": _int_payload(dependence.get("row_count")),
+        "sampled_row_count": _int_payload(dependence.get("sampled_row_count")),
+        "usable_row_count": _int_payload(dependence.get("usable_row_count")),
+        "invalid_row_count": _int_payload(dependence.get("invalid_row_count")),
+        "partial_row_count": _int_payload(dependence.get("partial_row_count")),
+        "truncated": dependence.get("truncated") is True,
+        "lag_count": len(lags),
+        "lags": list(included_lags),
+        "included_lag_count": len(included_lags),
+        "omitted_lag_count": omitted_lag_count,
+        "lags_truncated": omitted_lag_count > 0,
+        "computed_lag_count": computed_lag_count,
+        "skipped_lag_count": skipped_lag_count,
+        "skipped_lag_reason_counts": _counter_payload(skipped_reason_counts),
+        "series_count": len(series),
+    }
+    result["series"] = cast(JSONValue, series)
+    return result
+
+
+def _empty_dependence_readiness(
+    *,
+    status: str,
+    reason: str | None,
+) -> dict[str, JSONValue]:
+    return {
+        "status": status,
+        "reason": reason,
+        "basis": "unknown",
+        "acf_basis": "unknown",
+        "row_order": "unknown",
+        "computed_from": "unknown",
+        "cache_source": None,
+        "regular_grid": False,
+        "limitations": [],
+        "row_count": 0,
+        "sampled_row_count": 0,
+        "usable_row_count": 0,
+        "invalid_row_count": 0,
+        "partial_row_count": 0,
+        "truncated": False,
+        "lag_count": 0,
+        "lags": [],
+        "included_lag_count": 0,
+        "omitted_lag_count": 0,
+        "lags_truncated": False,
+        "computed_lag_count": 0,
+        "skipped_lag_count": 0,
+        "skipped_lag_reason_counts": {},
+        "series_count": 0,
+        "series": {},
+    }
+
+
+def _compact_acf_series_summary(value: JSONValue) -> dict[str, JSONValue]:
+    acf = _payload_mapping(value)
+    skipped_reason_counts = _acf_skipped_lag_reason_counts(acf)
+    computed_lag_count = _int_payload(acf.get("computed_lag_count"))
+    if computed_lag_count <= 0:
+        computed_lag_count = len(_payload_mapping(acf.get("lag_acf")))
+    skipped_lag_count = _int_payload(acf.get("skipped_lag_count"))
+    if skipped_lag_count <= 0:
+        skipped_lag_count = sum(skipped_reason_counts.values())
+    return {
+        "sample_count": _int_payload(acf.get("sample_count")),
+        "computed_lag_count": computed_lag_count,
+        "skipped_lag_count": skipped_lag_count,
+        "skipped_lag_reason_counts": _counter_payload(skipped_reason_counts),
+    }
+
+
+def _acf_skipped_lag_reason_counts(
+    acf: Mapping[str, JSONValue],
+) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for skipped in _payload_mapping(acf.get("skipped_lags")).values():
+        reason = _optional_summary_key(_payload_mapping(skipped).get("reason"))
+        if reason:
+            counts[reason] += 1
+    return counts
+
+
 def _compact_numeric_summary(value: JSONValue) -> dict[str, JSONValue]:
     numeric = _payload_mapping(value)
     if not numeric:
@@ -1225,10 +1417,17 @@ def _fingerprint_readiness_target_sort_key(
     target: Mapping[str, JSONValue],
 ) -> tuple[object, ...]:
     axis = _payload_mapping(target.get("target_axis"))
-    return (
+    dependence = _payload_mapping(target.get("dependence"))
+    readiness_rank = min(
         _fingerprint_readiness_status_rank(
             _summary_key(target.get("applicable_dynamics_status"))
         ),
+        _fingerprint_readiness_status_rank(
+            _summary_key(dependence.get("status"))
+        ),
+    )
+    return (
+        readiness_rank,
         _summary_key(axis.get("data_format")),
         _summary_key(axis.get("timeframe")),
         _summary_key(axis.get("symbol")),
@@ -2213,6 +2412,29 @@ def _summary_key(value: object) -> str:
 
 def _counter_payload(counter: Counter[str]) -> dict[str, JSONValue]:
     return {key: counter[key] for key in sorted(counter)}
+
+
+def _counter_from_mapping(mapping: Mapping[str, JSONValue]) -> Counter[str]:
+    counter: Counter[str] = Counter()
+    for key, value in mapping.items():
+        count = _int_payload(value)
+        if count > 0:
+            counter[_summary_key(key)] += count
+    return counter
+
+
+def _int_sequence_payload(value: JSONValue) -> tuple[int, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    parsed: list[int] = []
+    for item in value:
+        if isinstance(item, bool):
+            continue
+        try:
+            parsed.append(int(item))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+    return tuple(parsed)
 
 
 def _has_parsed_non_empty_coverage(
