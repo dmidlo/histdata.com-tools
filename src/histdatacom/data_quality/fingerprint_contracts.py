@@ -1,0 +1,535 @@
+"""Shared deterministic contract registry for fingerprint discovery surfaces."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+
+from histdatacom.data_quality.calendar import (
+    TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.fingerprints import (
+    CROSS_SERIES_FINGERPRINT_RULE_ID,
+    DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT,
+    DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_CACHE_FLOAT_PRECISION,
+    DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_TRUNCATED,
+    DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT,
+    DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_RATE,
+    DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_COUNT,
+    DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_RATE,
+    DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT,
+    DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_COUNT,
+    DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_RATE,
+    DEFAULT_FINGERPRINT_READINESS_LAG_LIMIT,
+    DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT,
+    DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT,
+    DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
+    SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
+)
+from histdatacom.histdata_ascii import M1, TICK
+from histdatacom.runtime_contracts import JSONValue
+
+FINGERPRINT_SERIES_CONFIG_KEYS = (
+    "quantiles",
+    "lags",
+    "rolling_windows",
+    "histogram_bins",
+    "max_rows",
+    "rounding_digits",
+    "distribution_attention",
+)
+FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
+    "invalid_row_min_count",
+    "invalid_row_min_rate",
+    "zero_spread_min_count",
+    "zero_spread_min_rate",
+    "negative_spread_min_count",
+    "negative_spread_min_rate",
+    "flag_truncated_distribution",
+    "flag_cache_float_precision",
+)
+
+FINGERPRINT_COVERAGE_BOUNDED_PAYLOAD_KEY = "fingerprint_coverage"
+FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY = "fingerprint_topology"
+FINGERPRINT_TOPOLOGY_ATTENTION_BOUNDED_PAYLOAD_KEY = (
+    "fingerprint_topology_attention"
+)
+FINGERPRINT_DISTRIBUTION_BOUNDED_PAYLOAD_KEY = "fingerprint_distribution"
+FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY = (
+    "fingerprint_distribution_attention"
+)
+FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY = "fingerprint_readiness"
+
+FINGERPRINT_SECTION_STATUSES = ("valid", "limited", "skipped", "unavailable")
+FINGERPRINT_DYNAMICS_STATUSES = ("ok", "limited", "unavailable")
+FINGERPRINT_READINESS_STATUSES = (
+    "computed",
+    "valid",
+    "limited",
+    "skipped",
+    "unavailable",
+    "not_applicable",
+)
+FINGERPRINT_ELIGIBILITY_STATUSES = ("eligible", "ineligible")
+FINGERPRINT_SKIP_REASON_CODES = (
+    "unsupported_timeframe",
+    "unsupported_target_kind",
+    "source_unreadable",
+    "cache_unavailable",
+    "missing_required_columns",
+    "metric_not_available",
+    "insufficient_rows",
+    "insufficient_sequence_rows",
+    "insufficient_sample_count",
+    "zero_variance",
+    "no_computable_lags",
+    "skipped_lags",
+    "not_emitted",
+)
+FINGERPRINT_TOPOLOGY_LIMITATIONS = (
+    "timestamp_topology_unavailable",
+    "no_parsed_timestamps",
+    "invalid_timestamps_skipped",
+    "non_monotonic_timestamp_order",
+    "duplicate_timestamps",
+    "suspicious_gaps",
+    "expected_session_closures",
+    "weekend_activity",
+)
+FINGERPRINT_CONDITIONAL_DISTRIBUTION_GROUPS = (
+    "active_session",
+    "special_tag",
+)
+
+FINGERPRINT_BASIS_DESCRIPTIONS = (
+    (
+        "observed_sequence",
+        "statistics computed over parsed row order without regular-grid imputation",
+    ),
+    ("regular_grid", "reserved for future grid-regularized calculations"),
+    ("limited", "section emitted with advisory limitations"),
+    ("unavailable", "section could not compute enough contract data"),
+)
+FINGERPRINT_ROW_ORDER_DESCRIPTIONS = (
+    (
+        "source_text_order",
+        "rows were scanned from source CSV or ZIP member text order",
+    ),
+    ("cache_order", "rows were scanned from the selected Polars cache order"),
+    ("none", "no row sequence was available"),
+    ("unknown", "older or incomplete payload did not state row order"),
+)
+FINGERPRINT_COMPUTED_FROM_DESCRIPTIONS = (
+    ("text_scan", "source text was read directly"),
+    ("direct_cache", "target itself was a cache"),
+    (
+        "fresh_sibling_cache",
+        "fresh sibling cache was used for the source target",
+    ),
+    ("unavailable", "source and cache projection were not usable"),
+    ("unknown", "older or incomplete payload did not state source basis"),
+)
+FINGERPRINT_CACHE_SOURCE_DESCRIPTIONS = (
+    ("direct", "cache target was evaluated directly"),
+    ("sibling", "fresh sibling cache was selected for a source target"),
+    ("none", "no cache source participated"),
+)
+
+
+@dataclass(frozen=True)
+class FingerprintSchemaContract:
+    """One schema or payload surface exposed by fingerprint discovery."""
+
+    key: str
+    schema_version: str | None
+    rule_id: str
+    status: str
+    metadata_key: str = ""
+    payload_path: str = ""
+    bounded_payload_key: str = ""
+    issue: str = ""
+
+    def to_discovery_payload(self) -> dict[str, JSONValue]:
+        payload: dict[str, JSONValue] = {
+            "schema_version": self.schema_version,
+            "rule_id": self.rule_id,
+            "status": self.status,
+        }
+        if self.metadata_key:
+            payload["metadata_key"] = self.metadata_key
+        if self.payload_path:
+            payload["payload_path"] = self.payload_path
+        if self.bounded_payload_key:
+            payload["bounded_payload_key"] = self.bounded_payload_key
+        if self.issue:
+            payload["issue"] = self.issue
+        return payload
+
+
+@dataclass(frozen=True)
+class FingerprintTargetSectionContract:
+    """One implemented target-scoped fingerprint section."""
+
+    name: str
+    description: str
+    target_timeframes: tuple[str, ...]
+    schema_key: str
+    key_fields: tuple[str, ...] = ()
+    basis_values: tuple[str, ...] = ()
+    row_order_values: tuple[str, ...] = ()
+    extra: Mapping[str, JSONValue] = field(default_factory=dict)
+
+    def to_discovery_payload(self) -> dict[str, JSONValue]:
+        payload: dict[str, JSONValue] = {
+            "name": self.name,
+            "status": "implemented",
+            "description": self.description,
+            "target_timeframes": _json_strings(self.target_timeframes),
+            "schema_key": self.schema_key,
+        }
+        if self.key_fields:
+            payload["key_fields"] = _json_strings(self.key_fields)
+        if self.basis_values:
+            payload["basis_values"] = _json_strings(self.basis_values)
+        if self.row_order_values:
+            payload["row_order_values"] = _json_strings(self.row_order_values)
+        if self.extra:
+            payload.update(dict(self.extra))
+        return payload
+
+
+@dataclass(frozen=True)
+class FingerprintPlannedSectionContract:
+    """One planned fingerprint roadmap section kept visible to consumers."""
+
+    name: str
+    issue: str
+
+    def to_discovery_payload(self) -> dict[str, JSONValue]:
+        return {
+            "name": self.name,
+            "status": "planned",
+            "schema_version": None,
+            "issue": self.issue,
+        }
+
+
+@dataclass(frozen=True)
+class FingerprintRunSectionContract:
+    """One run-scoped fingerprint section."""
+
+    name: str
+    status: str
+    rule_id: str
+    issue: str
+
+    def to_discovery_payload(self) -> dict[str, JSONValue]:
+        return {
+            "name": self.name,
+            "status": self.status,
+            "rule_id": self.rule_id,
+            "issue": self.issue,
+        }
+
+
+@dataclass(frozen=True)
+class FingerprintReportSurfaceContract:
+    """One report/bounded/CLI surface derived from fingerprint findings."""
+
+    key: str
+    report_metadata_key: str
+    bounded_payload_key: str
+    cli_summary_section: str
+
+
+FINGERPRINT_SCHEMA_CONTRACTS = (
+    FingerprintSchemaContract(
+        "series_fingerprint",
+        TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=TIME_SERIES_FINGERPRINT_METADATA_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_coverage_summary",
+        TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_topology_summary",
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_topology_attention",
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_distribution_summary",
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_distribution_attention",
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_calendar_regimes",
+        TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.calendar_regimes",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_conditional_distributions",
+        TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.conditional_distributions",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_dynamics",
+        TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.return_dynamics|microstructure_dynamics",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_dependence",
+        TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.dependence",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_audit",
+        TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.fingerprint_audit",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_readiness_summary",
+        TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
+        bounded_payload_key=FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "cross_series_fingerprint",
+        None,
+        rule_id=CROSS_SERIES_FINGERPRINT_RULE_ID,
+        status="planned",
+        issue="#331",
+    ),
+)
+
+FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
+    FingerprintReportSurfaceContract(
+        "coverage_summary",
+        TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+        FINGERPRINT_COVERAGE_BOUNDED_PAYLOAD_KEY,
+        "coverage",
+    ),
+    FingerprintReportSurfaceContract(
+        "topology_summary",
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
+        FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY,
+        "topology_summary",
+    ),
+    FingerprintReportSurfaceContract(
+        "topology_attention",
+        TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
+        FINGERPRINT_TOPOLOGY_ATTENTION_BOUNDED_PAYLOAD_KEY,
+        "topology_attention",
+    ),
+    FingerprintReportSurfaceContract(
+        "distribution_summary",
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
+        FINGERPRINT_DISTRIBUTION_BOUNDED_PAYLOAD_KEY,
+        "distribution_summary",
+    ),
+    FingerprintReportSurfaceContract(
+        "distribution_attention",
+        TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
+        FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY,
+        "distribution_attention",
+    ),
+    FingerprintReportSurfaceContract(
+        "readiness_summary",
+        TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
+        FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY,
+        "readiness_summary",
+    ),
+)
+
+IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
+    FingerprintTargetSectionContract(
+        "coverage",
+        "all supported targets",
+        target_timeframes=(M1, TICK),
+        schema_key="series_fingerprint",
+        key_fields=(
+            "row_count",
+            "parsed_row_count",
+            "start_timestamp_utc_ms",
+            "end_timestamp_utc_ms",
+        ),
+    ),
+    FingerprintTargetSectionContract(
+        "temporal_topology",
+        "timestamp continuity, ordering, gaps, duplicates, and sampling basis",
+        target_timeframes=(M1, TICK),
+        schema_key="series_fingerprint",
+        basis_values=("observed_sequence",),
+    ),
+    FingerprintTargetSectionContract(
+        "calendar_regimes",
+        "session, special-window, holiday, event, hour, and weekday counts",
+        target_timeframes=(M1, TICK),
+        schema_key="fingerprint_calendar_regimes",
+        basis_values=("text_scan", "direct_cache", "fresh_sibling_cache"),
+    ),
+    FingerprintTargetSectionContract(
+        "m1_bar_distribution",
+        "OHLC price, bar shape, precision, and invalid-row summaries",
+        target_timeframes=(M1,),
+        schema_key="series_fingerprint",
+    ),
+    FingerprintTargetSectionContract(
+        "tick_distribution",
+        "bid, ask, spread, precision, zero/negative spread, and invalid-row summaries",
+        target_timeframes=(TICK,),
+        schema_key="series_fingerprint",
+    ),
+    FingerprintTargetSectionContract(
+        "conditional_distributions",
+        "bounded tick-spread summaries by active session and special tag",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_conditional_distributions",
+        basis_values=("text", "cache"),
+        extra={
+            "metric": "tick_spread",
+            "grouped_by": ["active_session", "special_tag"],
+        },
+    ),
+    FingerprintTargetSectionContract(
+        "return_dynamics",
+        "M1 close returns, open jumps, flatlines, and sequence limitations",
+        target_timeframes=(M1,),
+        schema_key="fingerprint_dynamics",
+        basis_values=("observed_sequence",),
+        row_order_values=("source_text_order", "cache_order"),
+    ),
+    FingerprintTargetSectionContract(
+        "microstructure_dynamics",
+        "tick interarrival, spread changes, stale quotes, bursts, and one-sided movement",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_dynamics",
+        basis_values=("observed_sequence",),
+        row_order_values=("source_text_order", "cache_order"),
+    ),
+    FingerprintTargetSectionContract(
+        "dependence",
+        "observed-sequence lag autocorrelation for returns, ranges, spreads, and spread changes",
+        target_timeframes=(M1, TICK),
+        schema_key="fingerprint_dependence",
+        basis_values=("observed_sequence",),
+        row_order_values=("source_text_order", "cache_order"),
+        extra={
+            "acf_basis": "observed_sequence",
+            "profile_controlled_by": ["lags", "rounding_digits"],
+        },
+    ),
+    FingerprintTargetSectionContract(
+        "fingerprint_audit",
+        "machine-readable expected/emitted/skipped section accounting and readiness",
+        target_timeframes=(M1, TICK),
+        schema_key="fingerprint_audit",
+    ),
+)
+
+PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
+    FingerprintPlannedSectionContract("stationarity_diagnostics", "#329"),
+    FingerprintPlannedSectionContract("decomposition", "#330"),
+    FingerprintPlannedSectionContract("synthetic_constraints", "#333"),
+)
+PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS = (
+    FingerprintRunSectionContract(
+        "cross_series_fingerprint",
+        "planned",
+        CROSS_SERIES_FINGERPRINT_RULE_ID,
+        "#331",
+    ),
+)
+
+FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
+    "topology_summary_target_limit": DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
+    "topology_attention_target_limit": DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT,
+    "distribution_summary_target_limit": DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT,
+    "distribution_attention_target_limit": (
+        DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT
+    ),
+    "readiness_summary_target_limit": DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT,
+    "readiness_summary_lag_limit": DEFAULT_FINGERPRINT_READINESS_LAG_LIMIT,
+}
+FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS = {
+    "invalid_row_min_count": DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT,
+    "invalid_row_min_rate": DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_RATE,
+    "zero_spread_min_count": DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_COUNT,
+    "zero_spread_min_rate": DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_RATE,
+    "negative_spread_min_count": DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_COUNT,
+    "negative_spread_min_rate": DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_RATE,
+    "flag_truncated_distribution": DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_TRUNCATED,
+    "flag_cache_float_precision": DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_CACHE_FLOAT_PRECISION,
+}
+
+
+def implemented_fingerprint_target_section_names() -> tuple[str, ...]:
+    """Return implemented target section names in discovery order."""
+    return tuple(
+        section.name
+        for section in IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+    )
+
+
+def planned_fingerprint_target_section_names() -> tuple[str, ...]:
+    """Return planned target section names in discovery order."""
+    return tuple(
+        section.name for section in PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+    )
+
+
+def _json_strings(values: tuple[object, ...]) -> list[JSONValue]:
+    return [str(value) for value in values]

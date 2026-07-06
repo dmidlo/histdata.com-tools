@@ -1027,6 +1027,13 @@ It does not read local datasets or generate fingerprints; run
 `histdatacom --quality --quality-checks fingerprint` when you need real target
 fingerprint payloads.
 
+Fingerprint discovery is backed by the shared data-quality fingerprint contract
+registry, not by a separate hand-maintained copy in the discovery command. When
+new fingerprint sections, schema versions, report metadata keys, bounded payload
+keys, basis values, or status/reason vocabularies are added, update that registry
+first; the CLI/API discovery payload and drift tests should then follow the same
+contract surface.
+
 `provenance` checks are only applied when a local orchestration
 `.histdatacom/manifest-status.sqlite3` store is available. Explicit
 `--quality-checks provenance` runs without a store return a clean info finding
