@@ -240,6 +240,17 @@
       },
       "cache_source_counts": {},
       "computed_from_counts": {},
+      "dependence_acf_basis_counts": {},
+      "dependence_computed_lag_count": 0,
+      "dependence_limitation_counts": {},
+      "dependence_reason_counts": {
+        "not_emitted": 1
+      },
+      "dependence_skipped_lag_count": 0,
+      "dependence_skipped_lag_reason_counts": {},
+      "dependence_status_counts": {
+        "skipped": 1
+      },
       "dynamics_limitation_counts": {},
       "dynamics_reason_counts": {
         "microstructure_dynamics": {
@@ -293,6 +304,33 @@
           "applicable_dynamics_reason": "not_emitted",
           "applicable_dynamics_section": "return_dynamics",
           "applicable_dynamics_status": "skipped",
+          "dependence": {
+            "acf_basis": "unknown",
+            "basis": "unknown",
+            "cache_source": null,
+            "computed_from": "unknown",
+            "computed_lag_count": 0,
+            "included_lag_count": 0,
+            "invalid_row_count": 0,
+            "lag_count": 0,
+            "lags": [],
+            "lags_truncated": false,
+            "limitations": [],
+            "omitted_lag_count": 0,
+            "partial_row_count": 0,
+            "reason": "not_emitted",
+            "regular_grid": false,
+            "row_count": 0,
+            "row_order": "unknown",
+            "sampled_row_count": 0,
+            "series": {},
+            "series_count": 0,
+            "skipped_lag_count": 0,
+            "skipped_lag_reason_counts": {},
+            "status": "skipped",
+            "truncated": false,
+            "usable_row_count": 0
+          },
           "microstructure_dynamics": {
             "basis": "unknown",
             "cache_source": null,
