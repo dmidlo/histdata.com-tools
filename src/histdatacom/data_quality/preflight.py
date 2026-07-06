@@ -1462,7 +1462,7 @@ def _fingerprint_contract_audit_payload(
         "standalone_command": (
             "histdatacom quality fingerprint-schema --verify --json"
         ),
-        "data_dependency": "none",
+        "data_dependency": "representative-generated-report",
     }
     safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(audit)
     return safe_payload
@@ -2580,7 +2580,7 @@ def _preflight_policy_payload(
             "status_policy": (
                 QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY
             ),
-            "data_dependency": "none",
+            "data_dependency": "representative-generated-report",
             "standalone_command": (
                 "histdatacom quality fingerprint-schema --verify --json"
             ),
@@ -2630,7 +2630,9 @@ def _policy_mismatch_reason(
         QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY
     ):
         return "fingerprint contract audit status policy differs"
-    if fingerprint_policy.get("data_dependency") != "none":
+    if fingerprint_policy.get("data_dependency") != (
+        "representative-generated-report"
+    ):
         return "fingerprint contract audit data dependency differs"
     if fingerprint_policy.get("standalone_command") != (
         "histdatacom quality fingerprint-schema --verify --json"

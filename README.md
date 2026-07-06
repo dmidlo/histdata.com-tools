@@ -858,11 +858,16 @@ summary, generated timestamp, package version, preflight policy inputs,
 no-target diagnostics, and a decision section that says whether the full battery
 is safe, warned, failed, or has no matching targets. Safe and warned decisions
 include the next `histdatacom --quality ...` command for the same target scope.
-Every quality preflight also runs the data-free fingerprint contract self-audit
-and records its pass/fail status, bounded findings, standalone verification
-command, and explicit `fail-preflight-on-error` policy in the JSON evidence.
-If the contract audit fails, preflight fails before recommending a full quality
-battery, even when the cache sample and Temporal budget checks pass.
+Every quality preflight also runs the fingerprint contract self-audit and
+records its pass/fail status, bounded findings, representative report-surface
+matrix, standalone verification command, and explicit
+`fail-preflight-on-error` policy in the JSON evidence. The audit validates the
+declared fingerprint schema/report registry and proves that a generated
+representative report exposes each implemented fingerprint summary in full
+report metadata, bounded payloads, and human CLI/report summaries unless the
+surface is explicitly marked intentionally absent. If the contract audit fails,
+preflight fails before recommending a full quality battery, even when the cache
+sample and Temporal budget checks pass.
 Use `--quality-preflight-markdown-report PATH` to write the matching
 copy/paste-safe Markdown evidence report for GitHub issue updates, release
 handoffs, or operator notes. That Markdown includes command/config summary,
@@ -1049,21 +1054,26 @@ keys, basis values, or status/reason vocabularies are added, update that registr
 first; the CLI/API discovery payload and drift tests should then follow the same
 contract surface.
 
-Run the data-free contract self-audit when changing fingerprint schema,
-registry, report, or example surfaces:
+Run the market-data-free contract self-audit when changing fingerprint schema,
+registry, generated report, or example surfaces:
 
 ```sh
 histdatacom quality fingerprint-schema --verify --json
 ```
 
 `--verify` emits `histdatacom.time-series-fingerprint-contract-audit.v1` with
-pass/fail status, deterministic checks, and bounded drift findings for missing
-schemas, orphan report surfaces, stale payload keys, implemented/planned section
-mismatches, profile-default drift, vocabulary drift, and publish-safe example
-drift. It does not read market data, generate fingerprints, run quality rules, or
-automate GitHub/CI/release workflow. Cache-scale `--quality-preflight` runs the
-same data-free contract audit automatically and fails its readiness decision when
-the audit reports contract errors.
+pass/fail status, deterministic checks, a bounded
+`histdatacom.time-series-fingerprint-report-surface-evidence.v1` matrix, and
+drift findings for missing schemas, orphan report surfaces, stale payload keys,
+implemented/planned section mismatches, profile-default drift, vocabulary drift,
+publish-safe example drift, and missing generated report surfaces. The
+representative matrix proves that coverage, topology, topology attention,
+distribution, distribution attention, regime, and readiness summaries are wired
+through full report metadata, bounded payload keys, and CLI/report summary
+headings such as `Fingerprint regimes`. It does not read local market data, run
+quality rules, or automate GitHub/CI/release workflow. Cache-scale
+`--quality-preflight` runs the same contract audit automatically and fails its
+readiness decision when the audit reports contract errors.
 
 Run the bounded report-payload contract self-audit when changing report
 summaries, bounded payloads, next actions, remediation coverage, remediation

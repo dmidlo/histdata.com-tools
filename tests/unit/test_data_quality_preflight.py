@@ -94,7 +94,7 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
     assert payload["preflight_policy"]["fingerprint_contract_audit"] == {
         "mode": "always",
         "status_policy": "fail-preflight-on-error",
-        "data_dependency": "none",
+        "data_dependency": "representative-generated-report",
         "standalone_command": (
             "histdatacom quality fingerprint-schema --verify --json"
         ),
@@ -133,7 +133,9 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
         "fail-preflight-on-error"
     )
     assert contract_audit["preflight_gate"]["status"] == "pass"
-    assert contract_audit["preflight_gate"]["data_dependency"] == "none"
+    assert contract_audit["preflight_gate"]["data_dependency"] == (
+        "representative-generated-report"
+    )
     bounded_audit = payload["evidence"]["bounded_payload_contract_audit"]
     assert bounded_audit["schema_version"] == (
         "histdatacom.bounded-payload-contract-audit.v1"

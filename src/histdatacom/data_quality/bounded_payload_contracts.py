@@ -264,7 +264,7 @@ def bounded_payload_contract_audit(
 
 def representative_bounded_quality_payload() -> dict[str, JSONValue]:
     """Return a generated payload that exercises bounded report surfaces."""
-    report = _representative_quality_report()
+    report = representative_quality_report()
     payload = bounded_quality_payload(
         operation="data-quality-contract-audit",
         check_groups=("fingerprint", "time", "domain"),
@@ -292,6 +292,11 @@ def representative_bounded_quality_payload() -> dict[str, JSONValue]:
     )
     safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
     return safe_payload
+
+
+def representative_quality_report() -> QualityReport:
+    """Return a generated report that exercises public quality surfaces."""
+    return _representative_quality_report()
 
 
 def format_bounded_payload_contract_audit(
@@ -368,7 +373,7 @@ def _audit_limit_metadata_surfaces(
 ) -> tuple[int, int, int]:
     before = _finding_counts(findings)
     checked = 0
-    for path, metadata in _iter_limit_payloads(payload):
+    for path, metadata in _iter_limit_payloads(cast(JSONValue, payload)):
         checked += 1
         _audit_limit_payload(metadata, path=path, findings=findings)
         if _COUNT_KEYS <= metadata.keys():

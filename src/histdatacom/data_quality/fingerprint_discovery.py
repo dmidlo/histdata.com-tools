@@ -24,6 +24,7 @@ from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_SERIES_CONFIG_KEYS,
     FINGERPRINT_SKIP_REASON_CODES,
     FINGERPRINT_TOPOLOGY_LIMITATIONS,
+    FingerprintReportSurfaceContract,
     IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
     PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS,
     PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
@@ -54,6 +55,9 @@ TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION = (
 )
 TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-contract-audit.v1"
+)
+TIME_SERIES_FINGERPRINT_REPORT_SURFACE_EVIDENCE_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-report-surface-evidence.v1"
 )
 
 
@@ -152,12 +156,18 @@ def fingerprint_contract_audit(
     profile: Mapping[str, Any] | QualityProfile | None = None,
     *,
     discovery: Mapping[str, JSONValue] | None = None,
+    report_surface_evidence: Mapping[str, JSONValue] | None = None,
 ) -> dict[str, JSONValue]:
-    """Return a deterministic data-free audit of fingerprint contracts."""
+    """Return a deterministic audit of fingerprint contracts."""
     discovery_payload = (
         publish_safe_json_mapping(dict(discovery))
         if discovery is not None
         else fingerprint_schema_discovery(profile)
+    )
+    surface_evidence = (
+        publish_safe_json_mapping(dict(report_surface_evidence))
+        if report_surface_evidence is not None
+        else fingerprint_report_surface_evidence()
     )
     findings: list[dict[str, JSONValue]] = []
     checks: list[dict[str, JSONValue]] = []
@@ -179,6 +189,12 @@ def fingerprint_contract_audit(
         findings,
         "report_surfaces",
         _audit_report_surfaces(discovery_payload, findings),
+    )
+    _record_audit_check(
+        checks,
+        findings,
+        "report_surface_evidence",
+        _audit_report_surface_evidence(surface_evidence, findings),
     )
     _record_audit_check(
         checks,
@@ -228,17 +244,122 @@ def fingerprint_contract_audit(
             "report_surface_count": len(FINGERPRINT_REPORT_SURFACE_CONTRACTS),
             "vocabulary_group_count": len(_vocabulary_payload()),
             "calculation_basis_group_count": len(_calculation_basis_payload()),
+            "report_surface_evidence_count": len(
+                _mapping_rows(surface_evidence.get("surface_matrix"))
+            ),
         },
         "checks": cast(JSONValue, checks),
         "findings": cast(JSONValue, findings),
+        "report_surface_evidence": surface_evidence,
         "non_goals": _json_strings(
             (
-                "does not read target data",
-                "does not generate fingerprints",
+                "does not read local target data",
                 "does not run quality rules",
                 "does not automate GitHub, CI, merge, or release workflow",
             )
         ),
+    }
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
+    return safe_payload
+
+
+def fingerprint_report_surface_evidence(
+    *,
+    report_payload: Mapping[str, JSONValue] | None = None,
+    bounded_payload: Mapping[str, JSONValue] | None = None,
+    cli_summary: str | None = None,
+    contracts: tuple[FingerprintReportSurfaceContract, ...] = (
+        FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    ),
+) -> dict[str, JSONValue]:
+    """Return generated evidence for public fingerprint report surfaces."""
+    if report_payload is None or cli_summary is None:
+        from histdatacom.data_quality.bounded_payload_contracts import (
+            representative_quality_report,
+        )
+        from histdatacom.data_quality.reporting import (
+            format_quality_console_summary,
+            quality_report_payload,
+        )
+
+        report = representative_quality_report()
+        if report_payload is None:
+            report_payload = quality_report_payload(report)
+        if cli_summary is None:
+            cli_summary = format_quality_console_summary(
+                report,
+                check_groups=("fingerprint", "time", "domain"),
+            )
+    if bounded_payload is None:
+        from histdatacom.data_quality.bounded_payload_contracts import (
+            representative_bounded_quality_payload,
+        )
+
+        bounded_payload = representative_bounded_quality_payload()
+
+    metadata = _mapping(report_payload.get("metadata"))
+    surface_matrix: list[dict[str, JSONValue]] = []
+    for contract in contracts:
+        report_metadata_present = contract.report_metadata_key in metadata
+        bounded_payload_present = (
+            contract.bounded_payload_key in bounded_payload
+        )
+        cli_heading = contract.cli_summary_heading
+        cli_present = bool(cli_heading and cli_heading in cli_summary)
+        if contract.intentional_absence_reason and not cli_heading:
+            cli_state = "intentionally_absent"
+        else:
+            cli_state = "present" if cli_present else "missing"
+        surface_matrix.append(
+            {
+                "key": contract.key,
+                "summary_schema_key": contract.summary_schema_key,
+                "report_metadata_key": contract.report_metadata_key,
+                "report_metadata_state": (
+                    "present" if report_metadata_present else "missing"
+                ),
+                "bounded_payload_key": contract.bounded_payload_key,
+                "bounded_payload_state": (
+                    "present" if bounded_payload_present else "missing"
+                ),
+                "cli_summary_section": contract.cli_summary_section,
+                "cli_summary_heading": cli_heading,
+                "cli_summary_state": cli_state,
+                "intentional_absence_reason": (
+                    contract.intentional_absence_reason
+                ),
+            }
+        )
+
+    payload: dict[str, JSONValue] = {
+        "schema_version": (
+            TIME_SERIES_FINGERPRINT_REPORT_SURFACE_EVIDENCE_SCHEMA_VERSION
+        ),
+        "source": "representative-generated-report",
+        "surface_count": len(surface_matrix),
+        "full_report_metadata_keys": _json_strings(
+            tuple(
+                contract.report_metadata_key
+                for contract in contracts
+                if contract.report_metadata_key in metadata
+            )
+        ),
+        "bounded_payload_keys": _json_strings(
+            tuple(
+                contract.bounded_payload_key
+                for contract in contracts
+                if contract.bounded_payload_key in bounded_payload
+            )
+        ),
+        "cli_summary_headings": _json_strings(
+            tuple(
+                contract.cli_summary_heading
+                for contract in contracts
+                if contract.cli_summary_heading
+                and contract.cli_summary_heading in cli_summary
+            )
+        ),
+        "surface_matrix": cast(JSONValue, surface_matrix),
     }
     safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
     return safe_payload
@@ -467,8 +588,13 @@ def _audit_report_surfaces(
     findings: list[dict[str, JSONValue]],
 ) -> tuple[int, int, int]:
     before = _finding_counts(findings)
+    schemas = _mapping(discovery.get("schemas"))
     metadata_keys = _mapping(discovery.get("metadata_keys"))
     report_surfaces = _mapping(discovery.get("report_surfaces"))
+    expected_summary_schema = {
+        contract.key: contract.summary_schema_key
+        for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    }
     expected_report_metadata = {
         contract.key: contract.report_metadata_key
         for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
@@ -477,6 +603,15 @@ def _audit_report_surfaces(
         contract.key: contract.bounded_payload_key
         for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
     }
+    _compare_mapping(
+        findings,
+        path="report_surfaces.summary_schema_keys",
+        expected=expected_summary_schema,
+        actual=_mapping(report_surfaces.get("summary_schema_keys")),
+        missing_code="missing_report_surface_schema_key",
+        mismatch_code="report_surface_schema_key_mismatch",
+        unexpected_code="orphan_report_surface_schema_key",
+    )
     _compare_mapping(
         findings,
         path="metadata_keys.report_metadata",
@@ -528,7 +663,197 @@ def _audit_report_surfaces(
         code="report_surface_cli_summary_list_mismatch",
         message="CLI summary section list must match registry order",
     )
-    return (len(FINGERPRINT_REPORT_SURFACE_CONTRACTS) * 5, *before)
+    _compare_value(
+        findings,
+        path="report_surfaces.cli_summary_headings",
+        expected=[
+            contract.cli_summary_heading
+            for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+        ],
+        actual=report_surfaces.get("cli_summary_headings"),
+        code="report_surface_cli_heading_list_mismatch",
+        message="CLI summary heading list must match registry order",
+    )
+    _compare_value(
+        findings,
+        path="report_surfaces.surface_matrix",
+        expected=[
+            contract.to_discovery_payload()
+            for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+        ],
+        actual=report_surfaces.get("surface_matrix"),
+        code="report_surface_matrix_mismatch",
+        message="report surface matrix must match registry declarations",
+    )
+    for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS:
+        schema = _mapping(schemas.get(contract.summary_schema_key))
+        if not schema:
+            _add_audit_finding(
+                findings,
+                severity="error",
+                code="missing_report_surface_schema_contract",
+                path=f"schemas.{contract.summary_schema_key}",
+                message="report surface must reference a declared schema contract",
+                expected=contract.summary_schema_key,
+                actual=None,
+            )
+        elif schema.get("status") != "implemented":
+            _add_audit_finding(
+                findings,
+                severity="error",
+                code="report_surface_schema_not_implemented",
+                path=f"schemas.{contract.summary_schema_key}.status",
+                message="report surface schema contract must be implemented",
+                expected="implemented",
+                actual=schema.get("status"),
+            )
+    return (len(FINGERPRINT_REPORT_SURFACE_CONTRACTS) * 9, *before)
+
+
+def _audit_report_surface_evidence(
+    evidence: Mapping[str, JSONValue],
+    findings: list[dict[str, JSONValue]],
+    *,
+    contracts: tuple[FingerprintReportSurfaceContract, ...] = (
+        FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    ),
+) -> tuple[int, int, int]:
+    before = _finding_counts(findings)
+    _compare_value(
+        findings,
+        path="report_surface_evidence.schema_version",
+        expected=TIME_SERIES_FINGERPRINT_REPORT_SURFACE_EVIDENCE_SCHEMA_VERSION,
+        actual=evidence.get("schema_version"),
+        code="report_surface_evidence_schema_mismatch",
+        message="report surface evidence must use the current schema version",
+    )
+    _compare_value(
+        findings,
+        path="report_surface_evidence.surface_count",
+        expected=len(contracts),
+        actual=evidence.get("surface_count"),
+        code="report_surface_evidence_count_mismatch",
+        message="report surface evidence count must match contract registry",
+    )
+    rows = {
+        str(row.get("key") or ""): row
+        for row in _mapping_rows(evidence.get("surface_matrix"))
+    }
+    for contract in contracts:
+        row = _mapping(rows.get(contract.key))
+        path = f"report_surface_evidence.surface_matrix.{contract.key}"
+        if not row:
+            _add_audit_finding(
+                findings,
+                severity="error",
+                code="missing_report_surface_evidence_row",
+                path=path,
+                message="representative report surface evidence row is missing",
+                expected=contract.to_discovery_payload(),
+                actual=None,
+            )
+            continue
+        _audit_report_surface_evidence_row(
+            row,
+            contract=contract,
+            path=path,
+            findings=findings,
+        )
+    return (2 + len(contracts) * 7, *before)
+
+
+def _audit_report_surface_evidence_row(
+    row: Mapping[str, JSONValue],
+    *,
+    contract: FingerprintReportSurfaceContract,
+    path: str,
+    findings: list[dict[str, JSONValue]],
+) -> None:
+    for field, expected in (
+        ("summary_schema_key", contract.summary_schema_key),
+        ("report_metadata_key", contract.report_metadata_key),
+        ("bounded_payload_key", contract.bounded_payload_key),
+        ("cli_summary_section", contract.cli_summary_section),
+        ("cli_summary_heading", contract.cli_summary_heading),
+    ):
+        actual = row.get(field)
+        if actual != expected:
+            code = "report_surface_evidence_contract_mismatch"
+            if field == "cli_summary_section":
+                code = "missing_cli_summary_surface_declaration"
+            _add_audit_finding(
+                findings,
+                severity="error",
+                code=code,
+                path=f"{path}.{field}",
+                message="representative report surface evidence drifted from the contract registry",
+                expected=expected,
+                actual=actual,
+            )
+    _audit_surface_state(
+        row,
+        path=path,
+        field="report_metadata_state",
+        expected="present",
+        code="missing_runtime_report_metadata_key",
+        message="representative full report metadata is missing a fingerprint surface",
+        findings=findings,
+    )
+    _audit_surface_state(
+        row,
+        path=path,
+        field="bounded_payload_state",
+        expected="present",
+        code="missing_runtime_bounded_payload_key",
+        message="representative bounded payload is missing a fingerprint surface",
+        findings=findings,
+    )
+    expected_cli_state = (
+        "intentionally_absent"
+        if contract.intentional_absence_reason
+        else "present"
+    )
+    _audit_surface_state(
+        row,
+        path=path,
+        field="cli_summary_state",
+        expected=expected_cli_state,
+        code="missing_runtime_cli_summary_surface",
+        message="representative CLI summary is missing a fingerprint surface",
+        findings=findings,
+    )
+    if expected_cli_state == "intentionally_absent":
+        _compare_value(
+            findings,
+            path=f"{path}.intentional_absence_reason",
+            expected=contract.intentional_absence_reason,
+            actual=row.get("intentional_absence_reason"),
+            code="missing_cli_summary_intentional_absence_reason",
+            message="intentionally absent CLI surfaces must declare a reason",
+        )
+
+
+def _audit_surface_state(
+    row: Mapping[str, JSONValue],
+    *,
+    path: str,
+    field: str,
+    expected: str,
+    code: str,
+    message: str,
+    findings: list[dict[str, JSONValue]],
+) -> None:
+    actual = row.get(field)
+    if actual != expected:
+        _add_audit_finding(
+            findings,
+            severity="error",
+            code=code,
+            path=f"{path}.{field}",
+            message=message,
+            expected=expected,
+            actual=actual,
+        )
 
 
 def _audit_profile_defaults(
@@ -878,6 +1203,10 @@ def _section_payload() -> dict[str, JSONValue]:
 
 def _report_surface_payload() -> dict[str, JSONValue]:
     return {
+        "summary_schema_keys": {
+            surface.key: surface.summary_schema_key
+            for surface in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+        },
         "full_report_metadata": _json_strings(
             tuple(
                 surface.report_metadata_key
@@ -896,6 +1225,16 @@ def _report_surface_payload() -> dict[str, JSONValue]:
                 for surface in FINGERPRINT_REPORT_SURFACE_CONTRACTS
             )
         ),
+        "cli_summary_headings": _json_strings(
+            tuple(
+                surface.cli_summary_heading
+                for surface in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+            )
+        ),
+        "surface_matrix": [
+            surface.to_discovery_payload()
+            for surface in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+        ],
     }
 
 
