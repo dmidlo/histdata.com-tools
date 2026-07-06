@@ -26,6 +26,7 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
@@ -164,6 +165,7 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
         "calendar_regimes",
         "m1_bar_distribution",
         "return_dynamics",
+        "dependence",
     ]
     assert _list(audit["sections_emitted"]) == [
         "coverage",
@@ -171,6 +173,7 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
         "calendar_regimes",
         "m1_bar_distribution",
         "return_dynamics",
+        "dependence",
     ]
     assert _mapping(audit["sections_skipped"]) == {}
     statuses = _mapping(audit["section_statuses"])
@@ -179,6 +182,7 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
     assert statuses["calendar_regimes"] == "valid"
     assert statuses["m1_bar_distribution"] == "valid"
     assert statuses["return_dynamics"] == "valid"
+    assert statuses["dependence"] == "limited"
     eligibility = _mapping(
         _mapping(audit["conditional_distribution_eligibility"])["tick_spread"]
     )
@@ -242,12 +246,14 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
         "tick_distribution",
         "conditional_distributions",
         "microstructure_dynamics",
+        "dependence",
     ]
     assert _mapping(audit["sections_skipped"]) == {}
     statuses = _mapping(audit["section_statuses"])
     assert statuses["tick_distribution"] == "valid"
     assert statuses["conditional_distributions"] == "valid"
     assert statuses["microstructure_dynamics"] == "valid"
+    assert statuses["dependence"] == "limited"
     eligibility = _mapping(
         _mapping(audit["conditional_distribution_eligibility"])["tick_spread"]
     )
@@ -389,6 +395,179 @@ def test_fingerprint_tick_microstructure_dynamics_describe_sequence(
     assert one_sided["ask_only_count"] == 1
     assert one_sided["run_count"] == 1
     assert _mapping(one_sided["run_length_counts"]) == {"2": 1}
+
+
+def test_fingerprint_m1_dependence_describes_lag_acf(
+    tmp_path: Path,
+) -> None:
+    """M1 fingerprints should expose configured observed-sequence ACF."""
+    case = HistDataAsciiCase(
+        name="m1-dependence",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202_DEPENDENCE.csv",
+        rows=(
+            "20120201 000000;1.000000;1.100000;0.900000;1.000000;0",
+            "20120201 000100;1.100000;1.300000;1.000000;1.100000;0",
+            "20120201 000200;1.300000;1.500000;1.200000;1.300000;0",
+            "20120201 000300;1.600000;1.900000;1.400000;1.600000;0",
+            "20120201 000400;2.000000;2.400000;1.700000;2.000000;0",
+        ),
+    )
+    profile = HistDataFingerprintProfile(lags=(1, 3, 5), rounding_digits=6)
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target, profile))
+    dependence = _mapping(payload["dependence"])
+
+    close_returns = [
+        math.log(1.1 / 1.0),
+        math.log(1.3 / 1.1),
+        math.log(1.6 / 1.3),
+        math.log(2.0 / 1.6),
+    ]
+    range_ratios = [
+        (1.1 - 0.9) / ((1.1 + 0.9) / 2),
+        (1.3 - 1.0) / ((1.3 + 1.0) / 2),
+        (1.5 - 1.2) / ((1.5 + 1.2) / 2),
+        (1.9 - 1.4) / ((1.9 + 1.4) / 2),
+        (2.4 - 1.7) / ((2.4 + 1.7) / 2),
+    ]
+
+    assert dependence["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION
+    )
+    assert dependence["basis"] == "observed_sequence"
+    assert dependence["acf_basis"] == "observed_sequence"
+    assert dependence["row_order"] == "source_text_order"
+    assert dependence["computed_from"] == "text_scan"
+    assert dependence["regular_grid"] is False
+    assert dependence["lags"] == [1, 3, 5]
+    assert dependence["dependence_status"] == "limited"
+
+    close_acf = _mapping(dependence["close_log_return_acf"])
+    assert close_acf["sample_count"] == 4
+    assert _mapping(close_acf["lag_acf"]) == {
+        "1": _rounded_for_test(_acf_for_test(close_returns, 1), 6),
+        "3": _rounded_for_test(_acf_for_test(close_returns, 3), 6),
+    }
+    assert _mapping(close_acf["skipped_lags"])["5"] == {
+        "reason": "insufficient_sample_count",
+        "sample_count": 4,
+        "required_sample_count": 6,
+    }
+
+    range_acf = _mapping(dependence["range_ratio_acf"])
+    assert _mapping(range_acf["lag_acf"]) == {
+        "1": _rounded_for_test(_acf_for_test(range_ratios, 1), 6),
+        "3": _rounded_for_test(_acf_for_test(range_ratios, 3), 6),
+    }
+    assert _mapping(range_acf["skipped_lags"])["5"] == {
+        "reason": "insufficient_sample_count",
+        "sample_count": 5,
+        "required_sample_count": 6,
+    }
+
+
+def test_fingerprint_tick_dependence_describes_spread_acf(
+    tmp_path: Path,
+) -> None:
+    """Tick fingerprints should expose spread and spread-change ACF."""
+    case = HistDataAsciiCase(
+        name="tick-dependence",
+        timeframe=TICK,
+        filename="DAT_ASCII_EURUSD_T_201202_DEPENDENCE.csv",
+        rows=(
+            "20120201 000000000,1.000000,1.000200,0",
+            "20120201 000000100,1.000000,1.000100,0",
+            "20120201 000000200,1.000000,1.000300,0",
+            "20120201 000000300,1.000000,1.000600,0",
+        ),
+    )
+    profile = HistDataFingerprintProfile(lags=(1, 2), rounding_digits=6)
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target, profile))
+    dependence = _mapping(payload["dependence"])
+
+    spreads = [0.0002, 0.0001, 0.0003, 0.0006]
+    spread_changes = [-0.0001, 0.0002, 0.0003]
+    absolute_spread_changes = [0.0001, 0.0002, 0.0003]
+
+    assert dependence["dependence_status"] == "ok"
+    spread_acf = _mapping(dependence["spread_acf"])
+    assert _mapping(spread_acf["lag_acf"]) == {
+        "1": _rounded_for_test(_acf_for_test(spreads, 1), 6),
+        "2": _rounded_for_test(_acf_for_test(spreads, 2), 6),
+    }
+    spread_change_acf = _mapping(dependence["spread_change_acf"])
+    assert _mapping(spread_change_acf["lag_acf"]) == {
+        "1": _rounded_for_test(_acf_for_test(spread_changes, 1), 6),
+        "2": _rounded_for_test(_acf_for_test(spread_changes, 2), 6),
+    }
+    absolute_change_acf = _mapping(dependence["absolute_spread_change_acf"])
+    assert _mapping(absolute_change_acf["lag_acf"]) == {
+        "1": _rounded_for_test(_acf_for_test(absolute_spread_changes, 1), 6),
+        "2": _rounded_for_test(_acf_for_test(absolute_spread_changes, 2), 6),
+    }
+
+
+def test_fingerprint_dependence_records_invalid_and_uncomputable_series(
+    tmp_path: Path,
+) -> None:
+    """Dependence should filter invalid values and explain skipped lags."""
+    invalid_case = HistDataAsciiCase(
+        name="m1-dependence-invalid-row",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202_INVALID_DEPENDENCE.csv",
+        rows=(
+            "20120201 000000;1.000000;1.100000;0.900000;1.000000;0",
+            "20120201 000100;bad;1.300000;1.000000;1.100000;0",
+            "20120201 000200;1.300000;1.500000;1.200000;1.300000;0",
+            "20120201 000300;1.600000;1.900000;1.400000;1.600000;0",
+        ),
+    )
+    profile = HistDataFingerprintProfile(lags=(1,), rounding_digits=8)
+    invalid_target = _discovered_target(
+        write_ascii_case(tmp_path, invalid_case)
+    )
+    invalid_payload = _fingerprint_payload(
+        _fingerprint_finding(invalid_target, profile)
+    )
+    invalid_dependence = _mapping(invalid_payload["dependence"])
+
+    assert invalid_dependence["invalid_row_count"] == 1
+    assert invalid_dependence["usable_row_count"] == 3
+    assert _mapping(
+        _mapping(invalid_dependence["close_log_return_acf"])["lag_acf"]
+    ) == {
+        "1": _rounded_for_test(
+            _acf_for_test([math.log(1.3 / 1.0), math.log(1.6 / 1.3)], 1),
+            8,
+        )
+    }
+
+    flat_case = HistDataAsciiCase(
+        name="m1-dependence-zero-variance",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202_FLAT_DEPENDENCE.csv",
+        rows=(
+            "20120201 000000;1.000000;1.000000;1.000000;1.000000;0",
+            "20120201 000100;1.000000;1.000000;1.000000;1.000000;0",
+            "20120201 000200;1.000000;1.000000;1.000000;1.000000;0",
+        ),
+    )
+    flat_target = _discovered_target(write_ascii_case(tmp_path, flat_case))
+    flat_payload = _fingerprint_payload(
+        _fingerprint_finding(flat_target, profile)
+    )
+    flat_dependence = _mapping(flat_payload["dependence"])
+    close_acf = _mapping(flat_dependence["close_log_return_acf"])
+
+    assert flat_dependence["dependence_status"] == "limited"
+    assert flat_dependence["reason"] == "no_computable_lags"
+    assert _mapping(close_acf["lag_acf"]) == {}
+    assert _mapping(close_acf["skipped_lags"])["1"] == {
+        "reason": "zero_variance",
+        "sample_count": 2,
+    }
 
 
 def test_fingerprint_dynamics_mark_non_monotonic_sequences_limited(
@@ -618,6 +797,7 @@ def test_fingerprint_audit_marks_absent_conditioning_ineligible(
         "tick_distribution",
         "conditional_distributions",
         "microstructure_dynamics",
+        "dependence",
     ]
     assert _mapping(audit["sections_skipped"]) == {
         "conditional_distributions": {
@@ -634,6 +814,7 @@ def test_fingerprint_audit_marks_absent_conditioning_ineligible(
     assert _mapping(audit["section_statuses"])["microstructure_dynamics"] == (
         "unavailable"
     )
+    assert _mapping(audit["section_statuses"])["dependence"] == "unavailable"
     eligibility = _mapping(
         _mapping(audit["conditional_distribution_eligibility"])["tick_spread"]
     )
@@ -1105,6 +1286,7 @@ def test_fingerprint_rule_reports_unsupported_target(
         "calendar_regimes",
         "m1_bar_distribution",
         "return_dynamics",
+        "dependence",
     ]
     assert _list(audit["sections_emitted"]) == [
         "coverage",
@@ -1117,6 +1299,10 @@ def test_fingerprint_rule_reports_unsupported_target(
             "details": {"timeframe": "M1"},
         },
         "return_dynamics": {
+            "reason": "unsupported_target_kind",
+            "details": {"timeframe": "M1"},
+        },
+        "dependence": {
             "reason": "unsupported_target_kind",
             "details": {"timeframe": "M1"},
         },
@@ -1941,6 +2127,10 @@ def test_fingerprint_constants_are_stable() -> None:
         == "histdatacom.time-series-fingerprint-dynamics.v1"
     )
     assert (
+        TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-dependence.v1"
+    )
+    assert (
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION
         == "histdatacom.time-series-fingerprint-audit.v1"
     )
@@ -1997,6 +2187,24 @@ def _mapping(value: Any) -> dict[str, Any]:
 def _list(value: Any) -> list[Any]:
     assert isinstance(value, list)
     return value
+
+
+def _acf_for_test(values: list[float], lag: int) -> float:
+    assert len(values) > lag
+    mean = sum(values) / len(values)
+    centered = [value - mean for value in values]
+    denominator = sum(value * value for value in centered)
+    assert denominator > 0
+    numerator = sum(
+        centered[index] * centered[index - lag]
+        for index in range(lag, len(centered))
+    )
+    return numerator / denominator
+
+
+def _rounded_for_test(value: float, digits: int) -> float:
+    rounded = round(value, digits)
+    return 0.0 if rounded == 0 else rounded
 
 
 def _complete_calendar_profile() -> dict[str, Any]:

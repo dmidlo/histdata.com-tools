@@ -78,6 +78,9 @@ TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION = (
 TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-dynamics.v1"
 )
+TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-dependence.v1"
+)
 TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-audit.v1"
 )
@@ -169,6 +172,7 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "conditional_distributions",
     "return_dynamics",
     "microstructure_dynamics",
+    "dependence",
 )
 FINGERPRINT_DYNAMICS_SECTIONS = ("return_dynamics", "microstructure_dynamics")
 
@@ -1829,13 +1833,16 @@ def _fingerprint_expected_sections(
     if target.timeframe in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES:
         sections.append("calendar_regimes")
     if target.timeframe == M1:
-        sections.extend(("m1_bar_distribution", "return_dynamics"))
+        sections.extend(
+            ("m1_bar_distribution", "return_dynamics", "dependence")
+        )
     elif target.timeframe == TICK:
         sections.extend(
             (
                 "tick_distribution",
                 "conditional_distributions",
                 "microstructure_dynamics",
+                "dependence",
             )
         )
     return tuple(sections)
@@ -1884,6 +1891,7 @@ def _fingerprint_section_skip_details(
         "tick_distribution",
         "return_dynamics",
         "microstructure_dynamics",
+        "dependence",
     }:
         return {"timeframe": target.timeframe}
     return {}
@@ -1922,16 +1930,23 @@ def _section_timeframe_mismatch(
     target: QualityTarget,
 ) -> bool:
     return (
-        section in {"m1_bar_distribution", "return_dynamics"}
-        and target.timeframe != M1
-    ) or (
-        section
-        in {
-            "tick_distribution",
-            "conditional_distributions",
-            "microstructure_dynamics",
-        }
-        and target.timeframe != TICK
+        (
+            section in {"m1_bar_distribution", "return_dynamics"}
+            and target.timeframe != M1
+        )
+        or (
+            section
+            in {
+                "tick_distribution",
+                "conditional_distributions",
+                "microstructure_dynamics",
+            }
+            and target.timeframe != TICK
+        )
+        or (
+            section == "dependence"
+            and target.timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
+        )
     )
 
 
@@ -1967,6 +1982,8 @@ def _fingerprint_section_status(
         )
     if section in {"return_dynamics", "microstructure_dynamics"}:
         return _dynamics_section_status(_payload_mapping(payload[section]))
+    if section == "dependence":
+        return _dependence_section_status(_payload_mapping(payload[section]))
     return "valid"
 
 
@@ -2033,6 +2050,17 @@ def _dynamics_section_status(
         return "valid"
     if status in {"limited", "unavailable"}:
         return status
+    return "limited"
+
+
+def _dependence_section_status(
+    dependence: Mapping[str, JSONValue],
+) -> str:
+    status = _summary_key(dependence.get("dependence_status"))
+    if status == "ok":
+        return "valid"
+    if status == "unavailable":
+        return "unavailable"
     return "limited"
 
 
@@ -2646,28 +2674,32 @@ def _add_dynamics_payload(
     profile: HistDataFingerprintProfile,
 ) -> None:
     if target.timeframe == M1:
-        payload["return_dynamics"] = _m1_return_dynamics(
+        return_dynamics, dependence = _m1_sequence_payloads(
             payload,
             frame=frame,
             text=text,
             profile=profile,
         )
+        payload["return_dynamics"] = return_dynamics
+        payload["dependence"] = dependence
     elif target.timeframe == TICK:
-        payload["microstructure_dynamics"] = _tick_microstructure_dynamics(
+        microstructure_dynamics, dependence = _tick_sequence_payloads(
             payload,
             frame=frame,
             text=text,
             profile=profile,
         )
+        payload["microstructure_dynamics"] = microstructure_dynamics
+        payload["dependence"] = dependence
 
 
-def _m1_return_dynamics(
+def _m1_sequence_payloads(
     payload: Mapping[str, JSONValue],
     *,
     frame: Any | None,
     text: str | None,
     profile: HistDataFingerprintProfile,
-) -> dict[str, JSONValue]:
+) -> tuple[dict[str, JSONValue], dict[str, JSONValue]]:
     if frame is not None:
         rows, row_count, usable_row_count, invalid_row_count = (
             _m1_dynamics_rows_from_frame(frame, profile)
@@ -2701,16 +2733,19 @@ def _m1_return_dynamics(
         partial_row_count=partial_row_count,
         profile=profile,
     )
-    return _m1_return_dynamics_payload(rows, base=base, profile=profile)
+    return (
+        _m1_return_dynamics_payload(rows, base=base, profile=profile),
+        _m1_dependence_payload(rows, base=base, profile=profile),
+    )
 
 
-def _tick_microstructure_dynamics(
+def _tick_sequence_payloads(
     payload: Mapping[str, JSONValue],
     *,
     frame: Any | None,
     text: str | None,
     profile: HistDataFingerprintProfile,
-) -> dict[str, JSONValue]:
+) -> tuple[dict[str, JSONValue], dict[str, JSONValue]]:
     if frame is not None:
         rows, row_count, usable_row_count, invalid_row_count = (
             _tick_dynamics_rows_from_frame(frame, profile)
@@ -2744,10 +2779,13 @@ def _tick_microstructure_dynamics(
         partial_row_count=partial_row_count,
         profile=profile,
     )
-    return _tick_microstructure_dynamics_payload(
-        rows,
-        base=base,
-        profile=profile,
+    return (
+        _tick_microstructure_dynamics_payload(
+            rows,
+            base=base,
+            profile=profile,
+        ),
+        _tick_dependence_payload(rows, base=base, profile=profile),
     )
 
 
@@ -3361,6 +3399,212 @@ def _tick_microstructure_dynamics_payload(
         }
     )
     return result
+
+
+def _m1_dependence_payload(
+    rows: list[_M1DynamicsRow],
+    *,
+    base: dict[str, JSONValue],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    close_log_returns: list[float] = []
+    absolute_returns: list[float] = []
+    squared_returns: list[float] = []
+    range_ratios: list[float] = []
+    previous: _M1DynamicsRow | None = None
+
+    for row in rows:
+        range_ratio = _m1_range_ratio(row)
+        if range_ratio is not None:
+            range_ratios.append(range_ratio)
+        if previous is None:
+            previous = row
+            continue
+        if previous.close > 0.0 and row.close > 0.0:
+            log_return = math.log(row.close / previous.close)
+            close_log_returns.append(log_return)
+            absolute_returns.append(abs(log_return))
+            squared_returns.append(log_return * log_return)
+        previous = row
+
+    return _dependence_payload(
+        base,
+        profile=profile,
+        acf_series={
+            "close_log_return_acf": close_log_returns,
+            "absolute_return_acf": absolute_returns,
+            "squared_return_acf": squared_returns,
+            "range_ratio_acf": range_ratios,
+        },
+    )
+
+
+def _tick_dependence_payload(
+    rows: list[_TickDynamicsRow],
+    *,
+    base: dict[str, JSONValue],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    spreads = [row.spread for row in rows]
+    spread_changes: list[float] = []
+    absolute_spread_changes: list[float] = []
+    previous: _TickDynamicsRow | None = None
+
+    for row in rows:
+        if previous is None:
+            previous = row
+            continue
+        spread_change = row.spread - previous.spread
+        spread_changes.append(spread_change)
+        absolute_spread_changes.append(abs(spread_change))
+        previous = row
+
+    return _dependence_payload(
+        base,
+        profile=profile,
+        acf_series={
+            "spread_acf": spreads,
+            "spread_change_acf": spread_changes,
+            "absolute_spread_change_acf": absolute_spread_changes,
+        },
+    )
+
+
+def _m1_range_ratio(row: _M1DynamicsRow) -> float | None:
+    decimal_values = tuple(
+        Decimal(str(value))
+        for value in (row.open, row.high, row.low, row.close)
+    )
+    _open_decimal, high_decimal, low_decimal, _close_decimal = decimal_values
+    range_decimal = high_decimal - low_decimal
+    midpoint_decimal = (high_decimal + low_decimal) / Decimal("2")
+    if not midpoint_decimal:
+        return None
+    return float(range_decimal / midpoint_decimal)
+
+
+def _dependence_payload(
+    base: Mapping[str, JSONValue],
+    *,
+    profile: HistDataFingerprintProfile,
+    acf_series: Mapping[str, Iterable[float]],
+) -> dict[str, JSONValue]:
+    series_payloads: dict[str, JSONValue] = {
+        name: _acf_series_payload(values, profile)
+        for name, values in acf_series.items()
+    }
+    computed_lag_count = sum(
+        _int_payload(_payload_mapping(payload).get("computed_lag_count"))
+        for payload in series_payloads.values()
+    )
+    skipped_lag_count = sum(
+        _int_payload(_payload_mapping(payload).get("skipped_lag_count"))
+        for payload in series_payloads.values()
+    )
+    dependence_status = _dependence_status(
+        base,
+        computed_lag_count=computed_lag_count,
+        skipped_lag_count=skipped_lag_count,
+    )
+    result = dict(base)
+    result.update(
+        {
+            "schema_version": TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
+            "acf_basis": "observed_sequence",
+            "lags": [lag for lag in profile.lags],
+            "dependence_status": dependence_status,
+            "computed_lag_count": computed_lag_count,
+            "skipped_lag_count": skipped_lag_count,
+            **series_payloads,
+        }
+    )
+    if dependence_status in {"limited", "unavailable"}:
+        result["reason"] = _dependence_status_reason(
+            base,
+            computed_lag_count=computed_lag_count,
+            skipped_lag_count=skipped_lag_count,
+        )
+    return result
+
+
+def _dependence_status(
+    base: Mapping[str, JSONValue],
+    *,
+    computed_lag_count: int,
+    skipped_lag_count: int,
+) -> str:
+    sequence_status = _summary_key(base.get("sequence_status"))
+    if sequence_status == "unavailable":
+        return "unavailable"
+    if computed_lag_count <= 0:
+        return "limited"
+    if sequence_status == "limited" or skipped_lag_count > 0:
+        return "limited"
+    return "ok"
+
+
+def _dependence_status_reason(
+    base: Mapping[str, JSONValue],
+    *,
+    computed_lag_count: int,
+    skipped_lag_count: int,
+) -> str:
+    limitations = _string_list(base.get("limitations"))
+    if limitations:
+        return _summary_key(limitations[0])
+    if computed_lag_count <= 0:
+        return "no_computable_lags"
+    if skipped_lag_count > 0:
+        return "skipped_lags"
+    return "limited"
+
+
+def _acf_series_payload(
+    values: Iterable[float],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    finite_values = [value for value in values if _is_finite(value)]
+    lag_acf: dict[str, JSONValue] = {}
+    skipped_lags: dict[str, JSONValue] = {}
+    for lag in profile.lags:
+        lag_key = str(lag)
+        if len(finite_values) <= lag:
+            skipped_lags[lag_key] = {
+                "reason": "insufficient_sample_count",
+                "sample_count": len(finite_values),
+                "required_sample_count": lag + 1,
+            }
+            continue
+        acf = _autocorrelation(finite_values, lag)
+        if acf is None:
+            skipped_lags[lag_key] = {
+                "reason": "zero_variance",
+                "sample_count": len(finite_values),
+            }
+            continue
+        lag_acf[lag_key] = _rounded(acf, profile)
+    return {
+        "sample_count": len(finite_values),
+        "lag_acf": lag_acf,
+        "computed_lag_count": len(lag_acf),
+        "skipped_lags": skipped_lags,
+        "skipped_lag_count": len(skipped_lags),
+    }
+
+
+def _autocorrelation(values: list[float], lag: int) -> float | None:
+    if lag <= 0 or len(values) <= lag:
+        return None
+    mean = sum(values) / len(values)
+    centered = [value - mean for value in values]
+    denominator = sum(value * value for value in centered)
+    if denominator <= 0.0:
+        return None
+    numerator = sum(
+        centered[index] * centered[index - lag]
+        for index in range(lag, len(centered))
+    )
+    return numerator / denominator
 
 
 def _spread_jump_threshold(
