@@ -1020,10 +1020,27 @@ unavailable; which topology limitations affect sequence interpretation; and the
 compact return, jump, flatline, spread, stale quote, burst, and one-sided
 movement facts. The same readiness summary also includes bounded dependence
 status, ACF basis, configured lag coverage, computed/skipped lag counts,
-skipped-lag reason counts, and per-series sample counts. Use the raw
+skipped-lag reason counts, and per-series sample counts. Use
+`time_series_fingerprint_readiness_risk` when you need a bounded, deterministic
+triage list of targets and sections most likely to block downstream fingerprint
+use. It ranks existing readiness, topology, dependence, regime, cache-source,
+and report-surface evidence into stable reason codes such as
+`invalid_timestamps_skipped`, `duplicate_timestamps`, `suspicious_gaps`,
+`skipped_dependence_lags`, `insufficient_sample_count`, `zero_variance`,
+`unsupported_timeframe`, and `not_emitted`. Use the raw
 `time_series_fingerprint` payload when downstream tooling needs complete
 fingerprint sections, full quantile maps, full conditioned distributions, or full
 ACF lag maps.
+
+Rank fingerprint readiness risks from saved quality reports:
+
+```sh
+histdatacom quality fingerprint-readiness --report reports/quality.json --json
+```
+
+The command reads report JSON only; it does not rescan market data. Use
+`--target-limit`, `--section-limit`, and `--reason-limit` to control the bounded
+machine JSON and matching human output.
 
 Bounded report and fingerprint summary payloads include `limit_metadata` and
 expanded `payload_limits` entries with requested, default, effective, minimum,
@@ -1068,9 +1085,10 @@ drift findings for missing schemas, orphan report surfaces, stale payload keys,
 implemented/planned section mismatches, profile-default drift, vocabulary drift,
 publish-safe example drift, and missing generated report surfaces. The
 representative matrix proves that coverage, topology, topology attention,
-distribution, distribution attention, regime, and readiness summaries are wired
-through full report metadata, bounded payload keys, and CLI/report summary
-headings such as `Fingerprint regimes`. It does not read local market data, run
+distribution, distribution attention, regime, readiness, and readiness-risk
+summaries are wired through full report metadata, bounded payload keys, and
+CLI/report summary headings such as `Fingerprint regimes`. It does not read
+local market data, run
 quality rules, or automate GitHub/CI/release workflow. Cache-scale
 `--quality-preflight` runs the same contract audit automatically and fails its
 readiness decision when the audit reports contract errors.

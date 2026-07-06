@@ -24,7 +24,7 @@ def test_bounded_payload_contract_audit_passes_representative_payload() -> None:
     assert payload["status"] == "pass"
     assert payload["finding_count"] == 0
     assert payload["findings"] == []
-    assert payload["checked_surfaces"]["sequence_contract_count"] == 12
+    assert payload["checked_surfaces"]["sequence_contract_count"] == 13
     assert "does not read local market data" in payload["non_goals"]
 
 

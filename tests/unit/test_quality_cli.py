@@ -11,6 +11,15 @@ import pytest
 
 import histdatacom.histdata_com as histdata_com
 import histdatacom.quality_cli as quality_cli
+from histdatacom.data_quality import (
+    QualityFinding,
+    QualityReport,
+    QualityRuleResult,
+    QualitySeverity,
+    QualityTarget,
+    QualityTargetKind,
+    write_quality_report,
+)
 from histdatacom.data_quality.preflight import (
     run_cache_quality_preflight,
     write_quality_preflight_report,
@@ -18,7 +27,13 @@ from histdatacom.data_quality.preflight import (
 from histdatacom.data_quality.fingerprint_discovery import (
     TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION,
 )
-from histdatacom.data_quality.fingerprints import SERIES_FINGERPRINT_RULE_ID
+from histdatacom.data_quality.fingerprints import (
+    SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.profiles import QUALITY_PROFILE_SCHEMA_VERSION
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
@@ -477,12 +492,78 @@ histdatacom:
     assert payload["status"] == "pass"
 
 
+def test_quality_fingerprint_readiness_cli_reports_json(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The readiness command should rank risks from a saved report."""
+    report_path = _write_fingerprint_quality_report(tmp_path)
+
+    exit_code = main(
+        [
+            "fingerprint-readiness",
+            "--report",
+            str(report_path),
+            "--target-limit",
+            "1",
+            "--section-limit",
+            "2",
+            "--reason-limit",
+            "3",
+            "--json",
+        ]
+    )
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    summary = payload["reports"][0]["summary"]
+
+    assert exit_code == 0
+    assert payload["schema_version"] == (
+        quality_cli.FINGERPRINT_READINESS_RISK_COMMAND_SCHEMA_VERSION
+    )
+    assert payload["report_count"] == 1
+    assert payload["risk_report_count"] == 1
+    assert payload["reports"][0]["report_path"] == "fingerprint-quality.json"
+    assert (
+        summary["schema_version"]
+        == TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION
+    )
+    assert summary["included_target_count"] == 1
+    assert summary["target_risks"][0]["target_axis"]["symbol"] == "GBPUSD"
+    assert (
+        "invalid_timestamps_skipped"
+        in summary["target_risks"][0]["reason_codes"]
+    )
+    assert str(tmp_path) not in output
+
+
+def test_quality_fingerprint_readiness_cli_reports_human_output(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The readiness command should render a concise text ranking."""
+    report_path = _write_fingerprint_quality_report(tmp_path)
+
+    exit_code = main(["fingerprint-readiness", "--report", str(report_path)])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Fingerprint readiness risk command" in output
+    assert "Report: fingerprint-quality.json" in output
+    assert "Fingerprint readiness risk" in output
+    assert "#1 ascii GBPUSD M1 201202 csv: high" in output
+    assert "invalid_timestamps_skipped" in output
+    assert str(tmp_path) not in output
+
+
 def test_quality_help_advertises_fingerprint_schema_command() -> None:
     """The quality utility help should expose fingerprint schema discovery."""
     help_text = quality_cli.build_parser().format_help()
 
     assert "fingerprint-schema" in help_text
     assert "discover fingerprint schemas" in help_text
+    assert "fingerprint-readiness" in help_text
+    assert "rank fingerprint readiness risks" in help_text
 
 
 def _write_preflight_evidence(
@@ -530,6 +611,139 @@ def _write_tick_cache(
         cache_path,
     )
     return cache_path
+
+
+def _write_fingerprint_quality_report(tmp_path: Path) -> Path:
+    target = QualityTarget(
+        path=str(tmp_path / "DAT_ASCII_GBPUSD_M1_201202.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="GBPUSD",
+        period="201202",
+    )
+    payload = {
+        "schema_version": TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+        "target_axis": {
+            "data_format": "ascii",
+            "timeframe": "M1",
+            "symbol": "GBPUSD",
+            "period": "201202",
+            "kind": "csv",
+        },
+        "source": {"kind": "text"},
+        "temporal_topology": {
+            "row_count": 4,
+            "parsed_row_count": 3,
+            "invalid_timestamp_count": 1,
+            "duplicate_timestamp_count": 1,
+            "non_monotonic_count": 1,
+            "suspicious_gap_count": 1,
+            "expected_session_closure_count": 0,
+            "weekend_activity_count": 0,
+            "sequence_status": "limited",
+            "limitations": [
+                "invalid_timestamps_skipped",
+                "duplicate_timestamps",
+                "suspicious_gaps",
+            ],
+        },
+        "return_dynamics": {
+            "basis": "text",
+            "row_order": "source_text_order",
+            "computed_from": "text",
+            "regular_grid": False,
+            "row_count": 4,
+            "sampled_row_count": 4,
+            "usable_row_count": 3,
+            "invalid_row_count": 1,
+            "partial_row_count": 0,
+            "limitations": ["invalid_timestamps_skipped"],
+            "close_log_return": {"count": 2},
+        },
+        "dependence": {
+            "basis": "text",
+            "acf_basis": "observed_sequence",
+            "row_order": "source_text_order",
+            "computed_from": "text",
+            "regular_grid": False,
+            "reason": "invalid_timestamps_skipped",
+            "limitations": ["invalid_timestamps_skipped"],
+            "row_count": 4,
+            "sampled_row_count": 4,
+            "usable_row_count": 3,
+            "lags": [1, 3],
+            "computed_lag_count": 1,
+            "skipped_lag_count": 1,
+            "close_log_return_acf": {
+                "sample_count": 2,
+                "computed_lag_count": 1,
+                "skipped_lag_count": 1,
+                "skipped_lag_reason_counts": {
+                    "insufficient_sample_count": 1,
+                },
+            },
+        },
+        "fingerprint_audit": {
+            "schema_version": TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
+            "sections_expected": [
+                "coverage",
+                "temporal_topology",
+                "return_dynamics",
+                "dependence",
+            ],
+            "sections_emitted": [
+                "temporal_topology",
+                "return_dynamics",
+                "dependence",
+            ],
+            "sections_skipped": {},
+            "section_statuses": {
+                "coverage": "valid",
+                "temporal_topology": "limited",
+                "return_dynamics": "limited",
+                "dependence": "limited",
+            },
+            "dynamics_readiness": {
+                "return_dynamics": {
+                    "status": "limited",
+                    "reason": "invalid_timestamps_skipped",
+                    "basis": "text",
+                    "row_order": "source_text_order",
+                    "computed_from": "text",
+                    "regular_grid": False,
+                    "limitations": ["invalid_timestamps_skipped"],
+                    "row_count": 4,
+                    "sampled_row_count": 4,
+                    "usable_row_count": 3,
+                    "invalid_row_count": 1,
+                    "partial_row_count": 0,
+                }
+            },
+        },
+    }
+    finding = QualityFinding(
+        severity=QualitySeverity.INFO,
+        code="FINGERPRINT_SERIES_SUMMARY",
+        message="Canonical target time-series fingerprint.",
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        target=target,
+        metadata={TIME_SERIES_FINGERPRINT_METADATA_KEY: payload},
+    )
+    report = QualityReport(
+        targets=(target,),
+        rule_results=(
+            QualityRuleResult(
+                rule_id=SERIES_FINGERPRINT_RULE_ID,
+                target=target,
+                findings=(finding,),
+            ),
+        ),
+        metadata={"operation": "data-quality", "check_groups": ["fingerprint"]},
+    )
+    report_path = tmp_path / "fingerprint-quality.json"
+    write_quality_report(report, report_path)
+    return report_path
 
 
 def _catalog_payload(
