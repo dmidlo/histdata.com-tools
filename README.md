@@ -969,7 +969,7 @@ Supported groups:
 | `domain` | symbol metadata, quote conventions, calendar/session tags, cross-instrument consistency |
 | `modeling` | advisory modeling-readiness checks for bid-only bars, leakage risk, spread-cost assumptions, target horizon feasibility |
 | `provenance` | optional orchestration manifest/status lineage checks for artifact paths, sizes, checksums, cache metadata, stale caches, and orphan files |
-| `fingerprint` | deterministic INFO-only time-series fingerprints for target axis, coverage, timestamp topology, M1/tick distributions, calendar regimes, return/microstructure dynamics, and bounded tick spread conditioning |
+| `fingerprint` | deterministic INFO-only time-series fingerprints for target axis, coverage, timestamp topology, M1/tick distributions, calendar regimes, return/microstructure dynamics, lag dependence, and bounded tick spread conditioning |
 
 `fingerprint.series` payloads include a `calendar_regimes` section for readable
 ASCII M1 and tick targets. It counts session states, active/clock sessions,
@@ -986,6 +986,12 @@ stale quote runs, bursts, and one-sided movement. These sections record their
 calculation basis and topology limitations, so non-monotonic timestamps,
 duplicates, gaps, or insufficient sequence rows remain advisory metadata rather
 than hidden assumptions.
+Readable M1 and tick fingerprints also include a `dependence` section with
+observed-sequence autocorrelation summaries at profile-configured lags. M1
+dependence covers close returns, absolute returns, squared returns, and range
+ratios; tick dependence covers spreads plus spread-change series. Lags that are
+too long for the sampled sequence, or series with zero variance, are reported as
+skipped lag metadata instead of NaN values or quality failures.
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,
 stable skip/eligibility reason codes, calendar-profile completeness, tick-spread

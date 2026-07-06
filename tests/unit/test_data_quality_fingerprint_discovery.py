@@ -13,6 +13,7 @@ from histdatacom.data_quality.fingerprint_discovery import (
 from histdatacom.data_quality.fingerprints import (
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
@@ -44,6 +45,9 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert schemas["fingerprint_audit"]["schema_version"] == (
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION
     )
+    assert schemas["fingerprint_dependence"]["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION
+    )
     assert schemas["fingerprint_readiness_summary"]["schema_version"] == (
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION
     )
@@ -65,11 +69,11 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "conditional_distributions",
         "return_dynamics",
         "microstructure_dynamics",
+        "dependence",
         "fingerprint_audit",
     ]
     planned = payload["sections"]["planned"]["target_sections"]
     assert [section["name"] for section in planned] == [
-        "dependence",
         "stationarity_diagnostics",
         "decomposition",
         "synthetic_constraints",
@@ -156,5 +160,5 @@ def test_format_fingerprint_schema_discovery_renders_human_summary() -> None:
         "series_fingerprint: histdatacom.time-series-fingerprint.v1" in output
     )
     assert "- return_dynamics: implemented; timeframes=[M1]" in output
-    assert "- dependence: planned (#328)" in output
+    assert "- dependence: implemented; timeframes=[M1, T]" in output
     assert "without reading source or running data quality checks" in output

@@ -31,6 +31,7 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
@@ -89,10 +90,10 @@ _IMPLEMENTED_TARGET_SECTION_NAMES = (
     "conditional_distributions",
     "return_dynamics",
     "microstructure_dynamics",
+    "dependence",
     "fingerprint_audit",
 )
 _PLANNED_TARGET_SECTION_NAMES = (
-    "dependence",
     "stationarity_diagnostics",
     "decomposition",
     "synthetic_constraints",
@@ -122,7 +123,8 @@ def fingerprint_schema_discovery(
         "examples": _example_payload(),
         "consumer_guidance": _consumer_guidance_payload(),
     }
-    return cast(dict[str, JSONValue], publish_safe_json_mapping(payload))
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
+    return safe_payload
 
 
 def format_fingerprint_schema_discovery(
@@ -139,7 +141,7 @@ def format_fingerprint_schema_discovery(
     lines = [
         "Fingerprint Schema Discovery",
         f"schema: {payload.get('schema_version', '')}",
-        f"package: histdatacom { _mapping(payload.get('package')).get('version', '') }",
+        f"package: histdatacom {_mapping(payload.get('package')).get('version', '')}",
         (
             "profile: "
             f"{profile.get('name', 'unknown')} "
@@ -160,6 +162,7 @@ def format_fingerprint_schema_discovery(
         "series_fingerprint",
         "fingerprint_audit",
         "fingerprint_dynamics",
+        "fingerprint_dependence",
         "fingerprint_readiness_summary",
     ):
         schema = _mapping(schemas.get(key))
@@ -221,8 +224,8 @@ def _profile_payload(
         "is_default": bool(metadata.get("is_default")),
         "rule_id": SERIES_FINGERPRINT_RULE_ID,
         "configured": bool(configured),
-        "configured_rule_ids": cast(
-            JSONValue, list(metadata.get("configured_rule_ids") or [])
+        "configured_rule_ids": _json_string_list(
+            metadata.get("configured_rule_ids")
         ),
         "configurable_keys": _json_strings(_SERIES_FINGERPRINT_CONFIG_KEYS),
         "distribution_attention_configurable_keys": _json_strings(
@@ -313,6 +316,12 @@ def _schema_payload() -> dict[str, JSONValue]:
             TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
             rule_id=SERIES_FINGERPRINT_RULE_ID,
             payload_path="time_series_fingerprint.return_dynamics|microstructure_dynamics",
+            status="implemented",
+        ),
+        "fingerprint_dependence": _schema_entry(
+            TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
+            rule_id=SERIES_FINGERPRINT_RULE_ID,
+            payload_path="time_series_fingerprint.dependence",
             status="implemented",
         ),
         "fingerprint_audit": _schema_entry(
@@ -476,6 +485,18 @@ def _section_payload() -> dict[str, JSONValue]:
                     row_order=("source_text_order", "cache_order"),
                 ),
                 _section_entry(
+                    "dependence",
+                    "observed-sequence lag autocorrelation for returns, ranges, spreads, and spread changes",
+                    timeframes=(M1, TICK),
+                    schema_key="fingerprint_dependence",
+                    basis=("observed_sequence",),
+                    row_order=("source_text_order", "cache_order"),
+                    extra={
+                        "acf_basis": "observed_sequence",
+                        "profile_controlled_by": ["lags", "rounding_digits"],
+                    },
+                ),
+                _section_entry(
                     "fingerprint_audit",
                     "machine-readable expected/emitted/skipped section accounting and readiness",
                     timeframes=(M1, TICK),
@@ -485,7 +506,6 @@ def _section_payload() -> dict[str, JSONValue]:
         },
         "planned": {
             "target_sections": [
-                _planned_section("dependence", "#328"),
                 _planned_section("stationarity_diagnostics", "#329"),
                 _planned_section("decomposition", "#330"),
                 _planned_section("synthetic_constraints", "#333"),
@@ -631,6 +651,10 @@ def _vocabulary_payload() -> dict[str, JSONValue]:
                 "metric_not_available",
                 "insufficient_rows",
                 "insufficient_sequence_rows",
+                "insufficient_sample_count",
+                "zero_variance",
+                "no_computable_lags",
+                "skipped_lags",
                 "not_emitted",
             )
         ),
@@ -690,15 +714,22 @@ def _example_payload() -> dict[str, JSONValue]:
                     "calendar_regimes",
                     "m1_bar_distribution",
                     "return_dynamics",
+                    "dependence",
                 ],
                 "sections_emitted": ["coverage", "temporal_topology"],
                 "sections_skipped": {
-                    "calendar_regimes": {"reason": "not_emitted"}
+                    "calendar_regimes": {"reason": "not_emitted"},
+                    "m1_bar_distribution": {"reason": "not_emitted"},
+                    "return_dynamics": {"reason": "not_emitted"},
+                    "dependence": {"reason": "not_emitted"},
                 },
                 "section_statuses": {
                     "coverage": "limited",
                     "temporal_topology": "limited",
                     "calendar_regimes": "skipped",
+                    "m1_bar_distribution": "skipped",
+                    "return_dynamics": "skipped",
+                    "dependence": "skipped",
                 },
             },
         },
@@ -755,7 +786,7 @@ def _consumer_guidance_payload() -> dict[str, JSONValue]:
         "use_data_quality_for": _json_strings(
             (
                 "generating fingerprints for real local targets",
-                "computing distributions, dynamics, topology, and readiness",
+                "computing distributions, dynamics, dependence, topology, and readiness",
                 "writing full quality reports and bounded runtime payloads",
             )
         ),
@@ -772,6 +803,12 @@ def _consumer_guidance_payload() -> dict[str, JSONValue]:
 
 def _json_strings(values: tuple[object, ...]) -> list[JSONValue]:
     return [str(value) for value in values]
+
+
+def _json_string_list(value: object) -> list[JSONValue]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
 
 
 def _mapping(value: object) -> Mapping[str, JSONValue]:
