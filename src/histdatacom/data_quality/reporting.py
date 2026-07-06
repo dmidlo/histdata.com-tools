@@ -23,6 +23,7 @@ from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_DISTRIBUTION_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY,
+    FINGERPRINT_REGIME_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_TOPOLOGY_ATTENTION_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY,
 )
@@ -31,12 +32,14 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     series_fingerprint_coverage_summary,
     series_fingerprint_distribution_attention_summary,
     series_fingerprint_distribution_summary,
     series_fingerprint_readiness_summary,
+    series_fingerprint_regime_summary,
     series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
@@ -271,6 +274,13 @@ def quality_report_payload(
             TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY
         ] = fingerprint_distribution_attention
         payload["metadata"] = metadata
+    fingerprint_regimes = _fingerprint_regime_summary(report)
+    if fingerprint_regimes is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY] = (
+            fingerprint_regimes
+        )
+        payload["metadata"] = metadata
     fingerprint_topology = _fingerprint_topology_summary(report)
     if fingerprint_topology is not None:
         metadata = _mapping_payload(payload.get("metadata"))
@@ -431,6 +441,11 @@ def format_quality_console_summary(
             )
         )
         lines.extend(
+            format_fingerprint_regime_summary_lines(
+                _fingerprint_regime_summary(report)
+            )
+        )
+        lines.extend(
             format_fingerprint_topology_attention_lines(
                 _fingerprint_topology_attention_summary(report)
             )
@@ -486,6 +501,7 @@ def bounded_quality_payload(
     fingerprint_distribution_attention = (
         _fingerprint_distribution_attention_summary(report)
     )
+    fingerprint_regimes = _fingerprint_regime_summary(report)
     fingerprint_topology = _fingerprint_topology_summary(report)
     fingerprint_topology_attention = _fingerprint_topology_attention_summary(
         report
@@ -547,6 +563,8 @@ def bounded_quality_payload(
         payload[FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY] = (
             fingerprint_distribution_attention
         )
+    if fingerprint_regimes is not None:
+        payload[FINGERPRINT_REGIME_BOUNDED_PAYLOAD_KEY] = fingerprint_regimes
     if fingerprint_topology is not None:
         payload[FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY] = fingerprint_topology
     if fingerprint_topology_attention is not None:
@@ -1663,6 +1681,20 @@ def _fingerprint_distribution_attention_summary(
     )
 
 
+def _fingerprint_regime_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return fingerprint regime metadata from report or findings."""
+    summary = report.metadata.get(
+        TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY
+    )
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        series_fingerprint_regime_summary(report.findings)
+    )
+
+
 def _fingerprint_topology_summary(
     report: QualityReport,
 ) -> dict[str, JSONValue] | None:
@@ -1910,6 +1942,187 @@ def _format_fingerprint_distribution_target_line(
         f"source={_string_metadata(summary, 'distribution_source')}"
         f"{cache_text}"
     )
+
+
+def format_fingerprint_regime_summary_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable lines for fingerprint regimes."""
+    if not summary:
+        return []
+    lines = [
+        "",
+        "Fingerprint regimes",
+        (
+            "- targets: "
+            f"{_int_metadata(summary, 'target_count')} "
+            f"included: {_int_metadata(summary, 'included_target_count')} "
+            f"omitted: {_int_metadata(summary, 'omitted_target_count')} "
+            "calendar: "
+            f"{_int_metadata(summary, 'calendar_regime_target_count')} "
+            "conditioned-spread: "
+            f"{_int_metadata(summary, 'conditional_distribution_target_count')}"
+        ),
+    ]
+    count_lines = (
+        ("calendar statuses", "calendar_status_counts"),
+        ("conditioned spread statuses", "conditional_status_counts"),
+        ("computed from", "computed_from_counts"),
+        ("cache sources", "cache_source_counts"),
+    )
+    for label, key in count_lines:
+        counts = _format_count_metadata(summary.get(key))
+        if counts:
+            lines.append(f"- {label}: {counts}")
+    profile = _mapping_payload(summary.get("calendar_profile"))
+    if profile:
+        source_counts = _format_count_metadata(profile.get("source_counts"))
+        version_counts = _format_count_metadata(profile.get("version_counts"))
+        suffix = []
+        if source_counts:
+            suffix.append(f"sources: {source_counts}")
+        if version_counts:
+            suffix.append(f"versions: {version_counts}")
+        suffix_text = f" {'; '.join(suffix)}" if suffix else ""
+        lines.append(
+            "- calendar profile: "
+            f"complete={_int_metadata(profile, 'complete_count')} "
+            f"incomplete={_int_metadata(profile, 'incomplete_count')} "
+            "static-advisory="
+            f"{_int_metadata(profile, 'static_advisory_count')}"
+            f"{suffix_text}"
+        )
+    for label, key in (
+        ("session states", "top_session_state_counts"),
+        ("active sessions", "top_active_session_counts"),
+        ("special tags", "top_special_tag_counts"),
+        ("holiday tags", "top_holiday_tag_counts"),
+        ("event tags", "top_event_tag_counts"),
+        ("source hours", "top_hour_of_day_counts"),
+        ("source days", "top_day_of_week_counts"),
+    ):
+        counts = _format_count_rows(summary.get(key))
+        if counts:
+            lines.append(f"- {label}: {counts}")
+    target_summaries = summary.get("target_summaries")
+    if isinstance(target_summaries, list):
+        for item in target_summaries:
+            if isinstance(item, Mapping):
+                lines.append(
+                    f"- {_format_fingerprint_regime_target_line(item)}"
+                )
+    return lines
+
+
+def _format_fingerprint_regime_target_line(
+    summary: Mapping[str, JSONValue],
+) -> str:
+    axis = _mapping_payload(summary.get("target_axis"))
+    calendar = _mapping_payload(summary.get("calendar_regimes"))
+    conditional = _mapping_payload(summary.get("conditional_distributions"))
+    profile = _mapping_payload(calendar.get("calendar_profile"))
+    cache_source = _optional_string_metadata(calendar, "cache_source")
+    cache_text = f", cache={cache_source}" if cache_source else ""
+    session_counts = _format_count_metadata(
+        calendar.get("session_state_counts")
+    )
+    active_counts = _format_count_metadata(
+        calendar.get("active_session_counts")
+    )
+    special_counts = _format_count_metadata(calendar.get("special_tag_counts"))
+    holiday_counts = _format_count_metadata(calendar.get("holiday_tag_counts"))
+    event_counts = _format_count_metadata(calendar.get("event_tag_counts"))
+    hour_counts = _format_count_metadata(calendar.get("hour_of_day_counts"))
+    day_counts = _format_count_metadata(calendar.get("day_of_week_counts"))
+    counts = []
+    for label, value in (
+        ("sessions", session_counts),
+        ("active", active_counts),
+        ("special", special_counts),
+        ("holiday", holiday_counts),
+        ("event", event_counts),
+        ("hours", hour_counts),
+        ("days", day_counts),
+    ):
+        if value:
+            counts.append(f"{label}={value}")
+    counts_text = "; ".join(counts) if counts else "no calendar buckets"
+    conditional_text = _format_regime_conditioned_spread(conditional)
+    if conditional_text:
+        conditional_text = f"; {conditional_text}"
+    return (
+        f"{_string_metadata(axis, 'data_format')} "
+        f"{_string_metadata(axis, 'symbol')} "
+        f"{_string_metadata(axis, 'timeframe')} "
+        f"{_string_metadata(axis, 'period')} "
+        f"{_string_metadata(axis, 'kind')}: "
+        f"calendar={_string_metadata(calendar, 'status')} "
+        f"raw={_string_metadata(calendar, 'raw_status')}, "
+        f"rows={_int_metadata(calendar, 'row_count')} "
+        f"parsed={_int_metadata(calendar, 'parsed_row_count')} "
+        f"invalid={_int_metadata(calendar, 'invalid_timestamp_count')}, "
+        f"computed_from={_string_metadata(calendar, 'computed_from')}"
+        f"{cache_text}, "
+        "profile="
+        f"{_string_metadata(profile, 'source')}/"
+        f"{_string_metadata(profile, 'version')} "
+        f"complete={_bool_text(profile.get('complete'))} "
+        f"static-advisory={_bool_text(profile.get('static_advisory'))}; "
+        f"{counts_text}"
+        f"{conditional_text}"
+    )
+
+
+def _format_regime_conditioned_spread(
+    conditional: Mapping[str, JSONValue],
+) -> str:
+    status = _string_metadata(conditional, "status")
+    if status != "available":
+        if status in {"absent", "not_applicable"}:
+            return f"conditioned_spread={status}"
+        return ""
+    by_session = _format_conditioned_spread_rows(
+        conditional.get("by_active_session")
+    )
+    by_special = _format_conditioned_spread_rows(
+        conditional.get("by_special_tag")
+    )
+    parts = [
+        "conditioned_spread="
+        f"{_string_metadata(conditional, 'basis')} "
+        f"rows={_int_metadata(conditional, 'row_count')} "
+        f"usable={_int_metadata(conditional, 'usable_row_count')}"
+    ]
+    if by_session:
+        parts.append(f"by_session={by_session}")
+    if by_special:
+        parts.append(f"by_special={by_special}")
+    return " ".join(parts)
+
+
+def _format_conditioned_spread_rows(value: JSONValue) -> str:
+    rows = _list_metadata(value)
+    parts: list[str] = []
+    for row in rows:
+        spread = _mapping_payload(row.get("spread"))
+        parts.append(
+            f"{_string_metadata(row, 'bucket')}:"
+            f"n={_int_metadata(row, 'count')}/"
+            f"median={_format_rate(spread.get('median'))}/"
+            f"p95={_format_rate(spread.get('p95'))}"
+        )
+    return ";".join(parts)
+
+
+def _format_count_rows(value: JSONValue) -> str:
+    rows = _list_metadata(value)
+    parts: list[str] = []
+    for row in rows:
+        name = _string_metadata(row, "value")
+        count = _int_metadata(row, "count")
+        if name != "unknown" or count:
+            parts.append(f"{name}={count}")
+    return ", ".join(parts)
 
 
 def format_fingerprint_topology_attention_lines(

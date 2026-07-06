@@ -19,6 +19,8 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     QualityExitPolicy,
@@ -41,6 +43,7 @@ from histdatacom.data_quality import (
     quality_report_payload,
     quality_report_to_json,
     series_fingerprint_readiness_summary,
+    series_fingerprint_regime_summary,
     write_quality_report,
 )
 from histdatacom.runtime_contracts import ArtifactRef
@@ -1255,6 +1258,150 @@ def test_bounded_quality_payload_includes_fingerprint_readiness(
     )
 
 
+def test_fingerprint_regime_summary_reports_calendar_and_conditioning(
+    tmp_path: Path,
+) -> None:
+    """Regime summaries should expose calendar and conditioned spread facts."""
+    summary = series_fingerprint_regime_summary(
+        _fingerprint_regime_report(tmp_path).findings,
+        target_limit=-1,
+        count_limit=2,
+    )
+
+    assert summary is not None
+    assert summary["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_SCHEMA_VERSION
+    )
+    assert summary["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    assert summary["target_count"] == 4
+    assert summary["calendar_regime_target_count"] == 3
+    assert summary["conditional_distribution_target_count"] == 1
+    assert summary["calendar_status_counts"] == {
+        "available": 3,
+        "missing": 1,
+    }
+    assert summary["conditional_status_counts"] == {
+        "absent": 1,
+        "available": 1,
+        "not_applicable": 2,
+    }
+    assert summary["calendar_profile"] == {
+        "complete_count": 1,
+        "incomplete_count": 3,
+        "source_counts": {
+            "operator-config": 1,
+            "static_month_day_major_holidays": 2,
+            "unknown": 1,
+        },
+        "static_advisory_count": 2,
+        "version_counts": {"1": 2, "2026.06": 1, "unknown": 1},
+    }
+    assert summary["top_session_state_counts"][:2] == [
+        {"value": "market_open", "count": 17},
+        {"value": "weekend_closure", "count": 3},
+    ]
+
+    tick = next(
+        item
+        for item in summary["target_summaries"]
+        if item["target_axis"]["timeframe"] == "T"
+        and item["target_axis"]["symbol"] == "EURUSD"
+    )
+    conditional = tick["conditional_distributions"]
+
+    assert conditional["status"] == "available"
+    assert conditional["basis"] == "text"
+    assert conditional["by_active_session"][0]["bucket"] == "london"
+    assert conditional["by_active_session"][0]["spread"]["median"] == 0.0002
+    assert conditional["by_special_tag"][0]["bucket"] == (
+        "london_4pm_fix_window"
+    )
+
+
+def test_quality_report_payload_includes_fingerprint_regime_metadata(
+    tmp_path: Path,
+) -> None:
+    """Full JSON reports should publish bounded regime summaries."""
+    payload = quality_report_payload(_fingerprint_regime_report(tmp_path))
+    metadata = payload["metadata"]
+
+    assert TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY in metadata
+    regime = metadata[TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY]
+    assert regime["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_SCHEMA_VERSION
+    )
+    assert "calendar_policy" not in json.dumps(regime, sort_keys=True)
+    assert "quantiles" not in json.dumps(regime, sort_keys=True)
+    assert str(tmp_path) not in json.dumps(regime, sort_keys=True)
+
+
+def test_bounded_quality_payload_includes_fingerprint_regimes(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration payloads should expose regime summaries."""
+    report = _fingerprint_regime_report(tmp_path)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("fingerprint",),
+        discovery={"roots": [str(tmp_path)], "target_count": 4},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+
+    regimes = payload["fingerprint_regime"]
+
+    assert regimes["calendar_status_counts"] == {
+        "available": 3,
+        "missing": 1,
+    }
+    assert regimes["conditional_status_counts"]["available"] == 1
+    assert regimes["target_summaries"][0]["target_axis"]["symbol"] == "AUDUSD"
+
+
+def test_quality_console_summary_renders_fingerprint_regimes(
+    tmp_path: Path,
+) -> None:
+    """Console summaries should render regimes without nested JSON inspection."""
+    output = format_quality_console_summary(
+        _fingerprint_regime_report(tmp_path),
+        check_groups=("fingerprint",),
+    )
+
+    assert "Fingerprint regimes" in output
+    assert "- calendar statuses: available=3, missing=1" in output
+    assert "conditioned-spread: 1" in output
+    assert "profile=static_month_day_major_holidays/1" in output
+    assert "conditioned_spread=text rows=3 usable=3" in output
+    assert "london:n=2/median=0.0002/p95=0.0003" in output
+
+
+def test_fingerprint_regime_summary_is_bounded_and_deterministic(
+    tmp_path: Path,
+) -> None:
+    """Regime summaries should keep deterministic ordering and truncation."""
+    summary = series_fingerprint_regime_summary(
+        _fingerprint_regime_report(tmp_path).findings,
+        target_limit=2,
+        count_limit=0,
+    )
+
+    assert summary is not None
+    assert summary["included_target_count"] == 2
+    assert summary["omitted_target_count"] == 2
+    assert summary["count_limit"] == 1
+    assert summary["truncated"] is True
+    assert summary["top_session_state_counts"] == [
+        {"value": "market_open", "count": 17}
+    ]
+    assert [
+        item["target_axis"]["symbol"] for item in summary["target_summaries"]
+    ] == [
+        "AUDUSD",
+        "EURUSD",
+    ]
+
+
 def test_fingerprint_readiness_summary_is_bounded_and_issue_first(
     tmp_path: Path,
 ) -> None:
@@ -1743,6 +1890,205 @@ def _fingerprint_dynamics_report(tmp_path: Path) -> QualityReport:
             for finding in findings
         ),
     )
+
+
+def _fingerprint_regime_report(tmp_path: Path) -> QualityReport:
+    missing_m1 = QualityTarget(
+        path=str(tmp_path / "missing-calendar.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="AUDUSD",
+        period="201202",
+    )
+    valid_m1 = QualityTarget(
+        path=str(tmp_path / "calendar.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+    conditioned_tick = QualityTarget(
+        path=str(tmp_path / "conditioned-ticks.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="T",
+        symbol="EURUSD",
+        period="201202",
+    )
+    absent_tick = QualityTarget(
+        path=str(tmp_path / "plain-ticks.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="T",
+        symbol="GBPUSD",
+        period="201202",
+    )
+
+    missing_payload = _valid_m1_fingerprint_payload(kind="csv")
+    _set_payload_axis(missing_payload, symbol="AUDUSD", kind="csv")
+    missing_payload.pop("calendar_regimes", None)
+
+    m1_payload = _valid_m1_fingerprint_payload(kind="csv")
+    m1_payload["calendar_regimes"] = _calendar_regimes_payload(
+        row_count=10,
+        parsed_row_count=10,
+        session_state_counts={"market_open": 8, "weekend_closure": 2},
+        active_session_counts={"london": 4, "new_york": 3, "asia": 1},
+        special_tag_counts={"daily_rollover": 2, "month_end": 1},
+        holiday_tag_counts={"major_holiday:christmas_day": 1},
+        event_tag_counts={},
+        hour_of_day_counts={"11": 5, "12": 3, "17": 2},
+        day_of_week_counts={"wednesday": 8, "sunday": 2},
+        profile_name="static-major-holidays",
+        profile_source="static_month_day_major_holidays",
+        profile_version="1",
+        profile_complete=False,
+        profile_static_advisory=True,
+    )
+
+    conditioned_payload = _tick_fingerprint_payload()
+    conditioned_payload["calendar_regimes"] = _calendar_regimes_payload(
+        row_count=7,
+        parsed_row_count=7,
+        session_state_counts={"market_open": 6, "weekend_closure": 1},
+        active_session_counts={"london": 4, "new_york": 2},
+        special_tag_counts={"london_4pm_fix_window": 2},
+        holiday_tag_counts={},
+        event_tag_counts={"crisis:covid_shock": 1},
+        hour_of_day_counts={"11": 4, "16": 2, "17": 1},
+        day_of_week_counts={"wednesday": 6, "sunday": 1},
+        profile_name="complete-calendar",
+        profile_source="operator-config",
+        profile_version="2026.06",
+        profile_complete=True,
+        profile_static_advisory=False,
+    )
+    conditioned_payload["conditional_distributions"] = (
+        _conditional_distributions_payload()
+    )
+
+    absent_payload = _tick_fingerprint_payload()
+    _set_payload_axis(absent_payload, symbol="GBPUSD", kind="csv")
+    absent_payload["calendar_regimes"] = _calendar_regimes_payload(
+        row_count=3,
+        parsed_row_count=3,
+        session_state_counts={"market_open": 3},
+        active_session_counts={"london": 2, "new_york": 1},
+        special_tag_counts={},
+        holiday_tag_counts={},
+        event_tag_counts={},
+        hour_of_day_counts={"11": 2, "12": 1},
+        day_of_week_counts={"thursday": 3},
+        profile_name="static-major-holidays",
+        profile_source="static_month_day_major_holidays",
+        profile_version="1",
+        profile_complete=False,
+        profile_static_advisory=True,
+    )
+    absent_payload.pop("conditional_distributions", None)
+
+    findings = (
+        _fingerprint_series_finding(missing_m1, missing_payload),
+        _fingerprint_series_finding(valid_m1, m1_payload),
+        _fingerprint_series_finding(conditioned_tick, conditioned_payload),
+        _fingerprint_series_finding(absent_tick, absent_payload),
+    )
+    return QualityReport(
+        targets=(missing_m1, valid_m1, conditioned_tick, absent_tick),
+        rule_results=tuple(
+            QualityRuleResult(
+                rule_id=SERIES_FINGERPRINT_RULE_ID,
+                target=finding.target,
+                findings=(finding,),
+            )
+            for finding in findings
+        ),
+    )
+
+
+def _set_payload_axis(
+    payload: dict[str, object],
+    *,
+    symbol: str,
+    kind: str,
+) -> None:
+    axis = payload["target_axis"]
+    assert isinstance(axis, dict)
+    axis["symbol"] = symbol
+    axis["kind"] = kind
+
+
+def _calendar_regimes_payload(
+    *,
+    row_count: int,
+    parsed_row_count: int,
+    session_state_counts: dict[str, int],
+    active_session_counts: dict[str, int],
+    special_tag_counts: dict[str, int],
+    holiday_tag_counts: dict[str, int],
+    event_tag_counts: dict[str, int],
+    hour_of_day_counts: dict[str, int],
+    day_of_week_counts: dict[str, int],
+    profile_name: str,
+    profile_source: str,
+    profile_version: str,
+    profile_complete: bool,
+    profile_static_advisory: bool,
+) -> dict[str, object]:
+    return {
+        "status": "ok",
+        "computed_from": "text_scan",
+        "cache_source": None,
+        "row_count": row_count,
+        "parsed_row_count": parsed_row_count,
+        "invalid_timestamp_count": 0,
+        "session_state_counts": session_state_counts,
+        "active_session_counts": active_session_counts,
+        "special_tag_counts": special_tag_counts,
+        "holiday_tag_counts": holiday_tag_counts,
+        "event_tag_counts": event_tag_counts,
+        "hour_of_day_counts": hour_of_day_counts,
+        "day_of_week_counts": day_of_week_counts,
+        "calendar_profile_complete": profile_complete,
+        "missing_optional_calendar_data": not profile_complete,
+        "calendar_policy": {
+            "holiday_calendar_source": profile_source,
+            "holiday_calendar_complete": profile_complete,
+            "holiday_calendar_static_advisory": profile_static_advisory,
+            "calendar_profile": {
+                "name": profile_name,
+                "source": profile_source,
+                "version": profile_version,
+                "complete": profile_complete,
+                "static_advisory": profile_static_advisory,
+            },
+        },
+    }
+
+
+def _conditional_distributions_payload() -> dict[str, object]:
+    return {
+        "basis": "text",
+        "metric": "tick_spread",
+        "row_count": 3,
+        "sampled_row_count": 3,
+        "usable_row_count": 3,
+        "invalid_row_count": 0,
+        "truncated": False,
+        "by_active_session": {
+            "london": {"spread": _numeric(count=2, median=0.0002, p95=0.0003)},
+            "new_york": {
+                "spread": _numeric(count=1, median=0.0004, p95=0.0004)
+            },
+        },
+        "by_special_tag": {
+            "london_4pm_fix_window": {
+                "spread": _numeric(count=1, median=0.0003, p95=0.0003)
+            }
+        },
+    }
 
 
 def _fingerprint_series_finding(
