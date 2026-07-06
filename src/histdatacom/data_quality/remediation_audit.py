@@ -14,6 +14,10 @@ from histdatacom.data_quality.contracts import (
     QualityReport,
     QualitySeverity,
 )
+from histdatacom.data_quality.limits import (
+    BoundedReportLimit,
+    bounded_report_limit,
+)
 from histdatacom.data_quality.remediation import (
     remediation_hints_for_finding_code,
 )
@@ -135,14 +139,30 @@ def audit_remediation_catalog(
     *,
     known_findings: Iterable[KnownQualityFindingCode] | None = None,
     reports: Iterable[QualityReport | tuple[str, QualityReport]] = (),
-    code_limit: int = DEFAULT_REMEDIATION_CATALOG_AUDIT_CODE_LIMIT,
-    rule_limit: int = DEFAULT_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
-    source_limit: int = DEFAULT_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
-    target_axis_limit: int = (
+    code_limit: int | None = DEFAULT_REMEDIATION_CATALOG_AUDIT_CODE_LIMIT,
+    rule_limit: int | None = DEFAULT_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+    source_limit: int | None = DEFAULT_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
+    target_axis_limit: int | None = (
         DEFAULT_REMEDIATION_CATALOG_AUDIT_TARGET_AXIS_LIMIT
     ),
 ) -> dict[str, JSONValue]:
     """Return a bounded remediation-catalog completeness audit payload."""
+    code_limit_state = bounded_report_limit(
+        code_limit,
+        default_limit=DEFAULT_REMEDIATION_CATALOG_AUDIT_CODE_LIMIT,
+    )
+    rule_limit_state = bounded_report_limit(
+        rule_limit,
+        default_limit=DEFAULT_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+    )
+    source_limit_state = bounded_report_limit(
+        source_limit,
+        default_limit=DEFAULT_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
+    )
+    target_axis_limit_state = bounded_report_limit(
+        target_axis_limit,
+        default_limit=DEFAULT_REMEDIATION_CATALOG_AUDIT_TARGET_AXIS_LIMIT,
+    )
     known = tuple(
         known_findings
         if known_findings is not None
@@ -153,8 +173,8 @@ def audit_remediation_catalog(
         _report_coverage_payload(
             source,
             report,
-            code_limit=code_limit,
-            target_axis_limit=target_axis_limit,
+            code_limit=code_limit_state.effective_limit,
+            target_axis_limit=target_axis_limit_state.effective_limit,
         )
         for source, report in _normalized_reports(reports)
     ]
@@ -170,15 +190,10 @@ def audit_remediation_catalog(
     ranked_gaps = _ranked_gap_payloads(
         unmapped_known,
         report_gap_evidence=report_gap_evidence,
-        source_limit=source_limit,
+        source_limit=source_limit_state.effective_limit,
     )
-    included_ranked_gaps = list(
-        _bounded_sequence(ranked_gaps, limit=code_limit)
-    )
-    included_unmapped_known = _bounded_sequence(
-        unmapped_known,
-        limit=code_limit,
-    )
+    included_ranked_gaps = list(code_limit_state.slice(ranked_gaps))
+    included_unmapped_known = code_limit_state.slice(unmapped_known)
     report_summary = _report_coverage_summary(report_payloads)
     summary = _audit_summary(
         known_aggregates,
@@ -194,13 +209,13 @@ def audit_remediation_catalog(
         "summary": summary,
         "known_code_counts": _known_code_counts(
             known_aggregates,
-            rule_limit=rule_limit,
-            code_limit=code_limit,
+            rule_limit=rule_limit_state.effective_limit,
+            code_limit=code_limit_state.effective_limit,
         ),
         "known_unmapped_codes": [
             _code_aggregate_payload(
                 aggregate,
-                source_limit=source_limit,
+                source_limit=source_limit_state.effective_limit,
             )
             for aggregate in included_unmapped_known
         ],
@@ -209,40 +224,41 @@ def audit_remediation_catalog(
         "payload_limits": {
             "ranked_gaps": _payload_limit_metadata(
                 len(ranked_gaps),
-                code_limit,
+                code_limit_state,
             ),
             "known_unmapped_codes": _payload_limit_metadata(
                 len(unmapped_known),
-                code_limit,
+                code_limit_state,
             ),
             "known_code_sources": {
-                "limit": source_limit,
+                **source_limit_state.limit_payload(),
                 "applies_per_code": True,
             },
             "ranked_gap_sources": {
-                "limit": source_limit,
+                **source_limit_state.limit_payload(),
                 "applies_per_gap": True,
             },
             "ranked_gap_report_sources": {
-                "limit": source_limit,
+                **source_limit_state.limit_payload(),
                 "applies_per_gap": True,
             },
             "known_rule_id_counts": _payload_limit_metadata(
                 _counter_distinct_count(
                     aggregate.rule_id for aggregate in known_aggregates.values()
                 ),
-                rule_limit,
+                rule_limit_state,
             ),
             "known_finding_code_counts": _payload_limit_metadata(
                 _counter_distinct_count(
                     aggregate.finding_code
                     for aggregate in known_aggregates.values()
                 ),
-                code_limit,
+                code_limit_state,
             ),
             "report_unmapped_groups": {
-                "limit": code_limit,
-                "target_axis_limit": target_axis_limit,
+                **code_limit_state.limit_payload(),
+                "target_axis_limit": target_axis_limit_state.effective_limit,
+                "target_axes": target_axis_limit_state.limit_payload(),
                 "applies_per_report": True,
             },
         },
@@ -254,10 +270,10 @@ def audit_remediation_catalog_report_paths(
     report_paths: Iterable[str | Path],
     *,
     known_findings: Iterable[KnownQualityFindingCode] | None = None,
-    code_limit: int = DEFAULT_REMEDIATION_CATALOG_AUDIT_CODE_LIMIT,
-    rule_limit: int = DEFAULT_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
-    source_limit: int = DEFAULT_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
-    target_axis_limit: int = (
+    code_limit: int | None = DEFAULT_REMEDIATION_CATALOG_AUDIT_CODE_LIMIT,
+    rule_limit: int | None = DEFAULT_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+    source_limit: int | None = DEFAULT_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
+    target_axis_limit: int | None = (
         DEFAULT_REMEDIATION_CATALOG_AUDIT_TARGET_AXIS_LIMIT
     ),
 ) -> dict[str, JSONValue]:
@@ -1259,22 +1275,29 @@ def _format_ranked_gap(group: Mapping[str, JSONValue]) -> str:
 
 def _payload_limit_metadata(
     total_count: int,
-    limit: int,
+    limit: int | BoundedReportLimit | None,
 ) -> dict[str, JSONValue]:
-    included_count = total_count if limit < 0 else min(total_count, limit)
-    return {
-        "limit": limit,
-        "total_count": total_count,
-        "included_count": included_count,
-        "omitted_count": max(0, total_count - included_count),
-        "truncated": total_count > included_count,
-    }
+    if isinstance(limit, BoundedReportLimit):
+        limit_state = limit
+    else:
+        limit_state = bounded_report_limit(
+            limit,
+            default_limit=limit if isinstance(limit, int) else 0,
+        )
+    return limit_state.count_payload(total_count)
 
 
-def _bounded_sequence(values: Sequence[_T], *, limit: int) -> Sequence[_T]:
-    if limit < 0:
-        return values
-    return values[:limit]
+def _bounded_sequence(
+    values: Sequence[_T],
+    *,
+    limit: int | BoundedReportLimit,
+) -> Sequence[_T]:
+    if isinstance(limit, BoundedReportLimit):
+        return cast(Sequence[_T], limit.slice(values))
+    return cast(
+        Sequence[_T],
+        bounded_report_limit(limit, default_limit=limit).slice(values),
+    )
 
 
 def _counter_distinct_count(values: Iterable[str]) -> int:
@@ -1295,8 +1318,8 @@ def _named_counter_payloads(
     limit: int,
 ) -> list[JSONValue]:
     names = sorted(counter, key=lambda item: (-counter[item], item))
-    if limit >= 0:
-        names = names[:limit]
+    limit_state = bounded_report_limit(limit, default_limit=limit)
+    names = limit_state.slice(names)
     return [{key_name: name, "count": counter[name]} for name in names]
 
 

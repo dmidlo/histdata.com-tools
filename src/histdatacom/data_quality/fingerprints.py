@@ -34,6 +34,10 @@ from histdatacom.data_quality.calendar_profiles import (
     HistDataCalendarProfile,
     default_calendar_profile,
 )
+from histdatacom.data_quality.limits import (
+    BoundedReportLimit,
+    bounded_report_limit,
+)
 from histdatacom.data_quality.polars_cache import read_quality_polars_cache
 from histdatacom.data_quality.remediation import (
     remediation_hint_payloads_for_flags,
@@ -416,13 +420,17 @@ def series_fingerprint_coverage_summary(
 def series_fingerprint_topology_summary(
     findings: Iterable[QualityFinding],
     *,
-    target_limit: int = DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
+    target_limit: int | None = DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
 ) -> dict[str, JSONValue] | None:
     """Return bounded target summaries for fingerprint timestamp topology."""
     target_summaries = _series_fingerprint_topology_target_summaries(findings)
 
     if not target_summaries:
         return None
+    target_limit_state = bounded_report_limit(
+        target_limit,
+        default_limit=DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
+    )
 
     status_counts = Counter(
         _summary_key(item.get("status")) for item in target_summaries
@@ -444,12 +452,9 @@ def series_fingerprint_topology_summary(
         if isinstance(flags, list):
             flag_counts.update(_summary_key(flag) for flag in flags)
 
-    included_source = (
-        target_summaries
-        if target_limit < 0
-        else target_summaries[:target_limit]
-    )
-    included: list[JSONValue] = [dict(item) for item in included_source]
+    included: list[JSONValue] = [
+        dict(item) for item in target_limit_state.slice(target_summaries)
+    ]
     omitted_count = max(0, len(target_summaries) - len(included))
 
     return {
@@ -461,6 +466,7 @@ def series_fingerprint_topology_summary(
         "included_target_count": len(included),
         "omitted_target_count": omitted_count,
         "truncated": omitted_count > 0,
+        "limit_metadata": {"targets": target_limit_state.limit_payload()},
         "status_counts": _counter_payload(status_counts),
         "computed_from_counts": _counter_payload(computed_from_counts),
         "cache_source_counts": _counter_payload(cache_source_counts),
@@ -473,22 +479,26 @@ def series_fingerprint_topology_summary(
 def series_fingerprint_topology_attention_summary(
     findings: Iterable[QualityFinding],
     *,
-    target_limit: int = DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT,
+    target_limit: int | None = DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT,
 ) -> dict[str, JSONValue] | None:
     """Return bounded attention-first summaries for topology findings."""
     target_summaries = _series_fingerprint_topology_target_summaries(findings)
     if not target_summaries:
         return None
+    target_limit_state = bounded_report_limit(
+        target_limit,
+        default_limit=DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT,
+    )
     return _topology_attention_summary_from_targets(
         target_summaries,
-        target_limit=target_limit,
+        target_limit=target_limit_state,
     )
 
 
 def series_fingerprint_distribution_summary(
     findings: Iterable[QualityFinding],
     *,
-    target_limit: int = DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT,
+    target_limit: int | None = DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT,
 ) -> dict[str, JSONValue] | None:
     """Return bounded target summaries for fingerprint distributions."""
     target_summaries = _series_fingerprint_distribution_target_summaries(
@@ -496,6 +506,10 @@ def series_fingerprint_distribution_summary(
     )
     if not target_summaries:
         return None
+    target_limit_state = bounded_report_limit(
+        target_limit,
+        default_limit=DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT,
+    )
 
     distribution_kind_counts = Counter(
         _summary_key(item.get("distribution_kind")) for item in target_summaries
@@ -519,12 +533,9 @@ def series_fingerprint_distribution_summary(
         if item.get("cache_source") is not None
     )
 
-    included_source = (
-        target_summaries
-        if target_limit < 0
-        else target_summaries[:target_limit]
-    )
-    included: list[JSONValue] = [dict(item) for item in included_source]
+    included: list[JSONValue] = [
+        dict(item) for item in target_limit_state.slice(target_summaries)
+    ]
     omitted_count = max(0, len(target_summaries) - len(included))
 
     return {
@@ -536,6 +547,7 @@ def series_fingerprint_distribution_summary(
         "included_target_count": len(included),
         "omitted_target_count": omitted_count,
         "truncated": omitted_count > 0,
+        "limit_metadata": {"targets": target_limit_state.limit_payload()},
         "distribution_target_count": sum(
             1
             for item in target_summaries
@@ -598,7 +610,7 @@ def series_fingerprint_distribution_attention_summary(
     findings: Iterable[QualityFinding],
     *,
     profile: HistDataFingerprintProfile | None = None,
-    target_limit: int = DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT,
+    target_limit: int | None = DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT,
 ) -> dict[str, JSONValue] | None:
     """Return bounded attention-first summaries for distributions."""
     attention_profile = (
@@ -609,6 +621,10 @@ def series_fingerprint_distribution_attention_summary(
     )
     if not target_summaries:
         return None
+    target_limit_state = bounded_report_limit(
+        target_limit,
+        default_limit=DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT,
+    )
 
     attention_targets = [
         attention
@@ -632,12 +648,9 @@ def series_fingerprint_distribution_attention_summary(
         if isinstance(flags, list):
             attention_flag_counts.update(_summary_key(flag) for flag in flags)
 
-    included_source = (
-        attention_targets
-        if target_limit < 0
-        else attention_targets[:target_limit]
-    )
-    included: list[JSONValue] = [dict(item) for item in included_source]
+    included: list[JSONValue] = [
+        dict(item) for item in target_limit_state.slice(attention_targets)
+    ]
     omitted_count = max(0, len(attention_targets) - len(included))
 
     return {
@@ -650,6 +663,7 @@ def series_fingerprint_distribution_attention_summary(
         "included_attention_target_count": len(included),
         "omitted_attention_target_count": omitted_count,
         "truncated": omitted_count > 0,
+        "limit_metadata": {"targets": target_limit_state.limit_payload()},
         "attention_thresholds": attention_profile.to_metadata(),
         "attention_level_counts": _counter_payload(attention_level_counts),
         "attention_flag_counts": _counter_payload(attention_flag_counts),
@@ -660,14 +674,23 @@ def series_fingerprint_distribution_attention_summary(
 def series_fingerprint_regime_summary(
     findings: Iterable[QualityFinding],
     *,
-    target_limit: int = DEFAULT_FINGERPRINT_REGIME_SUMMARY_LIMIT,
-    count_limit: int = DEFAULT_FINGERPRINT_REGIME_COUNT_LIMIT,
+    target_limit: int | None = DEFAULT_FINGERPRINT_REGIME_SUMMARY_LIMIT,
+    count_limit: int | None = DEFAULT_FINGERPRINT_REGIME_COUNT_LIMIT,
 ) -> dict[str, JSONValue] | None:
     """Return bounded calendar/session and conditioned-spread summaries."""
-    bounded_count_limit = max(1, count_limit)
+    target_limit_state = bounded_report_limit(
+        target_limit,
+        default_limit=DEFAULT_FINGERPRINT_REGIME_SUMMARY_LIMIT,
+    )
+    count_limit_state = bounded_report_limit(
+        count_limit,
+        default_limit=DEFAULT_FINGERPRINT_REGIME_COUNT_LIMIT,
+        minimum_limit=1,
+        allow_unbounded=False,
+    )
     target_summaries = _series_fingerprint_regime_target_summaries(
         findings,
-        count_limit=bounded_count_limit,
+        count_limit=count_limit_state.effective_limit,
     )
     if not target_summaries:
         return None
@@ -726,12 +749,9 @@ def series_fingerprint_regime_summary(
                 _counter_from_mapping(_payload_mapping(calendar.get(key)))
             )
 
-    included_source = (
-        target_summaries
-        if target_limit < 0
-        else target_summaries[:target_limit]
-    )
-    included: list[JSONValue] = [dict(item) for item in included_source]
+    included: list[JSONValue] = [
+        dict(item) for item in target_limit_state.slice(target_summaries)
+    ]
     omitted_count = max(0, len(target_summaries) - len(included))
 
     return {
@@ -743,7 +763,11 @@ def series_fingerprint_regime_summary(
         "included_target_count": len(included),
         "omitted_target_count": omitted_count,
         "truncated": omitted_count > 0,
-        "count_limit": bounded_count_limit,
+        "count_limit": count_limit_state.effective_limit,
+        "limit_metadata": {
+            "targets": target_limit_state.limit_payload(),
+            "counts": count_limit_state.limit_payload(),
+        },
         "calendar_regime_target_count": sum(
             1
             for item in target_summaries
@@ -776,31 +800,31 @@ def series_fingerprint_regime_summary(
         },
         "top_session_state_counts": _bounded_count_rows(
             aggregate_counts["session_state_counts"],
-            limit=bounded_count_limit,
+            limit=count_limit_state.effective_limit,
         ),
         "top_active_session_counts": _bounded_count_rows(
             aggregate_counts["active_session_counts"],
-            limit=bounded_count_limit,
+            limit=count_limit_state.effective_limit,
         ),
         "top_special_tag_counts": _bounded_count_rows(
             aggregate_counts["special_tag_counts"],
-            limit=bounded_count_limit,
+            limit=count_limit_state.effective_limit,
         ),
         "top_holiday_tag_counts": _bounded_count_rows(
             aggregate_counts["holiday_tag_counts"],
-            limit=bounded_count_limit,
+            limit=count_limit_state.effective_limit,
         ),
         "top_event_tag_counts": _bounded_count_rows(
             aggregate_counts["event_tag_counts"],
-            limit=bounded_count_limit,
+            limit=count_limit_state.effective_limit,
         ),
         "top_hour_of_day_counts": _bounded_count_rows(
             aggregate_counts["hour_of_day_counts"],
-            limit=bounded_count_limit,
+            limit=count_limit_state.effective_limit,
         ),
         "top_day_of_week_counts": _bounded_count_rows(
             aggregate_counts["day_of_week_counts"],
-            limit=bounded_count_limit,
+            limit=count_limit_state.effective_limit,
         ),
         "target_summaries": included,
     }
@@ -809,12 +833,16 @@ def series_fingerprint_regime_summary(
 def series_fingerprint_readiness_summary(
     findings: Iterable[QualityFinding],
     *,
-    target_limit: int = DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT,
+    target_limit: int | None = DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT,
 ) -> dict[str, JSONValue] | None:
     """Return bounded target summaries for fingerprint audit/readiness."""
     target_summaries = _series_fingerprint_readiness_target_summaries(findings)
     if not target_summaries:
         return None
+    target_limit_state = bounded_report_limit(
+        target_limit,
+        default_limit=DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT,
+    )
 
     applicable_status_counts = Counter(
         _summary_key(item.get("applicable_dynamics_status"))
@@ -931,12 +959,9 @@ def series_fingerprint_readiness_summary(
         is True
     )
 
-    included_source = (
-        target_summaries
-        if target_limit < 0
-        else target_summaries[:target_limit]
-    )
-    included: list[JSONValue] = [dict(item) for item in included_source]
+    included: list[JSONValue] = [
+        dict(item) for item in target_limit_state.slice(target_summaries)
+    ]
     omitted_count = max(0, len(target_summaries) - len(included))
 
     return {
@@ -948,6 +973,7 @@ def series_fingerprint_readiness_summary(
         "included_target_count": len(included),
         "omitted_target_count": omitted_count,
         "truncated": omitted_count > 0,
+        "limit_metadata": {"targets": target_limit_state.limit_payload()},
         "applicable_dynamics_status_counts": _counter_payload(
             applicable_status_counts
         ),
@@ -1409,8 +1435,14 @@ def _fingerprint_readiness_dependence_summary(
             _int_payload(summary.get("skipped_lag_count"))
             for summary in series.values()
         )
+    lag_limit_state = bounded_report_limit(
+        None,
+        default_limit=DEFAULT_FINGERPRINT_READINESS_LAG_LIMIT,
+        minimum_limit=0,
+        allow_unbounded=True,
+    )
     lags = _int_sequence_payload(dependence.get("lags"))
-    included_lags = lags[:DEFAULT_FINGERPRINT_READINESS_LAG_LIMIT]
+    included_lags = lag_limit_state.slice(lags)
     omitted_lag_count = max(0, len(lags) - len(included_lags))
     result: dict[str, JSONValue] = {
         "status": _dependence_section_status(dependence),
@@ -1429,10 +1461,12 @@ def _fingerprint_readiness_dependence_summary(
         "partial_row_count": _int_payload(dependence.get("partial_row_count")),
         "truncated": dependence.get("truncated") is True,
         "lag_count": len(lags),
+        "lag_limit": lag_limit_state.effective_limit,
         "lags": list(included_lags),
         "included_lag_count": len(included_lags),
         "omitted_lag_count": omitted_lag_count,
         "lags_truncated": omitted_lag_count > 0,
+        "limit_metadata": {"lags": lag_limit_state.limit_payload()},
         "computed_lag_count": computed_lag_count,
         "skipped_lag_count": skipped_lag_count,
         "skipped_lag_reason_counts": _counter_payload(skipped_reason_counts),
@@ -1447,6 +1481,12 @@ def _empty_dependence_readiness(
     status: str,
     reason: str | None,
 ) -> dict[str, JSONValue]:
+    lag_limit_state = bounded_report_limit(
+        None,
+        default_limit=DEFAULT_FINGERPRINT_READINESS_LAG_LIMIT,
+        minimum_limit=0,
+        allow_unbounded=True,
+    )
     return {
         "status": status,
         "reason": reason,
@@ -1464,10 +1504,12 @@ def _empty_dependence_readiness(
         "partial_row_count": 0,
         "truncated": False,
         "lag_count": 0,
+        "lag_limit": lag_limit_state.effective_limit,
         "lags": [],
         "included_lag_count": 0,
         "omitted_lag_count": 0,
         "lags_truncated": False,
+        "limit_metadata": {"lags": lag_limit_state.limit_payload()},
         "computed_lag_count": 0,
         "skipped_lag_count": 0,
         "skipped_lag_reason_counts": {},
@@ -1609,7 +1651,6 @@ def _series_fingerprint_regime_target_summaries(
     count_limit: int,
 ) -> list[dict[str, JSONValue]]:
     target_summaries: list[dict[str, JSONValue]] = []
-    bounded_count_limit = max(1, count_limit)
     for finding in findings:
         if finding.rule_id != SERIES_FINGERPRINT_RULE_ID:
             continue
@@ -1620,7 +1661,7 @@ def _series_fingerprint_regime_target_summaries(
             _regime_target_summary(
                 finding,
                 cast(Mapping[str, JSONValue], payload),
-                count_limit=bounded_count_limit,
+                count_limit=count_limit,
             )
         )
     target_summaries.sort(key=_regime_target_sort_key)
@@ -1767,6 +1808,12 @@ def _conditioned_spread_rows(
     *,
     limit: int,
 ) -> list[JSONValue]:
+    limit_state = bounded_report_limit(
+        limit,
+        default_limit=limit,
+        minimum_limit=1,
+        allow_unbounded=False,
+    )
     rows: list[dict[str, JSONValue]] = []
     for bucket, payload in buckets.items():
         spread_payload = dict(
@@ -1786,7 +1833,7 @@ def _conditioned_spread_rows(
             _summary_key(item.get("bucket")),
         )
     )
-    return cast(list[JSONValue], rows[: max(1, limit)])
+    return limit_state.slice(rows)
 
 
 def _bounded_count_mapping(
@@ -1796,9 +1843,15 @@ def _bounded_count_mapping(
 ) -> dict[str, JSONValue]:
     if not counter:
         return {}
-    included = sorted(counter.items(), key=lambda item: (-item[1], item[0]))[
-        : max(1, limit)
-    ]
+    limit_state = bounded_report_limit(
+        limit,
+        default_limit=limit,
+        minimum_limit=1,
+        allow_unbounded=False,
+    )
+    included = limit_state.slice(
+        sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+    )
     return {key: count for key, count in included}
 
 
@@ -1807,11 +1860,17 @@ def _bounded_count_rows(
     *,
     limit: int,
 ) -> list[JSONValue]:
+    limit_state = bounded_report_limit(
+        limit,
+        default_limit=limit,
+        minimum_limit=1,
+        allow_unbounded=False,
+    )
     return [
         {"value": key, "count": count}
-        for key, count in sorted(
-            counter.items(), key=lambda item: (-item[1], item[0])
-        )[: max(1, limit)]
+        for key, count in limit_state.slice(
+            sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+        )
     ]
 
 
@@ -2979,7 +3038,7 @@ def _topology_flags(topology: Mapping[str, JSONValue]) -> list[JSONValue]:
 def _topology_attention_summary_from_targets(
     target_summaries: list[dict[str, JSONValue]],
     *,
-    target_limit: int,
+    target_limit: BoundedReportLimit,
 ) -> dict[str, JSONValue]:
     attention_targets = [
         attention
@@ -2998,12 +3057,9 @@ def _topology_attention_summary_from_targets(
         if isinstance(flags, list):
             flag_counts.update(_summary_key(flag) for flag in flags)
 
-    included_source = (
-        attention_targets
-        if target_limit < 0
-        else attention_targets[:target_limit]
-    )
-    included: list[JSONValue] = [dict(item) for item in included_source]
+    included: list[JSONValue] = [
+        dict(item) for item in target_limit.slice(attention_targets)
+    ]
     omitted_count = max(0, len(attention_targets) - len(included))
 
     return {
@@ -3016,6 +3072,7 @@ def _topology_attention_summary_from_targets(
         "included_attention_target_count": len(included),
         "omitted_attention_target_count": omitted_count,
         "truncated": omitted_count > 0,
+        "limit_metadata": {"targets": target_limit.limit_payload()},
         "attention_level_counts": _counter_payload(priority_counts),
         "attention_flag_counts": _counter_payload(flag_counts),
         "target_summaries": included,

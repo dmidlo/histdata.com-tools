@@ -7,46 +7,82 @@
     "remediation_coverage": {
       "count_limits": {
         "finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 1,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 1,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "mapped_finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 0,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 0,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "mapped_rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 0,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 0,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 1,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 1,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "unmapped_finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 1,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 1,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "unmapped_rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 1,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 1,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         }
       },
       "finding_code_counts": [
@@ -58,6 +94,26 @@
       "finding_count": 1,
       "included_unmapped_group_count": 1,
       "included_unmapped_warning_error_group_count": 0,
+      "limit_metadata": {
+        "groups": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 16,
+          "unbounded": false
+        },
+        "target_axes": {
+          "default_limit": 8,
+          "effective_limit": 8,
+          "limit": 8,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 8,
+          "unbounded": false
+        }
+      },
       "mapped_finding_code_counts": [],
       "mapped_finding_count": 0,
       "mapped_rule_id_counts": [],
@@ -86,6 +142,17 @@
         {
           "finding_code": "FINGERPRINT_SERIES_SUMMARY",
           "included_target_axis_count": 1,
+          "limit_metadata": {
+            "target_axes": {
+              "default_limit": 8,
+              "effective_limit": 8,
+              "limit": 8,
+              "maximum_limit": null,
+              "minimum_limit": 0,
+              "requested_limit": 8,
+              "unbounded": false
+            }
+          },
           "mapped": false,
           "max_severity": "info",
           "occurrence_count": 1,
@@ -162,6 +229,17 @@
       },
       "distribution_target_count": 1,
       "included_attention_target_count": 0,
+      "limit_metadata": {
+        "targets": {
+          "default_limit": 32,
+          "effective_limit": 32,
+          "limit": 32,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 32,
+          "unbounded": false
+        }
+      },
       "omitted_attention_target_count": 0,
       "rule_id": "fingerprint.series",
       "schema_version": "histdatacom.time-series-fingerprint-distribution-attention.v1",
@@ -181,6 +259,17 @@
       "empty_distribution_target_count": 0,
       "included_target_count": 1,
       "invalid_row_target_count": 0,
+      "limit_metadata": {
+        "targets": {
+          "default_limit": 128,
+          "effective_limit": 128,
+          "limit": 128,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 128,
+          "unbounded": false
+        }
+      },
       "m1_bar_distribution_target_count": 1,
       "missing_distribution_target_count": 0,
       "omitted_target_count": 0,
@@ -269,6 +358,17 @@
         }
       },
       "included_target_count": 1,
+      "limit_metadata": {
+        "targets": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 16,
+          "unbounded": false
+        }
+      },
       "omitted_target_count": 0,
       "profile_completeness": {
         "calendar_profile_complete_count": 0,
@@ -313,8 +413,20 @@
             "included_lag_count": 0,
             "invalid_row_count": 0,
             "lag_count": 0,
+            "lag_limit": 16,
             "lags": [],
             "lags_truncated": false,
+            "limit_metadata": {
+              "lags": {
+                "default_limit": 16,
+                "effective_limit": 16,
+                "limit": 16,
+                "maximum_limit": null,
+                "minimum_limit": 0,
+                "requested_limit": null,
+                "unbounded": false
+              }
+            },
             "limitations": [],
             "omitted_lag_count": 0,
             "partial_row_count": 0,
@@ -449,6 +561,26 @@
       },
       "count_limit": 8,
       "included_target_count": 1,
+      "limit_metadata": {
+        "counts": {
+          "default_limit": 8,
+          "effective_limit": 8,
+          "limit": 8,
+          "maximum_limit": null,
+          "minimum_limit": 1,
+          "requested_limit": 8,
+          "unbounded": false
+        },
+        "targets": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 16,
+          "unbounded": false
+        }
+      },
       "omitted_target_count": 0,
       "rule_id": "fingerprint.series",
       "schema_version": "histdatacom.time-series-fingerprint-regime-summary.v1",
@@ -507,6 +639,17 @@
       "attention_level_counts": {},
       "attention_target_count": 0,
       "included_attention_target_count": 0,
+      "limit_metadata": {
+        "targets": {
+          "default_limit": 32,
+          "effective_limit": 32,
+          "limit": 32,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 32,
+          "unbounded": false
+        }
+      },
       "omitted_attention_target_count": 0,
       "rule_id": "fingerprint.series",
       "schema_version": "histdatacom.time-series-fingerprint-topology-attention.v1",
@@ -521,6 +664,17 @@
       },
       "flag_counts": {},
       "included_target_count": 1,
+      "limit_metadata": {
+        "targets": {
+          "default_limit": 128,
+          "effective_limit": 128,
+          "limit": 128,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 128,
+          "unbounded": false
+        }
+      },
       "omitted_target_count": 0,
       "rule_id": "fingerprint.series",
       "sampling_basis_counts": {

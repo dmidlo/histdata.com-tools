@@ -830,6 +830,8 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     assert "rule_results" not in payload
     assert "findings" not in payload
     assert isinstance(payload["quality_profile"], dict)
+    for limit in _mapping(payload["payload_limits"]).values():
+        _assert_payload_limit(_mapping(limit))
     _assert_summary(_mapping(payload["summary"]))
     if "fingerprint_coverage" in payload:
         _assert_fingerprint_coverage(_mapping(payload["fingerprint_coverage"]))
@@ -945,6 +947,7 @@ def _assert_fingerprint_distribution(payload: dict[str, JSONValue]) -> None:
         "empty_distribution_target_count",
         "included_target_count",
         "invalid_row_target_count",
+        "limit_metadata",
         "m1_bar_distribution_target_count",
         "missing_distribution_target_count",
         "omitted_target_count",
@@ -968,6 +971,7 @@ def _assert_fingerprint_distribution(payload: dict[str, JSONValue]) -> None:
         TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION
     )
     assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    _assert_limit_metadata_map(payload["limit_metadata"], keys=("targets",))
     for key in (
         "cache_backed_distribution_target_count",
         "distribution_target_count",
@@ -1059,6 +1063,7 @@ def _assert_fingerprint_distribution_attention(
         "attention_thresholds",
         "distribution_target_count",
         "included_attention_target_count",
+        "limit_metadata",
         "omitted_attention_target_count",
         "rule_id",
         "schema_version",
@@ -1069,6 +1074,7 @@ def _assert_fingerprint_distribution_attention(
         TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION
     )
     assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    _assert_limit_metadata_map(payload["limit_metadata"], keys=("targets",))
     for key in (
         "distribution_target_count",
         "attention_target_count",
@@ -1187,6 +1193,7 @@ def _assert_fingerprint_regime(payload: dict[str, JSONValue]) -> None:
         "conditional_status_counts",
         "count_limit",
         "included_target_count",
+        "limit_metadata",
         "omitted_target_count",
         "rule_id",
         "schema_version",
@@ -1205,6 +1212,10 @@ def _assert_fingerprint_regime(payload: dict[str, JSONValue]) -> None:
         TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_SCHEMA_VERSION
     )
     assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    _assert_limit_metadata_map(
+        payload["limit_metadata"],
+        keys=("targets", "counts"),
+    )
     for key in (
         "calendar_regime_target_count",
         "conditional_distribution_target_count",
@@ -1317,6 +1328,7 @@ def _assert_fingerprint_topology(payload: dict[str, JSONValue]) -> None:
         "computed_from_counts",
         "flag_counts",
         "included_target_count",
+        "limit_metadata",
         "omitted_target_count",
         "rule_id",
         "sampling_basis_counts",
@@ -1330,6 +1342,7 @@ def _assert_fingerprint_topology(payload: dict[str, JSONValue]) -> None:
         TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION
     )
     assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    _assert_limit_metadata_map(payload["limit_metadata"], keys=("targets",))
     for key in (
         "target_count",
         "included_target_count",
@@ -1400,6 +1413,7 @@ def _assert_fingerprint_topology_attention(
         "attention_level_counts",
         "attention_target_count",
         "included_attention_target_count",
+        "limit_metadata",
         "omitted_attention_target_count",
         "rule_id",
         "schema_version",
@@ -1411,6 +1425,7 @@ def _assert_fingerprint_topology_attention(
         TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION
     )
     assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    _assert_limit_metadata_map(payload["limit_metadata"], keys=("targets",))
     for key in (
         "topology_target_count",
         "attention_target_count",
@@ -1496,6 +1511,7 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "dynamics_reason_counts",
         "dynamics_status_counts",
         "included_target_count",
+        "limit_metadata",
         "omitted_target_count",
         "profile_completeness",
         "row_order_counts",
@@ -1513,6 +1529,7 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION
     )
     assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    _assert_limit_metadata_map(payload["limit_metadata"], keys=("targets",))
     for key in (
         "target_count",
         "included_target_count",
@@ -1737,8 +1754,10 @@ def _assert_fingerprint_readiness_dependence(
         "included_lag_count",
         "invalid_row_count",
         "lag_count",
+        "lag_limit",
         "lags",
         "lags_truncated",
+        "limit_metadata",
         "limitations",
         "omitted_lag_count",
         "partial_row_count",
@@ -1762,11 +1781,13 @@ def _assert_fingerprint_readiness_dependence(
     assert isinstance(payload["regular_grid"], bool)
     assert isinstance(payload["truncated"], bool)
     assert isinstance(payload["skipped_lag_reason_counts"], dict)
+    _assert_limit_metadata_map(payload["limit_metadata"], keys=("lags",))
     for key in (
         "computed_lag_count",
         "included_lag_count",
         "invalid_row_count",
         "lag_count",
+        "lag_limit",
         "omitted_lag_count",
         "partial_row_count",
         "row_count",
@@ -1836,12 +1857,17 @@ def _assert_quality_next_actions(payload: dict[str, JSONValue]) -> None:
         "action_count",
         "actions",
         "included_action_count",
+        "limit_metadata",
         "omitted_action_count",
         "schema_version",
         "source_counts",
         "truncated",
     }
     assert payload["schema_version"] == QUALITY_NEXT_ACTIONS_SCHEMA_VERSION
+    _assert_limit_metadata_map(
+        payload["limit_metadata"],
+        keys=("actions", "target_axes"),
+    )
     assert isinstance(payload["action_count"], int)
     assert isinstance(payload["included_action_count"], int)
     assert isinstance(payload["omitted_action_count"], int)
@@ -1860,6 +1886,7 @@ def _assert_quality_next_action(payload: dict[str, JSONValue]) -> None:
         "finding_code_counts",
         "flag_counts",
         "included_target_axis_count",
+        "limit_metadata",
         "max_attention_level",
         "max_severity",
         "message",
@@ -1874,6 +1901,7 @@ def _assert_quality_next_action(payload: dict[str, JSONValue]) -> None:
         "urgency",
     }
     assert payload["urgency"] in {"high", "medium", "low"}
+    _assert_limit_metadata_map(payload["limit_metadata"], keys=("target_axes",))
     assert payload["action_kind"] in {
         "configure",
         "inspect",
@@ -1937,6 +1965,7 @@ def _assert_quality_remediation_coverage(
         "finding_count",
         "included_unmapped_group_count",
         "included_unmapped_warning_error_group_count",
+        "limit_metadata",
         "mapped_finding_code_counts",
         "mapped_finding_count",
         "mapped_rule_id_counts",
@@ -1958,6 +1987,10 @@ def _assert_quality_remediation_coverage(
     }
     assert payload["schema_version"] == (
         QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION
+    )
+    _assert_limit_metadata_map(
+        payload["limit_metadata"],
+        keys=("groups", "target_axes"),
     )
     for key in (
         "finding_count",
@@ -2014,6 +2047,7 @@ def _assert_quality_remediation_coverage_group(
     assert set(payload) == {
         "finding_code",
         "included_target_axis_count",
+        "limit_metadata",
         "mapped",
         "max_severity",
         "occurrence_count",
@@ -2025,6 +2059,7 @@ def _assert_quality_remediation_coverage_group(
         "target_axis_truncated",
     }
     assert payload["mapped"] is False
+    _assert_limit_metadata_map(payload["limit_metadata"], keys=("target_axes",))
     assert payload["max_severity"] in SEVERITY_VALUES
     assert isinstance(payload["finding_code"], str)
     assert payload["finding_code"]
@@ -2056,16 +2091,90 @@ def _assert_named_count(
 
 
 def _assert_payload_limit(payload: dict[str, JSONValue]) -> None:
-    assert set(payload) == {
+    required = {
+        "default_limit",
+        "effective_limit",
         "included_count",
         "limit",
+        "maximum_limit",
+        "minimum_limit",
         "omitted_count",
+        "requested_limit",
         "total_count",
         "truncated",
+        "unbounded",
     }
+    optional = {
+        "rule_counts",
+        "rule_limit",
+        "source_limit",
+        "sources",
+        "target_axes",
+        "target_axis_limit",
+    }
+    assert required <= set(payload)
+    assert set(payload) <= required | optional
+    _assert_limit_metadata(payload)
+    for nested_key in ("rule_counts", "sources", "target_axes"):
+        if nested_key in payload:
+            _assert_limit_metadata(_mapping(payload[nested_key]))
+    for numeric_key in ("rule_limit", "source_limit", "target_axis_limit"):
+        if numeric_key in payload:
+            assert isinstance(payload[numeric_key], int)
     for key in ("included_count", "limit", "omitted_count", "total_count"):
         assert isinstance(payload[key], int)
     assert isinstance(payload["truncated"], bool)
+
+
+def _assert_limit_metadata_map(
+    value: JSONValue,
+    *,
+    keys: tuple[str, ...],
+) -> None:
+    payload = _mapping(value)
+    assert set(payload) == set(keys)
+    for key in keys:
+        _assert_limit_metadata(_mapping(payload[key]))
+
+
+def _assert_limit_metadata(payload: dict[str, JSONValue]) -> None:
+    required = {
+        "default_limit",
+        "effective_limit",
+        "limit",
+        "maximum_limit",
+        "minimum_limit",
+        "requested_limit",
+        "unbounded",
+    }
+    optional = {
+        "included_count",
+        "omitted_count",
+        "rule_counts",
+        "rule_limit",
+        "source_limit",
+        "sources",
+        "target_axes",
+        "target_axis_limit",
+        "total_count",
+        "truncated",
+    }
+    assert required <= set(payload)
+    assert set(payload) <= required | optional
+    assert isinstance(payload["limit"], int)
+    assert isinstance(payload["effective_limit"], int)
+    assert payload["limit"] == payload["effective_limit"]
+    assert isinstance(payload["default_limit"], int)
+    assert isinstance(payload["minimum_limit"], int)
+    assert payload["requested_limit"] is None or isinstance(
+        payload["requested_limit"],
+        int,
+    )
+    assert payload["maximum_limit"] is None or isinstance(
+        payload["maximum_limit"],
+        int,
+    )
+    assert isinstance(payload["unbounded"], bool)
 
 
 def _assert_summary(summary: dict[str, Any]) -> None:

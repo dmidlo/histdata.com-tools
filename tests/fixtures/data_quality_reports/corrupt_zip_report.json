@@ -17,6 +17,17 @@
           },
           "flag_counts": {},
           "included_target_axis_count": 1,
+          "limit_metadata": {
+            "target_axes": {
+              "default_limit": 8,
+              "effective_limit": 8,
+              "limit": 8,
+              "maximum_limit": null,
+              "minimum_limit": 0,
+              "requested_limit": 8,
+              "unbounded": false
+            }
+          },
           "max_attention_level": null,
           "max_severity": "error",
           "message": "redownload or replace the corrupt ZIP archive",
@@ -47,6 +58,26 @@
         }
       ],
       "included_action_count": 1,
+      "limit_metadata": {
+        "actions": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 16,
+          "unbounded": false
+        },
+        "target_axes": {
+          "default_limit": 8,
+          "effective_limit": 8,
+          "limit": 8,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 8,
+          "unbounded": false
+        }
+      },
       "omitted_action_count": 0,
       "schema_version": "histdatacom.quality-next-actions.v1",
       "source_counts": {
@@ -57,46 +88,82 @@
     "remediation_coverage": {
       "count_limits": {
         "finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 1,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 1,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "mapped_finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 1,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 1,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "mapped_rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 1,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 1,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 1,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 1,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "unmapped_finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 0,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 0,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "unmapped_rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 0,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 0,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         }
       },
       "finding_code_counts": [
@@ -108,6 +175,26 @@
       "finding_count": 1,
       "included_unmapped_group_count": 0,
       "included_unmapped_warning_error_group_count": 0,
+      "limit_metadata": {
+        "groups": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 16,
+          "unbounded": false
+        },
+        "target_axes": {
+          "default_limit": 8,
+          "effective_limit": 8,
+          "limit": 8,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 8,
+          "unbounded": false
+        }
+      },
       "mapped_finding_code_counts": [
         {
           "count": 1,

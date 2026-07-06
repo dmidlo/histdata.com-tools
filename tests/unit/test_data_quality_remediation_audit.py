@@ -200,13 +200,16 @@ def test_remediation_catalog_audit_truncates_deterministically() -> None:
     ]
     assert included[0]["occurrence_count"] == 2
     assert included[0]["omitted_source_count"] == 1
-    assert payload["payload_limits"]["known_unmapped_codes"] == {
-        "included_count": 2,
-        "limit": 2,
-        "omitted_count": 1,
-        "total_count": 3,
-        "truncated": True,
-    }
+    _assert_count_limit_metadata(
+        payload["payload_limits"]["known_unmapped_codes"],
+        limit=2,
+        total_count=3,
+        included_count=2,
+        omitted_count=1,
+        truncated=True,
+        requested_limit=2,
+        default_limit=16,
+    )
     assert len(payload["known_code_counts"]["rule_id_counts"]) == 1
 
 
@@ -526,3 +529,25 @@ def _report_with_findings(
             ),
         ),
     )
+
+
+def _assert_count_limit_metadata(
+    value: object,
+    *,
+    limit: int,
+    total_count: int,
+    included_count: int,
+    omitted_count: int,
+    truncated: bool,
+    requested_limit: int | None,
+    default_limit: int,
+) -> None:
+    assert isinstance(value, dict)
+    assert value["limit"] == limit
+    assert value["effective_limit"] == limit
+    assert value["requested_limit"] == requested_limit
+    assert value["default_limit"] == default_limit
+    assert value["total_count"] == total_count
+    assert value["included_count"] == included_count
+    assert value["omitted_count"] == omitted_count
+    assert value["truncated"] is truncated

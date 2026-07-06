@@ -7,46 +7,82 @@
     "remediation_coverage": {
       "count_limits": {
         "finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 1,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 1,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "mapped_finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 0,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 0,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "mapped_rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 0,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 0,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 1,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 1,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "unmapped_finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 1,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 1,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         },
         "unmapped_rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
           "included_count": 1,
           "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
           "omitted_count": 0,
+          "requested_limit": 16,
           "total_count": 1,
-          "truncated": false
+          "truncated": false,
+          "unbounded": false
         }
       },
       "finding_code_counts": [
@@ -58,6 +94,26 @@
       "finding_count": 1,
       "included_unmapped_group_count": 1,
       "included_unmapped_warning_error_group_count": 0,
+      "limit_metadata": {
+        "groups": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 16,
+          "unbounded": false
+        },
+        "target_axes": {
+          "default_limit": 8,
+          "effective_limit": 8,
+          "limit": 8,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 8,
+          "unbounded": false
+        }
+      },
       "mapped_finding_code_counts": [],
       "mapped_finding_count": 0,
       "mapped_rule_id_counts": [],
@@ -86,6 +142,17 @@
         {
           "finding_code": "ASCII_CACHE_SCHEMA_SUMMARY",
           "included_target_axis_count": 1,
+          "limit_metadata": {
+            "target_axes": {
+              "default_limit": 8,
+              "effective_limit": 8,
+              "limit": 8,
+              "maximum_limit": null,
+              "minimum_limit": 0,
+              "requested_limit": 8,
+              "unbounded": false
+            }
+          },
           "mapped": false,
           "max_severity": "info",
           "occurrence_count": 1,

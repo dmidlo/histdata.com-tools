@@ -127,48 +127,105 @@
   "payload_limits": {
     "known_code_sources": {
       "applies_per_code": true,
-      "limit": 2
+      "default_limit": 8,
+      "effective_limit": 2,
+      "limit": 2,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "requested_limit": 2,
+      "unbounded": false
     },
     "known_finding_code_counts": {
+      "default_limit": 16,
+      "effective_limit": 4,
       "included_count": 3,
       "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
       "omitted_count": 0,
+      "requested_limit": 4,
       "total_count": 3,
-      "truncated": false
+      "truncated": false,
+      "unbounded": false
     },
     "known_rule_id_counts": {
+      "default_limit": 16,
+      "effective_limit": 4,
       "included_count": 2,
       "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
       "omitted_count": 0,
+      "requested_limit": 4,
       "total_count": 2,
-      "truncated": false
+      "truncated": false,
+      "unbounded": false
     },
     "known_unmapped_codes": {
+      "default_limit": 16,
+      "effective_limit": 4,
       "included_count": 2,
       "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
       "omitted_count": 0,
+      "requested_limit": 4,
       "total_count": 2,
-      "truncated": false
+      "truncated": false,
+      "unbounded": false
     },
     "ranked_gap_report_sources": {
       "applies_per_gap": true,
-      "limit": 2
+      "default_limit": 8,
+      "effective_limit": 2,
+      "limit": 2,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "requested_limit": 2,
+      "unbounded": false
     },
     "ranked_gap_sources": {
       "applies_per_gap": true,
-      "limit": 2
+      "default_limit": 8,
+      "effective_limit": 2,
+      "limit": 2,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "requested_limit": 2,
+      "unbounded": false
     },
     "ranked_gaps": {
+      "default_limit": 16,
+      "effective_limit": 4,
       "included_count": 2,
       "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
       "omitted_count": 0,
+      "requested_limit": 4,
       "total_count": 2,
-      "truncated": false
+      "truncated": false,
+      "unbounded": false
     },
     "report_unmapped_groups": {
       "applies_per_report": true,
+      "default_limit": 16,
+      "effective_limit": 4,
       "limit": 4,
-      "target_axis_limit": 8
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "requested_limit": 4,
+      "target_axes": {
+        "default_limit": 8,
+        "effective_limit": 8,
+        "limit": 8,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "requested_limit": 8,
+        "unbounded": false
+      },
+      "target_axis_limit": 8,
+      "unbounded": false
     }
   },
   "ranked_gaps": [
