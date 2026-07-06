@@ -1034,6 +1034,20 @@ keys, basis values, or status/reason vocabularies are added, update that registr
 first; the CLI/API discovery payload and drift tests should then follow the same
 contract surface.
 
+Run the data-free contract self-audit when changing fingerprint schema,
+registry, report, or example surfaces:
+
+```sh
+histdatacom quality fingerprint-schema --verify --json
+```
+
+`--verify` emits `histdatacom.time-series-fingerprint-contract-audit.v1` with
+pass/fail status, deterministic checks, and bounded drift findings for missing
+schemas, orphan report surfaces, stale payload keys, implemented/planned section
+mismatches, profile-default drift, vocabulary drift, and publish-safe example
+drift. It does not read market data, generate fingerprints, run quality rules, or
+automate GitHub/CI/release workflow.
+
 `provenance` checks are only applied when a local orchestration
 `.histdatacom/manifest-status.sqlite3` store is available. Explicit
 `--quality-checks provenance` runs without a store return a clean info finding

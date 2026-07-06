@@ -327,6 +327,7 @@ _QUALITY_ALIASES = {
 _QUALITY_TRUE_FLAG_ARGS = {
     "allow_stale_evidence": "--quality-preflight-evidence-stale-ok",
     "json": "--json",
+    "verify": "--verify",
 }
 _QUALITY_SCALAR_ARGS = {
     "code_limit": "--code-limit",

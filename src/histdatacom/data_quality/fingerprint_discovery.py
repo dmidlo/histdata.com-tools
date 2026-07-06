@@ -52,6 +52,9 @@ from histdatacom.runtime_contracts import JSONValue
 TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-schema-discovery.v1"
 )
+TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-contract-audit.v1"
+)
 
 
 def fingerprint_schema_discovery(
@@ -143,6 +146,621 @@ def format_fingerprint_schema_discovery(
         ]
     )
     return "\n".join(lines)
+
+
+def fingerprint_contract_audit(
+    profile: Mapping[str, Any] | QualityProfile | None = None,
+    *,
+    discovery: Mapping[str, JSONValue] | None = None,
+) -> dict[str, JSONValue]:
+    """Return a deterministic data-free audit of fingerprint contracts."""
+    discovery_payload = (
+        publish_safe_json_mapping(dict(discovery))
+        if discovery is not None
+        else fingerprint_schema_discovery(profile)
+    )
+    findings: list[dict[str, JSONValue]] = []
+    checks: list[dict[str, JSONValue]] = []
+
+    _record_audit_check(
+        checks,
+        findings,
+        "schema_contracts",
+        _audit_schema_contracts(discovery_payload, findings),
+    )
+    _record_audit_check(
+        checks,
+        findings,
+        "section_contracts",
+        _audit_section_contracts(discovery_payload, findings),
+    )
+    _record_audit_check(
+        checks,
+        findings,
+        "report_surfaces",
+        _audit_report_surfaces(discovery_payload, findings),
+    )
+    _record_audit_check(
+        checks,
+        findings,
+        "profile_defaults",
+        _audit_profile_defaults(discovery_payload, findings),
+    )
+    _record_audit_check(
+        checks,
+        findings,
+        "vocabularies",
+        _audit_vocabularies(discovery_payload, findings),
+    )
+    _record_audit_check(
+        checks,
+        findings,
+        "examples",
+        _audit_examples(discovery_payload, findings),
+    )
+
+    error_count = sum(
+        1 for finding in findings if finding["severity"] == "error"
+    )
+    warning_count = sum(
+        1 for finding in findings if finding["severity"] == "warning"
+    )
+    payload: dict[str, JSONValue] = {
+        "schema_version": TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION,
+        "status": "fail" if error_count else "pass",
+        "package": _package_payload(),
+        "discovery_schema_version": discovery_payload.get("schema_version"),
+        "check_count": len(checks),
+        "error_count": error_count,
+        "warning_count": warning_count,
+        "finding_count": len(findings),
+        "checked_surfaces": {
+            "schema_contract_count": len(FINGERPRINT_SCHEMA_CONTRACTS),
+            "implemented_target_section_count": len(
+                IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+            ),
+            "planned_target_section_count": len(
+                PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+            ),
+            "planned_run_section_count": len(
+                PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS
+            ),
+            "report_surface_count": len(FINGERPRINT_REPORT_SURFACE_CONTRACTS),
+            "vocabulary_group_count": len(_vocabulary_payload()),
+            "calculation_basis_group_count": len(_calculation_basis_payload()),
+        },
+        "checks": cast(JSONValue, checks),
+        "findings": cast(JSONValue, findings),
+        "non_goals": _json_strings(
+            (
+                "does not read target data",
+                "does not generate fingerprints",
+                "does not run quality rules",
+                "does not automate GitHub, CI, merge, or release workflow",
+            )
+        ),
+    }
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
+    return safe_payload
+
+
+def format_fingerprint_contract_audit(
+    payload: Mapping[str, JSONValue],
+) -> str:
+    """Return concise human-readable fingerprint contract audit text."""
+    lines = [
+        "Fingerprint Contract Audit",
+        f"schema: {payload.get('schema_version', '')}",
+        f"status: {payload.get('status', 'unknown')}",
+        (
+            "findings: "
+            f"errors={_int_value(payload.get('error_count'))} "
+            f"warnings={_int_value(payload.get('warning_count'))}"
+        ),
+        "",
+        "Checks",
+    ]
+    for check in _mapping_rows(payload.get("checks")):
+        lines.append(
+            f"- {check.get('name', '')}: {check.get('status', '')} "
+            f"({check.get('checked_count', 0)} checked)"
+        )
+    findings = _mapping_rows(payload.get("findings"))
+    if findings:
+        lines.extend(["", "Findings"])
+        for finding in findings:
+            lines.append(
+                "- "
+                f"{str(finding.get('severity', '')).upper()} "
+                f"{finding.get('code', '')} at {finding.get('path', '')}: "
+                f"{finding.get('message', '')}"
+            )
+    else:
+        lines.extend(["", "No contract drift detected."])
+    return "\n".join(lines)
+
+
+def _record_audit_check(
+    checks: list[dict[str, JSONValue]],
+    findings: list[dict[str, JSONValue]],
+    name: str,
+    result: tuple[int, int, int],
+) -> None:
+    checked_count, before_error_count, before_warning_count = result
+    error_count = sum(
+        1 for finding in findings if finding["severity"] == "error"
+    )
+    warning_count = sum(
+        1 for finding in findings if finding["severity"] == "warning"
+    )
+    new_errors = error_count - before_error_count
+    new_warnings = warning_count - before_warning_count
+    status = "fail" if new_errors else "warning" if new_warnings else "pass"
+    checks.append(
+        {
+            "name": name,
+            "status": status,
+            "checked_count": checked_count,
+            "error_count": new_errors,
+            "warning_count": new_warnings,
+        }
+    )
+
+
+def _audit_schema_contracts(
+    discovery: Mapping[str, JSONValue],
+    findings: list[dict[str, JSONValue]],
+) -> tuple[int, int, int]:
+    before = _finding_counts(findings)
+    schemas = _mapping(discovery.get("schemas"))
+    expected = {
+        contract.key: contract.to_discovery_payload()
+        for contract in FINGERPRINT_SCHEMA_CONTRACTS
+    }
+    _compare_mapping(
+        findings,
+        path="schemas",
+        expected=expected,
+        actual=schemas,
+        missing_code="missing_schema_contract",
+        mismatch_code="schema_contract_mismatch",
+        unexpected_code="orphan_schema_contract",
+    )
+    schema_keys = set(expected)
+    for contract in FINGERPRINT_SCHEMA_CONTRACTS:
+        if contract.status == "implemented" and not contract.schema_version:
+            _add_audit_finding(
+                findings,
+                severity="error",
+                code="implemented_schema_missing_version",
+                path=f"schemas.{contract.key}.schema_version",
+                message="implemented fingerprint schema contracts require a schema version",
+                expected="non-empty schema version",
+                actual=contract.schema_version,
+            )
+        if contract.status == "planned" and not contract.issue:
+            _add_audit_finding(
+                findings,
+                severity="error",
+                code="planned_schema_missing_issue",
+                path=f"schemas.{contract.key}.issue",
+                message="planned fingerprint schema contracts require an issue link",
+                expected="issue reference",
+                actual=contract.issue,
+            )
+        if contract.status not in {"implemented", "planned"}:
+            _add_audit_finding(
+                findings,
+                severity="error",
+                code="unknown_schema_status",
+                path=f"schemas.{contract.key}.status",
+                message="schema contract status must be implemented or planned",
+                expected=["implemented", "planned"],
+                actual=contract.status,
+            )
+    for section in IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS:
+        if section.schema_key not in schema_keys:
+            _add_audit_finding(
+                findings,
+                severity="error",
+                code="target_section_schema_missing",
+                path=f"sections.implemented.target_sections.{section.name}.schema_key",
+                message="implemented target section references an unknown schema",
+                expected=sorted(schema_keys),
+                actual=section.schema_key,
+            )
+    return (len(FINGERPRINT_SCHEMA_CONTRACTS), *before)
+
+
+def _audit_section_contracts(
+    discovery: Mapping[str, JSONValue],
+    findings: list[dict[str, JSONValue]],
+) -> tuple[int, int, int]:
+    before = _finding_counts(findings)
+    sections = _mapping(discovery.get("sections"))
+    implemented = _mapping(sections.get("implemented"))
+    planned = _mapping(sections.get("planned"))
+    expected_implemented = [
+        contract.to_discovery_payload()
+        for contract in IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+    ]
+    expected_planned_targets = [
+        contract.to_discovery_payload()
+        for contract in PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+    ]
+    expected_planned_runs = [
+        contract.to_discovery_payload()
+        for contract in PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS
+    ]
+    _compare_value(
+        findings,
+        path="sections.implemented.target_sections",
+        expected=expected_implemented,
+        actual=implemented.get("target_sections"),
+        code="implemented_target_sections_mismatch",
+        message="implemented target section discovery must be generated from the registry",
+    )
+    _compare_value(
+        findings,
+        path="sections.planned.target_sections",
+        expected=expected_planned_targets,
+        actual=planned.get("target_sections"),
+        code="planned_target_sections_mismatch",
+        message="planned target section discovery must stay separated from implemented sections",
+    )
+    _compare_value(
+        findings,
+        path="sections.planned.run_sections",
+        expected=expected_planned_runs,
+        actual=planned.get("run_sections"),
+        code="planned_run_sections_mismatch",
+        message="planned run section discovery must be generated from the registry",
+    )
+    _compare_value(
+        findings,
+        path="sections.implemented.audit_sections",
+        expected=_json_strings(FINGERPRINT_AUDIT_SECTIONS),
+        actual=implemented.get("audit_sections"),
+        code="audit_sections_mismatch",
+        message="implemented audit section names must match runtime fingerprint audit sections",
+    )
+    _compare_value(
+        findings,
+        path="sections.implemented.dynamics_sections",
+        expected=_json_strings(FINGERPRINT_DYNAMICS_SECTIONS),
+        actual=implemented.get("dynamics_sections"),
+        code="dynamics_sections_mismatch",
+        message="implemented dynamics section names must match runtime fingerprint dynamics sections",
+    )
+    implemented_names = {
+        contract.name
+        for contract in IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+    }
+    planned_names = {
+        contract.name
+        for contract in PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+    } | {
+        contract.name for contract in PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS
+    }
+    overlap = sorted(implemented_names & planned_names)
+    if overlap:
+        _add_audit_finding(
+            findings,
+            severity="error",
+            code="implemented_planned_section_overlap",
+            path="sections",
+            message="implemented and planned fingerprint sections must stay separated",
+            expected=[],
+            actual=overlap,
+        )
+    return (
+        len(expected_implemented)
+        + len(expected_planned_targets)
+        + len(expected_planned_runs)
+        + 2,
+        *before,
+    )
+
+
+def _audit_report_surfaces(
+    discovery: Mapping[str, JSONValue],
+    findings: list[dict[str, JSONValue]],
+) -> tuple[int, int, int]:
+    before = _finding_counts(findings)
+    metadata_keys = _mapping(discovery.get("metadata_keys"))
+    report_surfaces = _mapping(discovery.get("report_surfaces"))
+    expected_report_metadata = {
+        contract.key: contract.report_metadata_key
+        for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    }
+    expected_bounded_payload = {
+        contract.key: contract.bounded_payload_key
+        for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    }
+    _compare_mapping(
+        findings,
+        path="metadata_keys.report_metadata",
+        expected=expected_report_metadata,
+        actual=_mapping(metadata_keys.get("report_metadata")),
+        missing_code="missing_report_metadata_key",
+        mismatch_code="report_metadata_key_mismatch",
+        unexpected_code="orphan_report_metadata_key",
+    )
+    _compare_mapping(
+        findings,
+        path="metadata_keys.bounded_payload",
+        expected=expected_bounded_payload,
+        actual=_mapping(metadata_keys.get("bounded_payload")),
+        missing_code="missing_bounded_payload_key",
+        mismatch_code="bounded_payload_key_mismatch",
+        unexpected_code="orphan_bounded_payload_key",
+    )
+    _compare_value(
+        findings,
+        path="report_surfaces.full_report_metadata",
+        expected=[
+            contract.report_metadata_key
+            for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+        ],
+        actual=report_surfaces.get("full_report_metadata"),
+        code="report_surface_metadata_list_mismatch",
+        message="report metadata surface list must match registry order",
+    )
+    _compare_value(
+        findings,
+        path="report_surfaces.bounded_payload_keys",
+        expected=[
+            contract.bounded_payload_key
+            for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+        ],
+        actual=report_surfaces.get("bounded_payload_keys"),
+        code="report_surface_bounded_payload_list_mismatch",
+        message="bounded payload key list must match registry order",
+    )
+    _compare_value(
+        findings,
+        path="report_surfaces.cli_summary_sections",
+        expected=[
+            contract.cli_summary_section
+            for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+        ],
+        actual=report_surfaces.get("cli_summary_sections"),
+        code="report_surface_cli_summary_list_mismatch",
+        message="CLI summary section list must match registry order",
+    )
+    return (len(FINGERPRINT_REPORT_SURFACE_CONTRACTS) * 5, *before)
+
+
+def _audit_profile_defaults(
+    discovery: Mapping[str, JSONValue],
+    findings: list[dict[str, JSONValue]],
+) -> tuple[int, int, int]:
+    before = _finding_counts(findings)
+    profile = _mapping(discovery.get("profile"))
+    _compare_value(
+        findings,
+        path="profile.default_fingerprint_profile",
+        expected=HistDataFingerprintProfile().to_metadata(),
+        actual=profile.get("default_fingerprint_profile"),
+        code="default_fingerprint_profile_mismatch",
+        message="discovery profile defaults must match runtime fingerprint defaults",
+    )
+    _compare_value(
+        findings,
+        path="profile.section_limits",
+        expected=dict(FINGERPRINT_SECTION_LIMIT_DEFAULTS),
+        actual=profile.get("section_limits"),
+        code="fingerprint_section_limits_mismatch",
+        message="discovery section limits must match registry defaults",
+    )
+    _compare_value(
+        findings,
+        path="profile.distribution_attention_defaults",
+        expected=dict(FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS),
+        actual=profile.get("distribution_attention_defaults"),
+        code="fingerprint_distribution_attention_defaults_mismatch",
+        message="distribution attention defaults must match registry defaults",
+    )
+    return (3, *before)
+
+
+def _audit_vocabularies(
+    discovery: Mapping[str, JSONValue],
+    findings: list[dict[str, JSONValue]],
+) -> tuple[int, int, int]:
+    before = _finding_counts(findings)
+    _compare_value(
+        findings,
+        path="calculation_bases",
+        expected=_calculation_basis_payload(),
+        actual=discovery.get("calculation_bases"),
+        code="calculation_basis_mismatch",
+        message="calculation basis descriptions must match registry vocabulary",
+    )
+    _compare_value(
+        findings,
+        path="vocabularies",
+        expected=_vocabulary_payload(),
+        actual=discovery.get("vocabularies"),
+        code="fingerprint_vocabulary_mismatch",
+        message="status, reason, topology, and conditional-distribution vocabularies must match registry values",
+    )
+    return (
+        len(_calculation_basis_payload()) + len(_vocabulary_payload()),
+        *before,
+    )
+
+
+def _audit_examples(
+    discovery: Mapping[str, JSONValue],
+    findings: list[dict[str, JSONValue]],
+) -> tuple[int, int, int]:
+    before = _finding_counts(findings)
+    examples = _mapping(discovery.get("examples"))
+    series = _mapping(examples.get("series_fingerprint_fragment"))
+    source = _mapping(series.get("source"))
+    audit = _mapping(series.get("fingerprint_audit"))
+    expected_sections = list(_target_section_names_for_timeframe(M1))
+    emitted_sections = _string_values(audit.get("sections_emitted"))
+    expected_skipped = {
+        section: {"reason": "not_emitted"}
+        for section in expected_sections
+        if section not in emitted_sections
+    }
+    _compare_value(
+        findings,
+        path="examples.series_fingerprint_fragment.schema_version",
+        expected=TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+        actual=series.get("schema_version"),
+        code="series_example_schema_mismatch",
+        message="series fingerprint example must use the runtime series schema version",
+    )
+    _compare_value(
+        findings,
+        path="examples.series_fingerprint_fragment.fingerprint_audit.schema_version",
+        expected=TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
+        actual=audit.get("schema_version"),
+        code="audit_example_schema_mismatch",
+        message="fingerprint audit example must use the runtime audit schema version",
+    )
+    _compare_value(
+        findings,
+        path="examples.series_fingerprint_fragment.fingerprint_audit.sections_expected",
+        expected=expected_sections,
+        actual=audit.get("sections_expected"),
+        code="example_expected_sections_mismatch",
+        message="example expected sections must follow implemented M1 contracts",
+    )
+    _compare_value(
+        findings,
+        path="examples.series_fingerprint_fragment.fingerprint_audit.sections_skipped",
+        expected=expected_skipped,
+        actual=audit.get("sections_skipped"),
+        code="example_skipped_sections_mismatch",
+        message="example skipped sections must reflect expected minus emitted sections",
+    )
+    _compare_value(
+        findings,
+        path="examples.readiness_summary_fragment.schema_version",
+        expected=TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
+        actual=_mapping(examples.get("readiness_summary_fragment")).get(
+            "schema_version"
+        ),
+        code="readiness_example_schema_mismatch",
+        message="readiness summary example must use the runtime readiness schema version",
+    )
+    source_path = str(source.get("path") or "")
+    if source_path.startswith("/"):
+        _add_audit_finding(
+            findings,
+            severity="error",
+            code="example_source_path_not_publish_safe",
+            path="examples.series_fingerprint_fragment.source.path",
+            message="example source paths must be publish-safe relative paths",
+            expected="relative path",
+            actual=source_path,
+        )
+    return (6, *before)
+
+
+def _finding_counts(
+    findings: list[dict[str, JSONValue]],
+) -> tuple[int, int]:
+    return (
+        sum(1 for finding in findings if finding["severity"] == "error"),
+        sum(1 for finding in findings if finding["severity"] == "warning"),
+    )
+
+
+def _compare_mapping(
+    findings: list[dict[str, JSONValue]],
+    *,
+    path: str,
+    expected: Mapping[str, JSONValue],
+    actual: Mapping[str, JSONValue],
+    missing_code: str,
+    mismatch_code: str,
+    unexpected_code: str,
+) -> None:
+    for key in expected:
+        if key not in actual:
+            _add_audit_finding(
+                findings,
+                severity="error",
+                code=missing_code,
+                path=f"{path}.{key}",
+                message="expected contract key is missing",
+                expected=expected[key],
+                actual=None,
+            )
+        elif actual[key] != expected[key]:
+            _add_audit_finding(
+                findings,
+                severity="error",
+                code=mismatch_code,
+                path=f"{path}.{key}",
+                message="contract value drifted from the registry",
+                expected=expected[key],
+                actual=actual[key],
+            )
+    for key in actual:
+        if key not in expected:
+            _add_audit_finding(
+                findings,
+                severity="warning",
+                code=unexpected_code,
+                path=f"{path}.{key}",
+                message="discovery exposes a key not owned by the registry",
+                expected=None,
+                actual=actual[key],
+            )
+
+
+def _compare_value(
+    findings: list[dict[str, JSONValue]],
+    *,
+    path: str,
+    expected: object,
+    actual: object,
+    code: str,
+    message: str,
+) -> None:
+    if actual != expected:
+        _add_audit_finding(
+            findings,
+            severity="error",
+            code=code,
+            path=path,
+            message=message,
+            expected=expected,
+            actual=actual,
+        )
+
+
+def _add_audit_finding(
+    findings: list[dict[str, JSONValue]],
+    *,
+    severity: str,
+    code: str,
+    path: str,
+    message: str,
+    expected: object,
+    actual: object,
+) -> None:
+    findings.append(
+        {
+            "severity": severity,
+            "code": code,
+            "path": path,
+            "message": message,
+            "expected": _json_value(expected),
+            "actual": _json_value(actual),
+        }
+    )
+
+
+def _json_value(value: object) -> JSONValue:
+    return cast(JSONValue, value)
 
 
 def _package_payload() -> dict[str, JSONValue]:
@@ -439,6 +1057,12 @@ def _json_string_list(value: object) -> list[JSONValue]:
     return [str(item) for item in value]
 
 
+def _string_values(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(str(item) for item in value)
+
+
 def _description_mapping(
     pairs: tuple[tuple[str, str], ...],
 ) -> dict[str, JSONValue]:
@@ -474,3 +1098,11 @@ def _format_list(value: object) -> str:
     if not isinstance(value, list):
         return "[]"
     return "[" + ", ".join(str(item) for item in value) + "]"
+
+
+def _int_value(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    return 0
