@@ -128,8 +128,10 @@ from histdatacom.data_quality.fingerprints import (
 )
 from histdatacom.data_quality.fingerprint_discovery import (
     TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_REPORT_SURFACE_EVIDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION,
     fingerprint_contract_audit,
+    fingerprint_report_surface_evidence,
     fingerprint_schema_discovery,
     format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
@@ -139,6 +141,7 @@ from histdatacom.data_quality.bounded_payload_contracts import (
     bounded_payload_contract_audit,
     format_bounded_payload_contract_audit,
     representative_bounded_quality_payload,
+    representative_quality_report,
 )
 from histdatacom.data_quality.limits import (
     BoundedReportLimit,
@@ -384,6 +387,7 @@ __all__ = [
     "TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY",
     "TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_SCHEMA_VERSION",
     "TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION",
+    "TIME_SERIES_FINGERPRINT_REPORT_SURFACE_EVIDENCE_SCHEMA_VERSION",
     "TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION",
     "TIME_SERIES_FINGERPRINT_SCHEMA_VERSION",
     "TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION",
@@ -495,6 +499,7 @@ __all__ = [
     "evaluate_quality_rule",
     "fingerprint_contract_audit",
     "fingerprint_quality_rules",
+    "fingerprint_report_surface_evidence",
     "fingerprint_schema_discovery",
     "format_bounded_payload_contract_audit",
     "format_fingerprint_contract_audit",
@@ -508,6 +513,7 @@ __all__ = [
     "format_quality_remediation_catalog_audit_lines",
     "format_quality_next_action_lines",
     "format_quality_remediation_coverage_lines",
+    "representative_quality_report",
     "format_code_for_data_format",
     "ingestion_quality_rules",
     "inventory_quality_rules",

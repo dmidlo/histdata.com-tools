@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from pathlib import Path
 
 from histdatacom.data_quality.fingerprint_discovery import (
     TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_REPORT_SURFACE_EVIDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION,
+    _audit_report_surface_evidence,
     fingerprint_contract_audit,
+    fingerprint_report_surface_evidence,
     fingerprint_schema_discovery,
     format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
@@ -18,6 +22,7 @@ from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_REPORT_SURFACE_CONTRACTS,
     FINGERPRINT_SCHEMA_CONTRACTS,
     FINGERPRINT_SECTION_LIMIT_DEFAULTS,
+    FingerprintReportSurfaceContract,
     IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
     PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS,
     PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
@@ -38,6 +43,7 @@ from histdatacom.data_quality.profiles import (
     QUALITY_PROFILE_SCHEMA_VERSION,
     load_quality_profile_file,
 )
+from histdatacom.runtime_contracts import JSONValue
 
 
 def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
@@ -125,6 +131,10 @@ def test_fingerprint_schema_discovery_uses_contract_registry() -> None:
         contract.key: contract.bounded_payload_key
         for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
     }
+    assert payload["report_surfaces"]["summary_schema_keys"] == {
+        contract.key: contract.summary_schema_key
+        for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    }
     assert payload["report_surfaces"]["full_report_metadata"] == [
         contract.report_metadata_key
         for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
@@ -135,6 +145,14 @@ def test_fingerprint_schema_discovery_uses_contract_registry() -> None:
     ]
     assert payload["report_surfaces"]["cli_summary_sections"] == [
         contract.cli_summary_section
+        for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    ]
+    assert payload["report_surfaces"]["cli_summary_headings"] == [
+        contract.cli_summary_heading
+        for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    ]
+    assert payload["report_surfaces"]["surface_matrix"] == [
+        contract.to_discovery_payload()
         for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
     ]
 
@@ -184,8 +202,22 @@ def test_fingerprint_contract_audit_reports_clean_contract() -> None:
         "pass",
         "pass",
         "pass",
+        "pass",
     ]
-    assert "does not read target data" in payload["non_goals"]
+    assert checked["report_surface_evidence_count"] == len(
+        FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    )
+    evidence = payload["report_surface_evidence"]
+    assert isinstance(evidence, dict)
+    assert evidence["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_REPORT_SURFACE_EVIDENCE_SCHEMA_VERSION
+    )
+    assert (
+        _surface_row(evidence, "regime_summary")["report_metadata_state"]
+        == "present"
+    )
+    assert "Fingerprint regimes" in evidence["cli_summary_headings"]
+    assert "does not read local target data" in payload["non_goals"]
 
 
 def test_fingerprint_contract_audit_reports_synthetic_drift() -> None:
@@ -201,6 +233,109 @@ def test_fingerprint_contract_audit_reports_synthetic_drift() -> None:
     assert finding["severity"] == "error"
     assert finding["code"] == "missing_schema_contract"
     assert finding["path"] == "schemas.series_fingerprint"
+
+
+def test_fingerprint_report_surface_evidence_reports_runtime_matrix() -> None:
+    """Generated evidence should prove full, bounded, and CLI surfaces."""
+    payload = fingerprint_report_surface_evidence()
+
+    assert payload["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_REPORT_SURFACE_EVIDENCE_SCHEMA_VERSION
+    )
+    assert payload["source"] == "representative-generated-report"
+    assert payload["surface_count"] == len(FINGERPRINT_REPORT_SURFACE_CONTRACTS)
+    assert "time_series_fingerprint_regime_summary" in (
+        payload["full_report_metadata_keys"]
+    )
+    assert "fingerprint_regime" in payload["bounded_payload_keys"]
+    assert "Fingerprint regimes" in payload["cli_summary_headings"]
+    for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS:
+        row = _surface_row(payload, contract.key)
+        assert row["summary_schema_key"] == contract.summary_schema_key
+        assert row["report_metadata_state"] == "present"
+        assert row["bounded_payload_state"] == "present"
+        assert row["cli_summary_state"] == "present"
+
+
+def test_fingerprint_contract_audit_detects_missing_runtime_metadata_key() -> (
+    None
+):
+    """Representative evidence should fail when full report metadata is absent."""
+    evidence = _surface_evidence_copy()
+    _surface_row(evidence, "regime_summary")[
+        "report_metadata_state"
+    ] = "missing"
+
+    payload = fingerprint_contract_audit(report_surface_evidence=evidence)
+
+    assert payload["status"] == "fail"
+    finding = _first_finding(payload, "missing_runtime_report_metadata_key")
+    assert finding["path"] == (
+        "report_surface_evidence.surface_matrix."
+        "regime_summary.report_metadata_state"
+    )
+
+
+def test_fingerprint_contract_audit_detects_missing_runtime_bounded_key() -> (
+    None
+):
+    """Representative evidence should fail when bounded output is absent."""
+    evidence = _surface_evidence_copy()
+    _surface_row(evidence, "regime_summary")[
+        "bounded_payload_state"
+    ] = "missing"
+
+    payload = fingerprint_contract_audit(report_surface_evidence=evidence)
+
+    assert payload["status"] == "fail"
+    finding = _first_finding(payload, "missing_runtime_bounded_payload_key")
+    assert finding["path"] == (
+        "report_surface_evidence.surface_matrix."
+        "regime_summary.bounded_payload_state"
+    )
+
+
+def test_fingerprint_contract_audit_detects_missing_cli_surface_declaration() -> (
+    None
+):
+    """CLI/report surface declarations should stay explicit."""
+    evidence = _surface_evidence_copy()
+    _surface_row(evidence, "regime_summary")["cli_summary_section"] = ""
+
+    payload = fingerprint_contract_audit(report_surface_evidence=evidence)
+
+    assert payload["status"] == "fail"
+    finding = _first_finding(payload, "missing_cli_summary_surface_declaration")
+    assert finding["path"] == (
+        "report_surface_evidence.surface_matrix."
+        "regime_summary.cli_summary_section"
+    )
+
+
+def test_report_surface_evidence_accepts_intentionally_absent_cli_surface() -> (
+    None
+):
+    """Surface contracts may declare CLI absence instead of silently omitting it."""
+    contract = FingerprintReportSurfaceContract(
+        key="readiness_api_only",
+        summary_schema_key="fingerprint_readiness_summary",
+        report_metadata_key="time_series_fingerprint_readiness_summary",
+        bounded_payload_key="fingerprint_readiness",
+        cli_summary_section="",
+        cli_summary_heading="",
+        intentional_absence_reason="covered by machine-readable API only",
+    )
+    evidence = fingerprint_report_surface_evidence(contracts=(contract,))
+    findings: list[dict[str, object]] = []
+
+    _audit_report_surface_evidence(evidence, findings, contracts=(contract,))
+
+    assert findings == []
+    row = _surface_row(evidence, "readiness_api_only")
+    assert row["cli_summary_state"] == "intentionally_absent"
+    assert row["intentional_absence_reason"] == (
+        "covered by machine-readable API only"
+    )
 
 
 def test_format_fingerprint_contract_audit_renders_human_summary() -> None:
@@ -294,3 +429,34 @@ def test_format_fingerprint_schema_discovery_renders_human_summary() -> None:
     assert "- return_dynamics: implemented; timeframes=[M1]" in output
     assert "- dependence: implemented; timeframes=[M1, T]" in output
     assert "without reading source or running data quality checks" in output
+
+
+def _surface_evidence_copy() -> dict[str, JSONValue]:
+    return deepcopy(fingerprint_report_surface_evidence())
+
+
+def _surface_row(
+    evidence: dict[str, JSONValue] | JSONValue,
+    key: str,
+) -> dict[str, JSONValue]:
+    assert isinstance(evidence, dict)
+    matrix = evidence["surface_matrix"]
+    assert isinstance(matrix, list)
+    for item in matrix:
+        assert isinstance(item, dict)
+        if item.get("key") == key:
+            return item
+    raise AssertionError(f"missing surface row {key}")
+
+
+def _first_finding(
+    audit: dict[str, JSONValue],
+    code: str,
+) -> dict[str, JSONValue]:
+    findings = audit["findings"]
+    assert isinstance(findings, list)
+    for finding in findings:
+        assert isinstance(finding, dict)
+        if finding.get("code") == code:
+            return finding
+    raise AssertionError(f"missing finding code {code}")

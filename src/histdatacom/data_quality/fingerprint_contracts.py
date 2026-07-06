@@ -260,9 +260,33 @@ class FingerprintReportSurfaceContract:
     """One report/bounded/CLI surface derived from fingerprint findings."""
 
     key: str
+    summary_schema_key: str
     report_metadata_key: str
     bounded_payload_key: str
     cli_summary_section: str
+    cli_summary_heading: str
+    intentional_absence_reason: str = ""
+
+    def to_discovery_payload(self) -> dict[str, JSONValue]:
+        payload: dict[str, JSONValue] = {
+            "key": self.key,
+            "summary_schema_key": self.summary_schema_key,
+            "report_metadata_key": self.report_metadata_key,
+            "bounded_payload_key": self.bounded_payload_key,
+            "cli_summary_section": self.cli_summary_section,
+            "cli_summary_state": (
+                "intentionally_absent"
+                if self.intentional_absence_reason
+                else "present"
+            ),
+        }
+        if self.cli_summary_heading:
+            payload["cli_summary_heading"] = self.cli_summary_heading
+        if self.intentional_absence_reason:
+            payload["intentional_absence_reason"] = (
+                self.intentional_absence_reason
+            )
+        return payload
 
 
 FINGERPRINT_SCHEMA_CONTRACTS = (
@@ -371,45 +395,59 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
 FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
     FingerprintReportSurfaceContract(
         "coverage_summary",
+        "fingerprint_coverage_summary",
         TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
         FINGERPRINT_COVERAGE_BOUNDED_PAYLOAD_KEY,
         "coverage",
+        "Fingerprint coverage",
     ),
     FingerprintReportSurfaceContract(
         "topology_summary",
+        "fingerprint_topology_summary",
         TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
         FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY,
         "topology_summary",
+        "Fingerprint topology",
     ),
     FingerprintReportSurfaceContract(
         "topology_attention",
+        "fingerprint_topology_attention",
         TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
         FINGERPRINT_TOPOLOGY_ATTENTION_BOUNDED_PAYLOAD_KEY,
         "topology_attention",
+        "Fingerprint topology attention",
     ),
     FingerprintReportSurfaceContract(
         "distribution_summary",
+        "fingerprint_distribution_summary",
         TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
         FINGERPRINT_DISTRIBUTION_BOUNDED_PAYLOAD_KEY,
         "distribution_summary",
+        "Fingerprint distributions",
     ),
     FingerprintReportSurfaceContract(
         "distribution_attention",
+        "fingerprint_distribution_attention",
         TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
         FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY,
         "distribution_attention",
+        "Fingerprint distribution attention",
     ),
     FingerprintReportSurfaceContract(
         "regime_summary",
+        "fingerprint_regime_summary",
         TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY,
         FINGERPRINT_REGIME_BOUNDED_PAYLOAD_KEY,
         "regime_summary",
+        "Fingerprint regimes",
     ),
     FingerprintReportSurfaceContract(
         "readiness_summary",
+        "fingerprint_readiness_summary",
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
         FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY,
         "readiness_summary",
+        "Fingerprint readiness",
     ),
 )
 
