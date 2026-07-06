@@ -10,8 +10,20 @@ from histdatacom.data_quality.fingerprint_discovery import (
     fingerprint_schema_discovery,
     format_fingerprint_schema_discovery,
 )
+from histdatacom.data_quality.fingerprint_contracts import (
+    FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS,
+    FINGERPRINT_REPORT_SURFACE_CONTRACTS,
+    FINGERPRINT_SCHEMA_CONTRACTS,
+    FINGERPRINT_SECTION_LIMIT_DEFAULTS,
+    IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
+    PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS,
+    PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
+)
 from histdatacom.data_quality.fingerprints import (
+    FINGERPRINT_AUDIT_SECTIONS,
+    FINGERPRINT_DYNAMICS_SECTIONS,
     SERIES_FINGERPRINT_RULE_ID,
+    HistDataFingerprintProfile,
     TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
@@ -81,6 +93,68 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert "observed_sequence" in payload["calculation_bases"]["basis"]
     assert "source_text_order" in payload["calculation_bases"]["row_order"]
     assert "not_emitted" in payload["vocabularies"]["skip_and_reason_codes"]
+
+
+def test_fingerprint_schema_discovery_uses_contract_registry() -> None:
+    """Discovery should be generated from the shared contract registry."""
+    payload = fingerprint_schema_discovery()
+
+    assert list(payload["schemas"]) == [
+        contract.key for contract in FINGERPRINT_SCHEMA_CONTRACTS
+    ]
+    assert payload["sections"]["implemented"]["target_sections"] == [
+        contract.to_discovery_payload()
+        for contract in IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+    ]
+    assert payload["sections"]["planned"]["target_sections"] == [
+        contract.to_discovery_payload()
+        for contract in PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+    ]
+    assert payload["sections"]["planned"]["run_sections"] == [
+        contract.to_discovery_payload()
+        for contract in PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS
+    ]
+    assert payload["metadata_keys"]["report_metadata"] == {
+        contract.key: contract.report_metadata_key
+        for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    }
+    assert payload["metadata_keys"]["bounded_payload"] == {
+        contract.key: contract.bounded_payload_key
+        for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    }
+    assert payload["report_surfaces"]["full_report_metadata"] == [
+        contract.report_metadata_key
+        for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    ]
+    assert payload["report_surfaces"]["bounded_payload_keys"] == [
+        contract.bounded_payload_key
+        for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    ]
+    assert payload["report_surfaces"]["cli_summary_sections"] == [
+        contract.cli_summary_section
+        for contract in FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    ]
+
+
+def test_fingerprint_schema_discovery_registry_matches_runtime() -> None:
+    """Registry-backed discovery should stay aligned with runtime owners."""
+    payload = fingerprint_schema_discovery()
+
+    assert payload["sections"]["implemented"]["audit_sections"] == list(
+        FINGERPRINT_AUDIT_SECTIONS
+    )
+    assert payload["sections"]["implemented"]["dynamics_sections"] == list(
+        FINGERPRINT_DYNAMICS_SECTIONS
+    )
+    assert payload["profile"]["section_limits"] == dict(
+        FINGERPRINT_SECTION_LIMIT_DEFAULTS
+    )
+    assert payload["profile"]["distribution_attention_defaults"] == dict(
+        FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS
+    )
+    assert payload["profile"]["default_fingerprint_profile"] == (
+        HistDataFingerprintProfile().to_metadata()
+    )
 
 
 def test_fingerprint_schema_discovery_reflects_profile_overrides() -> None:

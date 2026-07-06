@@ -18,6 +18,14 @@ from histdatacom.data_quality.contracts import (
     QualityStatus,
     QualityTargetSummary,
 )
+from histdatacom.data_quality.fingerprint_contracts import (
+    FINGERPRINT_COVERAGE_BOUNDED_PAYLOAD_KEY,
+    FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY,
+    FINGERPRINT_DISTRIBUTION_BOUNDED_PAYLOAD_KEY,
+    FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY,
+    FINGERPRINT_TOPOLOGY_ATTENTION_BOUNDED_PAYLOAD_KEY,
+    FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY,
+)
 from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
@@ -530,21 +538,25 @@ def bounded_quality_payload(
         "payload_limits": payload_limits,
     }
     if fingerprint_coverage is not None:
-        payload["fingerprint_coverage"] = fingerprint_coverage
+        payload[FINGERPRINT_COVERAGE_BOUNDED_PAYLOAD_KEY] = fingerprint_coverage
     if fingerprint_distribution is not None:
-        payload["fingerprint_distribution"] = fingerprint_distribution
+        payload[FINGERPRINT_DISTRIBUTION_BOUNDED_PAYLOAD_KEY] = (
+            fingerprint_distribution
+        )
     if fingerprint_distribution_attention is not None:
-        payload["fingerprint_distribution_attention"] = (
+        payload[FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY] = (
             fingerprint_distribution_attention
         )
     if fingerprint_topology is not None:
-        payload["fingerprint_topology"] = fingerprint_topology
+        payload[FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY] = fingerprint_topology
     if fingerprint_topology_attention is not None:
-        payload["fingerprint_topology_attention"] = (
+        payload[FINGERPRINT_TOPOLOGY_ATTENTION_BOUNDED_PAYLOAD_KEY] = (
             fingerprint_topology_attention
         )
     if fingerprint_readiness is not None:
-        payload["fingerprint_readiness"] = fingerprint_readiness
+        payload[FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY] = (
+            fingerprint_readiness
+        )
     if next_actions is not None:
         payload["next_actions"] = next_actions
     if remediation_coverage is not None:

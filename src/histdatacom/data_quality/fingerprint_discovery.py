@@ -6,45 +6,36 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 import histdatacom
-from histdatacom.data_quality.calendar import (
-    TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
+from histdatacom.data_quality.fingerprint_contracts import (
+    FINGERPRINT_BASIS_DESCRIPTIONS,
+    FINGERPRINT_CACHE_SOURCE_DESCRIPTIONS,
+    FINGERPRINT_COMPUTED_FROM_DESCRIPTIONS,
+    FINGERPRINT_CONDITIONAL_DISTRIBUTION_GROUPS,
+    FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS,
+    FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS,
+    FINGERPRINT_DYNAMICS_STATUSES,
+    FINGERPRINT_ELIGIBILITY_STATUSES,
+    FINGERPRINT_READINESS_STATUSES,
+    FINGERPRINT_REPORT_SURFACE_CONTRACTS,
+    FINGERPRINT_ROW_ORDER_DESCRIPTIONS,
+    FINGERPRINT_SCHEMA_CONTRACTS,
+    FINGERPRINT_SECTION_LIMIT_DEFAULTS,
+    FINGERPRINT_SECTION_STATUSES,
+    FINGERPRINT_SERIES_CONFIG_KEYS,
+    FINGERPRINT_SKIP_REASON_CODES,
+    FINGERPRINT_TOPOLOGY_LIMITATIONS,
+    IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
+    PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS,
+    PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
 )
 from histdatacom.data_quality.fingerprints import (
-    CROSS_SERIES_FINGERPRINT_RULE_ID,
-    DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT,
-    DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_CACHE_FLOAT_PRECISION,
-    DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_TRUNCATED,
-    DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT,
-    DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_RATE,
-    DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_COUNT,
-    DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_RATE,
-    DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT,
-    DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_COUNT,
-    DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_RATE,
-    DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT,
-    DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT,
-    DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
     FINGERPRINT_AUDIT_SECTIONS,
     FINGERPRINT_DYNAMICS_SECTIONS,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
-    TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
-    TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
-    TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
-    TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
-    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
-    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
-    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
-    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
-    TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
-    TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
-    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
-    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
-    TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
-    TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
     HistDataFingerprintProfile,
 )
 from histdatacom.data_quality.profiles import (
@@ -60,43 +51,6 @@ from histdatacom.runtime_contracts import JSONValue
 
 TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-schema-discovery.v1"
-)
-
-_SERIES_FINGERPRINT_CONFIG_KEYS = (
-    "quantiles",
-    "lags",
-    "rolling_windows",
-    "histogram_bins",
-    "max_rows",
-    "rounding_digits",
-    "distribution_attention",
-)
-_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
-    "invalid_row_min_count",
-    "invalid_row_min_rate",
-    "zero_spread_min_count",
-    "zero_spread_min_rate",
-    "negative_spread_min_count",
-    "negative_spread_min_rate",
-    "flag_truncated_distribution",
-    "flag_cache_float_precision",
-)
-_IMPLEMENTED_TARGET_SECTION_NAMES = (
-    "coverage",
-    "temporal_topology",
-    "calendar_regimes",
-    "m1_bar_distribution",
-    "tick_distribution",
-    "conditional_distributions",
-    "return_dynamics",
-    "microstructure_dynamics",
-    "dependence",
-    "fingerprint_audit",
-)
-_PLANNED_TARGET_SECTION_NAMES = (
-    "stationarity_diagnostics",
-    "decomposition",
-    "synthetic_constraints",
 )
 
 
@@ -158,15 +112,11 @@ def format_fingerprint_schema_discovery(
         "",
         "Schemas",
     ]
-    for key in (
-        "series_fingerprint",
-        "fingerprint_audit",
-        "fingerprint_dynamics",
-        "fingerprint_dependence",
-        "fingerprint_readiness_summary",
-    ):
+    for key in schemas:
         schema = _mapping(schemas.get(key))
-        lines.append(f"- {key}: {schema.get('schema_version', '')}")
+        status = schema.get("status", "")
+        schema_version = schema.get("schema_version") or "planned"
+        lines.append(f"- {key}: {schema_version} ({status})")
 
     lines.extend(["", "Implemented Sections"])
     for section in _mapping_rows(implemented.get("target_sections")):
@@ -227,9 +177,9 @@ def _profile_payload(
         "configured_rule_ids": _json_string_list(
             metadata.get("configured_rule_ids")
         ),
-        "configurable_keys": _json_strings(_SERIES_FINGERPRINT_CONFIG_KEYS),
+        "configurable_keys": _json_strings(FINGERPRINT_SERIES_CONFIG_KEYS),
         "distribution_attention_configurable_keys": _json_strings(
-            _DISTRIBUTION_ATTENTION_CONFIG_KEYS
+            FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS
         ),
         "effective_fingerprint_profile": fingerprint_profile.to_metadata(),
         "default_fingerprint_profile": HistDataFingerprintProfile().to_metadata(),
@@ -240,133 +190,18 @@ def _profile_payload(
             "source_text_fallback": True,
             "profile_configurable": False,
         },
-        "section_limits": {
-            "topology_summary_target_limit": DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
-            "topology_attention_target_limit": DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT,
-            "distribution_summary_target_limit": DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT,
-            "distribution_attention_target_limit": DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT,
-            "readiness_summary_target_limit": DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT,
-        },
-        "distribution_attention_defaults": {
-            "invalid_row_min_count": DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT,
-            "invalid_row_min_rate": DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_RATE,
-            "zero_spread_min_count": DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_COUNT,
-            "zero_spread_min_rate": DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_RATE,
-            "negative_spread_min_count": DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_COUNT,
-            "negative_spread_min_rate": DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_RATE,
-            "flag_truncated_distribution": DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_TRUNCATED,
-            "flag_cache_float_precision": (
-                DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_CACHE_FLOAT_PRECISION
-            ),
-        },
+        "section_limits": dict(FINGERPRINT_SECTION_LIMIT_DEFAULTS),
+        "distribution_attention_defaults": dict(
+            FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS
+        ),
     }
 
 
 def _schema_payload() -> dict[str, JSONValue]:
     return {
-        "series_fingerprint": _schema_entry(
-            TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
-            rule_id=SERIES_FINGERPRINT_RULE_ID,
-            metadata_key=TIME_SERIES_FINGERPRINT_METADATA_KEY,
-            status="implemented",
-        ),
-        "fingerprint_coverage_summary": _schema_entry(
-            TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
-            rule_id=SERIES_FINGERPRINT_RULE_ID,
-            metadata_key=TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
-            status="implemented",
-        ),
-        "fingerprint_topology_summary": _schema_entry(
-            TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
-            rule_id=SERIES_FINGERPRINT_RULE_ID,
-            metadata_key=TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
-            status="implemented",
-        ),
-        "fingerprint_topology_attention": _schema_entry(
-            TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
-            rule_id=SERIES_FINGERPRINT_RULE_ID,
-            metadata_key=TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
-            status="implemented",
-        ),
-        "fingerprint_distribution_summary": _schema_entry(
-            TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
-            rule_id=SERIES_FINGERPRINT_RULE_ID,
-            metadata_key=TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
-            status="implemented",
-        ),
-        "fingerprint_distribution_attention": _schema_entry(
-            TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
-            rule_id=SERIES_FINGERPRINT_RULE_ID,
-            metadata_key=TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
-            status="implemented",
-        ),
-        "fingerprint_calendar_regimes": _schema_entry(
-            TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
-            rule_id=SERIES_FINGERPRINT_RULE_ID,
-            payload_path="time_series_fingerprint.calendar_regimes",
-            status="implemented",
-        ),
-        "fingerprint_conditional_distributions": _schema_entry(
-            TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
-            rule_id=SERIES_FINGERPRINT_RULE_ID,
-            payload_path="time_series_fingerprint.conditional_distributions",
-            status="implemented",
-        ),
-        "fingerprint_dynamics": _schema_entry(
-            TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
-            rule_id=SERIES_FINGERPRINT_RULE_ID,
-            payload_path="time_series_fingerprint.return_dynamics|microstructure_dynamics",
-            status="implemented",
-        ),
-        "fingerprint_dependence": _schema_entry(
-            TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
-            rule_id=SERIES_FINGERPRINT_RULE_ID,
-            payload_path="time_series_fingerprint.dependence",
-            status="implemented",
-        ),
-        "fingerprint_audit": _schema_entry(
-            TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
-            rule_id=SERIES_FINGERPRINT_RULE_ID,
-            payload_path="time_series_fingerprint.fingerprint_audit",
-            status="implemented",
-        ),
-        "fingerprint_readiness_summary": _schema_entry(
-            TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
-            rule_id=SERIES_FINGERPRINT_RULE_ID,
-            metadata_key=TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
-            bounded_payload_key="fingerprint_readiness",
-            status="implemented",
-        ),
-        "cross_series_fingerprint": {
-            "schema_version": None,
-            "rule_id": CROSS_SERIES_FINGERPRINT_RULE_ID,
-            "status": "planned",
-            "issue": "#331",
-        },
+        contract.key: contract.to_discovery_payload()
+        for contract in FINGERPRINT_SCHEMA_CONTRACTS
     }
-
-
-def _schema_entry(
-    schema_version: str,
-    *,
-    rule_id: str,
-    status: str,
-    metadata_key: str = "",
-    payload_path: str = "",
-    bounded_payload_key: str = "",
-) -> dict[str, JSONValue]:
-    entry: dict[str, JSONValue] = {
-        "schema_version": schema_version,
-        "rule_id": rule_id,
-        "status": status,
-    }
-    if metadata_key:
-        entry["metadata_key"] = metadata_key
-    if payload_path:
-        entry["payload_path"] = payload_path
-    if bounded_payload_key:
-        entry["bounded_payload_key"] = bounded_payload_key
-    return entry
 
 
 def _metadata_key_payload() -> dict[str, JSONValue]:
@@ -375,40 +210,27 @@ def _metadata_key_payload() -> dict[str, JSONValue]:
             "series_fingerprint": TIME_SERIES_FINGERPRINT_METADATA_KEY
         },
         "report_metadata": {
-            "coverage_summary": TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
-            "topology_summary": TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
-            "topology_attention": TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
-            "distribution_summary": (
-                TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY
-            ),
-            "distribution_attention": (
-                TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY
-            ),
-            "readiness_summary": (
-                TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY
-            ),
+            surface.key: surface.report_metadata_key
+            for surface in FINGERPRINT_REPORT_SURFACE_CONTRACTS
         },
         "bounded_payload": {
-            "coverage_summary": "fingerprint_coverage",
-            "topology_summary": "fingerprint_topology",
-            "topology_attention": "fingerprint_topology_attention",
-            "distribution_summary": "fingerprint_distribution",
-            "distribution_attention": "fingerprint_distribution_attention",
-            "readiness_summary": "fingerprint_readiness",
+            surface.key: surface.bounded_payload_key
+            for surface in FINGERPRINT_REPORT_SURFACE_CONTRACTS
         },
     }
 
 
 def _target_capability_payload() -> dict[str, JSONValue]:
+    run_contract = PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS[0]
     return {
         "supported_target_kinds": _json_strings(("csv", "zip", "cache")),
         "supported_data_format": "ascii",
         "supported_timeframes": _json_strings((M1, TICK)),
         "series_rule_id": SERIES_FINGERPRINT_RULE_ID,
         "run_rule_status": {
-            "rule_id": CROSS_SERIES_FINGERPRINT_RULE_ID,
-            "status": "planned",
-            "issue": "#331",
+            "rule_id": run_contract.rule_id,
+            "status": run_contract.status,
+            "issue": run_contract.issue,
         },
     }
 
@@ -419,177 +241,41 @@ def _section_payload() -> dict[str, JSONValue]:
             "audit_sections": _json_strings(FINGERPRINT_AUDIT_SECTIONS),
             "dynamics_sections": _json_strings(FINGERPRINT_DYNAMICS_SECTIONS),
             "target_sections": [
-                _section_entry(
-                    "coverage",
-                    "all supported targets",
-                    timeframes=(M1, TICK),
-                    schema_key="series_fingerprint",
-                    fields=(
-                        "row_count",
-                        "parsed_row_count",
-                        "start_timestamp_utc_ms",
-                        "end_timestamp_utc_ms",
-                    ),
-                ),
-                _section_entry(
-                    "temporal_topology",
-                    "timestamp continuity, ordering, gaps, duplicates, and sampling basis",
-                    timeframes=(M1, TICK),
-                    schema_key="series_fingerprint",
-                    basis=("observed_sequence",),
-                ),
-                _section_entry(
-                    "calendar_regimes",
-                    "session, special-window, holiday, event, hour, and weekday counts",
-                    timeframes=(M1, TICK),
-                    schema_key="fingerprint_calendar_regimes",
-                    basis=("text_scan", "direct_cache", "fresh_sibling_cache"),
-                ),
-                _section_entry(
-                    "m1_bar_distribution",
-                    "OHLC price, bar shape, precision, and invalid-row summaries",
-                    timeframes=(M1,),
-                    schema_key="series_fingerprint",
-                ),
-                _section_entry(
-                    "tick_distribution",
-                    "bid, ask, spread, precision, zero/negative spread, and invalid-row summaries",
-                    timeframes=(TICK,),
-                    schema_key="series_fingerprint",
-                ),
-                _section_entry(
-                    "conditional_distributions",
-                    "bounded tick-spread summaries by active session and special tag",
-                    timeframes=(TICK,),
-                    schema_key="fingerprint_conditional_distributions",
-                    basis=("text", "cache"),
-                    extra={
-                        "metric": "tick_spread",
-                        "grouped_by": ["active_session", "special_tag"],
-                    },
-                ),
-                _section_entry(
-                    "return_dynamics",
-                    "M1 close returns, open jumps, flatlines, and sequence limitations",
-                    timeframes=(M1,),
-                    schema_key="fingerprint_dynamics",
-                    basis=("observed_sequence",),
-                    row_order=("source_text_order", "cache_order"),
-                ),
-                _section_entry(
-                    "microstructure_dynamics",
-                    "tick interarrival, spread changes, stale quotes, bursts, and one-sided movement",
-                    timeframes=(TICK,),
-                    schema_key="fingerprint_dynamics",
-                    basis=("observed_sequence",),
-                    row_order=("source_text_order", "cache_order"),
-                ),
-                _section_entry(
-                    "dependence",
-                    "observed-sequence lag autocorrelation for returns, ranges, spreads, and spread changes",
-                    timeframes=(M1, TICK),
-                    schema_key="fingerprint_dependence",
-                    basis=("observed_sequence",),
-                    row_order=("source_text_order", "cache_order"),
-                    extra={
-                        "acf_basis": "observed_sequence",
-                        "profile_controlled_by": ["lags", "rounding_digits"],
-                    },
-                ),
-                _section_entry(
-                    "fingerprint_audit",
-                    "machine-readable expected/emitted/skipped section accounting and readiness",
-                    timeframes=(M1, TICK),
-                    schema_key="fingerprint_audit",
-                ),
+                contract.to_discovery_payload()
+                for contract in IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS
             ],
         },
         "planned": {
             "target_sections": [
-                _planned_section("stationarity_diagnostics", "#329"),
-                _planned_section("decomposition", "#330"),
-                _planned_section("synthetic_constraints", "#333"),
+                contract.to_discovery_payload()
+                for contract in PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS
             ],
             "run_sections": [
-                {
-                    "name": "cross_series_fingerprint",
-                    "status": "planned",
-                    "rule_id": CROSS_SERIES_FINGERPRINT_RULE_ID,
-                    "issue": "#331",
-                }
+                contract.to_discovery_payload()
+                for contract in PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS
             ],
         },
-    }
-
-
-def _section_entry(
-    name: str,
-    description: str,
-    *,
-    timeframes: tuple[str, ...],
-    schema_key: str,
-    fields: tuple[str, ...] = (),
-    basis: tuple[str, ...] = (),
-    row_order: tuple[str, ...] = (),
-    extra: Mapping[str, JSONValue] | None = None,
-) -> dict[str, JSONValue]:
-    payload: dict[str, JSONValue] = {
-        "name": name,
-        "status": "implemented",
-        "description": description,
-        "target_timeframes": _json_strings(timeframes),
-        "schema_key": schema_key,
-    }
-    if fields:
-        payload["key_fields"] = _json_strings(fields)
-    if basis:
-        payload["basis_values"] = _json_strings(basis)
-    if row_order:
-        payload["row_order_values"] = _json_strings(row_order)
-    if extra:
-        payload.update(dict(extra))
-    return payload
-
-
-def _planned_section(name: str, issue: str) -> dict[str, JSONValue]:
-    return {
-        "name": name,
-        "status": "planned",
-        "schema_version": None,
-        "issue": issue,
     }
 
 
 def _report_surface_payload() -> dict[str, JSONValue]:
     return {
         "full_report_metadata": _json_strings(
-            (
-                TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
-                TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
-                TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
-                TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
-                TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
-                TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
+            tuple(
+                surface.report_metadata_key
+                for surface in FINGERPRINT_REPORT_SURFACE_CONTRACTS
             )
         ),
         "bounded_payload_keys": _json_strings(
-            (
-                "fingerprint_coverage",
-                "fingerprint_topology",
-                "fingerprint_topology_attention",
-                "fingerprint_distribution",
-                "fingerprint_distribution_attention",
-                "fingerprint_readiness",
+            tuple(
+                surface.bounded_payload_key
+                for surface in FINGERPRINT_REPORT_SURFACE_CONTRACTS
             )
         ),
         "cli_summary_sections": _json_strings(
-            (
-                "coverage",
-                "distribution_attention",
-                "distribution_summary",
-                "topology_attention",
-                "topology_summary",
-                "readiness_summary",
+            tuple(
+                surface.cli_summary_section
+                for surface in FINGERPRINT_REPORT_SURFACE_CONTRACTS
             )
         ),
     }
@@ -597,86 +283,39 @@ def _report_surface_payload() -> dict[str, JSONValue]:
 
 def _calculation_basis_payload() -> dict[str, JSONValue]:
     return {
-        "basis": {
-            "observed_sequence": "statistics computed over parsed row order without regular-grid imputation",
-            "regular_grid": "reserved for future grid-regularized calculations",
-            "limited": "section emitted with advisory limitations",
-            "unavailable": "section could not compute enough contract data",
-        },
-        "row_order": {
-            "source_text_order": "rows were scanned from source CSV or ZIP member text order",
-            "cache_order": "rows were scanned from the selected Polars cache order",
-            "none": "no row sequence was available",
-            "unknown": "older or incomplete payload did not state row order",
-        },
-        "computed_from": {
-            "text_scan": "source text was read directly",
-            "direct_cache": "target itself was a cache",
-            "fresh_sibling_cache": "fresh sibling cache was used for the source target",
-            "unavailable": "source and cache projection were not usable",
-            "unknown": "older or incomplete payload did not state source basis",
-        },
-        "cache_source": {
-            "direct": "cache target was evaluated directly",
-            "sibling": "fresh sibling cache was selected for a source target",
-            "none": "no cache source participated",
-        },
+        "basis": _description_mapping(FINGERPRINT_BASIS_DESCRIPTIONS),
+        "row_order": _description_mapping(FINGERPRINT_ROW_ORDER_DESCRIPTIONS),
+        "computed_from": _description_mapping(
+            FINGERPRINT_COMPUTED_FROM_DESCRIPTIONS
+        ),
+        "cache_source": _description_mapping(
+            FINGERPRINT_CACHE_SOURCE_DESCRIPTIONS
+        ),
     }
 
 
 def _vocabulary_payload() -> dict[str, JSONValue]:
     return {
-        "section_statuses": _json_strings(
-            ("valid", "limited", "skipped", "unavailable")
-        ),
-        "dynamics_statuses": _json_strings(("ok", "limited", "unavailable")),
-        "readiness_statuses": _json_strings(
-            (
-                "computed",
-                "valid",
-                "limited",
-                "skipped",
-                "unavailable",
-                "not_applicable",
-            )
-        ),
-        "eligibility_statuses": _json_strings(("eligible", "ineligible")),
-        "skip_and_reason_codes": _json_strings(
-            (
-                "unsupported_timeframe",
-                "unsupported_target_kind",
-                "source_unreadable",
-                "cache_unavailable",
-                "missing_required_columns",
-                "metric_not_available",
-                "insufficient_rows",
-                "insufficient_sequence_rows",
-                "insufficient_sample_count",
-                "zero_variance",
-                "no_computable_lags",
-                "skipped_lags",
-                "not_emitted",
-            )
-        ),
-        "topology_limitations": _json_strings(
-            (
-                "timestamp_topology_unavailable",
-                "no_parsed_timestamps",
-                "invalid_timestamps_skipped",
-                "non_monotonic_timestamp_order",
-                "duplicate_timestamps",
-                "suspicious_gaps",
-                "expected_session_closures",
-                "weekend_activity",
-            )
-        ),
+        "section_statuses": _json_strings(FINGERPRINT_SECTION_STATUSES),
+        "dynamics_statuses": _json_strings(FINGERPRINT_DYNAMICS_STATUSES),
+        "readiness_statuses": _json_strings(FINGERPRINT_READINESS_STATUSES),
+        "eligibility_statuses": _json_strings(FINGERPRINT_ELIGIBILITY_STATUSES),
+        "skip_and_reason_codes": _json_strings(FINGERPRINT_SKIP_REASON_CODES),
+        "topology_limitations": _json_strings(FINGERPRINT_TOPOLOGY_LIMITATIONS),
         "conditional_distribution_groups": _json_strings(
-            ("active_session", "special_tag")
+            FINGERPRINT_CONDITIONAL_DISTRIBUTION_GROUPS
         ),
     }
 
 
 def _example_payload() -> dict[str, JSONValue]:
+    expected_sections = _target_section_names_for_timeframe(M1)
+    emitted_sections = ("coverage", "temporal_topology")
+    skipped_sections = tuple(
+        section
+        for section in expected_sections
+        if section not in emitted_sections
+    )
     return {
         "target_axis": {
             "data_format": "ascii",
@@ -708,28 +347,17 @@ def _example_payload() -> dict[str, JSONValue]:
             },
             "fingerprint_audit": {
                 "schema_version": TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
-                "sections_expected": [
-                    "coverage",
-                    "temporal_topology",
-                    "calendar_regimes",
-                    "m1_bar_distribution",
-                    "return_dynamics",
-                    "dependence",
-                ],
-                "sections_emitted": ["coverage", "temporal_topology"],
+                "sections_expected": _json_strings(expected_sections),
+                "sections_emitted": _json_strings(emitted_sections),
                 "sections_skipped": {
-                    "calendar_regimes": {"reason": "not_emitted"},
-                    "m1_bar_distribution": {"reason": "not_emitted"},
-                    "return_dynamics": {"reason": "not_emitted"},
-                    "dependence": {"reason": "not_emitted"},
+                    section: {"reason": "not_emitted"}
+                    for section in skipped_sections
                 },
                 "section_statuses": {
-                    "coverage": "limited",
-                    "temporal_topology": "limited",
-                    "calendar_regimes": "skipped",
-                    "m1_bar_distribution": "skipped",
-                    "return_dynamics": "skipped",
-                    "dependence": "skipped",
+                    section: (
+                        "limited" if section in emitted_sections else "skipped"
+                    )
+                    for section in expected_sections
                 },
             },
         },
@@ -809,6 +437,21 @@ def _json_string_list(value: object) -> list[JSONValue]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value]
+
+
+def _description_mapping(
+    pairs: tuple[tuple[str, str], ...],
+) -> dict[str, JSONValue]:
+    return {key: value for key, value in pairs}
+
+
+def _target_section_names_for_timeframe(timeframe: str) -> tuple[str, ...]:
+    return tuple(
+        contract.name
+        for contract in IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+        if timeframe in contract.target_timeframes
+        and contract.name != "fingerprint_audit"
+    )
 
 
 def _mapping(value: object) -> Mapping[str, JSONValue]:
