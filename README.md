@@ -1004,17 +1004,21 @@ stable skip/eligibility reason codes, calendar-profile completeness, tick-spread
 conditioning eligibility, and dynamics readiness. This is machine-readable
 contract metadata for report consumers; the full fingerprint sections remain the
 source of the detailed statistics.
-Quality JSON reports and CLI summaries also include a bounded
-`time_series_fingerprint_readiness_summary` when fingerprint findings are
-present. Use that report-level summary to scan whether return or microstructure
-dynamics are valid, limited, skipped, or unavailable; which topology limitations
-affect sequence interpretation; and the compact return, jump, flatline, spread,
-stale quote, burst, and one-sided movement facts. The same readiness summary
-also includes bounded dependence status, ACF basis, configured lag coverage,
-computed/skipped lag counts, skipped-lag reason counts, and per-series sample
-counts. Use the raw `time_series_fingerprint` payload when downstream tooling
-needs the complete fingerprint sections, full quantile maps, or full ACF lag
-maps.
+Quality JSON reports and CLI summaries also include bounded regime and
+readiness summaries when fingerprint findings are present. Use
+`time_series_fingerprint_regime_summary` to scan dominant session states, active
+sessions, special/holiday/event tags, source hour/day coverage, calendar-profile
+source/version/completeness/advisory state, and tick conditioned spread by active
+session or special tag. Use `time_series_fingerprint_readiness_summary` to scan
+whether return or microstructure dynamics are valid, limited, skipped, or
+unavailable; which topology limitations affect sequence interpretation; and the
+compact return, jump, flatline, spread, stale quote, burst, and one-sided
+movement facts. The same readiness summary also includes bounded dependence
+status, ACF basis, configured lag coverage, computed/skipped lag counts,
+skipped-lag reason counts, and per-series sample counts. Use the raw
+`time_series_fingerprint` payload when downstream tooling needs complete
+fingerprint sections, full quantile maps, full conditioned distributions, or full
+ACF lag maps.
 
 Discover the active fingerprint contract without scanning target data:
 

@@ -325,6 +325,85 @@
     "topology_limitation_counts": {},
     "truncated": false
   },
+  "fingerprint_regime": {
+    "cache_source_counts": {},
+    "calendar_profile": {
+      "complete_count": 0,
+      "incomplete_count": 1,
+      "source_counts": {
+        "unknown": 1
+      },
+      "static_advisory_count": 0,
+      "version_counts": {
+        "unknown": 1
+      }
+    },
+    "calendar_regime_target_count": 0,
+    "calendar_status_counts": {
+      "missing": 1
+    },
+    "computed_from_counts": {
+      "unknown": 1
+    },
+    "conditional_distribution_target_count": 0,
+    "conditional_status_counts": {
+      "not_applicable": 1
+    },
+    "count_limit": 8,
+    "included_target_count": 1,
+    "omitted_target_count": 0,
+    "rule_id": "fingerprint.series",
+    "schema_version": "histdatacom.time-series-fingerprint-regime-summary.v1",
+    "target_count": 1,
+    "target_summaries": [
+      {
+        "calendar_regimes": {
+          "active_session_counts": {},
+          "cache_source": null,
+          "calendar_profile": {
+            "complete": false,
+            "missing_optional_calendar_data": false,
+            "name": "unknown",
+            "source": "unknown",
+            "static_advisory": false,
+            "version": "unknown"
+          },
+          "computed_from": "unknown",
+          "day_of_week_counts": {},
+          "event_tag_counts": {},
+          "holiday_tag_counts": {},
+          "hour_of_day_counts": {},
+          "invalid_timestamp_count": 0,
+          "parsed_row_count": 0,
+          "raw_status": "missing",
+          "row_count": 0,
+          "session_state_counts": {},
+          "special_tag_counts": {},
+          "status": "missing"
+        },
+        "conditional_distributions": {
+          "metric": "tick_spread",
+          "status": "not_applicable"
+        },
+        "source_kind": "csv_text",
+        "target_axis": {
+          "data_format": "ascii",
+          "kind": "csv",
+          "period": "201202",
+          "symbol": "EURUSD",
+          "timeframe": "M1"
+        }
+      }
+    ],
+    "top_active_session_counts": [],
+    "top_day_of_week_counts": [],
+    "top_event_tag_counts": [],
+    "top_holiday_tag_counts": [],
+    "top_hour_of_day_counts": [],
+    "top_session_state_counts": [],
+    "top_special_tag_counts": [],
+    "truncated": false
+  },
   "fingerprint_topology": {
     "cache_source_counts": {},
     "computed_from_counts": {

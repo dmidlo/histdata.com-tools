@@ -72,6 +72,9 @@ TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION = (
 TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-distribution-attention.v1"
 )
+TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-regime-summary.v1"
+)
 TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-conditional-distributions.v1"
 )
@@ -103,6 +106,9 @@ TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY = (
 TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY = (
     "time_series_fingerprint_distribution_attention"
 )
+TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY = (
+    "time_series_fingerprint_regime_summary"
+)
 TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY = (
     "time_series_fingerprint_readiness_summary"
 )
@@ -129,6 +135,8 @@ DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT = 128
 DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT = 32
 DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT = 128
 DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT = 32
+DEFAULT_FINGERPRINT_REGIME_SUMMARY_LIMIT = 16
+DEFAULT_FINGERPRINT_REGIME_COUNT_LIMIT = 8
 DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT = 16
 DEFAULT_FINGERPRINT_READINESS_LAG_LIMIT = 16
 DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT = 1
@@ -645,6 +653,155 @@ def series_fingerprint_distribution_attention_summary(
         "attention_thresholds": attention_profile.to_metadata(),
         "attention_level_counts": _counter_payload(attention_level_counts),
         "attention_flag_counts": _counter_payload(attention_flag_counts),
+        "target_summaries": included,
+    }
+
+
+def series_fingerprint_regime_summary(
+    findings: Iterable[QualityFinding],
+    *,
+    target_limit: int = DEFAULT_FINGERPRINT_REGIME_SUMMARY_LIMIT,
+    count_limit: int = DEFAULT_FINGERPRINT_REGIME_COUNT_LIMIT,
+) -> dict[str, JSONValue] | None:
+    """Return bounded calendar/session and conditioned-spread summaries."""
+    bounded_count_limit = max(1, count_limit)
+    target_summaries = _series_fingerprint_regime_target_summaries(
+        findings,
+        count_limit=bounded_count_limit,
+    )
+    if not target_summaries:
+        return None
+
+    calendar_status_counts = Counter(
+        _summary_key(
+            _payload_mapping(item.get("calendar_regimes")).get("status")
+        )
+        for item in target_summaries
+    )
+    conditional_status_counts = Counter(
+        _summary_key(
+            _payload_mapping(item.get("conditional_distributions")).get(
+                "status"
+            )
+        )
+        for item in target_summaries
+    )
+    computed_from_counts: Counter[str] = Counter()
+    cache_source_counts: Counter[str] = Counter()
+    profile_source_counts: Counter[str] = Counter()
+    profile_version_counts: Counter[str] = Counter()
+    calendar_profile_complete_count = 0
+    calendar_profile_static_advisory_count = 0
+    aggregate_counts: dict[str, Counter[str]] = {
+        "session_state_counts": Counter(),
+        "active_session_counts": Counter(),
+        "special_tag_counts": Counter(),
+        "holiday_tag_counts": Counter(),
+        "event_tag_counts": Counter(),
+        "hour_of_day_counts": Counter(),
+        "day_of_week_counts": Counter(),
+    }
+
+    for item in target_summaries:
+        calendar = _payload_mapping(item.get("calendar_regimes"))
+        computed_from = _optional_summary_key(calendar.get("computed_from"))
+        if computed_from:
+            computed_from_counts[computed_from] += 1
+        cache_source = _optional_summary_key(calendar.get("cache_source"))
+        if cache_source:
+            cache_source_counts[cache_source] += 1
+        profile = _payload_mapping(calendar.get("calendar_profile"))
+        profile_source = _optional_summary_key(profile.get("source"))
+        if profile_source:
+            profile_source_counts[profile_source] += 1
+        profile_version = _optional_summary_key(profile.get("version"))
+        if profile_version:
+            profile_version_counts[profile_version] += 1
+        if profile.get("complete") is True:
+            calendar_profile_complete_count += 1
+        if profile.get("static_advisory") is True:
+            calendar_profile_static_advisory_count += 1
+        for key, counter in aggregate_counts.items():
+            counter.update(
+                _counter_from_mapping(_payload_mapping(calendar.get(key)))
+            )
+
+    included_source = (
+        target_summaries
+        if target_limit < 0
+        else target_summaries[:target_limit]
+    )
+    included: list[JSONValue] = [dict(item) for item in included_source]
+    omitted_count = max(0, len(target_summaries) - len(included))
+
+    return {
+        "schema_version": (
+            TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_SCHEMA_VERSION
+        ),
+        "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "target_count": len(target_summaries),
+        "included_target_count": len(included),
+        "omitted_target_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "count_limit": bounded_count_limit,
+        "calendar_regime_target_count": sum(
+            1
+            for item in target_summaries
+            if _payload_mapping(item.get("calendar_regimes")).get("status")
+            == "available"
+        ),
+        "conditional_distribution_target_count": sum(
+            1
+            for item in target_summaries
+            if _payload_mapping(item.get("conditional_distributions")).get(
+                "status"
+            )
+            == "available"
+        ),
+        "calendar_status_counts": _counter_payload(calendar_status_counts),
+        "conditional_status_counts": _counter_payload(
+            conditional_status_counts
+        ),
+        "computed_from_counts": _counter_payload(computed_from_counts),
+        "cache_source_counts": _counter_payload(cache_source_counts),
+        "calendar_profile": {
+            "complete_count": calendar_profile_complete_count,
+            "incomplete_count": max(
+                0,
+                len(target_summaries) - calendar_profile_complete_count,
+            ),
+            "static_advisory_count": calendar_profile_static_advisory_count,
+            "source_counts": _counter_payload(profile_source_counts),
+            "version_counts": _counter_payload(profile_version_counts),
+        },
+        "top_session_state_counts": _bounded_count_rows(
+            aggregate_counts["session_state_counts"],
+            limit=bounded_count_limit,
+        ),
+        "top_active_session_counts": _bounded_count_rows(
+            aggregate_counts["active_session_counts"],
+            limit=bounded_count_limit,
+        ),
+        "top_special_tag_counts": _bounded_count_rows(
+            aggregate_counts["special_tag_counts"],
+            limit=bounded_count_limit,
+        ),
+        "top_holiday_tag_counts": _bounded_count_rows(
+            aggregate_counts["holiday_tag_counts"],
+            limit=bounded_count_limit,
+        ),
+        "top_event_tag_counts": _bounded_count_rows(
+            aggregate_counts["event_tag_counts"],
+            limit=bounded_count_limit,
+        ),
+        "top_hour_of_day_counts": _bounded_count_rows(
+            aggregate_counts["hour_of_day_counts"],
+            limit=bounded_count_limit,
+        ),
+        "top_day_of_week_counts": _bounded_count_rows(
+            aggregate_counts["day_of_week_counts"],
+            limit=bounded_count_limit,
+        ),
         "target_summaries": included,
     }
 
@@ -1443,6 +1600,245 @@ def _fingerprint_readiness_status_rank(status: str) -> int:
         "skipped": 2,
         "valid": 3,
     }
+    return ranks.get(status, 99)
+
+
+def _series_fingerprint_regime_target_summaries(
+    findings: Iterable[QualityFinding],
+    *,
+    count_limit: int,
+) -> list[dict[str, JSONValue]]:
+    target_summaries: list[dict[str, JSONValue]] = []
+    bounded_count_limit = max(1, count_limit)
+    for finding in findings:
+        if finding.rule_id != SERIES_FINGERPRINT_RULE_ID:
+            continue
+        payload = finding.metadata.get(TIME_SERIES_FINGERPRINT_METADATA_KEY)
+        if not isinstance(payload, Mapping):
+            continue
+        target_summaries.append(
+            _regime_target_summary(
+                finding,
+                cast(Mapping[str, JSONValue], payload),
+                count_limit=bounded_count_limit,
+            )
+        )
+    target_summaries.sort(key=_regime_target_sort_key)
+    return target_summaries
+
+
+def _regime_target_summary(
+    finding: QualityFinding,
+    payload: Mapping[str, JSONValue],
+    *,
+    count_limit: int,
+) -> dict[str, JSONValue]:
+    target_axis = _topology_target_axis(
+        finding,
+        _payload_mapping(payload.get("target_axis")),
+    )
+    source = _payload_mapping(payload.get("source"))
+    return {
+        "target_axis": target_axis,
+        "source_kind": _summary_key(source.get("kind")),
+        "calendar_regimes": _calendar_regime_summary(
+            _payload_mapping(payload.get("calendar_regimes")),
+            count_limit=count_limit,
+        ),
+        "conditional_distributions": _conditional_distribution_summary(
+            _payload_mapping(payload.get("conditional_distributions")),
+            timeframe=_summary_key(target_axis.get("timeframe")),
+            count_limit=count_limit,
+        ),
+    }
+
+
+def _calendar_regime_summary(
+    calendar: Mapping[str, JSONValue],
+    *,
+    count_limit: int,
+) -> dict[str, JSONValue]:
+    if not calendar:
+        return {
+            "status": "missing",
+            "raw_status": "missing",
+            "computed_from": "unknown",
+            "cache_source": None,
+            "row_count": 0,
+            "parsed_row_count": 0,
+            "invalid_timestamp_count": 0,
+            "calendar_profile": _calendar_profile_summary(calendar),
+            "session_state_counts": {},
+            "active_session_counts": {},
+            "special_tag_counts": {},
+            "holiday_tag_counts": {},
+            "event_tag_counts": {},
+            "hour_of_day_counts": {},
+            "day_of_week_counts": {},
+        }
+    raw_status = _summary_key(calendar.get("status"))
+    status = "unavailable" if raw_status == "unavailable" else "available"
+    summary: dict[str, JSONValue] = {
+        "status": status,
+        "raw_status": raw_status,
+        "computed_from": _summary_key(calendar.get("computed_from")),
+        "cache_source": _optional_summary_key(calendar.get("cache_source")),
+        "row_count": _int_payload(calendar.get("row_count")),
+        "parsed_row_count": _int_payload(calendar.get("parsed_row_count")),
+        "invalid_timestamp_count": _int_payload(
+            calendar.get("invalid_timestamp_count")
+        ),
+        "calendar_profile": _calendar_profile_summary(calendar),
+    }
+    count_fields = (
+        "session_state_counts",
+        "active_session_counts",
+        "special_tag_counts",
+        "holiday_tag_counts",
+        "event_tag_counts",
+        "hour_of_day_counts",
+        "day_of_week_counts",
+    )
+    for count_field in count_fields:
+        summary[count_field] = _bounded_count_mapping(
+            _counter_from_mapping(_payload_mapping(calendar.get(count_field))),
+            limit=count_limit,
+        )
+    return summary
+
+
+def _calendar_profile_summary(
+    calendar: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    policy = _payload_mapping(calendar.get("calendar_policy"))
+    profile = _payload_mapping(policy.get("calendar_profile"))
+    return {
+        "name": _summary_key(profile.get("name")),
+        "source": _summary_key(
+            profile.get("source") or policy.get("holiday_calendar_source")
+        ),
+        "version": _summary_key(profile.get("version")),
+        "complete": (
+            calendar.get("calendar_profile_complete") is True
+            or policy.get("holiday_calendar_complete") is True
+        ),
+        "missing_optional_calendar_data": (
+            calendar.get("missing_optional_calendar_data") is True
+        ),
+        "static_advisory": (
+            profile.get("static_advisory") is True
+            or policy.get("holiday_calendar_static_advisory") is True
+        ),
+    }
+
+
+def _conditional_distribution_summary(
+    conditional: Mapping[str, JSONValue],
+    *,
+    timeframe: str,
+    count_limit: int,
+) -> dict[str, JSONValue]:
+    if timeframe != TICK:
+        return {"status": "not_applicable", "metric": "tick_spread"}
+    if not conditional:
+        return {"status": "absent", "metric": "tick_spread"}
+    return {
+        "status": "available",
+        "basis": _summary_key(conditional.get("basis")),
+        "metric": _summary_key(conditional.get("metric")),
+        "row_count": _int_payload(conditional.get("row_count")),
+        "sampled_row_count": _int_payload(conditional.get("sampled_row_count")),
+        "usable_row_count": _int_payload(conditional.get("usable_row_count")),
+        "invalid_row_count": _int_payload(conditional.get("invalid_row_count")),
+        "truncated": conditional.get("truncated") is True,
+        "by_active_session": _conditioned_spread_rows(
+            _payload_mapping(conditional.get("by_active_session")),
+            limit=count_limit,
+        ),
+        "by_special_tag": _conditioned_spread_rows(
+            _payload_mapping(conditional.get("by_special_tag")),
+            limit=count_limit,
+        ),
+    }
+
+
+def _conditioned_spread_rows(
+    buckets: Mapping[str, JSONValue],
+    *,
+    limit: int,
+) -> list[JSONValue]:
+    rows: list[dict[str, JSONValue]] = []
+    for bucket, payload in buckets.items():
+        spread_payload = dict(
+            _payload_mapping(_payload_mapping(payload).get("spread"))
+        )
+        spread = _compact_numeric_summary(spread_payload)
+        rows.append(
+            {
+                "bucket": _summary_key(bucket),
+                "count": _int_payload(spread.get("count")),
+                "spread": spread,
+            }
+        )
+    rows.sort(
+        key=lambda item: (
+            -_int_payload(item.get("count")),
+            _summary_key(item.get("bucket")),
+        )
+    )
+    return cast(list[JSONValue], rows[: max(1, limit)])
+
+
+def _bounded_count_mapping(
+    counter: Counter[str],
+    *,
+    limit: int,
+) -> dict[str, JSONValue]:
+    if not counter:
+        return {}
+    included = sorted(counter.items(), key=lambda item: (-item[1], item[0]))[
+        : max(1, limit)
+    ]
+    return {key: count for key, count in included}
+
+
+def _bounded_count_rows(
+    counter: Counter[str],
+    *,
+    limit: int,
+) -> list[JSONValue]:
+    return [
+        {"value": key, "count": count}
+        for key, count in sorted(
+            counter.items(), key=lambda item: (-item[1], item[0])
+        )[: max(1, limit)]
+    ]
+
+
+def _regime_target_sort_key(
+    target: Mapping[str, JSONValue],
+) -> tuple[object, ...]:
+    axis = _payload_mapping(target.get("target_axis"))
+    calendar = _payload_mapping(target.get("calendar_regimes"))
+    conditional = _payload_mapping(target.get("conditional_distributions"))
+    return (
+        _regime_status_rank(_summary_key(calendar.get("status"))),
+        _conditional_status_rank(_summary_key(conditional.get("status"))),
+        _summary_key(axis.get("data_format")),
+        _summary_key(axis.get("timeframe")),
+        _summary_key(axis.get("symbol")),
+        _summary_key(axis.get("period")),
+        _summary_key(axis.get("kind")),
+    )
+
+
+def _regime_status_rank(status: str) -> int:
+    ranks = {"unavailable": 0, "missing": 1, "available": 2}
+    return ranks.get(status, 99)
+
+
+def _conditional_status_rank(status: str) -> int:
+    ranks = {"available": 0, "absent": 1, "not_applicable": 2}
     return ranks.get(status, 99)
 
 

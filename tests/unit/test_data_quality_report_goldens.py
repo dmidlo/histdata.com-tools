@@ -36,6 +36,8 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
@@ -743,6 +745,12 @@ def _assert_report_contract(payload: dict[str, JSONValue]) -> None:
                 ]
             )
         )
+    if TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY in metadata:
+        _assert_fingerprint_regime(
+            _mapping(
+                metadata[TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY]
+            )
+        )
     if TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY in metadata:
         _assert_fingerprint_topology(
             _mapping(
@@ -809,6 +817,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "fingerprint_distribution",
         "fingerprint_distribution_attention",
         "fingerprint_readiness",
+        "fingerprint_regime",
         "fingerprint_topology",
         "fingerprint_topology_attention",
         "next_actions",
@@ -832,6 +841,8 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         _assert_fingerprint_distribution_attention(
             _mapping(payload["fingerprint_distribution_attention"])
         )
+    if "fingerprint_regime" in payload:
+        _assert_fingerprint_regime(_mapping(payload["fingerprint_regime"]))
     if "fingerprint_topology" in payload:
         _assert_fingerprint_topology(_mapping(payload["fingerprint_topology"]))
     if "fingerprint_topology_attention" in payload:
@@ -1163,6 +1174,141 @@ def _assert_fingerprint_distribution_attention_target(
         "zero_spread_count",
     ):
         assert isinstance(payload[key], int)
+
+
+def _assert_fingerprint_regime(payload: dict[str, JSONValue]) -> None:
+    assert set(payload) == {
+        "cache_source_counts",
+        "calendar_profile",
+        "calendar_regime_target_count",
+        "calendar_status_counts",
+        "computed_from_counts",
+        "conditional_distribution_target_count",
+        "conditional_status_counts",
+        "count_limit",
+        "included_target_count",
+        "omitted_target_count",
+        "rule_id",
+        "schema_version",
+        "target_count",
+        "target_summaries",
+        "top_active_session_counts",
+        "top_day_of_week_counts",
+        "top_event_tag_counts",
+        "top_holiday_tag_counts",
+        "top_hour_of_day_counts",
+        "top_session_state_counts",
+        "top_special_tag_counts",
+        "truncated",
+    }
+    assert payload["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_SCHEMA_VERSION
+    )
+    assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    for key in (
+        "calendar_regime_target_count",
+        "conditional_distribution_target_count",
+        "count_limit",
+        "included_target_count",
+        "omitted_target_count",
+        "target_count",
+    ):
+        assert isinstance(payload[key], int)
+    assert isinstance(payload["truncated"], bool)
+    for key in (
+        "cache_source_counts",
+        "calendar_status_counts",
+        "computed_from_counts",
+        "conditional_status_counts",
+    ):
+        assert isinstance(payload[key], dict)
+    profile = _mapping(payload["calendar_profile"])
+    assert set(profile) == {
+        "complete_count",
+        "incomplete_count",
+        "source_counts",
+        "static_advisory_count",
+        "version_counts",
+    }
+    for key in (
+        "complete_count",
+        "incomplete_count",
+        "static_advisory_count",
+    ):
+        assert isinstance(profile[key], int)
+    assert isinstance(profile["source_counts"], dict)
+    assert isinstance(profile["version_counts"], dict)
+    for key in (
+        "top_active_session_counts",
+        "top_day_of_week_counts",
+        "top_event_tag_counts",
+        "top_holiday_tag_counts",
+        "top_hour_of_day_counts",
+        "top_session_state_counts",
+        "top_special_tag_counts",
+    ):
+        for row in _list(payload[key]):
+            assert set(_mapping(row)) == {"count", "value"}
+    for target_summary in _list(payload["target_summaries"]):
+        _assert_fingerprint_regime_target(_mapping(target_summary))
+
+
+def _assert_fingerprint_regime_target(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "calendar_regimes",
+        "conditional_distributions",
+        "source_kind",
+        "target_axis",
+    }
+    axis = _mapping(payload["target_axis"])
+    assert set(axis) == {
+        "data_format",
+        "kind",
+        "period",
+        "symbol",
+        "timeframe",
+    }
+    calendar = _mapping(payload["calendar_regimes"])
+    assert set(calendar) == {
+        "active_session_counts",
+        "calendar_profile",
+        "cache_source",
+        "computed_from",
+        "day_of_week_counts",
+        "event_tag_counts",
+        "holiday_tag_counts",
+        "hour_of_day_counts",
+        "invalid_timestamp_count",
+        "parsed_row_count",
+        "raw_status",
+        "row_count",
+        "session_state_counts",
+        "special_tag_counts",
+        "status",
+    }
+    assert calendar["status"] in {"available", "missing", "unavailable"}
+    for key in ("invalid_timestamp_count", "parsed_row_count", "row_count"):
+        assert isinstance(calendar[key], int)
+    profile = _mapping(calendar["calendar_profile"])
+    assert set(profile) == {
+        "complete",
+        "missing_optional_calendar_data",
+        "name",
+        "source",
+        "static_advisory",
+        "version",
+    }
+    conditional = _mapping(payload["conditional_distributions"])
+    assert conditional["status"] in {
+        "absent",
+        "available",
+        "not_applicable",
+    }
+    if conditional["status"] == "available":
+        assert "by_active_session" in conditional
+        assert "by_special_tag" in conditional
 
 
 def _assert_fingerprint_topology(payload: dict[str, JSONValue]) -> None:
