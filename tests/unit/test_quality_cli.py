@@ -15,6 +15,11 @@ from histdatacom.data_quality.preflight import (
     run_cache_quality_preflight,
     write_quality_preflight_report,
 )
+from histdatacom.data_quality.fingerprint_discovery import (
+    TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.fingerprints import SERIES_FINGERPRINT_RULE_ID
+from histdatacom.data_quality.profiles import QUALITY_PROFILE_SCHEMA_VERSION
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     TICK,
@@ -283,6 +288,114 @@ histdatacom:
     assert captured["rule_limit"] == 6
     assert captured["source_limit"] == 7
     assert captured["target_axis_limit"] == 8
+
+
+def test_quality_fingerprint_schema_cli_reports_json(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The fingerprint schema command should expose machine-readable JSON."""
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "cli-fingerprint-profile",
+                "rules": {
+                    SERIES_FINGERPRINT_RULE_ID: {
+                        "quantiles": [0.2, 0.5, 0.8],
+                        "lags": [1, 2],
+                        "max_rows": 25,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "fingerprint-schema",
+            "--quality-profile",
+            str(profile_path),
+            "--json",
+        ]
+    )
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert (
+        payload["schema_version"]
+        == TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION
+    )
+    assert payload["profile"]["name"] == "cli-fingerprint-profile"
+    assert payload["profile"]["source_path"] == "quality-profile.json"
+    assert payload["profile"]["effective_fingerprint_profile"]["lags"] == [
+        1,
+        2,
+    ]
+    assert str(tmp_path) not in output
+
+
+def test_quality_fingerprint_schema_cli_reports_human_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Default fingerprint schema output should be concise text."""
+    exit_code = main(["fingerprint-schema"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Fingerprint Schema Discovery" in output
+    assert "Implemented Sections" in output
+    assert "- return_dynamics: implemented; timeframes=[M1]" in output
+
+
+def test_quality_fingerprint_schema_cli_applies_yaml_defaults(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """YAML defaults should support fingerprint-schema discovery."""
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "yaml-fingerprint-profile",
+                "rules": {SERIES_FINGERPRINT_RULE_ID: {"rounding_digits": 4}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "quality.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality:
+    command: fingerprint_schema
+    quality_profile: {profile_path}
+    json: true
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["--config", str(config_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["profile"]["name"] == "yaml-fingerprint-profile"
+    assert (
+        payload["profile"]["effective_fingerprint_profile"]["rounding_digits"]
+        == 4
+    )
+
+
+def test_quality_help_advertises_fingerprint_schema_command() -> None:
+    """The quality utility help should expose fingerprint schema discovery."""
+    help_text = quality_cli.build_parser().format_help()
+
+    assert "fingerprint-schema" in help_text
+    assert "discover fingerprint schemas" in help_text
 
 
 def _write_preflight_evidence(

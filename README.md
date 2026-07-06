@@ -1001,6 +1001,23 @@ stale quote, burst, and one-sided movement facts. Use the raw
 `time_series_fingerprint` payload when downstream tooling needs the complete
 fingerprint sections or full quantile maps.
 
+Discover the active fingerprint contract without scanning target data:
+
+```sh
+histdatacom quality fingerprint-schema --json
+```
+
+Use `histdatacom quality fingerprint-schema` for a concise human-readable
+summary, or add `--quality-profile profiles/strict-ci.json` to reflect
+profile-overridden fingerprint knobs such as quantiles, lags, rolling windows,
+histogram bins, max rows, rounding, and distribution-attention thresholds. This
+discovery command is for downstream parsers, validators, and schema review: it
+lists schema versions, metadata keys, target capabilities, implemented/planned
+sections, basis/status/reason vocabularies, and publish-safe example fragments.
+It does not read local datasets or generate fingerprints; run
+`histdatacom --quality --quality-checks fingerprint` when you need real target
+fingerprint payloads.
+
 `provenance` checks are only applied when a local orchestration
 `.histdatacom/manifest-status.sqlite3` store is available. Explicit
 `--quality-checks provenance` runs without a store return a clean info finding

@@ -13,10 +13,18 @@ from histdatacom.cli_config import (
     configured_quality_argv,
 )
 from histdatacom.data_quality import QUALITY_CHECK_GROUPS
+from histdatacom.data_quality.fingerprint_discovery import (
+    fingerprint_schema_discovery,
+    format_fingerprint_schema_discovery,
+)
 from histdatacom.data_quality.preflight import (
     DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS,
     format_quality_preflight_evidence_inspection,
     inspect_quality_preflight_evidence,
+)
+from histdatacom.data_quality.profiles import (
+    QualityProfileError,
+    load_quality_profile_file,
 )
 from histdatacom.data_quality.remediation_audit import (
     DEFAULT_REMEDIATION_CATALOG_AUDIT_CODE_LIMIT,
@@ -209,6 +217,26 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit the machine-readable audit payload",
     )
+    fingerprint_schema = subparsers.add_parser(
+        "fingerprint-schema",
+        aliases=("fingerprint-contract", "fingerprint-discovery"),
+        help="discover fingerprint schemas, profile knobs, and vocabulary",
+    )
+    fingerprint_schema.add_argument(
+        "--quality-profile",
+        dest="quality_profile_path",
+        default="",
+        metavar="PATH",
+        help=(
+            "read a quality profile file and reflect effective fingerprint "
+            "controls"
+        ),
+    )
+    fingerprint_schema.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the machine-readable discovery payload",
+    )
     return parser
 
 
@@ -270,6 +298,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             if remediation_catalog_audit_has_warning_error_gaps(payload)
             else 0
         )
+
+    if args.quality_command in {
+        "fingerprint-schema",
+        "fingerprint-contract",
+        "fingerprint-discovery",
+    }:
+        try:
+            profile = (
+                load_quality_profile_file(args.quality_profile_path)
+                if args.quality_profile_path
+                else None
+            )
+        except QualityProfileError as exc:
+            print(f"quality profile error: {exc}", file=sys.stderr)  # noqa:T201
+            return 1
+        payload = fingerprint_schema_discovery(profile)
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+        else:
+            print(format_fingerprint_schema_discovery(payload))  # noqa:T201
+        return 0
 
     parser.error(f"unsupported quality command: {args.quality_command}")
 
