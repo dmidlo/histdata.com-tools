@@ -28,6 +28,9 @@ from histdatacom.data_quality.discovery import (
     normalize_quality_check_groups,
 )
 from histdatacom.data_quality.engine import run_quality_assessment
+from histdatacom.data_quality.fingerprint_discovery import (
+    fingerprint_contract_audit,
+)
 from histdatacom.data_quality.polars_cache import read_quality_polars_cache
 from histdatacom.data_quality.rules import (
     quality_profile_report_metadata,
@@ -66,6 +69,10 @@ QUALITY_PREFLIGHT_WARN_FRACTION = 0.80
 QUALITY_PREFLIGHT_LARGE_CACHE_TARGET_COUNT = 32
 QUALITY_PREFLIGHT_VALIDATION_TEXT_LIMIT = 1200
 QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST = "latest"
+QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY = (
+    "fail-preflight-on-error"
+)
+QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_FINDING_DISPLAY_LIMIT = 8
 DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR = (
     Path(".histdatacom") / "closure-readiness"
 )
@@ -263,6 +270,7 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
     safe_payload = publish_safe_json_mapping(payload)
     evidence = _mapping(safe_payload.get("evidence"))
     commands = _mapping(evidence.get("commands"))
+    fingerprint_contract = _mapping(evidence.get("fingerprint_contract_audit"))
     profile_preview = _evidence_artifact(
         evidence,
         "quality_profile_preview",
@@ -460,6 +468,30 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
             "",
         ]
     )
+    lines.extend(
+        [
+            "## Fingerprint Contract Audit",
+            "",
+            *_markdown_table(
+                ("Measure", "Value"),
+                _fingerprint_contract_audit_markdown_rows(fingerprint_contract),
+            ),
+            "",
+        ]
+    )
+    finding_rows = _fingerprint_contract_finding_rows(fingerprint_contract)
+    if finding_rows:
+        lines.extend(
+            [
+                "### Fingerprint Contract Findings",
+                "",
+                *_markdown_table(
+                    ("Severity", "Code", "Path", "Message"),
+                    finding_rows,
+                ),
+                "",
+            ]
+        )
     if remediation_audit_summary:
         lines.extend(
             [
@@ -888,6 +920,7 @@ def format_quality_preflight_console_summary(
     decision = _mapping(payload.get("decision"))
     diagnostics = _mapping(payload.get("diagnostics"))
     evidence = _mapping(payload.get("evidence"))
+    fingerprint_contract = _mapping(evidence.get("fingerprint_contract_audit"))
     lines = [
         "Data quality cache preflight",
         "status: " + str(payload.get("status", "unknown")),
@@ -939,6 +972,16 @@ def format_quality_preflight_console_summary(
             f"{remediation_audit_summary.get('unmapped_warning_error_gap_count', 0)} "
             "observed_unmapped_warning_error_groups="
             f"{remediation_audit_summary.get('report_unmapped_warning_error_group_count', 0)}"
+        )
+    if fingerprint_contract:
+        lines.append(
+            "fingerprint contract audit: "
+            f"{fingerprint_contract.get('status', 'unknown')} "
+            f"checks={fingerprint_contract.get('check_count', 0)} "
+            f"findings={fingerprint_contract.get('finding_count', 0)} "
+            f"errors={fingerprint_contract.get('error_count', 0)} "
+            f"warnings={fingerprint_contract.get('warning_count', 0)} "
+            f"policy={fingerprint_contract.get('preflight_status_policy', '')}"
         )
     lines.extend(_evidence_artifact_console_lines(evidence))
     if decision.get("reason"):
@@ -1236,6 +1279,20 @@ def _payload(
             "status": "fail",
             "reason": "no cache targets matched the requested scope",
         }
+    payload["evidence"] = _quality_preflight_evidence_payload(
+        root_path=root_path,
+        check_groups=check_groups,
+        selected_groups=selected_groups,
+        selected_pairs=selected_pairs,
+        selected_formats=selected_formats,
+        selected_timeframes=selected_timeframes,
+        quality_profile=quality_profile,
+        validation_report_path=validation_report_path,
+        run_validation=run_validation,
+        validation_runner=validation_runner,
+    )
+    if _fingerprint_contract_audit_failed(payload["evidence"]):
+        payload["status"] = "fail"
     payload["decision"] = _decision_payload(
         payload,
         root_path=root_path,
@@ -1244,17 +1301,6 @@ def _payload(
         selected_pairs=selected_pairs,
         selected_formats=selected_formats,
         selected_timeframes=selected_timeframes,
-    )
-    payload["evidence"] = _quality_preflight_evidence_payload(
-        root_path=root_path,
-        check_groups=check_groups,
-        selected_groups=selected_groups,
-        selected_pairs=selected_pairs,
-        selected_formats=selected_formats,
-        selected_timeframes=selected_timeframes,
-        validation_report_path=validation_report_path,
-        run_validation=run_validation,
-        validation_runner=validation_runner,
     )
     safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
     return safe_payload
@@ -1268,6 +1314,7 @@ def _quality_preflight_evidence_payload(
     selected_pairs: tuple[str, ...],
     selected_formats: tuple[str, ...],
     selected_timeframes: tuple[str, ...],
+    quality_profile: Mapping[str, Any] | None,
     validation_report_path: str | Path | None,
     run_validation: bool,
     validation_runner: ValidationRunner | None,
@@ -1315,6 +1362,9 @@ def _quality_preflight_evidence_payload(
         ),
         "validation_source": validation_source,
         "validation_commands": validation,
+        "fingerprint_contract_audit": _fingerprint_contract_audit_payload(
+            quality_profile
+        ),
         "runtime_cleanup": _preflight_runtime_cleanup_payload(),
         "operational": _preflight_operational_payload(
             root_path=root_path,
@@ -1340,6 +1390,50 @@ def _quality_preflight_evidence_payload(
     }
     safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
     return safe_payload
+
+
+def _fingerprint_contract_audit_payload(
+    quality_profile: Mapping[str, Any] | None,
+) -> dict[str, JSONValue]:
+    audit = dict(fingerprint_contract_audit(quality_profile))
+    audit["preflight_status_policy"] = (
+        QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY
+    )
+    audit["preflight_gate"] = {
+        "status": "fail" if audit.get("status") == "fail" else "pass",
+        "policy": QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY,
+        "reason": _fingerprint_contract_gate_reason(audit),
+        "standalone_command": (
+            "histdatacom quality fingerprint-schema --verify --json"
+        ),
+        "data_dependency": "none",
+    }
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(audit)
+    return safe_payload
+
+
+def _fingerprint_contract_gate_reason(
+    audit: Mapping[str, JSONValue],
+) -> str:
+    if audit.get("status") == "fail":
+        return (
+            "fingerprint contract audit failed with "
+            f"{_int_value(audit.get('error_count'))} errors and "
+            f"{_int_value(audit.get('warning_count'))} warnings"
+        )
+    return "fingerprint contract audit passed"
+
+
+def _fingerprint_contract_audit_failed(
+    evidence: JSONValue,
+) -> bool:
+    audit = _mapping(_mapping(evidence).get("fingerprint_contract_audit"))
+    gate = _mapping(audit.get("preflight_gate"))
+    return (
+        audit.get("status") == "fail"
+        and gate.get("policy")
+        == QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY
+    )
 
 
 def _evidence_commands_payload(
@@ -2009,6 +2103,15 @@ def _decision_payload(
             "reason": reason or "no cache targets matched the requested scope",
             "next_command": "",
         }
+    fingerprint_gate = _fingerprint_contract_audit_gate(payload)
+    if fingerprint_gate.get("status") == "fail":
+        return {
+            "state": "fail",
+            "label": "do not run full quality battery",
+            "action": "fix fingerprint contract drift",
+            "reason": str(fingerprint_gate.get("reason", "")),
+            "next_command": str(fingerprint_gate.get("standalone_command", "")),
+        }
     if status == "pass":
         return {
             "state": "safe",
@@ -2046,6 +2149,14 @@ def _decision_payload(
         "reason": reason,
         "next_command": "",
     }
+
+
+def _fingerprint_contract_audit_gate(
+    payload: Mapping[str, JSONValue],
+) -> dict[str, Any]:
+    evidence = _mapping(payload.get("evidence"))
+    audit = _mapping(evidence.get("fingerprint_contract_audit"))
+    return _mapping(audit.get("preflight_gate"))
 
 
 def _quality_preflight_evidence_state(
@@ -2345,6 +2456,16 @@ def _preflight_policy_payload(
                 DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS
             )
         },
+        "fingerprint_contract_audit": {
+            "mode": "always",
+            "status_policy": (
+                QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY
+            ),
+            "data_dependency": "none",
+            "standalone_command": (
+                "histdatacom quality fingerprint-schema --verify --json"
+            ),
+        },
     }
 
 
@@ -2373,6 +2494,19 @@ def _policy_mismatch_reason(
         QUALITY_PREFLIGHT_WARN_FRACTION
     ):
         return "Temporal budget warning policy differs"
+    fingerprint_policy = _mapping(policy.get("fingerprint_contract_audit"))
+    if fingerprint_policy.get("mode") != "always":
+        return "fingerprint contract audit policy differs"
+    if fingerprint_policy.get("status_policy") != (
+        QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY
+    ):
+        return "fingerprint contract audit status policy differs"
+    if fingerprint_policy.get("data_dependency") != "none":
+        return "fingerprint contract audit data dependency differs"
+    if fingerprint_policy.get("standalone_command") != (
+        "histdatacom quality fingerprint-schema --verify --json"
+    ):
+        return "fingerprint contract audit standalone command differs"
     return ""
 
 
@@ -2692,6 +2826,63 @@ def _source_artifact_state(operational: Mapping[str, Any]) -> str:
         f"{cleanup.get('state', 'unknown')} "
         f"({cleanup.get('source_artifact_count', 0)} artifacts)"
     )
+
+
+def _fingerprint_contract_audit_markdown_rows(
+    audit: Mapping[str, Any],
+) -> tuple[tuple[str, str], ...]:
+    if not audit:
+        return (
+            ("Status", "not-run"),
+            (
+                "Policy",
+                QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY,
+            ),
+            ("Reason", "fingerprint contract audit was not emitted"),
+        )
+    gate = _mapping(audit.get("preflight_gate"))
+    return (
+        ("Status", str(audit.get("status", "unknown"))),
+        ("Checks", str(audit.get("check_count", 0))),
+        ("Findings", str(audit.get("finding_count", 0))),
+        ("Errors", str(audit.get("error_count", 0))),
+        ("Warnings", str(audit.get("warning_count", 0))),
+        ("Policy", str(audit.get("preflight_status_policy", ""))),
+        ("Reason", str(gate.get("reason", ""))),
+        ("Standalone command", str(gate.get("standalone_command", ""))),
+    )
+
+
+def _fingerprint_contract_finding_rows(
+    audit: Mapping[str, Any],
+) -> tuple[tuple[str, str, str, str], ...]:
+    findings = _list_of_mappings(audit.get("findings"))
+    rows: list[tuple[str, str, str, str]] = []
+    for finding in findings[
+        :QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_FINDING_DISPLAY_LIMIT
+    ]:
+        rows.append(
+            (
+                str(finding.get("severity", "")),
+                str(finding.get("code", "")),
+                str(finding.get("path", "")),
+                str(finding.get("message", "")),
+            )
+        )
+    finding_count = _int_value(audit.get("finding_count"))
+    if finding_count > len(rows):
+        rows.append(
+            (
+                "info",
+                "truncated",
+                "findings",
+                (
+                    f"{finding_count - len(rows)} additional fingerprint "
+                    "contract findings omitted from Markdown summary"
+                ),
+            )
+        )
+    return tuple(rows)
 
 
 def _evidence_artifact(
