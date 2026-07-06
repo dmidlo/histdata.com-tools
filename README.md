@@ -1020,6 +1020,11 @@ skipped-lag reason counts, and per-series sample counts. Use the raw
 fingerprint sections, full quantile maps, full conditioned distributions, or full
 ACF lag maps.
 
+Bounded report and fingerprint summary payloads include `limit_metadata` and
+expanded `payload_limits` entries with requested, default, effective, minimum,
+maximum, and unbounded limit fields. The legacy `limit` field remains present
+and represents the effective limit applied to the emitted rows.
+
 Discover the active fingerprint contract without scanning target data:
 
 ```sh

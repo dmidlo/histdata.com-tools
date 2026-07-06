@@ -927,20 +927,38 @@ def test_quality_remediation_coverage_is_bounded_and_stably_ordered(
     assert coverage["included_unmapped_group_count"] == 1
     assert coverage["omitted_unmapped_group_count"] == 2
     assert coverage["unmapped_truncated"] is True
-    assert coverage["count_limits"]["rule_id_counts"] == {
-        "limit": 1,
-        "total_count": 4,
-        "included_count": 1,
-        "omitted_count": 3,
-        "truncated": True,
-    }
-    assert coverage["count_limits"]["finding_code_counts"] == {
-        "limit": 1,
-        "total_count": 4,
-        "included_count": 1,
-        "omitted_count": 3,
-        "truncated": True,
-    }
+    _assert_count_limit_metadata(
+        coverage["count_limits"]["rule_id_counts"],
+        limit=1,
+        total_count=4,
+        included_count=1,
+        omitted_count=3,
+        truncated=True,
+        requested_limit=1,
+        default_limit=16,
+    )
+    _assert_count_limit_metadata(
+        coverage["count_limits"]["finding_code_counts"],
+        limit=1,
+        total_count=4,
+        included_count=1,
+        omitted_count=3,
+        truncated=True,
+        requested_limit=1,
+        default_limit=16,
+    )
+    _assert_limit_metadata(
+        coverage["limit_metadata"]["groups"],
+        limit=1,
+        requested_limit=1,
+        default_limit=16,
+    )
+    _assert_limit_metadata(
+        coverage["limit_metadata"]["target_axes"],
+        limit=1,
+        requested_limit=1,
+        default_limit=8,
+    )
 
     groups = coverage["unmapped_groups"]
     assert len(groups) == 1
@@ -1503,13 +1521,22 @@ def test_bounded_quality_payload_includes_next_actions(
 
     assert "rule_results" not in payload
     assert payload["next_actions"]["action_count"] == 2
-    assert payload["payload_limits"]["next_actions"] == {
-        "limit": 16,
-        "total_count": 2,
-        "included_count": 2,
-        "omitted_count": 0,
-        "truncated": False,
-    }
+    _assert_count_limit_metadata(
+        payload["payload_limits"]["next_actions"],
+        limit=16,
+        total_count=2,
+        included_count=2,
+        omitted_count=0,
+        truncated=False,
+        requested_limit=16,
+        default_limit=16,
+    )
+    _assert_limit_metadata(
+        payload["payload_limits"]["next_actions"]["target_axes"],
+        limit=8,
+        requested_limit=8,
+        default_limit=8,
+    )
 
     prebounded_actions = quality_next_actions_summary(report, action_limit=1)
     assert prebounded_actions is not None
@@ -1531,13 +1558,16 @@ def test_bounded_quality_payload_includes_next_actions(
     )
 
     assert len(prebounded_payload["next_actions"]["actions"]) == 1
-    assert prebounded_payload["payload_limits"]["next_actions"] == {
-        "limit": 16,
-        "total_count": 2,
-        "included_count": 1,
-        "omitted_count": 1,
-        "truncated": True,
-    }
+    _assert_count_limit_metadata(
+        prebounded_payload["payload_limits"]["next_actions"],
+        limit=1,
+        total_count=2,
+        included_count=1,
+        omitted_count=1,
+        truncated=True,
+        requested_limit=1,
+        default_limit=16,
+    )
 
 
 def test_bounded_quality_payload_includes_remediation_coverage(
@@ -1559,14 +1589,26 @@ def test_bounded_quality_payload_includes_remediation_coverage(
     assert "rule_results" not in payload
     assert payload["remediation_coverage"]["finding_count"] == 5
     assert payload["remediation_coverage"]["unmapped_finding_count"] == 4
-    assert payload["payload_limits"]["remediation_coverage"] == {
-        "limit": 16,
-        "target_axis_limit": 8,
-        "total_count": 3,
-        "included_count": 3,
-        "omitted_count": 0,
-        "truncated": False,
-    }
+    _assert_count_limit_metadata(
+        payload["payload_limits"]["remediation_coverage"],
+        limit=16,
+        total_count=3,
+        included_count=3,
+        omitted_count=0,
+        truncated=False,
+        requested_limit=16,
+        default_limit=16,
+    )
+    assert (
+        payload["payload_limits"]["remediation_coverage"]["target_axis_limit"]
+        == 8
+    )
+    _assert_limit_metadata(
+        payload["payload_limits"]["remediation_coverage"]["target_axes"],
+        limit=8,
+        requested_limit=8,
+        default_limit=8,
+    )
 
 
 def test_bounded_quality_payload_includes_enabled_remediation_catalog_audit(
@@ -2642,10 +2684,22 @@ def _empty_dependence_summary(reason: str) -> dict[str, object]:
         "partial_row_count": 0,
         "truncated": False,
         "lag_count": 0,
+        "lag_limit": 16,
         "lags": [],
         "included_lag_count": 0,
         "omitted_lag_count": 0,
         "lags_truncated": False,
+        "limit_metadata": {
+            "lags": {
+                "limit": 16,
+                "effective_limit": 16,
+                "requested_limit": None,
+                "default_limit": 16,
+                "minimum_limit": 0,
+                "maximum_limit": None,
+                "unbounded": False,
+            }
+        },
         "computed_lag_count": 0,
         "skipped_lag_count": 0,
         "skipped_lag_reason_counts": {},
@@ -3009,3 +3063,44 @@ def _target(path: Path) -> QualityTarget:
         symbol="EURUSD",
         period="201202",
     )
+
+
+def _assert_count_limit_metadata(
+    value: object,
+    *,
+    limit: int,
+    total_count: int,
+    included_count: int,
+    omitted_count: int,
+    truncated: bool,
+    requested_limit: int | None,
+    default_limit: int,
+) -> None:
+    assert isinstance(value, dict)
+    _assert_limit_metadata(
+        value,
+        limit=limit,
+        requested_limit=requested_limit,
+        default_limit=default_limit,
+    )
+    assert value["total_count"] == total_count
+    assert value["included_count"] == included_count
+    assert value["omitted_count"] == omitted_count
+    assert value["truncated"] is truncated
+
+
+def _assert_limit_metadata(
+    value: object,
+    *,
+    limit: int,
+    requested_limit: int | None,
+    default_limit: int,
+) -> None:
+    assert isinstance(value, dict)
+    assert value["limit"] == limit
+    assert value["effective_limit"] == limit
+    assert value["requested_limit"] == requested_limit
+    assert value["default_limit"] == default_limit
+    assert value["minimum_limit"] == 0
+    assert value["maximum_limit"] is None
+    assert value["unbounded"] is (limit < 0)

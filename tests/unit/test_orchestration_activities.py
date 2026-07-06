@@ -1420,13 +1420,15 @@ def test_data_quality_activity_bounds_many_cache_targets(
     assert len(quality["target_summaries"]) == 128
     assert len(quality["discovery"]["targets"]) == 128
     assert quality["target_status_counts"]["clean"] == 200
-    assert quality["payload_limits"]["target_summaries"] == {
-        "limit": 128,
-        "total_count": 200,
-        "included_count": 128,
-        "omitted_count": 72,
-        "truncated": True,
-    }
+    target_limit = quality["payload_limits"]["target_summaries"]
+    assert target_limit["limit"] == 128
+    assert target_limit["effective_limit"] == 128
+    assert target_limit["requested_limit"] == 128
+    assert target_limit["default_limit"] == 128
+    assert target_limit["total_count"] == 200
+    assert target_limit["included_count"] == 128
+    assert target_limit["omitted_count"] == 72
+    assert target_limit["truncated"] is True
     assert len(json.dumps(payload, sort_keys=True)) < 2_097_152
 
 

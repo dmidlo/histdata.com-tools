@@ -134,6 +134,10 @@ from histdatacom.data_quality.fingerprint_discovery import (
     format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
 )
+from histdatacom.data_quality.limits import (
+    BoundedReportLimit,
+    bounded_report_limit,
+)
 from histdatacom.data_quality.ingestion import (
     ASCII_ROW_COUNT_INGESTION_RULE_ID,
     ASCII_SCHEMA_INGESTION_RULE_ID,
@@ -460,9 +464,11 @@ __all__ = [
     "QUALITY_REMEDIATION_COVERAGE_METADATA_KEY",
     "QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION",
     "QUALITY_REPORTING_METADATA_KEY",
+    "BoundedReportLimit",
     "bars_quality_rules",
     "bars_quality_run_rules",
     "bounded_quality_payload",
+    "bounded_report_limit",
     "build_full_dataset_campaign_report",
     "build_storage_backed_campaign_plan",
     "calendar_policy_metadata",

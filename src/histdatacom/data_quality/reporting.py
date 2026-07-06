@@ -43,6 +43,10 @@ from histdatacom.data_quality.fingerprints import (
     series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
+from histdatacom.data_quality.limits import (
+    BoundedReportLimit,
+    bounded_report_limit,
+)
 from histdatacom.data_quality.remediation import (
     remediation_hint_payloads_for_finding,
 )
@@ -489,11 +493,25 @@ def bounded_quality_payload(
     decision: QualityExitDecision,
     artifact: ArtifactRef | None,
     publish_safe: bool = True,
-    discovery_target_limit: int = QUALITY_PAYLOAD_DISCOVERY_TARGET_LIMIT,
-    target_summary_limit: int = QUALITY_PAYLOAD_TARGET_SUMMARY_LIMIT,
-    cross_target_summary_limit: int = QUALITY_PAYLOAD_CROSS_TARGET_SUMMARY_LIMIT,
+    discovery_target_limit: int | None = QUALITY_PAYLOAD_DISCOVERY_TARGET_LIMIT,
+    target_summary_limit: int | None = QUALITY_PAYLOAD_TARGET_SUMMARY_LIMIT,
+    cross_target_summary_limit: int | None = (
+        QUALITY_PAYLOAD_CROSS_TARGET_SUMMARY_LIMIT
+    ),
 ) -> dict[str, JSONValue]:
     """Return a bounded result payload without detailed findings."""
+    discovery_target_limit_state = bounded_report_limit(
+        discovery_target_limit,
+        default_limit=QUALITY_PAYLOAD_DISCOVERY_TARGET_LIMIT,
+    )
+    target_summary_limit_state = bounded_report_limit(
+        target_summary_limit,
+        default_limit=QUALITY_PAYLOAD_TARGET_SUMMARY_LIMIT,
+    )
+    cross_target_summary_limit_state = bounded_report_limit(
+        cross_target_summary_limit,
+        default_limit=QUALITY_PAYLOAD_CROSS_TARGET_SUMMARY_LIMIT,
+    )
     target_summaries = report.target_summaries
     cross_target_summaries = _cross_target_summaries(report)
     fingerprint_coverage = _fingerprint_coverage_summary(report)
@@ -515,15 +533,15 @@ def bounded_quality_payload(
     payload_limits: dict[str, JSONValue] = {
         "discovery_targets": _payload_limit_metadata(
             _sequence_count(discovery.get("targets")),
-            discovery_target_limit,
+            discovery_target_limit_state,
         ),
         "target_summaries": _payload_limit_metadata(
             len(target_summaries),
-            target_summary_limit,
+            target_summary_limit_state,
         ),
         "cross_target_summaries": _payload_limit_metadata(
             len(cross_target_summaries),
-            cross_target_summary_limit,
+            cross_target_summary_limit_state,
         ),
         "next_actions": _next_action_payload_limit_metadata(next_actions),
         "remediation_coverage": _remediation_coverage_payload_limit_metadata(
@@ -535,17 +553,17 @@ def bounded_quality_payload(
         "check_groups": list(check_groups),
         "discovery": _bounded_discovery_payload(
             discovery,
-            target_limit=discovery_target_limit,
+            target_limit=discovery_target_limit_state,
         ),
         "summary": report.summary().to_dict(),
         "target_status_counts": _target_status_counts(target_summaries),
         "target_summaries": _bounded_target_summaries(
             target_summaries,
-            limit=target_summary_limit,
+            limit=target_summary_limit_state,
         ),
         "cross_target_summaries": _bounded_json_list(
             cross_target_summaries,
-            limit=cross_target_summary_limit,
+            limit=cross_target_summary_limit_state,
         ),
         "quality_profile": _quality_profile_metadata(report),
         "report_schema_version": QUALITY_REPORT_SCHEMA_VERSION,
@@ -594,7 +612,7 @@ def bounded_quality_payload(
 def _bounded_discovery_payload(
     discovery: Mapping[str, JSONValue],
     *,
-    target_limit: int,
+    target_limit: BoundedReportLimit,
 ) -> dict[str, JSONValue]:
     """Return discovery metadata with the target list capped."""
     payload = dict(discovery)
@@ -619,7 +637,7 @@ def _bounded_discovery_payload(
 def _bounded_target_summaries(
     summaries: tuple[QualityTargetSummary, ...],
     *,
-    limit: int,
+    limit: BoundedReportLimit,
 ) -> list[JSONValue]:
     """Return capped target summaries with warning/error examples first."""
     ordered = sorted(
@@ -646,37 +664,109 @@ def _target_summary_status_priority(summary: QualityTargetSummary) -> int:
 def _bounded_json_list(
     values: list[JSONValue],
     *,
-    limit: int,
+    limit: BoundedReportLimit,
 ) -> list[JSONValue]:
-    if limit < 0:
-        return list(values)
-    return list(values[:limit])
+    return limit.slice(values)
 
 
 def _payload_limit_metadata(
-    total_count: int, limit: int
+    total_count: int,
+    limit: int | BoundedReportLimit | None,
+    *,
+    default_limit: int | None = None,
+    minimum_limit: int = 0,
+    maximum_limit: int | None = None,
+    allow_unbounded: bool = True,
 ) -> dict[str, JSONValue]:
-    included_count = total_count if limit < 0 else min(total_count, limit)
-    return {
-        "limit": limit,
-        "total_count": total_count,
-        "included_count": included_count,
-        "omitted_count": max(0, total_count - included_count),
-        "truncated": total_count > included_count,
-    }
+    limit_state = _normalize_report_limit(
+        limit,
+        default_limit=(
+            default_limit
+            if default_limit is not None
+            else (limit if isinstance(limit, int) else 0)
+        ),
+        minimum_limit=minimum_limit,
+        maximum_limit=maximum_limit,
+        allow_unbounded=allow_unbounded,
+    )
+    return limit_state.count_payload(total_count)
+
+
+def _normalize_report_limit(
+    limit: int | BoundedReportLimit | None,
+    *,
+    default_limit: int,
+    minimum_limit: int = 0,
+    maximum_limit: int | None = None,
+    allow_unbounded: bool = True,
+) -> BoundedReportLimit:
+    if isinstance(limit, BoundedReportLimit):
+        return limit
+    return bounded_report_limit(
+        limit,
+        default_limit=default_limit,
+        minimum_limit=minimum_limit,
+        maximum_limit=maximum_limit,
+        allow_unbounded=allow_unbounded,
+    )
+
+
+def _summary_limit_payload(
+    summary: Mapping[str, JSONValue],
+    key: str,
+) -> dict[str, JSONValue]:
+    metadata = _mapping_payload(summary.get("limit_metadata"))
+    return _mapping_payload(metadata.get(key))
+
+
+def _limit_payload_effective_limit(
+    payload: Mapping[str, JSONValue],
+    *,
+    fallback: int,
+) -> int:
+    value = payload.get("effective_limit", payload.get("limit"))
+    if isinstance(value, bool) or value is None:
+        return fallback
+    if not isinstance(value, (int, float, str)):
+        return fallback
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _next_action_payload_limit_metadata(
     summary: Mapping[str, JSONValue] | None,
 ) -> dict[str, JSONValue]:
     if summary is None:
-        return _payload_limit_metadata(0, QUALITY_PAYLOAD_NEXT_ACTION_LIMIT)
+        payload = _payload_limit_metadata(0, QUALITY_PAYLOAD_NEXT_ACTION_LIMIT)
+        target_axes = bounded_report_limit(
+            QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT,
+            default_limit=QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT,
+        ).limit_payload()
+        payload["target_axis_limit"] = (
+            QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT
+        )
+        payload["target_axes"] = target_axes
+        return payload
     total_count = _int_metadata(summary, "action_count")
     included_count = _int_metadata(summary, "included_action_count")
     omitted_count = _int_metadata(summary, "omitted_action_count")
     truncated = summary.get("truncated")
-    return {
-        "limit": QUALITY_PAYLOAD_NEXT_ACTION_LIMIT,
+    action_limit_payload = _summary_limit_payload(summary, "actions")
+    target_axis_limit_payload = _summary_limit_payload(summary, "target_axes")
+    if not action_limit_payload:
+        action_limit_payload = bounded_report_limit(
+            QUALITY_PAYLOAD_NEXT_ACTION_LIMIT,
+            default_limit=QUALITY_PAYLOAD_NEXT_ACTION_LIMIT,
+        ).limit_payload()
+    if not target_axis_limit_payload:
+        target_axis_limit_payload = bounded_report_limit(
+            QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT,
+            default_limit=QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT,
+        ).limit_payload()
+    metadata_payload: dict[str, JSONValue] = {
+        **action_limit_payload,
         "total_count": total_count,
         "included_count": included_count,
         "omitted_count": omitted_count,
@@ -684,25 +774,49 @@ def _next_action_payload_limit_metadata(
             truncated if isinstance(truncated, bool) else omitted_count > 0
         ),
     }
+    metadata_payload["target_axis_limit"] = _limit_payload_effective_limit(
+        target_axis_limit_payload,
+        fallback=QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT,
+    )
+    metadata_payload["target_axes"] = target_axis_limit_payload
+    return metadata_payload
 
 
 def _remediation_coverage_payload_limit_metadata(
     summary: Mapping[str, JSONValue] | None,
 ) -> dict[str, JSONValue]:
     if summary is None:
-        return _payload_limit_metadata(
+        payload = _payload_limit_metadata(
             0,
             QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
         )
+        target_axes = bounded_report_limit(
+            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+            default_limit=QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+        ).limit_payload()
+        payload["target_axis_limit"] = (
+            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT
+        )
+        payload["target_axes"] = target_axes
+        return payload
     total_count = _int_metadata(summary, "unmapped_group_count")
     included_count = _int_metadata(summary, "included_unmapped_group_count")
     omitted_count = _int_metadata(summary, "omitted_unmapped_group_count")
     truncated = summary.get("unmapped_truncated")
-    return {
-        "limit": QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
-        "target_axis_limit": (
-            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT
-        ),
+    group_limit_payload = _summary_limit_payload(summary, "groups")
+    target_axis_limit_payload = _summary_limit_payload(summary, "target_axes")
+    if not group_limit_payload:
+        group_limit_payload = bounded_report_limit(
+            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
+            default_limit=QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
+        ).limit_payload()
+    if not target_axis_limit_payload:
+        target_axis_limit_payload = bounded_report_limit(
+            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+            default_limit=QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+        ).limit_payload()
+    payload = {
+        **group_limit_payload,
         "total_count": total_count,
         "included_count": included_count,
         "omitted_count": omitted_count,
@@ -710,29 +824,67 @@ def _remediation_coverage_payload_limit_metadata(
             truncated if isinstance(truncated, bool) else omitted_count > 0
         ),
     }
+    payload["target_axis_limit"] = _limit_payload_effective_limit(
+        target_axis_limit_payload,
+        fallback=QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+    )
+    payload["target_axes"] = target_axis_limit_payload
+    return payload
 
 
 def _remediation_catalog_audit_payload_limit_metadata(
     summary: Mapping[str, JSONValue] | None,
 ) -> dict[str, JSONValue]:
     if summary is None:
-        return _payload_limit_metadata(
+        payload = _payload_limit_metadata(
             0,
             QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
         )
+        rule_counts = bounded_report_limit(
+            QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+            default_limit=QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+        ).limit_payload()
+        sources = bounded_report_limit(
+            QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
+            default_limit=QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
+        ).limit_payload()
+        target_axes = bounded_report_limit(
+            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+            default_limit=QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+        ).limit_payload()
+        payload["rule_limit"] = (
+            QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT
+        )
+        payload["rule_counts"] = rule_counts
+        payload["source_limit"] = (
+            QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT
+        )
+        payload["sources"] = sources
+        payload["target_axis_limit"] = (
+            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT
+        )
+        payload["target_axes"] = target_axes
+        return payload
     limits = _mapping_payload(summary.get("payload_limits"))
     ranked_gaps = _mapping_payload(limits.get("ranked_gaps"))
     total_count = _int_metadata(ranked_gaps, "total_count")
     included_count = _int_metadata(ranked_gaps, "included_count")
     omitted_count = _int_metadata(ranked_gaps, "omitted_count")
     truncated = ranked_gaps.get("truncated")
-    return {
-        "limit": QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
-        "rule_limit": QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
-        "source_limit": QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
-        "target_axis_limit": (
-            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT
-        ),
+    rule_limit_payload = _mapping_payload(limits.get("known_rule_id_counts"))
+    source_limit_payload = _mapping_payload(limits.get("known_code_sources"))
+    target_axis_limit_payload = _mapping_payload(
+        _mapping_payload(limits.get("report_unmapped_groups")).get(
+            "target_axes"
+        )
+    )
+    if not target_axis_limit_payload:
+        target_axis_limit_payload = bounded_report_limit(
+            QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+            default_limit=QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+        ).limit_payload()
+    payload = {
+        **ranked_gaps,
         "total_count": total_count,
         "included_count": included_count,
         "omitted_count": omitted_count,
@@ -740,6 +892,22 @@ def _remediation_catalog_audit_payload_limit_metadata(
             truncated if isinstance(truncated, bool) else omitted_count > 0
         ),
     }
+    payload["rule_limit"] = _limit_payload_effective_limit(
+        rule_limit_payload,
+        fallback=QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+    )
+    payload["rule_counts"] = rule_limit_payload
+    payload["source_limit"] = _limit_payload_effective_limit(
+        source_limit_payload,
+        fallback=QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
+    )
+    payload["sources"] = source_limit_payload
+    payload["target_axis_limit"] = _limit_payload_effective_limit(
+        target_axis_limit_payload,
+        fallback=QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+    )
+    payload["target_axes"] = target_axis_limit_payload
+    return payload
 
 
 def _sequence_count(value: object) -> int:
@@ -810,13 +978,23 @@ def _quality_profile_metadata(report: QualityReport) -> dict[str, JSONValue]:
 def quality_remediation_coverage_summary(
     report: QualityReport,
     *,
-    group_limit: int = QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
-    target_axis_limit: int = QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+    group_limit: int | None = QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
+    target_axis_limit: int | None = (
+        QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT
+    ),
 ) -> dict[str, JSONValue] | None:
     """Return bounded remediation-catalog coverage for quality findings."""
     summary = report.metadata.get(QUALITY_REMEDIATION_COVERAGE_METADATA_KEY)
     if isinstance(summary, Mapping):
         return dict(summary)
+    group_limit_state = bounded_report_limit(
+        group_limit,
+        default_limit=QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
+    )
+    target_axis_limit_state = bounded_report_limit(
+        target_axis_limit,
+        default_limit=QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+    )
 
     aggregates = _remediation_coverage_aggregates(report)
     if not aggregates:
@@ -867,9 +1045,7 @@ def quality_remediation_coverage_summary(
         ),
         key=_remediation_coverage_group_sort_key,
     )
-    included_unmapped_groups = (
-        unmapped_groups if group_limit < 0 else unmapped_groups[:group_limit]
-    )
+    included_unmapped_groups = group_limit_state.slice(unmapped_groups)
     unmapped_warning_error_group_count = sum(
         1
         for aggregate in unmapped_groups
@@ -887,7 +1063,7 @@ def quality_remediation_coverage_summary(
         finding_code_counts=finding_code_counts,
         mapped_finding_code_counts=mapped_finding_code_counts,
         unmapped_finding_code_counts=unmapped_finding_code_counts,
-        limit=group_limit,
+        limit=group_limit_state,
     )
     omitted_unmapped_group_count = max(
         0,
@@ -909,34 +1085,38 @@ def quality_remediation_coverage_summary(
         "rule_id_counts": _named_counter_payloads(
             rule_id_counts,
             key_name="rule_id",
-            limit=group_limit,
+            limit=group_limit_state,
         ),
         "mapped_rule_id_counts": _named_counter_payloads(
             mapped_rule_id_counts,
             key_name="rule_id",
-            limit=group_limit,
+            limit=group_limit_state,
         ),
         "unmapped_rule_id_counts": _named_counter_payloads(
             unmapped_rule_id_counts,
             key_name="rule_id",
-            limit=group_limit,
+            limit=group_limit_state,
         ),
         "finding_code_counts": _named_counter_payloads(
             finding_code_counts,
             key_name="finding_code",
-            limit=group_limit,
+            limit=group_limit_state,
         ),
         "mapped_finding_code_counts": _named_counter_payloads(
             mapped_finding_code_counts,
             key_name="finding_code",
-            limit=group_limit,
+            limit=group_limit_state,
         ),
         "unmapped_finding_code_counts": _named_counter_payloads(
             unmapped_finding_code_counts,
             key_name="finding_code",
-            limit=group_limit,
+            limit=group_limit_state,
         ),
         "count_limits": count_limits,
+        "limit_metadata": {
+            "groups": group_limit_state.limit_payload(),
+            "target_axes": target_axis_limit_state.limit_payload(),
+        },
         "unmapped_group_count": len(unmapped_groups),
         "included_unmapped_group_count": len(included_unmapped_groups),
         "omitted_unmapped_group_count": omitted_unmapped_group_count,
@@ -955,7 +1135,7 @@ def quality_remediation_coverage_summary(
         "unmapped_groups": [
             _remediation_coverage_group_payload(
                 aggregate,
-                target_axis_limit=target_axis_limit,
+                target_axis_limit=target_axis_limit_state,
             )
             for aggregate in included_unmapped_groups
         ],
@@ -1007,10 +1187,16 @@ def quality_remediation_catalog_audit_summary(
     report: QualityReport,
     *,
     enabled: bool | None = None,
-    code_limit: int = QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
-    rule_limit: int = QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
-    source_limit: int = QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
-    target_axis_limit: int = QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT,
+    code_limit: int | None = QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT,
+    rule_limit: (
+        int | None
+    ) = QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+    source_limit: int | None = (
+        QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT
+    ),
+    target_axis_limit: int | None = (
+        QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT
+    ),
 ) -> dict[str, JSONValue] | None:
     """Return an opt-in bounded remediation-catalog audit for a report."""
     summary = report.metadata.get(
@@ -1089,13 +1275,23 @@ def format_quality_remediation_catalog_audit_lines(
 def quality_next_actions_summary(
     report: QualityReport,
     *,
-    action_limit: int = QUALITY_PAYLOAD_NEXT_ACTION_LIMIT,
-    target_axis_limit: int = QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT,
+    action_limit: int | None = QUALITY_PAYLOAD_NEXT_ACTION_LIMIT,
+    target_axis_limit: (
+        int | None
+    ) = QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT,
 ) -> dict[str, JSONValue] | None:
     """Return bounded run-level next actions from remediation hints."""
     summary = report.metadata.get(QUALITY_NEXT_ACTIONS_METADATA_KEY)
     if isinstance(summary, Mapping):
         return dict(summary)
+    action_limit_state = bounded_report_limit(
+        action_limit,
+        default_limit=QUALITY_PAYLOAD_NEXT_ACTION_LIMIT,
+    )
+    target_axis_limit_state = bounded_report_limit(
+        target_axis_limit,
+        default_limit=QUALITY_PAYLOAD_NEXT_ACTION_TARGET_AXIS_LIMIT,
+    )
 
     aggregates = _next_action_aggregates(report)
     if not aggregates:
@@ -1105,13 +1301,13 @@ def quality_next_actions_summary(
         (
             _next_action_payload(
                 aggregate,
-                target_axis_limit=target_axis_limit,
+                target_axis_limit=target_axis_limit_state,
             )
             for aggregate in aggregates.values()
         ),
         key=_next_action_sort_key,
     )
-    included = actions if action_limit < 0 else actions[:action_limit]
+    included = action_limit_state.slice(actions)
     included_actions: list[JSONValue] = [action for action in included]
     omitted_count = max(0, len(actions) - len(included))
     source_counts: Counter[str] = Counter()
@@ -1123,6 +1319,10 @@ def quality_next_actions_summary(
         "included_action_count": len(included),
         "omitted_action_count": omitted_count,
         "truncated": omitted_count > 0,
+        "limit_metadata": {
+            "actions": action_limit_state.limit_payload(),
+            "target_axes": target_axis_limit_state.limit_payload(),
+        },
         "source_counts": _counter_payload(source_counts),
         "actions": included_actions,
     }
@@ -1260,7 +1460,7 @@ def _add_next_action_hint(
 def _next_action_payload(
     aggregate: _NextActionAggregate,
     *,
-    target_axis_limit: int,
+    target_axis_limit: BoundedReportLimit,
 ) -> dict[str, JSONValue]:
     target_axis_counts = _target_axis_count_payloads(
         aggregate.target_axis_counts,
@@ -1298,6 +1498,9 @@ def _next_action_payload(
         "included_target_axis_count": included_target_axis_count,
         "omitted_target_axis_count": omitted_target_axis_count,
         "target_axis_truncated": omitted_target_axis_count > 0,
+        "limit_metadata": {
+            "target_axes": target_axis_limit.limit_payload(),
+        },
         "severity_counts": _counter_payload(aggregate.severity_counts),
         "attention_level_counts": _counter_payload(
             aggregate.attention_level_counts
@@ -1362,13 +1565,13 @@ def _ranked_counter_max(
 def _target_axis_count_payloads(
     counter: Counter[tuple[str, str, str, str, str]],
     *,
-    limit: int,
+    limit: BoundedReportLimit,
 ) -> list[JSONValue]:
     ordered = sorted(
         counter.items(),
         key=lambda item: (-item[1], item[0]),
     )
-    included = ordered if limit < 0 else ordered[:limit]
+    included = limit.slice(ordered)
     return [
         {
             "target_axis": _target_axis_payload_from_key(axis),
@@ -1467,7 +1670,7 @@ def _remediation_coverage_aggregates(
 def _remediation_coverage_group_payload(
     aggregate: _RemediationCoverageAggregate,
     *,
-    target_axis_limit: int,
+    target_axis_limit: BoundedReportLimit,
 ) -> dict[str, JSONValue]:
     target_axis_counts = _target_axis_count_payloads(
         aggregate.target_axis_counts,
@@ -1492,6 +1695,9 @@ def _remediation_coverage_group_payload(
         "included_target_axis_count": included_target_axis_count,
         "omitted_target_axis_count": omitted_target_axis_count,
         "target_axis_truncated": omitted_target_axis_count > 0,
+        "limit_metadata": {
+            "target_axes": target_axis_limit.limit_payload(),
+        },
         "severity_counts": _counter_payload(aggregate.severity_counts),
         "target_axis_counts": target_axis_counts,
     }
@@ -1531,7 +1737,7 @@ def _remediation_coverage_count_limits(
     finding_code_counts: Counter[str],
     mapped_finding_code_counts: Counter[str],
     unmapped_finding_code_counts: Counter[str],
-    limit: int,
+    limit: BoundedReportLimit,
 ) -> dict[str, JSONValue]:
     return {
         "rule_id_counts": _payload_limit_metadata(len(rule_id_counts), limit),
@@ -1562,13 +1768,13 @@ def _named_counter_payloads(
     counter: Counter[str],
     *,
     key_name: str,
-    limit: int,
+    limit: BoundedReportLimit,
 ) -> list[JSONValue]:
     ordered = sorted(
         counter.items(),
         key=lambda item: (-item[1], item[0]),
     )
-    included = ordered if limit < 0 else ordered[:limit]
+    included = limit.slice(ordered)
     return [
         {
             key_name: key,
