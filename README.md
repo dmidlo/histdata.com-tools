@@ -858,12 +858,18 @@ summary, generated timestamp, package version, preflight policy inputs,
 no-target diagnostics, and a decision section that says whether the full battery
 is safe, warned, failed, or has no matching targets. Safe and warned decisions
 include the next `histdatacom --quality ...` command for the same target scope.
+Every quality preflight also runs the data-free fingerprint contract self-audit
+and records its pass/fail status, bounded findings, standalone verification
+command, and explicit `fail-preflight-on-error` policy in the JSON evidence.
+If the contract audit fails, preflight fails before recommending a full quality
+battery, even when the cache sample and Temporal budget checks pass.
 Use `--quality-preflight-markdown-report PATH` to write the matching
 copy/paste-safe Markdown evidence report for GitHub issue updates, release
 handoffs, or operator notes. That Markdown includes command/config summary,
 package version, cache inventory, benchmark sample, ETA/rate, Temporal budget,
-source-artifact cleanliness, POSIX disk headroom, validation commands, and the
-explicit runtime-cleanup disposition for the local preflight run. Pass
+fingerprint contract audit summary, source-artifact cleanliness, POSIX disk
+headroom, validation commands, and the explicit runtime-cleanup disposition for
+the local preflight run. Pass
 `--quality-preflight-profile-preview-output PATH` when the same evidence bundle
 should include the resolved quality-profile preview used by the preflight. The
 preview artifact can be JSON, text, or Markdown via
@@ -1046,7 +1052,9 @@ pass/fail status, deterministic checks, and bounded drift findings for missing
 schemas, orphan report surfaces, stale payload keys, implemented/planned section
 mismatches, profile-default drift, vocabulary drift, and publish-safe example
 drift. It does not read market data, generate fingerprints, run quality rules, or
-automate GitHub/CI/release workflow.
+automate GitHub/CI/release workflow. Cache-scale `--quality-preflight` runs the
+same data-free contract audit automatically and fails its readiness decision when
+the audit reports contract errors.
 
 `provenance` checks are only applied when a local orchestration
 `.histdatacom/manifest-status.sqlite3` store is available. Explicit

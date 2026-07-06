@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 import histdatacom
+import histdatacom.data_quality.preflight as preflight_module
 import pytest
 
 from histdatacom import Options
@@ -90,6 +91,14 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
         ]
         == 1000
     )
+    assert payload["preflight_policy"]["fingerprint_contract_audit"] == {
+        "mode": "always",
+        "status_policy": "fail-preflight-on-error",
+        "data_dependency": "none",
+        "standalone_command": (
+            "histdatacom quality fingerprint-schema --verify --json"
+        ),
+    }
     assert payload["decision"]["state"] == "safe"
     assert payload["decision"]["next_command"].startswith(
         "histdatacom --quality"
@@ -107,6 +116,16 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
         == 0
     )
     assert payload["evidence"]["validation_commands"][0]["status"] == "not-run"
+    contract_audit = payload["evidence"]["fingerprint_contract_audit"]
+    assert contract_audit["schema_version"] == (
+        "histdatacom.time-series-fingerprint-contract-audit.v1"
+    )
+    assert contract_audit["status"] == "pass"
+    assert contract_audit["preflight_status_policy"] == (
+        "fail-preflight-on-error"
+    )
+    assert contract_audit["preflight_gate"]["status"] == "pass"
+    assert contract_audit["preflight_gate"]["data_dependency"] == "none"
     assert "--pair-groups majors" in payload["decision"]["next_command"]
     assert payload["sample_quality"]["summary"]["target_count"] == 3
     encoded = json.dumps(payload, sort_keys=True)
@@ -114,6 +133,166 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
     assert "/Users/" not in encoded
     assert "/private/" not in encoded
     assert "/var/folders/" not in encoded
+
+
+def test_quality_preflight_surfaces_fingerprint_contract_audit(
+    tmp_path: Path,
+) -> None:
+    """Preflight output should include the data-free fingerprint audit."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+    console = format_quality_preflight_console_summary(payload)
+    markdown = quality_preflight_to_markdown(payload)
+    audit = payload["evidence"]["fingerprint_contract_audit"]
+
+    assert audit["status"] == "pass"
+    assert audit["finding_count"] == 0
+    assert "fingerprint contract audit: pass" in console
+    assert "policy=fail-preflight-on-error" in console
+    assert "## Fingerprint Contract Audit" in markdown
+    assert "| Status | pass |" in markdown
+    assert "histdatacom quality fingerprint-schema --verify --json" in markdown
+    assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
+    assert str(tmp_path) not in markdown
+
+
+def test_quality_preflight_fails_on_fingerprint_contract_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Contract audit errors should fail preflight with bounded findings."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    def fake_contract_audit(profile: object | None = None) -> dict[str, object]:
+        return {
+            "schema_version": (
+                "histdatacom.time-series-fingerprint-contract-audit.v1"
+            ),
+            "status": "fail",
+            "check_count": 1,
+            "finding_count": 1,
+            "error_count": 1,
+            "warning_count": 0,
+            "checks": [
+                {
+                    "name": "schema_contracts",
+                    "status": "fail",
+                    "checked_count": 1,
+                    "error_count": 1,
+                    "warning_count": 0,
+                }
+            ],
+            "findings": [
+                {
+                    "severity": "error",
+                    "code": "missing_schema_contract",
+                    "path": "schemas.series_fingerprint",
+                    "message": "expected contract key is missing",
+                    "expected": {"status": "implemented"},
+                    "actual": None,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        preflight_module,
+        "fingerprint_contract_audit",
+        fake_contract_audit,
+    )
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+    console = format_quality_preflight_console_summary(payload)
+    markdown = quality_preflight_to_markdown(payload)
+
+    assert payload["status"] == "fail"
+    assert payload["temporal_budget"]["status"] == "pass"
+    assert payload["decision"]["action"] == "fix fingerprint contract drift"
+    assert payload["decision"]["next_command"] == (
+        "histdatacom quality fingerprint-schema --verify --json"
+    )
+    audit = payload["evidence"]["fingerprint_contract_audit"]
+    assert audit["preflight_gate"]["status"] == "fail"
+    assert audit["preflight_gate"]["reason"] == (
+        "fingerprint contract audit failed with 1 errors and 0 warnings"
+    )
+    assert "fingerprint contract audit: fail" in console
+    assert "missing_schema_contract" in markdown
+    assert "schemas.series_fingerprint" in markdown
+
+
+def test_quality_preflight_passes_profile_to_fingerprint_contract_audit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Preflight should audit the same quality profile it benchmarks."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    profile = {
+        "schema_version": "histdatacom.quality-profile.v1",
+        "name": "fingerprint-contract-preflight-profile",
+        "rules": {
+            "fingerprint.series": {
+                "rounding_digits": 4,
+            }
+        },
+    }
+    seen_profiles: list[object | None] = []
+
+    def fake_contract_audit(
+        profile_value: object | None = None,
+    ) -> dict[str, object]:
+        seen_profiles.append(profile_value)
+        return {
+            "schema_version": (
+                "histdatacom.time-series-fingerprint-contract-audit.v1"
+            ),
+            "status": "pass",
+            "check_count": 1,
+            "finding_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+            "checks": [],
+            "findings": [],
+        }
+
+    monkeypatch.setattr(
+        preflight_module,
+        "fingerprint_contract_audit",
+        fake_contract_audit,
+    )
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        quality_profile=profile,
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+
+    assert seen_profiles == [profile]
+    assert payload["evidence"]["fingerprint_contract_audit"]["status"] == "pass"
 
 
 def test_quality_preflight_accepts_individual_triangle_group(
@@ -567,6 +746,8 @@ def test_quality_preflight_markdown_evidence_is_publish_safe(
     assert "# Quality Preflight Evidence" in markdown
     assert "## GitHub Issue Evidence" in markdown
     assert "Runtime cleanup" in markdown
+    assert "Fingerprint Contract Audit" in markdown
+    assert "histdatacom quality fingerprint-schema --verify --json" in markdown
     assert "Source artifacts" in markdown
     assert "1 transient source artifacts" in markdown
     assert "python -m pytest" in markdown
@@ -925,6 +1106,7 @@ def test_quality_preflight_evidence_inspection_reports_stale_and_bypass(
     (
         ("version", "version-mismatch"),
         ("policy", "policy-mismatch"),
+        ("fingerprint-policy", "policy-mismatch"),
         ("root", "root-mismatch"),
         ("filter", "filter-mismatch"),
         ("count", "cache-count-mismatch"),
@@ -964,6 +1146,10 @@ def test_quality_preflight_evidence_inspection_reports_mismatch_classes(
     )
     if mutation == "version":
         evidence["package"]["version"] = "0.0.0"
+    if mutation == "fingerprint-policy":
+        evidence["preflight_policy"]["fingerprint_contract_audit"] = {
+            "mode": "manual"
+        }
     if mutation == "fingerprint":
         evidence["cache_inventory"]["fingerprint"] = "stale"
     report_path = tmp_path / "preflight.json"
@@ -1184,9 +1370,9 @@ def test_api_quality_preflight_writes_markdown_report(
 
     assert payload["markdown_report_path"] == "reports/preflight.md"
     assert markdown_path.exists()
-    assert "Quality Preflight Evidence" in markdown_path.read_text(
-        encoding="utf-8"
-    )
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "Quality Preflight Evidence" in markdown
+    assert "Fingerprint Contract Audit" in markdown
 
 
 @pytest.mark.parametrize(
