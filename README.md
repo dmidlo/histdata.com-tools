@@ -1075,6 +1075,12 @@ quality rules, or automate GitHub/CI/release workflow. Cache-scale
 `--quality-preflight` runs the same contract audit automatically and fails its
 readiness decision when the audit reports contract errors.
 
+The human `histdatacom quality fingerprint-schema --verify` output and
+quality-preflight Markdown report include a bounded report-surface evidence
+table, so operators can see the representative surface key, summary schema key,
+full-report metadata state, bounded-payload state, CLI/report heading state, and
+intentional CLI absence reason without inspecting nested JSON.
+
 Run the bounded report-payload contract self-audit when changing report
 summaries, bounded payloads, next actions, remediation coverage, remediation
 catalog audits, or fingerprint summary surfaces:

@@ -347,7 +347,43 @@ def test_format_fingerprint_contract_audit_renders_human_summary() -> None:
     assert output.startswith("Fingerprint Contract Audit\n")
     assert "status: pass" in output
     assert "- schema_contracts: pass" in output
+    assert "Report Surface Evidence" in output
+    assert "coverage_summary" in output
+    assert "present (Fingerprint coverage)" in output
+    assert "regime_summary" in output
+    assert "present (Fingerprint regimes)" in output
     assert "No contract drift detected." in output
+
+
+def test_format_fingerprint_contract_audit_renders_intentional_absence() -> (
+    None
+):
+    """Human audit output should explain intentionally absent CLI surfaces."""
+    contract = FingerprintReportSurfaceContract(
+        key="readiness_api_only",
+        summary_schema_key="fingerprint_readiness_summary",
+        report_metadata_key="time_series_fingerprint_readiness_summary",
+        bounded_payload_key="fingerprint_readiness",
+        cli_summary_section="",
+        cli_summary_heading="",
+        intentional_absence_reason="covered by machine-readable API only",
+    )
+    evidence = fingerprint_report_surface_evidence(contracts=(contract,))
+    payload = {
+        "schema_version": TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION,
+        "status": "pass",
+        "error_count": 0,
+        "warning_count": 0,
+        "checks": [],
+        "findings": [],
+        "report_surface_evidence": evidence,
+    }
+
+    output = format_fingerprint_contract_audit(payload)
+
+    assert "readiness_api_only" in output
+    assert "intentionally_absent" in output
+    assert "covered by machine-readable API only" in output
 
 
 def test_fingerprint_schema_discovery_reflects_profile_overrides() -> None:

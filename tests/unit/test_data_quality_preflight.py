@@ -16,6 +16,13 @@ import pytest
 
 from histdatacom import Options
 from histdatacom.cli import ArgParser
+from histdatacom.data_quality.fingerprint_contracts import (
+    FingerprintReportSurfaceContract,
+)
+from histdatacom.data_quality.fingerprint_discovery import (
+    TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION,
+    fingerprint_report_surface_evidence,
+)
 from histdatacom.data_quality.preflight import (
     DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR,
     QUALITY_PREFLIGHT_SCHEMA_VERSION,
@@ -186,12 +193,60 @@ def test_quality_preflight_surfaces_fingerprint_contract_audit(
     assert "bounded payload contract audit: pass" in console
     assert "policy=fail-preflight-on-error" in console
     assert "## Fingerprint Contract Audit" in markdown
+    assert "### Fingerprint Report Surface Evidence" in markdown
+    assert "coverage_summary" in markdown
+    assert "regime_summary" in markdown
+    assert "present (Fingerprint regimes)" in markdown
     assert "## Bounded Payload Contract Audit" in markdown
     assert "| Status | pass |" in markdown
     assert "histdatacom quality fingerprint-schema --verify --json" in markdown
     assert "histdatacom quality bounded-payload-contract --json" in markdown
     assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
     assert str(tmp_path) not in markdown
+
+
+def test_quality_preflight_markdown_renders_intentional_cli_absence() -> None:
+    """Markdown evidence should explain intentionally absent CLI surfaces."""
+    contract = FingerprintReportSurfaceContract(
+        key="readiness_api_only",
+        summary_schema_key="fingerprint_readiness_summary",
+        report_metadata_key="time_series_fingerprint_readiness_summary",
+        bounded_payload_key="fingerprint_readiness",
+        cli_summary_section="",
+        cli_summary_heading="",
+        intentional_absence_reason="covered by machine-readable API only",
+    )
+    evidence = fingerprint_report_surface_evidence(contracts=(contract,))
+    payload = {
+        "schema_version": QUALITY_PREFLIGHT_SCHEMA_VERSION,
+        "evidence": {
+            "fingerprint_contract_audit": {
+                "schema_version": (
+                    TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION
+                ),
+                "status": "pass",
+                "check_count": 0,
+                "finding_count": 0,
+                "error_count": 0,
+                "warning_count": 0,
+                "preflight_status_policy": "fail-preflight-on-error",
+                "preflight_gate": {
+                    "reason": "fingerprint contract audit passed",
+                    "standalone_command": (
+                        "histdatacom quality fingerprint-schema --verify --json"
+                    ),
+                },
+                "report_surface_evidence": evidence,
+            }
+        },
+    }
+
+    markdown = quality_preflight_to_markdown(payload)
+
+    assert "### Fingerprint Report Surface Evidence" in markdown
+    assert "readiness_api_only" in markdown
+    assert "intentionally_absent" in markdown
+    assert "covered by machine-readable API only" in markdown
 
 
 def test_quality_preflight_fails_on_fingerprint_contract_drift(

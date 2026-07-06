@@ -32,7 +32,9 @@ from histdatacom.data_quality.discovery import (
 )
 from histdatacom.data_quality.engine import run_quality_assessment
 from histdatacom.data_quality.fingerprint_discovery import (
+    FINGERPRINT_REPORT_SURFACE_EVIDENCE_TABLE_HEADERS,
     fingerprint_contract_audit,
+    fingerprint_report_surface_evidence_table_rows,
 )
 from histdatacom.data_quality.polars_cache import read_quality_polars_cache
 from histdatacom.data_quality.rules import (
@@ -489,6 +491,21 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
             "",
         ]
     )
+    surface_rows = fingerprint_report_surface_evidence_table_rows(
+        _mapping(fingerprint_contract.get("report_surface_evidence"))
+    )
+    if surface_rows:
+        lines.extend(
+            [
+                "### Fingerprint Report Surface Evidence",
+                "",
+                *_markdown_table(
+                    FINGERPRINT_REPORT_SURFACE_EVIDENCE_TABLE_HEADERS,
+                    surface_rows,
+                ),
+                "",
+            ]
+        )
     finding_rows = _fingerprint_contract_finding_rows(fingerprint_contract)
     if finding_rows:
         lines.extend(
