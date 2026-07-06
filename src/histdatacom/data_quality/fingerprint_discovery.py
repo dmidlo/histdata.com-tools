@@ -59,6 +59,15 @@ TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION = (
 TIME_SERIES_FINGERPRINT_REPORT_SURFACE_EVIDENCE_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-report-surface-evidence.v1"
 )
+FINGERPRINT_REPORT_SURFACE_EVIDENCE_TABLE_HEADERS = (
+    "surface key",
+    "summary schema key",
+    "report metadata",
+    "bounded payload",
+    "CLI/report summary",
+    "intentional absence",
+)
+FINGERPRINT_REPORT_SURFACE_EVIDENCE_DISPLAY_LIMIT = 12
 
 
 def fingerprint_schema_discovery(
@@ -386,6 +395,20 @@ def format_fingerprint_contract_audit(
             f"- {check.get('name', '')}: {check.get('status', '')} "
             f"({check.get('checked_count', 0)} checked)"
         )
+    evidence_rows = fingerprint_report_surface_evidence_table_rows(
+        _mapping(payload.get("report_surface_evidence"))
+    )
+    if evidence_rows:
+        lines.extend(
+            [
+                "",
+                "Report Surface Evidence",
+                *_plain_text_table(
+                    FINGERPRINT_REPORT_SURFACE_EVIDENCE_TABLE_HEADERS,
+                    evidence_rows,
+                ),
+            ]
+        )
     findings = _mapping_rows(payload.get("findings"))
     if findings:
         lines.extend(["", "Findings"])
@@ -399,6 +422,73 @@ def format_fingerprint_contract_audit(
     else:
         lines.extend(["", "No contract drift detected."])
     return "\n".join(lines)
+
+
+def fingerprint_report_surface_evidence_table_rows(
+    evidence: Mapping[str, JSONValue],
+    *,
+    limit: int = FINGERPRINT_REPORT_SURFACE_EVIDENCE_DISPLAY_LIMIT,
+) -> tuple[tuple[str, str, str, str, str, str], ...]:
+    """Return bounded display rows for representative report-surface evidence."""
+    rows: list[tuple[str, str, str, str, str, str]] = []
+    surface_rows = _mapping_rows(evidence.get("surface_matrix"))
+    display_limit = max(0, limit)
+    for row in surface_rows[:display_limit]:
+        rows.append(_report_surface_evidence_table_row(row))
+    omitted = len(surface_rows) - len(rows)
+    if omitted > 0:
+        rows.append(
+            (
+                f"{omitted} additional surfaces omitted",
+                "",
+                "",
+                "",
+                "",
+                "",
+            )
+        )
+    return tuple(rows)
+
+
+def _report_surface_evidence_table_row(
+    row: Mapping[str, JSONValue],
+) -> tuple[str, str, str, str, str, str]:
+    heading = str(row.get("cli_summary_heading") or "")
+    cli_state = str(row.get("cli_summary_state") or "")
+    cli_display = f"{cli_state} ({heading})" if heading else cli_state
+    return (
+        str(row.get("key") or ""),
+        str(row.get("summary_schema_key") or ""),
+        str(row.get("report_metadata_state") or ""),
+        str(row.get("bounded_payload_state") or ""),
+        cli_display,
+        str(row.get("intentional_absence_reason") or ""),
+    )
+
+
+def _plain_text_table(
+    headers: tuple[str, ...],
+    rows: tuple[tuple[str, ...], ...],
+) -> list[str]:
+    widths = [
+        max(len(header), *(len(row[index]) for row in rows))
+        for index, header in enumerate(headers)
+    ]
+    lines = [
+        "  "
+        + " | ".join(
+            header.ljust(widths[index]) for index, header in enumerate(headers)
+        ),
+        "  " + "-+-".join("-" * width for width in widths),
+    ]
+    for row in rows:
+        lines.append(
+            "  "
+            + " | ".join(
+                row[index].ljust(widths[index]) for index in range(len(headers))
+            )
+        )
+    return lines
 
 
 def _record_audit_check(
