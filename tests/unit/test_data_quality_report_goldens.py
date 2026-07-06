@@ -36,6 +36,8 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
@@ -771,6 +773,12 @@ def _assert_report_contract(payload: dict[str, JSONValue]) -> None:
                 metadata[TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY]
             )
         )
+    if TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY in metadata:
+        _assert_fingerprint_readiness_risk(
+            _mapping(
+                metadata[TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY]
+            )
+        )
     if QUALITY_NEXT_ACTIONS_METADATA_KEY in metadata:
         _assert_quality_next_actions(
             _mapping(metadata[QUALITY_NEXT_ACTIONS_METADATA_KEY])
@@ -817,6 +825,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "fingerprint_distribution",
         "fingerprint_distribution_attention",
         "fingerprint_readiness",
+        "fingerprint_readiness_risk",
         "fingerprint_regime",
         "fingerprint_topology",
         "fingerprint_topology_attention",
@@ -854,6 +863,10 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     if "fingerprint_readiness" in payload:
         _assert_fingerprint_readiness(
             _mapping(payload["fingerprint_readiness"])
+        )
+    if "fingerprint_readiness_risk" in payload:
+        _assert_fingerprint_readiness_risk(
+            _mapping(payload["fingerprint_readiness_risk"])
         )
     if "next_actions" in payload:
         _assert_quality_next_actions(_mapping(payload["next_actions"]))
@@ -1567,6 +1580,143 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
     }
     for target_summary in _list(payload["target_summaries"]):
         _assert_fingerprint_readiness_target(_mapping(target_summary))
+
+
+def _assert_fingerprint_readiness_risk(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "clean_target_count",
+        "included_target_count",
+        "limit_metadata",
+        "omitted_target_count",
+        "reason_counts",
+        "report_surface_evidence",
+        "risk_level_counts",
+        "risk_target_count",
+        "rule_id",
+        "schema_version",
+        "section_risk_counts",
+        "section_status_counts",
+        "source_schema_version",
+        "target_count",
+        "target_risks",
+        "truncated",
+    }
+    assert payload["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION
+    )
+    assert payload["source_schema_version"] == (
+        TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION
+    )
+    assert payload["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+    _assert_limit_metadata_map(
+        payload["limit_metadata"],
+        keys=("targets", "sections", "reasons"),
+    )
+    for key in (
+        "clean_target_count",
+        "included_target_count",
+        "omitted_target_count",
+        "risk_target_count",
+        "target_count",
+    ):
+        assert isinstance(payload[key], int)
+        assert payload[key] >= 0
+    assert isinstance(payload["truncated"], bool)
+    for key in (
+        "reason_counts",
+        "risk_level_counts",
+        "section_risk_counts",
+        "section_status_counts",
+    ):
+        assert isinstance(payload[key], dict)
+    _assert_report_surface_risk_summary(
+        _mapping(payload["report_surface_evidence"])
+    )
+    for target_risk in _list(payload["target_risks"]):
+        _assert_fingerprint_readiness_risk_target(_mapping(target_risk))
+
+
+def _assert_report_surface_risk_summary(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "bounded_payload_state_counts",
+        "cli_summary_state_counts",
+        "report_metadata_state_counts",
+        "schema_version",
+        "surface_count",
+    }
+    assert isinstance(payload["surface_count"], int)
+    for key in (
+        "bounded_payload_state_counts",
+        "cli_summary_state_counts",
+        "report_metadata_state_counts",
+    ):
+        assert isinstance(payload[key], dict)
+
+
+def _assert_fingerprint_readiness_risk_target(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "included_section_risk_count",
+        "omitted_section_risk_count",
+        "rank",
+        "reason_codes",
+        "reason_counts",
+        "risk_level",
+        "risk_score",
+        "section_risk_count",
+        "section_risks",
+        "section_risks_truncated",
+        "target_axis",
+    }
+    axis = _mapping(payload["target_axis"])
+    assert set(axis) == {
+        "data_format",
+        "kind",
+        "period",
+        "symbol",
+        "timeframe",
+    }
+    assert payload["risk_level"] in {"clean", "low", "medium", "high"}
+    assert isinstance(payload["reason_codes"], list)
+    assert isinstance(payload["reason_counts"], dict)
+    assert isinstance(payload["section_risks_truncated"], bool)
+    for key in (
+        "included_section_risk_count",
+        "omitted_section_risk_count",
+        "rank",
+        "risk_score",
+        "section_risk_count",
+    ):
+        assert isinstance(payload[key], int)
+    for section_risk in _list(payload["section_risks"]):
+        _assert_fingerprint_readiness_section_risk(_mapping(section_risk))
+
+
+def _assert_fingerprint_readiness_section_risk(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "included_reason_count",
+        "omitted_reason_count",
+        "reason_count",
+        "reasons",
+        "score",
+        "section",
+        "status",
+    }
+    assert isinstance(payload["reasons"], list)
+    for key in (
+        "included_reason_count",
+        "omitted_reason_count",
+        "reason_count",
+        "score",
+    ):
+        assert isinstance(payload[key], int)
 
 
 def _assert_fingerprint_readiness_target(

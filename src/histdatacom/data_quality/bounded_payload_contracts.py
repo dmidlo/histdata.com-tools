@@ -193,6 +193,15 @@ _SEQUENCE_CONTRACTS: tuple[_BoundedSequenceContract, ...] = (
         ("fingerprint_readiness", "omitted_target_count"),
         ("fingerprint_readiness", "truncated"),
     ),
+    _BoundedSequenceContract(
+        "fingerprint_readiness_risk",
+        ("fingerprint_readiness_risk", "limit_metadata", "targets"),
+        ("fingerprint_readiness_risk", "target_risks"),
+        ("fingerprint_readiness_risk", "risk_target_count"),
+        ("fingerprint_readiness_risk", "included_target_count"),
+        ("fingerprint_readiness_risk", "omitted_target_count"),
+        ("fingerprint_readiness_risk", "truncated"),
+    ),
 )
 
 

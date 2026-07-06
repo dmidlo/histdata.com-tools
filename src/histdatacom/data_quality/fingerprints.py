@@ -94,6 +94,9 @@ TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION = (
 TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-readiness-summary.v1"
 )
+TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-readiness-risk.v1"
+)
 TIME_SERIES_FINGERPRINT_METADATA_KEY = "time_series_fingerprint"
 TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY = (
     "time_series_fingerprint_coverage"
@@ -115,6 +118,9 @@ TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY = (
 )
 TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY = (
     "time_series_fingerprint_readiness_summary"
+)
+TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY = (
+    "time_series_fingerprint_readiness_risk"
 )
 SERIES_FINGERPRINT_RULE_ID = "fingerprint.series"
 CROSS_SERIES_FINGERPRINT_RULE_ID = "fingerprint.cross_series"
@@ -143,6 +149,9 @@ DEFAULT_FINGERPRINT_REGIME_SUMMARY_LIMIT = 16
 DEFAULT_FINGERPRINT_REGIME_COUNT_LIMIT = 8
 DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT = 16
 DEFAULT_FINGERPRINT_READINESS_LAG_LIMIT = 16
+DEFAULT_FINGERPRINT_READINESS_RISK_TARGET_LIMIT = 16
+DEFAULT_FINGERPRINT_READINESS_RISK_SECTION_LIMIT = 8
+DEFAULT_FINGERPRINT_READINESS_RISK_REASON_LIMIT = 8
 DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT = 1
 DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_RATE = 0.0
 DEFAULT_FINGERPRINT_DISTRIBUTION_ZERO_SPREAD_MIN_COUNT = 1
@@ -1020,6 +1029,562 @@ def series_fingerprint_readiness_summary(
     }
 
 
+def series_fingerprint_readiness_risk_summary(
+    findings: Iterable[QualityFinding],
+    *,
+    target_limit: int | None = DEFAULT_FINGERPRINT_READINESS_RISK_TARGET_LIMIT,
+    section_limit: (
+        int | None
+    ) = DEFAULT_FINGERPRINT_READINESS_RISK_SECTION_LIMIT,
+    reason_limit: int | None = DEFAULT_FINGERPRINT_READINESS_RISK_REASON_LIMIT,
+    report_surface_evidence: Mapping[str, JSONValue] | None = None,
+) -> dict[str, JSONValue] | None:
+    """Return a bounded cross-section fingerprint readiness risk ranking."""
+    finding_tuple = tuple(findings)
+    readiness = series_fingerprint_readiness_summary(
+        finding_tuple,
+        target_limit=-1,
+    )
+    if readiness is None:
+        return None
+    regimes = series_fingerprint_regime_summary(
+        finding_tuple,
+        target_limit=-1,
+        count_limit=DEFAULT_FINGERPRINT_REGIME_COUNT_LIMIT,
+    )
+    return fingerprint_readiness_risk_summary(
+        readiness,
+        regime_summary=regimes,
+        target_limit=target_limit,
+        section_limit=section_limit,
+        reason_limit=reason_limit,
+        report_surface_evidence=report_surface_evidence,
+    )
+
+
+def fingerprint_readiness_risk_summary(
+    readiness_summary: Mapping[str, JSONValue],
+    *,
+    regime_summary: Mapping[str, JSONValue] | None = None,
+    target_limit: int | None = DEFAULT_FINGERPRINT_READINESS_RISK_TARGET_LIMIT,
+    section_limit: (
+        int | None
+    ) = DEFAULT_FINGERPRINT_READINESS_RISK_SECTION_LIMIT,
+    reason_limit: int | None = DEFAULT_FINGERPRINT_READINESS_RISK_REASON_LIMIT,
+    report_surface_evidence: Mapping[str, JSONValue] | None = None,
+) -> dict[str, JSONValue] | None:
+    """Rank fingerprint targets by already-emitted readiness evidence."""
+    target_summaries = _payload_mapping_rows(
+        readiness_summary.get("target_summaries")
+    )
+    if not target_summaries:
+        return None
+    target_limit_state = bounded_report_limit(
+        target_limit,
+        default_limit=DEFAULT_FINGERPRINT_READINESS_RISK_TARGET_LIMIT,
+    )
+    section_limit_state = bounded_report_limit(
+        section_limit,
+        default_limit=DEFAULT_FINGERPRINT_READINESS_RISK_SECTION_LIMIT,
+    )
+    reason_limit_state = bounded_report_limit(
+        reason_limit,
+        default_limit=DEFAULT_FINGERPRINT_READINESS_RISK_REASON_LIMIT,
+    )
+    regime_by_axis = _regime_summary_by_axis(regime_summary or {})
+    target_risks = [
+        _fingerprint_readiness_risk_target(
+            target,
+            regime_by_axis.get(
+                _fingerprint_target_axis_key(
+                    _payload_mapping(target.get("target_axis"))
+                )
+            ),
+            section_limit=section_limit_state,
+            reason_limit=reason_limit_state,
+        )
+        for target in target_summaries
+    ]
+    risk_targets = [
+        item for item in target_risks if _int_payload(item.get("risk_score"))
+    ]
+    risk_targets.sort(key=_fingerprint_readiness_risk_sort_key)
+    ranked_targets = [
+        {**item, "rank": rank}
+        for rank, item in enumerate(risk_targets, start=1)
+    ]
+    included = [dict(item) for item in target_limit_state.slice(ranked_targets)]
+    omitted_count = max(0, len(ranked_targets) - len(included))
+    risk_level_counts = Counter(
+        _summary_key(item.get("risk_level")) for item in ranked_targets
+    )
+    reason_counts: Counter[str] = Counter()
+    section_risk_counts: Counter[str] = Counter()
+    for item in ranked_targets:
+        reason_counts.update(
+            _counter_from_mapping(_payload_mapping(item.get("reason_counts")))
+        )
+        for section in _payload_mapping_rows(item.get("section_risks")):
+            section_risk_counts[_summary_key(section.get("section"))] += 1
+    return {
+        "schema_version": TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION,
+        "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "source_schema_version": _summary_key(
+            readiness_summary.get("schema_version")
+        ),
+        "target_count": len(target_summaries),
+        "risk_target_count": len(ranked_targets),
+        "clean_target_count": max(
+            0, len(target_summaries) - len(ranked_targets)
+        ),
+        "included_target_count": len(included),
+        "omitted_target_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "limit_metadata": {
+            "targets": target_limit_state.limit_payload(),
+            "sections": section_limit_state.limit_payload(),
+            "reasons": reason_limit_state.limit_payload(),
+        },
+        "risk_level_counts": _counter_payload(risk_level_counts),
+        "reason_counts": _bounded_counter_payload(
+            reason_counts,
+            limit=reason_limit_state,
+        ),
+        "section_risk_counts": _bounded_counter_payload(
+            section_risk_counts,
+            limit=section_limit_state,
+        ),
+        "section_status_counts": dict(
+            _payload_mapping(readiness_summary.get("section_status_counts"))
+        ),
+        "report_surface_evidence": _report_surface_risk_summary(
+            report_surface_evidence or {}
+        ),
+        "target_risks": cast(JSONValue, included),
+    }
+
+
+def _fingerprint_readiness_risk_target(
+    target: Mapping[str, JSONValue],
+    regime: Mapping[str, JSONValue] | None,
+    *,
+    section_limit: BoundedReportLimit,
+    reason_limit: BoundedReportLimit,
+) -> dict[str, JSONValue]:
+    axis = _payload_mapping(target.get("target_axis"))
+    reason_counts: Counter[str] = Counter()
+    section_risks: list[dict[str, JSONValue]] = []
+    for section, status_value in _payload_mapping(
+        target.get("section_statuses")
+    ).items():
+        if _fingerprint_section_is_non_applicable(section, axis):
+            continue
+        if section in {
+            "calendar_regimes",
+            "conditional_distributions",
+            "dependence",
+            "temporal_topology",
+            *FINGERPRINT_DYNAMICS_SECTIONS,
+        }:
+            continue
+        status = _summary_key(status_value)
+        if status == "valid":
+            continue
+        reasons = _section_status_reasons(section, status, target)
+        _add_section_risk(
+            section_risks,
+            reason_counts,
+            section=_summary_key(section),
+            status=status,
+            reasons=reasons,
+            base_score=_fingerprint_status_risk_score(status),
+        )
+    _add_topology_risks(section_risks, reason_counts, target)
+    _add_dynamics_risks(section_risks, reason_counts, target, axis)
+    _add_dependence_risks(section_risks, reason_counts, target)
+    _add_regime_risks(section_risks, reason_counts, regime or {})
+    compact_sections = _bounded_section_risks(
+        section_risks,
+        limit=section_limit,
+        reason_limit=reason_limit,
+    )
+    compact_reasons = _bounded_counter_payload(
+        reason_counts,
+        limit=reason_limit,
+    )
+    risk_score = sum(_int_payload(item.get("score")) for item in section_risks)
+    return {
+        "target_axis": dict(axis),
+        "risk_score": risk_score,
+        "risk_level": _fingerprint_risk_level(risk_score),
+        "reason_counts": compact_reasons,
+        "reason_codes": list(compact_reasons),
+        "section_risk_count": len(section_risks),
+        "included_section_risk_count": len(compact_sections),
+        "omitted_section_risk_count": max(
+            0,
+            len(section_risks) - len(compact_sections),
+        ),
+        "section_risks_truncated": len(compact_sections) < len(section_risks),
+        "section_risks": compact_sections,
+    }
+
+
+def _add_topology_risks(
+    section_risks: list[dict[str, JSONValue]],
+    reason_counts: Counter[str],
+    target: Mapping[str, JSONValue],
+) -> None:
+    reasons = [
+        _summary_key(reason)
+        for reason in _string_list(target.get("topology_limitations"))
+    ]
+    if reasons:
+        _add_section_risk(
+            section_risks,
+            reason_counts,
+            section="temporal_topology",
+            status="limited",
+            reasons=reasons,
+            base_score=_fingerprint_status_risk_score("limited"),
+        )
+
+
+def _add_dynamics_risks(
+    section_risks: list[dict[str, JSONValue]],
+    reason_counts: Counter[str],
+    target: Mapping[str, JSONValue],
+    axis: Mapping[str, JSONValue],
+) -> None:
+    for section in FINGERPRINT_DYNAMICS_SECTIONS:
+        if _fingerprint_section_is_non_applicable(section, axis):
+            continue
+        dynamics = _payload_mapping(target.get(section))
+        status = _summary_key(dynamics.get("status"))
+        if status in {"valid", "ok"}:
+            continue
+        reasons: list[str] = []
+        primary_reason = _optional_summary_key(dynamics.get("reason"))
+        if primary_reason:
+            reasons.append(primary_reason)
+        reasons.extend(
+            _summary_key(reason)
+            for reason in _string_list(dynamics.get("limitations"))
+        )
+        if (
+            status == "unavailable"
+            and _int_payload(dynamics.get("row_count")) == 0
+        ):
+            reasons.append("insufficient_rows")
+        if not reasons and status not in {"unknown", "valid", "ok"}:
+            reasons.append(status)
+        _add_section_risk(
+            section_risks,
+            reason_counts,
+            section=section,
+            status=status,
+            reasons=tuple(_ordered_unique(reasons)),
+            base_score=_fingerprint_status_risk_score(status),
+        )
+
+
+def _fingerprint_section_is_non_applicable(
+    section: str,
+    axis: Mapping[str, JSONValue],
+) -> bool:
+    timeframe = _summary_key(axis.get("timeframe"))
+    return (
+        section == "return_dynamics"
+        and timeframe != M1
+        or section == "microstructure_dynamics"
+        and timeframe != TICK
+    )
+
+
+def _add_dependence_risks(
+    section_risks: list[dict[str, JSONValue]],
+    reason_counts: Counter[str],
+    target: Mapping[str, JSONValue],
+) -> None:
+    dependence = _payload_mapping(target.get("dependence"))
+    status = _summary_key(dependence.get("status"))
+    reasons: list[str] = []
+    primary_reason = _optional_summary_key(dependence.get("reason"))
+    if primary_reason:
+        reasons.append(primary_reason)
+    reasons.extend(
+        _summary_key(reason)
+        for reason in _string_list(dependence.get("limitations"))
+    )
+    skipped_lag_count = _int_payload(dependence.get("skipped_lag_count"))
+    if skipped_lag_count:
+        reasons.append("skipped_dependence_lags")
+        reasons.extend(
+            _counter_from_mapping(
+                _payload_mapping(dependence.get("skipped_lag_reason_counts"))
+            ).elements()
+        )
+    if status in {"valid", "ok"} and not reasons:
+        return
+    if status == "skipped" and not reasons:
+        reasons.append("not_emitted")
+    _add_section_risk(
+        section_risks,
+        reason_counts,
+        section="dependence",
+        status=status,
+        reasons=tuple(_ordered_unique(reasons)),
+        base_score=(
+            _fingerprint_status_risk_score(status)
+            + min(20, skipped_lag_count * 2)
+        ),
+    )
+
+
+def _add_regime_risks(
+    section_risks: list[dict[str, JSONValue]],
+    reason_counts: Counter[str],
+    regime: Mapping[str, JSONValue],
+) -> None:
+    calendar = _payload_mapping(regime.get("calendar_regimes"))
+    status = _summary_key(calendar.get("status"))
+    if status in {"missing", "unavailable"}:
+        _add_section_risk(
+            section_risks,
+            reason_counts,
+            section="calendar_regimes",
+            status=status,
+            reasons=(f"{status}_regime_summary",),
+            base_score=25 if status == "missing" else 35,
+        )
+    profile = _payload_mapping(calendar.get("calendar_profile"))
+    if profile.get("static_advisory") is True:
+        _add_section_risk(
+            section_risks,
+            reason_counts,
+            section="calendar_profile",
+            status="limited",
+            reasons=("static_calendar_profile_advisory",),
+            base_score=5,
+        )
+    cache_source = _optional_summary_key(calendar.get("cache_source"))
+    if cache_source in {"none", "sibling"}:
+        _add_section_risk(
+            section_risks,
+            reason_counts,
+            section="calendar_regimes",
+            status="limited",
+            reasons=(f"cache_source_{cache_source}",),
+            base_score=3,
+        )
+    conditional = _payload_mapping(regime.get("conditional_distributions"))
+    conditional_status = _summary_key(conditional.get("status"))
+    if conditional_status in {"absent", "unavailable"}:
+        _add_section_risk(
+            section_risks,
+            reason_counts,
+            section="conditional_distributions",
+            status=conditional_status,
+            reasons=(f"conditional_distribution_{conditional_status}",),
+            base_score=12,
+        )
+
+
+def _add_section_risk(
+    section_risks: list[dict[str, JSONValue]],
+    reason_counts: Counter[str],
+    *,
+    section: str,
+    status: str,
+    reasons: Iterable[str],
+    base_score: int,
+) -> None:
+    reason_tuple = tuple(
+        _ordered_unique(_summary_key(reason) for reason in reasons)
+    )
+    if not reason_tuple and not base_score:
+        return
+    for reason in reason_tuple:
+        reason_counts[reason] += 1
+    score = base_score + sum(
+        _fingerprint_reason_score(reason) for reason in reason_tuple
+    )
+    section_risks.append(
+        {
+            "section": section,
+            "status": status,
+            "score": score,
+            "reasons": list(reason_tuple),
+        }
+    )
+
+
+def _section_status_reasons(
+    section: str,
+    status: str,
+    target: Mapping[str, JSONValue],
+) -> tuple[str, ...]:
+    if status == "skipped":
+        return tuple(
+            _summary_key(reason)
+            for reason in _string_list(target.get("section_skip_reasons"))
+        ) or ("not_emitted",)
+    if status == "unavailable":
+        return ("section_unavailable",)
+    if status == "limited":
+        return (f"{section}_limited",)
+    return (status,)
+
+
+def _bounded_section_risks(
+    section_risks: list[dict[str, JSONValue]],
+    *,
+    limit: BoundedReportLimit,
+    reason_limit: BoundedReportLimit,
+) -> list[JSONValue]:
+    ordered = sorted(
+        section_risks,
+        key=lambda item: (
+            -_int_payload(item.get("score")),
+            _summary_key(item.get("section")),
+            _summary_key(item.get("status")),
+        ),
+    )
+    bounded: list[JSONValue] = []
+    for item in limit.slice(ordered):
+        reasons = [
+            _summary_key(reason) for reason in _string_list(item.get("reasons"))
+        ]
+        bounded.append(
+            {
+                **item,
+                "reasons": reason_limit.slice(reasons),
+                "reason_count": len(reasons),
+                "included_reason_count": len(reason_limit.slice(reasons)),
+                "omitted_reason_count": max(
+                    0,
+                    len(reasons) - len(reason_limit.slice(reasons)),
+                ),
+            }
+        )
+    return bounded
+
+
+def _bounded_counter_payload(
+    counter: Counter[str],
+    *,
+    limit: BoundedReportLimit,
+) -> dict[str, JSONValue]:
+    ordered = sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+    return {key: count for key, count in limit.slice(ordered)}
+
+
+def _fingerprint_readiness_risk_sort_key(
+    target: Mapping[str, JSONValue],
+) -> tuple[object, ...]:
+    axis = _payload_mapping(target.get("target_axis"))
+    return (
+        -_int_payload(target.get("risk_score")),
+        _summary_key(axis.get("data_format")),
+        _summary_key(axis.get("timeframe")),
+        _summary_key(axis.get("symbol")),
+        _summary_key(axis.get("period")),
+        _summary_key(axis.get("kind")),
+    )
+
+
+def _fingerprint_status_risk_score(status: str) -> int:
+    scores = {
+        "unavailable": 40,
+        "missing": 35,
+        "skipped": 25,
+        "limited": 15,
+        "absent": 10,
+    }
+    return scores.get(status, 0)
+
+
+def _fingerprint_reason_score(reason: str) -> int:
+    scores = {
+        "missing_required_columns": 40,
+        "source_unreadable": 40,
+        "unsupported_target_kind": 35,
+        "unsupported_timeframe": 30,
+        "no_parsed_timestamps": 30,
+        "invalid_timestamps_skipped": 25,
+        "non_monotonic_timestamp_order": 25,
+        "duplicate_timestamps": 20,
+        "suspicious_gaps": 20,
+        "insufficient_rows": 18,
+        "insufficient_sequence_rows": 18,
+        "insufficient_sample_count": 15,
+        "zero_variance": 15,
+        "skipped_dependence_lags": 12,
+        "not_emitted": 10,
+        "missing_regime_summary": 10,
+        "unavailable_regime_summary": 20,
+        "conditional_distribution_absent": 8,
+        "conditional_distribution_unavailable": 15,
+        "static_calendar_profile_advisory": 5,
+        "cache_source_sibling": 3,
+        "cache_source_none": 5,
+    }
+    return scores.get(reason, 3)
+
+
+def _fingerprint_risk_level(score: int) -> str:
+    if score >= 80:
+        return "high"
+    if score >= 35:
+        return "medium"
+    if score > 0:
+        return "low"
+    return "clean"
+
+
+def _regime_summary_by_axis(
+    regime_summary: Mapping[str, JSONValue],
+) -> dict[tuple[str, str, str, str, str], Mapping[str, JSONValue]]:
+    return {
+        _fingerprint_target_axis_key(
+            _payload_mapping(row.get("target_axis"))
+        ): row
+        for row in _payload_mapping_rows(regime_summary.get("target_summaries"))
+    }
+
+
+def _fingerprint_target_axis_key(
+    axis: Mapping[str, JSONValue],
+) -> tuple[str, str, str, str, str]:
+    return (
+        _summary_key(axis.get("data_format")),
+        _summary_key(axis.get("timeframe")),
+        _summary_key(axis.get("symbol")),
+        _summary_key(axis.get("period")),
+        _summary_key(axis.get("kind")),
+    )
+
+
+def _report_surface_risk_summary(
+    evidence: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    rows = _payload_mapping_rows(evidence.get("surface_matrix"))
+    metadata_counts: Counter[str] = Counter()
+    bounded_counts: Counter[str] = Counter()
+    cli_counts: Counter[str] = Counter()
+    for row in rows:
+        metadata_counts[_summary_key(row.get("report_metadata_state"))] += 1
+        bounded_counts[_summary_key(row.get("bounded_payload_state"))] += 1
+        cli_counts[_summary_key(row.get("cli_summary_state"))] += 1
+    return {
+        "schema_version": _optional_summary_key(evidence.get("schema_version")),
+        "surface_count": len(rows),
+        "report_metadata_state_counts": _counter_payload(metadata_counts),
+        "bounded_payload_state_counts": _counter_payload(bounded_counts),
+        "cli_summary_state_counts": _counter_payload(cli_counts),
+    }
+
+
 def _series_fingerprint_readiness_target_summaries(
     findings: Iterable[QualityFinding],
 ) -> list[dict[str, JSONValue]]:
@@ -1833,7 +2398,7 @@ def _conditioned_spread_rows(
             _summary_key(item.get("bucket")),
         )
     )
-    return limit_state.slice(rows)
+    return cast(list[JSONValue], limit_state.slice(rows))
 
 
 def _bounded_count_mapping(
@@ -2858,6 +3423,16 @@ def _payload_mapping(value: object) -> Mapping[str, JSONValue]:
     if isinstance(value, Mapping):
         return cast(Mapping[str, JSONValue], value)
     return {}
+
+
+def _payload_mapping_rows(value: object) -> list[Mapping[str, JSONValue]]:
+    if not isinstance(value, list):
+        return []
+    return [
+        cast(Mapping[str, JSONValue], item)
+        for item in value
+        if isinstance(item, Mapping)
+    ]
 
 
 def _summary_key(value: object) -> str:

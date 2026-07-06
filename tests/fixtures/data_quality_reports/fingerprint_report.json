@@ -323,6 +323,149 @@
       "truncated_distribution_target_count": 0,
       "unavailable_distribution_target_count": 0
     },
+    "time_series_fingerprint_readiness_risk": {
+      "clean_target_count": 0,
+      "included_target_count": 1,
+      "limit_metadata": {
+        "reasons": {
+          "default_limit": 8,
+          "effective_limit": 8,
+          "limit": 8,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": null,
+          "unbounded": false
+        },
+        "sections": {
+          "default_limit": 8,
+          "effective_limit": 8,
+          "limit": 8,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": null,
+          "unbounded": false
+        },
+        "targets": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": null,
+          "unbounded": false
+        }
+      },
+      "omitted_target_count": 0,
+      "reason_counts": {
+        "missing_regime_summary": 1,
+        "not_emitted": 2
+      },
+      "report_surface_evidence": {
+        "bounded_payload_state_counts": {
+          "present": 8
+        },
+        "cli_summary_state_counts": {
+          "present": 8
+        },
+        "report_metadata_state_counts": {
+          "present": 8
+        },
+        "schema_version": "histdatacom.time-series-fingerprint-report-surface-evidence.v1",
+        "surface_count": 8
+      },
+      "risk_level_counts": {
+        "high": 1
+      },
+      "risk_target_count": 1,
+      "rule_id": "fingerprint.series",
+      "schema_version": "histdatacom.time-series-fingerprint-readiness-risk.v1",
+      "section_risk_counts": {
+        "calendar_regimes": 1,
+        "dependence": 1,
+        "return_dynamics": 1
+      },
+      "section_status_counts": {
+        "calendar_regimes": {
+          "skipped": 1
+        },
+        "coverage": {
+          "valid": 1
+        },
+        "m1_bar_distribution": {
+          "valid": 1
+        },
+        "return_dynamics": {
+          "skipped": 1
+        },
+        "temporal_topology": {
+          "valid": 1
+        }
+      },
+      "source_schema_version": "histdatacom.time-series-fingerprint-readiness-summary.v1",
+      "target_count": 1,
+      "target_risks": [
+        {
+          "included_section_risk_count": 3,
+          "omitted_section_risk_count": 0,
+          "rank": 1,
+          "reason_codes": [
+            "not_emitted",
+            "missing_regime_summary"
+          ],
+          "reason_counts": {
+            "missing_regime_summary": 1,
+            "not_emitted": 2
+          },
+          "risk_level": "high",
+          "risk_score": 105,
+          "section_risk_count": 3,
+          "section_risks": [
+            {
+              "included_reason_count": 1,
+              "omitted_reason_count": 0,
+              "reason_count": 1,
+              "reasons": [
+                "missing_regime_summary"
+              ],
+              "score": 35,
+              "section": "calendar_regimes",
+              "status": "missing"
+            },
+            {
+              "included_reason_count": 1,
+              "omitted_reason_count": 0,
+              "reason_count": 1,
+              "reasons": [
+                "not_emitted"
+              ],
+              "score": 35,
+              "section": "dependence",
+              "status": "skipped"
+            },
+            {
+              "included_reason_count": 1,
+              "omitted_reason_count": 0,
+              "reason_count": 1,
+              "reasons": [
+                "not_emitted"
+              ],
+              "score": 35,
+              "section": "return_dynamics",
+              "status": "skipped"
+            }
+          ],
+          "section_risks_truncated": false,
+          "target_axis": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "M1"
+          }
+        }
+      ],
+      "truncated": false
+    },
     "time_series_fingerprint_readiness_summary": {
       "applicable_dynamics_status_counts": {
         "skipped": 1

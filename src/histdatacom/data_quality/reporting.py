@@ -9,6 +9,7 @@ from enum import Enum
 import hashlib
 import json
 from pathlib import Path
+from typing import cast
 
 from histdatacom.data_quality.contracts import (
     QualityFinding,
@@ -23,6 +24,7 @@ from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_DISTRIBUTION_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY,
+    FINGERPRINT_READINESS_RISK_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_REGIME_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_TOPOLOGY_ATTENTION_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY,
@@ -31,7 +33,9 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
@@ -39,9 +43,13 @@ from histdatacom.data_quality.fingerprints import (
     series_fingerprint_distribution_attention_summary,
     series_fingerprint_distribution_summary,
     series_fingerprint_readiness_summary,
+    series_fingerprint_readiness_risk_summary,
     series_fingerprint_regime_summary,
     series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
+)
+from histdatacom.data_quality.fingerprint_discovery import (
+    fingerprint_report_surface_evidence,
 )
 from histdatacom.data_quality.limits import (
     BoundedReportLimit,
@@ -75,6 +83,7 @@ QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT = 8
 QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT = 16
 QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT = 8
 
+_FINGERPRINT_REPORT_SURFACE_EVIDENCE_ACTIVE = False
 _NEXT_ACTION_SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
 _REMEDIATION_COVERAGE_SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
 _NEXT_ACTION_ATTENTION_RANK = {
@@ -308,6 +317,13 @@ def quality_report_payload(
             fingerprint_readiness
         )
         payload["metadata"] = metadata
+    fingerprint_readiness_risk = _fingerprint_readiness_risk_summary(report)
+    if fingerprint_readiness_risk is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY] = (
+            fingerprint_readiness_risk
+        )
+        payload["metadata"] = metadata
     next_actions = quality_next_actions_summary(report)
     if next_actions is not None:
         metadata = _mapping_payload(payload.get("metadata"))
@@ -464,6 +480,11 @@ def format_quality_console_summary(
                 _fingerprint_readiness_summary(report)
             )
         )
+        lines.extend(
+            format_fingerprint_readiness_risk_lines(
+                _fingerprint_readiness_risk_summary(report)
+            )
+        )
 
     sections = (
         (QualityStatus.CLEAN, "Clean files"),
@@ -525,6 +546,7 @@ def bounded_quality_payload(
         report
     )
     fingerprint_readiness = _fingerprint_readiness_summary(report)
+    fingerprint_readiness_risk = _fingerprint_readiness_risk_summary(report)
     next_actions = quality_next_actions_summary(report)
     remediation_coverage = quality_remediation_coverage_summary(report)
     remediation_catalog_audit = quality_remediation_catalog_audit_summary(
@@ -592,6 +614,10 @@ def bounded_quality_payload(
     if fingerprint_readiness is not None:
         payload[FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY] = (
             fingerprint_readiness
+        )
+    if fingerprint_readiness_risk is not None:
+        payload[FINGERPRINT_READINESS_RISK_BOUNDED_PAYLOAD_KEY] = (
+            fingerprint_readiness_risk
         )
     if next_actions is not None:
         payload["next_actions"] = next_actions
@@ -666,7 +692,7 @@ def _bounded_json_list(
     *,
     limit: BoundedReportLimit,
 ) -> list[JSONValue]:
-    return limit.slice(values)
+    return cast(list[JSONValue], limit.slice(values))
 
 
 def _payload_limit_metadata(
@@ -689,7 +715,10 @@ def _payload_limit_metadata(
         maximum_limit=maximum_limit,
         allow_unbounded=allow_unbounded,
     )
-    return limit_state.count_payload(total_count)
+    return cast(  # type: ignore[redundant-cast]
+        dict[str, JSONValue],
+        limit_state.count_payload(total_count),
+    )
 
 
 def _normalize_report_limit(
@@ -1943,6 +1972,83 @@ def _fingerprint_readiness_summary(
     )
 
 
+def fingerprint_readiness_risk_summary(
+    report: QualityReport,
+    *,
+    target_limit: int | None = None,
+    section_limit: int | None = None,
+    reason_limit: int | None = None,
+) -> dict[str, JSONValue] | None:
+    """Return fingerprint readiness risk metadata for one report."""
+    return _fingerprint_readiness_risk_summary(
+        report,
+        target_limit=target_limit,
+        section_limit=section_limit,
+        reason_limit=reason_limit,
+    )
+
+
+def _fingerprint_readiness_risk_summary(
+    report: QualityReport,
+    *,
+    target_limit: int | None = None,
+    section_limit: int | None = None,
+    reason_limit: int | None = None,
+) -> dict[str, JSONValue] | None:
+    summary = report.metadata.get(
+        TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY
+    )
+    if (
+        isinstance(summary, Mapping)
+        and target_limit is None
+        and section_limit is None
+        and reason_limit is None
+    ):
+        return dict(summary)
+    findings = tuple(report.findings)
+    if not _has_fingerprint_series_findings(findings):
+        return None
+    return _optional_mapping_payload(
+        series_fingerprint_readiness_risk_summary(
+            findings,
+            target_limit=target_limit,
+            section_limit=section_limit,
+            reason_limit=reason_limit,
+            report_surface_evidence=(
+                _fingerprint_report_surface_evidence_for_readiness_risk()
+            ),
+        )
+    )
+
+
+def _has_fingerprint_series_findings(
+    findings: tuple[QualityFinding, ...],
+) -> bool:
+    return any(
+        isinstance(
+            finding.metadata.get(TIME_SERIES_FINGERPRINT_METADATA_KEY),
+            Mapping,
+        )
+        for finding in findings
+    )
+
+
+def _fingerprint_report_surface_evidence_for_readiness_risk() -> (
+    dict[str, JSONValue]
+):
+    global _FINGERPRINT_REPORT_SURFACE_EVIDENCE_ACTIVE  # noqa: PLW0603
+    if _FINGERPRINT_REPORT_SURFACE_EVIDENCE_ACTIVE:
+        return {}
+    _FINGERPRINT_REPORT_SURFACE_EVIDENCE_ACTIVE = True
+    try:
+        return cast(  # type: ignore[redundant-cast]
+            dict[str, JSONValue],
+            fingerprint_report_surface_evidence(),
+        )
+    finally:
+        _FINGERPRINT_REPORT_SURFACE_EVIDENCE_ACTIVE = False
+
+
 def _fingerprint_group_selected(check_groups: tuple[str, ...]) -> bool:
     normalized = {group.strip().lower() for group in check_groups if group}
     if not normalized:
@@ -2562,6 +2668,78 @@ def format_fingerprint_readiness_summary_lines(
                     f"- {_format_fingerprint_readiness_target_line(item)}"
                 )
     return lines
+
+
+def format_fingerprint_readiness_risk_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable lines for readiness risk ranking."""
+    if not summary:
+        return []
+    lines = [
+        "",
+        "Fingerprint readiness risk",
+        (
+            "- targets: "
+            f"{_int_metadata(summary, 'target_count')} "
+            f"risk: {_int_metadata(summary, 'risk_target_count')} "
+            f"clean: {_int_metadata(summary, 'clean_target_count')} "
+            f"included: {_int_metadata(summary, 'included_target_count')} "
+            f"omitted: {_int_metadata(summary, 'omitted_target_count')}"
+        ),
+    ]
+    risk_levels = _format_count_metadata(summary.get("risk_level_counts"))
+    if risk_levels:
+        lines.append(f"- risk levels: {risk_levels}")
+    reasons = _format_count_metadata(summary.get("reason_counts"))
+    if reasons:
+        lines.append(f"- top reasons: {reasons}")
+    sections = _format_count_metadata(summary.get("section_risk_counts"))
+    if sections:
+        lines.append(f"- sections: {sections}")
+    surface = _mapping_payload(summary.get("report_surface_evidence"))
+    surface_count = _int_metadata(surface, "surface_count")
+    if surface_count:
+        cli_states = _format_count_metadata(
+            surface.get("cli_summary_state_counts")
+        )
+        lines.append(
+            "- report surfaces: "
+            f"{surface_count}"
+            f"{' cli=' + cli_states if cli_states else ''}"
+        )
+    target_risks = summary.get("target_risks")
+    if isinstance(target_risks, list):
+        for item in target_risks:
+            if isinstance(item, Mapping):
+                lines.append(
+                    f"- {_format_fingerprint_readiness_risk_target(item)}"
+                )
+    return lines
+
+
+def _format_fingerprint_readiness_risk_target(
+    summary: Mapping[str, JSONValue],
+) -> str:
+    axis = _mapping_payload(summary.get("target_axis"))
+    reasons = _string_list_metadata(summary.get("reason_codes"))
+    reason_text = ", ".join(reasons) if reasons else "none"
+    sections = [
+        _string_metadata(section, "section")
+        for section in _list_metadata(summary.get("section_risks"))
+    ]
+    section_text = ", ".join(sections) if sections else "none"
+    return (
+        f"#{_int_metadata(summary, 'rank')} "
+        f"{_string_metadata(axis, 'data_format')} "
+        f"{_string_metadata(axis, 'symbol')} "
+        f"{_string_metadata(axis, 'timeframe')} "
+        f"{_string_metadata(axis, 'period')} "
+        f"{_string_metadata(axis, 'kind')}: "
+        f"{_string_metadata(summary, 'risk_level')} "
+        f"score={_int_metadata(summary, 'risk_score')} "
+        f"sections={section_text} reasons={reason_text}"
+    )
 
 
 def _format_nested_count_metadata(value: JSONValue, key: str) -> str:

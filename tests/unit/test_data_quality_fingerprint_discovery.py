@@ -37,6 +37,8 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
 )
 from histdatacom.data_quality.profiles import (
@@ -72,12 +74,18 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert schemas["fingerprint_readiness_summary"]["schema_version"] == (
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION
     )
+    assert schemas["fingerprint_readiness_risk"]["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION
+    )
     assert schemas["cross_series_fingerprint"]["status"] == "planned"
     assert payload["metadata_keys"]["finding_metadata"] == {
         "series_fingerprint": TIME_SERIES_FINGERPRINT_METADATA_KEY
     }
     assert payload["metadata_keys"]["report_metadata"]["readiness_summary"] == (
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY
+    )
+    assert payload["metadata_keys"]["report_metadata"]["readiness_risk"] == (
+        TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY
     )
 
     implemented = payload["sections"]["implemented"]["target_sections"]
@@ -217,6 +225,7 @@ def test_fingerprint_contract_audit_reports_clean_contract() -> None:
         == "present"
     )
     assert "Fingerprint regimes" in evidence["cli_summary_headings"]
+    assert "Fingerprint readiness risk" in evidence["cli_summary_headings"]
     assert "does not read local target data" in payload["non_goals"]
 
 

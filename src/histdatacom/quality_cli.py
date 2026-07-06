@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import cast
 
 from histdatacom.cli_config import (
     CliConfigError,
@@ -23,6 +24,10 @@ from histdatacom.data_quality.fingerprint_discovery import (
     format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
 )
+from histdatacom.data_quality.reporting import (
+    fingerprint_readiness_risk_summary,
+    format_fingerprint_readiness_risk_lines,
+)
 from histdatacom.data_quality.preflight import (
     DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS,
     format_quality_preflight_evidence_inspection,
@@ -39,6 +44,7 @@ from histdatacom.data_quality.remediation_audit import (
     DEFAULT_REMEDIATION_CATALOG_AUDIT_TARGET_AXIS_LIMIT,
     audit_remediation_catalog_report_paths,
     format_remediation_catalog_audit,
+    load_quality_report,
     remediation_catalog_audit_has_warning_error_gaps,
     remediation_catalog_audit_to_json,
 )
@@ -49,7 +55,13 @@ from histdatacom.fx_enums import (
     normalize_pair_group,
     pair_group_names,
 )
+from histdatacom.publication_safety import publish_safe_path
+from histdatacom.runtime_contracts import JSONValue
 from histdatacom.verbosity import configure_logging
+
+FINGERPRINT_READINESS_RISK_COMMAND_SCHEMA_VERSION = (
+    "histdatacom.fingerprint-readiness-risk-command.v1"
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -203,8 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
         metavar="N",
         help=(
-            "maximum source examples to include per finding code; "
-            "use -1 for all"
+            "maximum source examples to include per finding code; use -1 for all"
         ),
     )
     catalog.add_argument(
@@ -214,8 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_REMEDIATION_CATALOG_AUDIT_TARGET_AXIS_LIMIT,
         metavar="N",
         help=(
-            "maximum target-axis samples to keep from report coverage; "
-            "use -1 for all"
+            "maximum target-axis samples to keep from report coverage; use -1 for all"
         ),
     )
     catalog.add_argument(
@@ -234,8 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         metavar="PATH",
         help=(
-            "read a quality profile file and reflect effective fingerprint "
-            "controls"
+            "read a quality profile file and reflect effective fingerprint controls"
         ),
     )
     fingerprint_schema.add_argument(
@@ -247,6 +256,52 @@ def build_parser() -> argparse.ArgumentParser:
         "--verify",
         action="store_true",
         help="emit a data-free fingerprint contract drift audit",
+    )
+    fingerprint_readiness = subparsers.add_parser(
+        "fingerprint-readiness",
+        aliases=("fingerprint-risk", "readiness-risk"),
+        help="rank fingerprint readiness risks from saved quality reports",
+    )
+    fingerprint_readiness.add_argument(
+        "--report",
+        dest="report_paths",
+        action="extend",
+        nargs="+",
+        required=True,
+        metavar="PATH",
+        help=(
+            "saved quality JSON report to rank; repeat or pass multiple "
+            "paths to compare reports"
+        ),
+    )
+    fingerprint_readiness.add_argument(
+        "--target-limit",
+        dest="target_limit",
+        type=_integer_limit,
+        default=None,
+        metavar="N",
+        help="maximum ranked targets to include; use -1 for all",
+    )
+    fingerprint_readiness.add_argument(
+        "--section-limit",
+        dest="section_limit",
+        type=_integer_limit,
+        default=None,
+        metavar="N",
+        help="maximum section risks to include per target; use -1 for all",
+    )
+    fingerprint_readiness.add_argument(
+        "--reason-limit",
+        dest="reason_limit",
+        type=_integer_limit,
+        default=None,
+        metavar="N",
+        help="maximum reason codes to include; use -1 for all",
+    )
+    fingerprint_readiness.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the machine-readable readiness risk ranking payload",
     )
     bounded_payload = subparsers.add_parser(
         "bounded-payload-contract",
@@ -337,9 +392,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.verify:
             audit_payload = fingerprint_contract_audit(profile)
             if args.json:
-                print(  # noqa:T201
+                print(
                     json.dumps(audit_payload, indent=2, sort_keys=True)
-                )
+                )  # noqa:T201
             else:
                 print(
                     format_fingerprint_contract_audit(audit_payload)
@@ -354,22 +409,116 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.quality_command in {
+        "fingerprint-readiness",
+        "fingerprint-risk",
+        "readiness-risk",
+    }:
+        try:
+            risk_payload = _fingerprint_readiness_risk_command_payload(
+                args.report_paths,
+                target_limit=args.target_limit,
+                section_limit=args.section_limit,
+                reason_limit=args.reason_limit,
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            print(f"quality report error: {exc}", file=sys.stderr)  # noqa:T201
+            return 1
+        if args.json:
+            print(
+                json.dumps(risk_payload, indent=2, sort_keys=True)
+            )  # noqa:T201
+        else:
+            print(
+                _format_fingerprint_readiness_risk_command(risk_payload)
+            )  # noqa:T201
+        return 0
+
+    if args.quality_command in {
         "bounded-payload-contract",
         "bounded-payload-audit",
         "report-payload-contract",
     }:
         audit_payload = bounded_payload_contract_audit()
         if args.json:
-            print(  # noqa:T201
+            print(
                 json.dumps(audit_payload, indent=2, sort_keys=True)
-            )
+            )  # noqa:T201
         else:
-            print(  # noqa:T201
+            print(
                 format_bounded_payload_contract_audit(audit_payload)
-            )
+            )  # noqa:T201
         return 1 if audit_payload.get("status") == "fail" else 0
 
     parser.error(f"unsupported quality command: {args.quality_command}")
+
+
+def _fingerprint_readiness_risk_command_payload(
+    report_paths: Sequence[str],
+    *,
+    target_limit: int | None,
+    section_limit: int | None,
+    reason_limit: int | None,
+) -> dict[str, JSONValue]:
+    reports: list[dict[str, JSONValue]] = []
+    risk_report_count = 0
+    for path in report_paths:
+        report = load_quality_report(path)
+        summary = fingerprint_readiness_risk_summary(
+            report,
+            target_limit=target_limit,
+            section_limit=section_limit,
+            reason_limit=reason_limit,
+        )
+        risk_target_count = _json_int_value(
+            summary.get("risk_target_count") if summary else 0
+        )
+        if risk_target_count > 0:
+            risk_report_count += 1
+        reports.append(
+            {
+                "report_path": publish_safe_path(path),
+                "summary": summary or {},
+            }
+        )
+    return {
+        "schema_version": FINGERPRINT_READINESS_RISK_COMMAND_SCHEMA_VERSION,
+        "report_count": len(reports),
+        "risk_report_count": risk_report_count,
+        "reports": cast(JSONValue, reports),
+    }
+
+
+def _format_fingerprint_readiness_risk_command(
+    payload: Mapping[str, JSONValue],
+) -> str:
+    lines = [
+        "Fingerprint readiness risk command",
+        f"reports: {payload.get('report_count', 0)}",
+        f"reports with risks: {payload.get('risk_report_count', 0)}",
+    ]
+    reports = payload.get("reports")
+    if not isinstance(reports, list):
+        return "\n".join(lines)
+    for item in reports:
+        if not isinstance(item, dict):
+            continue
+        lines.append("")
+        lines.append(f"Report: {item.get('report_path', 'unknown')}")
+        summary = item.get("summary")
+        if isinstance(summary, dict) and summary:
+            lines.extend(format_fingerprint_readiness_risk_lines(summary))
+        else:
+            lines.append("Fingerprint readiness risk")
+            lines.append("- no fingerprint readiness data")
+    return "\n".join(lines)
+
+
+def _json_int_value(value: JSONValue | None) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    return 0
 
 
 def _non_negative_int(value: str) -> int:

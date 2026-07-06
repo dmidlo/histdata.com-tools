@@ -19,6 +19,8 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
@@ -43,6 +45,7 @@ from histdatacom.data_quality import (
     quality_report_payload,
     quality_report_to_json,
     series_fingerprint_readiness_summary,
+    series_fingerprint_readiness_risk_summary,
     series_fingerprint_regime_summary,
     write_quality_report,
 )
@@ -551,6 +554,52 @@ def test_quality_report_payload_adds_fingerprint_readiness_metadata(
     assert tick["dependence"]["series"]["spread_acf"]["sample_count"] == 5
 
 
+def test_quality_report_payload_adds_fingerprint_readiness_risk_metadata(
+    tmp_path: Path,
+) -> None:
+    """Fingerprint reports should serialize a bounded risk ranking."""
+    payload = quality_report_payload(_fingerprint_dynamics_report(tmp_path))
+
+    summary = payload["metadata"][
+        TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY
+    ]
+    target_risks = summary["target_risks"]
+
+    assert (
+        summary["schema_version"]
+        == TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION
+    )
+    assert summary["source_schema_version"] == (
+        TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION
+    )
+    assert summary["target_count"] == 3
+    assert summary["risk_target_count"] == 3
+    assert summary["included_target_count"] == 3
+    assert summary["clean_target_count"] == 0
+    assert summary["reason_counts"]["invalid_timestamps_skipped"] == 3
+    assert summary["reason_counts"]["duplicate_timestamps"] == 3
+    assert summary["reason_counts"]["suspicious_gaps"] == 3
+    assert summary["reason_counts"]["skipped_dependence_lags"] == 1
+    assert summary["reason_counts"]["insufficient_sample_count"] == 1
+    assert summary["reason_counts"]["missing_regime_summary"] == 3
+    assert summary["section_risk_counts"]["dependence"] == 1
+    assert summary["report_surface_evidence"]["surface_count"] >= 1
+
+    assert target_risks[0]["rank"] == 1
+    assert target_risks[0]["target_axis"]["symbol"] == "GBPUSD"
+    assert target_risks[0]["risk_level"] == "high"
+    assert "temporal_topology" in {
+        item["section"] for item in target_risks[0]["section_risks"]
+    }
+    assert set(target_risks[0]["reason_codes"]) >= {
+        "invalid_timestamps_skipped",
+        "duplicate_timestamps",
+        "suspicious_gaps",
+        "skipped_dependence_lags",
+    }
+    assert "time_series_fingerprint" in json.dumps(payload, sort_keys=True)
+
+
 def test_fingerprint_readiness_summary_handles_absent_dynamics_sections(
     tmp_path: Path,
 ) -> None:
@@ -590,6 +639,26 @@ def test_fingerprint_readiness_summary_handles_absent_dynamics_sections(
         "truncated": False,
     }
     assert target["dependence"] == _empty_dependence_summary("not_emitted")
+
+
+def test_fingerprint_readiness_risk_summary_handles_missing_sections(
+    tmp_path: Path,
+) -> None:
+    """Risk ranking should flag older or unsupported fingerprint payloads."""
+    summary = series_fingerprint_readiness_risk_summary(
+        _fingerprint_report(tmp_path).findings,
+        target_limit=-1,
+    )
+
+    assert summary is not None
+    assert summary["target_count"] == 2
+    assert summary["risk_target_count"] == 2
+    assert summary["reason_counts"]["not_emitted"] == 3
+    assert summary["reason_counts"]["unsupported_target_kind"] == 2
+    assert summary["target_risks"][0]["target_axis"]["kind"] == "spreadsheet"
+    assert (
+        "unsupported_target_kind" in summary["target_risks"][0]["reason_codes"]
+    )
 
 
 def test_fingerprint_console_summary_reports_readiness_lines(
@@ -647,6 +716,23 @@ def test_fingerprint_console_summary_reports_readiness_lines(
     assert "interarrival=4 median=250ms" in output
     assert "spread_jumps=1 rate=0.25" in output
     assert "one_sided=2 bid_only=1 ask_only=1" in output
+
+
+def test_fingerprint_console_summary_reports_readiness_risk_lines(
+    tmp_path: Path,
+) -> None:
+    """Human quality output should include ranked fingerprint risk targets."""
+    output = format_quality_console_summary(
+        _fingerprint_dynamics_report(tmp_path),
+        check_groups=("fingerprint",),
+    )
+
+    assert "Fingerprint readiness risk" in output
+    assert "- targets: 3 risk: 3 clean: 0 included: 3 omitted: 0" in output
+    assert "#1 ascii GBPUSD M1 201202 csv: high" in output
+    assert "reasons=duplicate_timestamps" in output
+    assert "invalid_timestamps_skipped" in output
+    assert "skipped_dependence_lags" in output
 
 
 def test_quality_report_payload_adds_mixed_next_actions(
@@ -1276,6 +1362,32 @@ def test_bounded_quality_payload_includes_fingerprint_readiness(
     )
 
 
+def test_bounded_quality_payload_includes_fingerprint_readiness_risk(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration payloads should expose risk-ranked targets."""
+    report = _fingerprint_dynamics_report(tmp_path)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("fingerprint",),
+        discovery={"roots": [str(tmp_path)], "target_count": 3},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+
+    risk = payload["fingerprint_readiness_risk"]
+
+    assert risk["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION
+    )
+    assert risk["risk_target_count"] == 3
+    assert risk["target_risks"][0]["target_axis"]["symbol"] == "GBPUSD"
+    assert (
+        "invalid_timestamps_skipped" in risk["target_risks"][0]["reason_codes"]
+    )
+
+
 def test_fingerprint_regime_summary_reports_calendar_and_conditioning(
     tmp_path: Path,
 ) -> None:
@@ -1503,6 +1615,32 @@ def test_fingerprint_readiness_summary_orders_limited_dependence_first(
         "valid"
     )
     assert summary["target_summaries"][0]["dependence"]["status"] == "limited"
+
+
+def test_fingerprint_readiness_risk_summary_is_bounded_and_stable(
+    tmp_path: Path,
+) -> None:
+    """Risk ranking should bound target, section, and reason surfaces."""
+    summary = series_fingerprint_readiness_risk_summary(
+        _fingerprint_dynamics_report(tmp_path).findings,
+        target_limit=1,
+        section_limit=1,
+        reason_limit=1,
+    )
+
+    assert summary is not None
+    assert summary["target_count"] == 3
+    assert summary["risk_target_count"] == 3
+    assert summary["included_target_count"] == 1
+    assert summary["omitted_target_count"] == 2
+    assert summary["truncated"] is True
+    assert summary["target_risks"][0]["target_axis"]["symbol"] == "GBPUSD"
+    assert summary["target_risks"][0]["included_section_risk_count"] == 1
+    assert summary["target_risks"][0]["omitted_section_risk_count"] > 0
+    assert len(summary["target_risks"][0]["reason_codes"]) == 1
+    assert summary["limit_metadata"]["targets"]["requested_limit"] == 1
+    assert summary["limit_metadata"]["sections"]["requested_limit"] == 1
+    assert summary["limit_metadata"]["reasons"]["requested_limit"] == 1
 
 
 def test_bounded_quality_payload_includes_next_actions(

@@ -61,6 +61,7 @@ from histdatacom.data_quality.profiles import (
 from histdatacom.data_quality.reporting import (
     format_fingerprint_distribution_attention_lines,
     format_fingerprint_distribution_summary_lines,
+    format_fingerprint_readiness_risk_lines,
     format_fingerprint_topology_attention_lines,
     format_fingerprint_topology_summary_lines,
     format_quality_next_action_lines,
@@ -1801,6 +1802,13 @@ def _format_orchestration_quality_console_summary(
     lines.extend(
         format_fingerprint_topology_summary_lines(
             _mapping_from_payload(quality_payload.get("fingerprint_topology"))
+        )
+    )
+    lines.extend(
+        format_fingerprint_readiness_risk_lines(
+            _mapping_from_payload(
+                quality_payload.get("fingerprint_readiness_risk")
+            )
         )
     )
     lines.extend(_format_quality_target_sections(quality_payload))
