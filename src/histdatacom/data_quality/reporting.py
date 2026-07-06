@@ -2633,10 +2633,45 @@ def format_fingerprint_readiness_summary_lines(
             f"{_int_metadata(summary, 'dependence_skipped_lag_count')}"
         )
         lines.append(dependence_line)
+    stationarity_counts = _format_count_metadata(
+        summary.get("stationarity_status_counts")
+    )
+    if stationarity_counts:
+        stationarity_line = f"- stationarity: {stationarity_counts}"
+        stationarity_reasons = _format_count_metadata(
+            summary.get("stationarity_reason_counts")
+        )
+        if stationarity_reasons:
+            stationarity_line += f" reasons: {stationarity_reasons}"
+        skipped_window_reasons = _format_count_metadata(
+            summary.get("stationarity_skipped_window_reason_counts")
+        )
+        if skipped_window_reasons:
+            stationarity_line += (
+                f" skipped-window reasons: {skipped_window_reasons}"
+            )
+        basis_counts = _format_count_metadata(
+            summary.get("stationarity_basis_counts")
+        )
+        if basis_counts:
+            stationarity_line += f" basis: {basis_counts}"
+        transform_counts = _format_count_metadata(
+            summary.get("stationarity_recommended_transform_counts")
+        )
+        if transform_counts:
+            stationarity_line += f" transforms: {transform_counts}"
+        stationarity_line += (
+            " computed_windows="
+            f"{_int_metadata(summary, 'stationarity_computed_window_count')} "
+            "skipped_windows="
+            f"{_int_metadata(summary, 'stationarity_skipped_window_count')}"
+        )
+        lines.append(stationarity_line)
     count_lines = (
         ("topology limitations", "topology_limitation_counts"),
         ("dynamics limitations", "dynamics_limitation_counts"),
         ("dependence limitations", "dependence_limitation_counts"),
+        ("stationarity limitations", "stationarity_limitation_counts"),
         ("row order", "row_order_counts"),
         ("computed from", "computed_from_counts"),
         ("cache sources", "cache_source_counts"),
@@ -2767,6 +2802,12 @@ def _format_fingerprint_readiness_target_line(
         _mapping_payload(summary.get("dependence"))
     )
     dependence_text = f", {dependence_details}" if dependence_details else ""
+    stationarity_details = _format_fingerprint_readiness_stationarity_details(
+        _mapping_payload(summary.get("stationarity_diagnostics"))
+    )
+    stationarity_text = (
+        f", {stationarity_details}" if stationarity_details else ""
+    )
     return (
         f"{_string_metadata(axis, 'data_format')} "
         f"{_string_metadata(axis, 'symbol')} "
@@ -2789,6 +2830,7 @@ def _format_fingerprint_readiness_target_line(
         f"limitations={limitation_text}"
         f"{details_text}"
         f"{dependence_text}"
+        f"{stationarity_text}"
     )
 
 
@@ -2889,6 +2931,46 @@ def _format_fingerprint_readiness_dependence_details(
         f"{skipped_reason_text}"
         f"{series_text}"
     )
+
+
+def _format_fingerprint_readiness_stationarity_details(
+    stationarity: Mapping[str, JSONValue],
+) -> str:
+    if not stationarity:
+        return ""
+    status = _string_metadata(stationarity, "status")
+    reason = _optional_string_metadata(stationarity, "reason")
+    reason_text = f" reason={reason}" if reason else ""
+    skipped_reasons = _format_count_metadata(
+        stationarity.get("skipped_window_reason_counts")
+    )
+    skipped_reason_text = (
+        f" skipped_reasons={skipped_reasons}" if skipped_reasons else ""
+    )
+    transforms = _string_list_metadata(
+        stationarity.get("recommended_transforms")
+    )
+    transform_text = ",".join(transforms) if transforms else "none"
+    return (
+        f"stationarity={status}{reason_text} "
+        f"basis={_string_metadata(stationarity, 'calculation_basis')} "
+        f"metric={_string_metadata(stationarity, 'metric')} "
+        f"samples={_int_metadata(stationarity, 'level_sample_count')}/"
+        f"{_int_metadata(stationarity, 'return_sample_count')} "
+        f"windows={_format_window_metadata(stationarity)} "
+        "computed_windows="
+        f"{_int_metadata(stationarity, 'computed_window_count')} "
+        "skipped_windows="
+        f"{_int_metadata(stationarity, 'skipped_window_count')} "
+        f"rounding={_int_metadata(stationarity, 'rounding_digits')} "
+        f"transforms={transform_text}"
+        f"{skipped_reason_text}"
+    )
+
+
+def _format_window_metadata(stationarity: Mapping[str, JSONValue]) -> str:
+    windows = _int_list_metadata(stationarity.get("windows"))
+    return "[" + ",".join(str(window) for window in windows) + "]"
 
 
 def _format_lag_metadata(dependence: Mapping[str, JSONValue]) -> str:

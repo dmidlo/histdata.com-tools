@@ -1532,6 +1532,14 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "schema_version",
         "section_skip_reason_counts",
         "section_status_counts",
+        "stationarity_basis_counts",
+        "stationarity_computed_window_count",
+        "stationarity_limitation_counts",
+        "stationarity_reason_counts",
+        "stationarity_recommended_transform_counts",
+        "stationarity_skipped_window_count",
+        "stationarity_skipped_window_reason_counts",
+        "stationarity_status_counts",
         "target_count",
         "target_summaries",
         "tick_spread_conditioning_status_counts",
@@ -1549,6 +1557,8 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "omitted_target_count",
         "dependence_computed_lag_count",
         "dependence_skipped_lag_count",
+        "stationarity_computed_window_count",
+        "stationarity_skipped_window_count",
     ):
         assert isinstance(payload[key], int)
         assert payload[key] >= 0
@@ -1568,6 +1578,12 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "row_order_counts",
         "section_skip_reason_counts",
         "section_status_counts",
+        "stationarity_basis_counts",
+        "stationarity_limitation_counts",
+        "stationarity_reason_counts",
+        "stationarity_recommended_transform_counts",
+        "stationarity_skipped_window_reason_counts",
+        "stationarity_status_counts",
         "tick_spread_conditioning_status_counts",
         "topology_limitation_counts",
     ):
@@ -1737,6 +1753,7 @@ def _assert_fingerprint_readiness_target(
         "sections_skipped_count",
         "source_kind",
         "source_reason",
+        "stationarity_diagnostics",
         "target_axis",
         "tick_spread_conditioning",
         "topology",
@@ -1782,6 +1799,9 @@ def _assert_fingerprint_readiness_target(
         _mapping(payload["microstructure_dynamics"])
     )
     _assert_fingerprint_readiness_dependence(_mapping(payload["dependence"]))
+    _assert_fingerprint_readiness_stationarity(
+        _mapping(payload["stationarity_diagnostics"])
+    )
 
 
 def _assert_fingerprint_readiness_topology(
@@ -1950,6 +1970,103 @@ def _assert_fingerprint_readiness_dependence(
     series = _mapping(payload["series"])
     for summary in series.values():
         _assert_fingerprint_readiness_acf_series(_mapping(summary))
+
+
+def _assert_fingerprint_readiness_stationarity(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "basis",
+        "cache_source",
+        "calculation_basis",
+        "computed_from",
+        "computed_window_count",
+        "distribution_shift",
+        "invalid_row_count",
+        "level_sample_count",
+        "limitations",
+        "metric",
+        "partial_row_count",
+        "reason",
+        "recommended_transforms",
+        "regular_grid",
+        "return_sample_count",
+        "rolling_windows",
+        "rounding_digits",
+        "row_count",
+        "row_order",
+        "sampled_row_count",
+        "skipped_window_count",
+        "skipped_window_reason_counts",
+        "status",
+        "truncated",
+        "usable_row_count",
+        "windows",
+        "zero_variance_metrics",
+    }
+    assert payload["status"] in {"limited", "skipped", "unavailable", "valid"}
+    assert isinstance(payload["limitations"], list)
+    assert isinstance(payload["recommended_transforms"], list)
+    assert isinstance(payload["regular_grid"], bool)
+    assert isinstance(payload["truncated"], bool)
+    assert isinstance(payload["windows"], list)
+    assert isinstance(payload["zero_variance_metrics"], list)
+    assert isinstance(payload["skipped_window_reason_counts"], dict)
+    assert isinstance(payload["rolling_windows"], dict)
+    assert isinstance(payload["distribution_shift"], dict)
+    for key in (
+        "computed_window_count",
+        "invalid_row_count",
+        "level_sample_count",
+        "partial_row_count",
+        "return_sample_count",
+        "rounding_digits",
+        "row_count",
+        "sampled_row_count",
+        "skipped_window_count",
+        "usable_row_count",
+    ):
+        assert isinstance(payload[key], int)
+    for window in _mapping(payload["rolling_windows"]).values():
+        _assert_fingerprint_readiness_stationarity_window(_mapping(window))
+
+
+def _assert_fingerprint_readiness_stationarity_window(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert {
+        "reason",
+        "sample_counts",
+        "status",
+        "window",
+    } <= set(payload)
+    assert payload["status"] in {"computed", "skipped"}
+    assert isinstance(payload["sample_counts"], dict)
+    assert isinstance(payload["window"], int)
+    if payload["status"] == "computed":
+        for key in (
+            "level_rolling_mean_drift",
+            "level_rolling_variance_drift",
+            "return_rolling_mean_drift",
+            "return_rolling_variance_drift",
+        ):
+            _assert_fingerprint_readiness_stationarity_change(
+                _mapping(payload[key])
+            )
+    else:
+        assert isinstance(payload["required_sample_count"], int)
+
+
+def _assert_fingerprint_readiness_stationarity_change(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "absolute_change",
+        "first",
+        "last",
+        "relative_change",
+        "signed_change",
+    }
 
 
 def _assert_fingerprint_readiness_acf_series(

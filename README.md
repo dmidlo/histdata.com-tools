@@ -980,7 +980,7 @@ Supported groups:
 | `domain` | symbol metadata, quote conventions, calendar/session tags, cross-instrument consistency |
 | `modeling` | advisory modeling-readiness checks for bid-only bars, leakage risk, spread-cost assumptions, target horizon feasibility |
 | `provenance` | optional orchestration manifest/status lineage checks for artifact paths, sizes, checksums, cache metadata, stale caches, and orphan files |
-| `fingerprint` | deterministic INFO-only time-series fingerprints for target axis, coverage, timestamp topology, M1/tick distributions, calendar regimes, return/microstructure dynamics, lag dependence, and bounded tick spread conditioning |
+| `fingerprint` | deterministic INFO-only time-series fingerprints for target axis, coverage, timestamp topology, M1/tick distributions, calendar regimes, return/microstructure dynamics, lag dependence, stationarity/drift diagnostics, and bounded tick spread conditioning |
 
 `fingerprint.series` payloads include a `calendar_regimes` section for readable
 ASCII M1 and tick targets. It counts session states, active/clock sessions,
@@ -1003,12 +1003,18 @@ dependence covers close returns, absolute returns, squared returns, and range
 ratios; tick dependence covers spreads plus spread-change series. Lags that are
 too long for the sampled sequence, or series with zero variance, are reported as
 skipped lag metadata instead of NaN values or quality failures.
+They also include `stationarity_diagnostics` with advisory rolling mean/variance
+drift, first/middle/last distribution-shift summaries, skipped rolling-window
+reasons, sample counts, configured windows, rounding policy, zero-variance
+markers, and deterministic transform recommendations such as `log_return`,
+`differencing`, and `session_conditioning`. These diagnostics are descriptive
+fingerprint facts only; nonstationarity does not fail a quality run.
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,
 stable skip/eligibility reason codes, calendar-profile completeness, tick-spread
-conditioning eligibility, and dynamics readiness. This is machine-readable
-contract metadata for report consumers; the full fingerprint sections remain the
-source of the detailed statistics.
+conditioning eligibility, dynamics readiness, and stationarity readiness. This
+is machine-readable contract metadata for report consumers; the full fingerprint
+sections remain the source of the detailed statistics.
 Quality JSON reports and CLI summaries also include bounded regime and
 readiness summaries when fingerprint findings are present. Use
 `time_series_fingerprint_regime_summary` to scan dominant session states, active
@@ -1020,14 +1026,18 @@ unavailable; which topology limitations affect sequence interpretation; and the
 compact return, jump, flatline, spread, stale quote, burst, and one-sided
 movement facts. The same readiness summary also includes bounded dependence
 status, ACF basis, configured lag coverage, computed/skipped lag counts,
-skipped-lag reason counts, and per-series sample counts. Use
+skipped-lag reason counts, and per-series sample counts. It also includes
+stationarity status, calculation basis, sample counts, configured rolling
+windows, computed/skipped window counts, skipped-window reasons, rounding
+policy, zero-variance markers, and recommended transforms. Use
 `time_series_fingerprint_readiness_risk` when you need a bounded, deterministic
 triage list of targets and sections most likely to block downstream fingerprint
 use. It ranks existing readiness, topology, dependence, regime, cache-source,
 and report-surface evidence into stable reason codes such as
 `invalid_timestamps_skipped`, `duplicate_timestamps`, `suspicious_gaps`,
-`skipped_dependence_lags`, `insufficient_sample_count`, `zero_variance`,
-`unsupported_timeframe`, and `not_emitted`. Use the raw
+`skipped_dependence_lags`, `skipped_rolling_windows`,
+`insufficient_sample_count`, `zero_variance`, `unsupported_timeframe`, and
+`not_emitted`. Use the raw
 `time_series_fingerprint` payload when downstream tooling needs complete
 fingerprint sections, full quantile maps, full conditioned distributions, or full
 ACF lag maps.

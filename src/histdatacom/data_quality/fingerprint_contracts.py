@@ -48,6 +48,7 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
@@ -113,6 +114,7 @@ FINGERPRINT_SKIP_REASON_CODES = (
     "zero_variance",
     "no_computable_lags",
     "skipped_lags",
+    "skipped_rolling_windows",
     "not_emitted",
 )
 FINGERPRINT_TOPOLOGY_LIMITATIONS = (
@@ -375,6 +377,13 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_stationarity_diagnostics",
+        TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.stationarity_diagnostics",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_audit",
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -552,6 +561,20 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "stationarity_diagnostics",
+        "advisory rolling drift, distribution shift, and transform recommendations",
+        target_timeframes=(M1, TICK),
+        schema_key="fingerprint_stationarity_diagnostics",
+        basis_values=("observed_sequence",),
+        row_order_values=("source_text_order", "cache_order"),
+        extra={
+            "profile_controlled_by": [
+                "rolling_windows",
+                "rounding_digits",
+            ],
+        },
+    ),
+    FingerprintTargetSectionContract(
         "fingerprint_audit",
         "machine-readable expected/emitted/skipped section accounting and readiness",
         target_timeframes=(M1, TICK),
@@ -560,7 +583,6 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
 )
 
 PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
-    FingerprintPlannedSectionContract("stationarity_diagnostics", "#329"),
     FingerprintPlannedSectionContract("decomposition", "#330"),
     FingerprintPlannedSectionContract("synthetic_constraints", "#333"),
 )

@@ -30,6 +30,7 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
@@ -166,6 +167,7 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
         "m1_bar_distribution",
         "return_dynamics",
         "dependence",
+        "stationarity_diagnostics",
     ]
     assert _list(audit["sections_emitted"]) == [
         "coverage",
@@ -174,6 +176,7 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
         "m1_bar_distribution",
         "return_dynamics",
         "dependence",
+        "stationarity_diagnostics",
     ]
     assert _mapping(audit["sections_skipped"]) == {}
     statuses = _mapping(audit["section_statuses"])
@@ -183,6 +186,24 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
     assert statuses["m1_bar_distribution"] == "valid"
     assert statuses["return_dynamics"] == "valid"
     assert statuses["dependence"] == "limited"
+    assert statuses["stationarity_diagnostics"] == "limited"
+    stationarity = _mapping(payload["stationarity_diagnostics"])
+    assert stationarity["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION
+    )
+    assert stationarity["calculation_basis"] == "observed_sequence"
+    assert stationarity["metric"] == "close_price"
+    assert _mapping(stationarity["sample_counts"]) == {
+        "level": 3,
+        "return": 2,
+    }
+    assert stationarity["windows"] == [60, 240, 1440]
+    assert stationarity["rounding_digits"] == 12
+    assert stationarity["skipped_window_count"] == 3
+    assert _mapping(stationarity["skipped_window_reason_counts"]) == {
+        "insufficient_sample_count": 3,
+    }
+    assert "log_return" in _list(stationarity["recommended_transforms"])
     eligibility = _mapping(
         _mapping(audit["conditional_distribution_eligibility"])["tick_spread"]
     )
@@ -247,6 +268,7 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
         "conditional_distributions",
         "microstructure_dynamics",
         "dependence",
+        "stationarity_diagnostics",
     ]
     assert _mapping(audit["sections_skipped"]) == {}
     statuses = _mapping(audit["section_statuses"])
@@ -254,6 +276,16 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
     assert statuses["conditional_distributions"] == "valid"
     assert statuses["microstructure_dynamics"] == "valid"
     assert statuses["dependence"] == "limited"
+    assert statuses["stationarity_diagnostics"] == "limited"
+    stationarity = _mapping(payload["stationarity_diagnostics"])
+    assert stationarity["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION
+    )
+    assert stationarity["metric"] == "mid_price"
+    assert _mapping(stationarity["sample_counts"]) == {
+        "level": 3,
+        "return": 2,
+    }
     eligibility = _mapping(
         _mapping(audit["conditional_distribution_eligibility"])["tick_spread"]
     )
@@ -570,6 +602,135 @@ def test_fingerprint_dependence_records_invalid_and_uncomputable_series(
     }
 
 
+def test_fingerprint_stationarity_diagnostics_describe_stable_series(
+    tmp_path: Path,
+) -> None:
+    """Stationarity diagnostics should summarize stable bounded windows."""
+    case = _m1_case_from_closes(
+        "m1-stable-stationarity",
+        (0.9, 1.1, 1.0, 0.95, 1.05, 1.0, 1.0, 0.9, 1.1),
+    )
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2, 3),
+        rounding_digits=6,
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target, profile))
+    stationarity = _mapping(payload["stationarity_diagnostics"])
+
+    assert stationarity["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION
+    )
+    assert stationarity["stationarity_status"] == "ok"
+    assert stationarity["calculation_basis"] == "observed_sequence"
+    assert stationarity["metric"] == "close_price"
+    assert _mapping(stationarity["sample_counts"]) == {
+        "level": 9,
+        "return": 8,
+    }
+    assert stationarity["windows"] == [2, 3]
+    assert stationarity["rounding_digits"] == 6
+    assert stationarity["computed_window_count"] == 2
+    assert stationarity["skipped_window_count"] == 0
+    assert _mapping(stationarity["skipped_window_reason_counts"]) == {}
+    assert _list(stationarity["recommended_transforms"]) == [
+        "log_return",
+        "session_conditioning",
+    ]
+    window_two = _mapping(_mapping(stationarity["rolling_windows"])["2"])
+    assert window_two["status"] == "computed"
+    level_mean_drift = _mapping(window_two["level_rolling_mean_drift"])
+    assert level_mean_drift["first"] == 1.0
+    assert level_mean_drift["last"] == 1.0
+    assert level_mean_drift["absolute_change"] == 0.0
+    distribution_shift = _mapping(
+        stationarity["first_middle_last_distribution_shift"]
+    )
+    assert distribution_shift["status"] == "computed"
+    level_shift = _mapping(
+        _mapping(distribution_shift["level"])["mean_shift_first_to_last"]
+    )
+    assert level_shift["absolute_change"] == 0.0
+    assert (
+        _mapping(payload["fingerprint_audit"])["section_statuses"][
+            "stationarity_diagnostics"
+        ]
+        == "valid"
+    )
+
+
+def test_fingerprint_stationarity_diagnostics_describe_drifting_series(
+    tmp_path: Path,
+) -> None:
+    """Drifting levels should produce advisory transform recommendations."""
+    case = _m1_case_from_closes(
+        "m1-drifting-stationarity",
+        (1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8),
+    )
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2, 3),
+        rounding_digits=6,
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target, profile))
+    stationarity = _mapping(payload["stationarity_diagnostics"])
+
+    assert stationarity["stationarity_status"] == "ok"
+    assert stationarity["computed_window_count"] == 2
+    assert stationarity["skipped_window_count"] == 0
+    assert _list(stationarity["recommended_transforms"]) == [
+        "log_return",
+        "differencing",
+        "session_conditioning",
+    ]
+    window_three = _mapping(_mapping(stationarity["rolling_windows"])["3"])
+    level_mean_drift = _mapping(window_three["level_rolling_mean_drift"])
+    assert level_mean_drift["first"] == 1.1
+    assert level_mean_drift["last"] == 1.7
+    assert level_mean_drift["absolute_change"] == 0.6
+    distribution_shift = _mapping(
+        stationarity["first_middle_last_distribution_shift"]
+    )
+    level_shift = _mapping(
+        _mapping(distribution_shift["level"])["mean_shift_first_to_last"]
+    )
+    assert level_shift["absolute_change"] == 0.6
+
+
+def test_fingerprint_stationarity_diagnostics_report_insufficient_data(
+    tmp_path: Path,
+) -> None:
+    """Short series should report skipped windows without failing quality."""
+    case = _m1_case_from_closes("m1-short-stationarity", (1.0, 1.1))
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2, 3),
+        rounding_digits=6,
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    finding = _fingerprint_finding(target, profile)
+    payload = _fingerprint_payload(finding)
+    stationarity = _mapping(payload["stationarity_diagnostics"])
+
+    assert finding.severity is QualitySeverity.INFO
+    assert stationarity["stationarity_status"] == "unavailable"
+    assert stationarity["reason"] == "insufficient_sample_count"
+    assert _mapping(stationarity["sample_counts"]) == {
+        "level": 2,
+        "return": 1,
+    }
+    assert stationarity["windows"] == [2, 3]
+    assert stationarity["skipped_window_count"] == 2
+    assert _mapping(stationarity["skipped_window_reason_counts"]) == {
+        "insufficient_sample_count": 2,
+    }
+    assert (
+        _mapping(payload["fingerprint_audit"])["section_statuses"][
+            "stationarity_diagnostics"
+        ]
+        == "unavailable"
+    )
+
+
 def test_fingerprint_dynamics_mark_non_monotonic_sequences_limited(
     tmp_path: Path,
 ) -> None:
@@ -798,6 +959,7 @@ def test_fingerprint_audit_marks_absent_conditioning_ineligible(
         "conditional_distributions",
         "microstructure_dynamics",
         "dependence",
+        "stationarity_diagnostics",
     ]
     assert _mapping(audit["sections_skipped"]) == {
         "conditional_distributions": {
@@ -815,6 +977,9 @@ def test_fingerprint_audit_marks_absent_conditioning_ineligible(
         "unavailable"
     )
     assert _mapping(audit["section_statuses"])["dependence"] == "unavailable"
+    assert _mapping(audit["section_statuses"])["stationarity_diagnostics"] == (
+        "unavailable"
+    )
     eligibility = _mapping(
         _mapping(audit["conditional_distribution_eligibility"])["tick_spread"]
     )
@@ -1287,6 +1452,7 @@ def test_fingerprint_rule_reports_unsupported_target(
         "m1_bar_distribution",
         "return_dynamics",
         "dependence",
+        "stationarity_diagnostics",
     ]
     assert _list(audit["sections_emitted"]) == [
         "coverage",
@@ -1303,6 +1469,10 @@ def test_fingerprint_rule_reports_unsupported_target(
             "details": {"timeframe": "M1"},
         },
         "dependence": {
+            "reason": "unsupported_target_kind",
+            "details": {"timeframe": "M1"},
+        },
+        "stationarity_diagnostics": {
             "reason": "unsupported_target_kind",
             "details": {"timeframe": "M1"},
         },
@@ -2131,6 +2301,10 @@ def test_fingerprint_constants_are_stable() -> None:
         == "histdatacom.time-series-fingerprint-dependence.v1"
     )
     assert (
+        TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-stationarity.v1"
+    )
+    assert (
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION
         == "histdatacom.time-series-fingerprint-audit.v1"
     )
@@ -2187,6 +2361,24 @@ def _mapping(value: Any) -> dict[str, Any]:
 def _list(value: Any) -> list[Any]:
     assert isinstance(value, list)
     return value
+
+
+def _m1_case_from_closes(
+    name: str,
+    closes: tuple[float, ...],
+) -> HistDataAsciiCase:
+    return HistDataAsciiCase(
+        name=name,
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202.csv",
+        rows=tuple(
+            (
+                f"20120201 {index // 60:02d}{index % 60:02d}00;"
+                f"{close:.6f};{close:.6f};{close:.6f};{close:.6f};0"
+            )
+            for index, close in enumerate(closes)
+        ),
+    )
 
 
 def _acf_for_test(values: list[float], lag: int) -> float:

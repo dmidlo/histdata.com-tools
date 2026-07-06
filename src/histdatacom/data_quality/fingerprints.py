@@ -88,6 +88,9 @@ TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION = (
 TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-dependence.v1"
 )
+TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-stationarity.v1"
+)
 TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-audit.v1"
 )
@@ -195,6 +198,7 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "return_dynamics",
     "microstructure_dynamics",
     "dependence",
+    "stationarity_diagnostics",
 )
 FINGERPRINT_DYNAMICS_SECTIONS = ("return_dynamics", "microstructure_dynamics")
 
@@ -890,6 +894,14 @@ def series_fingerprint_readiness_summary(
     dependence_skipped_lag_reason_counts: Counter[str] = Counter()
     dependence_computed_lag_count = 0
     dependence_skipped_lag_count = 0
+    stationarity_status_counts: Counter[str] = Counter()
+    stationarity_reason_counts: Counter[str] = Counter()
+    stationarity_basis_counts: Counter[str] = Counter()
+    stationarity_limitation_counts: Counter[str] = Counter()
+    stationarity_skipped_window_reason_counts: Counter[str] = Counter()
+    stationarity_recommended_transform_counts: Counter[str] = Counter()
+    stationarity_computed_window_count = 0
+    stationarity_skipped_window_count = 0
     topology_limitation_counts: Counter[str] = Counter()
     dynamics_limitation_counts: Counter[str] = Counter()
     row_order_counts: Counter[str] = Counter()
@@ -950,6 +962,39 @@ def series_fingerprint_readiness_summary(
         dependence_skipped_lag_count += _int_payload(
             dependence.get("skipped_lag_count")
         )
+        stationarity = _payload_mapping(item.get("stationarity_diagnostics"))
+        stationarity_status_counts[
+            _summary_key(stationarity.get("status"))
+        ] += 1
+        stationarity_reason = _optional_summary_key(stationarity.get("reason"))
+        if stationarity_reason:
+            stationarity_reason_counts[stationarity_reason] += 1
+        stationarity_basis = _summary_key(stationarity.get("calculation_basis"))
+        if stationarity_basis != "unknown":
+            stationarity_basis_counts[stationarity_basis] += 1
+        stationarity_limitation_counts.update(
+            _summary_key(value)
+            for value in _string_list(stationarity.get("limitations"))
+        )
+        stationarity_skipped_window_reason_counts.update(
+            _counter_from_mapping(
+                _payload_mapping(
+                    stationarity.get("skipped_window_reason_counts")
+                )
+            )
+        )
+        stationarity_recommended_transform_counts.update(
+            _summary_key(value)
+            for value in _string_list(
+                stationarity.get("recommended_transforms")
+            )
+        )
+        stationarity_computed_window_count += _int_payload(
+            stationarity.get("computed_window_count")
+        )
+        stationarity_skipped_window_count += _int_payload(
+            stationarity.get("skipped_window_count")
+        )
 
     profile_complete_count = sum(
         1
@@ -1002,6 +1047,30 @@ def series_fingerprint_readiness_summary(
         ),
         "dependence_computed_lag_count": dependence_computed_lag_count,
         "dependence_skipped_lag_count": dependence_skipped_lag_count,
+        "stationarity_status_counts": _counter_payload(
+            stationarity_status_counts
+        ),
+        "stationarity_reason_counts": _counter_payload(
+            stationarity_reason_counts
+        ),
+        "stationarity_basis_counts": _counter_payload(
+            stationarity_basis_counts
+        ),
+        "stationarity_limitation_counts": _counter_payload(
+            stationarity_limitation_counts
+        ),
+        "stationarity_skipped_window_reason_counts": _counter_payload(
+            stationarity_skipped_window_reason_counts
+        ),
+        "stationarity_recommended_transform_counts": _counter_payload(
+            stationarity_recommended_transform_counts
+        ),
+        "stationarity_computed_window_count": (
+            stationarity_computed_window_count
+        ),
+        "stationarity_skipped_window_count": (
+            stationarity_skipped_window_count
+        ),
         "topology_limitation_counts": _counter_payload(
             topology_limitation_counts
         ),
@@ -1183,6 +1252,7 @@ def _fingerprint_readiness_risk_target(
             "calendar_regimes",
             "conditional_distributions",
             "dependence",
+            "stationarity_diagnostics",
             "temporal_topology",
             *FINGERPRINT_DYNAMICS_SECTIONS,
         }:
@@ -1202,6 +1272,7 @@ def _fingerprint_readiness_risk_target(
     _add_topology_risks(section_risks, reason_counts, target)
     _add_dynamics_risks(section_risks, reason_counts, target, axis)
     _add_dependence_risks(section_risks, reason_counts, target)
+    _add_stationarity_risks(section_risks, reason_counts, target)
     _add_regime_risks(section_risks, reason_counts, regime or {})
     compact_sections = _bounded_section_risks(
         section_risks,
@@ -1298,6 +1369,8 @@ def _fingerprint_section_is_non_applicable(
         and timeframe != M1
         or section == "microstructure_dynamics"
         and timeframe != TICK
+        or section == "stationarity_diagnostics"
+        and timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
     )
 
 
@@ -1337,6 +1410,53 @@ def _add_dependence_risks(
         base_score=(
             _fingerprint_status_risk_score(status)
             + min(20, skipped_lag_count * 2)
+        ),
+    )
+
+
+def _add_stationarity_risks(
+    section_risks: list[dict[str, JSONValue]],
+    reason_counts: Counter[str],
+    target: Mapping[str, JSONValue],
+) -> None:
+    section_statuses = _payload_mapping(target.get("section_statuses"))
+    if "stationarity_diagnostics" not in section_statuses:
+        return
+    stationarity = _payload_mapping(target.get("stationarity_diagnostics"))
+    status = _summary_key(stationarity.get("status"))
+    reasons: list[str] = []
+    primary_reason = _optional_summary_key(stationarity.get("reason"))
+    if primary_reason:
+        reasons.append(primary_reason)
+    reasons.extend(
+        _summary_key(reason)
+        for reason in _string_list(stationarity.get("limitations"))
+    )
+    skipped_window_count = _int_payload(
+        stationarity.get("skipped_window_count")
+    )
+    if skipped_window_count:
+        reasons.append("skipped_rolling_windows")
+        reasons.extend(
+            _counter_from_mapping(
+                _payload_mapping(
+                    stationarity.get("skipped_window_reason_counts")
+                )
+            ).elements()
+        )
+    if status in {"valid", "ok"} and not reasons:
+        return
+    if status == "skipped" and not reasons:
+        reasons.append("not_emitted")
+    _add_section_risk(
+        section_risks,
+        reason_counts,
+        section="stationarity_diagnostics",
+        status=status,
+        reasons=tuple(_ordered_unique(reasons)),
+        base_score=(
+            _fingerprint_status_risk_score(status)
+            + min(20, skipped_window_count * 2)
         ),
     )
 
@@ -1520,6 +1640,7 @@ def _fingerprint_reason_score(reason: str) -> int:
         "insufficient_sample_count": 15,
         "zero_variance": 15,
         "skipped_dependence_lags": 12,
+        "skipped_rolling_windows": 12,
         "not_emitted": 10,
         "missing_regime_summary": 10,
         "unavailable_regime_summary": 20,
@@ -1668,6 +1789,12 @@ def _fingerprint_readiness_target_summary(
         section_statuses=section_statuses,
         skipped_sections=skipped_sections,
     )
+    stationarity_readiness = _fingerprint_readiness_stationarity_summary(
+        finding,
+        payload,
+        section_statuses=section_statuses,
+        skipped_sections=skipped_sections,
+    )
 
     return {
         "target_axis": target_axis,
@@ -1708,6 +1835,7 @@ def _fingerprint_readiness_target_summary(
             )
         ),
         "dependence": dependence_readiness,
+        "stationarity_diagnostics": stationarity_readiness,
     }
 
 
@@ -2083,6 +2211,213 @@ def _empty_dependence_readiness(
     }
 
 
+def _fingerprint_readiness_stationarity_summary(
+    finding: QualityFinding,
+    payload: Mapping[str, JSONValue],
+    *,
+    section_statuses: Mapping[str, JSONValue],
+    skipped_sections: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    stationarity = _payload_mapping(payload.get("stationarity_diagnostics"))
+    if not stationarity:
+        status = _summary_key(
+            section_statuses.get("stationarity_diagnostics") or "skipped"
+        )
+        if status not in {"skipped", "unavailable"}:
+            status = "skipped"
+        skipped = _payload_mapping(
+            skipped_sections.get("stationarity_diagnostics")
+        )
+        reason = _optional_summary_key(skipped.get("reason"))
+        if reason is None:
+            reason = _fingerprint_section_skip_reason(
+                "stationarity_diagnostics",
+                payload,
+                target=finding.target,
+            )
+        return _empty_stationarity_readiness(status=status, reason=reason)
+
+    sample_counts = _payload_mapping(stationarity.get("sample_counts"))
+    window_payloads: dict[str, JSONValue] = {
+        str(window): _compact_stationarity_window_summary(window_payload)
+        for window, window_payload in sorted(
+            _payload_mapping(stationarity.get("rolling_windows")).items()
+        )
+    }
+    skipped_reason_counts = _counter_from_mapping(
+        _payload_mapping(stationarity.get("skipped_window_reason_counts"))
+    )
+    result: dict[str, JSONValue] = {
+        "status": _stationarity_section_status(stationarity),
+        "reason": _optional_summary_key(stationarity.get("reason")),
+        "basis": _summary_key(stationarity.get("basis")),
+        "calculation_basis": _summary_key(
+            stationarity.get("calculation_basis")
+        ),
+        "row_order": _summary_key(stationarity.get("row_order")),
+        "computed_from": _summary_key(stationarity.get("computed_from")),
+        "cache_source": _optional_summary_key(stationarity.get("cache_source")),
+        "regular_grid": stationarity.get("regular_grid") is True,
+        "metric": _summary_key(stationarity.get("metric")),
+        "limitations": _string_list(stationarity.get("limitations")),
+        "row_count": _int_payload(stationarity.get("row_count")),
+        "sampled_row_count": _int_payload(
+            stationarity.get("sampled_row_count")
+        ),
+        "usable_row_count": _int_payload(stationarity.get("usable_row_count")),
+        "invalid_row_count": _int_payload(
+            stationarity.get("invalid_row_count")
+        ),
+        "partial_row_count": _int_payload(
+            stationarity.get("partial_row_count")
+        ),
+        "truncated": stationarity.get("truncated") is True,
+        "level_sample_count": _int_payload(sample_counts.get("level")),
+        "return_sample_count": _int_payload(sample_counts.get("return")),
+        "windows": list(_int_sequence_payload(stationarity.get("windows"))),
+        "rounding_digits": _int_payload(stationarity.get("rounding_digits")),
+        "computed_window_count": _int_payload(
+            stationarity.get("computed_window_count")
+        ),
+        "skipped_window_count": _int_payload(
+            stationarity.get("skipped_window_count")
+        ),
+        "skipped_window_reason_counts": _counter_payload(skipped_reason_counts),
+        "recommended_transforms": _string_list(
+            stationarity.get("recommended_transforms")
+        ),
+        "zero_variance_metrics": _string_list(
+            stationarity.get("zero_variance_metrics")
+        ),
+        "distribution_shift": (
+            _compact_stationarity_distribution_shift_summary(
+                stationarity.get("first_middle_last_distribution_shift")
+            )
+        ),
+        "rolling_windows": window_payloads,
+    }
+    return result
+
+
+def _empty_stationarity_readiness(
+    *,
+    status: str,
+    reason: str | None,
+) -> dict[str, JSONValue]:
+    return {
+        "status": status,
+        "reason": reason,
+        "basis": "unknown",
+        "calculation_basis": "unknown",
+        "row_order": "unknown",
+        "computed_from": "unknown",
+        "cache_source": None,
+        "regular_grid": False,
+        "metric": "unknown",
+        "limitations": [],
+        "row_count": 0,
+        "sampled_row_count": 0,
+        "usable_row_count": 0,
+        "invalid_row_count": 0,
+        "partial_row_count": 0,
+        "truncated": False,
+        "level_sample_count": 0,
+        "return_sample_count": 0,
+        "windows": [],
+        "rounding_digits": 0,
+        "computed_window_count": 0,
+        "skipped_window_count": 0,
+        "skipped_window_reason_counts": {},
+        "recommended_transforms": [],
+        "zero_variance_metrics": [],
+        "distribution_shift": {},
+        "rolling_windows": {},
+    }
+
+
+def _compact_stationarity_window_summary(
+    value: JSONValue,
+) -> dict[str, JSONValue]:
+    window = _payload_mapping(value)
+    result: dict[str, JSONValue] = {
+        "status": _summary_key(window.get("status")),
+        "reason": _optional_summary_key(window.get("reason")),
+        "window": _int_payload(window.get("window")),
+        "sample_counts": dict(_payload_mapping(window.get("sample_counts"))),
+    }
+    if result["status"] != "computed":
+        result["required_sample_count"] = _int_payload(
+            window.get("required_sample_count")
+        )
+        return result
+    for key in (
+        "level_rolling_mean_drift",
+        "level_rolling_variance_drift",
+        "return_rolling_mean_drift",
+        "return_rolling_variance_drift",
+    ):
+        result[key] = _compact_stationarity_change_summary(window.get(key))
+    return result
+
+
+def _compact_stationarity_distribution_shift_summary(
+    value: JSONValue,
+) -> dict[str, JSONValue]:
+    shift = _payload_mapping(value)
+    if not shift:
+        return {}
+    return {
+        "status": _summary_key(shift.get("status")),
+        "reason": _optional_summary_key(shift.get("reason")),
+        "level": _compact_stationarity_segment_shift_summary(
+            shift.get("level")
+        ),
+        "return": _compact_stationarity_segment_shift_summary(
+            shift.get("return")
+        ),
+    }
+
+
+def _compact_stationarity_segment_shift_summary(
+    value: JSONValue,
+) -> dict[str, JSONValue]:
+    shift = _payload_mapping(value)
+    if not shift:
+        return {}
+    result: dict[str, JSONValue] = {
+        "status": _summary_key(shift.get("status")),
+        "reason": _optional_summary_key(shift.get("reason")),
+        "sample_count": _int_payload(shift.get("sample_count")),
+        "segment_size": _int_payload(shift.get("segment_size")),
+    }
+    for key in (
+        "mean_shift_first_to_last",
+        "median_shift_first_to_last",
+        "variance_shift_first_to_last",
+    ):
+        result[key] = _compact_stationarity_change_summary(shift.get(key))
+    return result
+
+
+def _compact_stationarity_change_summary(
+    value: JSONValue,
+) -> dict[str, JSONValue]:
+    change = _payload_mapping(value)
+    if not change:
+        return {}
+    return {
+        "first": _optional_float_payload(change.get("first")),
+        "last": _optional_float_payload(change.get("last")),
+        "signed_change": _optional_float_payload(change.get("signed_change")),
+        "absolute_change": _optional_float_payload(
+            change.get("absolute_change")
+        ),
+        "relative_change": _optional_float_payload(
+            change.get("relative_change")
+        ),
+    }
+
+
 def _compact_acf_series_summary(value: JSONValue) -> dict[str, JSONValue]:
     acf = _payload_mapping(value)
     skipped_reason_counts = _acf_skipped_lag_reason_counts(acf)
@@ -2182,12 +2517,16 @@ def _fingerprint_readiness_target_sort_key(
 ) -> tuple[object, ...]:
     axis = _payload_mapping(target.get("target_axis"))
     dependence = _payload_mapping(target.get("dependence"))
+    stationarity = _payload_mapping(target.get("stationarity_diagnostics"))
     readiness_rank = min(
         _fingerprint_readiness_status_rank(
             _summary_key(target.get("applicable_dynamics_status"))
         ),
         _fingerprint_readiness_status_rank(
             _summary_key(dependence.get("status"))
+        ),
+        _fingerprint_readiness_status_rank(
+            _summary_key(stationarity.get("status"))
         ),
     )
     return (
@@ -3025,6 +3364,10 @@ def _fingerprint_audit_payload(
             target=target,
         ),
     }
+    stationarity_readiness = _fingerprint_stationarity_readiness(
+        payload,
+        target=target,
+    )
     audit_payload: dict[str, JSONValue] = {
         "schema_version": TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         "sections_expected": [section for section in expected],
@@ -3041,6 +3384,7 @@ def _fingerprint_audit_payload(
             profile=profile,
         ),
         "dynamics_readiness": dynamics_readiness,
+        "stationarity_readiness": stationarity_readiness,
     }
     return audit_payload
 
@@ -3053,7 +3397,12 @@ def _fingerprint_expected_sections(
         sections.append("calendar_regimes")
     if target.timeframe == M1:
         sections.extend(
-            ("m1_bar_distribution", "return_dynamics", "dependence")
+            (
+                "m1_bar_distribution",
+                "return_dynamics",
+                "dependence",
+                "stationarity_diagnostics",
+            )
         )
     elif target.timeframe == TICK:
         sections.extend(
@@ -3062,6 +3411,7 @@ def _fingerprint_expected_sections(
                 "conditional_distributions",
                 "microstructure_dynamics",
                 "dependence",
+                "stationarity_diagnostics",
             )
         )
     return tuple(sections)
@@ -3111,6 +3461,7 @@ def _fingerprint_section_skip_details(
         "return_dynamics",
         "microstructure_dynamics",
         "dependence",
+        "stationarity_diagnostics",
     }:
         return {"timeframe": target.timeframe}
     return {}
@@ -3166,6 +3517,10 @@ def _section_timeframe_mismatch(
             section == "dependence"
             and target.timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
         )
+        or (
+            section == "stationarity_diagnostics"
+            and target.timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
+        )
     )
 
 
@@ -3203,6 +3558,8 @@ def _fingerprint_section_status(
         return _dynamics_section_status(_payload_mapping(payload[section]))
     if section == "dependence":
         return _dependence_section_status(_payload_mapping(payload[section]))
+    if section == "stationarity_diagnostics":
+        return _stationarity_section_status(_payload_mapping(payload[section]))
     return "valid"
 
 
@@ -3276,6 +3633,17 @@ def _dependence_section_status(
     dependence: Mapping[str, JSONValue],
 ) -> str:
     status = _summary_key(dependence.get("dependence_status"))
+    if status == "ok":
+        return "valid"
+    if status == "unavailable":
+        return "unavailable"
+    return "limited"
+
+
+def _stationarity_section_status(
+    stationarity: Mapping[str, JSONValue],
+) -> str:
+    status = _summary_key(stationarity.get("stationarity_status"))
     if status == "ok":
         return "valid"
     if status == "unavailable":
@@ -3409,6 +3777,83 @@ def _fingerprint_dynamics_readiness(
             _string_list(dynamics.get("limitations"))[0]
             if _string_list(dynamics.get("limitations"))
             else dynamics.get("sequence_status")
+        )
+    return readiness
+
+
+def _fingerprint_stationarity_readiness(
+    payload: Mapping[str, JSONValue],
+    *,
+    target: QualityTarget,
+) -> dict[str, JSONValue]:
+    section = "stationarity_diagnostics"
+    if section not in payload:
+        return {
+            "status": "skipped",
+            "reason": _fingerprint_section_skip_reason(
+                section,
+                payload,
+                target=target,
+            ),
+        }
+    stationarity = _payload_mapping(payload.get(section))
+    sample_counts = _payload_mapping(stationarity.get("sample_counts"))
+    readiness: dict[str, JSONValue] = {
+        "status": _stationarity_section_status(stationarity),
+        "reason": _optional_summary_key(stationarity.get("reason")),
+        "basis": _summary_key(stationarity.get("basis")),
+        "calculation_basis": _summary_key(
+            stationarity.get("calculation_basis")
+        ),
+        "row_order": _summary_key(stationarity.get("row_order")),
+        "computed_from": _summary_key(stationarity.get("computed_from")),
+        "cache_source": _optional_summary_key(stationarity.get("cache_source")),
+        "regular_grid": stationarity.get("regular_grid") is True,
+        "metric": _summary_key(stationarity.get("metric")),
+        "limitations": _string_list(stationarity.get("limitations")),
+        "row_count": _int_payload(stationarity.get("row_count")),
+        "sampled_row_count": _int_payload(
+            stationarity.get("sampled_row_count")
+        ),
+        "usable_row_count": _int_payload(stationarity.get("usable_row_count")),
+        "invalid_row_count": _int_payload(
+            stationarity.get("invalid_row_count")
+        ),
+        "partial_row_count": _int_payload(
+            stationarity.get("partial_row_count")
+        ),
+        "truncated": stationarity.get("truncated") is True,
+        "level_sample_count": _int_payload(sample_counts.get("level")),
+        "return_sample_count": _int_payload(sample_counts.get("return")),
+        "windows": list(_int_sequence_payload(stationarity.get("windows"))),
+        "rounding_digits": _int_payload(stationarity.get("rounding_digits")),
+        "computed_window_count": _int_payload(
+            stationarity.get("computed_window_count")
+        ),
+        "skipped_window_count": _int_payload(
+            stationarity.get("skipped_window_count")
+        ),
+        "skipped_window_reason_counts": _counter_payload(
+            _counter_from_mapping(
+                _payload_mapping(
+                    stationarity.get("skipped_window_reason_counts")
+                )
+            )
+        ),
+        "zero_variance_metrics": _string_list(
+            stationarity.get("zero_variance_metrics")
+        ),
+        "recommended_transforms": _string_list(
+            stationarity.get("recommended_transforms")
+        ),
+    }
+    if readiness["status"] in {"limited", "unavailable"} and not readiness.get(
+        "reason"
+    ):
+        readiness["reason"] = _summary_key(
+            _string_list(stationarity.get("limitations"))[0]
+            if _string_list(stationarity.get("limitations"))
+            else stationarity.get("stationarity_status")
         )
     return readiness
 
@@ -3924,7 +4369,7 @@ def _add_dynamics_payload(
     profile: HistDataFingerprintProfile,
 ) -> None:
     if target.timeframe == M1:
-        return_dynamics, dependence = _m1_sequence_payloads(
+        return_dynamics, dependence, stationarity = _m1_sequence_payloads(
             payload,
             frame=frame,
             text=text,
@@ -3932,15 +4377,19 @@ def _add_dynamics_payload(
         )
         payload["return_dynamics"] = return_dynamics
         payload["dependence"] = dependence
+        payload["stationarity_diagnostics"] = stationarity
     elif target.timeframe == TICK:
-        microstructure_dynamics, dependence = _tick_sequence_payloads(
-            payload,
-            frame=frame,
-            text=text,
-            profile=profile,
+        microstructure_dynamics, dependence, stationarity = (
+            _tick_sequence_payloads(
+                payload,
+                frame=frame,
+                text=text,
+                profile=profile,
+            )
         )
         payload["microstructure_dynamics"] = microstructure_dynamics
         payload["dependence"] = dependence
+        payload["stationarity_diagnostics"] = stationarity
 
 
 def _m1_sequence_payloads(
@@ -3949,7 +4398,7 @@ def _m1_sequence_payloads(
     frame: Any | None,
     text: str | None,
     profile: HistDataFingerprintProfile,
-) -> tuple[dict[str, JSONValue], dict[str, JSONValue]]:
+) -> tuple[dict[str, JSONValue], dict[str, JSONValue], dict[str, JSONValue]]:
     if frame is not None:
         rows, row_count, usable_row_count, invalid_row_count = (
             _m1_dynamics_rows_from_frame(frame, profile)
@@ -3986,6 +4435,7 @@ def _m1_sequence_payloads(
     return (
         _m1_return_dynamics_payload(rows, base=base, profile=profile),
         _m1_dependence_payload(rows, base=base, profile=profile),
+        _m1_stationarity_payload(rows, base=base, profile=profile),
     )
 
 
@@ -3995,7 +4445,7 @@ def _tick_sequence_payloads(
     frame: Any | None,
     text: str | None,
     profile: HistDataFingerprintProfile,
-) -> tuple[dict[str, JSONValue], dict[str, JSONValue]]:
+) -> tuple[dict[str, JSONValue], dict[str, JSONValue], dict[str, JSONValue]]:
     if frame is not None:
         rows, row_count, usable_row_count, invalid_row_count = (
             _tick_dynamics_rows_from_frame(frame, profile)
@@ -4036,6 +4486,7 @@ def _tick_sequence_payloads(
             profile=profile,
         ),
         _tick_dependence_payload(rows, base=base, profile=profile),
+        _tick_stationarity_payload(rows, base=base, profile=profile),
     )
 
 
@@ -4717,6 +5168,485 @@ def _tick_dependence_payload(
             "spread_change_acf": spread_changes,
             "absolute_spread_change_acf": absolute_spread_changes,
         },
+    )
+
+
+def _m1_stationarity_payload(
+    rows: list[_M1DynamicsRow],
+    *,
+    base: dict[str, JSONValue],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    levels = [row.close for row in rows]
+    returns: list[float] = []
+    previous: _M1DynamicsRow | None = None
+    for row in rows:
+        if previous is not None and previous.close > 0.0 and row.close > 0.0:
+            returns.append(math.log(row.close / previous.close))
+        previous = row
+    return _stationarity_payload(
+        base,
+        profile=profile,
+        metric="close_price",
+        level_values=levels,
+        return_values=returns,
+    )
+
+
+def _tick_stationarity_payload(
+    rows: list[_TickDynamicsRow],
+    *,
+    base: dict[str, JSONValue],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    mids = [(row.bid + row.ask) / 2.0 for row in rows]
+    returns: list[float] = []
+    previous_mid: float | None = None
+    for mid in mids:
+        if previous_mid is not None and previous_mid > 0.0 and mid > 0.0:
+            returns.append(math.log(mid / previous_mid))
+        previous_mid = mid
+    return _stationarity_payload(
+        base,
+        profile=profile,
+        metric="mid_price",
+        level_values=mids,
+        return_values=returns,
+    )
+
+
+def _stationarity_payload(
+    base: Mapping[str, JSONValue],
+    *,
+    profile: HistDataFingerprintProfile,
+    metric: str,
+    level_values: Iterable[float],
+    return_values: Iterable[float],
+) -> dict[str, JSONValue]:
+    levels = _finite_values(level_values)
+    returns = _finite_values(return_values)
+    rolling_windows: dict[str, JSONValue] = {}
+    skipped_window_reason_counts: Counter[str] = Counter()
+    computed_window_count = 0
+    for window in profile.rolling_windows:
+        window_payload = _stationarity_window_payload(
+            levels,
+            returns,
+            window=int(window),
+            profile=profile,
+        )
+        rolling_windows[str(window)] = window_payload
+        if _summary_key(window_payload.get("status")) == "computed":
+            computed_window_count += 1
+        else:
+            reason = _optional_summary_key(window_payload.get("reason"))
+            if reason:
+                skipped_window_reason_counts[reason] += 1
+
+    distribution_shift = _stationarity_distribution_shift_payload(
+        levels,
+        returns,
+        profile=profile,
+    )
+    zero_variance_metrics = _stationarity_zero_variance_metrics(
+        levels,
+        returns,
+    )
+    skipped_window_count = sum(skipped_window_reason_counts.values())
+    stationarity_status = _stationarity_status(
+        base,
+        level_count=len(levels),
+        return_count=len(returns),
+        skipped_window_count=skipped_window_count,
+        distribution_shift=distribution_shift,
+    )
+    limitations = _stationarity_limitations(
+        base,
+        level_count=len(levels),
+        return_count=len(returns),
+        skipped_window_count=skipped_window_count,
+        distribution_shift=distribution_shift,
+        zero_variance_metrics=zero_variance_metrics,
+    )
+    result = dict(base)
+    result.update(
+        {
+            "schema_version": (
+                TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION
+            ),
+            "stationarity_status": stationarity_status,
+            "calculation_basis": "observed_sequence",
+            "metric": metric,
+            "sample_counts": {
+                "level": len(levels),
+                "return": len(returns),
+            },
+            "windows": [int(window) for window in profile.rolling_windows],
+            "rounding_digits": int(profile.rounding_digits),
+            "rolling_windows": rolling_windows,
+            "computed_window_count": computed_window_count,
+            "skipped_window_count": skipped_window_count,
+            "skipped_window_reason_counts": _counter_payload(
+                skipped_window_reason_counts
+            ),
+            "first_middle_last_distribution_shift": distribution_shift,
+            "zero_variance_metrics": [value for value in zero_variance_metrics],
+            "recommended_transforms": _stationarity_recommended_transforms(
+                levels,
+                returns,
+                rolling_windows=rolling_windows,
+                distribution_shift=distribution_shift,
+            ),
+            "limitations": [value for value in limitations],
+        }
+    )
+    if stationarity_status in {"limited", "unavailable"}:
+        result["reason"] = _stationarity_status_reason(
+            limitations,
+            skipped_window_count=skipped_window_count,
+            distribution_shift=distribution_shift,
+        )
+    return result
+
+
+def _stationarity_window_payload(
+    levels: list[float],
+    returns: list[float],
+    *,
+    window: int,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    sample_counts: dict[str, JSONValue] = {
+        "level": len(levels),
+        "return": len(returns),
+    }
+    required_sample_count = max(2, window * 2)
+    if window <= 0:
+        return {
+            "status": "skipped",
+            "reason": "insufficient_sample_count",
+            "window": window,
+            "sample_counts": sample_counts,
+            "required_sample_count": required_sample_count,
+        }
+    if (
+        len(levels) < required_sample_count
+        or len(returns) < required_sample_count
+    ):
+        return {
+            "status": "skipped",
+            "reason": "insufficient_sample_count",
+            "window": window,
+            "sample_counts": sample_counts,
+            "required_sample_count": required_sample_count,
+        }
+    return {
+        "status": "computed",
+        "window": window,
+        "sample_counts": sample_counts,
+        "required_sample_count": required_sample_count,
+        "level_rolling_mean_drift": _stationarity_stat_drift_payload(
+            levels,
+            window=window,
+            statistic="mean",
+            profile=profile,
+        ),
+        "level_rolling_variance_drift": _stationarity_stat_drift_payload(
+            levels,
+            window=window,
+            statistic="variance",
+            profile=profile,
+        ),
+        "return_rolling_mean_drift": _stationarity_stat_drift_payload(
+            returns,
+            window=window,
+            statistic="mean",
+            profile=profile,
+        ),
+        "return_rolling_variance_drift": _stationarity_stat_drift_payload(
+            returns,
+            window=window,
+            statistic="variance",
+            profile=profile,
+        ),
+    }
+
+
+def _stationarity_stat_drift_payload(
+    values: list[float],
+    *,
+    window: int,
+    statistic: str,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    first_window = values[:window]
+    last_window = values[-window:]
+    first_value = _stationarity_statistic(first_window, statistic)
+    last_value = _stationarity_statistic(last_window, statistic)
+    payload = _stationarity_change_payload(first_value, last_value, profile)
+    payload.update(
+        {
+            "statistic": statistic,
+            "window": window,
+            "sample_count": len(values),
+        }
+    )
+    return payload
+
+
+def _stationarity_distribution_shift_payload(
+    levels: list[float],
+    returns: list[float],
+    *,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    level_shift = _stationarity_segment_shift_payload(levels, profile)
+    return_shift = _stationarity_segment_shift_payload(returns, profile)
+    status = (
+        "computed"
+        if (
+            _summary_key(level_shift.get("status")) == "computed"
+            or _summary_key(return_shift.get("status")) == "computed"
+        )
+        else "skipped"
+    )
+    result: dict[str, JSONValue] = {
+        "status": status,
+        "level": level_shift,
+        "return": return_shift,
+    }
+    if status == "skipped":
+        result["reason"] = "insufficient_sample_count"
+    return result
+
+
+def _stationarity_segment_shift_payload(
+    values: list[float],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    sample_count = len(values)
+    if sample_count < 3:
+        return {
+            "status": "skipped",
+            "reason": "insufficient_sample_count",
+            "sample_count": sample_count,
+            "required_sample_count": 3,
+        }
+    segment_size = max(1, sample_count // 3)
+    middle_start = max(0, (sample_count - segment_size) // 2)
+    first_values = values[:segment_size]
+    middle_values = values[middle_start : middle_start + segment_size]
+    last_values = values[-segment_size:]
+    first_stats = _stationarity_segment_stats(first_values, profile)
+    middle_stats = _stationarity_segment_stats(middle_values, profile)
+    last_stats = _stationarity_segment_stats(last_values, profile)
+    return {
+        "status": "computed",
+        "sample_count": sample_count,
+        "segment_size": segment_size,
+        "first": first_stats,
+        "middle": middle_stats,
+        "last": last_stats,
+        "mean_shift_first_to_last": _stationarity_change_payload(
+            _optional_float_payload(first_stats.get("mean")) or 0.0,
+            _optional_float_payload(last_stats.get("mean")) or 0.0,
+            profile,
+        ),
+        "median_shift_first_to_last": _stationarity_change_payload(
+            _optional_float_payload(first_stats.get("median")) or 0.0,
+            _optional_float_payload(last_stats.get("median")) or 0.0,
+            profile,
+        ),
+        "variance_shift_first_to_last": _stationarity_change_payload(
+            _optional_float_payload(first_stats.get("variance")) or 0.0,
+            _optional_float_payload(last_stats.get("variance")) or 0.0,
+            profile,
+        ),
+    }
+
+
+def _stationarity_segment_stats(
+    values: list[float],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    sorted_values = sorted(values)
+    return {
+        "count": len(sorted_values),
+        "min": _rounded(sorted_values[0], profile),
+        "max": _rounded(sorted_values[-1], profile),
+        "mean": _rounded(_mean(sorted_values), profile),
+        "median": _rounded(_quantile(sorted_values, 0.5), profile),
+        "variance": _rounded(_population_variance(sorted_values), profile),
+    }
+
+
+def _stationarity_change_payload(
+    first_value: float,
+    last_value: float,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    signed_change = last_value - first_value
+    denominator = abs(first_value)
+    return {
+        "first": _rounded(first_value, profile),
+        "last": _rounded(last_value, profile),
+        "signed_change": _rounded(signed_change, profile),
+        "absolute_change": _rounded(abs(signed_change), profile),
+        "relative_change": (
+            _rounded(abs(signed_change) / denominator, profile)
+            if denominator > 0.0
+            else None
+        ),
+    }
+
+
+def _stationarity_statistic(
+    values: list[float],
+    statistic: str,
+) -> float:
+    if statistic == "variance":
+        return _population_variance(values)
+    return _mean(values)
+
+
+def _stationarity_status(
+    base: Mapping[str, JSONValue],
+    *,
+    level_count: int,
+    return_count: int,
+    skipped_window_count: int,
+    distribution_shift: Mapping[str, JSONValue],
+) -> str:
+    if _summary_key(base.get("sequence_status")) == "unavailable":
+        return "unavailable"
+    if level_count < 3 or return_count < 1:
+        return "unavailable"
+    if (
+        _summary_key(base.get("sequence_status")) == "limited"
+        or skipped_window_count > 0
+        or _summary_key(distribution_shift.get("status")) != "computed"
+    ):
+        return "limited"
+    return "ok"
+
+
+def _stationarity_limitations(
+    base: Mapping[str, JSONValue],
+    *,
+    level_count: int,
+    return_count: int,
+    skipped_window_count: int,
+    distribution_shift: Mapping[str, JSONValue],
+    zero_variance_metrics: tuple[str, ...],
+) -> tuple[str, ...]:
+    limitations = [
+        str(value) for value in _string_list(base.get("limitations"))
+    ]
+    if level_count < 3 or return_count < 1:
+        limitations.append("insufficient_sample_count")
+    if skipped_window_count > 0:
+        limitations.append("skipped_rolling_windows")
+    if _summary_key(distribution_shift.get("status")) != "computed":
+        limitations.append("insufficient_sample_count")
+    if zero_variance_metrics:
+        limitations.append("zero_variance")
+    return _ordered_unique(limitations)
+
+
+def _stationarity_status_reason(
+    limitations: tuple[str, ...],
+    *,
+    skipped_window_count: int,
+    distribution_shift: Mapping[str, JSONValue],
+) -> str:
+    if limitations:
+        return _summary_key(limitations[0])
+    if skipped_window_count > 0:
+        return "skipped_rolling_windows"
+    if _summary_key(distribution_shift.get("status")) != "computed":
+        return "insufficient_sample_count"
+    return "limited"
+
+
+def _stationarity_zero_variance_metrics(
+    levels: list[float],
+    returns: list[float],
+) -> tuple[str, ...]:
+    metrics: list[str] = []
+    if len(levels) >= 2 and _population_variance(levels) <= 0.0:
+        metrics.append("level")
+    if len(returns) >= 2 and _population_variance(returns) <= 0.0:
+        metrics.append("return")
+    return tuple(metrics)
+
+
+def _stationarity_recommended_transforms(
+    levels: list[float],
+    returns: list[float],
+    *,
+    rolling_windows: Mapping[str, JSONValue],
+    distribution_shift: Mapping[str, JSONValue],
+) -> list[JSONValue]:
+    transforms: list[str] = []
+    if returns and all(value > 0.0 for value in levels):
+        transforms.append("log_return")
+    if _stationarity_has_level_shift(
+        rolling_windows=rolling_windows,
+        distribution_shift=distribution_shift,
+    ):
+        transforms.append("differencing")
+    if returns:
+        transforms.append("session_conditioning")
+    return [value for value in _ordered_unique(transforms)]
+
+
+def _stationarity_has_level_shift(
+    *,
+    rolling_windows: Mapping[str, JSONValue],
+    distribution_shift: Mapping[str, JSONValue],
+) -> bool:
+    level_shift = _payload_mapping(distribution_shift.get("level"))
+    for key in (
+        "mean_shift_first_to_last",
+        "median_shift_first_to_last",
+    ):
+        if _stationarity_change_is_nonzero(
+            _payload_mapping(level_shift.get(key))
+        ):
+            return True
+    for window_payload in rolling_windows.values():
+        window = _payload_mapping(window_payload)
+        if _summary_key(window.get("status")) != "computed":
+            continue
+        if _stationarity_change_is_nonzero(
+            _payload_mapping(window.get("level_rolling_mean_drift"))
+        ):
+            return True
+    return False
+
+
+def _stationarity_change_is_nonzero(
+    change_payload: Mapping[str, JSONValue],
+) -> bool:
+    return (
+        _optional_float_payload(change_payload.get("absolute_change")) or 0.0
+    ) > 0.0
+
+
+def _finite_values(values: Iterable[float]) -> list[float]:
+    return [float(value) for value in values if _is_finite(float(value))]
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _population_variance(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    mean = _mean(values)
+    return sum((value - mean) * (value - mean) for value in values) / len(
+        values
     )
 
 
