@@ -99,6 +99,14 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
             "histdatacom quality fingerprint-schema --verify --json"
         ),
     }
+    assert payload["preflight_policy"]["bounded_payload_contract_audit"] == {
+        "mode": "always",
+        "status_policy": "fail-preflight-on-error",
+        "data_dependency": "representative-generated-report",
+        "standalone_command": (
+            "histdatacom quality bounded-payload-contract --json"
+        ),
+    }
     assert payload["decision"]["state"] == "safe"
     assert payload["decision"]["next_command"].startswith(
         "histdatacom --quality"
@@ -126,6 +134,18 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
     )
     assert contract_audit["preflight_gate"]["status"] == "pass"
     assert contract_audit["preflight_gate"]["data_dependency"] == "none"
+    bounded_audit = payload["evidence"]["bounded_payload_contract_audit"]
+    assert bounded_audit["schema_version"] == (
+        "histdatacom.bounded-payload-contract-audit.v1"
+    )
+    assert bounded_audit["status"] == "pass"
+    assert bounded_audit["preflight_status_policy"] == (
+        "fail-preflight-on-error"
+    )
+    assert bounded_audit["preflight_gate"]["status"] == "pass"
+    assert bounded_audit["preflight_gate"]["data_dependency"] == (
+        "representative-generated-report"
+    )
     assert "--pair-groups majors" in payload["decision"]["next_command"]
     assert payload["sample_quality"]["summary"]["target_count"] == 3
     encoded = json.dumps(payload, sort_keys=True)
@@ -138,7 +158,7 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
 def test_quality_preflight_surfaces_fingerprint_contract_audit(
     tmp_path: Path,
 ) -> None:
-    """Preflight output should include the data-free fingerprint audit."""
+    """Preflight output should include contract self-audits."""
     data_dir = tmp_path / "data"
     _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
 
@@ -154,14 +174,20 @@ def test_quality_preflight_surfaces_fingerprint_contract_audit(
     console = format_quality_preflight_console_summary(payload)
     markdown = quality_preflight_to_markdown(payload)
     audit = payload["evidence"]["fingerprint_contract_audit"]
+    bounded_audit = payload["evidence"]["bounded_payload_contract_audit"]
 
     assert audit["status"] == "pass"
     assert audit["finding_count"] == 0
+    assert bounded_audit["status"] == "pass"
+    assert bounded_audit["finding_count"] == 0
     assert "fingerprint contract audit: pass" in console
+    assert "bounded payload contract audit: pass" in console
     assert "policy=fail-preflight-on-error" in console
     assert "## Fingerprint Contract Audit" in markdown
+    assert "## Bounded Payload Contract Audit" in markdown
     assert "| Status | pass |" in markdown
     assert "histdatacom quality fingerprint-schema --verify --json" in markdown
+    assert "histdatacom quality bounded-payload-contract --json" in markdown
     assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
     assert str(tmp_path) not in markdown
 
@@ -237,6 +263,78 @@ def test_quality_preflight_fails_on_fingerprint_contract_drift(
     assert "fingerprint contract audit: fail" in console
     assert "missing_schema_contract" in markdown
     assert "schemas.series_fingerprint" in markdown
+
+
+def test_quality_preflight_fails_on_bounded_payload_contract_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Bounded payload contract errors should fail preflight."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    def fake_bounded_payload_contract_audit() -> dict[str, object]:
+        return {
+            "schema_version": "histdatacom.bounded-payload-contract-audit.v1",
+            "status": "fail",
+            "check_count": 1,
+            "finding_count": 1,
+            "error_count": 1,
+            "warning_count": 0,
+            "checks": [
+                {
+                    "name": "sequence_counts",
+                    "status": "fail",
+                    "checked_count": 1,
+                    "error_count": 1,
+                    "warning_count": 0,
+                }
+            ],
+            "findings": [
+                {
+                    "severity": "error",
+                    "code": "bounded_payload_count_mismatch",
+                    "path": "payload_limits.target_summaries.included_count",
+                    "message": "included_count must match emitted length",
+                    "expected": 2,
+                    "actual": 99,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        preflight_module,
+        "bounded_payload_contract_audit",
+        fake_bounded_payload_contract_audit,
+    )
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+    console = format_quality_preflight_console_summary(payload)
+    markdown = quality_preflight_to_markdown(payload)
+
+    assert payload["status"] == "fail"
+    assert payload["decision"]["action"] == (
+        "fix bounded payload contract drift"
+    )
+    assert payload["decision"]["next_command"] == (
+        "histdatacom quality bounded-payload-contract --json"
+    )
+    audit = payload["evidence"]["bounded_payload_contract_audit"]
+    assert audit["preflight_gate"]["status"] == "fail"
+    assert audit["preflight_gate"]["reason"] == (
+        "bounded payload contract audit failed with 1 errors and 0 warnings"
+    )
+    assert "bounded payload contract audit: fail" in console
+    assert "bounded_payload_count_mismatch" in markdown
+    assert "payload_limits.target_summaries.included_count" in markdown
 
 
 def test_quality_preflight_passes_profile_to_fingerprint_contract_audit(

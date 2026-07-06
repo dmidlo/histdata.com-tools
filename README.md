@@ -1065,6 +1065,21 @@ automate GitHub/CI/release workflow. Cache-scale `--quality-preflight` runs the
 same data-free contract audit automatically and fails its readiness decision when
 the audit reports contract errors.
 
+Run the bounded report-payload contract self-audit when changing report
+summaries, bounded payloads, next actions, remediation coverage, remediation
+catalog audits, or fingerprint summary surfaces:
+
+```sh
+histdatacom quality bounded-payload-contract --json
+```
+
+This emits `histdatacom.bounded-payload-contract-audit.v1`. The audit generates
+a representative quality report through the application serializer, then checks
+that bounded payload metadata exposes coherent requested/default/effective limit
+semantics, counts, omitted counts, and truncation state. Cache-scale
+`--quality-preflight` runs this bounded-payload audit automatically and fails its
+readiness decision when generated report payload metadata drifts.
+
 `provenance` checks are only applied when a local orchestration
 `.histdatacom/manifest-status.sqlite3` store is available. Explicit
 `--quality-checks provenance` runs without a store return a clean info finding

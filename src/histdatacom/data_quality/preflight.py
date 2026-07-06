@@ -22,6 +22,9 @@ from histdatacom.data_quality.contracts import (
     QualityTargetKind,
     QualityStatus,
 )
+from histdatacom.data_quality.bounded_payload_contracts import (
+    bounded_payload_contract_audit,
+)
 from histdatacom.data_quality.discovery import (
     QualityDiscoveryError,
     discover_quality_targets,
@@ -72,7 +75,11 @@ QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST = "latest"
 QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY = (
     "fail-preflight-on-error"
 )
+QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY = (
+    "fail-preflight-on-error"
+)
 QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_FINDING_DISPLAY_LIMIT = 8
+QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_FINDING_DISPLAY_LIMIT = 8
 DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR = (
     Path(".histdatacom") / "closure-readiness"
 )
@@ -271,6 +278,9 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
     evidence = _mapping(safe_payload.get("evidence"))
     commands = _mapping(evidence.get("commands"))
     fingerprint_contract = _mapping(evidence.get("fingerprint_contract_audit"))
+    bounded_payload_contract = _mapping(
+        evidence.get("bounded_payload_contract_audit")
+    )
     profile_preview = _evidence_artifact(
         evidence,
         "quality_profile_preview",
@@ -488,6 +498,34 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
                 *_markdown_table(
                     ("Severity", "Code", "Path", "Message"),
                     finding_rows,
+                ),
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Bounded Payload Contract Audit",
+            "",
+            *_markdown_table(
+                ("Measure", "Value"),
+                _bounded_payload_contract_audit_markdown_rows(
+                    bounded_payload_contract
+                ),
+            ),
+            "",
+        ]
+    )
+    bounded_finding_rows = _bounded_payload_contract_finding_rows(
+        bounded_payload_contract
+    )
+    if bounded_finding_rows:
+        lines.extend(
+            [
+                "### Bounded Payload Contract Findings",
+                "",
+                *_markdown_table(
+                    ("Severity", "Code", "Path", "Message"),
+                    bounded_finding_rows,
                 ),
                 "",
             ]
@@ -921,6 +959,9 @@ def format_quality_preflight_console_summary(
     diagnostics = _mapping(payload.get("diagnostics"))
     evidence = _mapping(payload.get("evidence"))
     fingerprint_contract = _mapping(evidence.get("fingerprint_contract_audit"))
+    bounded_payload_contract = _mapping(
+        evidence.get("bounded_payload_contract_audit")
+    )
     lines = [
         "Data quality cache preflight",
         "status: " + str(payload.get("status", "unknown")),
@@ -982,6 +1023,16 @@ def format_quality_preflight_console_summary(
             f"errors={fingerprint_contract.get('error_count', 0)} "
             f"warnings={fingerprint_contract.get('warning_count', 0)} "
             f"policy={fingerprint_contract.get('preflight_status_policy', '')}"
+        )
+    if bounded_payload_contract:
+        lines.append(
+            "bounded payload contract audit: "
+            f"{bounded_payload_contract.get('status', 'unknown')} "
+            f"checks={bounded_payload_contract.get('check_count', 0)} "
+            f"findings={bounded_payload_contract.get('finding_count', 0)} "
+            f"errors={bounded_payload_contract.get('error_count', 0)} "
+            f"warnings={bounded_payload_contract.get('warning_count', 0)} "
+            f"policy={bounded_payload_contract.get('preflight_status_policy', '')}"
         )
     lines.extend(_evidence_artifact_console_lines(evidence))
     if decision.get("reason"):
@@ -1291,7 +1342,9 @@ def _payload(
         run_validation=run_validation,
         validation_runner=validation_runner,
     )
-    if _fingerprint_contract_audit_failed(payload["evidence"]):
+    if _fingerprint_contract_audit_failed(
+        payload["evidence"]
+    ) or _bounded_payload_contract_audit_failed(payload["evidence"]):
         payload["status"] = "fail"
     payload["decision"] = _decision_payload(
         payload,
@@ -1365,6 +1418,9 @@ def _quality_preflight_evidence_payload(
         "fingerprint_contract_audit": _fingerprint_contract_audit_payload(
             quality_profile
         ),
+        "bounded_payload_contract_audit": (
+            _bounded_payload_contract_audit_payload()
+        ),
         "runtime_cleanup": _preflight_runtime_cleanup_payload(),
         "operational": _preflight_operational_payload(
             root_path=root_path,
@@ -1412,6 +1468,26 @@ def _fingerprint_contract_audit_payload(
     return safe_payload
 
 
+def _bounded_payload_contract_audit_payload() -> dict[str, JSONValue]:
+    audit = dict(bounded_payload_contract_audit())
+    audit["preflight_status_policy"] = (
+        QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY
+    )
+    audit["preflight_gate"] = {
+        "status": "fail" if audit.get("status") == "fail" else "pass",
+        "policy": (
+            QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY
+        ),
+        "reason": _bounded_payload_contract_gate_reason(audit),
+        "standalone_command": (
+            "histdatacom quality bounded-payload-contract --json"
+        ),
+        "data_dependency": "representative-generated-report",
+    }
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(audit)
+    return safe_payload
+
+
 def _fingerprint_contract_gate_reason(
     audit: Mapping[str, JSONValue],
 ) -> str:
@@ -1424,6 +1500,18 @@ def _fingerprint_contract_gate_reason(
     return "fingerprint contract audit passed"
 
 
+def _bounded_payload_contract_gate_reason(
+    audit: Mapping[str, JSONValue],
+) -> str:
+    if audit.get("status") == "fail":
+        return (
+            "bounded payload contract audit failed with "
+            f"{_int_value(audit.get('error_count'))} errors and "
+            f"{_int_value(audit.get('warning_count'))} warnings"
+        )
+    return "bounded payload contract audit passed"
+
+
 def _fingerprint_contract_audit_failed(
     evidence: JSONValue,
 ) -> bool:
@@ -1433,6 +1521,18 @@ def _fingerprint_contract_audit_failed(
         audit.get("status") == "fail"
         and gate.get("policy")
         == QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY
+    )
+
+
+def _bounded_payload_contract_audit_failed(
+    evidence: JSONValue,
+) -> bool:
+    audit = _mapping(_mapping(evidence).get("bounded_payload_contract_audit"))
+    gate = _mapping(audit.get("preflight_gate"))
+    return (
+        audit.get("status") == "fail"
+        and gate.get("policy")
+        == QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY
     )
 
 
@@ -2112,6 +2212,17 @@ def _decision_payload(
             "reason": str(fingerprint_gate.get("reason", "")),
             "next_command": str(fingerprint_gate.get("standalone_command", "")),
         }
+    bounded_payload_gate = _bounded_payload_contract_audit_gate(payload)
+    if bounded_payload_gate.get("status") == "fail":
+        return {
+            "state": "fail",
+            "label": "do not run full quality battery",
+            "action": "fix bounded payload contract drift",
+            "reason": str(bounded_payload_gate.get("reason", "")),
+            "next_command": str(
+                bounded_payload_gate.get("standalone_command", "")
+            ),
+        }
     if status == "pass":
         return {
             "state": "safe",
@@ -2156,6 +2267,14 @@ def _fingerprint_contract_audit_gate(
 ) -> dict[str, Any]:
     evidence = _mapping(payload.get("evidence"))
     audit = _mapping(evidence.get("fingerprint_contract_audit"))
+    return _mapping(audit.get("preflight_gate"))
+
+
+def _bounded_payload_contract_audit_gate(
+    payload: Mapping[str, JSONValue],
+) -> dict[str, Any]:
+    evidence = _mapping(payload.get("evidence"))
+    audit = _mapping(evidence.get("bounded_payload_contract_audit"))
     return _mapping(audit.get("preflight_gate"))
 
 
@@ -2466,6 +2585,16 @@ def _preflight_policy_payload(
                 "histdatacom quality fingerprint-schema --verify --json"
             ),
         },
+        "bounded_payload_contract_audit": {
+            "mode": "always",
+            "status_policy": (
+                QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY
+            ),
+            "data_dependency": "representative-generated-report",
+            "standalone_command": (
+                "histdatacom quality bounded-payload-contract --json"
+            ),
+        },
     }
 
 
@@ -2507,6 +2636,23 @@ def _policy_mismatch_reason(
         "histdatacom quality fingerprint-schema --verify --json"
     ):
         return "fingerprint contract audit standalone command differs"
+    bounded_payload_policy = _mapping(
+        policy.get("bounded_payload_contract_audit")
+    )
+    if bounded_payload_policy.get("mode") != "always":
+        return "bounded payload contract audit policy differs"
+    if bounded_payload_policy.get("status_policy") != (
+        QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY
+    ):
+        return "bounded payload contract audit status policy differs"
+    if bounded_payload_policy.get("data_dependency") != (
+        "representative-generated-report"
+    ):
+        return "bounded payload contract audit data dependency differs"
+    if bounded_payload_policy.get("standalone_command") != (
+        "histdatacom quality bounded-payload-contract --json"
+    ):
+        return "bounded payload contract audit standalone command differs"
     return ""
 
 
@@ -2878,6 +3024,63 @@ def _fingerprint_contract_finding_rows(
                 "findings",
                 (
                     f"{finding_count - len(rows)} additional fingerprint "
+                    "contract findings omitted from Markdown summary"
+                ),
+            )
+        )
+    return tuple(rows)
+
+
+def _bounded_payload_contract_audit_markdown_rows(
+    audit: Mapping[str, Any],
+) -> tuple[tuple[str, str], ...]:
+    if not audit:
+        return (
+            ("Status", "not-run"),
+            (
+                "Policy",
+                QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY,
+            ),
+            ("Reason", "bounded payload contract audit was not emitted"),
+        )
+    gate = _mapping(audit.get("preflight_gate"))
+    return (
+        ("Status", str(audit.get("status", "unknown"))),
+        ("Checks", str(audit.get("check_count", 0))),
+        ("Findings", str(audit.get("finding_count", 0))),
+        ("Errors", str(audit.get("error_count", 0))),
+        ("Warnings", str(audit.get("warning_count", 0))),
+        ("Policy", str(audit.get("preflight_status_policy", ""))),
+        ("Reason", str(gate.get("reason", ""))),
+        ("Standalone command", str(gate.get("standalone_command", ""))),
+    )
+
+
+def _bounded_payload_contract_finding_rows(
+    audit: Mapping[str, Any],
+) -> tuple[tuple[str, str, str, str], ...]:
+    findings = _list_of_mappings(audit.get("findings"))
+    rows: list[tuple[str, str, str, str]] = []
+    for finding in findings[
+        :QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_FINDING_DISPLAY_LIMIT
+    ]:
+        rows.append(
+            (
+                str(finding.get("severity", "")),
+                str(finding.get("code", "")),
+                str(finding.get("path", "")),
+                str(finding.get("message", "")),
+            )
+        )
+    finding_count = _int_value(audit.get("finding_count"))
+    if finding_count > len(rows):
+        rows.append(
+            (
+                "info",
+                "truncated",
+                "findings",
+                (
+                    f"{finding_count - len(rows)} additional bounded payload "
                     "contract findings omitted from Markdown summary"
                 ),
             )
