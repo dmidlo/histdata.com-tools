@@ -351,6 +351,36 @@ def test_quality_fingerprint_schema_cli_reports_human_output(
     assert "- return_dynamics: implemented; timeframes=[M1]" in output
 
 
+def test_quality_fingerprint_schema_cli_verifies_contract_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fingerprint schema verify mode should emit machine-readable audit."""
+    exit_code = main(["fingerprint-schema", "--verify", "--json"])
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == (
+        "histdatacom.time-series-fingerprint-contract-audit.v1"
+    )
+    assert payload["status"] == "pass"
+    assert payload["error_count"] == 0
+    assert payload["findings"] == []
+
+
+def test_quality_fingerprint_schema_cli_verifies_contract_text(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fingerprint schema verify mode should render human audit text."""
+    exit_code = main(["fingerprint-schema", "--verify"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Fingerprint Contract Audit" in output
+    assert "status: pass" in output
+    assert "No contract drift detected." in output
+
+
 def test_quality_fingerprint_schema_cli_applies_yaml_defaults(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -388,6 +418,33 @@ histdatacom:
         payload["profile"]["effective_fingerprint_profile"]["rounding_digits"]
         == 4
     )
+
+
+def test_quality_fingerprint_schema_cli_accepts_yaml_verify(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """YAML defaults should support fingerprint-schema contract verification."""
+    config_path = tmp_path / "quality.yaml"
+    config_path.write_text(
+        """
+histdatacom:
+  quality:
+    command: fingerprint_schema
+    verify: true
+    json: true
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["--config", str(config_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == (
+        "histdatacom.time-series-fingerprint-contract-audit.v1"
+    )
+    assert payload["status"] == "pass"
 
 
 def test_quality_help_advertises_fingerprint_schema_command() -> None:

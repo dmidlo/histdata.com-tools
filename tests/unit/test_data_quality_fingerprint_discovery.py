@@ -6,8 +6,11 @@ import json
 from pathlib import Path
 
 from histdatacom.data_quality.fingerprint_discovery import (
+    TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION,
+    fingerprint_contract_audit,
     fingerprint_schema_discovery,
+    format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
 )
 from histdatacom.data_quality.fingerprint_contracts import (
@@ -155,6 +158,61 @@ def test_fingerprint_schema_discovery_registry_matches_runtime() -> None:
     assert payload["profile"]["default_fingerprint_profile"] == (
         HistDataFingerprintProfile().to_metadata()
     )
+
+
+def test_fingerprint_contract_audit_reports_clean_contract() -> None:
+    """Contract audit should expose deterministic pass/fail drift status."""
+    payload = fingerprint_contract_audit()
+
+    assert (
+        payload["schema_version"]
+        == TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION
+    )
+    assert payload["status"] == "pass"
+    assert payload["error_count"] == 0
+    assert payload["warning_count"] == 0
+    assert payload["findings"] == []
+    checked = payload["checked_surfaces"]
+    assert checked["schema_contract_count"] == len(FINGERPRINT_SCHEMA_CONTRACTS)
+    assert checked["report_surface_count"] == len(
+        FINGERPRINT_REPORT_SURFACE_CONTRACTS
+    )
+    assert [check["status"] for check in payload["checks"]] == [
+        "pass",
+        "pass",
+        "pass",
+        "pass",
+        "pass",
+        "pass",
+    ]
+    assert "does not read target data" in payload["non_goals"]
+
+
+def test_fingerprint_contract_audit_reports_synthetic_drift() -> None:
+    """Synthetic contract drift should produce deterministic failure details."""
+    discovery = fingerprint_schema_discovery()
+    del discovery["schemas"]["series_fingerprint"]
+
+    payload = fingerprint_contract_audit(discovery=discovery)
+
+    assert payload["status"] == "fail"
+    assert payload["error_count"] == 1
+    finding = payload["findings"][0]
+    assert finding["severity"] == "error"
+    assert finding["code"] == "missing_schema_contract"
+    assert finding["path"] == "schemas.series_fingerprint"
+
+
+def test_format_fingerprint_contract_audit_renders_human_summary() -> None:
+    """Human audit output should summarize pass/fail checks."""
+    payload = fingerprint_contract_audit()
+
+    output = format_fingerprint_contract_audit(payload)
+
+    assert output.startswith("Fingerprint Contract Audit\n")
+    assert "status: pass" in output
+    assert "- schema_contracts: pass" in output
+    assert "No contract drift detected." in output
 
 
 def test_fingerprint_schema_discovery_reflects_profile_overrides() -> None:

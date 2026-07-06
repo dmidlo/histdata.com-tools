@@ -124,8 +124,11 @@ from histdatacom.data_quality.fingerprints import (
     series_fingerprint_topology_summary,
 )
 from histdatacom.data_quality.fingerprint_discovery import (
+    TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION,
+    fingerprint_contract_audit,
     fingerprint_schema_discovery,
+    format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
 )
 from histdatacom.data_quality.ingestion import (
@@ -365,6 +368,7 @@ __all__ = [
     "TIME_SERIES_FINGERPRINT_METADATA_KEY",
     "TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY",
     "TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION",
+    "TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION",
     "TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION",
     "TIME_SERIES_FINGERPRINT_SCHEMA_VERSION",
     "TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION",
@@ -470,8 +474,10 @@ __all__ = [
     "domain_quality_run_rules",
     "discover_quality_targets",
     "evaluate_quality_rule",
+    "fingerprint_contract_audit",
     "fingerprint_quality_rules",
     "fingerprint_schema_discovery",
+    "format_fingerprint_contract_audit",
     "format_fingerprint_schema_discovery",
     "format_fingerprint_topology_attention_lines",
     "format_fingerprint_topology_summary_lines",

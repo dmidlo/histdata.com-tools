@@ -14,7 +14,9 @@ from histdatacom.cli_config import (
 )
 from histdatacom.data_quality import QUALITY_CHECK_GROUPS
 from histdatacom.data_quality.fingerprint_discovery import (
+    fingerprint_contract_audit,
     fingerprint_schema_discovery,
+    format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
 )
 from histdatacom.data_quality.preflight import (
@@ -237,6 +239,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit the machine-readable discovery payload",
     )
+    fingerprint_schema.add_argument(
+        "--verify",
+        action="store_true",
+        help="emit a data-free fingerprint contract drift audit",
+    )
     return parser
 
 
@@ -313,6 +320,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         except QualityProfileError as exc:
             print(f"quality profile error: {exc}", file=sys.stderr)  # noqa:T201
             return 1
+        if args.verify:
+            audit_payload = fingerprint_contract_audit(profile)
+            if args.json:
+                print(  # noqa:T201
+                    json.dumps(audit_payload, indent=2, sort_keys=True)
+                )
+            else:
+                print(
+                    format_fingerprint_contract_audit(audit_payload)
+                )  # noqa:T201
+            return 1 if audit_payload.get("status") == "fail" else 0
+
         payload = fingerprint_schema_discovery(profile)
         if args.json:
             print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
