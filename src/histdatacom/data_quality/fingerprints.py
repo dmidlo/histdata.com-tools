@@ -2689,7 +2689,7 @@ def _conditioned_spread_rows(
             _summary_key(item.get("bucket")),
         )
     )
-    return cast(list[JSONValue], limit_state.slice(rows))
+    return cast(list[JSONValue], limit_state.slice(rows))  # type: ignore[redundant-cast]
 
 
 def _bounded_count_mapping(

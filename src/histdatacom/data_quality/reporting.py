@@ -692,7 +692,7 @@ def _bounded_json_list(
     *,
     limit: BoundedReportLimit,
 ) -> list[JSONValue]:
-    return cast(list[JSONValue], limit.slice(values))
+    return cast(list[JSONValue], limit.slice(values))  # type: ignore[redundant-cast]
 
 
 def _payload_limit_metadata(
