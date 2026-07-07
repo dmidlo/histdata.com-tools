@@ -16,9 +16,9 @@ from histdatacom.data_quality import (
     quality_rules_for_groups,
     run_quality_assessment,
 )
-from histdatacom.histdata_ascii import M1
+from histdatacom.histdata_ascii import TICK
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
+    CLEAN_TICK_CASE,
     HistDataAsciiCase,
     write_ascii_case,
     write_zip_case,
@@ -28,8 +28,8 @@ from tests.fixtures.histdata_ascii.quality_cases import (
 def test_calendar_classifier_uses_fixed_est_no_dst_on_dst_boundary() -> None:
     """Session projection must not localize HistData rows as New York DST."""
     classification = classify_histdata_source_timestamp(
-        "20220313 023000",
-        M1,
+        "20220313 023000000",
+        TICK,
     )
 
     assert classification.timestamp_utc_ms == 1647156600000
@@ -64,14 +64,14 @@ def test_domain_calendar_rule_reports_session_and_overlap_counts(
     path = write_ascii_case(
         tmp_path,
         HistDataAsciiCase(
-            name="m1_session_windows",
-            timeframe=M1,
-            filename="DAT_ASCII_EURUSD_M1_201202_SESSIONS.csv",
+            name="tick_session_windows",
+            timeframe=TICK,
+            filename="DAT_ASCII_EURUSD_T_201202_SESSIONS.csv",
             rows=(
-                "20120201 000000;1.306600;1.306610;1.306590;1.306600;0",
-                "20120201 030000;1.306600;1.306610;1.306590;1.306600;0",
-                "20120201 080000;1.306600;1.306610;1.306590;1.306600;0",
-                "20120201 130000;1.306600;1.306610;1.306590;1.306600;0",
+                "20120201 000000000,1.306600,1.306610,0",
+                "20120201 030000000,1.306600,1.306610,0",
+                "20120201 080000000,1.306600,1.306610,0",
+                "20120201 130000000,1.306600,1.306610,0",
             ),
         ),
     )
@@ -118,16 +118,16 @@ def test_domain_calendar_rule_reports_open_close_rollover_and_fix_tags(
     path = write_ascii_case(
         tmp_path,
         HistDataAsciiCase(
-            name="m1_calendar_regimes",
-            timeframe=M1,
-            filename="DAT_ASCII_EURUSD_M1_201202_REGIMES.csv",
+            name="tick_calendar_regimes",
+            timeframe=TICK,
+            filename="DAT_ASCII_EURUSD_T_201202_REGIMES.csv",
             rows=(
-                "20120205 170000;1.306600;1.306610;1.306590;1.306600;0",
-                "20120203 165900;1.306600;1.306610;1.306590;1.306600;0",
-                "20120201 110000;1.306600;1.306610;1.306590;1.306600;0",
-                "20120331 110000;1.306600;1.306610;1.306590;1.306600;0",
-                "20221225 120000;1.306600;1.306610;1.306590;1.306600;0",
-                "20221231 110000;1.306600;1.306610;1.306590;1.306600;0",
+                "20120205 170000000,1.306600,1.306610,0",
+                "20120203 165900000,1.306600,1.306610,0",
+                "20120201 110000000,1.306600,1.306610,0",
+                "20120331 110000000,1.306600,1.306610,0",
+                "20221225 120000000,1.306600,1.306610,0",
+                "20221231 110000000,1.306600,1.306610,0",
             ),
         ),
     )
@@ -165,13 +165,13 @@ def test_domain_calendar_rule_uses_configured_complete_profile(
     path = write_ascii_case(
         tmp_path,
         HistDataAsciiCase(
-            name="m1_configured_calendar_profile",
-            timeframe=M1,
-            filename="DAT_ASCII_EURUSD_M1_202203_PROFILED.csv",
+            name="tick_configured_calendar_profile",
+            timeframe=TICK,
+            filename="DAT_ASCII_EURUSD_T_202203_PROFILED.csv",
             rows=(
-                "20220415 120000;1.306600;1.306610;1.306590;1.306600;0",
-                "20221227 120000;1.306600;1.306610;1.306590;1.306600;0",
-                "20200316 120000;1.306600;1.306610;1.306590;1.306600;0",
+                "20220415 120000000,1.306600,1.306610,0",
+                "20221227 120000000,1.306600,1.306610,0",
+                "20200316 120000000,1.306600,1.306610,0",
             ),
         ),
     )
@@ -216,14 +216,14 @@ def test_calendar_classifier_accepts_asset_scoped_profile() -> None:
     profile = calendar_profile_from_mapping(profile_config)
 
     fx = classify_histdata_source_timestamp(
-        "20220415 120000",
-        M1,
+        "20220415 120000000",
+        TICK,
         calendar_profile=profile,
         asset_class="fx",
     )
     metal = classify_histdata_source_timestamp(
-        "20220415 120000",
-        M1,
+        "20220415 120000000",
+        TICK,
         calendar_profile=profile,
         asset_class="metal",
     )
@@ -239,10 +239,10 @@ def test_domain_calendar_rule_warns_on_unparseable_timestamps(
     path = write_ascii_case(
         tmp_path,
         HistDataAsciiCase(
-            name="m1_calendar_bad_timestamp",
-            timeframe=M1,
-            filename="DAT_ASCII_EURUSD_M1_201202_BAD_CALENDAR.csv",
-            rows=("not-a-date;1.306600;1.306610;1.306590;1.306600;0",),
+            name="tick_calendar_bad_timestamp",
+            timeframe=TICK,
+            filename="DAT_ASCII_EURUSD_T_201202_BAD_CALENDAR.csv",
+            rows=("not-a-date,1.306600,1.306610,0",),
         ),
     )
 
@@ -264,17 +264,17 @@ def test_domain_calendar_rule_retains_zip_source_member(
     """ZIP calendar findings should retain member context."""
     archive = write_zip_case(
         tmp_path,
-        CLEAN_M1_CASE,
-        zip_filename="DAT_ASCII_EURUSD_M1_201202.zip",
+        CLEAN_TICK_CASE,
+        zip_filename="DAT_ASCII_EURUSD_T_201202.zip",
     )
 
     report = _report_for_path(archive)
 
     summary = _finding(report, "DOMAIN_CALENDAR_SESSION_SUMMARY")
     assert report.status is QualityStatus.CLEAN
-    assert summary.metadata["source_member"] == CLEAN_M1_CASE.filename
+    assert summary.metadata["source_member"] == CLEAN_TICK_CASE.filename
     assert summary.metadata["samples"][0]["source_member"] == (
-        CLEAN_M1_CASE.filename
+        CLEAN_TICK_CASE.filename
     )
 
 

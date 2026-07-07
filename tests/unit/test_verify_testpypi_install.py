@@ -172,7 +172,7 @@ def test_verify_report_records_source_index_and_installed_version(
     assert written["cli"]["version"] == "1.3.4"
 
 
-def test_download_smoke_uses_bounded_historical_m1_download(
+def test_download_smoke_uses_bounded_historical_tick_download(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -187,7 +187,7 @@ def test_download_smoke_uses_bounded_historical_m1_download(
         captured_envs.append(kwargs["env"])
         data_dir = Path(command[command.index("--data-directory") + 1])
         data_dir.mkdir(parents=True, exist_ok=True)
-        (data_dir / "HISTDATA_COM_ASCII_EURUSD_M1202201.zip").touch()
+        (data_dir / "HISTDATA_COM_ASCII_EURUSD_T202201.zip").touch()
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     def fake_run_json(command: list[str], **kwargs: Any) -> dict[str, str]:
@@ -206,10 +206,10 @@ def test_download_smoke_uses_bounded_historical_m1_download(
 
     command = commands[0]
     assert "-t" in command
-    assert command[command.index("-t") + 1] == "1-minute-bar-quotes"
+    assert command[command.index("-t") + 1] == "tick-data-quotes"
     assert command[command.index("-s") + 1] == "202201"
     assert command[command.index("-e") + 1] == "202202"
-    assert "tick-data-quotes" not in command
+    assert "1-minute-bar-quotes" not in command
     assert "now" not in command
     assert json_commands == [
         [
@@ -230,7 +230,7 @@ def test_download_smoke_uses_bounded_historical_m1_download(
         tmp_path / "temporal-runtime-cache"
     )
     assert captured_envs[1] == captured_envs[0]
-    assert report["files"] == ["HISTDATA_COM_ASCII_EURUSD_M1202201.zip"]
+    assert report["files"] == ["HISTDATA_COM_ASCII_EURUSD_T202201.zip"]
     assert report["runtime_stop"] == {"state": "stopped"}
 
 

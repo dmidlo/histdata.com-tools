@@ -1757,7 +1757,7 @@ def _format_orchestration_quality_console_summary(
         source_state = source_cleanliness.get("state", "unknown")
         lines.append(
             "source artifacts: "
-            f"{source_state} ({source_count} transient ZIP/CSV/XLS/XLSX)"
+            f"{source_state} ({source_count} transient ZIP/CSV)"
         )
     repo_quality = _mapping_from_payload(quality_payload.get("repo_quality"))
     repo_artifact = _mapping_from_payload(repo_quality.get("repo_artifact"))

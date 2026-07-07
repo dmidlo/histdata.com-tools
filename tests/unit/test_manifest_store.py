@@ -32,14 +32,14 @@ from histdatacom.orchestration.control import (
     OrchestrationJobSnapshot,
 )
 
-ASCII_M1_URL = (
+ASCII_TICK_URL = (
     "http://www.histdata.com/download-free-forex-data/"
-    "?/ascii/1-minute-bar-quotes/eurusd/2022"
+    "?/ascii/tick-data-quotes/eurusd/2022"
 )
 
 
-def _expected_ascii_m1_dir(base_dir: Path) -> str:
-    data_path = Path("ASCII", "M1", "eurusd", "2022")
+def _expected_ascii_tick_dir(base_dir: Path) -> str:
+    data_path = Path("ASCII", "T", "eurusd", "2022")
     return f"{base_dir / data_path}{os.sep}"
 
 
@@ -47,7 +47,7 @@ def test_record_write_creates_manifest_without_legacy_meta(
     tmp_path: Path,
 ) -> None:
     """Record writes should upsert the manifest without legacy orchestrations."""
-    record = Record(url=ASCII_M1_URL, status=WorkStatus.CSV_FILE.value)
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.CSV_FILE.value)
 
     record.write_manifest_status(base_dir=str(tmp_path))
 
@@ -60,7 +60,7 @@ def test_record_write_creates_manifest_without_legacy_meta(
     assert db_path.exists()
     assert not meta_path.exists()
     assert item.status is WorkStatus.CSV_FILE
-    assert item.data_dir == _expected_ascii_m1_dir(tmp_path)
+    assert item.data_dir == _expected_ascii_tick_dir(tmp_path)
     assert history[-1]["stage"] == "record_manifest_status"
 
 
@@ -109,7 +109,7 @@ def test_record_delete_clears_current_manifest_state(
     tmp_path: Path,
 ) -> None:
     """Deleting status should clear manifest and existing legacy metadata."""
-    record = Record(url=ASCII_M1_URL, status=WorkStatus.CSV_FILE.value)
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.CSV_FILE.value)
     record.write_manifest_status(base_dir=str(tmp_path))
     meta_path = Path(record.data_dir) / ".meta"
     meta_path.write_text("{}", encoding="UTF-8")
@@ -128,14 +128,14 @@ def test_restore_imports_legacy_meta_without_manifest(
     """Existing `.meta` files should be imported into the manifest store."""
     current_base = tmp_path / "current"
     stale_base = tmp_path / "stale"
-    current_data_dir = _expected_ascii_m1_dir(current_base)
-    stale_data_dir = _expected_ascii_m1_dir(stale_base)
+    current_data_dir = _expected_ascii_tick_dir(current_base)
+    stale_data_dir = _expected_ascii_tick_dir(stale_base)
     meta_path = Path(current_data_dir) / ".meta"
     meta_path.parent.mkdir(parents=True)
     meta_path.write_text(
         json.dumps(
             {
-                "url": ASCII_M1_URL,
+                "url": ASCII_TICK_URL,
                 "status": "CSV_FILE",
                 "data_dir": stale_data_dir,
                 "zip_filename": "legacy.zip",
@@ -143,7 +143,7 @@ def test_restore_imports_legacy_meta_without_manifest(
         ),
         encoding="UTF-8",
     )
-    restored = Record(url=ASCII_M1_URL)
+    restored = Record(url=ASCII_TICK_URL)
 
     assert restored.restore_manifest_status(str(current_base))
 
@@ -163,9 +163,9 @@ def test_missing_or_corrupt_legacy_meta_is_graceful(
     tmp_path: Path,
 ) -> None:
     """Missing and corrupt legacy metadata should not crash restore/import."""
-    missing = Record(url=ASCII_M1_URL)
-    corrupt = Record(url=ASCII_M1_URL)
-    corrupt_data_dir = _expected_ascii_m1_dir(tmp_path / "corrupt")
+    missing = Record(url=ASCII_TICK_URL)
+    corrupt = Record(url=ASCII_TICK_URL)
+    corrupt_data_dir = _expected_ascii_tick_dir(tmp_path / "corrupt")
     corrupt_meta = Path(corrupt_data_dir) / ".meta"
     corrupt_meta.parent.mkdir(parents=True)
     corrupt_meta.write_text("{not-json", encoding="UTF-8")

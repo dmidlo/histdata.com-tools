@@ -22,26 +22,28 @@ from histdatacom.histdata_ascii import (
     write_polars_cache,
 )
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
-    CLEAN_M1_ROWS,
+    CLEAN_TICK_CASE,
+    CLEAN_TICK_ROWS,
     case_by_name,
 )
 
 
-def test_clean_m1_cache_runs_deep_ingestion_time_and_bar_checks(
+def test_clean_tick_cache_runs_deep_ingestion_time_and_tick_checks(
     tmp_path: Path,
 ) -> None:
     """A direct .data target should receive semantic validation."""
-    cache_path = _write_cache_case(tmp_path, CLEAN_M1_CASE)
+    cache_path = _write_cache_case(tmp_path, CLEAN_TICK_CASE)
 
-    report = _report_for_cache(cache_path, groups=("ingestion", "time", "bars"))
+    report = _report_for_cache(
+        cache_path, groups=("ingestion", "time", "ticks")
+    )
 
     assert report.status is QualityStatus.CLEAN
     assert _non_info_codes(report.findings) == []
     row_count = _finding(report.findings, "ASCII_ROW_COUNT_SUMMARY")
     assert row_count.metadata["kind"] == "cache"
     assert row_count.metadata["data_format"] == "ascii"
-    assert row_count.metadata["timeframe"] == "M1"
+    assert row_count.metadata["timeframe"] == "T"
     assert row_count.metadata["symbol"] == "EURUSD"
     assert row_count.metadata["period"] == "201202"
     assert row_count.metadata["row_count"] == 3
@@ -55,12 +57,10 @@ def test_clean_m1_cache_runs_deep_ingestion_time_and_bar_checks(
     assert (
         _finding(
             report.findings,
-            "ASCII_M1_OHLC_SUMMARY",
+            "ASCII_TICK_SPREAD_SUMMARY",
         ).metadata["parsed_row_count"]
         == 3
     )
-    precision = _finding(report.findings, "ASCII_M1_PRECISION_SUMMARY")
-    assert precision.metadata["raw_decimal_precision_preserved"] is False
 
 
 def test_cache_schema_validation_flags_missing_columns(
@@ -69,8 +69,8 @@ def test_cache_schema_validation_flags_missing_columns(
     """Required canonical cache columns should be enforced."""
     cache_path = _write_cache_case(
         tmp_path,
-        CLEAN_M1_CASE,
-        mutate=lambda frame: frame.drop("close"),
+        CLEAN_TICK_CASE,
+        mutate=lambda frame: frame.drop("ask"),
     )
 
     report = _report_for_cache(cache_path, groups=("ingestion",))
@@ -78,7 +78,7 @@ def test_cache_schema_validation_flags_missing_columns(
     finding = _finding(report.findings, "ASCII_CACHE_SCHEMA_MISSING_COLUMNS")
     assert report.status is QualityStatus.FAILED
     assert finding.severity is QualitySeverity.ERROR
-    assert finding.metadata["missing_columns"] == ["close"]
+    assert finding.metadata["missing_columns"] == ["ask"]
 
 
 def test_cache_schema_validation_flags_dtypes_nulls_and_non_finite_values(
@@ -87,12 +87,12 @@ def test_cache_schema_validation_flags_dtypes_nulls_and_non_finite_values(
     """Cache payloads should retain canonical dtypes and finite values."""
     cache_path = _write_cache_case(
         tmp_path,
-        CLEAN_M1_CASE,
+        CLEAN_TICK_CASE,
         mutate=lambda frame: frame.with_columns(
             [
                 pl.col("datetime").cast(pl.Float64),
-                pl.lit(None).cast(pl.Float64).alias("open"),
-                pl.lit(float("inf")).alias("high"),
+                pl.lit(None).cast(pl.Float64).alias("bid"),
+                pl.lit(float("inf")).alias("ask"),
                 pl.lit(-1).alias("vol"),
             ]
         ),
@@ -117,32 +117,19 @@ def test_cache_schema_validation_flags_dtypes_nulls_and_non_finite_values(
     )
 
 
-def test_m1_cache_time_checks_detect_non_monotonic_rows(
+def test_tick_cache_time_checks_detect_non_monotonic_rows(
     tmp_path: Path,
 ) -> None:
-    """Timestamp rules should inspect direct M1 cache ordering."""
+    """Timestamp rules should inspect direct tick cache ordering."""
     cache_path = _write_cache_case(
         tmp_path,
-        case_by_name("m1_non_monotonic_timestamp"),
+        case_by_name("tick_non_monotonic_timestamp"),
     )
 
     report = _report_for_cache(cache_path, groups=("time",))
 
     finding = _finding(report.findings, "ASCII_TIMESTAMP_NON_MONOTONIC")
     assert report.status is QualityStatus.WARNING
-    assert finding.location.row_number == 2
-
-
-def test_m1_cache_bar_checks_detect_ohlc_violations(
-    tmp_path: Path,
-) -> None:
-    """Bar integrity rules should inspect direct M1 cache prices."""
-    cache_path = _write_cache_case(tmp_path, case_by_name("m1_ohlc_violation"))
-
-    report = _report_for_cache(cache_path, groups=("bars",))
-
-    finding = _finding(report.findings, "ASCII_M1_OHLC_INVALID")
-    assert report.status is QualityStatus.FAILED
     assert finding.location.row_number == 2
 
 
@@ -171,11 +158,11 @@ def _write_cache_case(
     *,
     mutate: Callable[[Any], Any] | None = None,
 ) -> Path:
-    batch = parse_ascii_lines(case.timeframe, case.rows or CLEAN_M1_ROWS)
+    batch = parse_ascii_lines(case.timeframe, case.rows or CLEAN_TICK_ROWS)
     frame = to_polars_frame(batch)
     if mutate is not None:
         frame = mutate(frame)
-    source_row = (case.rows or CLEAN_M1_ROWS)[0]
+    source_row = (case.rows or CLEAN_TICK_ROWS)[0]
     period = source_row[:6]
     year = period[:4]
     month = period[4:6]

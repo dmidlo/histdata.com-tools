@@ -23,7 +23,7 @@ def test_cli() -> None:
 def test_unsupported_format_timeframe_combination_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reject CLI requests that would generate zero supported URLs."""
+    """Reject retired formats at argument parsing."""
     monkeypatch.setattr(
         sys,
         "argv",
@@ -44,7 +44,7 @@ def test_unsupported_format_timeframe_combination_exits_nonzero(
     with pytest.raises(SystemExit) as err:
         ArgParser(Options())()
 
-    assert err.value.code == 1
+    assert err.value.code == 2
 
 
 @pytest.mark.parametrize(
@@ -326,13 +326,13 @@ def test_build_cache_cli_filters_default_dimensions(
 
     assert options.build_cache
     assert options.formats == {"ascii"}
-    assert options.timeframes == {"M1", "T"}
+    assert options.timeframes == {"T"}
 
 
 def test_build_cache_cli_rejects_non_cacheable_dimensions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cache-only mode should fail clearly when nothing can produce .data."""
+    """Cache-only mode rejects retired formats at argument parsing."""
     monkeypatch.setattr(
         sys,
         "argv",
@@ -344,7 +344,7 @@ def test_build_cache_cli_rejects_non_cacheable_dimensions(
             "-f",
             "metatrader",
             "-t",
-            "1-minute-bar-quotes",
+            "tick-data-quotes",
             "-s",
             "2022-12",
         ],
@@ -353,7 +353,7 @@ def test_build_cache_cli_rejects_non_cacheable_dimensions(
     with pytest.raises(SystemExit) as err:
         ArgParser(Options())()
 
-    assert err.value.code == 1
+    assert err.value.code == 2
 
 
 def test_pair_groups_cli_expands_without_defaulting_to_all_pairs(
@@ -612,7 +612,7 @@ histdatacom:
             "-p",
             "usdjpy",
             "-t",
-            "1-minute-bar-quotes",
+            "tick-data-quotes",
             "-s",
             "2022-12",
             "-v",
@@ -623,7 +623,7 @@ histdatacom:
 
     assert options.pairs == ["usdjpy"]
     assert options.formats == ["ascii"]
-    assert options.timeframes == ["M1"]
+    assert options.timeframes == ["T"]
     assert options.start_yearmonth == "202212"
     assert options.verbosity == 1
     assert options.validate_urls
@@ -1405,7 +1405,7 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
             "-f",
             "ascii",
             "-t",
-            "1-minute-bar-quotes",
+            "tick-data-quotes",
             "-s",
             "2022-12",
             "--data-directory",
@@ -1437,7 +1437,7 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
 
     assert first_options.pairs == ["eurusd"]
     assert first_options.formats == ["ascii"]
-    assert first_options.timeframes == ["M1"]
+    assert first_options.timeframes == ["T"]
     assert first_options.data_directory == str(first_data_dir)
     assert first_options.validate_urls
     assert first_options.download_data_archives

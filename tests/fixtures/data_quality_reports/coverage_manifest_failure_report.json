@@ -12,7 +12,7 @@
           "data_format": "ascii",
           "period": "201203",
           "symbol": "EURUSD",
-          "timeframe": "M1"
+          "timeframe": "T"
         }
       ],
       "missing_count": 1,
@@ -187,7 +187,7 @@
                 "kind": "directory",
                 "period": "unknown",
                 "symbol": "unknown",
-                "timeframe": "M1"
+                "timeframe": "T"
               }
             }
           ],
@@ -220,7 +220,7 @@
                 "data_format": "ascii",
                 "period": "201203",
                 "symbol": "EURUSD",
-                "timeframe": "M1"
+                "timeframe": "T"
               }
             },
             "path": "data",
@@ -234,7 +234,7 @@
               "data_format": "ascii",
               "period": "201203",
               "symbol": "EURUSD",
-              "timeframe": "M1"
+              "timeframe": "T"
             }
           },
           "rule_id": "inventory.coverage_manifest",
@@ -248,7 +248,7 @@
             "path": "data",
             "period": "",
             "symbol": "",
-            "timeframe": "M1"
+            "timeframe": "T"
           }
         }
       ],
@@ -264,7 +264,7 @@
         "path": "data",
         "period": "",
         "symbol": "",
-        "timeframe": "M1"
+        "timeframe": "T"
       }
     }
   ],
@@ -296,7 +296,7 @@
         "path": "data",
         "period": "",
         "symbol": "",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     }
@@ -311,7 +311,7 @@
       "path": "data",
       "period": "",
       "symbol": "",
-      "timeframe": "M1"
+      "timeframe": "T"
     }
   ]
 }

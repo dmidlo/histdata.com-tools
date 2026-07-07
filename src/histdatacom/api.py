@@ -98,12 +98,9 @@ class Api:  # noqa:H601
             args (dict): args received from argparse
         """
         warn_legacy_side_effect("Api.test_for_cache_or_create")
-        if str.lower(  # noqa:BLK001
-            record.data_format
-        ) == "ascii" and record.data_timeframe in [
-            "T",
-            "M1",
-        ]:
+        if str.lower(record.data_format) == "ascii" and (
+            record.data_timeframe == "T"
+        ):
             output = build_cache_work_item(
                 WorkItem.from_record(record),
                 args=args,
@@ -188,14 +185,14 @@ class Api:  # noqa:H601
     def _import_frame_with_headers(  # noqa:BLK001
         cls, timeframe: str, zip_path: Path
     ) -> "PolarsDataFrame":
-        """Import a raw Polars dataframe with headers for M1 and Tick data.
+        """Import a raw Polars dataframe with headers for Tick data.
 
         Args:
-            timeframe (str): M1 or T
+            timeframe (str): T
             zip_path (Path): Path
 
         Raises:
-            ValueError: when not M1 or T
+            ValueError: when not T
 
         Returns:
             DataFrame: polars.DataFrame

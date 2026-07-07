@@ -31,7 +31,7 @@ def test_repository_quality_payload_updates_legacy_pair_entries() -> None:
                 "target": {
                     "symbol": "EURUSD",
                     "data_format": "ascii",
-                    "timeframe": "M1",
+                    "timeframe": "T",
                     "period": "201202",
                 },
                 "finding_count": 1,
@@ -79,7 +79,7 @@ def test_repository_quality_payload_updates_legacy_pair_entries() -> None:
     assert quality["finding_count"] == 1
     assert quality["warning_finding_count"] == 1
     assert quality["formats"] == ["ascii"]
-    assert quality["timeframes"] == ["M1", "T"]
+    assert quality["timeframes"] == ["T"]
     assert quality["periods"] == ["201202"]
     assert quality["report_artifact"]["path"] == "quality.json"
 
@@ -98,7 +98,7 @@ def test_repository_quality_attributes_cross_target_findings() -> None:
         "report_schema_version": "histdatacom.quality-report.v1",
         "report_artifact": {
             "kind": "quality-report",
-            "path": ".quality/issue-241/ascii-m1-all-quality-report.json",
+            "path": ".quality/issue-241/ascii-t-all-quality-report.json",
             "sha256": "abc",
         },
         "exit_decision": {"exit_code": 1, "reason": "error threshold"},
@@ -107,7 +107,7 @@ def test_repository_quality_attributes_cross_target_findings() -> None:
                 "target": {
                     "symbol": symbol.upper(),
                     "data_format": "ascii",
-                    "timeframe": "M1",
+                    "timeframe": "T",
                     "period": "2008",
                 },
                 "finding_count": 0,
@@ -124,7 +124,7 @@ def test_repository_quality_attributes_cross_target_findings() -> None:
                 "target": {
                     "symbol": symbol.upper(),
                     "data_format": "ascii",
-                    "timeframe": "M1",
+                    "timeframe": "T",
                     "period": "2008",
                 },
                 "finding_count": 1,
@@ -141,7 +141,7 @@ def test_repository_quality_attributes_cross_target_findings() -> None:
     updated = repository_data_with_quality_payload(
         repo,
         payload,
-        request_id="issue-233-ascii-m1-all-quality",
+        request_id="issue-233-ascii-t-all-quality",
         checked_at_utc="2026-06-23T00:00:00Z",
     )
 
@@ -152,7 +152,7 @@ def test_repository_quality_attributes_cross_target_findings() -> None:
         assert quality["error_count"] == 1
         assert quality["failed_target_count"] == 1
         assert quality["report_artifact"]["path"].endswith(
-            "ascii-m1-all-quality-report.json"
+            "ascii-t-all-quality-report.json"
         )
     assert updated["audjpy"]["quality"]["status"] == "clean"
 

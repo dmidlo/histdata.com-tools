@@ -28,7 +28,7 @@ def build_polars_options() -> Options:
     options = Options()
     options.api_return_type = "polars"
     options.formats = {"ascii"}
-    options.timeframes = {"1-minute-bar-quotes"}
+    options.timeframes = {"tick-data-quotes"}
     options.pairs = {"eurusd"}
     options.start_yearmonth = "2021-04"
     options.end_yearmonth = "2021-05"

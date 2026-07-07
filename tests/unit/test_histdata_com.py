@@ -26,7 +26,7 @@ from histdatacom.orchestration.client import (
     RuntimeDependencyError,
 )
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
+    CLEAN_TICK_CASE,
     write_ascii_case,
     write_corrupt_zip,
     write_zip_case,
@@ -43,7 +43,7 @@ def _orchestration_options(api_return_type: str = "polars") -> Options:
     options = Options()
     options.pairs = {"eurusd"}
     options.formats = {"ascii"}
-    options.timeframes = {"M1"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2022-12"
     options.api_return_type = api_return_type
     return options
@@ -161,10 +161,10 @@ def _orchestration_quality_result(
         "target_summaries": [
             {
                 "target": {
-                    "path": "/tmp/DAT_ASCII_EURUSD_M1_201202.csv",
+                    "path": "/tmp/DAT_ASCII_EURUSD_T_201202.csv",
                     "kind": "csv",
                     "data_format": "ascii",
-                    "timeframe": "M1",
+                    "timeframe": "T",
                     "symbol": "EURUSD",
                     "period": "201202",
                     "metadata": {},
@@ -262,8 +262,8 @@ def _orchestration_cache_result(tmp_path: Path) -> JobResult:
     from histdatacom.histdata_ascii import CACHE_FILENAME, write_polars_cache
 
     source = Api._import_file_to_polars(
-        SimpleNamespace(data_timeframe="M1"),
-        Path("tests/fixtures/histdata_ascii/DAT_ASCII_EURUSD_M1_201202.csv"),
+        SimpleNamespace(data_timeframe="T"),
+        Path("tests/fixtures/histdata_ascii/DAT_ASCII_EURUSD_T_201202.csv"),
     )
     cache_path = tmp_path / CACHE_FILENAME
     write_polars_cache(source, cache_path)
@@ -272,7 +272,7 @@ def _orchestration_cache_result(tmp_path: Path) -> JobResult:
         "path": str(cache_path),
         "metadata": {
             "filename": CACHE_FILENAME,
-            "timeframe": "M1",
+            "timeframe": "T",
             "pair": "eurusd",
             "line_count": str(source.height),
             "start": str(source.item(0, "datetime")),
@@ -823,8 +823,8 @@ def test_data_quality_cli_submits_quality_request_to_orchestration(
 
     root = tmp_path / target_kind
     root.mkdir()
-    csv_path = write_ascii_case(root, CLEAN_M1_CASE)
-    zip_path = write_zip_case(root, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(root, CLEAN_TICK_CASE)
+    zip_path = write_zip_case(root, CLEAN_TICK_CASE)
     target_path = {
         "directory": root,
         "csv": csv_path,
@@ -885,7 +885,7 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
 
     root = tmp_path / "quality"
     root.mkdir()
-    write_ascii_case(root, CLEAN_M1_CASE)
+    write_ascii_case(root, CLEAN_TICK_CASE)
 
     def fake_submit(request, **kwargs: object) -> JobResult:
         return _orchestration_quality_result(
@@ -921,7 +921,7 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                             {
                                 "target_axis": {
                                     "data_format": "ascii",
-                                    "timeframe": "M1",
+                                    "timeframe": "T",
                                     "symbol": "EURUSD",
                                     "period": "201202",
                                     "kind": "csv",
@@ -942,8 +942,7 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                 "omitted_target_count": 0,
                 "truncated": False,
                 "distribution_target_count": 1,
-                "m1_bar_distribution_target_count": 1,
-                "tick_distribution_target_count": 0,
+                "tick_distribution_target_count": 1,
                 "missing_distribution_target_count": 0,
                 "unavailable_distribution_target_count": 0,
                 "empty_distribution_target_count": 0,
@@ -954,7 +953,7 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                 "text_backed_distribution_target_count": 1,
                 "total_invalid_row_count": 0,
                 "total_partial_row_count": 0,
-                "distribution_kind_counts": {"m1_bar": 1},
+                "distribution_kind_counts": {"tick": 1},
                 "status_counts": {"available": 1},
                 "source_kind_counts": {"csv_text": 1},
                 "distribution_source_counts": {"text": 1},
@@ -964,12 +963,12 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                     {
                         "target_axis": {
                             "data_format": "ascii",
-                            "timeframe": "M1",
+                            "timeframe": "T",
                             "symbol": "EURUSD",
                             "period": "201202",
                             "kind": "csv",
                         },
-                        "distribution_kind": "m1_bar",
+                        "distribution_kind": "tick",
                         "status": "available",
                         "row_count": 3,
                         "sampled_row_count": 3,
@@ -1013,7 +1012,7 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                     {
                         "target_axis": {
                             "data_format": "ascii",
-                            "timeframe": "M1",
+                            "timeframe": "T",
                             "symbol": "EURUSD",
                             "period": "201202",
                             "kind": "csv",
@@ -1044,7 +1043,7 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                     {
                         "target_axis": {
                             "data_format": "ascii",
-                            "timeframe": "M1",
+                            "timeframe": "T",
                             "symbol": "EURUSD",
                             "period": "201202",
                             "kind": "csv",
@@ -1106,18 +1105,16 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
     assert "Fingerprint distribution attention" in output
     assert "- targets needing attention: 0 included: 0 omitted: 0" in output
     assert "Fingerprint distributions" in output
+    assert "- targets: 1 with distributions: 1 tick: 1 missing: 0" in output
     assert (
-        "- targets: 1 with distributions: 1 m1: 1 tick: 0 missing: 0" in output
-    )
-    assert (
-        "- ascii EURUSD M1 201202 csv: available, m1_bar, 3 rows, "
+        "- ascii EURUSD T 201202 csv: available, tick, 3 rows, "
         "3 usable, 0 invalid, 3 sampled, truncated=false, "
         "precision=text, source=text"
     ) in output
     assert "Fingerprint topology attention" in output
     assert "- targets needing attention: 1 included: 1 omitted: 0" in output
     assert (
-        "- ascii EURUSD M1 201202 csv: sequence, "
+        "- ascii EURUSD T 201202 csv: sequence, "
         "duplicate_timestamps, invalid=0, duplicates=1, "
         "non-monotonic=0, suspicious gaps=0, weekend activity=0, "
         "max gap 60s, computed_from=text_scan, "
@@ -1128,7 +1125,7 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
         "- targets: 1 included: 1 regular: 0 irregular: 1 unavailable: 0"
     ) in output
     assert (
-        "- ascii EURUSD M1 201202 csv: irregular, observed_sequence, "
+        "- ascii EURUSD T 201202 csv: irregular, observed_sequence, "
         "3 rows, 3 parsed, duplicates=1, non-monotonic=0, "
         "median interval 60s, max gap 60s, 0 expected closures, "
         "0 suspicious gaps, weekend activity=0, computed_from=text_scan"
@@ -1255,7 +1252,7 @@ def test_data_quality_api_returns_orchestration_quality_payload(
     """API quality runs should return the bounded orchestration quality payload."""
     import histdatacom.histdata_com as histdata_com
 
-    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     options = Options()
     options.data_quality = True
     options.quality_paths = (str(csv_path),)
@@ -1296,7 +1293,7 @@ def test_data_quality_api_runs_inventory_rules_for_corrupt_zip(
 
     archive = write_corrupt_zip(
         tmp_path,
-        filename="DAT_ASCII_EURUSD_M1_201202.zip",
+        filename="DAT_ASCII_EURUSD_T_201202.zip",
     )
     options = Options()
     options.data_quality = True
@@ -1344,7 +1341,7 @@ def test_data_quality_api_writes_coverage_manifest_from_metadata(
     """API quality runs should carry expected coverage into report output."""
     import histdatacom.histdata_com as histdata_com
 
-    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     options = Options()
     options.data_quality = True
     options.quality_paths = (str(csv_path),)
@@ -1355,13 +1352,13 @@ def test_data_quality_api_writes_coverage_manifest_from_metadata(
             "expected_dimensions": [
                 {
                     "data_format": "ascii",
-                    "timeframe": "M1",
+                    "timeframe": "T",
                     "symbol": "EURUSD",
                     "period": "201202",
                 },
                 {
                     "data_format": "ascii",
-                    "timeframe": "M1",
+                    "timeframe": "T",
                     "symbol": "EURUSD",
                     "period": "201203",
                 },
@@ -1411,7 +1408,7 @@ def test_data_quality_cli_writes_json_report_artifact(
     """Quality CLI should write a full JSON report when requested."""
     import histdatacom.histdata_com as histdata_com
 
-    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     report_path = tmp_path / "reports" / "quality.json"
 
     captured: dict[str, object] = {}
@@ -1487,7 +1484,7 @@ def test_data_quality_console_summary_reports_scratch_and_sources() -> None:
     )
 
     assert "quality report: scratch report deleted after validation" in output
-    assert "source artifacts: dirty (2 transient ZIP/CSV/XLS/XLSX)" in output
+    assert "source artifacts: dirty (2 transient ZIP/CSV)" in output
 
 
 def test_data_quality_console_summary_reports_remediation_coverage() -> None:
@@ -1559,7 +1556,7 @@ def test_data_quality_cli_exit_policy_fails_on_errors(
     """Quality CLI should exit non-zero when findings exceed policy."""
     import histdatacom.histdata_com as histdata_com
 
-    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
 
     captured: dict[str, object] = {}
 
@@ -2336,7 +2333,7 @@ def test_api_default_runtime_uses_orchestration(
     options = Options()
     options.pairs = {"eurusd"}
     options.formats = {"ascii"}
-    options.timeframes = {"M1"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2022-12"
 
     result = histdata_com.main(options)
@@ -2370,7 +2367,7 @@ def test_api_pair_groups_submit_expanded_pairs(
     options = Options()
     options.pair_groups = {"majors"}
     options.formats = {"ascii"}
-    options.timeframes = {"M1"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2022-12"
 
     result = histdata_com.main(options)
@@ -2408,7 +2405,7 @@ def test_api_major_triangle_group_submits_expanded_pairs(
     options = Options()
     options.pair_groups = {"major triangles"}
     options.formats = {"ascii"}
-    options.timeframes = {"M1"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2022-12"
 
     result = histdata_com.main(options)
@@ -2439,7 +2436,7 @@ def test_api_individual_triangle_group_submits_expanded_pairs(
     options = Options()
     options.pair_groups = {group}
     options.formats = {"ascii"}
-    options.timeframes = {"M1"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2022-12"
 
     result = histdata_com.main(options)
@@ -2608,7 +2605,7 @@ def test_back_to_back_cli_orchestration_requests_use_fresh_parser_state(
             "-f",
             "ascii",
             "-t",
-            "1-minute-bar-quotes",
+            "tick-data-quotes",
             "-s",
             "2022-12",
             "--data-directory",
@@ -2644,7 +2641,7 @@ def test_back_to_back_cli_orchestration_requests_use_fresh_parser_state(
     first_request, first_kwargs = captured[0]
     second_request, second_kwargs = captured[1]
     assert first_request.pairs == ("eurusd",)
-    assert first_request.timeframes == ("M1",)
+    assert first_request.timeframes == ("T",)
     assert first_request.data_directory == str(tmp_path / "first")
     assert first_request.validate_urls
     assert first_request.download_data_archives
@@ -2726,7 +2723,7 @@ def test_api_foreground_opt_out_is_rejected(
     options.use_orchestration = False
     options.pairs = {"eurusd"}
     options.formats = {"ascii"}
-    options.timeframes = {"M1"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2022-12"
 
     with pytest.raises(ValueError, match="foreground compatibility runtime"):

@@ -25,7 +25,7 @@ def test_api_quickstart_script_options_are_copyable() -> None:
     assert extract_options.pairs == {"eurusd"}
     assert polars_options.api_return_type == "polars"
     assert polars_options.formats == {"ascii"}
-    assert polars_options.timeframes == {"1-minute-bar-quotes"}
+    assert polars_options.timeframes == {"tick-data-quotes"}
 
 
 def test_api_quickstart_script_calls_runner() -> None:
@@ -38,7 +38,7 @@ def test_api_quickstart_script_calls_runner() -> None:
 
     result = api_quickstart.load_polars_frame(fake_runner)
 
-    assert result.shape == (2, 6)
+    assert result.shape == (2, 4)
     assert captured["options"].api_return_type == "polars"
 
 

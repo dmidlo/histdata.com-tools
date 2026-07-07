@@ -1072,12 +1072,6 @@ def _is_valid_source_timestamp(value: str, timeframe: str) -> bool:
 def _source_timestamp_shape_matches(value: str, timeframe: str) -> bool:
     raw = value.strip()
     match timeframe:
-        case "M1":
-            return (
-                len(raw) == 15
-                and raw[8] == " "
-                and (raw[:8] + raw[9:]).isdigit()
-            )
         case "T":
             return (
                 len(raw) == 18

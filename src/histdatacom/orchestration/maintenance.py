@@ -191,7 +191,7 @@ class OrchestrationMaintenanceResult:
             "downloaded_artifacts_removed": self.downloaded_artifacts_removed,
             "data_directory_policy": (
                 "Orchestration maintenance is workspace-scoped and does not remove "
-                "downloaded HistData ZIP, CSV, XLSX, or cache artifacts by "
+                "downloaded HistData ZIP, CSV, or cache artifacts by "
                 "default."
             ),
         }

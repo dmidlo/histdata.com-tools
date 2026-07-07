@@ -32,7 +32,7 @@ def test_source_cleanup_dry_run_preserves_sources_and_caches(
     artifact_dir = _case_artifact_dir(data_dir)
 
     assert result.dry_run is True
-    assert result.matched_count == 4
+    assert result.matched_count == 2
     assert result.deleted_count == 0
     assert (artifact_dir / "HISTDATA_COM_ASCII_EURUSD_T202001.zip").exists()
     assert (artifact_dir / "DAT_ASCII_EURUSD_T_202001.csv").exists()
@@ -52,12 +52,12 @@ def test_source_cleanup_apply_deletes_only_transient_sources(
     artifact_dir = _case_artifact_dir(data_dir)
 
     assert result.dry_run is False
-    assert result.matched_count == 4
-    assert result.deleted_count == 4
+    assert result.matched_count == 2
+    assert result.deleted_count == 2
     assert not (artifact_dir / "HISTDATA_COM_ASCII_EURUSD_T202001.zip").exists()
     assert not (artifact_dir / "DAT_ASCII_EURUSD_T_202001.csv").exists()
-    assert not (artifact_dir / "quality.xlsx").exists()
-    assert not (artifact_dir / "notes.xls").exists()
+    assert (artifact_dir / "quality.xlsx").exists()
+    assert (artifact_dir / "notes.xls").exists()
     assert (artifact_dir / ".data").exists()
     assert (artifact_dir / "README.txt").exists()
 
@@ -72,13 +72,13 @@ def test_source_artifact_cleanliness_payload_is_publish_safe(
     encoded = json.dumps(payload, sort_keys=True)
 
     assert payload["state"] == "dirty"
-    assert payload["source_artifact_count"] == 4
+    assert payload["source_artifact_count"] == 2
     assert payload["path_limit"] == {
         "limit": 2,
-        "total_count": 4,
+        "total_count": 2,
         "included_count": 2,
-        "omitted_count": 2,
-        "truncated": True,
+        "omitted_count": 0,
+        "truncated": False,
     }
     assert all(str(path).startswith("data/") for path in payload["paths"])
     assert str(tmp_path) not in encoded
@@ -106,7 +106,7 @@ def test_cleanup_cli_dry_run_json_reports_matches(
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["dry_run"] is True
-    assert payload["matched_count"] == 4
+    assert payload["matched_count"] == 2
     assert payload["deleted_count"] == 0
     assert (
         _case_artifact_dir(data_dir) / "HISTDATA_COM_ASCII_EURUSD_T202001.zip"
@@ -131,7 +131,7 @@ def test_cache_status_reports_group_cleanup_and_missing_symbols(
 
     assert payload["status"] == "pending-cleanup"
     assert payload["summary"]["cache_count"] == 1
-    assert payload["summary"]["source_artifact_count"] == 4
+    assert payload["summary"]["source_artifact_count"] == 2
     assert payload["cleanup"]["state"] == "pending"
     assert payload["groups"][0]["group"] == "majors"
     assert payload["groups"][0]["expected_symbol_count"] == 7
@@ -265,7 +265,7 @@ def test_cleanup_status_cli_json_reports_runtime_and_cleanup(
     payload = json.loads(capsys.readouterr().out)
     assert payload["runtime"]["state"] == "stopped"
     assert payload["workflows"]["state"] == "no-jobs"
-    assert payload["summary"]["source_artifact_count"] == 4
+    assert payload["summary"]["source_artifact_count"] == 2
     assert payload["cleanup"]["preserves"] == [".data"]
     assert payload["groups"][0]["group"] == "majors"
 
@@ -295,7 +295,7 @@ def test_histdatacom_main_dispatches_cleanup_command(
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["dry_run"] is False
-    assert payload["deleted_count"] == 4
+    assert payload["deleted_count"] == 2
     artifact_dir = _case_artifact_dir(data_dir)
     assert (artifact_dir / ".data").exists()
     assert not (artifact_dir / "DAT_ASCII_EURUSD_T_202001.csv").exists()
@@ -324,7 +324,7 @@ histdatacom:
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["dry_run"] is False
-    assert payload["deleted_count"] == 4
+    assert payload["deleted_count"] == 2
     artifact_dir = _case_artifact_dir(data_dir)
     assert (artifact_dir / ".data").exists()
     assert not (artifact_dir / "HISTDATA_COM_ASCII_EURUSD_T202001.zip").exists()
@@ -369,7 +369,7 @@ histdatacom:
     assert payload["filters"]["pair_groups"] == ["majors"]
     assert payload["filters"]["timeframes"] == ["T"]
     assert payload["filters"]["formats"] == ["ASCII"]
-    assert payload["summary"]["source_artifact_count"] == 4
+    assert payload["summary"]["source_artifact_count"] == 2
 
 
 def _write_cleanup_case(tmp_path: Path) -> Path:

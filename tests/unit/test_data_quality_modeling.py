@@ -14,7 +14,6 @@ from histdatacom.data_quality import (
     run_quality_assessment,
 )
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
     CLEAN_TICK_CASE,
     write_ascii_case,
 )
@@ -32,37 +31,30 @@ def test_modeling_group_registers_readiness_rule() -> None:
     }
 
 
-def test_m1_modeling_readiness_warns_for_bid_only_and_bar_leakage(
+def test_tick_modeling_readiness_has_no_bar_execution_warnings(
     tmp_path: Path,
 ) -> None:
-    """Bid-only M1 bars need explicit modeling assumptions for backtests."""
-    report = _report_for_path(write_ascii_case(tmp_path, CLEAN_M1_CASE))
+    """Tick bid/ask data should not inherit retired M1 bar advisories."""
+    report = _report_for_path(write_ascii_case(tmp_path, CLEAN_TICK_CASE))
 
     summary = _finding(report, "MODELING_READINESS_SUMMARY")
-    assert report.status is QualityStatus.WARNING
+    assert report.status is QualityStatus.CLEAN
     assert [finding.code for finding in report.findings] == [
         "MODELING_READINESS_SUMMARY",
-        "MODELING_BID_ONLY_EXECUTION_RISK",
-        "MODELING_CURRENT_BAR_LEAKAGE_RISK",
-        "MODELING_SPREAD_COST_MISSING",
     ]
     assert summary.metadata["data_defect"] is False
     assert summary.metadata["advisory"] is True
     readiness = summary.metadata[MODELING_READINESS_METADATA_KEY]
     assert readiness["finding_kind"] == "modeling_assumption"
-    assert readiness["format_profile"]["price_basis"] == "bid_ohlc"
-    assert readiness["cost_assumptions"]["spread_cost"]["status"] == "missing"
+    assert readiness["format_profile"]["price_basis"] == "bid_ask_tick"
+    assert readiness["cost_assumptions"]["spread_cost"]["status"] == "available"
     assert readiness["target_horizon"]["status"] == "unconfigured"
-    for warning in report.findings[1:]:
-        assert warning.metadata["data_defect"] is False
-        assert warning.metadata["finding_domain"] == "modeling_readiness"
-        assert warning.metadata["finding_kind"] == "modeling_assumption"
 
 
 def test_tick_modeling_readiness_reports_spread_cost_available(
     tmp_path: Path,
 ) -> None:
-    """Tick bid/ask targets can supply spread costs without M1 warnings."""
+    """Tick bid/ask targets can supply spread costs directly."""
     report = _report_for_path(write_ascii_case(tmp_path, CLEAN_TICK_CASE))
 
     summary = _finding(report, "MODELING_READINESS_SUMMARY")
@@ -81,9 +73,9 @@ def test_tick_modeling_readiness_reports_spread_cost_available(
 def test_modeling_readiness_honors_explicit_execution_assumptions(
     tmp_path: Path,
 ) -> None:
-    """Explicit execution assumptions should suppress M1 advisory warnings."""
+    """Explicit execution assumptions should still be reflected in readiness."""
     target = _target_for_path(
-        write_ascii_case(tmp_path, CLEAN_M1_CASE),
+        write_ascii_case(tmp_path, CLEAN_TICK_CASE),
         modeling_assumptions={
             "ask_side_execution_model": True,
             "current_bar_action_timing": "after_bar_close",
@@ -118,12 +110,12 @@ def test_modeling_target_horizon_warns_when_not_larger_than_granularity(
 ) -> None:
     """Configured horizons must exceed the target granularity."""
     target = _target_for_path(
-        write_ascii_case(tmp_path, CLEAN_M1_CASE),
+        write_ascii_case(tmp_path, CLEAN_TICK_CASE),
         modeling_assumptions={
             "ask_side_execution_model": True,
             "current_bar_action_timing": "after_bar_close",
             "spread_cost_model": "fixed_session_profile",
-            "target_horizon_ms": 60_000,
+            "target_horizon_ms": 1,
         },
     )
 
@@ -141,20 +133,18 @@ def test_modeling_target_horizon_warns_when_not_larger_than_granularity(
         "MODELING_READINESS_SUMMARY",
         "MODELING_TARGET_HORIZON_FEASIBILITY_WARNING",
     ]
-    assert warning.metadata["target_horizon"]["value_ms"] == 60_000
-    assert (
-        warning.metadata["target_horizon"]["minimum_recommended_ms"] == 60_000
-    )
+    assert warning.metadata["target_horizon"]["value_ms"] == 1
+    assert warning.metadata["target_horizon"]["minimum_recommended_ms"] == 1
     assert warning.metadata["target_horizon"]["status"] == "too_short"
     assert warning.metadata["data_defect"] is False
 
 
-def test_modeling_warns_for_m1_high_low_fill_without_intrabar_model(
+def test_modeling_high_low_fill_assumption_is_inert_for_tick_base(
     tmp_path: Path,
 ) -> None:
-    """High/low fills need an intrabar path model for M1 bars."""
+    """Bar high/low fill knobs are recorded but do not warn for tick data."""
     target = _target_for_path(
-        write_ascii_case(tmp_path, CLEAN_M1_CASE),
+        write_ascii_case(tmp_path, CLEAN_TICK_CASE),
         modeling_assumptions={
             "ask_side_execution_model": True,
             "current_bar_action_timing": "after_bar_close",
@@ -168,22 +158,17 @@ def test_modeling_warns_for_m1_high_low_fill_without_intrabar_model(
         quality_rules_for_groups(("modeling",)),
     )
 
-    warning = _finding(
-        report,
-        "MODELING_HIGH_LOW_EXECUTION_REALISM_RISK",
-    )
     summary = _finding(report, "MODELING_READINESS_SUMMARY")
     execution = summary.metadata[MODELING_READINESS_METADATA_KEY][
         "execution_assumptions"
     ]
-    assert report.status is QualityStatus.WARNING
+    assert report.status is QualityStatus.CLEAN
     assert [finding.code for finding in report.findings] == [
         "MODELING_READINESS_SUMMARY",
-        "MODELING_HIGH_LOW_EXECUTION_REALISM_RISK",
     ]
     assert execution["uses_high_low_fills"] is True
     assert execution["high_low_execution_model"] is False
-    assert warning.metadata["missing_assumption"] == "high_low_execution_model"
+    assert execution["high_low_execution_risk"] is False
 
 
 def test_modeling_warns_for_required_slippage_and_rollover_costs(
@@ -191,7 +176,7 @@ def test_modeling_warns_for_required_slippage_and_rollover_costs(
 ) -> None:
     """Backtests and overnight positions need explicit cost assumptions."""
     target = _target_for_path(
-        write_ascii_case(tmp_path, CLEAN_M1_CASE),
+        write_ascii_case(tmp_path, CLEAN_TICK_CASE),
         modeling_assumptions={
             "ask_side_execution_model": True,
             "current_bar_action_timing": "after_bar_close",
@@ -225,7 +210,7 @@ def test_modeling_warns_for_forward_fill_and_cross_instrument_alignment(
 ) -> None:
     """Joined sparse features need stale-fill and timestamp alignment policy."""
     target = _target_for_path(
-        write_ascii_case(tmp_path, CLEAN_M1_CASE),
+        write_ascii_case(tmp_path, CLEAN_TICK_CASE),
         modeling_assumptions={
             "ask_side_execution_model": True,
             "current_bar_action_timing": "after_bar_close",
@@ -261,7 +246,7 @@ def test_modeling_ignores_empty_alignment_and_calendar_assumptions(
 ) -> None:
     """Empty list metadata should not create modeling-readiness warnings."""
     target = _target_for_path(
-        write_ascii_case(tmp_path, CLEAN_M1_CASE),
+        write_ascii_case(tmp_path, CLEAN_TICK_CASE),
         modeling_assumptions={
             "ask_side_execution_model": True,
             "current_bar_action_timing": "after_bar_close",
@@ -300,7 +285,7 @@ def test_modeling_warns_for_training_transform_leakage_policy(
 ) -> None:
     """Scaling and similar transforms need training-only fit policy."""
     target = _target_for_path(
-        write_ascii_case(tmp_path, CLEAN_M1_CASE),
+        write_ascii_case(tmp_path, CLEAN_TICK_CASE),
         modeling_assumptions={
             "ask_side_execution_model": True,
             "current_bar_action_timing": "after_bar_close",
@@ -330,7 +315,7 @@ def test_modeling_calendar_event_tags_require_policy_when_available(
 ) -> None:
     """Calendar-profile event tags should flow into modeling readiness."""
     target = _target_for_path(
-        write_ascii_case(tmp_path, CLEAN_M1_CASE),
+        write_ascii_case(tmp_path, CLEAN_TICK_CASE),
         modeling_assumptions={
             "ask_side_execution_model": True,
             "current_bar_action_timing": "after_bar_close",

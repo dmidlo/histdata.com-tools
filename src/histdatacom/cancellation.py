@@ -156,14 +156,14 @@ OPERATION_RESUME_POLICIES: dict[str, OperationResumePolicy] = {
         partial_artifact_disposition=PartialArtifactDisposition.REMOVE_TEMP,
         resume_mode=ResumeMode.REUSE_COMPLETE_ARTIFACT,
         cleanup_summary=(
-            "Extraction writes hidden temp CSV/XLSX files and atomically "
+            "Extraction writes hidden temp CSV files and atomically "
             "renames them; cancellation removes temp extraction files."
         ),
         resume_summary=(
             "Resume reuses complete CSV/cache artifacts or extracts again "
             "from the complete ZIP."
         ),
-        partial_artifact_patterns=("*.csv.*.tmp", "*.xlsx.*.tmp"),
+        partial_artifact_patterns=("*.csv.*.tmp",),
     ),
     "build_cache": OperationResumePolicy(
         stage="build_cache",

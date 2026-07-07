@@ -42,15 +42,14 @@ from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkItem, WorkStatus, derive_work_id
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
-ASCII_M1_URL = (
+ASCII_TICK_URL = (
     "http://www.histdata.com/download-free-forex-data/"
-    "?/ascii/1-minute-bar-quotes/eurusd/2022"
+    "?/ascii/tick-data-quotes/eurusd/2022/1"
 )
-EXPECTED_M1_DATETIMES = [1328072400000, 1328072460000, 1328072520000]
-EXPECTED_M1_LINE = (
-    "eurusd,source=histdata.com,format=ascii,timeframe=M1 "
-    "openbid=1.3066,highbid=1.3066,lowbid=1.30656,closebid=1.30656 "
-    "1328072400000"
+EXPECTED_TICK_DATETIMES = [1328072403660, 1328072403973, 1328072414990]
+EXPECTED_TICK_LINE = (
+    "eurusd,source=histdata.com,format=ascii,timeframe=T "
+    "bidquote=1.3066,askquote=1.30677 1328072403660"
 )
 
 
@@ -81,16 +80,16 @@ def _args(tmp_path: Path) -> dict[str, object]:
     }
 
 
-def _m1_frame() -> object:
-    """Return the normalized Polars M1 fixture frame."""
+def _tick_frame() -> object:
+    """Return the normalized Polars T fixture frame."""
     raw = read_ascii_file_to_polars(
-        FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
-        "M1",
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
+        "T",
     )
-    return convert_polars_datetime_to_utc_ms(raw, "M1")
+    return convert_polars_datetime_to_utc_ms(raw, "T")
 
 
-def _zip_bytes(filename: str = "DAT_ASCII_EURUSD_M1_2022.csv") -> bytes:
+def _zip_bytes(filename: str = "DAT_ASCII_EURUSD_T_202201.csv") -> bytes:
     """Return a minimal valid ZIP payload."""
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w") as archive:
@@ -105,9 +104,9 @@ def _form_html(*, token: str = "token") -> str:
       <form id="file_down">
         <input id="tk" value="{token}">
         <input id="date" value="2022">
-        <input id="datemonth" value="2022">
+        <input id="datemonth" value="202201">
         <input id="platform" value="ASCII">
-        <input id="timeframe" value="M1">
+        <input id="timeframe" value="T">
         <input id="fxpair" value="eurusd">
       </form>
     </html>
@@ -118,14 +117,14 @@ def test_validate_url_work_item_returns_updated_item_without_queue(
     tmp_path: Path,
 ) -> None:
     """URL validation should return an updated work item and manifest state."""
-    record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.URL_NEW.value)
 
     def scrape(record_: Record) -> Record:
         record_.data_tk = "token"
         record_.data_date = "2022"
         record_.data_datemonth = "2022"
         record_.data_format = "ASCII"
-        record_.data_timeframe = "M1"
+        record_.data_timeframe = "T"
         record_.data_fxpair = "eurusd"
         return record_
 
@@ -152,7 +151,7 @@ def test_validate_url_work_item_parses_form_metadata(
     tmp_path: Path,
 ) -> None:
     """URL validation should parse form metadata without record callbacks."""
-    record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.URL_NEW.value)
 
     output = validate_url_work_item(
         WorkItem.from_record(record),
@@ -222,7 +221,7 @@ def test_parse_histdata_form_metadata_reports_missing_required_fields() -> None:
                   <input id="date" value="2022">
                   <input id="datemonth" value="2022">
                   <input id="platform" value="ASCII">
-                  <input id="timeframe" value="M1">
+                  <input id="timeframe" value="T">
                 </form>
                 """,
                 encoding="gzip",
@@ -239,7 +238,7 @@ def test_validate_url_work_item_missing_data_does_not_forward(
     tmp_path: Path,
 ) -> None:
     """Missing HistData pages should become terminal explicit outputs."""
-    record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.URL_NEW.value)
 
     output = validate_url_work_item(
         WorkItem.from_record(record),
@@ -266,7 +265,7 @@ def test_validate_url_work_item_missing_token_is_no_data(
     tmp_path: Path,
 ) -> None:
     """Missing form tokens should be an explicit no-data result."""
-    record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.URL_NEW.value)
 
     output = validate_url_work_item(
         WorkItem.from_record(record),
@@ -290,7 +289,7 @@ def test_validate_url_work_item_malformed_headers_fail(
     tmp_path: Path,
 ) -> None:
     """Malformed fetch headers should be a structured failed result."""
-    record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.URL_NEW.value)
 
     def get(url: str, *, timeout: int) -> _FakeResponse:
         return _FakeResponse(headers={}, content=_form_html().encode())
@@ -317,7 +316,7 @@ def test_validate_url_work_item_network_failure_is_retried(
     tmp_path: Path,
 ) -> None:
     """Network failures should be retryable validation outcomes."""
-    record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.URL_NEW.value)
 
     def get(url: str, *, timeout: int) -> _FakeResponse:
         raise requests.Timeout("connect timeout")
@@ -344,16 +343,16 @@ def test_download_archive_work_item_returns_zip_artifact(
     tmp_path: Path,
 ) -> None:
     """Archive download should be callable with an injected downloader."""
-    data_dir = tmp_path / "ASCII" / "M1" / "eurusd" / "2022"
+    data_dir = tmp_path / "ASCII" / "T" / "eurusd" / "2022"
     data_dir.mkdir(parents=True)
     record = Record(
-        url=ASCII_M1_URL,
+        url=ASCII_TICK_URL,
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{data_dir}{os.sep}",
     )
 
     def download(record_: Record) -> None:
-        record_.zip_filename = "DAT_ASCII_EURUSD_M1_2022.zip"
+        record_.zip_filename = "DAT_ASCII_EURUSD_T_2022.zip"
         Path(record_.data_dir, record_.zip_filename).write_bytes(b"zip-bytes")
 
     output = download_archive_work_item(
@@ -364,7 +363,7 @@ def test_download_archive_work_item_returns_zip_artifact(
 
     assert output.forward
     assert output.work_item.status is WorkStatus.CSV_ZIP
-    assert output.work_item.zip_filename == "DAT_ASCII_EURUSD_M1_2022.zip"
+    assert output.work_item.zip_filename == "DAT_ASCII_EURUSD_T_2022.zip"
     assert output.result.artifacts[0].kind == "zip"
     assert (
         output.result.artifacts[0].sha256
@@ -378,26 +377,26 @@ def test_download_archive_work_item_atomically_writes_valid_zip(
     tmp_path: Path,
 ) -> None:
     """Default archive download should write validated ZIP metadata."""
-    data_dir = tmp_path / "ASCII" / "M1" / "eurusd" / "2022"
+    data_dir = tmp_path / "ASCII" / "T" / "eurusd" / "2022"
     payload = _zip_bytes()
     record = Record(
-        url=ASCII_M1_URL,
+        url=ASCII_TICK_URL,
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{data_dir}{os.sep}",
         data_tk="token",
         data_date="2022",
         data_datemonth="2022",
         data_format="ASCII",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
     )
 
     def post(url: str, *, data, headers, timeout):  # noqa:ANN001
-        assert headers["Referer"] == ASCII_M1_URL
+        assert headers["Referer"] == ASCII_TICK_URL
         return _FakeResponse(
             headers={
                 "Content-Disposition": (
-                    'attachment; filename="DAT_ASCII_EURUSD_M1_2022.zip"'
+                    'attachment; filename="DAT_ASCII_EURUSD_T_2022.zip"'
                 ),
             },
             content=payload,
@@ -409,7 +408,7 @@ def test_download_archive_work_item_atomically_writes_valid_zip(
         post_archive=post,
     )
 
-    zip_path = data_dir / "DAT_ASCII_EURUSD_M1_2022.zip"
+    zip_path = data_dir / "DAT_ASCII_EURUSD_T_2022.zip"
     assert zip_path.read_bytes() == payload
     assert not list(data_dir.glob("*.tmp"))
     assert output.forward
@@ -427,12 +426,12 @@ def test_download_archive_work_item_reuses_existing_zip(
     tmp_path: Path,
 ) -> None:
     """Retrying a download should reuse an existing local ZIP."""
-    data_dir = tmp_path / "ASCII" / "M1" / "eurusd" / "2022"
+    data_dir = tmp_path / "ASCII" / "T" / "eurusd" / "2022"
     data_dir.mkdir(parents=True)
-    zip_path = data_dir / "DAT_ASCII_EURUSD_M1_2022.zip"
+    zip_path = data_dir / "DAT_ASCII_EURUSD_T_2022.zip"
     zip_path.write_bytes(_zip_bytes())
     record = Record(
-        url=ASCII_M1_URL,
+        url=ASCII_TICK_URL,
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{data_dir}{os.sep}",
         zip_filename=zip_path.name,
@@ -456,12 +455,12 @@ def test_download_archive_work_item_reuses_existing_csv(
     tmp_path: Path,
 ) -> None:
     """Existing CSV artifacts should be explicit skip/reuse decisions."""
-    data_dir = tmp_path / "ASCII" / "M1" / "eurusd" / "2022"
+    data_dir = tmp_path / "ASCII" / "T" / "eurusd" / "2022"
     data_dir.mkdir(parents=True)
-    csv_path = data_dir / "DAT_ASCII_EURUSD_M1_2022.csv"
+    csv_path = data_dir / "DAT_ASCII_EURUSD_T_2022.csv"
     csv_path.write_text("rows", encoding="utf-8")
     record = Record(
-        url=ASCII_M1_URL,
+        url=ASCII_TICK_URL,
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{data_dir}{os.sep}",
         csv_filename=csv_path.name,
@@ -482,12 +481,12 @@ def test_download_archive_work_item_reuses_existing_cache(
     tmp_path: Path,
 ) -> None:
     """Existing cache artifacts should be explicit skip/reuse decisions."""
-    data_dir = tmp_path / "ASCII" / "M1" / "eurusd" / "2022"
+    data_dir = tmp_path / "ASCII" / "T" / "eurusd" / "2022"
     data_dir.mkdir(parents=True)
     cache_path = data_dir / CACHE_FILENAME
     cache_path.write_bytes(b"cache")
     record = Record(
-        url=ASCII_M1_URL,
+        url=ASCII_TICK_URL,
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{data_dir}{os.sep}",
         cache_filename=cache_path.name,
@@ -509,14 +508,14 @@ def test_download_archive_work_item_network_failure_is_retried(
 ) -> None:
     """HTTP/network errors should be retryable structured failures."""
     record = Record(
-        url=ASCII_M1_URL,
+        url=ASCII_TICK_URL,
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{tmp_path}{os.sep}",
         data_tk="token",
         data_date="2022",
         data_datemonth="2022",
         data_format="ASCII",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
     )
 
@@ -541,14 +540,14 @@ def test_download_archive_work_item_invalid_content_disposition_is_retried(
 ) -> None:
     """Missing archive filenames should be distinguished from bad ZIPs."""
     record = Record(
-        url=ASCII_M1_URL,
+        url=ASCII_TICK_URL,
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{tmp_path}{os.sep}",
         data_tk="token",
         data_date="2022",
         data_datemonth="2022",
         data_format="ASCII",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
     )
 
@@ -571,14 +570,14 @@ def test_download_archive_work_item_invalid_zip_payload_is_retried(
 ) -> None:
     """Invalid ZIP payloads should not leave committed files behind."""
     record = Record(
-        url=ASCII_M1_URL,
+        url=ASCII_TICK_URL,
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{tmp_path}{os.sep}",
         data_tk="token",
         data_date="2022",
         data_datemonth="2022",
         data_format="ASCII",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
     )
 
@@ -607,14 +606,14 @@ def test_download_archive_work_item_filesystem_failure_is_failed(
     data_dir = tmp_path / "not-a-directory"
     data_dir.write_text("blocked", encoding="utf-8")
     record = Record(
-        url=ASCII_M1_URL,
+        url=ASCII_TICK_URL,
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{data_dir}{os.sep}",
         data_tk="token",
         data_date="2022",
         data_datemonth="2022",
         data_format="ASCII",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
     )
 
@@ -639,7 +638,7 @@ def test_extract_csv_work_item_extracts_data_member(tmp_path: Path) -> None:
     """CSV extraction should not require queue objects."""
     archive_path = tmp_path / "archive.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:
-        archive.writestr("DAT_ASCII_EURUSD_M1_2022.csv", b"rows")
+        archive.writestr("DAT_ASCII_EURUSD_T_2022.csv", b"rows")
     record = Record(
         data_dir=f"{tmp_path}{os.sep}",
         zip_filename=archive_path.name,
@@ -652,7 +651,7 @@ def test_extract_csv_work_item_extracts_data_member(tmp_path: Path) -> None:
     )
 
     assert output.work_item.status is WorkStatus.CSV_FILE
-    assert output.work_item.csv_filename == "DAT_ASCII_EURUSD_M1_2022.csv"
+    assert output.work_item.csv_filename == "DAT_ASCII_EURUSD_T_2022.csv"
     assert (tmp_path / output.work_item.csv_filename).read_bytes() == b"rows"
     assert not archive_path.exists()
     assert output.result.status is WorkStatus.CSV_FILE
@@ -672,7 +671,7 @@ def test_extract_csv_work_item_preserves_zip_when_configured(
     """zip_persist should keep the source archive after extraction."""
     archive_path = tmp_path / "archive.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:
-        archive.writestr("DAT_ASCII_EURUSD_M1_2022.csv", b"rows")
+        archive.writestr("DAT_ASCII_EURUSD_T_2022.csv", b"rows")
     record = Record(
         data_dir=f"{tmp_path}{os.sep}",
         zip_filename=archive_path.name,
@@ -696,7 +695,7 @@ def test_extract_csv_work_item_reuses_existing_csv(
     """Extraction retries should reuse an already extracted CSV."""
     archive_path = tmp_path / "archive.zip"
     archive_path.write_bytes(b"already consumed")
-    csv_path = tmp_path / "DAT_ASCII_EURUSD_M1_2022.csv"
+    csv_path = tmp_path / "DAT_ASCII_EURUSD_T_2022.csv"
     csv_path.write_bytes(b"rows")
     record = Record(
         data_dir=f"{tmp_path}{os.sep}",
@@ -770,14 +769,14 @@ def test_build_cache_work_item_writes_cache_from_csv(
     tmp_path: Path,
 ) -> None:
     """Cache build should return a cache-ready item and artifact metadata."""
-    filename = "DAT_ASCII_EURUSD_M1_201202.csv"
+    filename = "DAT_ASCII_EURUSD_T_201202.csv"
     shutil.copyfile(FIXTURES / filename, tmp_path / filename)
     record = Record(
         data_dir=f"{tmp_path}{os.sep}",
         csv_filename=filename,
         zip_filename="missing.zip",
         data_format="ascii",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
         status=WorkStatus.CSV_FILE.value,
     )
@@ -790,23 +789,25 @@ def test_build_cache_work_item_writes_cache_from_csv(
     assert output.work_item.status is WorkStatus.CACHE_READY
     assert output.work_item.cache_filename == CACHE_FILENAME
     assert output.work_item.cache_line_count == "3"
-    assert output.work_item.cache_start == str(EXPECTED_M1_DATETIMES[0])
-    assert output.work_item.cache_end == str(EXPECTED_M1_DATETIMES[-1])
+    assert output.work_item.cache_start == str(EXPECTED_TICK_DATETIMES[0])
+    assert output.work_item.cache_end == str(EXPECTED_TICK_DATETIMES[-1])
     assert output.result.status is WorkStatus.CACHE_READY
     assert output.result.metrics["cache_created"] is True
     assert output.result.metrics["cache_line_count"] == 3
-    assert output.result.metrics["cache_start"] == str(EXPECTED_M1_DATETIMES[0])
-    assert output.result.metrics["cache_end"] == str(EXPECTED_M1_DATETIMES[-1])
+    assert output.result.metrics["cache_start"] == str(
+        EXPECTED_TICK_DATETIMES[0]
+    )
+    assert output.result.metrics["cache_end"] == str(
+        EXPECTED_TICK_DATETIMES[-1]
+    )
     assert output.result.metrics["line_count"] == 3
-    assert output.result.metrics["start"] == str(EXPECTED_M1_DATETIMES[0])
-    assert output.result.metrics["end"] == str(EXPECTED_M1_DATETIMES[-1])
-    assert output.result.metrics["timeframe"] == "M1"
+    assert output.result.metrics["start"] == str(EXPECTED_TICK_DATETIMES[0])
+    assert output.result.metrics["end"] == str(EXPECTED_TICK_DATETIMES[-1])
+    assert output.result.metrics["timeframe"] == "T"
     assert output.result.metrics["schema"] == {
         "datetime": "Int64",
-        "open": "Float64",
-        "high": "Float64",
-        "low": "Float64",
-        "close": "Float64",
+        "bid": "Float64",
+        "ask": "Float64",
         "vol": "Int32",
     }
     assert output.result.artifacts[0].path == str(tmp_path / CACHE_FILENAME)
@@ -817,11 +818,11 @@ def test_build_cache_work_item_reuses_existing_cache(
     tmp_path: Path,
 ) -> None:
     """Existing Polars caches should be validated and summarized."""
-    write_polars_cache(_m1_frame(), tmp_path / CACHE_FILENAME)
+    write_polars_cache(_tick_frame(), tmp_path / CACHE_FILENAME)
     record = Record(
         data_dir=f"{tmp_path}{os.sep}",
         data_format="ascii",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
         status=WorkStatus.CSV_FILE.value,
     )
@@ -850,7 +851,7 @@ def test_build_cache_work_item_invalid_legacy_cache_is_failed(
         data_dir=f"{tmp_path}{os.sep}",
         cache_filename=CACHE_FILENAME,
         data_format="ascii",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
         status=WorkStatus.CACHE_READY.value,
     )
@@ -877,7 +878,7 @@ def test_build_cache_work_item_missing_source_is_failed(
         csv_filename="missing.csv",
         zip_filename="missing.zip",
         data_format="ascii",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
         status=WorkStatus.CSV_FILE.value,
     )
@@ -904,7 +905,7 @@ def test_build_cache_work_item_invalid_source_is_failed(
         csv_filename=filename,
         zip_filename="missing.zip",
         data_format="ascii",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
         status=WorkStatus.CSV_FILE.value,
     )
@@ -923,7 +924,7 @@ def test_build_cache_work_item_invalid_source_is_failed(
 
 def test_merge_cache_work_items_uses_explicit_inputs(tmp_path: Path) -> None:
     """Cache merge should not read queue globals."""
-    frame = _m1_frame()
+    frame = _tick_frame()
     first_dir = tmp_path / "first"
     second_dir = tmp_path / "second"
     first_dir.mkdir()
@@ -935,10 +936,10 @@ def test_merge_cache_work_items_uses_explicit_inputs(tmp_path: Path) -> None:
             data_dir=f"{first_dir}{os.sep}",
             cache_filename=CACHE_FILENAME,
             cache_line_count="1",
-            cache_start=str(EXPECTED_M1_DATETIMES[0]),
-            cache_end=str(EXPECTED_M1_DATETIMES[0]),
+            cache_start=str(EXPECTED_TICK_DATETIMES[0]),
+            cache_end=str(EXPECTED_TICK_DATETIMES[0]),
             data_fxpair="eurusd",
-            data_timeframe="M1",
+            data_timeframe="T",
         )
     )
     second = WorkItem.from_record(
@@ -946,10 +947,10 @@ def test_merge_cache_work_items_uses_explicit_inputs(tmp_path: Path) -> None:
             data_dir=f"{second_dir}{os.sep}",
             cache_filename=CACHE_FILENAME,
             cache_line_count="2",
-            cache_start=str(EXPECTED_M1_DATETIMES[1]),
-            cache_end=str(EXPECTED_M1_DATETIMES[2]),
+            cache_start=str(EXPECTED_TICK_DATETIMES[1]),
+            cache_end=str(EXPECTED_TICK_DATETIMES[2]),
             data_fxpair="eurusd",
-            data_timeframe="M1",
+            data_timeframe="T",
         )
     )
 
@@ -960,11 +961,11 @@ def test_merge_cache_work_items_uses_explicit_inputs(tmp_path: Path) -> None:
     assert output.result.metrics["set_count"] == 1
     assert output.result.metrics["materialized"] is True
     assert output.merge_sets[0].line_count == 3
-    assert output.merge_sets[0].start == str(EXPECTED_M1_DATETIMES[0])
-    assert output.merge_sets[0].end == str(EXPECTED_M1_DATETIMES[2])
+    assert output.merge_sets[0].start == str(EXPECTED_TICK_DATETIMES[0])
+    assert output.merge_sets[0].end == str(EXPECTED_TICK_DATETIMES[2])
     assert len(output.result.artifacts) == 2
     assert output.data.select("datetime").to_series().to_list() == (
-        EXPECTED_M1_DATETIMES
+        EXPECTED_TICK_DATETIMES
     )
 
 
@@ -972,7 +973,7 @@ def test_merge_cache_work_items_can_skip_materialization(
     tmp_path: Path,
 ) -> None:
     """Workflow merge summaries should not include dataframe payloads."""
-    frame = _m1_frame()
+    frame = _tick_frame()
     first_dir = tmp_path / "first"
     second_dir = tmp_path / "second"
     first_dir.mkdir()
@@ -984,10 +985,10 @@ def test_merge_cache_work_items_can_skip_materialization(
             data_dir=f"{first_dir}{os.sep}",
             cache_filename=CACHE_FILENAME,
             cache_line_count="1",
-            cache_start=str(EXPECTED_M1_DATETIMES[0]),
-            cache_end=str(EXPECTED_M1_DATETIMES[0]),
+            cache_start=str(EXPECTED_TICK_DATETIMES[0]),
+            cache_end=str(EXPECTED_TICK_DATETIMES[0]),
             data_fxpair="eurusd",
-            data_timeframe="M1",
+            data_timeframe="T",
         )
     )
     second = WorkItem.from_record(
@@ -995,10 +996,10 @@ def test_merge_cache_work_items_can_skip_materialization(
             data_dir=f"{second_dir}{os.sep}",
             cache_filename=CACHE_FILENAME,
             cache_line_count="2",
-            cache_start=str(EXPECTED_M1_DATETIMES[1]),
-            cache_end=str(EXPECTED_M1_DATETIMES[2]),
+            cache_start=str(EXPECTED_TICK_DATETIMES[1]),
+            cache_end=str(EXPECTED_TICK_DATETIMES[2]),
             data_fxpair="eurusd",
-            data_timeframe="M1",
+            data_timeframe="T",
         )
     )
 
@@ -1020,12 +1021,12 @@ def test_import_to_influx_work_item_emits_batches_without_writer(
     tmp_path: Path,
 ) -> None:
     """Influx import should expose line batches without a live client."""
-    write_polars_cache(_m1_frame(), tmp_path / CACHE_FILENAME)
+    write_polars_cache(_tick_frame(), tmp_path / CACHE_FILENAME)
     record = Record(
         data_dir=f"{tmp_path}{os.sep}",
         cache_filename=CACHE_FILENAME,
         data_format="ascii",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
         status=WorkStatus.CACHE_READY.value,
     )
@@ -1041,57 +1042,57 @@ def test_import_to_influx_work_item_emits_batches_without_writer(
     assert output.result.status is WorkStatus.INFLUX_UPLOAD
     assert output.result.metrics == {"batch_count": 2, "line_count": 3}
     assert [len(batch) for batch in emitted] == [2, 1]
-    assert emitted[0][0] == EXPECTED_M1_LINE
+    assert emitted[0][0] == EXPECTED_TICK_LINE
 
 
-def test_dataset_plan_stage_emits_stable_historical_m1_work_item(
+def test_dataset_plan_stage_emits_stable_historical_tick_work_items(
     tmp_path: Path,
 ) -> None:
-    """Historical M1 ranges should plan yearly HistData archive units."""
+    """Historical T ranges should plan monthly HistData archive units."""
     output = dataset_plan_stage(
         start_yearmonth="202201",
         end_yearmonth="202203",
         formats=("ascii",),
         pairs=("eurusd",),
-        timeframes=("M1",),
+        timeframes=("T",),
         default_download_dir=f"{tmp_path}{os.sep}",
         current_yearmonth="202606",
     )
 
     assert output.result.status is WorkStatus.COMPLETED
-    assert output.result.metrics["work_item_count"] == 1
-    assert len(output.work_items) == 1
-    [item] = output.work_items
+    assert output.result.metrics["work_item_count"] == 3
+    assert len(output.work_items) == 3
+    item = output.work_items[0]
     assert item.work_id == derive_work_id(
         "dataset_plan",
         "ascii",
-        "M1",
+        "T",
         "eurusd",
         "2022",
-        "",
+        "1",
     )
     assert item.status is WorkStatus.URL_NEW
     assert item.url == (
         "http://www.histdata.com/download-free-forex-data/"
-        "?/ascii/1-minute-bar-quotes/eurusd/2022"
+        "?/ascii/tick-data-quotes/eurusd/2022/1"
     )
-    assert item.data_datemonth == "2022"
+    assert item.data_datemonth == "202201"
     assert (
         item.data_dir
-        == f"{tmp_path}{os.sep}ASCII{os.sep}M1{os.sep}eurusd{os.sep}2022{os.sep}"
+        == f"{tmp_path}{os.sep}ASCII{os.sep}T{os.sep}eurusd{os.sep}2022{os.sep}1{os.sep}"
     )
 
 
-def test_dataset_plan_stage_preserves_current_year_m1_monthly_edge(
+def test_dataset_plan_stage_preserves_current_year_tick_monthly_edge(
     tmp_path: Path,
 ) -> None:
-    """Current-year M1 data should plan monthly URLs like legacy code."""
+    """Current-year T data should plan monthly URLs like legacy code."""
     output = dataset_plan_stage(
         start_yearmonth="202401",
         end_yearmonth="202403",
         formats=("ascii",),
         pairs=("eurusd",),
-        timeframes=("M1",),
+        timeframes=("T",),
         default_download_dir=f"{tmp_path}{os.sep}",
         current_yearmonth="202403",
     )
@@ -1207,7 +1208,7 @@ def test_dataset_plan_stage_is_deterministic_for_sets_and_generators() -> None:
         end_yearmonth="202201",
         formats={"ascii"},
         pairs={"gbpusd", "eurusd"},
-        timeframes={"T", "M1"},
+        timeframes={"T"},
         current_yearmonth="202606",
     )
     second = dataset_plan_stage(
@@ -1215,7 +1216,7 @@ def test_dataset_plan_stage_is_deterministic_for_sets_and_generators() -> None:
         end_yearmonth="202201",
         formats=(item for item in ("ascii",)),
         pairs=(item for item in ("eurusd", "gbpusd")),
-        timeframes=(item for item in ("M1", "T")),
+        timeframes=(item for item in ("T",)),
         current_yearmonth="202606",
     )
 
@@ -1227,27 +1228,18 @@ def test_dataset_plan_stage_is_deterministic_for_sets_and_generators() -> None:
     ]
 
 
-def test_dataset_plan_stage_cache_only_keeps_ascii_cache_dimensions() -> None:
-    """Cache-only planning should exclude non-cacheable formats upfront."""
-    output = dataset_plan_stage(
-        start_yearmonth="202201",
-        end_yearmonth="202201",
-        formats={"ascii", "metatrader"},
-        pairs={"eurusd"},
-        timeframes={"M1", "T"},
-        current_yearmonth="202606",
-        cache_only=True,
-    )
-
-    assert {
-        (item.data_format, item.data_timeframe) for item in output.work_items
-    } == {
-        ("ASCII", "M1"),
-        ("ASCII", "T"),
-    }
-    assert output.result.metrics["formats"] == ["ascii"]
-    assert output.result.metrics["timeframes"] == ["M1", "T"]
-    assert output.result.metrics["cache_only"] is True
+def test_dataset_plan_stage_rejects_retired_formats() -> None:
+    """Private planning should reject formats outside the enum surface."""
+    with pytest.raises(ValueError, match="metatrader"):
+        dataset_plan_stage(
+            start_yearmonth="202201",
+            end_yearmonth="202201",
+            formats={"ascii", "metatrader"},
+            pairs={"eurusd"},
+            timeframes={"T"},
+            current_yearmonth="202606",
+            cache_only=True,
+        )
 
 
 def test_repository_refresh_stage_writes_artifact_and_available_data(

@@ -20,9 +20,8 @@ from histdatacom.data_quality import (
     quality_run_rules_for_groups,
     run_quality_assessment,
 )
-from histdatacom.histdata_ascii import M1, TICK
+from histdatacom.histdata_ascii import TICK
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
     CLEAN_TICK_CASE,
     HistDataAsciiCase,
     write_ascii_case,
@@ -49,8 +48,8 @@ def test_domain_group_registers_symbol_metadata_rule() -> None:
 def test_domain_symbol_metadata_reports_eurusd_quote_convention(
     tmp_path: Path,
 ) -> None:
-    """EURUSD should report FX base/quote and bid-only M1 assumptions."""
-    report = _report_for_path(write_ascii_case(tmp_path, CLEAN_M1_CASE))
+    """EURUSD should report FX base/quote and tick quote assumptions."""
+    report = _report_for_path(write_ascii_case(tmp_path, CLEAN_TICK_CASE))
 
     summary = _finding(report, "DOMAIN_SYMBOL_METADATA_SUMMARY")
     symbol = summary.metadata["symbol_metadata"]
@@ -64,13 +63,12 @@ def test_domain_symbol_metadata_reports_eurusd_quote_convention(
     assert symbol["pip_size"] == "0.0001"
     assert symbol["tick_size"] == "0.000001"
     assert symbol["quote_side"] == "bid"
-    assert symbol["m1_bid_only"] is True
     assert "EUR_USD" in symbol["aliases"]
     assert quote["pair_direction"] == "base_quote"
     assert quote["price_unit"] == "USD per EUR"
-    assert quote["m1_bid_only"] is True
-    assert assumptions["m1_bid_ohlc"] is True
-    assert assumptions["active_quote_side"] == "bid"
+    assert quote["tick_quote_sides"] == ["bid", "ask"]
+    assert assumptions["tick_bid_ask"] is True
+    assert assumptions["active_quote_side"] == "bid/ask"
 
 
 def test_domain_symbol_metadata_reports_jpy_pip_size(
@@ -80,10 +78,10 @@ def test_domain_symbol_metadata_reports_jpy_pip_size(
     path = write_ascii_case(
         tmp_path,
         HistDataAsciiCase(
-            name="m1_usdjpy_domain",
-            timeframe=M1,
-            filename="DAT_ASCII_USDJPY_M1_201202.csv",
-            rows=("20120201 000000;76.123;76.124;76.120;76.121;0",),
+            name="tick_usdjpy_domain",
+            timeframe=TICK,
+            filename="DAT_ASCII_USDJPY_T_201202.csv",
+            rows=("20120201 000000000,76.123,76.124,0",),
         ),
     )
 
@@ -123,19 +121,19 @@ def test_domain_symbol_metadata_reports_known_metals_and_indexes(
     metal_path = write_ascii_case(
         tmp_path,
         HistDataAsciiCase(
-            name="m1_xauusd_domain",
-            timeframe=M1,
-            filename="DAT_ASCII_XAUUSD_M1_201202.csv",
-            rows=("20120201 000000;1730.120;1730.125;1730.100;1730.110;0",),
+            name="tick_xauusd_domain",
+            timeframe=TICK,
+            filename="DAT_ASCII_XAUUSD_T_201202.csv",
+            rows=("20120201 000000000,1730.120,1730.125,0",),
         ),
     )
     index_path = write_ascii_case(
         tmp_path,
         HistDataAsciiCase(
-            name="m1_spxusd_domain",
-            timeframe=M1,
-            filename="DAT_ASCII_SPXUSD_M1_201202.csv",
-            rows=("20120201 000000;4500.100;4500.200;4499.900;4500.000;0",),
+            name="tick_spxusd_domain",
+            timeframe=TICK,
+            filename="DAT_ASCII_SPXUSD_T_201202.csv",
+            rows=("20120201 000000000,4500.100,4500.200,0",),
         ),
     )
 
@@ -162,16 +160,16 @@ def test_domain_symbol_metadata_supports_enum_value_aliases(
     tmp_path: Path,
 ) -> None:
     """Pairs enum values such as EUR_USD should normalize to EURUSD."""
-    path = tmp_path / "DAT_ASCII_EUR_USD_M1_201202.csv"
+    path = tmp_path / "DAT_ASCII_EUR_USD_T_201202.csv"
     path.write_text(
-        "20120201 000000;1.306600;1.306610;1.306590;1.306600;0\n",
+        "20120201 000000000,1.306600,1.306610,0\n",
         encoding="utf-8",
     )
     target = QualityTarget(
         path=str(path.resolve()),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe=M1,
+        timeframe=TICK,
         symbol="EUR_USD",
         period="201202",
         metadata={"symbol": "EUR_USD"},
@@ -199,10 +197,10 @@ def test_domain_symbol_metadata_warns_for_unknown_symbols(
     path = write_ascii_case(
         tmp_path,
         HistDataAsciiCase(
-            name="m1_unknown_domain",
-            timeframe=M1,
-            filename="DAT_ASCII_FOOBAR_M1_201202.csv",
-            rows=("20120201 000000;1.306600;1.306610;1.306590;1.306600;0",),
+            name="tick_unknown_domain",
+            timeframe=TICK,
+            filename="DAT_ASCII_FOOBAR_T_201202.csv",
+            rows=("20120201 000000000,1.306600,1.306610,0",),
         ),
     )
 
@@ -221,17 +219,17 @@ def test_cross_instrument_run_rule_compares_triangular_fx_sets(
     tmp_path: Path,
 ) -> None:
     """EURUSD / GBPUSD should be compared against direct EURGBP."""
-    _write_m1_prices(
+    _write_tick_prices(
         tmp_path,
         "EURUSD",
         ("1.200000", "1.210000", "1.220000"),
     )
-    _write_m1_prices(
+    _write_tick_prices(
         tmp_path,
         "GBPUSD",
         ("1.500000", "1.512500", "1.525000"),
     )
-    _write_m1_prices(
+    _write_tick_prices(
         tmp_path,
         "EURGBP",
         ("0.810000", "0.900000", "0.800000"),
@@ -261,25 +259,25 @@ def test_cross_instrument_run_rule_preserves_issue_242_data_defect(
     tmp_path: Path,
 ) -> None:
     """The reviewed AUDCAD 2008 triangle defect should remain a hard error."""
-    _write_single_m1_close(
+    _write_single_tick_mid(
         tmp_path,
         symbol="AUDCHF",
-        period="2008",
-        timestamp="20080601 170200",
+        period="200806",
+        timestamp="20080601 170200000",
         close="0.994400",
     )
-    _write_single_m1_close(
+    _write_single_tick_mid(
         tmp_path,
         symbol="CADCHF",
-        period="2008",
-        timestamp="20080601 170200",
+        period="200806",
+        timestamp="20080601 170200000",
         close="1.046900",
     )
-    _write_single_m1_close(
+    _write_single_tick_mid(
         tmp_path,
         symbol="AUDCAD",
-        period="2008",
-        timestamp="20080601 170200",
+        period="200806",
+        timestamp="20080601 170200000",
         close="1.041700",
     )
 
@@ -292,8 +290,8 @@ def test_cross_instrument_run_rule_preserves_issue_242_data_defect(
     assert sample["direct_symbol"] == "AUDCAD"
     assert sample["numerator_symbol"] == "AUDCHF"
     assert sample["denominator_symbol"] == "CADCHF"
-    assert sample["timeframe"] == M1
-    assert sample["period"] == "2008"
+    assert sample["timeframe"] == TICK
+    assert sample["period"] == "200806"
     assert sample["timestamp_utc_ms"] == 1212357720000
     assert sample["direct_price"] == 1.0417
     assert sample["implied_price"] == pytest.approx(0.9498519438341771)
@@ -304,12 +302,12 @@ def test_cross_instrument_run_rule_warns_for_stale_join_risk(
     tmp_path: Path,
 ) -> None:
     """Sparse joins should flag forward-filled stale instrument values."""
-    _write_m1_prices(
+    _write_tick_prices(
         tmp_path,
         "EURUSD",
         ("1.200000", "1.201000", "1.202000", "1.203000"),
     )
-    _write_m1_prices(tmp_path, "GBPUSD", ("1.500000",))
+    _write_tick_prices(tmp_path, "GBPUSD", ("1.500000",))
 
     report = _domain_run_report_for_paths((tmp_path,))
 
@@ -332,7 +330,7 @@ def test_cross_instrument_run_rule_reports_unavailable_symbol_sets(
     tmp_path: Path,
 ) -> None:
     """Single-instrument runs should report unavailable cross checks as info."""
-    _write_m1_prices(tmp_path, "EURUSD", ("1.200000", "1.201000"))
+    _write_tick_prices(tmp_path, "EURUSD", ("1.200000", "1.201000"))
 
     report = _domain_run_report_for_paths((tmp_path,))
 
@@ -362,27 +360,27 @@ def _domain_run_report_for_paths(paths: tuple[Path, ...]):
     )
 
 
-def _write_m1_prices(
+def _write_tick_prices(
     directory: Path,
     symbol: str,
     closes: tuple[str, ...],
 ) -> Path:
     rows = tuple(
-        f"20120201 000{index}00;{close};{close};{close};{close};0"
+        f"20120201 00000{index}000,{close},{close},0"
         for index, close in enumerate(closes)
     )
     return write_ascii_case(
         directory,
         HistDataAsciiCase(
-            name=f"m1_{symbol.lower()}",
-            timeframe=M1,
-            filename=f"DAT_ASCII_{symbol}_M1_201202.csv",
+            name=f"tick_{symbol.lower()}",
+            timeframe=TICK,
+            filename=f"DAT_ASCII_{symbol}_T_201202.csv",
             rows=rows,
         ),
     )
 
 
-def _write_single_m1_close(
+def _write_single_tick_mid(
     directory: Path,
     *,
     symbol: str,
@@ -393,10 +391,10 @@ def _write_single_m1_close(
     return write_ascii_case(
         directory,
         HistDataAsciiCase(
-            name=f"m1_{symbol.lower()}_{period}",
-            timeframe=M1,
-            filename=f"DAT_ASCII_{symbol}_M1_{period}.csv",
-            rows=(f"{timestamp};{close};{close};{close};{close};0",),
+            name=f"tick_{symbol.lower()}_{period}",
+            timeframe=TICK,
+            filename=f"DAT_ASCII_{symbol}_T_{period}.csv",
+            rows=(f"{timestamp},{close},{close},0",),
         ),
     )
 

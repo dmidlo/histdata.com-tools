@@ -6,8 +6,8 @@ engine for durable planning, downloads, extraction, cache builds, imports, job
 telemetry, and live Rich progress, while normal PyPI artifacts stay lean by
 provisioning the pinned Temporal executable through a verified first-run cache.
 
-Data-quality checks cover ZIP/file inventory, CSV/XLSX ingestion, timestamp
-continuity, OHLC bars, tick and spread behavior, symbol/domain calendars,
+Data-quality checks cover ASCII tick ZIP/file inventory, CSV ingestion,
+timestamp continuity, tick and spread behavior, symbol/domain calendars,
 modeling readiness, and orchestration provenance with JSON reports and
 CI-friendly exit policies.
 
@@ -154,11 +154,9 @@ Config:
                         groups: majors, minors, crosses, exotics, major-
                         triangles, metals, commodities, indices
   -f, --formats FORMAT [FORMAT ...]
-                        space separated formats. -f metatrader ascii
-                        ninjatrader metastock
+                        space separated formats. -f ascii
   -t, --timeframes TIMEFRAME [TIMEFRAME ...]
                         space separated Timeframes. -t tick-data-quotes
-                        1-minute-bar-quotes
   -s, --start_yearmonth START_YEARMONTH
                         set a start year and month for data. e.g. -s 2000-04
                         or -s 2015-00
@@ -219,12 +217,12 @@ Data quality:
                         caches before running a cache-scale quality battery
   --quality-target, --quality-path PATH [PATH ...]
                         local file or directory to assess; supports
-                        directories, HistData ZIP archives, CSV files, XLSX
-                        payloads, and .data cache files
+                        directories, HistData ZIP archives, CSV files, and
+                        .data cache files
   --quality-checks GROUP [GROUP ...]
                         quality check groups to run; defaults to all.
-                        Supported: all, inventory, ingestion, time, bars,
-                        ticks, domain, modeling, provenance, fingerprint
+                        Supported: all, inventory, ingestion, time, ticks,
+                        domain, modeling, provenance, fingerprint
   --quality-report PATH
                         write the full machine-readable JSON quality report to
                         PATH
@@ -365,7 +363,7 @@ python scripts/closure_readiness.py \
 
 The helper checks branch/upstream alignment, dirty and untracked files, linked
 GitHub issue state, lingering pytest/pre-commit/Temporal/histdatacom tool
-processes before and after gates, transient ZIP/CSV/XLS/XLSX source artifacts
+processes before and after gates, transient ZIP/CSV source artifacts
 under `data/`, README help synchronization, `git diff --check`, main help smoke
 output, pytest, and pre-commit. Reports are publish-safe JSON and Markdown with
 a GitHub-ready close comment block. `--commit-readiness` validates the current
@@ -436,16 +434,16 @@ not-applicable.
 
 ### Basic Use
 
-#### Download and extract the current month's available EURUSD data for metatrader 4/5into the default data directory ./data
+#### Download and extract the current month's available EURUSD ASCII tick data into the default data directory ./data
 
 ```sh
-histdatacom -p eurusd -f metatrader -s now
+histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
 ```
 
 #### include the `-D` flag to download but NOT extract to csv
 
 ```sh
-histdatacom -D -p usdcad -f metastock -s now
+histdatacom -D -p usdcad -f ascii -t tick-data-quotes -s now
 ```
 
 #### include the `-C` flag to build internal Polars caches and discard ZIP/CSV sources
@@ -456,8 +454,8 @@ histdatacom -C -p eurusd -f ascii -t tick-data-quotes -s 2024-01 -e 2024-03
 
 Cache-only mode validates and downloads the selected HistData archives, builds
 canonical `.data` cache files, and removes transient ZIP/CSV sources after each
-cache is ready. It is intentionally limited to cache-capable ASCII `M1` and
-tick quote datasets, and it does not merge the caches into memory.
+cache is ready. It is intentionally limited to cache-capable ASCII tick quote
+datasets, and it does not merge the caches into memory.
 
 #### clean up transient source artifacts without removing internal caches
 
@@ -468,11 +466,11 @@ histdatacom cleanup status --data-directory data --pair-groups majors -f ascii -
 ```
 
 Cleanup mode is a dry run unless `--apply` is present. It removes downloaded
-ZIP, CSV, XLS, and XLSX source artifacts while preserving internal `.data`
-caches. Use `cleanup status` to inspect cache counts, pending source cleanup,
-disk pressure, runtime state, and offline workflow snapshots for a symbol or
-instrument group without shelling out to `find`, `df`, `ps`, or raw Temporal
-commands. Add `--json` for the stable scriptable payload.
+ZIP and CSV source artifacts while preserving internal `.data` caches. Use
+`cleanup status` to inspect cache counts, pending source cleanup, disk pressure,
+runtime state, and offline workflow snapshots for a symbol or instrument group
+without shelling out to `find`, `df`, `ps`, or raw Temporal commands. Add
+`--json` for the stable scriptable payload.
 
 ---
 
@@ -495,7 +493,7 @@ histdatacom:
   formats:
     - ascii
   timeframes:
-    - 1-minute-bar-quotes
+    - tick-data-quotes
   start_yearmonth: 2022-01
   end_yearmonth: 2022-03
   data_directory: /data/histdata
@@ -569,43 +567,30 @@ full command snapshot surface.
 For recurrent low-disk cache-building jobs, set `build_cache: true` instead of
 `download_data_archives` / `extract_csvs`. The option accepts the same dataset
 selectors as the CLI and leaves only the internal `.data` cache artifacts for
-supported ASCII `M1` and tick quote datasets.
+supported ASCII tick quote datasets.
 
 ---
 
 #### Available Formats
 
-The formats available are:
+The raw HistData dimension currently supported by the application is:
 
-||
-|-----------|
-|metatrader|
-|metastock|
-|ninjatrader|
-|excel|
-|ascii|
+| Format | Timeframe |
+| --- | --- |
+| `ascii` | `tick-data-quotes` |
 
- histdata.com provides different resolutions of time
- depending on the format.
-
- The following format/timeframe combinations are available:
-
-|||
-|------------------|:-----------:|
-|1-minute-bar-quotes|all formats|
-|tick-data-quotes |ascii|
-|tick-last-quotes|ninjatrader|
-|tick-bid-quotes|ninjatrader|
-|tick-ask-quotes|ninjatrader|
+Other HistData platform formats and raw bar timeframes were intentionally
+removed. Downsampling and platform-specific formatting will be added back as
+derived outputs after the ASCII tick substrate is stable.
 
 ##### CSV Dialect and Format Specifications
 
 - *For Detailed specifications for the CSVs that the histdata.com repo provides see [histdata.com_data_specs.md](https://github.com/dmidlo/histdata.com-tools/blob/main/histdata.com_data_specs.md)*
 
-##### To download 1-minute-bar-quotes for both metastock and excel
+##### To download ASCII tick-data-quotes
 
 ```sh
-histdatacom -p usdjpy -f metastock excel -s now
+histdatacom -p usdjpy -f ascii -t tick-data-quotes -s now
 ```
 
 ---
@@ -622,7 +607,8 @@ date ranges are for year and month and can be specified in the following ways:
 
 ##### to fetch a single year's data, leave out the month
 
-- note: unless you're fetching data for the current year, tick data types will fetch 12 files for each month of the year, 1-minute-bar-quotes will fetch a single OHLC file with the whole year's data.
+- note: unless you're fetching data for the current year, a year-only tick request
+  expands to the monthly tick archives available for that year.
 
 ```txt
 histdatacom -p udxusd -f ascii -t tick-data-quotes -s 2011
@@ -674,14 +660,14 @@ group with its readable relationship rule.
 
 ##### to fetch a single month's data, include a month, but do not use the `-e, --end_yearmonth` flag
 
-- if you're requesting 1-minute-bar-quotes for any
+- if you're requesting tick-data-quotes for any
     year except the current year, you will receive the
     the whole year's data
 - this example leaves out the `-p --pair` flag, and will
     fetch data for all 66 available instruments
 
 ```txt
-histdatacom -f metatrader -s 2012-07
+histdatacom -f ascii -t tick-data-quotes -s 2012-07
 ```
 
 #### `Start` & `Now` Keywords
@@ -694,22 +680,20 @@ you may have noticed that two special year-month keywords exist
    to indicate a range of data
 
 ```txt
-histdatacom -p audusd -f metatrader -s start -e 2008-12
+histdatacom -p audusd -f ascii -t tick-data-quotes -s start -e 2008-12
 ```
 
 - `now` used alone will return the current year-month
 - when used with as `-s now` it will return the most current month's data
 
 ```txt
-histdatacom -p frxeur -f ninjatrader -s now
+histdatacom -p frxeur -f ascii -t tick-data-quotes -s now
 ```
-
-in the above example, no `-t --timeframe` flag was specified. This will return all time resolutions available for the specified format(s)
 
 `now` when used with the `-e --end_yearmonth` flag is intended to be the end of a range. Rather, if the flags were to be `-s 2019-04 -e now` the request would return data from April 2019-04 to the present.
 
 ```txt
-histdatacom -p xagusd -f ascii -1-minute-bar-quotes -s 2019-04 -e now
+histdatacom -p xagusd -f ascii -t tick-data-quotes -s 2019-04 -e now
 ```
 
 ---
@@ -723,7 +707,7 @@ this example with use the `-e --end_yearmonth` flag to request a range of data f
 - note: Large requests like these are to be avoided. remember to sign up with histdata.com to help them pay for network costs
 
 ```txt
-histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
+histdatacom -p eurusd usdcad udxusd -f ascii -t tick-data-quotes -s start -e 2017-04
 ```
 
 ---
@@ -738,7 +722,7 @@ One can set a cap on CPU Utilization with `-c --cpu_utilization`
   eg. `-c 100` is equal to `-c high`
 
 ```sh
-histdatacom -c medium -p udxusd -f metatrader -s 2015-04 -e 2016-04
+histdatacom -c medium -p udxusd -f ascii -t tick-data-quotes -s 2015-04 -e 2016-04
 ```
 
 ---
@@ -769,8 +753,8 @@ without a user-managed `influxdb.yaml`:
 python scripts/smoke_influx_docker.py
 ```
 
-The smoke starts `influxdb:2.7-alpine`, writes representative HistData M1 and
-tick line-protocol batches through the real `InfluxBatchWriter`, queries the
+The smoke starts `influxdb:2.7-alpine`, writes representative HistData tick
+line-protocol batches through the real `InfluxBatchWriter`, queries the
 bucket, reports the field count, and removes the container. It is intentionally
 not part of default pytest because it depends on Docker and a pullable InfluxDB
 image.
@@ -810,9 +794,9 @@ histdatacom --quality --quality-target data/ --quality-report reports/quality.js
 
 The command prints a human summary, source-artifact cleanliness, and scratch
 report cleanup status. If no `--quality-target` is passed, quality mode uses
-the configured data directory. Targets can be plain HistData CSV files,
-extracted Excel `.xlsx` payloads, HistData ZIP archives, directories containing
-those files, or the canonical `.data` cache file.
+the configured data directory. Targets can be plain HistData CSV files, HistData
+ZIP archives, directories containing those files, or the canonical `.data`
+cache file.
 
 Use `--repo-quality` when the same quality run should also update the local
 repo helper file with bounded per-instrument quality summaries:
@@ -942,19 +926,19 @@ the transient ZIP/CSV sources as each cache completes. Run cleanup only after
 reports.
 
 For interrupted cache builds or older local source artifacts, use
-`histdatacom cleanup sources` to inspect removable ZIP, CSV, XLS, and XLSX files,
-then repeat with `--apply` when the report is expected. The cleanup command
+`histdatacom cleanup sources` to inspect removable ZIP and CSV files, then
+repeat with `--apply` when the report is expected. The cleanup command
 preserves internal `.data` cache files. Use `histdatacom cleanup status` first
 when an operator needs the cache count, pending cleanup count, disk pressure,
 runtime state, and durable workflow status in one report.
 
 ```sh
-histdatacom -D -X -p eurusd -f ascii -t M1 --data-directory /Volumes/histdata/data
+histdatacom -D -X -p eurusd -f ascii -t tick-data-quotes --data-directory /Volumes/histdata/data
 histdatacom --repo-quality \
-  --quality-target /Volumes/histdata/data/ASCII/M1/eurusd \
-  --quality-report /Volumes/histdata/reports/eurusd-ascii-m1-quality.json \
+  --quality-target /Volumes/histdata/data/ASCII/T/eurusd \
+  --quality-report /Volumes/histdata/reports/eurusd-ascii-tick-quality.json \
   --data-directory /Volumes/histdata/data
-histdatacom --build-cache -p eurusd -f ascii -t M1 --data-directory /Volumes/histdata/data
+histdatacom --build-cache -p eurusd -f ascii -t tick-data-quotes --data-directory /Volumes/histdata/data
 ```
 
 #### Quality Targets and Check Groups
@@ -964,7 +948,7 @@ specific groups in the same command.
 
 ```sh
 histdatacom --quality --quality-target data/ --quality-checks inventory ingestion
-histdatacom --quality --quality-target data/DAT_ASCII_EURUSD_M1_201202.csv --quality-checks time bars
+histdatacom --quality --quality-target data/DAT_ASCII_EURUSD_T_201202.csv --quality-checks time ticks
 histdatacom --quality --quality-target data/DAT_ASCII_EURUSD_T_201202.zip --quality-checks ticks domain
 ```
 
@@ -975,34 +959,30 @@ Supported groups:
 | `inventory` | ZIP integrity, filename metadata, expected coverage manifest |
 | `ingestion` | text readability, line endings, delimiter/header checks, schema and typed parsing, row-count anomalies |
 | `time` | EST-no-DST to UTC normalization, month boundaries, ordering, duplicates, granularity, gaps, cross-file continuity |
-| `bars` | M1 bid OHLC integrity, positive prices, precision, outliers, tick-to-M1 reconstruction |
 | `ticks` | tick bid/ask ordering, spread, duplicate/stale/burst/one-sided quote behavior, spread regimes |
 | `domain` | symbol metadata, quote conventions, calendar/session tags, cross-instrument consistency |
-| `modeling` | advisory modeling-readiness checks for bid-only bars, leakage risk, spread-cost assumptions, target horizon feasibility |
+| `modeling` | advisory modeling-readiness checks for leakage risk, spread-cost assumptions, and target horizon feasibility |
 | `provenance` | optional orchestration manifest/status lineage checks for artifact paths, sizes, checksums, cache metadata, stale caches, and orphan files |
-| `fingerprint` | deterministic INFO-only time-series fingerprints for target axis, coverage, timestamp topology, M1/tick distributions, calendar regimes, return/microstructure dynamics, lag dependence, stationarity/drift diagnostics, and bounded tick spread conditioning |
+| `fingerprint` | deterministic INFO-only time-series fingerprints for target axis, coverage, timestamp topology, tick distributions, calendar regimes, microstructure dynamics, lag dependence, stationarity/drift diagnostics, and bounded tick spread conditioning |
 
 `fingerprint.series` payloads include a `calendar_regimes` section for readable
-ASCII M1 and tick targets. It counts session states, active/clock sessions,
+ASCII tick targets. It counts session states, active/clock sessions,
 overlaps, special windows, holiday/event tags, calendar tags, source
 hour-of-day, and source day-of-week. The section embeds the calendar policy and
 profile metadata used for classification, so incomplete/static calendar
 profiles remain advisory and visible rather than becoming hidden failures. Tick
 fingerprints also include bounded `conditional_distributions` for spread by
 active session and special tag when spread data is available.
-M1 fingerprints include observed-sequence `return_dynamics` for close returns,
-open jumps, and flatline runs. Tick fingerprints include
-`microstructure_dynamics` for interarrival times, spread changes, spread jumps,
-stale quote runs, bursts, and one-sided movement. These sections record their
-calculation basis and topology limitations, so non-monotonic timestamps,
-duplicates, gaps, or insufficient sequence rows remain advisory metadata rather
-than hidden assumptions.
-Readable M1 and tick fingerprints also include a `dependence` section with
-observed-sequence autocorrelation summaries at profile-configured lags. M1
-dependence covers close returns, absolute returns, squared returns, and range
-ratios; tick dependence covers spreads plus spread-change series. Lags that are
-too long for the sampled sequence, or series with zero variance, are reported as
-skipped lag metadata instead of NaN values or quality failures.
+Tick fingerprints include `microstructure_dynamics` for interarrival times,
+spread changes, spread jumps, stale quote runs, bursts, and one-sided movement.
+These sections record their calculation basis and topology limitations, so
+non-monotonic timestamps, duplicates, gaps, or insufficient sequence rows remain
+advisory metadata rather than hidden assumptions.
+Readable tick fingerprints also include a `dependence` section with
+observed-sequence autocorrelation summaries for spreads plus spread-change
+series at profile-configured lags. Lags that are too long for the sampled
+sequence, or series with zero variance, are reported as skipped lag metadata
+instead of NaN values or quality failures.
 They also include `stationarity_diagnostics` with advisory rolling mean/variance
 drift, first/middle/last distribution-shift summaries, skipped rolling-window
 reasons, sample counts, configured windows, rounding policy, zero-variance
@@ -1167,13 +1147,6 @@ modeling assumptions without changing global defaults:
   "schema_version": "histdatacom.quality-profile.v1",
   "name": "exploratory-research",
   "rules": {
-    "bars.ascii.m1_outliers": {
-      "thresholds_by_asset_class": {
-        "fx": {
-          "max_open_jump_ratio": 0.01
-        }
-      }
-    },
     "ticks.ascii.microstructure": {
       "session_name": "rollover",
       "thresholds_by_symbol_session": {
@@ -1294,34 +1267,28 @@ metadata. The current quality boundary is:
 
 | Format | Timeframes | Quality support |
 | --- | --- | --- |
-| `ascii` | `M1`, `T` | Deep parser-level checks for ZIP, CSV, and canonical `.data` cache artifacts |
-| `metatrader` | `M1` | Inventory-only: filename, ZIP integrity, and expected member checks |
-| `ninjatrader` | `M1`, `T_LAST`, `T_BID`, `T_ASK` | Inventory-only: filename, ZIP integrity, and expected member checks |
-| `metastock` | `M1` | Inventory-only: filename, ZIP integrity, and expected member checks |
-| `excel` | `M1` | Inventory-only for ZIPs and extracted `.xlsx` workbook payloads |
+| `ascii` | `T` | Deep parser-level checks for ZIP, CSV, and canonical `.data` cache artifacts |
 
-Inventory-only targets emit a warning with code
-`HISTDATA_FORMAT_INVENTORY_ONLY`; they are intentionally not reported as deeply
-clean. Recognized formats used with unsupported timeframes emit
-`HISTDATA_FORMAT_UNSUPPORTED`.
+Retired formats and timeframes emit `HISTDATA_FORMAT_UNSUPPORTED` when they are
+encountered as direct CSV inputs and fail ZIP inventory naming checks when they
+arrive as unsupported archive/member names.
 
 HistData-specific assumptions are reported directly in findings:
 
-- ASCII M1 rows are bid-based OHLCV bars.
 - ASCII tick rows include bid and ask values.
 - HistData timestamps are interpreted as fixed EST with no daylight-saving
   adjustment and normalized to UTC.
-- M1 `volume` is not treated as automatically meaningful or required for
+- Tick `volume` is not treated as automatically meaningful or required for
   market-quality decisions.
 
 #### Clean and Failing Examples
 
-A focused ingestion run against a clean M1 CSV reports a clean file and writes a
+A focused ingestion run against a clean tick CSV reports a clean file and writes a
 machine-readable report:
 
 ```sh
 histdatacom --quality \
-  --quality-target data/DAT_ASCII_EURUSD_M1_201202.csv \
+  --quality-target data/DAT_ASCII_EURUSD_T_201202.csv \
   --quality-checks ingestion \
   --quality-report reports/quality-clean.json
 ```
@@ -1335,7 +1302,7 @@ findings: 1 info: 1 warning: 0 error: 0
 report: /path/to/reports/quality-clean.json
 
 Clean files
-- csv: /path/to/data/DAT_ASCII_EURUSD_M1_201202.csv (findings=1, warnings=0, errors=0)
+- csv: /path/to/data/DAT_ASCII_EURUSD_T_201202.csv (findings=1, warnings=0, errors=0)
 
 Warning files
 - none
@@ -1366,7 +1333,7 @@ The report payload is a public automation contract. Compatibility expectations
 and the golden-fixture update workflow are documented in
 `docs/data-quality/report-compatibility.md`.
 
-A malformed M1 CSV fails ingestion and exits nonzero by default because
+A malformed tick CSV fails ingestion and exits nonzero by default because
 `--quality-fail-on error` with `--quality-max-errors 0` is the default policy:
 
 ```sh
@@ -1391,7 +1358,7 @@ Warning files
 - none
 
 Failed files
-- csv: /path/to/data/bad/DAT_ASCII_EURUSD_M1_201202_BAD.csv (findings=2, warnings=0, errors=1)
+- csv: /path/to/data/bad/DAT_ASCII_EURUSD_T_201202_BAD.csv (findings=2, warnings=0, errors=1)
 ```
 
 The detailed report carries row and field context for automation and manual
@@ -1433,7 +1400,7 @@ Quality findings use three severities:
 - `warning`: suspicious data, domain assumptions, or modeling-readiness risks
   that should be reviewed but do not block ingestion by default.
 - `error`: hard defects such as corrupt ZIP archives, unreadable files, schema
-  violations, parse failures, invalid OHLC relationships, or negative spreads.
+  violations, parse failures, invalid timestamps, or negative spreads.
 
 Target status rolls up from findings: any error makes a target `failed`; warnings
 without errors make it `warning`; otherwise it is `clean`.
@@ -1536,7 +1503,7 @@ contract: base installs include the Temporal SDK needed by clients and workers.
 
 The runtime stores Temporal process state, SQLite history, logs, and runtime
 manifests under a per-user, per-workspace runtime directory. Downloaded ZIP
-files, extracted CSV/XLSX files, cache IPC files, and merged API artifacts stay
+files, extracted CSV files, cache IPC files, and merged API artifacts stay
 under the existing HistData data-directory policy.
 
 Record status metadata is manifest-only for new writes. Normal CLI/API paths
@@ -1632,7 +1599,7 @@ may not be stable.
 Submit a job through the default orchestration runtime:
 
 ```sh
-histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
 ```
 
 Interactive waited CLI runs render a live Rich progress view while the Temporal
@@ -1642,7 +1609,7 @@ path.
 Submit without waiting for completion:
 
 ```sh
-histdatacom --submit-only -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+histdatacom --submit-only -p eurusd -f ascii -t tick-data-quotes -s now
 ```
 
 The JSON control surface supports job inspection and future GUI polling:
@@ -1773,7 +1740,7 @@ add `--apply` only when the cleanup policy is understood for that data root.
 # Record cache/source cleanup status each morning.
 30 6 * * * cd "$HISTDATACOM_PROJECT" && histdatacom cleanup status --data-directory "$HISTDATACOM_DATA" --pair-groups majors -f ascii -t tick-data-quotes --json >> "$HISTDATACOM_LOG_DIR/cleanup-status.jsonl" 2>&1
 
-# Remove transient ZIP/CSV/XLS/XLSX sources while preserving .data caches.
+# Remove transient ZIP/CSV sources while preserving .data caches.
 45 6 * * 0 cd "$HISTDATACOM_PROJECT" && flock -n /tmp/histdatacom-cleanup.lock histdatacom cleanup sources --data-directory "$HISTDATACOM_DATA" --apply >> "$HISTDATACOM_LOG_DIR/source-cleanup.log" 2>&1
 ```
 
@@ -1942,7 +1909,7 @@ options = Options()
 ```python
 options.api_return_type = "polars"  # "polars", "pandas", or "arrow"
 options.formats = {"ascii"}  # Must be {"ascii"}
-options.timeframes = {"1-minute-bar-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
+options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or tick-data-quotes
 options.pairs = {"eurusd"}
 # Or choose named baskets with options.pair_groups = {"majors", "major-triangles"}
 # Or one triangle with options.pair_groups = {"triangle-eurgbp-eurusd-gbpusd"}
@@ -1951,7 +1918,7 @@ options.end_yearmonth = "2021-05"
 options.cpu_utilization = "medium"
 ```
 
-- This example uses just one pair/instrument/symbol `eurusd` and just one timeframe `1-minute-bar-quotes`. When the api is called with this 'one-one` specificity, the api will directly return the requested data.
+- This example uses just one pair/instrument/symbol `eurusd` and just one timeframe `tick-data-quotes`. When the api is called with this 'one-one` specificity, the api will directly return the requested data.
 - Regardless of the specified start_yearmonth and end_yearmonth, the resultant data will be sorted and merged into a single dataset.
 
 ##### Pass the options to histdatacom and assign the return to a variable
@@ -1975,7 +1942,7 @@ print(data.shape)
 ```python
 options.api_return_type = "pandas"
 options.formats = {"ascii"}
-options.timeframes = {"1-minute-bar-quotes"}
+options.timeframes = {"tick-data-quotes"}
 options.pairs = {"eurusd","usdcad"}
 options.start_yearmonth = "2021-01"
 options.end_yearmonth = "2021-02"
@@ -1992,44 +1959,44 @@ print(type(data))
 ```txt
 [
   {
-    'timeframe': 'M1',
+    'timeframe': 'T',
     'pair': 'EURUSD',
     'records': [<histdatacom.records.Record object ...>, ...],
     'data':
-                    datetime     open     high      low    close  vol
-      0       1609711200000  1.22396  1.22396  1.22373  1.22395    0
-      1       1609711260000  1.22387  1.22420  1.22385  1.22395    0
-      2       1609711320000  1.22396  1.22398  1.22382  1.22382    0
-      3       1609711380000  1.22383  1.22396  1.22376  1.22378    0
-      4       1609711440000  1.22378  1.22385  1.22296  1.22347    0
-      ...               ...      ...      ...      ...      ...  ...
-      484172  1650664440000  1.07976  1.08014  1.07976  1.08014    0
-      484173  1650664500000  1.08013  1.08021  1.07997  1.08000    0
-      484174  1650664560000  1.08000  1.08000  1.07956  1.07968    0
-      484175  1650664620000  1.07980  1.07980  1.07958  1.07968    0
-      484176  1650664680000  1.07980  1.07986  1.07963  1.07963    0
+                    datetime      bid      ask  vol
+      0       1609711200123  1.22396  1.22398    0
+      1       1609711200456  1.22397  1.22399    0
+      2       1609711200789  1.22395  1.22397    0
+      3       1609711201123  1.22398  1.22400    0
+      4       1609711201456  1.22399  1.22401    0
+      ...               ...      ...      ...  ...
+      994672  1650664680123  1.07980  1.07982    0
+      994673  1650664680456  1.07981  1.07983    0
+      994674  1650664680789  1.07979  1.07981    0
+      994675  1650664681123  1.07978  1.07980    0
+      994676  1650664681456  1.07980  1.07982    0
 
-      [484177 rows x 6 columns]
+      [994677 rows x 4 columns]
   },
   {
-    'timeframe': 'M1',
+    'timeframe': 'T',
     'pair': 'USDCAD',
     'records': [<histdatacom.records.Record object ...>, ...],
     'data':
-                    datetime     open     high      low    close  vol
-      0       1609711200000  1.27136  1.27201  1.27136  1.27201    0
-      1       1609711260000  1.27207  1.27241  1.27207  1.27220    0
-      2       1609711320000  1.27211  1.27219  1.27211  1.27219    0
-      3       1609711380000  1.27212  1.27261  1.27212  1.27261    0
-      4       1609711440000  1.27268  1.27268  1.27261  1.27261    0
-      ...               ...      ...      ...      ...      ...  ...
-      483946  1650664440000  1.27121  1.27132  1.27114  1.27131    0
-      483947  1650664500000  1.27129  1.27137  1.27102  1.27106    0
-      483948  1650664560000  1.27107  1.27114  1.27098  1.27101    0
-      483949  1650664620000  1.27105  1.27105  1.27091  1.27091    0
-      483950  1650664680000  1.27091  1.27097  1.27073  1.27097    0
+                    datetime      bid      ask  vol
+      0       1609711200123  1.27136  1.27138    0
+      1       1609711200456  1.27137  1.27139    0
+      2       1609711200789  1.27135  1.27137    0
+      3       1609711201123  1.27138  1.27140    0
+      4       1609711201456  1.27139  1.27141    0
+      ...               ...      ...      ...  ...
+      993946  1650664680123  1.27091  1.27093    0
+      993947  1650664680456  1.27092  1.27094    0
+      993948  1650664680789  1.27090  1.27092    0
+      993949  1650664681123  1.27089  1.27091    0
+      993950  1650664681456  1.27091  1.27093    0
 
-      [483951 rows x 6 columns]
+      [993951 rows x 4 columns]
   }
 ]
 
@@ -2043,21 +2010,21 @@ print(type(data[0]['data']))
 ```
 
 ```txt
-M1 EURUSD
-               datetime     open     high      low    close  vol
-0       20210103 170000  1.22396  1.22396  1.22373  1.22395    0
-1       20210103 170100  1.22387  1.22420  1.22385  1.22395    0
-2       20210103 170200  1.22396  1.22398  1.22382  1.22382    0
-3       20210103 170300  1.22383  1.22396  1.22376  1.22378    0
-4       20210103 170400  1.22378  1.22385  1.22296  1.22347    0
-...                 ...      ...      ...      ...      ...  ...
-484172  20220422 165400  1.07976  1.08014  1.07976  1.08014    0
-484173  20220422 165500  1.08013  1.08021  1.07997  1.08000    0
-484174  20220422 165600  1.08000  1.08000  1.07956  1.07968    0
-484175  20220422 165700  1.07980  1.07980  1.07958  1.07968    0
-484176  20220422 165800  1.07980  1.07986  1.07963  1.07963    0
+T EURUSD
+               datetime      bid      ask  vol
+0       20210103 170000123  1.22396  1.22398    0
+1       20210103 170000456  1.22397  1.22399    0
+2       20210103 170000789  1.22395  1.22397    0
+3       20210103 170001123  1.22398  1.22400    0
+4       20210103 170001456  1.22399  1.22401    0
+...                   ...      ...      ...  ...
+994672  20220422 165800123  1.07980  1.07982    0
+994673  20220422 165800456  1.07981  1.07983    0
+994674  20220422 165800789  1.07979  1.07981    0
+994675  20220422 165801123  1.07978  1.07980    0
+994676  20220422 165801456  1.07980  1.07982    0
 
-[484177 rows x 6 columns]
+[994677 rows x 4 columns]
 <class 'pandas.core.frame.DataFrame'>
 ```
 
@@ -2085,7 +2052,7 @@ def import_pair_to_influx(pair, start, end):
     data_options.start_yearmonth = f"{start}"
     data_options.end_yearmonth = f"{end}"
     data_options.formats = {"ascii"}  # Must be {"ascii"}
-    data_options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or 1-minute-bar-quotes
+    data_options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or tick-data-quotes
     histdatacom(data_options)
 
 def get_available_range_data(pairs):
@@ -2281,7 +2248,7 @@ explicit worker config so the installed package must resolve the running
 frontend, namespace, and queues from persisted runtime state. Run
 `scripts/smoke_runtime_install.py --quality-runtime-smoke` to exercise the
 installed `histdatacom --quality` console command against clean and dirty
-local M1 fixtures through the packaged `DataQualityWorkflow` without contacting
+local tick fixtures through the packaged `DataQualityWorkflow` without contacting
 HistData.com or InfluxDB. Run
 `scripts/smoke_runtime_install.py --live-runtime-smoke` separately when an
 operator intentionally wants external HistData.com URL-validation coverage.

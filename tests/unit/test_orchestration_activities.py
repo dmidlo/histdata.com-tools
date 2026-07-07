@@ -58,19 +58,14 @@ from histdatacom.orchestration.activities import (
     validate_urls_activity,
 )
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
+    CLEAN_TICK_CASE,
     write_ascii_case,
     write_corrupt_zip,
 )
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
-EXPECTED_M1_DATETIMES = [1328072400000, 1328072460000, 1328072520000]
-EXPECTED_M1_LINE = (
-    "eurusd,source=histdata.com,format=ascii,timeframe=M1 "
-    "openbid=1.3066,highbid=1.3066,lowbid=1.30656,closebid=1.30656 "
-    "1328072400000"
-)
-EXPECTED_TICK_LINE = (
+EXPECTED_T_DATETIMES = [1328072403660, 1328072403973, 1328072414990]
+EXPECTED_T_LINE = (
     "eurusd,source=histdata.com,format=ascii,timeframe=T "
     "bidquote=1.3066,askquote=1.30677 1328072403660"
 )
@@ -109,7 +104,7 @@ def _form_html(*, token: str = "token") -> str:
         <input id="date" value="2022">
         <input id="datemonth" value="2022">
         <input id="platform" value="ASCII">
-        <input id="timeframe" value="M1">
+        <input id="timeframe" value="T">
         <input id="fxpair" value="eurusd">
       </form>
     </html>
@@ -129,7 +124,7 @@ def _validation_payload(tmp_path) -> dict:
             "status": WorkStatus.URL_NEW.value,
             "url": (
                 "http://www.histdata.com/download-free-forex-data/"
-                "?/ascii/1-minute-bar-quotes/eurusd/2022"
+                "?/ascii/tick-data-quotes/eurusd/2022"
             ),
         },
     }
@@ -139,13 +134,13 @@ def _zip_bytes() -> bytes:
     """Return a minimal valid ZIP payload."""
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w") as archive:
-        archive.writestr("DAT_ASCII_EURUSD_M1_2022.csv", "rows")
+        archive.writestr("DAT_ASCII_EURUSD_T_2022.csv", "rows")
     return stream.getvalue()
 
 
 def _download_payload(tmp_path) -> dict:
     """Return a minimal download activity payload with existing ZIP."""
-    zip_path = tmp_path / "DAT_ASCII_EURUSD_M1_2022.zip"
+    zip_path = tmp_path / "DAT_ASCII_EURUSD_T_2022.zip"
     zip_path.write_bytes(_zip_bytes())
     request = RunRequest(
         request_id="run-download",
@@ -158,7 +153,7 @@ def _download_payload(tmp_path) -> dict:
             "status": WorkStatus.URL_VALID.value,
             "url": (
                 "http://www.histdata.com/download-free-forex-data/"
-                "?/ascii/1-minute-bar-quotes/eurusd/2022"
+                "?/ascii/tick-data-quotes/eurusd/2022"
             ),
             "data_dir": f"{tmp_path}/",
             "zip_filename": zip_path.name,
@@ -168,7 +163,7 @@ def _download_payload(tmp_path) -> dict:
 
 def _extraction_payload(tmp_path) -> dict:
     """Return a minimal extraction activity payload with existing ZIP."""
-    zip_path = tmp_path / "DAT_ASCII_EURUSD_M1_2022.zip"
+    zip_path = tmp_path / "DAT_ASCII_EURUSD_T_2022.zip"
     zip_path.write_bytes(_zip_bytes())
     request = RunRequest(
         request_id="run-extract",
@@ -187,7 +182,7 @@ def _extraction_payload(tmp_path) -> dict:
 
 def _cache_payload(tmp_path) -> dict:
     """Return a minimal cache activity payload with an existing CSV."""
-    filename = "DAT_ASCII_EURUSD_M1_201202.csv"
+    filename = "DAT_ASCII_EURUSD_T_201202.csv"
     shutil.copyfile(FIXTURES / filename, tmp_path / filename)
     request = RunRequest(
         request_id="run-cache",
@@ -202,7 +197,7 @@ def _cache_payload(tmp_path) -> dict:
             "csv_filename": filename,
             "zip_filename": "missing.zip",
             "data_format": "ascii",
-            "data_timeframe": "M1",
+            "data_timeframe": "T",
             "data_fxpair": "eurusd",
         },
     }
@@ -212,10 +207,10 @@ def _merge_payload(tmp_path) -> dict:
     """Return a merge activity payload with two cache artifacts."""
     source = convert_polars_datetime_to_utc_ms(
         read_ascii_file_to_polars(
-            FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
-            "M1",
+            FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
+            "T",
         ),
-        "M1",
+        "T",
     )
     first_dir = tmp_path / "first"
     second_dir = tmp_path / "second"
@@ -237,10 +232,10 @@ def _merge_payload(tmp_path) -> dict:
                 "data_dir": f"{second_dir}/",
                 "cache_filename": CACHE_FILENAME,
                 "cache_line_count": "2",
-                "cache_start": str(EXPECTED_M1_DATETIMES[1]),
-                "cache_end": str(EXPECTED_M1_DATETIMES[2]),
+                "cache_start": str(EXPECTED_T_DATETIMES[1]),
+                "cache_end": str(EXPECTED_T_DATETIMES[2]),
                 "data_format": "ascii",
-                "data_timeframe": "M1",
+                "data_timeframe": "T",
                 "data_fxpair": "eurusd",
             },
             {
@@ -249,10 +244,10 @@ def _merge_payload(tmp_path) -> dict:
                 "data_dir": f"{first_dir}/",
                 "cache_filename": CACHE_FILENAME,
                 "cache_line_count": "1",
-                "cache_start": str(EXPECTED_M1_DATETIMES[0]),
-                "cache_end": str(EXPECTED_M1_DATETIMES[0]),
+                "cache_start": str(EXPECTED_T_DATETIMES[0]),
+                "cache_end": str(EXPECTED_T_DATETIMES[0]),
                 "data_format": "ascii",
-                "data_timeframe": "M1",
+                "data_timeframe": "T",
                 "data_fxpair": "eurusd",
             },
         ],
@@ -262,7 +257,7 @@ def _merge_payload(tmp_path) -> dict:
 def _influx_payload(
     tmp_path,
     *,
-    timeframe: str = "M1",
+    timeframe: str = "T",
     batch_size: str = "2",
     delete_after_influx: bool = False,
     influx_config: dict | None = None,
@@ -293,8 +288,8 @@ def _influx_payload(
             "data_dir": f"{tmp_path}/",
             "cache_filename": CACHE_FILENAME,
             "cache_line_count": "3",
-            "cache_start": str(EXPECTED_M1_DATETIMES[0]),
-            "cache_end": str(EXPECTED_M1_DATETIMES[-1]),
+            "cache_start": str(EXPECTED_T_DATETIMES[0]),
+            "cache_end": str(EXPECTED_T_DATETIMES[-1]),
             "zip_filename": zip_filename,
             "data_format": "ascii",
             "data_timeframe": timeframe,
@@ -356,7 +351,7 @@ def test_dataset_plan_activity_returns_explicit_work_items(tmp_path) -> None:
         request_id="run-plan",
         pairs=("eurusd",),
         formats=("ascii",),
-        timeframes=("M1",),
+        timeframes=("T",),
         start_yearmonth="202201",
         end_yearmonth="202203",
         data_directory=str(tmp_path),
@@ -366,13 +361,13 @@ def test_dataset_plan_activity_returns_explicit_work_items(tmp_path) -> None:
 
     assert result["result"]["stage"] == "dataset_plan"
     assert result["result"]["status"] == WorkStatus.COMPLETED.value
-    assert result["result"]["metrics"]["work_item_count"] == 1
-    assert len(result["work_items"]) == 1
+    assert result["result"]["metrics"]["work_item_count"] == 3
+    assert len(result["work_items"]) == 3
     assert result["work_items"][0]["url"] == (
         "http://www.histdata.com/download-free-forex-data/"
-        "?/ascii/1-minute-bar-quotes/eurusd/2022"
+        "?/ascii/tick-data-quotes/eurusd/2022/1"
     )
-    assert result["work_items"][0]["data_datemonth"] == "2022"
+    assert result["work_items"][0]["data_datemonth"] == "202201"
 
 
 def test_dataset_plan_activity_uses_repo_ranges_for_full_scope(
@@ -501,7 +496,7 @@ def test_dataset_plan_activity_payload_survives_temporal_converter(
         request_id="run-plan-converter",
         pairs=("eurusd",),
         formats=("ascii",),
-        timeframes=("M1",),
+        timeframes=("T",),
         start_yearmonth="202201",
         end_yearmonth="202201",
         data_directory=str(tmp_path),
@@ -622,7 +617,7 @@ def test_validate_urls_activity_persists_live_status_without_inspect(
             "status": WorkStatus.URL_NEW.value,
             "url": (
                 "http://www.histdata.com/download-free-forex-data/"
-                "?/ascii/1-minute-bar-quotes/eurusd/2022"
+                "?/ascii/tick-data-quotes/eurusd/2022"
             ),
         },
     }
@@ -793,7 +788,7 @@ def test_download_archives_activity_removes_partial_temp_on_cancel(
 
     payload = _download_payload(tmp_path)
     zip_path = tmp_path / payload["work_item"]["zip_filename"]
-    partial = tmp_path / ".DAT_ASCII_EURUSD_M1_2022.zip.partial.tmp"
+    partial = tmp_path / ".DAT_ASCII_EURUSD_T_2022.zip.partial.tmp"
     partial.write_text("partial", encoding="utf-8")
     monkeypatch.setattr(
         activities.activity,
@@ -826,7 +821,7 @@ def test_extract_csv_activity_extracts_existing_zip(tmp_path) -> None:
     assert result["result"]["metrics"]["zip_deleted"] is True
     assert result["work_item"]["status"] == WorkStatus.CSV_FILE.value
     assert result["work_item"]["csv_filename"] == (
-        "DAT_ASCII_EURUSD_M1_2022.csv"
+        "DAT_ASCII_EURUSD_T_2022.csv"
     )
     assert result["result"]["artifacts"][0]["kind"] == "csv"
     assert result["result"]["artifacts"][0]["sha256"]
@@ -841,12 +836,12 @@ def test_build_cache_activity_builds_polars_cache(tmp_path) -> None:
     assert result["result"]["metrics"]["decision"] == "built"
     assert result["result"]["metrics"]["cache_line_count"] == 3
     assert result["result"]["metrics"]["cache_start"] == str(
-        EXPECTED_M1_DATETIMES[0]
+        EXPECTED_T_DATETIMES[0]
     )
     assert result["result"]["metrics"]["cache_end"] == str(
-        EXPECTED_M1_DATETIMES[-1]
+        EXPECTED_T_DATETIMES[-1]
     )
-    assert result["result"]["metrics"]["timeframe"] == "M1"
+    assert result["result"]["metrics"]["timeframe"] == "T"
     assert result["result"]["artifacts"][0]["kind"] == "cache"
     assert result["work_item"]["status"] == WorkStatus.CACHE_READY.value
     assert result["work_item"]["cache_filename"] == CACHE_FILENAME
@@ -888,7 +883,7 @@ def test_build_cache_activity_loads_cache_only_batch_from_plan_ref(
         request_id="run-plan-build-cache",
         pairs=("eurusd",),
         formats=("ascii",),
-        timeframes=("M1",),
+        timeframes=("T",),
         start_yearmonth="201201",
         end_yearmonth="201302",
         data_directory=str(tmp_path),
@@ -905,7 +900,7 @@ def test_build_cache_activity_loads_cache_only_batch_from_plan_ref(
         str(plan_payload[DATASET_PLAN_REF_KEY]["plan_id"]),
         work_ids=(str(partition["work_ids"]),),
     )[0]
-    csv_filename = "DAT_ASCII_EURUSD_M1_201202.csv"
+    csv_filename = "DAT_ASCII_EURUSD_T_201202.csv"
     data_dir = Path(planned_item.data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(FIXTURES / csv_filename, data_dir / csv_filename)
@@ -914,7 +909,7 @@ def test_build_cache_activity_loads_cache_only_batch_from_plan_ref(
             **planned_item.to_dict(),
             "status": WorkStatus.CSV_FILE.value,
             "csv_filename": csv_filename,
-            "zip_filename": "DAT_ASCII_EURUSD_M1_2012.zip",
+            "zip_filename": "DAT_ASCII_EURUSD_T_2012.zip",
         }
     )
     store.write_work_item(stored_item, source="test_downloaded_source")
@@ -949,22 +944,22 @@ def test_merge_cache_activity_returns_bounded_merge_metadata(tmp_path) -> None:
     assert result["result"]["metrics"]["materialized"] is False
     assert "data" not in result
     merge_set = result["merge_sets"][0]
-    assert merge_set["timeframe"] == "M1"
+    assert merge_set["timeframe"] == "T"
     assert merge_set["pair"] == "eurusd"
     assert merge_set["line_count"] == 3
-    assert merge_set["start"] == str(EXPECTED_M1_DATETIMES[0])
-    assert merge_set["end"] == str(EXPECTED_M1_DATETIMES[2])
+    assert merge_set["start"] == str(EXPECTED_T_DATETIMES[0])
+    assert merge_set["end"] == str(EXPECTED_T_DATETIMES[2])
     assert [artifact["kind"] for artifact in merge_set["artifacts"]] == [
         "cache",
         "cache",
     ]
 
 
-def test_import_to_influx_activity_writes_m1_batches(
+def test_import_to_influx_activity_writes_tick_batches(
     monkeypatch,
     tmp_path,
 ) -> None:
-    """Influx activity should write bounded M1 line-protocol batches."""
+    """Influx activity should write bounded T line-protocol batches."""
     FakeInfluxWriter.instances.clear()
     FakeInfluxWriter.fail_with = None
     monkeypatch.setattr(
@@ -977,7 +972,7 @@ def test_import_to_influx_activity_writes_m1_batches(
     [writer] = FakeInfluxWriter.instances
     assert writer.args["batch_size"] == "2"
     assert [len(batch) for batch in writer.batches] == [2, 1]
-    assert writer.batches[0][0] == EXPECTED_M1_LINE
+    assert writer.batches[0][0] == EXPECTED_T_LINE
     assert writer.closed
     assert result["work_item"]["status"] == WorkStatus.INFLUX_UPLOAD.value
     assert result["result"]["stage"] == "import_to_influx"
@@ -1054,32 +1049,10 @@ def test_activity_logs_bounded_metadata_without_secrets(
         for item in caplog.records
         if item.getMessage().startswith("Temporal activity work item updated")
     )
-    assert record.request_id == "run-influx-M1"
+    assert record.request_id == "run-influx-T"
     assert record.stage == "import_to_influx"
     assert record.status == WorkStatus.INFLUX_UPLOAD.value
     assert record.per_work_item is True
-
-
-def test_import_to_influx_activity_writes_tick_batches(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    """Influx activity should preserve tick bid/ask line formatting."""
-    FakeInfluxWriter.instances.clear()
-    FakeInfluxWriter.fail_with = None
-    monkeypatch.setattr(
-        "histdatacom.orchestration.activities._influx_batch_writer",
-        FakeInfluxWriter,
-    )
-
-    result = import_to_influx_activity(
-        _influx_payload(tmp_path, timeframe="T", batch_size="2")
-    )
-
-    [writer] = FakeInfluxWriter.instances
-    assert [len(batch) for batch in writer.batches] == [2, 1]
-    assert writer.batches[0][0] == EXPECTED_TICK_LINE
-    assert result["result"]["metrics"]["line_count"] == 3
 
 
 def test_import_to_influx_activity_raises_retryable_write_failure(
@@ -1161,7 +1134,7 @@ def test_data_quality_activity_writes_report_and_bounded_metrics(
     tmp_path: Path,
 ) -> None:
     """Quality activity should persist detailed findings outside history."""
-    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     report_path = tmp_path / "reports" / "quality.json"
     request = RunRequest(
         request_id="run-quality",
@@ -1222,7 +1195,7 @@ def test_data_quality_activity_deletes_default_scratch_report_on_success(
     data_dir.mkdir()
     target_dir = tmp_path / "targets"
     target_dir.mkdir()
-    csv_path = write_ascii_case(target_dir, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(target_dir, CLEAN_TICK_CASE)
     source_zip = data_dir / "HISTDATA_COM_ASCII_EURUSD_T202001.zip"
     source_zip.write_bytes(b"zip")
     request_id = f"run-quality-scratch-{tmp_path.name}"
@@ -1436,7 +1409,7 @@ def test_data_quality_activity_refreshes_repo_quality_metadata(
     tmp_path: Path,
 ) -> None:
     """Repo-quality refresh should persist bounded pair summaries in .repo."""
-    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     repo_path = tmp_path / ".repo"
     repo_path.write_text(
         json.dumps({"eurusd": {"start": "200005", "end": "202606"}}),
@@ -1475,7 +1448,7 @@ def test_data_quality_activity_refreshes_repo_quality_metadata(
     assert quality["target_count"] == 1
     assert quality["finding_count"] == 1
     assert quality["formats"] == ["ascii"]
-    assert quality["timeframes"] == ["M1"]
+    assert quality["timeframes"] == ["T"]
     assert quality["periods"] == ["201202"]
     assert quality["report_artifact"]["path"] == "reports/repo-quality.json"
 
@@ -1486,7 +1459,7 @@ def test_data_quality_activity_runs_inventory_rules_for_corrupt_zip(
     """Quality activity should execute concrete rules, not an empty registry."""
     archive = write_corrupt_zip(
         tmp_path,
-        filename="DAT_ASCII_EURUSD_M1_201202.zip",
+        filename="DAT_ASCII_EURUSD_T_201202.zip",
     )
     report_path = tmp_path / "reports" / "quality-corrupt-zip.json"
     request = RunRequest(
@@ -1520,7 +1493,7 @@ def test_data_quality_activity_preserves_coverage_manifest_metadata(
     tmp_path: Path,
 ) -> None:
     """Quality activity should pass expected coverage metadata to run rules."""
-    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     report_path = tmp_path / "reports" / "quality-coverage.json"
     request = RunRequest(
         request_id="run-quality-coverage",
@@ -1534,13 +1507,13 @@ def test_data_quality_activity_preserves_coverage_manifest_metadata(
                 "expected_dimensions": [
                     {
                         "data_format": "ascii",
-                        "timeframe": "M1",
+                        "timeframe": "T",
                         "symbol": "EURUSD",
                         "period": "201202",
                     },
                     {
                         "data_format": "ascii",
-                        "timeframe": "M1",
+                        "timeframe": "T",
                         "symbol": "EURUSD",
                         "period": "201203",
                     },
@@ -1563,7 +1536,7 @@ def test_data_quality_activity_preserves_coverage_manifest_metadata(
     assert manifest["missing"] == [
         {
             "data_format": "ascii",
-            "timeframe": "M1",
+            "timeframe": "T",
             "symbol": "EURUSD",
             "period": "201203",
         }
@@ -1581,7 +1554,7 @@ def test_data_quality_activity_returns_failed_stage_for_policy_failure(
     tmp_path: Path,
 ) -> None:
     """Quality failures should be non-retryable stage failures."""
-    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     report_path = tmp_path / "reports" / "quality-failed.json"
     request = RunRequest(
         request_id="run-quality-failed",

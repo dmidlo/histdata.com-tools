@@ -40,7 +40,7 @@ TIMESTAMP_CONTINUITY_METADATA_KEY = "timestamp_continuity"
 SOURCE_TIMEZONE = "EST-no-DST"
 SOURCE_UTC_OFFSET = "-05:00"
 CANONICAL_TIMEZONE = "UTC"
-M1_GRANULARITY_MS = 60_000
+ONE_MINUTE_MS = 60_000
 EXPECTED_TICK_MILLISECOND_DIGITS = 3
 DEFAULT_GAP_BUCKETS_MS = (
     60_000,
@@ -52,7 +52,7 @@ DEFAULT_GAP_BUCKETS_MS = (
 FX_FRIDAY_CLOSE_WEEKDAY = 4
 FX_SUNDAY_OPEN_WEEKDAY = 6
 FX_CLOSE_OPEN_MINUTE = 17 * 60
-FX_CLOSE_OPEN_TIME_OF_DAY_MS = FX_CLOSE_OPEN_MINUTE * M1_GRANULARITY_MS
+FX_CLOSE_OPEN_TIME_OF_DAY_MS = FX_CLOSE_OPEN_MINUTE * ONE_MINUTE_MS
 MAX_TIMESTAMP_SAMPLES = 5
 TIMESTAMP_SCAN_CACHE_MAX_ENTRIES = 4
 TIMESTAMP_BOUNDARY_CACHE_MAX_ENTRIES = 2_048
@@ -142,10 +142,6 @@ class _TimestampScan:
     period_mismatches: list[_TimestampSample] = field(default_factory=list)
     utc_month_boundary_count: int = 0
     utc_month_boundaries: list[_TimestampSample] = field(default_factory=list)
-    m1_granularity_drift_count: int = 0
-    m1_granularity_drifts: list["_TimestampIssueSample"] = field(
-        default_factory=list
-    )
     tick_precision_mismatch_count: int = 0
     tick_precision_mismatches: list["_TimestampIssueSample"] = field(
         default_factory=list
@@ -195,10 +191,6 @@ class _TimestampSequenceScan:
     non_monotonic_rows: list[_TimestampIssueSample] = field(
         default_factory=list
     )
-    m1_duplicate_timestamp_count: int = 0
-    m1_duplicate_timestamps: list[_TimestampIssueSample] = field(
-        default_factory=list
-    )
     tick_duplicate_row_count: int = 0
     tick_duplicate_rows: list[_TimestampIssueSample] = field(
         default_factory=list
@@ -209,12 +201,12 @@ class _TimestampSequenceScan:
 class HistDataGapTolerance:
     """Configurable gap and session tolerance windows for HistData checks."""
 
-    expected_interval_ms: int = M1_GRANULARITY_MS
-    suspicious_gap_ms: int = 5 * M1_GRANULARITY_MS
+    expected_interval_ms: int = ONE_MINUTE_MS
+    suspicious_gap_ms: int = 5 * ONE_MINUTE_MS
     bucket_thresholds_ms: tuple[int, ...] = DEFAULT_GAP_BUCKETS_MS
-    session_boundary_grace_ms: int = 60 * M1_GRANULARITY_MS
-    dynamic_window_initial_ms: int = 5 * M1_GRANULARITY_MS
-    dynamic_window_max_ms: int = 60 * M1_GRANULARITY_MS
+    session_boundary_grace_ms: int = 60 * ONE_MINUTE_MS
+    dynamic_window_initial_ms: int = 5 * ONE_MINUTE_MS
+    dynamic_window_max_ms: int = 60 * ONE_MINUTE_MS
     dynamic_window_growth_factor: float = 2.0
     dynamic_window_shrink_factor: float = 0.5
 
@@ -718,7 +710,6 @@ def timestamp_topology_payload_for_target(
         tolerance=resolved_tolerance,
     )
     interval_summary = _timestamp_interval_summary(scan)
-    m1_duplicate_count = sequence.m1_duplicate_timestamp_count
     tick_duplicate_count = sequence.tick_duplicate_row_count
 
     return {
@@ -726,12 +717,10 @@ def timestamp_topology_payload_for_target(
         "parsed_row_count": scan.parsed_row_count,
         "invalid_timestamp_count": scan.invalid_timestamp_count,
         "non_monotonic_count": sequence.non_monotonic_count,
-        "duplicate_timestamp_count": m1_duplicate_count + tick_duplicate_count,
+        "duplicate_timestamp_count": tick_duplicate_count,
         "duplicate_timestamp_source_counts": {
-            "m1_duplicate_timestamp": m1_duplicate_count,
             "tick_duplicate_row": tick_duplicate_count,
         },
-        "m1_duplicate_timestamp_count": m1_duplicate_count,
         "tick_duplicate_row_count": tick_duplicate_count,
         "min_interval_ms": interval_summary["min_interval_ms"],
         "median_interval_ms": interval_summary["median_interval_ms"],
@@ -892,7 +881,7 @@ def _timestamp_scan_for_target(target: QualityTarget) -> _TimestampScan:
 def _timestamp_scan_from_polars_cache(
     target: QualityTarget,
 ) -> _TimestampScan | None:
-    if target.timeframe not in {"M1", "T"}:
+    if target.timeframe != "T":
         return None
 
     cache = read_quality_polars_cache(
@@ -933,11 +922,10 @@ def _timestamp_scan_from_polars_cache(
         _timestamp_sample_from_projected_row(row, target=target)
         for row in projected.head(MAX_TIMESTAMP_SAMPLES).iter_rows(named=True)
     )
-    if target.timeframe == "T":
-        scan.valid_rows.extend(
-            _timestamp_sample_from_projected_row(row, target=target)
-            for row in projected.iter_rows(named=True)
-        )
+    scan.valid_rows.extend(
+        _timestamp_sample_from_projected_row(row, target=target)
+        for row in projected.iter_rows(named=True)
+    )
 
     if target.period:
         period_mismatches = projected.filter(
@@ -961,27 +949,10 @@ def _timestamp_scan_from_polars_cache(
             )
         )
 
-    if target.timeframe == "M1":
-        granularity_drifts = projected.filter(
-            projected["datetime"] % M1_GRANULARITY_MS != 0
-        )
-        scan.m1_granularity_drift_count = granularity_drifts.height
-        for row in granularity_drifts.head(MAX_TIMESTAMP_SAMPLES).iter_rows(
-            named=True
-        ):
-            sample = _m1_granularity_drift_sample(
-                row_number=int(row["_row_number"]),
-                timestamp_source=str(row["_source_timestamp"]),
-                timestamp_utc_ms=int(row["datetime"]),
-                source_member="",
-            )
-            if sample is not None:
-                scan.m1_granularity_drifts.append(sample)
-
-        scan.sequence_scan = _scan_timestamp_sequence_polars(
-            target,
-            projected,
-        )
+    scan.sequence_scan = _scan_timestamp_sequence_polars(
+        target,
+        projected,
+    )
     return scan
 
 
@@ -1120,41 +1091,44 @@ def _scan_timestamp_sequence_polars(
             ),
         )
 
-    if target.timeframe == "M1":
-        unique_count = int(frame.select(pl.col("datetime").n_unique()).item())
-        scan.m1_duplicate_timestamp_count = max(frame.height - unique_count, 0)
-        if scan.m1_duplicate_timestamp_count:
-            duplicates = frame.with_columns(
-                pl.col("datetime")
-                .cum_count()
-                .over("datetime")
-                .alias("_duplicate_ordinal"),
-                pl.col("_row_number")
-                .first()
-                .over("datetime")
-                .alias("_duplicate_of_row"),
-            ).filter(pl.col("_duplicate_ordinal") > 1)
-            for row in duplicates.head(MAX_TIMESTAMP_SAMPLES).iter_rows(
-                named=True
-            ):
-                timestamp_utc_ms = int(row["datetime"])
-                _append_issue_sample(
-                    scan.m1_duplicate_timestamps,
-                    _TimestampIssueSample(
-                        row_number=int(row["_row_number"]),
-                        timestamp_source=str(row["_source_timestamp"]),
-                        timestamp_utc_ms=timestamp_utc_ms,
-                        source_member="",
-                        metadata={
-                            "duplicate_of_row": int(row["_duplicate_of_row"]),
-                            "duplicate_timestamp_utc_ms": timestamp_utc_ms,
-                            "duplicate_utc_timestamp": _utc_iso_from_ms(
-                                timestamp_utc_ms
-                            ),
-                            "dedupe_policy": "report-only",
-                        },
-                    ),
-                )
+    duplicate_columns = (
+        "_source_timestamp",
+        "_row_bid",
+        "_row_ask",
+        "_row_vol",
+    )
+    if set(duplicate_columns).issubset(set(frame.columns)):
+        duplicates = frame.with_columns(
+            pl.col("_row_number")
+            .cum_count()
+            .over(duplicate_columns)
+            .alias("_duplicate_ordinal"),
+            pl.col("_row_number")
+            .first()
+            .over(duplicate_columns)
+            .alias("_duplicate_of_row"),
+        ).filter(pl.col("_duplicate_ordinal") > 1)
+        scan.tick_duplicate_row_count = duplicates.height
+        for row in duplicates.head(MAX_TIMESTAMP_SAMPLES).iter_rows(named=True):
+            _append_issue_sample(
+                scan.tick_duplicate_rows,
+                _TimestampIssueSample(
+                    row_number=int(row["_row_number"]),
+                    timestamp_source=str(row["_source_timestamp"]),
+                    timestamp_utc_ms=int(row["datetime"]),
+                    source_member="",
+                    metadata={
+                        "duplicate_of_row": int(row["_duplicate_of_row"]),
+                        "duplicate_row_values": [
+                            str(row["_source_timestamp"]),
+                            str(row["_row_bid"]),
+                            str(row["_row_ask"]),
+                            str(row["_row_vol"]),
+                        ],
+                        "dedupe_policy": "report-only",
+                    },
+                ),
+            )
     return scan
 
 
@@ -1382,7 +1356,6 @@ def _scan_timestamp_sequence(
 ) -> _TimestampSequenceScan:
     scan = _TimestampSequenceScan()
     previous: _TimestampSample | None = None
-    seen_m1_timestamps: dict[int, _TimestampSample] = {}
     seen_tick_rows: dict[tuple[str, ...], _TimestampSample] = {}
 
     for row in rows:
@@ -1407,28 +1380,6 @@ def _scan_timestamp_sequence(
                 ),
             )
         previous = row
-
-        if target.timeframe == "M1":
-            duplicate = seen_m1_timestamps.get(row.timestamp_utc_ms)
-            if duplicate is not None:
-                scan.m1_duplicate_timestamp_count += 1
-                _append_issue_sample(
-                    scan.m1_duplicate_timestamps,
-                    _TimestampIssueSample(
-                        row_number=row.row_number,
-                        timestamp_source=row.timestamp_source,
-                        timestamp_utc_ms=row.timestamp_utc_ms,
-                        source_member=row.source_member,
-                        metadata={
-                            "duplicate_of_row": duplicate.row_number,
-                            "duplicate_timestamp_utc_ms": row.timestamp_utc_ms,
-                            "duplicate_utc_timestamp": row.utc_timestamp,
-                            "dedupe_policy": "report-only",
-                        },
-                    ),
-                )
-            else:
-                seen_m1_timestamps[row.timestamp_utc_ms] = row
 
         if target.timeframe == "T":
             duplicate = seen_tick_rows.get(row.row_values)
@@ -1474,15 +1425,10 @@ def _timestamp_sequence_findings(
                 "parsed_row_count": scan.parsed_row_count,
                 "invalid_timestamp_count": scan.invalid_timestamp_count,
                 "non_monotonic_count": sequence.non_monotonic_count,
-                "m1_duplicate_timestamp_count": (
-                    sequence.m1_duplicate_timestamp_count
-                ),
                 "tick_duplicate_row_count": sequence.tick_duplicate_row_count,
-                "m1_granularity_drift_count": (scan.m1_granularity_drift_count),
                 "tick_precision_mismatch_count": (
                     scan.tick_precision_mismatch_count
                 ),
-                "m1_expected_granularity_ms": M1_GRANULARITY_MS,
                 "tick_expected_fractional_digits": (
                     EXPECTED_TICK_MILLISECOND_DIGITS
                 ),
@@ -1503,18 +1449,6 @@ def _timestamp_sequence_findings(
                 row_count=sequence.non_monotonic_count,
             )
         )
-    if sequence.m1_duplicate_timestamps:
-        findings.append(
-            _issue_sample_finding(
-                target,
-                code="ASCII_M1_DUPLICATE_TIMESTAMP",
-                message="M1 file contains duplicate normalized timestamps.",
-                severity=QualitySeverity.WARNING,
-                rule_id=ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
-                samples=sequence.m1_duplicate_timestamps,
-                row_count=sequence.m1_duplicate_timestamp_count,
-            )
-        )
     if sequence.tick_duplicate_rows:
         findings.append(
             _issue_sample_finding(
@@ -1526,19 +1460,6 @@ def _timestamp_sequence_findings(
                 rule_id=ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
                 samples=sequence.tick_duplicate_rows,
                 row_count=sequence.tick_duplicate_row_count,
-            )
-        )
-    if scan.m1_granularity_drifts:
-        findings.append(
-            _issue_sample_finding(
-                target,
-                code="ASCII_M1_GRANULARITY_DRIFT",
-                message="M1 timestamp is not aligned to a one-minute "
-                "boundary.",
-                severity=QualitySeverity.ERROR,
-                rule_id=ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
-                samples=scan.m1_granularity_drifts,
-                row_count=scan.m1_granularity_drift_count,
             )
         )
     if scan.tick_precision_mismatches:
@@ -1654,7 +1575,7 @@ def _gap_scan_for_timestamp_scan(
     cached = timestamp_scan.gap_scans.get(key)
     if cached is not None:
         return cached
-    if target.timeframe == "M1" and timestamp_scan.polars_frame is not None:
+    if timestamp_scan.polars_frame is not None:
         gap_scan = _scan_timestamp_gaps_polars(
             timestamp_scan.polars_frame,
             target=target,
@@ -1686,10 +1607,8 @@ def _empty_timestamp_topology_payload(
         "non_monotonic_count": 0,
         "duplicate_timestamp_count": 0,
         "duplicate_timestamp_source_counts": {
-            "m1_duplicate_timestamp": 0,
             "tick_duplicate_row": 0,
         },
-        "m1_duplicate_timestamp_count": 0,
         "tick_duplicate_row_count": 0,
         "min_interval_ms": None,
         "median_interval_ms": None,
@@ -3029,16 +2948,6 @@ def _record_raw_timestamp_shape(
     source_member: str,
     timeframe: str,
 ) -> None:
-    if timeframe == "M1":
-        sample = _m1_granularity_drift_sample(
-            row_number=row_number,
-            timestamp_source=timestamp_source,
-            timestamp_utc_ms=timestamp_utc_ms,
-            source_member=source_member,
-        )
-        if sample is not None:
-            scan.m1_granularity_drift_count += 1
-            _append_issue_sample(scan.m1_granularity_drifts, sample)
     if timeframe == "T":
         sample = _tick_precision_mismatch_sample(
             row_number=row_number,
@@ -3049,45 +2958,6 @@ def _record_raw_timestamp_shape(
         if sample is not None:
             scan.tick_precision_mismatch_count += 1
             _append_issue_sample(scan.tick_precision_mismatches, sample)
-
-
-def _m1_granularity_drift_sample(
-    *,
-    row_number: int,
-    timestamp_source: str,
-    timestamp_utc_ms: int | None,
-    source_member: str,
-) -> _TimestampIssueSample | None:
-    raw = timestamp_source.strip()
-    if len(raw) == 15 and raw[8:9] == " " and raw[13:15] == "00":
-        return None
-
-    parts = _source_timestamp_parts(timestamp_source)
-    if parts is None:
-        return None
-
-    seconds = parts["second"]
-    fraction = parts["fraction"]
-    if seconds == "00" and not fraction:
-        return None
-
-    actual_modulus_ms = (
-        None
-        if timestamp_utc_ms is None
-        else timestamp_utc_ms % M1_GRANULARITY_MS
-    )
-    return _TimestampIssueSample(
-        row_number=row_number,
-        timestamp_source=timestamp_source,
-        timestamp_utc_ms=timestamp_utc_ms,
-        source_member=source_member,
-        metadata={
-            "expected_granularity_ms": M1_GRANULARITY_MS,
-            "actual_modulus_ms": actual_modulus_ms,
-            "source_second": int(seconds),
-            "source_subsecond_digits": fraction,
-        },
-    )
 
 
 def _tick_precision_mismatch_sample(

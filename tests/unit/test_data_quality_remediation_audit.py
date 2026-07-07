@@ -29,7 +29,7 @@ def test_remediation_catalog_audit_accepts_fully_mapped_warning_codes() -> None:
         known_findings=(
             _known(
                 "time.ascii.sequence",
-                "ASCII_M1_DUPLICATE_TIMESTAMP",
+                "ASCII_TICK_DUPLICATE_ROW",
                 QualitySeverity.WARNING,
             ),
         )
@@ -49,12 +49,12 @@ def test_remediation_catalog_audit_reports_mixed_mapped_and_unmapped() -> None:
         known_findings=(
             _known(
                 "time.ascii.sequence",
-                "ASCII_M1_DUPLICATE_TIMESTAMP",
+                "ASCII_TICK_DUPLICATE_ROW",
                 QualitySeverity.WARNING,
             ),
             _known(
-                "time.ascii.sequence",
-                "ASCII_M1_GRANULARITY_DRIFT",
+                "time.ascii.est_no_dst",
+                "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH",
                 QualitySeverity.ERROR,
             ),
             _known(
@@ -70,7 +70,7 @@ def test_remediation_catalog_audit_reports_mixed_mapped_and_unmapped() -> None:
     assert payload["summary"]["unmapped_known_code_count"] == 2
     assert payload["summary"]["unmapped_warning_error_code_count"] == 1
     assert payload["known_unmapped_codes"][0]["finding_code"] == (
-        "ASCII_M1_GRANULARITY_DRIFT"
+        "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH"
     )
     assert payload["known_unmapped_codes"][0]["max_severity"] == "error"
     assert remediation_catalog_audit_has_warning_error_gaps(payload)
@@ -280,14 +280,14 @@ def test_remediation_catalog_audit_ranks_report_only_gaps(
         (
             _finding(
                 tmp_path,
-                "time.ascii.sequence",
-                "ASCII_M1_GRANULARITY_DRIFT",
+                "time.ascii.est_no_dst",
+                "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH",
                 QualitySeverity.ERROR,
             ),
             _finding(
                 tmp_path,
-                "time.ascii.sequence",
-                "ASCII_M1_GRANULARITY_DRIFT",
+                "time.ascii.est_no_dst",
+                "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH",
                 QualitySeverity.ERROR,
             ),
         ),
@@ -302,8 +302,8 @@ def test_remediation_catalog_audit_ranks_report_only_gaps(
 
     assert payload["summary"]["unmapped_warning_error_gap_count"] == 1
     assert ranked[0]["rank"] == 1
-    assert ranked[0]["finding_code"] == "ASCII_M1_GRANULARITY_DRIFT"
-    assert ranked[0]["rule_id"] == "time.ascii.sequence"
+    assert ranked[0]["finding_code"] == "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH"
+    assert ranked[0]["rule_id"] == "time.ascii.est_no_dst"
     assert ranked[0]["source_family"] == "time"
     assert ranked[0]["known_source_occurrence_count"] == 0
     assert ranked[0]["report_occurrence_count"] == 2
@@ -395,13 +395,13 @@ def test_remediation_catalog_audit_uses_report_coverage_and_sanitizes_paths(
             _finding(
                 tmp_path,
                 "time.ascii.sequence",
-                "ASCII_M1_DUPLICATE_TIMESTAMP",
+                "ASCII_TICK_DUPLICATE_ROW",
                 QualitySeverity.WARNING,
             ),
             _finding(
                 tmp_path,
-                "time.ascii.sequence",
-                "ASCII_M1_GRANULARITY_DRIFT",
+                "time.ascii.est_no_dst",
+                "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH",
                 QualitySeverity.ERROR,
             ),
         ),
@@ -430,12 +430,12 @@ def test_remediation_catalog_audit_json_matches_golden_fixture() -> None:
         known_findings=(
             _known(
                 "time.ascii.sequence",
-                "ASCII_M1_DUPLICATE_TIMESTAMP",
+                "ASCII_TICK_DUPLICATE_ROW",
                 QualitySeverity.WARNING,
             ),
             _known(
-                "time.ascii.sequence",
-                "ASCII_M1_GRANULARITY_DRIFT",
+                "time.ascii.est_no_dst",
+                "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH",
                 QualitySeverity.ERROR,
             ),
             _known(
@@ -481,10 +481,10 @@ def _finding(
     severity: QualitySeverity,
 ) -> QualityFinding:
     target = QualityTarget(
-        path=str(tmp_path / "DAT_ASCII_EURUSD_M1_201202.csv"),
+        path=str(tmp_path / "DAT_ASCII_EURUSD_T_201202.csv"),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="EURUSD",
         period="201202",
     )
@@ -502,10 +502,10 @@ def _report_with_findings(
     findings: tuple[QualityFinding, ...],
 ) -> QualityReport:
     target = QualityTarget(
-        path=str(tmp_path / "DAT_ASCII_EURUSD_M1_201202.csv"),
+        path=str(tmp_path / "DAT_ASCII_EURUSD_T_201202.csv"),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="EURUSD",
         period="201202",
     )

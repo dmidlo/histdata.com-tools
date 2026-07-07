@@ -18,7 +18,7 @@ The local Temporal runtime is the production default for ordinary CLI and API
 runs:
 
 ```sh
-histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
 ```
 
 Default requests submit a `RunRequest` through Temporal orchestration and start
@@ -181,7 +181,7 @@ The runtime stores only orchestration state:
 - runtime manifests
 - server and worker logs
 
-Downloaded ZIP files, extracted CSV/XLSX files, cache IPC files, and merged
+Downloaded ZIP files, extracted CSV files, cache IPC files, and merged
 API-return artifacts stay under the existing HistData data-directory policy.
 They are not moved into the orchestration runtime home.
 
@@ -391,7 +391,7 @@ Maintenance is workspace-scoped and only mutates orchestration runtime state:
 - durable runtime manifest/status rows under
   `manifests/.histdatacom/manifest-status.sqlite3`
 
-It does not remove downloaded HistData ZIP files, extracted CSV/XLSX files,
+It does not remove downloaded HistData ZIP files, extracted CSV files,
 cache IPC files, merged API-return artifacts, or files referenced by artifact
 rows. Temporal SQLite history is measured and preserved by default. If it grows
 past the warning threshold, preserve `logs/` and `sqlite/temporal.db` for
@@ -420,7 +420,7 @@ Submit through the default orchestration runtime and start it if no healthy serv
 already running:
 
 ```sh
-histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
 ```
 
 Interactive waited CLI requests render a live Rich progress view while the
@@ -430,13 +430,13 @@ result path.
 Require an already-running runtime instead of autostarting one:
 
 ```sh
-histdatacom --no-orchestration-start -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+histdatacom --no-orchestration-start -p eurusd -f ascii -t tick-data-quotes -s now
 ```
 
 Submit without waiting for the workflow result:
 
 ```sh
-histdatacom --submit-only --no-overlap --schedule-key eurusd-cache -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+histdatacom --submit-only --no-overlap --schedule-key eurusd-cache -p eurusd -f ascii -t tick-data-quotes -s now
 ```
 
 Orchestrated API calls use the same public options and runtime defaults:
@@ -449,7 +449,7 @@ options = Options()
 options.orchestration_wait_result = True
 options.api_return_type = "polars"
 options.formats = {"ascii"}
-options.timeframes = {"1-minute-bar-quotes"}
+options.timeframes = {"tick-data-quotes"}
 options.pairs = {"eurusd"}
 options.start_yearmonth = "now"
 
@@ -594,7 +594,7 @@ The original job snapshot is updated to `retry_requested` or
 `resuming`. Both snapshots carry bounded `control_execution` metadata with the
 parent workflow ID, previous run ID, replacement handle, stage-specific resume
 policy, cleanup decisions, attempt number, and whether complete artifacts should
-be reused. Complete ZIP, CSV/XLSX, and Polars cache artifacts are reused by
+be reused. Complete ZIP, CSV, and Polars cache artifacts are reused by
 default through the existing stage helpers; pass `--recompute-complete` to mark a
 replacement run as explicitly recompute-oriented. Known hidden temp artifacts are
 removed before replacement submission when the stage resume policy says partials
@@ -672,8 +672,8 @@ partition IDs, status events, and artifact references. Rows, dataframes, ZIP
 bytes, and CSV contents stay on disk.
 
 Public cache-only requests (`--build-cache` / `Options.build_cache`) run
-validation, archive download, and `BuildCacheWorkflow` for supported ASCII `M1`
-or tick quote datasets. They deliberately skip `MergeCacheWorkflow` and remove
+validation, archive download, and `BuildCacheWorkflow` for supported ASCII tick
+quote datasets. They deliberately skip `MergeCacheWorkflow` and remove
 ZIP/CSV source artifacts after each `.data` cache is ready.
 
 See `docs/temporal-workflow-topology.md` for the contributor-facing topology
@@ -691,7 +691,7 @@ to avoid promoting partial artifacts:
 | `dataset_plan` | No filesystem side effects | Replay deterministic planning |
 | `validate_urls` | Reuse complete metadata only | Repeat unfinished validation |
 | `download_archives` | Remove temp ZIP files | Reuse complete ZIP/CSV/cache artifacts or redownload |
-| `extract_csv` | Remove temp CSV/XLSX files | Reuse complete CSV/cache artifacts or extract again |
+| `extract_csv` | Remove temp CSV files | Reuse complete CSV/cache artifacts or extract again |
 | `build_cache` | Remove temp IPC cache files | Reuse complete cache or rebuild |
 | `merge_cache` | No promoted partial merged data | Replay merge assembly from complete caches |
 | `import_to_influx` | External bounded batches | Retry idempotent batches from cache metadata |
@@ -777,8 +777,8 @@ Data-quality checks:
 
 - `histdatacom --quality` runs offline against local files and directories and
   submits a `DataQualityWorkflow` to the CPU/file lane. It is the operator path
-  for assessing ZIP archives, extracted CSV files, extracted Excel `.xlsx`
-  payloads, and `.data` cache files that already exist on disk; the workflow
+  for assessing ZIP archives, extracted CSV files, and `.data` cache files that
+  already exist on disk; the workflow
   does not contact HistData.com or InfluxDB.
 - The activity uses a scratch detailed `quality-report` JSON file for
   successful default runs and deletes it after validation. Pass
@@ -820,7 +820,7 @@ Data-quality checks:
   slices. For each slice, run download/extract, then `--repo-quality`; normal
   execution keeps cache artifacts. The `.repo` file and detailed quality reports
   are the durable audit artifacts. When disk pressure requires source cleanup,
-  use `--build-cache` for supported ASCII `M1` or tick quote datasets so the run
+  use `--build-cache` for supported ASCII tick quote datasets so the run
   leaves only canonical `.data` caches. Perform any broader cleanup only after
   `--repo-quality` succeeds and never remove `.repo` or reports. Source
   checkouts whose doctor output reports
@@ -842,23 +842,20 @@ Data-quality checks:
   CI jobs that want warnings to fail should pass
   `--quality-fail-on warning --quality-max-warnings 0`; report-only jobs can
   pass `--quality-fail-on never`.
-- The checks encode HistData-specific assumptions: ASCII M1 files are bid OHLC
-  bars, ASCII tick files include bid and ask, and source timestamps are fixed
-  EST with no daylight-saving adjustment before UTC normalization.
+- The checks encode HistData-specific assumptions: ASCII tick files include bid
+  and ask, and source timestamps are fixed EST with no daylight-saving
+  adjustment before UTC normalization.
 - Format coverage is explicit per target through `quality_support` metadata.
-  ASCII `M1` and `T` artifacts receive parser-level checks. MetaTrader `M1`,
-  NinjaTrader `M1`/`T_LAST`/`T_BID`/`T_ASK`, MetaStock `M1`, and Excel `M1`
-  artifacts are inventory-only today: ZIP integrity and expected filename/member
-  checks are supported, but parser-level content checks emit
-  `HISTDATA_FORMAT_INVENTORY_ONLY` warnings instead of reporting the target as
-  deeply clean. Recognized formats used with unsupported timeframes emit
-  `HISTDATA_FORMAT_UNSUPPORTED`.
+  ASCII `T` artifacts receive parser-level checks. Retired formats and
+  timeframes emit `HISTDATA_FORMAT_UNSUPPORTED` as direct CSV inputs and fail
+  ZIP inventory naming checks when they arrive as unsupported archive/member
+  names.
 
 Example clean focused ingestion run:
 
 ```sh
 histdatacom --quality \
-  --quality-target data/DAT_ASCII_EURUSD_M1_201202.csv \
+  --quality-target data/DAT_ASCII_EURUSD_T_201202.csv \
   --quality-checks ingestion \
   --quality-report reports/quality-clean.json
 ```
@@ -871,7 +868,7 @@ targets: 1 clean: 1 warning: 0 failed: 0
 findings: 1 info: 1 warning: 0 error: 0
 
 Clean files
-- csv: /path/to/data/DAT_ASCII_EURUSD_M1_201202.csv (findings=1, warnings=0, errors=0)
+- csv: /path/to/data/DAT_ASCII_EURUSD_T_201202.csv (findings=1, warnings=0, errors=0)
 
 Warning files
 - none
@@ -932,7 +929,7 @@ Warning files
 - none
 
 Failed files
-- csv: /path/to/data/bad/DAT_ASCII_EURUSD_M1_201202_BAD.csv (findings=2, warnings=0, errors=1)
+- csv: /path/to/data/bad/DAT_ASCII_EURUSD_T_201202_BAD.csv (findings=2, warnings=0, errors=1)
 ```
 
 Representative JSON report fields:

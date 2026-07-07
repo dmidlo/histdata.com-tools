@@ -128,19 +128,19 @@ def test_quality_report_golden_update_workflow_is_documented() -> None:
 
 def _clean_csv_report_payload() -> dict[str, JSONValue]:
     target = _target(
-        path="/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+        path="/quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
         kind=QualityTargetKind.CSV,
-        metadata={"filename": "DAT_ASCII_EURUSD_M1_201202.csv"},
+        metadata={"filename": "DAT_ASCII_EURUSD_T_201202.csv"},
     )
     finding = _finding(
         target,
         severity=QualitySeverity.INFO,
         code="ASCII_SCHEMA_SUMMARY",
-        message="ASCII M1 schema profile.",
+        message="ASCII T schema profile.",
         rule_id="ingestion.ascii.schema",
         metadata={
             "row_count": 3,
-            "columns": ["datetime", "open", "high", "low", "close", "vol"],
+            "columns": ["datetime", "bid", "ask", "vol"],
         },
     )
     return quality_report_payload(
@@ -163,15 +163,15 @@ def _clean_csv_report_payload() -> dict[str, JSONValue]:
 
 def _dirty_csv_report_payload() -> dict[str, JSONValue]:
     target = _target(
-        path="/quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+        path="/quality-fixtures/DAT_ASCII_EURUSD_T_201202_DIRTY.csv",
         kind=QualityTargetKind.CSV,
-        metadata={"filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"},
+        metadata={"filename": "DAT_ASCII_EURUSD_T_201202_DIRTY.csv"},
     )
     duplicate = _finding(
         target,
         severity=QualitySeverity.WARNING,
         code="ASCII_TIMESTAMP_DUPLICATE",
-        message="Duplicate timestamp found in M1 rows.",
+        message="Duplicate timestamp found in T rows.",
         rule_id="time.ascii.timestamp",
         location=QualityLocation(
             path=target.path,
@@ -182,24 +182,23 @@ def _dirty_csv_report_payload() -> dict[str, JSONValue]:
             metadata={"duplicate_of_row": 1},
         ),
     )
-    invalid_ohlc = _finding(
+    negative_spread = _finding(
         target,
         severity=QualitySeverity.ERROR,
-        code="ASCII_M1_OHLC_INVALID",
-        message="M1 OHLC values violate high/low ordering.",
-        rule_id="bars.ascii.m1.ohlc",
+        code="ASCII_TICK_NEGATIVE_SPREAD",
+        message="Tick bid is greater than ask.",
+        rule_id="ticks.ascii.spread",
         location=QualityLocation(
             path=target.path,
             row_number=3,
-            timestamp_source="20120201 000100",
-            timestamp_utc_ms=1328072460000,
-            column="high",
+            timestamp_source="20120201 000003973",
+            timestamp_utc_ms=1328072403973,
+            column="spread",
         ),
         metadata={
-            "open": 1.30657,
-            "high": 1.30647,
-            "low": 1.30656,
-            "close": 1.30656,
+            "bid": 1.3068,
+            "ask": 1.30675,
+            "spread": -0.00005,
         },
     )
     return quality_report_payload(
@@ -212,14 +211,14 @@ def _dirty_csv_report_payload() -> dict[str, JSONValue]:
                     findings=(duplicate,),
                 ),
                 QualityRuleResult(
-                    rule_id="bars.ascii.m1.ohlc",
+                    rule_id="ticks.ascii.spread",
                     target=target,
-                    findings=(invalid_ohlc,),
+                    findings=(negative_spread,),
                 ),
             ),
             metadata={
                 "operation": "data-quality",
-                "check_groups": ["time", "bars"],
+                "check_groups": ["time", "ticks"],
             },
         )
     )
@@ -227,9 +226,9 @@ def _dirty_csv_report_payload() -> dict[str, JSONValue]:
 
 def _corrupt_zip_report_payload() -> dict[str, JSONValue]:
     target = _target(
-        path="/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+        path="/quality-fixtures/DAT_ASCII_EURUSD_T_201202.zip",
         kind=QualityTargetKind.ZIP,
-        metadata={"filename": "DAT_ASCII_EURUSD_M1_201202.zip"},
+        metadata={"filename": "DAT_ASCII_EURUSD_T_201202.zip"},
     )
     finding = _finding(
         target,
@@ -270,7 +269,7 @@ def _coverage_manifest_failure_report_payload() -> dict[str, JSONValue]:
     )
     missing_dimension = {
         "data_format": "ascii",
-        "timeframe": "M1",
+        "timeframe": "T",
         "symbol": "EURUSD",
         "period": "201203",
     }
@@ -316,7 +315,7 @@ def _coverage_manifest_failure_report_payload() -> dict[str, JSONValue]:
 
 def _cache_target_report_payload() -> dict[str, JSONValue]:
     target = _target(
-        path="/quality-fixtures/data/ASCII/M1/eurusd/2012/02/.data",
+        path="/quality-fixtures/data/ASCII/T/eurusd/2012/02/.data",
         kind=QualityTargetKind.CACHE,
         metadata={
             "filename": ".data",
@@ -384,7 +383,7 @@ def _fingerprint_bounded_payload() -> dict[str, JSONValue]:
         operation="data-quality",
         check_groups=("fingerprint",),
         discovery={
-            "roots": ["/quality-fixtures/data/ASCII/M1"],
+            "roots": ["/quality-fixtures/data/ASCII/T"],
             "target_count": 1,
             "metadata": {"supported_kinds": ["zip", "csv", "cache"]},
         },
@@ -396,16 +395,16 @@ def _fingerprint_bounded_payload() -> dict[str, JSONValue]:
 
 def _fingerprint_report() -> QualityReport:
     target = _target(
-        path="/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+        path="/quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
         kind=QualityTargetKind.CSV,
-        metadata={"filename": "DAT_ASCII_EURUSD_M1_201202.csv"},
+        metadata={"filename": "DAT_ASCII_EURUSD_T_201202.csv"},
     )
     fingerprint = _fingerprint_payload(
         {
             "schema_version": TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
             "target_axis": {
                 "data_format": "ascii",
-                "timeframe": "M1",
+                "timeframe": "T",
                 "symbol": "EURUSD",
                 "period": "201202",
                 "kind": "csv",
@@ -417,7 +416,7 @@ def _fingerprint_report() -> QualityReport:
                 "end_timestamp_utc_ms": 1328072520000,
                 "duration_ms": 120000,
             },
-            "m1_bar_distribution": {
+            "tick_distribution": {
                 "row_count": 3,
                 "sampled_row_count": 3,
                 "usable_row_count": 3,
@@ -429,10 +428,8 @@ def _fingerprint_report() -> QualityReport:
                         "6": 12,
                     },
                     "column_decimal_place_counts": {
-                        "open": {"6": 3},
-                        "high": {"6": 3},
-                        "low": {"6": 3},
-                        "close": {"6": 3},
+                        "bid": {"6": 3},
+                        "ask": {"6": 3},
                     },
                 },
             },
@@ -443,10 +440,8 @@ def _fingerprint_report() -> QualityReport:
                 "non_monotonic_count": 0,
                 "duplicate_timestamp_count": 0,
                 "duplicate_timestamp_source_counts": {
-                    "m1_duplicate_timestamp": 0,
                     "tick_duplicate_row": 0,
                 },
-                "m1_duplicate_timestamp_count": 0,
                 "tick_duplicate_row_count": 0,
                 "min_interval_ms": 60000,
                 "median_interval_ms": 60000,
@@ -489,27 +484,27 @@ def _fingerprint_report() -> QualityReport:
                     "coverage",
                     "temporal_topology",
                     "calendar_regimes",
-                    "m1_bar_distribution",
-                    "return_dynamics",
+                    "tick_distribution",
+                    "microstructure_dynamics",
                 ],
                 "sections_emitted": [
                     "coverage",
                     "temporal_topology",
-                    "m1_bar_distribution",
+                    "tick_distribution",
                 ],
                 "sections_skipped": {
                     "calendar_regimes": {"reason": "not_emitted"},
-                    "return_dynamics": {
+                    "microstructure_dynamics": {
                         "reason": "not_emitted",
-                        "details": {"timeframe": "M1"},
+                        "details": {"timeframe": "T"},
                     },
                 },
                 "section_statuses": {
                     "coverage": "valid",
                     "temporal_topology": "valid",
                     "calendar_regimes": "skipped",
-                    "m1_bar_distribution": "valid",
-                    "return_dynamics": "skipped",
+                    "tick_distribution": "valid",
+                    "microstructure_dynamics": "skipped",
                 },
                 "target_capability": {
                     "supported": True,
@@ -522,9 +517,9 @@ def _fingerprint_report() -> QualityReport:
                 },
                 "conditional_distribution_eligibility": {
                     "tick_spread": {
-                        "eligible": False,
-                        "status": "ineligible",
-                        "reason": "unsupported_timeframe",
+                        "eligible": True,
+                        "status": "eligible",
+                        "reason": None,
                     }
                 },
                 "profile_completeness": {
@@ -539,19 +534,15 @@ def _fingerprint_report() -> QualityReport:
                     "calendar_profile_static_advisory": True,
                 },
                 "dynamics_readiness": {
-                    "return_dynamics": {
-                        "status": "skipped",
-                        "reason": "not_emitted",
-                    },
                     "microstructure_dynamics": {
                         "status": "skipped",
-                        "reason": "unsupported_timeframe",
+                        "reason": "not_emitted",
                     },
                 },
             },
             "source": {
                 "kind": "csv_text",
-                "path": "/quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+                "path": "/quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
             },
         }
     )
@@ -608,7 +599,7 @@ def _orchestration_bounded_payload() -> dict[str, JSONValue]:
         operation="data-quality",
         check_groups=("domain",),
         discovery={
-            "roots": ["/quality-fixtures/data/ASCII/M1"],
+            "roots": ["/quality-fixtures/data/ASCII/T"],
             "target_count": 3,
             "metadata": {"supported_kinds": ["zip", "csv", "cache"]},
         },
@@ -620,11 +611,11 @@ def _orchestration_bounded_payload() -> dict[str, JSONValue]:
 
 def _run_scoped_report() -> QualityReport:
     target = _target(
-        path="/quality-fixtures/data/ASCII/M1",
+        path="/quality-fixtures/data/ASCII/T",
         kind=QualityTargetKind.DIRECTORY,
         symbol="",
         period="",
-        metadata={"root": "/quality-fixtures/data/ASCII/M1"},
+        metadata={"root": "/quality-fixtures/data/ASCII/T"},
     )
     finding = _finding(
         target,
@@ -637,7 +628,7 @@ def _run_scoped_report() -> QualityReport:
             metadata={
                 "direct_symbol": "AUDCAD",
                 "period": "2008",
-                "timeframe": "M1",
+                "timeframe": "T",
             },
         ),
         metadata={
@@ -652,7 +643,7 @@ def _run_scoped_report() -> QualityReport:
                     "period": "2008",
                     "relationship": "AUDCHF / CADCHF ~= AUDCAD",
                     "relative_difference": 0.088171312437192,
-                    "timeframe": "M1",
+                    "timeframe": "T",
                     "timestamp_utc_ms": 1212357720000,
                 }
             ],
@@ -679,7 +670,7 @@ def _target(
     path: str,
     kind: QualityTargetKind,
     data_format: str = "ascii",
-    timeframe: str = "M1",
+    timeframe: str = "T",
     symbol: str = "EURUSD",
     period: str = "201202",
     metadata: dict[str, JSONValue] | None = None,
@@ -961,7 +952,6 @@ def _assert_fingerprint_distribution(payload: dict[str, JSONValue]) -> None:
         "included_target_count",
         "invalid_row_target_count",
         "limit_metadata",
-        "m1_bar_distribution_target_count",
         "missing_distribution_target_count",
         "omitted_target_count",
         "partial_row_target_count",
@@ -991,7 +981,6 @@ def _assert_fingerprint_distribution(payload: dict[str, JSONValue]) -> None:
         "empty_distribution_target_count",
         "included_target_count",
         "invalid_row_target_count",
-        "m1_bar_distribution_target_count",
         "missing_distribution_target_count",
         "omitted_target_count",
         "partial_row_target_count",
@@ -1050,7 +1039,7 @@ def _assert_fingerprint_distribution_target(
         "symbol",
         "timeframe",
     }
-    assert payload["distribution_kind"] in {"m1_bar", "missing", "tick"}
+    assert payload["distribution_kind"] in {"missing", "tick"}
     assert payload["status"] in {"available", "missing", "unavailable"}
     assert isinstance(payload["truncated"], bool)
     for key in (
@@ -1181,7 +1170,7 @@ def _assert_fingerprint_distribution_attention_target(
         "sample",
     }
     assert isinstance(payload["attention_flags"], list)
-    assert payload["distribution_kind"] in {"m1_bar", "missing", "tick"}
+    assert payload["distribution_kind"] in {"missing", "tick"}
     for key in (
         "invalid_row_count",
         "negative_spread_count",
@@ -1745,7 +1734,6 @@ def _assert_fingerprint_readiness_target(
         "dependence",
         "microstructure_dynamics",
         "profile_completeness",
-        "return_dynamics",
         "section_skip_reasons",
         "section_statuses",
         "sections_emitted_count",
@@ -1770,7 +1758,6 @@ def _assert_fingerprint_readiness_target(
     assert payload["applicable_dynamics_section"] in {
         "microstructure_dynamics",
         "none",
-        "return_dynamics",
     }
     assert payload["applicable_dynamics_status"] in {
         "limited",
@@ -1794,7 +1781,6 @@ def _assert_fingerprint_readiness_target(
     _assert_fingerprint_readiness_tick_spread(
         _mapping(payload["tick_spread_conditioning"])
     )
-    _assert_fingerprint_readiness_dynamics(_mapping(payload["return_dynamics"]))
     _assert_fingerprint_readiness_dynamics(
         _mapping(payload["microstructure_dynamics"])
     )

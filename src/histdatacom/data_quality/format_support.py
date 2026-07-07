@@ -8,43 +8,23 @@ from typing import Any
 
 from histdatacom.runtime_contracts import JSONValue
 
-DEEP_QUALITY_DIMENSIONS = (("ascii", "M1"), ("ascii", "T"))
+DEEP_QUALITY_DIMENSIONS = (("ascii", "T"),)
 HISTDATA_FORMAT_SUPPORT_RULE_ID = "inventory.format_support"
 
 _FORMAT_CODE_TO_VALUE = {
     "ASCII": "ascii",
-    "MT": "metatrader",
-    "NT": "ninjatrader",
-    "MS": "metastock",
-    "XLSX": "excel",
 }
 _FORMAT_VALUE_TO_CODE = {
     value: code for code, value in _FORMAT_CODE_TO_VALUE.items()
 }
 _SUPPORTED_TIMEFRAMES = {
-    "ascii": ("M1", "T"),
-    "metatrader": ("M1",),
-    "ninjatrader": ("M1", "T_ASK", "T_BID", "T_LAST"),
-    "metastock": ("M1",),
-    "excel": ("M1",),
+    "ascii": ("T",),
 }
 _TIMEFRAME_SCHEMAS = {
-    ("ascii", "M1"): "ascii-m1-bid-ohlcv",
     ("ascii", "T"): "ascii-tick-bid-ask-volume",
-    ("metatrader", "M1"): "metatrader-m1-bid-ohlcv",
-    ("ninjatrader", "M1"): "ninjatrader-m1-bid-ohlcv",
-    ("ninjatrader", "T_LAST"): "ninjatrader-tick-last-volume",
-    ("ninjatrader", "T_BID"): "ninjatrader-tick-bid-volume",
-    ("ninjatrader", "T_ASK"): "ninjatrader-tick-ask-volume",
-    ("metastock", "M1"): "metastock-m1-bid-ohlcv",
-    ("excel", "M1"): "excel-m1-workbook",
 }
 _PAYLOAD_EXTENSIONS = {
     "ASCII": "csv",
-    "MT": "csv",
-    "NT": "csv",
-    "MS": "csv",
-    "XLSX": "xlsx",
 }
 
 
@@ -189,10 +169,10 @@ def quality_support_for_target(
             supported_check_groups=(
                 "ingestion",
                 "time",
-                "bars",
                 "ticks",
                 "domain",
                 "modeling",
+                "fingerprint",
             ),
             message=(
                 "Canonical ASCII cache metadata and typed columns are "
@@ -217,36 +197,12 @@ def quality_support_for_target(
                 "inventory",
                 "ingestion",
                 "time",
-                "bars",
                 "ticks",
                 "domain",
                 "modeling",
+                "fingerprint",
             ),
             message="Parser-level data-quality checks are supported.",
-        )
-
-    if (
-        normalized_format in _SUPPORTED_TIMEFRAMES
-        and normalized_timeframe in supported_timeframes
-    ):
-        return HistDataFormatSupport(
-            data_format=normalized_format,
-            format_code=format_code,
-            timeframe=normalized_timeframe,
-            status="inventory-only",
-            level="inventory",
-            inventory_supported=True,
-            parser_supported=False,
-            canonical_cache_supported=False,
-            payload_extension=payload_extension,
-            schema=schema,
-            supported_timeframes=supported_timeframes,
-            supported_check_groups=("inventory",),
-            message=(
-                "This HistData format/timeframe is recognized for filename "
-                "and ZIP-member inventory only; parser-level content checks "
-                "are not implemented yet."
-            ),
         )
 
     if normalized_format in _SUPPORTED_TIMEFRAMES:

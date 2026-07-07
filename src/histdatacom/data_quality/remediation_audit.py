@@ -1133,7 +1133,6 @@ def _source_family_for_path(path: Path) -> str:
     if name in {"format_support.py", "inventory.py", "manifest.py"}:
         return "inventory"
     family_by_name = {
-        "bars.py": "bars",
         "fingerprints.py": "fingerprint",
         "ingestion.py": "ingestion",
         "modeling.py": "modeling",
@@ -1284,7 +1283,8 @@ def _payload_limit_metadata(
             limit,
             default_limit=limit if isinstance(limit, int) else 0,
         )
-    return limit_state.count_payload(total_count)
+    payload: dict[str, JSONValue] = limit_state.count_payload(total_count)
+    return payload
 
 
 def _bounded_sequence(

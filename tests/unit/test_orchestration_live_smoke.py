@@ -184,7 +184,7 @@ def test_default_live_orchestration_smoke_request_is_minimal_non_influx(
     assert request.extract_csvs is False
     assert request.pairs == ("eurusd",)
     assert request.formats == ("ascii",)
-    assert request.timeframes == ("M1",)
+    assert request.timeframes == ("T",)
 
 
 def test_default_hermetic_orchestration_smoke_request_is_local_only(
@@ -204,7 +204,7 @@ def test_default_hermetic_orchestration_smoke_request_is_local_only(
     assert request.metadata == {"hermetic_orchestration_smoke": True}
     assert request.pairs == ("eurusd",)
     assert request.formats == ("ascii",)
-    assert request.timeframes == ("M1",)
+    assert request.timeframes == ("T",)
 
 
 def test_default_client_routing_orchestration_smoke_request_is_local_only(

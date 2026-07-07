@@ -4697,7 +4697,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         action="append",
         dest="artifact_roots",
-        help="root to scan for transient ZIP/CSV/XLS/XLSX artifacts",
+        help="root to scan for transient ZIP/CSV artifacts",
     )
     parser.add_argument("--report-json", type=Path, help="write JSON report")
     parser.add_argument(

@@ -115,13 +115,13 @@ def test_quality_report_payload_can_preserve_raw_local_paths(
 def test_publish_safe_json_value_sanitizes_nested_path_metadata() -> None:
     """Metadata path fields and embedded local paths should be publishable."""
     payload = {
-        "m1_path": (
-            "/Users/alice/projects/histdata.com-tools/data/ASCII/M1/"
-            "eurusd/2012/DAT_ASCII_EURUSD_M1_2012.csv"
+        "tick_path": (
+            "/Users/alice/projects/histdata.com-tools/data/ASCII/T/"
+            "eurusd/2012/DAT_ASCII_EURUSD_T_2012.csv"
         ),
         "message": (
             "read /Users/alice/projects/histdata.com-tools/"
-            "data/ASCII/M1/eurusd/2012/input.csv"
+            "data/ASCII/T/eurusd/2012/input.csv"
         ),
         "store_root": (
             "/Users/alice/Library/Application Support/histdatacom/"
@@ -131,10 +131,10 @@ def test_publish_safe_json_value_sanitizes_nested_path_metadata() -> None:
 
     safe = publish_safe_json_value(payload)
 
-    assert safe["m1_path"] == (
-        "data/ASCII/M1/eurusd/2012/DAT_ASCII_EURUSD_M1_2012.csv"
+    assert safe["tick_path"] == (
+        "data/ASCII/T/eurusd/2012/DAT_ASCII_EURUSD_T_2012.csv"
     )
-    assert safe["message"] == "read data/ASCII/M1/eurusd/2012/input.csv"
+    assert safe["message"] == "read data/ASCII/T/eurusd/2012/input.csv"
     assert safe["store_root"] == "manifests"
     assert publish_safe_path("/tmp/quality.json") == "quality.json"
 
@@ -348,7 +348,7 @@ def test_quality_report_payload_adds_fingerprint_topology_metadata(
     }
     assert target_summaries[0]["target_axis"] == {
         "data_format": "ascii",
-        "timeframe": "M1",
+        "timeframe": "T",
         "symbol": "EURUSD",
         "period": "201202",
         "kind": "cache",
@@ -389,10 +389,10 @@ def test_quality_report_payload_adds_fingerprint_topology_attention_metadata(
     }
     assert target_summaries[0]["target_axis"] == {
         "data_format": "ascii",
-        "timeframe": "M1",
+        "timeframe": "T",
         "symbol": "EURUSD",
         "period": "201202",
-        "kind": "spreadsheet",
+        "kind": "unknown",
     }
     assert target_summaries[0]["attention_level"] == "unavailable"
     assert target_summaries[0]["attention_flags"] == [
@@ -426,13 +426,12 @@ def test_quality_report_payload_adds_fingerprint_distribution_metadata(
 
     assert summary["target_count"] == 2
     assert summary["distribution_target_count"] == 1
-    assert summary["m1_bar_distribution_target_count"] == 1
-    assert summary["tick_distribution_target_count"] == 0
+    assert summary["tick_distribution_target_count"] == 1
     assert summary["missing_distribution_target_count"] == 0
     assert summary["unavailable_distribution_target_count"] == 1
     assert summary["cache_backed_distribution_target_count"] == 1
     assert summary["text_backed_distribution_target_count"] == 0
-    assert summary["distribution_kind_counts"] == {"m1_bar": 1, "missing": 1}
+    assert summary["distribution_kind_counts"] == {"tick": 1, "missing": 1}
     assert summary["precision_source_counts"] == {
         "cache_float": 1,
         "unavailable": 1,
@@ -465,14 +464,9 @@ def test_quality_report_payload_adds_fingerprint_readiness_metadata(
         "limited": 1,
         "valid": 2,
     }
-    assert summary["dynamics_status_counts"]["return_dynamics"] == {
-        "limited": 1,
-        "skipped": 1,
-        "valid": 1,
-    }
     assert summary["dynamics_status_counts"]["microstructure_dynamics"] == {
-        "skipped": 2,
-        "valid": 1,
+        "limited": 1,
+        "valid": 2,
     }
     assert summary["dependence_status_counts"] == {
         "limited": 1,
@@ -482,11 +476,10 @@ def test_quality_report_payload_adds_fingerprint_readiness_metadata(
         "invalid_timestamps_skipped": 1,
     }
     assert summary["dependence_skipped_lag_reason_counts"] == {
-        "insufficient_sample_count": 4,
-        "zero_variance": 1,
+        "insufficient_sample_count": 3,
     }
-    assert summary["dependence_computed_lag_count"] == 17
-    assert summary["dependence_skipped_lag_count"] == 5
+    assert summary["dependence_computed_lag_count"] == 15
+    assert summary["dependence_skipped_lag_count"] == 3
     assert summary["topology_limitation_counts"] == {
         "duplicate_timestamps": 1,
         "expected_session_closures": 1,
@@ -494,14 +487,10 @@ def test_quality_report_payload_adds_fingerprint_readiness_metadata(
         "non_monotonic_timestamp_order": 1,
         "suspicious_gaps": 1,
     }
-    assert summary["row_order_counts"] == {
-        "cache_order": 1,
-        "source_text_order": 2,
-    }
-    assert summary["cache_source_counts"] == {"direct": 1}
+    assert summary["row_order_counts"] == {"source_text_order": 3}
+    assert summary["cache_source_counts"] == {}
     assert summary["tick_spread_conditioning_status_counts"] == {
-        "eligible": 1,
-        "ineligible": 2,
+        "eligible": 3,
     }
     assert [item["target_axis"]["symbol"] for item in target_summaries] == [
         "GBPUSD",
@@ -510,11 +499,11 @@ def test_quality_report_payload_adds_fingerprint_readiness_metadata(
     ]
 
     limited = target_summaries[0]
-    assert limited["applicable_dynamics_section"] == "return_dynamics"
+    assert limited["applicable_dynamics_section"] == "microstructure_dynamics"
     assert limited["applicable_dynamics_status"] == "limited"
     assert limited["applicable_dynamics_reason"] == "invalid_timestamps_skipped"
     assert limited["topology"]["duplicate_timestamp_count"] == 2
-    assert limited["return_dynamics"]["limitations"] == [
+    assert limited["microstructure_dynamics"]["limitations"] == [
         "invalid_timestamps_skipped",
         "non_monotonic_timestamp_order",
         "duplicate_timestamps",
@@ -526,12 +515,11 @@ def test_quality_report_payload_adds_fingerprint_readiness_metadata(
     assert limited["dependence"]["acf_basis"] == "observed_sequence"
     assert limited["dependence"]["lags"] == [1, 3]
     assert limited["dependence"]["computed_lag_count"] == 3
-    assert limited["dependence"]["skipped_lag_count"] == 5
+    assert limited["dependence"]["skipped_lag_count"] == 3
     assert limited["dependence"]["skipped_lag_reason_counts"] == {
-        "insufficient_sample_count": 4,
-        "zero_variance": 1,
+        "insufficient_sample_count": 3,
     }
-    assert limited["dependence"]["series"]["close_log_return_acf"] == {
+    assert limited["dependence"]["series"]["spread_acf"] == {
         "sample_count": 2,
         "computed_lag_count": 1,
         "skipped_lag_count": 1,
@@ -612,7 +600,7 @@ def test_fingerprint_readiness_summary_handles_absent_dynamics_sections(
     target = summary["target_summaries"][0]
 
     assert summary["applicable_dynamics_status_counts"] == {"skipped": 2}
-    assert summary["dynamics_reason_counts"]["return_dynamics"] == {
+    assert summary["dynamics_reason_counts"]["microstructure_dynamics"] == {
         "not_emitted": 1,
         "unsupported_target_kind": 1,
     }
@@ -621,8 +609,8 @@ def test_fingerprint_readiness_summary_handles_absent_dynamics_sections(
         "not_emitted": 1,
         "unsupported_target_kind": 1,
     }
-    assert target["applicable_dynamics_section"] == "return_dynamics"
-    assert target["return_dynamics"] == {
+    assert target["applicable_dynamics_section"] == "microstructure_dynamics"
+    assert target["microstructure_dynamics"] == {
         "status": "skipped",
         "reason": "not_emitted",
         "basis": "unknown",
@@ -655,7 +643,7 @@ def test_fingerprint_readiness_risk_summary_handles_missing_sections(
     assert summary["risk_target_count"] == 2
     assert summary["reason_counts"]["not_emitted"] == 4
     assert summary["reason_counts"]["unsupported_target_kind"] == 3
-    assert summary["target_risks"][0]["target_axis"]["kind"] == "spreadsheet"
+    assert summary["target_risks"][0]["target_axis"]["kind"] == "unknown"
     assert (
         "unsupported_target_kind" in summary["target_risks"][0]["reason_codes"]
     )
@@ -674,14 +662,14 @@ def test_fingerprint_console_summary_reports_readiness_lines(
     assert "- targets: 3 included: 3 omitted: 0" in output
     assert "- applicable dynamics statuses: limited=1, valid=2" in output
     assert (
-        "- return dynamics: limited=1, skipped=1, valid=1 "
-        "reasons: invalid_timestamps_skipped=1, unsupported_timeframe=1"
+        "- microstructure dynamics: limited=1, valid=2 "
+        "reasons: invalid_timestamps_skipped=1"
     ) in output
     assert (
         "- dependence: limited=1, valid=2 reasons: "
         "invalid_timestamps_skipped=1 skipped-lag reasons: "
-        "insufficient_sample_count=4, zero_variance=1 "
-        "acf_basis: observed_sequence=3 computed_lags=17 skipped_lags=5"
+        "insufficient_sample_count=3 "
+        "acf_basis: observed_sequence=3 computed_lags=15 skipped_lags=3"
     ) in output
     assert (
         "- topology limitations: duplicate_timestamps=1, "
@@ -694,7 +682,7 @@ def test_fingerprint_console_summary_reports_readiness_lines(
         "non_monotonic_timestamp_order=1, suspicious_gaps=1"
     ) in output
     assert (
-        "- ascii GBPUSD M1 201202 csv: return_dynamics limited, "
+        "- ascii GBPUSD T 201202 csv: microstructure_dynamics limited, "
         "reason=invalid_timestamps_skipped"
     ) in output
     assert "row_order=source_text_order" in output
@@ -702,14 +690,13 @@ def test_fingerprint_console_summary_reports_readiness_lines(
         "limitations=invalid_timestamps_skipped, non_monotonic_timestamp_order"
         in output
     )
-    assert "close_returns=3 median=0.0001" in output
+    assert "spread_jumps=1 rate=0.333" in output
     assert (
         "dependence=limited reason=invalid_timestamps_skipped "
         "acf_basis=observed_sequence lags=[1,3] computed_lags=3 "
-        "skipped_lags=5 skipped_reasons=insufficient_sample_count=4, "
-        "zero_variance=1"
+        "skipped_lags=3 skipped_reasons=insufficient_sample_count=3"
     ) in output
-    assert "close_log_return_acf:samples=2/computed=1/skipped=1" in output
+    assert "spread_acf:samples=2/computed=1/skipped=1" in output
     assert (
         "- ascii EURUSD T 201202 csv: microstructure_dynamics valid"
     ) in output
@@ -729,7 +716,7 @@ def test_fingerprint_console_summary_reports_readiness_risk_lines(
 
     assert "Fingerprint readiness risk" in output
     assert "- targets: 3 risk: 3 clean: 0 included: 3 omitted: 0" in output
-    assert "#1 ascii GBPUSD M1 201202 csv: high" in output
+    assert "#1 ascii GBPUSD T 201202 csv: high" in output
     assert "reasons=duplicate_timestamps" in output
     assert "invalid_timestamps_skipped" in output
     assert "skipped_dependence_lags" in output
@@ -757,7 +744,7 @@ def test_quality_report_payload_adds_mixed_next_actions(
     actions = next_actions["actions"]
     assert [action["code"] for action in actions] == [
         "verify_fingerprint_source",
-        "inspect_duplicate_timestamp_rows",
+        "inspect_duplicate_tick_rows",
     ]
     assert actions[0]["urgency"] == "high"
     assert actions[0]["max_attention_level"] == "unavailable"
@@ -766,13 +753,13 @@ def test_quality_report_payload_adds_mixed_next_actions(
     assert actions[1]["max_severity"] == "warning"
     assert actions[1]["severity_counts"] == {"warning": 1}
     assert actions[1]["finding_code_counts"] == {
-        "ASCII_M1_DUPLICATE_TIMESTAMP": 1,
+        "ASCII_TICK_DUPLICATE_ROW": 1,
     }
     assert actions[1]["target_axis_counts"] == [
         {
             "target_axis": {
                 "data_format": "ascii",
-                "timeframe": "M1",
+                "timeframe": "T",
                 "symbol": "EURUSD",
                 "period": "201202",
                 "kind": "csv",
@@ -809,7 +796,7 @@ def test_quality_next_actions_are_bounded_and_stably_ordered(
     assert axis_summary["included_action_count"] == 1
     assert axis_summary["omitted_action_count"] == 0
     action = axis_summary["actions"][0]
-    assert action["code"] == "inspect_duplicate_timestamp_rows"
+    assert action["code"] == "inspect_duplicate_tick_rows"
     assert action["occurrence_count"] == 3
     assert action["affected_target_count"] == 2
     assert action["target_axis_count"] == 2
@@ -879,7 +866,7 @@ def test_quality_report_payload_adds_all_mapped_remediation_coverage(
     assert coverage["mapped_finding_count"] == 3
     assert coverage["unmapped_finding_count"] == 0
     assert coverage["mapped_finding_code_counts"] == [
-        {"finding_code": "ASCII_M1_DUPLICATE_TIMESTAMP", "count": 3},
+        {"finding_code": "ASCII_TICK_DUPLICATE_ROW", "count": 3},
     ]
     assert coverage["unmapped_groups"] == []
 
@@ -1092,8 +1079,8 @@ def test_fingerprint_console_summary_reports_coverage_counts(
     assert "- source kinds: cache=1, unavailable=1" in output
     assert "- cache sources: direct=1" in output
     assert "- unavailable reasons: unsupported_target_kind=1" in output
-    assert "- target kinds: cache=1, spreadsheet=1" in output
-    assert "- timeframes: M1=2" in output
+    assert "- target kinds: cache=1, unknown=1" in output
+    assert "- timeframes: T=2" in output
 
 
 def test_fingerprint_console_summary_reports_topology_lines(
@@ -1109,7 +1096,7 @@ def test_fingerprint_console_summary_reports_topology_lines(
     assert "Fingerprint topology attention" in output
     assert "- targets needing attention: 1 included: 1 omitted: 0" in output
     assert (
-        "- ascii EURUSD M1 201202 spreadsheet: unavailable, "
+        "- ascii EURUSD T 201202 unknown: unavailable, "
         "unavailable_topology, invalid=0, duplicates=0, non-monotonic=0, "
         "suspicious gaps=0, weekend activity=0, max gap unavailable, "
         "computed_from=unavailable, "
@@ -1119,14 +1106,14 @@ def test_fingerprint_console_summary_reports_topology_lines(
         "- targets: 2 included: 2 regular: 1 irregular: 0 unavailable: 1"
     ) in output
     assert (
-        "- ascii EURUSD M1 201202 cache: regular, observed_sequence, "
+        "- ascii EURUSD T 201202 cache: regular, observed_sequence, "
         "3 rows, 3 parsed, no duplicates, non-monotonic=0, "
         "median interval 60s, max gap 60s, 0 expected closures, "
         "0 suspicious gaps, weekend activity=0, "
         "computed_from=direct_cache, cache=direct"
     ) in output
     assert (
-        "- ascii EURUSD M1 201202 spreadsheet: unavailable, unavailable, "
+        "- ascii EURUSD T 201202 unknown: unavailable, unavailable, "
         "0 rows, unknown parsed, no duplicates, non-monotonic=0, "
         "median interval unavailable, max gap unavailable, "
         "0 expected closures, 0 suspicious gaps, weekend activity=0, "
@@ -1154,18 +1141,16 @@ def test_fingerprint_console_summary_reports_distribution_lines(
         "cache_float_precision=true"
     ) in output
     assert (
-        "- ascii EURUSD M1 201202 cache: precision, m1_bar, "
+        "- ascii EURUSD T 201202 cache: precision, tick, "
         "cache_float_precision_basis, rows=3, usable=3, invalid=0, "
         "sampled=3, zero spread=unavailable, negative spread=unavailable, "
         "precision=cache_float, source=cache, cache=direct"
     ) in output
-    assert (
-        "- targets: 2 with distributions: 1 m1: 1 tick: 0 missing: 0" in output
-    )
+    assert "- targets: 2 with distributions: 1 tick: 1 missing: 0" in output
     assert "- sources: cache=1, unavailable=1" in output
     assert "- precision sources: cache_float=1, unavailable=1" in output
     assert (
-        "- ascii EURUSD M1 201202 cache: available, m1_bar, 3 rows, "
+        "- ascii EURUSD T 201202 cache: available, tick, 3 rows, "
         "3 usable, 0 invalid, 3 sampled, truncated=false, "
         "precision=cache_float, source=cache, cache=direct"
     ) in output
@@ -1188,8 +1173,8 @@ def test_quality_console_summary_renders_next_actions(
         "attention=unavailable)"
     ) in output
     assert (
-        "- medium inspect: inspect duplicate timestamp rows "
-        "(inspect_duplicate_timestamp_rows, rule=time.ascii.sequence, "
+        "- medium inspect: inspect duplicate tick rows "
+        "(inspect_duplicate_tick_rows, rule=time.ascii.sequence, "
         "targets=1, severity=warning)"
     ) in output
 
@@ -1260,7 +1245,7 @@ def test_bounded_quality_payload_includes_fingerprint_distribution(
     )
 
     assert payload["fingerprint_distribution"]["distribution_kind_counts"] == {
-        "m1_bar": 1,
+        "tick": 1,
         "missing": 1,
     }
     assert payload["fingerprint_distribution_attention"][
@@ -1357,8 +1342,9 @@ def test_bounded_quality_payload_includes_fingerprint_readiness(
     assert readiness["target_summaries"][0]["target_axis"]["symbol"] == (
         "GBPUSD"
     )
-    assert readiness["target_summaries"][0]["return_dynamics"]["truncated"] is (
-        True
+    assert (
+        readiness["target_summaries"][0]["microstructure_dynamics"]["truncated"]
+        is True
     )
 
 
@@ -1405,15 +1391,14 @@ def test_fingerprint_regime_summary_reports_calendar_and_conditioning(
     assert summary["rule_id"] == SERIES_FINGERPRINT_RULE_ID
     assert summary["target_count"] == 4
     assert summary["calendar_regime_target_count"] == 3
-    assert summary["conditional_distribution_target_count"] == 1
+    assert summary["conditional_distribution_target_count"] == 3
     assert summary["calendar_status_counts"] == {
         "available": 3,
         "missing": 1,
     }
     assert summary["conditional_status_counts"] == {
         "absent": 1,
-        "available": 1,
-        "not_applicable": 2,
+        "available": 3,
     }
     assert summary["calendar_profile"] == {
         "complete_count": 1,
@@ -1436,6 +1421,7 @@ def test_fingerprint_regime_summary_reports_calendar_and_conditioning(
         for item in summary["target_summaries"]
         if item["target_axis"]["timeframe"] == "T"
         and item["target_axis"]["symbol"] == "EURUSD"
+        and item["conditional_distributions"]["basis"] == "text"
     )
     conditional = tick["conditional_distributions"]
 
@@ -1485,7 +1471,7 @@ def test_bounded_quality_payload_includes_fingerprint_regimes(
         "available": 3,
         "missing": 1,
     }
-    assert regimes["conditional_status_counts"]["available"] == 1
+    assert regimes["conditional_status_counts"]["available"] == 3
     assert regimes["target_summaries"][0]["target_axis"]["symbol"] == "AUDUSD"
 
 
@@ -1500,7 +1486,7 @@ def test_quality_console_summary_renders_fingerprint_regimes(
 
     assert "Fingerprint regimes" in output
     assert "- calendar statuses: available=3, missing=1" in output
-    assert "conditioned-spread: 1" in output
+    assert "conditioned-spread: 3" in output
     assert "profile=static_month_day_major_holidays/1" in output
     assert "conditioned_spread=text rows=3 usable=3" in output
     assert "london:n=2/median=0.0002/p95=0.0003" in output
@@ -1560,7 +1546,7 @@ def test_fingerprint_readiness_summary_orders_limited_dependence_first(
         path=str(tmp_path / "limited-dependence.csv"),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="AUDUSD",
         period="201202",
     )
@@ -1568,11 +1554,11 @@ def test_fingerprint_readiness_summary_orders_limited_dependence_first(
         path=str(tmp_path / "valid-dependence.csv"),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="EURUSD",
         period="201202",
     )
-    limited_payload = _valid_m1_fingerprint_payload(kind="csv")
+    limited_payload = _valid_tick_fingerprint_payload(kind="csv")
     axis = limited_payload["target_axis"]
     assert isinstance(axis, dict)
     axis["symbol"] = "AUDUSD"
@@ -1596,7 +1582,7 @@ def test_fingerprint_readiness_summary_orders_limited_dependence_first(
     section_statuses = audit["section_statuses"]
     assert isinstance(section_statuses, dict)
     section_statuses["dependence"] = "limited"
-    valid_payload = _valid_m1_fingerprint_payload(kind="csv")
+    valid_payload = _valid_tick_fingerprint_payload(kind="csv")
 
     summary = series_fingerprint_readiness_summary(
         (
@@ -1815,9 +1801,9 @@ def _mixed_report(tmp_path: Path) -> QualityReport:
     failed = _target(tmp_path / "failed.csv")
     warning_finding = QualityFinding(
         severity=QualitySeverity.WARNING,
-        code="M1_DUPLICATE_TIMESTAMP",
-        message="duplicate minute bar timestamp",
-        rule_id="m1.timestamp.unique",
+        code="TICK_DUPLICATE_ROW",
+        message="duplicate tick row",
+        rule_id="tick.timestamp.unique",
         target=warning,
         location=QualityLocation(
             path=warning.path,
@@ -1840,7 +1826,7 @@ def _mixed_report(tmp_path: Path) -> QualityReport:
         rule_results=(
             QualityRuleResult(rule_id="file.exists", target=clean),
             QualityRuleResult(
-                rule_id="m1.timestamp.unique",
+                rule_id="tick.timestamp.unique",
                 target=warning,
                 findings=(warning_finding,),
             ),
@@ -1861,8 +1847,8 @@ def _remediation_catalog_audit_report(
     target = _target(tmp_path / "catalog-audit.csv")
     mapped = QualityFinding(
         severity=QualitySeverity.WARNING,
-        code="ASCII_M1_DUPLICATE_TIMESTAMP",
-        message="duplicate minute bar timestamp",
+        code="ASCII_TICK_DUPLICATE_ROW",
+        message="duplicate tick row",
         rule_id="time.ascii.sequence",
         target=target,
     )
@@ -1907,15 +1893,15 @@ def _fingerprint_report(tmp_path: Path) -> QualityReport:
         path=str(tmp_path / ".data"),
         kind=QualityTargetKind.CACHE,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="EURUSD",
         period="201202",
     )
     unavailable = QualityTarget(
-        path=str(tmp_path / "unsupported.xlsx"),
-        kind=QualityTargetKind.SPREADSHEET,
+        path=str(tmp_path / "unsupported.bin"),
+        kind=QualityTargetKind.UNKNOWN,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="EURUSD",
         period="201202",
     )
@@ -1929,13 +1915,13 @@ def _fingerprint_report(tmp_path: Path) -> QualityReport:
             "time_series_fingerprint": {
                 "target_axis": {
                     "kind": "cache",
-                    "timeframe": "M1",
+                    "timeframe": "T",
                 },
                 "coverage": {
                     "row_count": 3,
                     "parsed_row_count": 3,
                 },
-                "m1_bar_distribution": {
+                "tick_distribution": {
                     "row_count": 3,
                     "sampled_row_count": 3,
                     "usable_row_count": 3,
@@ -1977,8 +1963,8 @@ def _fingerprint_report(tmp_path: Path) -> QualityReport:
         metadata={
             "time_series_fingerprint": {
                 "target_axis": {
-                    "kind": "spreadsheet",
-                    "timeframe": "M1",
+                    "kind": "unknown",
+                    "timeframe": "T",
                 },
                 "coverage": {
                     "row_count": 0,
@@ -2024,19 +2010,19 @@ def _fingerprint_report(tmp_path: Path) -> QualityReport:
 
 
 def _fingerprint_dynamics_report(tmp_path: Path) -> QualityReport:
-    valid_m1 = QualityTarget(
+    valid_tick = QualityTarget(
         path=str(tmp_path / "valid.data"),
         kind=QualityTargetKind.CACHE,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="EURUSD",
         period="201202",
     )
-    limited_m1 = QualityTarget(
+    limited_tick = QualityTarget(
         path=str(tmp_path / "limited.csv"),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="GBPUSD",
         period="201202",
     )
@@ -2050,17 +2036,17 @@ def _fingerprint_dynamics_report(tmp_path: Path) -> QualityReport:
     )
     findings = (
         _fingerprint_series_finding(
-            valid_m1,
-            _valid_m1_fingerprint_payload(kind="cache"),
+            valid_tick,
+            _valid_tick_fingerprint_payload(kind="cache"),
         ),
         _fingerprint_series_finding(
-            limited_m1,
-            _limited_m1_fingerprint_payload(),
+            limited_tick,
+            _limited_tick_fingerprint_payload(),
         ),
         _fingerprint_series_finding(tick, _tick_fingerprint_payload()),
     )
     return QualityReport(
-        targets=(valid_m1, limited_m1, tick),
+        targets=(valid_tick, limited_tick, tick),
         rule_results=tuple(
             QualityRuleResult(
                 rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -2073,19 +2059,19 @@ def _fingerprint_dynamics_report(tmp_path: Path) -> QualityReport:
 
 
 def _fingerprint_regime_report(tmp_path: Path) -> QualityReport:
-    missing_m1 = QualityTarget(
+    missing_tick = QualityTarget(
         path=str(tmp_path / "missing-calendar.csv"),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="AUDUSD",
         period="201202",
     )
-    valid_m1 = QualityTarget(
+    valid_tick = QualityTarget(
         path=str(tmp_path / "calendar.csv"),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="EURUSD",
         period="201202",
     )
@@ -2106,12 +2092,12 @@ def _fingerprint_regime_report(tmp_path: Path) -> QualityReport:
         period="201202",
     )
 
-    missing_payload = _valid_m1_fingerprint_payload(kind="csv")
+    missing_payload = _valid_tick_fingerprint_payload(kind="csv")
     _set_payload_axis(missing_payload, symbol="AUDUSD", kind="csv")
     missing_payload.pop("calendar_regimes", None)
 
-    m1_payload = _valid_m1_fingerprint_payload(kind="csv")
-    m1_payload["calendar_regimes"] = _calendar_regimes_payload(
+    tick_payload = _valid_tick_fingerprint_payload(kind="csv")
+    tick_payload["calendar_regimes"] = _calendar_regimes_payload(
         row_count=10,
         parsed_row_count=10,
         session_state_counts={"market_open": 8, "weekend_closure": 2},
@@ -2170,13 +2156,13 @@ def _fingerprint_regime_report(tmp_path: Path) -> QualityReport:
     absent_payload.pop("conditional_distributions", None)
 
     findings = (
-        _fingerprint_series_finding(missing_m1, missing_payload),
-        _fingerprint_series_finding(valid_m1, m1_payload),
+        _fingerprint_series_finding(missing_tick, missing_payload),
+        _fingerprint_series_finding(valid_tick, tick_payload),
         _fingerprint_series_finding(conditioned_tick, conditioned_payload),
         _fingerprint_series_finding(absent_tick, absent_payload),
     )
     return QualityReport(
-        targets=(missing_m1, valid_m1, conditioned_tick, absent_tick),
+        targets=(missing_tick, valid_tick, conditioned_tick, absent_tick),
         rule_results=tuple(
             QualityRuleResult(
                 rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -2285,101 +2271,21 @@ def _fingerprint_series_finding(
     )
 
 
-def _valid_m1_fingerprint_payload(*, kind: str) -> dict[str, object]:
-    return {
-        "target_axis": {
-            "data_format": "ascii",
-            "timeframe": "M1",
-            "symbol": "EURUSD",
-            "period": "201202",
-            "kind": kind,
-        },
-        "coverage": {"row_count": 4, "parsed_row_count": 4},
-        "temporal_topology": _topology_payload(
-            computed_from="direct_cache",
-            cache_source="direct",
-        ),
-        "m1_bar_distribution": {"row_count": 4, "usable_row_count": 4},
-        "return_dynamics": {
-            "basis": "observed_sequence",
-            "row_order": "cache_order",
-            "computed_from": "direct_cache",
-            "cache_source": "direct",
-            "regular_grid": False,
-            "sequence_status": "ok",
-            "limitations": [],
-            "row_count": 4,
-            "sampled_row_count": 4,
-            "usable_row_count": 4,
-            "invalid_row_count": 0,
-            "partial_row_count": 0,
-            "truncated": False,
-            "close_log_return": _numeric(count=3, median=0.0001),
-            "absolute_return": _numeric(count=3, median=0.0001, p95=0.0003),
-            "squared_return": _numeric(count=3, median=0.0),
-            "open_jump": _numeric(count=3, median=0.0, p95=0.0002),
-            "flatline": {
-                "zero_return_count": 1,
-                "zero_return_rate": 0.333333333333,
-                "zero_return_run_count": 1,
-                "ohlc_flatline_row_count": 0,
-                "ohlc_flatline_rate": 0.0,
-                "ohlc_flatline_run_count": 0,
-                "ohlc_flatline_affected_row_count": 0,
-            },
-        },
-        "dependence": _dependence_payload(
-            status="ok",
-            row_order="cache_order",
-            computed_from="direct_cache",
-            cache_source="direct",
-            row_count=4,
-            sampled_row_count=4,
-            usable_row_count=4,
-            series={
-                "absolute_return_acf": _acf_payload(sample_count=3, computed=2),
-                "close_log_return_acf": _acf_payload(
-                    sample_count=3,
-                    computed=2,
-                ),
-                "range_ratio_acf": _acf_payload(sample_count=4, computed=2),
-                "squared_return_acf": _acf_payload(sample_count=3, computed=2),
-            },
-        ),
-        "fingerprint_audit": _audit_payload(
-            expected=(
-                "coverage",
-                "temporal_topology",
-                "calendar_regimes",
-                "m1_bar_distribution",
-                "return_dynamics",
-                "dependence",
-            ),
-            emitted=(
-                "coverage",
-                "temporal_topology",
-                "m1_bar_distribution",
-                "return_dynamics",
-                "dependence",
-            ),
-            skipped={"calendar_regimes": "not_emitted"},
-            section_statuses={
-                "coverage": "valid",
-                "temporal_topology": "valid",
-                "calendar_regimes": "skipped",
-                "m1_bar_distribution": "valid",
-                "return_dynamics": "valid",
-                "dependence": "valid",
-            },
-            return_status="valid",
-            micro_status="skipped",
-            micro_reason="unsupported_timeframe",
-        ),
-        "source": {"kind": "cache", "cache_source": "direct"},
-    }
+def _valid_tick_fingerprint_payload(*, kind: str) -> dict[str, object]:
+    payload = _tick_fingerprint_payload()
+    target_axis = payload["target_axis"]
+    assert isinstance(target_axis, dict)
+    target_axis["kind"] = kind
+    if kind == "cache":
+        topology = payload["temporal_topology"]
+        assert isinstance(topology, dict)
+        topology["computed_from"] = "direct_cache"
+        topology["cache_source"] = "direct"
+        payload["source"] = {"kind": "cache", "cache_source": "direct"}
+    return payload
 
 
-def _limited_m1_fingerprint_payload() -> dict[str, object]:
+def _limited_tick_fingerprint_payload() -> dict[str, object]:
     limitations = [
         "invalid_timestamps_skipped",
         "non_monotonic_timestamp_order",
@@ -2387,120 +2293,148 @@ def _limited_m1_fingerprint_payload() -> dict[str, object]:
         "suspicious_gaps",
         "expected_session_closures",
     ]
-    return {
-        "target_axis": {
-            "data_format": "ascii",
-            "timeframe": "M1",
-            "symbol": "GBPUSD",
-            "period": "201202",
-            "kind": "csv",
-        },
-        "coverage": {"row_count": 4, "parsed_row_count": 3},
-        "temporal_topology": _topology_payload(
-            invalid_timestamp_count=1,
-            duplicate_timestamp_count=2,
-            non_monotonic_count=1,
-            suspicious_gap_count=1,
-            expected_session_closure_count=1,
+    payload = _tick_fingerprint_payload()
+    target_axis = payload["target_axis"]
+    assert isinstance(target_axis, dict)
+    target_axis["symbol"] = "GBPUSD"
+    payload["coverage"] = {"row_count": 4, "parsed_row_count": 3}
+    payload["temporal_topology"] = _topology_payload(
+        invalid_timestamp_count=1,
+        duplicate_timestamp_count=2,
+        non_monotonic_count=1,
+        suspicious_gap_count=1,
+        expected_session_closure_count=1,
+    )
+    payload["tick_distribution"] = {"row_count": 4, "usable_row_count": 3}
+    payload["microstructure_dynamics"] = {
+        "basis": "observed_sequence",
+        "row_order": "source_text_order",
+        "computed_from": "text_scan",
+        "cache_source": None,
+        "regular_grid": False,
+        "sequence_status": "limited",
+        "limitations": limitations,
+        "row_count": 4,
+        "sampled_row_count": 3,
+        "usable_row_count": 3,
+        "invalid_row_count": 1,
+        "partial_row_count": 1,
+        "truncated": True,
+        "interarrival_ms": _numeric(count=3, median=250.0, p95=500.0),
+        "spread": _numeric(count=4, median=0.0002, p95=0.0008),
+        "spread_change": _numeric(count=3, median=0.0, p95=0.0004),
+        "absolute_spread_change": _numeric(
+            count=3,
+            median=0.0001,
+            p95=0.0004,
         ),
-        "m1_bar_distribution": {"row_count": 4, "usable_row_count": 3},
-        "return_dynamics": {
-            "basis": "observed_sequence",
+        "spread_jump": {
+            "threshold": 0.0002,
+            "count": 1,
+            "rate": 0.333333333333,
+        },
+        "stale_quote": {
+            "repeat_count": 0,
+            "repeat_rate": 0.0,
+            "run_count": 0,
+            "affected_row_count": 0,
+        },
+        "burst": {
+            "interval_count": 0,
+            "burst_rate": 0.0,
+            "run_count": 0,
+            "tick_count": 0,
+        },
+        "one_sided_movement": {
+            "count": 0,
+            "rate": 0.0,
+            "bid_only_count": 0,
+            "ask_only_count": 0,
+            "run_count": 0,
+        },
+    }
+    payload["dependence"] = _dependence_payload(
+        status="limited",
+        reason="invalid_timestamps_skipped",
+        limitations=tuple(limitations),
+        row_count=4,
+        sampled_row_count=3,
+        usable_row_count=3,
+        invalid_row_count=1,
+        partial_row_count=1,
+        truncated=True,
+        series={
+            "absolute_spread_change_acf": _acf_payload(
+                sample_count=3,
+                computed=1,
+                skipped={"3": "insufficient_sample_count"},
+            ),
+            "spread_acf": _acf_payload(
+                sample_count=2,
+                computed=1,
+                skipped={"3": "insufficient_sample_count"},
+            ),
+            "spread_change_acf": _acf_payload(
+                sample_count=3,
+                computed=1,
+                skipped={"3": "insufficient_sample_count"},
+            ),
+        },
+    )
+    payload["fingerprint_audit"] = _audit_payload(
+        expected=(
+            "coverage",
+            "temporal_topology",
+            "calendar_regimes",
+            "tick_distribution",
+            "conditional_distributions",
+            "microstructure_dynamics",
+            "dependence",
+        ),
+        emitted=(
+            "coverage",
+            "temporal_topology",
+            "tick_distribution",
+            "microstructure_dynamics",
+            "dependence",
+        ),
+        skipped={"calendar_regimes": "not_emitted"},
+        section_statuses={
+            "coverage": "valid",
+            "temporal_topology": "limited",
+            "calendar_regimes": "skipped",
+            "tick_distribution": "valid",
+            "conditional_distributions": "skipped",
+            "microstructure_dynamics": "limited",
+            "dependence": "limited",
+        },
+        micro_status="limited",
+        micro_reason="invalid_timestamps_skipped",
+        tick_spread_status="eligible",
+        tick_spread_eligible=True,
+        tick_spread_emitted=False,
+    )
+    audit = payload["fingerprint_audit"]
+    assert isinstance(audit, dict)
+    readiness = audit["dynamics_readiness"]
+    assert isinstance(readiness, dict)
+    micro_readiness = readiness["microstructure_dynamics"]
+    assert isinstance(micro_readiness, dict)
+    micro_readiness.update(
+        {
             "row_order": "source_text_order",
             "computed_from": "text_scan",
-            "cache_source": None,
-            "regular_grid": False,
-            "sequence_status": "limited",
-            "limitations": limitations,
+            "limitations": list(limitations),
             "row_count": 4,
             "sampled_row_count": 3,
             "usable_row_count": 3,
             "invalid_row_count": 1,
             "partial_row_count": 1,
             "truncated": True,
-            "close_log_return": _numeric(count=3, median=0.0001),
-            "absolute_return": _numeric(count=3, median=0.0002, p95=0.0008),
-            "squared_return": _numeric(count=3, median=0.0),
-            "open_jump": _numeric(count=3, median=0.0001, p95=0.0004),
-            "flatline": {
-                "zero_return_count": 0,
-                "zero_return_rate": 0.0,
-                "zero_return_run_count": 0,
-                "ohlc_flatline_row_count": 2,
-                "ohlc_flatline_rate": 0.5,
-                "ohlc_flatline_run_count": 1,
-                "ohlc_flatline_affected_row_count": 2,
-            },
-        },
-        "dependence": _dependence_payload(
-            status="limited",
-            reason="invalid_timestamps_skipped",
-            limitations=tuple(limitations),
-            row_count=4,
-            sampled_row_count=3,
-            usable_row_count=3,
-            invalid_row_count=1,
-            partial_row_count=1,
-            truncated=True,
-            series={
-                "absolute_return_acf": _acf_payload(
-                    sample_count=3,
-                    computed=1,
-                    skipped={"3": "insufficient_sample_count"},
-                ),
-                "close_log_return_acf": _acf_payload(
-                    sample_count=2,
-                    computed=1,
-                    skipped={"3": "insufficient_sample_count"},
-                ),
-                "range_ratio_acf": _acf_payload(
-                    sample_count=3,
-                    computed=1,
-                    skipped={"3": "insufficient_sample_count"},
-                ),
-                "squared_return_acf": _acf_payload(
-                    sample_count=3,
-                    computed=0,
-                    skipped={
-                        "1": "zero_variance",
-                        "3": "insufficient_sample_count",
-                    },
-                ),
-            },
-        ),
-        "fingerprint_audit": _audit_payload(
-            expected=(
-                "coverage",
-                "temporal_topology",
-                "calendar_regimes",
-                "m1_bar_distribution",
-                "return_dynamics",
-                "dependence",
-            ),
-            emitted=(
-                "coverage",
-                "temporal_topology",
-                "m1_bar_distribution",
-                "return_dynamics",
-                "dependence",
-            ),
-            skipped={"calendar_regimes": "not_emitted"},
-            section_statuses={
-                "coverage": "valid",
-                "temporal_topology": "limited",
-                "calendar_regimes": "skipped",
-                "m1_bar_distribution": "valid",
-                "return_dynamics": "limited",
-                "dependence": "limited",
-            },
-            return_status="limited",
-            return_reason="invalid_timestamps_skipped",
-            return_limitations=tuple(limitations),
-            micro_status="skipped",
-            micro_reason="unsupported_timeframe",
-        ),
-        "source": {"kind": "csv_text"},
-    }
+        }
+    )
+    payload["source"] = {"kind": "csv_text"}
+    return payload
 
 
 def _tick_fingerprint_payload() -> dict[str, object]:
@@ -2610,8 +2544,6 @@ def _tick_fingerprint_payload() -> dict[str, object]:
                 "microstructure_dynamics": "valid",
                 "dependence": "valid",
             },
-            return_status="skipped",
-            return_reason="unsupported_timeframe",
             micro_status="valid",
             tick_spread_status="eligible",
             tick_spread_eligible=True,
@@ -2656,11 +2588,8 @@ def _audit_payload(
     emitted: tuple[str, ...],
     skipped: dict[str, str],
     section_statuses: dict[str, str],
-    return_status: str,
     micro_status: str,
-    return_reason: str | None = None,
     micro_reason: str | None = None,
-    return_limitations: tuple[str, ...] = (),
     tick_spread_status: str = "ineligible",
     tick_spread_eligible: bool = False,
     tick_spread_emitted: bool = False,
@@ -2692,36 +2621,6 @@ def _audit_payload(
             "calendar_profile_static_advisory": True,
         },
         "dynamics_readiness": {
-            "return_dynamics": _readiness_payload(
-                status=return_status,
-                reason=return_reason,
-                row_order=(
-                    "source_text_order"
-                    if return_status == "limited"
-                    else "cache_order" if return_status == "valid" else None
-                ),
-                computed_from=(
-                    "text_scan"
-                    if return_status == "limited"
-                    else "direct_cache" if return_status == "valid" else None
-                ),
-                cache_source="direct" if return_status == "valid" else None,
-                limitations=return_limitations,
-                row_count=4 if return_status in {"valid", "limited"} else 0,
-                sampled_row_count=(
-                    3
-                    if return_status == "limited"
-                    else 4 if return_status == "valid" else 0
-                ),
-                usable_row_count=(
-                    3
-                    if return_status == "limited"
-                    else 4 if return_status == "valid" else 0
-                ),
-                invalid_row_count=1 if return_status == "limited" else 0,
-                partial_row_count=1 if return_status == "limited" else 0,
-                truncated=return_status == "limited",
-            ),
             "microstructure_dynamics": _readiness_payload(
                 status=micro_status,
                 reason=micro_reason,
@@ -2906,8 +2805,8 @@ def _next_action_report(tmp_path: Path) -> QualityReport:
     duplicate = _target(tmp_path / "duplicate.csv")
     duplicate_finding = QualityFinding(
         severity=QualitySeverity.WARNING,
-        code="ASCII_M1_DUPLICATE_TIMESTAMP",
-        message="M1 file contains duplicate normalized timestamps.",
+        code="ASCII_TICK_DUPLICATE_ROW",
+        message="Tick file contains exact duplicate rows.",
         rule_id="time.ascii.sequence",
         target=duplicate,
         location=QualityLocation(path=duplicate.path),
@@ -2931,7 +2830,7 @@ def _many_duplicate_next_action_report(tmp_path: Path) -> QualityReport:
         path=str(tmp_path / "second.csv"),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="GBPUSD",
         period="201202",
     )
@@ -2939,8 +2838,8 @@ def _many_duplicate_next_action_report(tmp_path: Path) -> QualityReport:
     def finding(target: QualityTarget) -> QualityFinding:
         return QualityFinding(
             severity=QualitySeverity.WARNING,
-            code="ASCII_M1_DUPLICATE_TIMESTAMP",
-            message="M1 file contains duplicate normalized timestamps.",
+            code="ASCII_TICK_DUPLICATE_ROW",
+            message="Tick file contains exact duplicate rows.",
             rule_id="time.ascii.sequence",
             target=target,
             location=QualityLocation(path=target.path),
@@ -2968,7 +2867,7 @@ def _inventory_archive_remediation_report(tmp_path: Path) -> QualityReport:
         path=str(tmp_path / "EURUSD_201202.zip"),
         kind=QualityTargetKind.ZIP,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="EURUSD",
         period="201202",
     )
@@ -3020,7 +2919,7 @@ def _remediation_coverage_report(tmp_path: Path) -> QualityReport:
         path=str(tmp_path / "missing-gbp.csv"),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="GBPUSD",
         period="201202",
     )
@@ -3028,8 +2927,8 @@ def _remediation_coverage_report(tmp_path: Path) -> QualityReport:
     schema_summary = _target(tmp_path / "schema-summary.csv")
     mapped_finding = QualityFinding(
         severity=QualitySeverity.WARNING,
-        code="ASCII_M1_DUPLICATE_TIMESTAMP",
-        message="M1 file contains duplicate normalized timestamps.",
+        code="ASCII_TICK_DUPLICATE_ROW",
+        message="Tick file contains exact duplicate rows.",
         rule_id="time.ascii.sequence",
         target=mapped,
         location=QualityLocation(path=mapped.path),
@@ -3061,7 +2960,7 @@ def _remediation_coverage_report(tmp_path: Path) -> QualityReport:
     schema_summary_finding = QualityFinding(
         severity=QualitySeverity.INFO,
         code="ASCII_SCHEMA_SUMMARY",
-        message="ASCII M1 schema profile.",
+        message="ASCII T schema profile.",
         rule_id="ingestion.ascii.schema",
         target=schema_summary,
         location=QualityLocation(path=schema_summary.path),
@@ -3112,9 +3011,9 @@ def _many_target_report(tmp_path: Path, *, clean_count: int) -> QualityReport:
     failed = _target(tmp_path / "failed.csv")
     warning_finding = QualityFinding(
         severity=QualitySeverity.WARNING,
-        code="M1_DUPLICATE_TIMESTAMP",
-        message="duplicate minute bar timestamp",
-        rule_id="m1.timestamp.unique",
+        code="TICK_DUPLICATE_ROW",
+        message="duplicate tick row",
+        rule_id="tick.timestamp.unique",
         target=warning,
         location=QualityLocation(path=warning.path),
     )
@@ -3134,7 +3033,7 @@ def _many_target_report(tmp_path: Path, *, clean_count: int) -> QualityReport:
                 for target in clean_targets
             ),
             QualityRuleResult(
-                rule_id="m1.timestamp.unique",
+                rule_id="tick.timestamp.unique",
                 target=warning,
                 findings=(warning_finding,),
             ),
@@ -3149,7 +3048,7 @@ def _many_target_report(tmp_path: Path, *, clean_count: int) -> QualityReport:
 
 def _cross_target_report(tmp_path: Path) -> QualityReport:
     directory = QualityTarget(
-        path=str(tmp_path / "data" / "ASCII" / "M1"),
+        path=str(tmp_path / "data" / "ASCII" / "T"),
         kind=QualityTargetKind.DIRECTORY,
         data_format="ascii",
     )
@@ -3164,7 +3063,7 @@ def _cross_target_report(tmp_path: Path) -> QualityReport:
             metadata={
                 "direct_symbol": "AUDCAD",
                 "period": "2008",
-                "timeframe": "M1",
+                "timeframe": "T",
             },
         ),
         metadata={
@@ -3175,7 +3074,7 @@ def _cross_target_report(tmp_path: Path) -> QualityReport:
                     "numerator_symbol": "AUDCHF",
                     "period": "2008",
                     "relationship": "AUDCHF / CADCHF ~= AUDCAD",
-                    "timeframe": "M1",
+                    "timeframe": "T",
                 }
             ]
         },
@@ -3197,7 +3096,7 @@ def _target(path: Path) -> QualityTarget:
         path=str(path),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="EURUSD",
         period="201202",
     )

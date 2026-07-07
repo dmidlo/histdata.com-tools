@@ -32,7 +32,6 @@ from histdatacom.histdata_ascii import (
 )
 import histdatacom.data_quality.ticks as tick_rules
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
     CLEAN_TICK_CASE,
     HistDataAsciiCase,
     case_by_name,
@@ -278,11 +277,16 @@ def test_non_fx_tick_reports_select_asset_class_thresholds(
     )
 
 
-def test_m1_files_are_ignored_by_tick_spread_rule(
+def test_legacy_m1_files_are_ignored_by_tick_spread_rule(
     tmp_path: Path,
 ) -> None:
-    """M1 bars are owned by the bars quality group, not tick rules."""
-    report = _report_for_path(write_ascii_case(tmp_path, CLEAN_M1_CASE))
+    """Retired M1 bar files should not be scanned by tick rules."""
+    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202.csv"
+    path.write_text(
+        "20120201 000000;1.306600;1.306600;1.306560;1.306560;0\n",
+        encoding="utf-8",
+    )
+    report = _report_for_path(path)
 
     assert report.status is QualityStatus.CLEAN
     assert report.findings == ()

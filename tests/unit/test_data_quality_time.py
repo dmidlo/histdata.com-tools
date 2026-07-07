@@ -21,11 +21,11 @@ from histdatacom.data_quality import (
     run_quality_assessment,
 )
 from histdatacom.histdata_ascii import (
-    M1,
+    TICK,
     parse_histdata_datetime_to_utc_ms,
 )
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
+    CLEAN_TICK_CASE,
     CLEAN_TICK_ROWS,
     EST_NO_DST_CALENDAR_CASES,
     case_by_name,
@@ -54,7 +54,7 @@ def test_clean_ascii_file_reports_est_no_dst_conversion_summary(
     tmp_path: Path,
 ) -> None:
     """Clean source timestamps should be normalized as fixed UTC-05:00."""
-    report = _report_for_path(write_ascii_case(tmp_path, CLEAN_M1_CASE))
+    report = _report_for_path(write_ascii_case(tmp_path, CLEAN_TICK_CASE))
 
     summary = _finding(report.findings, "ASCII_TIMESTAMP_EST_NO_DST_SUMMARY")
     assert report.status is QualityStatus.CLEAN
@@ -67,21 +67,21 @@ def test_clean_ascii_file_reports_est_no_dst_conversion_summary(
     assert summary.metadata["source_period_mismatch_count"] == 0
     assert summary.metadata["utc_month_boundary_count"] == 0
     assert summary.metadata["samples"][0]["timestamp_source"] == (
-        "20120201 000000"
+        "20120201 000003660"
     )
-    assert summary.metadata["samples"][0]["timestamp_utc_ms"] == 1328072400000
+    assert summary.metadata["samples"][0]["timestamp_utc_ms"] == 1328072403660
 
     sequence = _finding(report.findings, "ASCII_TIMESTAMP_SEQUENCE_SUMMARY")
     assert sequence.rule_id == ASCII_TIMESTAMP_SEQUENCE_RULE_ID
     assert sequence.metadata["non_monotonic_count"] == 0
-    assert sequence.metadata["m1_duplicate_timestamp_count"] == 0
-    assert sequence.metadata["m1_granularity_drift_count"] == 0
+    assert sequence.metadata["tick_duplicate_row_count"] == 0
+    assert sequence.metadata["tick_precision_mismatch_count"] == 0
     assert sequence.metadata["duplicate_policy"] == "detect-only"
 
     gaps = _finding(report.findings, "ASCII_TIMESTAMP_GAP_SUMMARY")
     assert gaps.rule_id == ASCII_TIMESTAMP_GAP_RULE_ID
     assert gaps.metadata["tracked_gap_count"] == 0
-    assert gaps.metadata["max_gap_ms"] == 60_000
+    assert gaps.metadata["max_gap_ms"] == 11_017
     assert gaps.metadata["gap_bucket_counts"] == {
         "gt_1m": 0,
         "gt_5m": 0,
@@ -104,11 +104,8 @@ def test_dst_boundary_rows_keep_fixed_est_no_dst_offset(
     paths = []
     for case in cases:
         period = case.raw[:6]
-        path = tmp_path / f"DAT_ASCII_EURUSD_M1_{period}_DST.csv"
-        path.write_text(
-            f"{case.raw};1.306600;1.306600;1.306560;1.306560;0\n",
-            encoding="utf-8",
-        )
+        path = tmp_path / f"DAT_ASCII_EURUSD_T_{period}_DST.csv"
+        path.write_text(_tick_row(case.raw) + "\n", encoding="utf-8")
         paths.append(path)
 
     for path, case in zip(paths, cases, strict=True):
@@ -130,13 +127,10 @@ def test_source_month_membership_wins_over_utc_month_boundary(
     case = next(
         case
         for case in EST_NO_DST_CALENDAR_CASES
-        if case.raw == "20120229 235900"
+        if case.raw == "20120229 235959999"
     )
-    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_BOUNDARY.csv"
-    path.write_text(
-        f"{case.raw};1.306600;1.306600;1.306560;1.306560;0\n",
-        encoding="utf-8",
-    )
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_BOUNDARY.csv"
+    path.write_text(_tick_row(case.raw) + "\n", encoding="utf-8")
 
     report = _report_for_path(path)
 
@@ -150,19 +144,16 @@ def test_source_month_membership_wins_over_utc_month_boundary(
     assert boundary.metadata["samples"][0]["source_period"] == "201202"
     assert boundary.metadata["samples"][0]["utc_period"] == "201203"
     assert boundary.metadata["samples"][0]["utc_timestamp"] == (
-        "2012-03-01T04:59:00Z"
+        "2012-03-01T04:59:59.999Z"
     )
 
 
-def test_annual_m1_source_membership_allows_year_periods(
+def test_annual_tick_source_membership_allows_year_periods(
     tmp_path: Path,
 ) -> None:
-    """Historical M1 annual files should validate by source year."""
-    path = tmp_path / "DAT_ASCII_EURUSD_M1_2012.csv"
-    path.write_text(
-        "20121231 235900;1.306600;1.306600;1.306560;1.306560;0\n",
-        encoding="utf-8",
-    )
+    """Annual source-year files still validate by source year if present."""
+    path = tmp_path / "DAT_ASCII_EURUSD_T_2012.csv"
+    path.write_text(_tick_row("20121231 235959999") + "\n", encoding="utf-8")
 
     report = _report_for_path(path)
 
@@ -203,12 +194,9 @@ def test_source_period_mismatch_is_an_error_with_source_and_utc_context(
     tmp_path: Path,
 ) -> None:
     """Wrong source-month rows should fail even when UTC context is available."""
-    raw_timestamp = "20120301 000000"
-    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_WRONG_MONTH.csv"
-    path.write_text(
-        f"{raw_timestamp};1.306600;1.306600;1.306560;1.306560;0\n",
-        encoding="utf-8",
-    )
+    raw_timestamp = "20120301 000000000"
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_WRONG_MONTH.csv"
+    path.write_text(_tick_row(raw_timestamp) + "\n", encoding="utf-8")
 
     report = _report_for_path(path)
 
@@ -221,7 +209,7 @@ def test_source_period_mismatch_is_an_error_with_source_and_utc_context(
     assert mismatch.location.row_number == 1
     assert mismatch.location.timestamp_source == raw_timestamp
     assert mismatch.location.timestamp_utc_ms == (
-        parse_histdata_datetime_to_utc_ms(raw_timestamp, M1)
+        parse_histdata_datetime_to_utc_ms(raw_timestamp, TICK)
     )
     assert mismatch.metadata["target_period"] == "201202"
     assert mismatch.metadata["samples"][0]["source_period"] == "201203"
@@ -234,39 +222,39 @@ def test_zip_member_timestamp_findings_include_source_member(
     """ZIP timestamp findings should retain member context for investigation."""
     archive = write_zip_case(
         tmp_path,
-        CLEAN_M1_CASE,
-        zip_filename="DAT_ASCII_EURUSD_M1_201202.zip",
+        CLEAN_TICK_CASE,
+        zip_filename="DAT_ASCII_EURUSD_T_201202.zip",
     )
 
     report = _report_for_path(archive)
 
     summary = _finding(report.findings, "ASCII_TIMESTAMP_EST_NO_DST_SUMMARY")
     assert report.status is QualityStatus.CLEAN
-    assert summary.metadata["source_member"] == CLEAN_M1_CASE.filename
+    assert summary.metadata["source_member"] == CLEAN_TICK_CASE.filename
     assert summary.metadata["samples"][0]["source_member"] == (
-        CLEAN_M1_CASE.filename
+        CLEAN_TICK_CASE.filename
     )
 
 
-def test_m1_duplicate_timestamp_reports_without_deduping(
+def test_tick_duplicate_timestamp_reports_without_deduping(
     tmp_path: Path,
 ) -> None:
-    """Duplicate M1 timestamps should be reported, not mutated."""
+    """Duplicate tick rows should be reported, not mutated."""
     report = _report_for_path(
-        write_ascii_case(tmp_path, case_by_name("m1_duplicate_timestamp"))
+        write_ascii_case(tmp_path, case_by_name("tick_duplicate_row"))
     )
 
-    finding = _finding(report.findings, "ASCII_M1_DUPLICATE_TIMESTAMP")
+    finding = _finding(report.findings, "ASCII_TICK_DUPLICATE_ROW")
     summary = _finding(report.findings, "ASCII_TIMESTAMP_SEQUENCE_SUMMARY")
     assert report.status is QualityStatus.WARNING
     assert finding.severity is QualitySeverity.WARNING
     assert finding.rule_id == ASCII_TIMESTAMP_SEQUENCE_RULE_ID
     assert finding.location.row_number == 2
-    assert finding.location.timestamp_source == "20120201 000000"
+    assert finding.location.timestamp_source == "20120201 000003660"
     assert finding.location.metadata["duplicate_of_row"] == 1
     assert finding.location.metadata["dedupe_policy"] == "report-only"
     assert finding.metadata["row_count"] == 1
-    assert summary.metadata["m1_duplicate_timestamp_count"] == 1
+    assert summary.metadata["tick_duplicate_row_count"] == 1
 
 
 def test_non_monotonic_timestamp_reports_previous_row_context(
@@ -276,7 +264,7 @@ def test_non_monotonic_timestamp_reports_previous_row_context(
     report = _report_for_path(
         write_ascii_case(
             tmp_path,
-            case_by_name("m1_non_monotonic_timestamp"),
+            case_by_name("tick_non_monotonic_timestamp"),
         )
     )
 
@@ -284,50 +272,15 @@ def test_non_monotonic_timestamp_reports_previous_row_context(
     assert report.status is QualityStatus.WARNING
     assert finding.severity is QualitySeverity.WARNING
     assert finding.location.row_number == 2
-    assert finding.location.timestamp_source == "20120201 000000"
+    assert finding.location.timestamp_source == "20120201 000003660"
     assert finding.location.metadata["previous_row_number"] == 1
     assert finding.location.metadata["previous_timestamp_source"] == (
-        "20120201 000100"
+        "20120201 000003973"
     )
-    assert finding.location.timestamp_utc_ms == 1328072400000
+    assert finding.location.timestamp_utc_ms == 1328072403660
     assert finding.location.metadata["previous_timestamp_utc_ms"] == (
-        1328072460000
+        1328072403973
     )
-
-
-def test_m1_granularity_reports_second_and_subsecond_drift(
-    tmp_path: Path,
-) -> None:
-    """M1 rows must land exactly on minute boundaries."""
-    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_GRANULARITY.csv"
-    path.write_text(
-        "\n".join(
-            (
-                "20120201 000030;1.306600;1.306600;1.306560;1.306560;0",
-                "20120201 000100123;1.306570;1.306570;1.306470;1.306560;17",
-            )
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    report = _report_for_path(path)
-
-    finding = _finding(report.findings, "ASCII_M1_GRANULARITY_DRIFT")
-    summary = _finding(report.findings, "ASCII_TIMESTAMP_SEQUENCE_SUMMARY")
-    assert report.status is QualityStatus.FAILED
-    assert finding.severity is QualitySeverity.ERROR
-    assert finding.location.row_number == 1
-    assert finding.location.metadata["source_second"] == 30
-    assert finding.location.metadata["source_subsecond_digits"] == ""
-    assert finding.metadata["row_count"] == 2
-    assert (
-        finding.metadata["samples"][1]["metadata"]["source_subsecond_digits"]
-        == "123"
-    )
-    assert finding.metadata["samples"][1]["timestamp_utc_ms"] is None
-    assert summary.metadata["m1_granularity_drift_count"] == 2
-    assert summary.metadata["invalid_timestamp_count"] == 1
 
 
 def test_tick_duplicate_row_reports_exact_row_policy(
@@ -414,14 +367,14 @@ def test_suspicious_weekday_gap_reports_distribution_and_dynamic_score(
     tmp_path: Path,
 ) -> None:
     """Weekday gaps outside tolerance should warn with bucket context."""
-    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_WEEKDAY_GAP.csv"
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_WEEKDAY_GAP.csv"
     path.write_text(
         "\n".join(
             (
-                "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
-                "20120201 000200;1.306570;1.306570;1.306470;1.306560;17",
-                "20120201 001000;1.306520;1.306560;1.306520;1.306560;2",
-                "20120201 001100;1.306520;1.306560;1.306520;1.306560;3",
+                _tick_row("20120201 000000000"),
+                _tick_row("20120201 000200000", volume=17),
+                _tick_row("20120201 001000000", volume=2),
+                _tick_row("20120201 001100000", volume=3),
             )
         )
         + "\n",
@@ -455,12 +408,12 @@ def test_weekend_closure_gap_is_reported_as_expected_session_gap(
     tmp_path: Path,
 ) -> None:
     """Friday close to Sunday open should be classified as normal closure."""
-    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_WEEKEND_CLOSE.csv"
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_WEEKEND_CLOSE.csv"
     path.write_text(
         "\n".join(
             (
-                "20120203 165900;1.306600;1.306600;1.306560;1.306560;0",
-                "20120205 170100;1.306570;1.306570;1.306470;1.306560;17",
+                _tick_row("20120203 165900000"),
+                _tick_row("20120205 170100000", volume=17),
             )
         )
         + "\n",
@@ -490,12 +443,12 @@ def test_weekend_closure_classification_requires_boundary_windows(
     tmp_path: Path,
 ) -> None:
     """Large gaps spanning Friday close are not automatically normal closure."""
-    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_BROAD_WEEKEND_GAP.csv"
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_BROAD_WEEKEND_GAP.csv"
     path.write_text(
         "\n".join(
             (
-                "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
-                "20120205 170100;1.306570;1.306570;1.306470;1.306560;17",
+                _tick_row("20120201 000000000"),
+                _tick_row("20120205 170100000", volume=17),
             )
         )
         + "\n",
@@ -523,11 +476,8 @@ def test_unexpected_weekend_activity_warns_without_hard_failure(
     tmp_path: Path,
 ) -> None:
     """Weekend records should be warnings by default."""
-    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_WEEKEND_ACTIVITY.csv"
-    path.write_text(
-        "20120204 120000;1.306600;1.306600;1.306560;1.306560;0\n",
-        encoding="utf-8",
-    )
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_WEEKEND_ACTIVITY.csv"
+    path.write_text(_tick_row("20120204 120000000") + "\n", encoding="utf-8")
 
     report = _report_for_path(path)
 
@@ -536,7 +486,7 @@ def test_unexpected_weekend_activity_warns_without_hard_failure(
     assert report.status is QualityStatus.WARNING
     assert activity.severity is QualitySeverity.WARNING
     assert activity.location.row_number == 1
-    assert activity.location.timestamp_source == "20120204 120000"
+    assert activity.location.timestamp_source == "20120204 120000000"
     assert activity.location.metadata["session_state"] == "weekend_closure"
     assert summary.metadata["weekend_activity_count"] == 1
 
@@ -545,12 +495,12 @@ def test_gap_tolerance_windows_are_adjustable(
     tmp_path: Path,
 ) -> None:
     """Operators can widen suspicious-gap tolerance without changing parser."""
-    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_ADJUSTABLE_GAP.csv"
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_ADJUSTABLE_GAP.csv"
     path.write_text(
         "\n".join(
             (
-                "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
-                "20120201 000800;1.306570;1.306570;1.306470;1.306560;17",
+                _tick_row("20120201 000000000"),
+                _tick_row("20120201 000800000", volume=17),
             )
         )
         + "\n",
@@ -597,15 +547,15 @@ def test_dynamic_gap_score_uses_inverted_backoff_windowing(
     tmp_path: Path,
 ) -> None:
     """Clustered suspicious gaps should score higher as tolerance narrows."""
-    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202_DYNAMIC_GAP.csv"
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_DYNAMIC_GAP.csv"
     path.write_text(
         "\n".join(
             (
-                "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
-                "20120201 000100;1.306570;1.306570;1.306470;1.306560;17",
-                "20120201 000200;1.306520;1.306560;1.306520;1.306560;2",
-                "20120201 000500;1.306520;1.306560;1.306520;1.306560;3",
-                "20120201 000800;1.306520;1.306560;1.306520;1.306560;4",
+                _tick_row("20120201 000000000"),
+                _tick_row("20120201 000100000", volume=17),
+                _tick_row("20120201 000200000", volume=2),
+                _tick_row("20120201 000500000", volume=3),
+                _tick_row("20120201 000800000", volume=4),
             )
         )
         + "\n",
@@ -639,8 +589,8 @@ def test_cross_file_continuity_clean_adjacent_months(
     tmp_path: Path,
 ) -> None:
     """Adjacent monthly files should compare clean boundary timestamps."""
-    _write_m1_file(tmp_path, "201202", ("20120229 235900",))
-    _write_m1_file(tmp_path, "201203", ("20120301 000000",))
+    _write_tick_file(tmp_path, "201202", ("20120229 235900000",))
+    _write_tick_file(tmp_path, "201203", ("20120301 000000000",))
 
     report = _continuity_report_for_path(tmp_path)
 
@@ -657,8 +607,8 @@ def test_cross_file_continuity_reports_missing_next_month(
     tmp_path: Path,
 ) -> None:
     """Observed month gaps should name the skipped period and both files."""
-    previous = _write_m1_file(tmp_path, "201202", ("20120229 235900",))
-    current = _write_m1_file(tmp_path, "201204", ("20120401 000000",))
+    previous = _write_tick_file(tmp_path, "201202", ("20120229 235900000",))
+    current = _write_tick_file(tmp_path, "201204", ("20120401 000000000",))
 
     report = _continuity_report_for_path(tmp_path)
 
@@ -684,8 +634,8 @@ def test_cross_file_continuity_reports_duplicate_overlap(
     tmp_path: Path,
 ) -> None:
     """Repeated boundary timestamps should be reported across files."""
-    previous = _write_m1_file(tmp_path, "201202", ("20120301 000000",))
-    current = _write_m1_file(tmp_path, "201203", ("20120301 000000",))
+    previous = _write_tick_file(tmp_path, "201202", ("20120301 000000000",))
+    current = _write_tick_file(tmp_path, "201203", ("20120301 000000000",))
 
     report = _continuity_report_for_path(tmp_path)
 
@@ -710,8 +660,8 @@ def test_cross_file_continuity_reports_reversed_file_ordering(
     tmp_path: Path,
 ) -> None:
     """A next file that starts before the previous file ends should warn."""
-    _write_m1_file(tmp_path, "201202", ("20120301 001000",))
-    _write_m1_file(tmp_path, "201203", ("20120301 000000",))
+    _write_tick_file(tmp_path, "201202", ("20120301 001000000",))
+    _write_tick_file(tmp_path, "201203", ("20120301 000000000",))
 
     report = _continuity_report_for_path(tmp_path)
 
@@ -732,8 +682,8 @@ def test_cross_file_continuity_reports_suspicious_boundary_gap(
     tmp_path: Path,
 ) -> None:
     """Adjacent files with large non-session boundary gaps should warn."""
-    _write_m1_file(tmp_path, "201202", ("20120229 235000",))
-    _write_m1_file(tmp_path, "201203", ("20120301 001000",))
+    _write_tick_file(tmp_path, "201202", ("20120229 235000000",))
+    _write_tick_file(tmp_path, "201203", ("20120301 001000000",))
 
     report = _continuity_report_for_path(tmp_path)
 
@@ -752,8 +702,8 @@ def test_cross_file_continuity_allows_expected_session_closure(
     tmp_path: Path,
 ) -> None:
     """Month boundaries crossing FX weekend closure should remain clean."""
-    _write_m1_file(tmp_path, "201203", ("20120330 165900",))
-    _write_m1_file(tmp_path, "201204", ("20120401 170100",))
+    _write_tick_file(tmp_path, "201203", ("20120330 165900000",))
+    _write_tick_file(tmp_path, "201204", ("20120401 170100000",))
 
     report = _continuity_report_for_path(tmp_path)
 
@@ -771,12 +721,12 @@ def test_cross_file_continuity_allows_expected_session_closure(
     assert summary.metadata["suspicious_gap_count"] == 0
 
 
-def test_cross_file_continuity_handles_adjacent_annual_m1_files(
+def test_cross_file_continuity_handles_adjacent_annual_tick_files(
     tmp_path: Path,
 ) -> None:
-    """Annual M1 files should participate in boundary continuity checks."""
-    _write_m1_file(tmp_path, "2012", ("20121231 235900",))
-    _write_m1_file(tmp_path, "2013", ("20130101 000000",))
+    """Annual tick files should participate in boundary continuity checks."""
+    _write_tick_file(tmp_path, "2012", ("20121231 235900000",))
+    _write_tick_file(tmp_path, "2013", ("20130101 000000000",))
 
     report = _continuity_report_for_path(tmp_path)
 
@@ -791,7 +741,7 @@ def test_time_rules_reuse_timestamp_scan_per_target(
     monkeypatch,
 ) -> None:
     """The three per-target time rules should share one parsed scan."""
-    path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     time_quality.clear_timestamp_scan_caches()
     calls = 0
     original = time_quality._scan_timestamp_rows
@@ -827,21 +777,21 @@ def _continuity_report_for_path(path: Path):
     )
 
 
-def _write_m1_file(
+def _write_tick_file(
     directory: Path,
     period: str,
     timestamps: tuple[str, ...],
 ) -> Path:
-    path = directory / f"DAT_ASCII_EURUSD_M1_{period}.csv"
+    path = directory / f"DAT_ASCII_EURUSD_T_{period}.csv"
     path.write_text(
-        "\n".join(_m1_row(timestamp) for timestamp in timestamps) + "\n",
+        "\n".join(_tick_row(timestamp) for timestamp in timestamps) + "\n",
         encoding="utf-8",
     )
     return path
 
 
-def _m1_row(timestamp: str) -> str:
-    return f"{timestamp};1.306600;1.306600;1.306560;1.306560;0"
+def _tick_row(timestamp: str, *, volume: int = 0) -> str:
+    return f"{timestamp},1.306600,1.306770,{volume}"
 
 
 def _finding(findings, code: str):

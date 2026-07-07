@@ -65,7 +65,7 @@ Unit coverage includes local fake/fixture baselines for representative
 operations:
 
 - `validate_url_work_item` with fake HistData form HTML
-- `build_cache_work_item` with checked-in M1 CSV fixture data
+- `build_cache_work_item` with checked-in ASCII tick CSV fixture data
 - `import_to_influx_work_item` with a local line sink instead of live Influx
 - `ImportWorkflow` with the real Influx activity and a local
   contract-backed writer
@@ -165,7 +165,7 @@ with a local writer. This proves:
 
 - Influx work is routed to the `influx` task queue.
 - `batch_size=2` emits bounded line-protocol batches of `2` and `1` rows for
-  the checked-in EURUSD M1 fixture.
+  the checked-in EURUSD ASCII tick fixture.
 - the generated line protocol keeps the existing HistData ESTnoDST-to-UTC
   timestamp conversion and field names.
 - retryable writer failures preserve `INFLUX_IMPORT_RETRYABLE`,
@@ -208,8 +208,9 @@ python scripts/benchmark_runtime_throughput.py \
   --temporal-executable /opt/local/bin/temporal
 ```
 
-The default matrix uses one EURUSD M1 period for the single-item scenarios and
-a two-pair, three-month ASCII tick validation scenario for fan-out coverage. It
+The default matrix uses one EURUSD ASCII tick period for the single-item
+scenarios and a two-pair, three-month ASCII tick validation scenario for
+fan-out coverage. It
 covers:
 
 - repository refresh

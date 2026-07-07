@@ -711,36 +711,40 @@ def _iter_limit_payloads(
 
 
 def _representative_quality_report() -> QualityReport:
-    valid_m1 = _target("data/EURUSD-M1.csv", symbol="EURUSD", timeframe="M1")
-    limited_m1 = _target("data/GBPUSD-M1.csv", symbol="GBPUSD", timeframe="M1")
-    tick = _target("data/EURUSD-T.csv", symbol="EURUSD", timeframe="T")
+    valid_tick = _target(
+        "data/EURUSD-T-valid.csv", symbol="EURUSD", timeframe="T"
+    )
+    limited_tick = _target(
+        "data/GBPUSD-T-limited.csv", symbol="GBPUSD", timeframe="T"
+    )
+    tick = _target("data/USDJPY-T.csv", symbol="USDJPY", timeframe="T")
     duplicate = _target(
         "data/duplicate.csv",
         symbol="AUDUSD",
-        timeframe="M1",
+        timeframe="T",
     )
-    missing = _target("data/missing.csv", symbol="CADCHF", timeframe="M1")
+    missing = _target("data/missing.csv", symbol="CADCHF", timeframe="T")
     negative_spread = _target(
         "data/negative-spread.csv",
         symbol="EURGBP",
         timeframe="T",
     )
     directory = QualityTarget(
-        path="data/ASCII/M1",
+        path="data/ASCII/T",
         kind=QualityTargetKind.DIRECTORY,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
     )
 
     fingerprint_findings = (
-        _fingerprint_finding(valid_m1, _valid_m1_fingerprint_payload()),
-        _fingerprint_finding(limited_m1, _limited_m1_fingerprint_payload()),
-        _fingerprint_finding(tick, _tick_fingerprint_payload()),
+        _fingerprint_finding(valid_tick, _valid_tick_fingerprint_payload()),
+        _fingerprint_finding(limited_tick, _limited_tick_fingerprint_payload()),
+        _fingerprint_finding(tick, _tick_fingerprint_payload(symbol="USDJPY")),
     )
     duplicate_finding = QualityFinding(
         severity=QualitySeverity.WARNING,
-        code="ASCII_M1_DUPLICATE_TIMESTAMP",
-        message="M1 file contains duplicate normalized timestamps.",
+        code="ASCII_TICK_DUPLICATE_ROW",
+        message="Tick file contains exact duplicate timestamp, bid, ask, and volume rows.",
         rule_id="time.ascii.sequence",
         target=duplicate,
         location=QualityLocation(path=duplicate.path),
@@ -769,7 +773,7 @@ def _representative_quality_report() -> QualityReport:
         target=directory,
         location=QualityLocation(
             path=directory.path,
-            metadata={"period": "201202", "timeframe": "M1"},
+            metadata={"period": "201202", "timeframe": "T"},
         ),
         metadata={
             "samples": [
@@ -778,14 +782,14 @@ def _representative_quality_report() -> QualityReport:
                     "direct_symbol": "AUDCAD",
                     "numerator_symbol": "AUDCHF",
                     "period": "201202",
-                    "timeframe": "M1",
+                    "timeframe": "T",
                 }
             ]
         },
     )
     targets = (
-        valid_m1,
-        limited_m1,
+        valid_tick,
+        limited_tick,
         tick,
         duplicate,
         missing,
@@ -859,65 +863,30 @@ def _fingerprint_finding(
     )
 
 
-def _valid_m1_fingerprint_payload() -> dict[str, JSONValue]:
-    return {
-        "target_axis": _axis(symbol="EURUSD", timeframe="M1", kind="csv"),
-        "coverage": {"row_count": 4, "parsed_row_count": 4},
-        "temporal_topology": _topology_payload(computed_from="text_scan"),
-        "m1_bar_distribution": {
-            "row_count": 4,
-            "sampled_row_count": 4,
-            "usable_row_count": 4,
-            "invalid_row_count": 0,
-            "partial_row_count": 0,
-            "truncated": False,
-            "precision": {
-                "precision_source": "text",
-                "decimal_place_counts": {"5": 16},
-            },
-        },
-        "calendar_regimes": _calendar_regimes_payload(),
-        "return_dynamics": _return_dynamics_payload(),
-        "dependence": _dependence_payload(status="ok"),
-        "fingerprint_audit": _audit_payload(
-            sections=(
-                "coverage",
-                "temporal_topology",
-                "calendar_regimes",
-                "m1_bar_distribution",
-                "return_dynamics",
-                "dependence",
-            ),
-            section_statuses={
-                "coverage": "valid",
-                "temporal_topology": "valid",
-                "calendar_regimes": "valid",
-                "m1_bar_distribution": "valid",
-                "return_dynamics": "valid",
-                "dependence": "valid",
-            },
-            return_status="valid",
-            micro_status="skipped",
-        ),
-        "source": {"kind": "csv_text"},
-    }
+def _valid_tick_fingerprint_payload(
+    *, symbol: str = "EURUSD"
+) -> dict[str, JSONValue]:
+    return _tick_fingerprint_payload(symbol=symbol)
 
 
-def _limited_m1_fingerprint_payload() -> dict[str, JSONValue]:
-    payload = _valid_m1_fingerprint_payload()
-    payload["target_axis"] = _axis(symbol="GBPUSD", timeframe="M1", kind="csv")
+def _limited_tick_fingerprint_payload() -> dict[str, JSONValue]:
+    payload = _valid_tick_fingerprint_payload(symbol="GBPUSD")
     payload["temporal_topology"] = _topology_payload(
         invalid_timestamp_count=1,
         duplicate_timestamp_count=1,
         non_monotonic_count=1,
         suspicious_gap_count=1,
     )
-    payload["return_dynamics"] = _return_dynamics_payload(
-        sequence_status="limited",
-        limitations=("invalid_timestamps_skipped", "duplicate_timestamps"),
-        invalid_row_count=1,
-        truncated=True,
+    microstructure_dynamics = cast(
+        dict[str, JSONValue], payload["microstructure_dynamics"]
     )
+    microstructure_dynamics["sequence_status"] = "limited"
+    microstructure_dynamics["limitations"] = [
+        "invalid_timestamps_skipped",
+        "duplicate_rows",
+    ]
+    microstructure_dynamics["invalid_row_count"] = 1
+    microstructure_dynamics["truncated"] = True
     payload["dependence"] = _dependence_payload(
         status="limited",
         reason="invalid_timestamps_skipped",
@@ -928,28 +897,33 @@ def _limited_m1_fingerprint_payload() -> dict[str, JSONValue]:
             "coverage",
             "temporal_topology",
             "calendar_regimes",
-            "m1_bar_distribution",
-            "return_dynamics",
+            "tick_distribution",
+            "conditional_distributions",
+            "microstructure_dynamics",
             "dependence",
         ),
         section_statuses={
             "coverage": "valid",
             "temporal_topology": "limited",
             "calendar_regimes": "valid",
-            "m1_bar_distribution": "valid",
-            "return_dynamics": "limited",
+            "tick_distribution": "valid",
+            "conditional_distributions": "valid",
+            "microstructure_dynamics": "limited",
             "dependence": "limited",
         },
-        return_status="limited",
-        micro_status="skipped",
-        return_reason="invalid_timestamps_skipped",
+        micro_status="limited",
+        micro_reason="invalid_timestamps_skipped",
+        tick_spread_eligible=True,
+        tick_spread_emitted=True,
     )
     return payload
 
 
-def _tick_fingerprint_payload() -> dict[str, JSONValue]:
+def _tick_fingerprint_payload(
+    *, symbol: str = "EURUSD"
+) -> dict[str, JSONValue]:
     return {
-        "target_axis": _axis(symbol="EURUSD", timeframe="T", kind="csv"),
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
         "coverage": {"row_count": 5, "parsed_row_count": 5},
         "temporal_topology": _topology_payload(computed_from="text_scan"),
         "tick_distribution": {
@@ -999,7 +973,6 @@ def _tick_fingerprint_payload() -> dict[str, JSONValue]:
                 "microstructure_dynamics": "valid",
                 "dependence": "valid",
             },
-            return_status="skipped",
             micro_status="valid",
             tick_spread_eligible=True,
             tick_spread_emitted=True,
@@ -1071,43 +1044,6 @@ def _calendar_regimes_payload() -> dict[str, JSONValue]:
                 "complete": False,
                 "static_advisory": True,
             },
-        },
-    }
-
-
-def _return_dynamics_payload(
-    *,
-    sequence_status: str = "ok",
-    limitations: tuple[str, ...] = (),
-    invalid_row_count: int = 0,
-    truncated: bool = False,
-) -> dict[str, JSONValue]:
-    return {
-        "basis": "observed_sequence",
-        "row_order": "source_text_order",
-        "computed_from": "text_scan",
-        "cache_source": None,
-        "regular_grid": False,
-        "sequence_status": sequence_status,
-        "limitations": list(limitations),
-        "row_count": 4,
-        "sampled_row_count": 4 - invalid_row_count,
-        "usable_row_count": 4 - invalid_row_count,
-        "invalid_row_count": invalid_row_count,
-        "partial_row_count": invalid_row_count,
-        "truncated": truncated,
-        "close_log_return": _numeric(count=3, median=0.0001),
-        "absolute_return": _numeric(count=3, median=0.0001),
-        "squared_return": _numeric(count=3, median=0.0),
-        "open_jump": _numeric(count=3, median=0.0),
-        "flatline": {
-            "zero_return_count": 1,
-            "zero_return_rate": 0.333333333333,
-            "zero_return_run_count": 1,
-            "ohlc_flatline_row_count": 0,
-            "ohlc_flatline_rate": 0.0,
-            "ohlc_flatline_run_count": 0,
-            "ohlc_flatline_affected_row_count": 0,
         },
     }
 
@@ -1210,9 +1146,8 @@ def _audit_payload(
     *,
     sections: tuple[str, ...],
     section_statuses: Mapping[str, str],
-    return_status: str,
     micro_status: str,
-    return_reason: str | None = None,
+    micro_reason: str | None = None,
     tick_spread_eligible: bool = False,
     tick_spread_emitted: bool = False,
 ) -> dict[str, JSONValue]:
@@ -1239,13 +1174,9 @@ def _audit_payload(
             "calendar_profile_static_advisory": True,
         },
         "dynamics_readiness": {
-            "return_dynamics": _readiness_payload(
-                status=return_status,
-                reason=return_reason,
-                row_count=4 if return_status != "skipped" else 0,
-            ),
             "microstructure_dynamics": _readiness_payload(
                 status=micro_status,
+                reason=micro_reason,
                 row_count=5 if micro_status != "skipped" else 0,
             ),
         },

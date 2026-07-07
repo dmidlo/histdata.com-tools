@@ -14,7 +14,7 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
 )
 from histdatacom.data_quality.symbols import symbol_metadata_for
-from histdatacom.histdata_ascii import M1, TICK
+from histdatacom.histdata_ascii import TICK
 from histdatacom.runtime_contracts import JSONValue
 
 MODELING_READINESS_RULE_ID = "modeling.readiness"
@@ -23,8 +23,6 @@ MODELING_READINESS_METADATA_KEY = "modeling_readiness"
 MODELING_FINDING_DOMAIN = "modeling_readiness"
 MODELING_FINDING_KIND = "modeling_assumption"
 
-M1_GRANULARITY_MS = 60_000
-M1_TIMESTAMP_PRECISION_MS = 1_000
 TICK_MINIMUM_INTERVAL_MS = 1
 TICK_TIMESTAMP_PRECISION_MS = 1
 
@@ -180,82 +178,6 @@ class HistDataModelingReadinessRule:
             )
         ]
 
-        if _needs_bid_only_execution_warning(target, assumptions):
-            findings.append(
-                _modeling_finding(
-                    target,
-                    code="MODELING_BID_ONLY_EXECUTION_RISK",
-                    message=(
-                        "M1 OHLC bars are bid-only; long-entry and "
-                        "short-exit assumptions need an ask-side execution "
-                        "model or joined spread data."
-                    ),
-                    severity=self.warning_severity,
-                    rule_id=self.rule_id,
-                    metadata={
-                        **profile,
-                        "missing_assumption": "ask_side_execution_model",
-                    },
-                )
-            )
-
-        if _needs_current_bar_leakage_warning(target, assumptions):
-            findings.append(
-                _modeling_finding(
-                    target,
-                    code="MODELING_CURRENT_BAR_LEAKAGE_RISK",
-                    message=(
-                        "Current-bar high, low, and close values are only "
-                        "known after the M1 bar completes; acting inside the "
-                        "same bar risks feature or label leakage."
-                    ),
-                    severity=self.warning_severity,
-                    rule_id=self.rule_id,
-                    metadata={
-                        **profile,
-                        "missing_assumption": "after_bar_close_action_timing",
-                    },
-                )
-            )
-
-        if _needs_spread_cost_warning(target, assumptions):
-            findings.append(
-                _modeling_finding(
-                    target,
-                    code="MODELING_SPREAD_COST_MISSING",
-                    message=(
-                        "Spread cost is not available from bid-only M1 bars; "
-                        "configure a spread-cost model or use tick bid/ask "
-                        "data for execution-cost estimates."
-                    ),
-                    severity=self.warning_severity,
-                    rule_id=self.rule_id,
-                    metadata={
-                        **profile,
-                        "missing_assumption": "spread_cost_model",
-                    },
-                )
-            )
-
-        if _needs_high_low_execution_warning(target, assumptions):
-            findings.append(
-                _modeling_finding(
-                    target,
-                    code="MODELING_HIGH_LOW_EXECUTION_REALISM_RISK",
-                    message=(
-                        "M1 high/low values are only known after the bar and "
-                        "do not prove an executable intrabar path; configure "
-                        "an intrabar or high/low execution model."
-                    ),
-                    severity=self.warning_severity,
-                    rule_id=self.rule_id,
-                    metadata={
-                        **profile,
-                        "missing_assumption": "high_low_execution_model",
-                    },
-                )
-            )
-
         if _needs_slippage_cost_warning(assumptions):
             findings.append(
                 _modeling_finding(
@@ -398,7 +320,10 @@ def modeling_quality_rules() -> tuple[QualityRule, ...]:
 
 
 def _is_histdata_ascii_market_target(target: QualityTarget) -> bool:
-    return target.data_format == "ascii" and target.timeframe in {M1, TICK}
+    return (
+        str(target.data_format).lower() == "ascii"
+        and str(target.timeframe).upper() == TICK
+    )
 
 
 def _modeling_assumptions(
@@ -470,19 +395,6 @@ def _modeling_readiness_metadata(
 
 
 def _format_profile(target: QualityTarget) -> dict[str, JSONValue]:
-    if target.timeframe == M1:
-        return {
-            "data_format": target.data_format,
-            "timeframe": target.timeframe,
-            "price_basis": "bid_ohlc",
-            "quote_sides": ["bid"],
-            "tradable_quote_sides_available": False,
-            "bar_close_required_for_ohlc": True,
-            "granularity_ms": M1_GRANULARITY_MS,
-            "timestamp_precision_ms": M1_TIMESTAMP_PRECISION_MS,
-            "timestamp_precision": "seconds",
-        }
-
     return {
         "data_format": target.data_format,
         "timeframe": target.timeframe,
@@ -553,16 +465,9 @@ def _execution_assumptions(
         "bar_close_action_timing": _bar_close_action_timing(assumptions),
         "uses_high_low_fills": uses_high_low,
         "high_low_execution_model": high_low_modeled,
-        "bid_only_long_entry_short_exit_risk": (
-            target.timeframe == M1
-            and not _ask_side_execution_modeled(assumptions)
-        ),
-        "current_bar_leakage_risk": (
-            target.timeframe == M1 and not _bar_close_action_timing(assumptions)
-        ),
-        "high_low_execution_risk": (
-            target.timeframe == M1 and uses_high_low and not high_low_modeled
-        ),
+        "bid_only_long_entry_short_exit_risk": False,
+        "current_bar_leakage_risk": False,
+        "high_low_execution_risk": False,
     }
 
 
@@ -659,40 +564,6 @@ def _target_horizon_metadata(
         "minimum_recommended_ms": minimum_recommended_ms,
         "status": status,
     }
-
-
-def _needs_bid_only_execution_warning(
-    target: QualityTarget,
-    assumptions: Mapping[str, JSONValue],
-) -> bool:
-    return target.timeframe == M1 and not _ask_side_execution_modeled(
-        assumptions
-    )
-
-
-def _needs_current_bar_leakage_warning(
-    target: QualityTarget,
-    assumptions: Mapping[str, JSONValue],
-) -> bool:
-    return target.timeframe == M1 and not _bar_close_action_timing(assumptions)
-
-
-def _needs_spread_cost_warning(
-    target: QualityTarget,
-    assumptions: Mapping[str, JSONValue],
-) -> bool:
-    return target.timeframe == M1 and not _spread_cost_configured(assumptions)
-
-
-def _needs_high_low_execution_warning(
-    target: QualityTarget,
-    assumptions: Mapping[str, JSONValue],
-) -> bool:
-    return (
-        target.timeframe == M1
-        and _uses_high_low_execution(assumptions)
-        and not _high_low_execution_modeled(assumptions)
-    )
 
 
 def _needs_slippage_cost_warning(

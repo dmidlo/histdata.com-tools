@@ -54,7 +54,7 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
 )
-from histdatacom.histdata_ascii import M1, TICK
+from histdatacom.histdata_ascii import TICK
 from histdatacom.runtime_contracts import JSONValue
 
 FINGERPRINT_SERIES_CONFIG_KEYS = (
@@ -366,7 +366,7 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         "fingerprint_dynamics",
         TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
-        payload_path="time_series_fingerprint.return_dynamics|microstructure_dynamics",
+        payload_path="time_series_fingerprint.microstructure_dynamics",
         status="implemented",
     ),
     FingerprintSchemaContract(
@@ -486,7 +486,7 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
     FingerprintTargetSectionContract(
         "coverage",
         "all supported targets",
-        target_timeframes=(M1, TICK),
+        target_timeframes=(TICK,),
         schema_key="series_fingerprint",
         key_fields=(
             "row_count",
@@ -498,22 +498,16 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
     FingerprintTargetSectionContract(
         "temporal_topology",
         "timestamp continuity, ordering, gaps, duplicates, and sampling basis",
-        target_timeframes=(M1, TICK),
+        target_timeframes=(TICK,),
         schema_key="series_fingerprint",
         basis_values=("observed_sequence",),
     ),
     FingerprintTargetSectionContract(
         "calendar_regimes",
         "session, special-window, holiday, event, hour, and weekday counts",
-        target_timeframes=(M1, TICK),
+        target_timeframes=(TICK,),
         schema_key="fingerprint_calendar_regimes",
         basis_values=("text_scan", "direct_cache", "fresh_sibling_cache"),
-    ),
-    FingerprintTargetSectionContract(
-        "m1_bar_distribution",
-        "OHLC price, bar shape, precision, and invalid-row summaries",
-        target_timeframes=(M1,),
-        schema_key="series_fingerprint",
     ),
     FingerprintTargetSectionContract(
         "tick_distribution",
@@ -533,14 +527,6 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
-        "return_dynamics",
-        "M1 close returns, open jumps, flatlines, and sequence limitations",
-        target_timeframes=(M1,),
-        schema_key="fingerprint_dynamics",
-        basis_values=("observed_sequence",),
-        row_order_values=("source_text_order", "cache_order"),
-    ),
-    FingerprintTargetSectionContract(
         "microstructure_dynamics",
         "tick interarrival, spread changes, stale quotes, bursts, and one-sided movement",
         target_timeframes=(TICK,),
@@ -551,7 +537,7 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
     FingerprintTargetSectionContract(
         "dependence",
         "observed-sequence lag autocorrelation for returns, ranges, spreads, and spread changes",
-        target_timeframes=(M1, TICK),
+        target_timeframes=(TICK,),
         schema_key="fingerprint_dependence",
         basis_values=("observed_sequence",),
         row_order_values=("source_text_order", "cache_order"),
@@ -563,7 +549,7 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
     FingerprintTargetSectionContract(
         "stationarity_diagnostics",
         "advisory rolling drift, distribution shift, and transform recommendations",
-        target_timeframes=(M1, TICK),
+        target_timeframes=(TICK,),
         schema_key="fingerprint_stationarity_diagnostics",
         basis_values=("observed_sequence",),
         row_order_values=("source_text_order", "cache_order"),
@@ -577,7 +563,7 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
     FingerprintTargetSectionContract(
         "fingerprint_audit",
         "machine-readable expected/emitted/skipped section accounting and readiness",
-        target_timeframes=(M1, TICK),
+        target_timeframes=(TICK,),
         schema_key="fingerprint_audit",
     ),
 )

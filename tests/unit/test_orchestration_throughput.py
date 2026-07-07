@@ -248,7 +248,7 @@ def _single_scenario_matrix(
                 request_id="throughput-stop-check",
                 pairs=("eurusd",),
                 formats=("ascii",),
-                timeframes=("M1",),
+                timeframes=("T",),
                 start_yearmonth="202201",
                 end_yearmonth="202201",
                 data_directory=str(tmp_path / "data"),

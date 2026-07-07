@@ -18,7 +18,7 @@ from histdatacom.data_quality.format_support import (
     known_histdata_timeframes,
     quality_support_for_target,
 )
-from histdatacom.histdata_ascii import CACHE_FILENAME, M1, TICK
+from histdatacom.histdata_ascii import CACHE_FILENAME, TICK
 from histdatacom.runtime_contracts import JSONValue
 
 QUALITY_CHECK_GROUPS = (
@@ -26,7 +26,6 @@ QUALITY_CHECK_GROUPS = (
     "inventory",
     "ingestion",
     "time",
-    "bars",
     "ticks",
     "domain",
     "modeling",
@@ -42,7 +41,7 @@ _HISTDATA_DATA_FILENAME_RE = re.compile(
     rf"^DAT_(?P<format>{_FORMAT_CODE_PATTERN})_"
     rf"(?P<symbol>[A-Z0-9]+)_(?P<timeframe>{_TIMEFRAME_PATTERN})_"
     r"(?P<period>\d{4}(?:\d{2})?)(?:_[A-Z0-9_]+)?"
-    r"(?:\.(?:csv|xlsx))?$",
+    r"(?:\.csv)?$",
     re.IGNORECASE,
 )
 _HISTDATA_ARCHIVE_FILENAME_RE = re.compile(
@@ -210,8 +209,6 @@ def _target_kind(path: Path) -> QualityTargetKind | None:
         return QualityTargetKind.ZIP
     if suffix == ".csv":
         return QualityTargetKind.CSV
-    if suffix == ".xlsx":
-        return QualityTargetKind.SPREADSHEET
     return None
 
 
@@ -253,7 +250,7 @@ def _metadata_from_cache_path(path: Path) -> dict[str, JSONValue]:
             symbol = parts[index + 2].upper()
         except IndexError:
             return {}
-        if timeframe not in {M1, TICK}:
+        if timeframe != TICK:
             return {}
 
         period_parts = parts[index + 3 : -1]
@@ -295,6 +292,5 @@ def _period_from_path_parts(parts: tuple[str, ...]) -> str:
 _TARGET_KINDS = (
     QualityTargetKind.ZIP,
     QualityTargetKind.CSV,
-    QualityTargetKind.SPREADSHEET,
     QualityTargetKind.CACHE,
 )

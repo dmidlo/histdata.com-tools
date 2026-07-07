@@ -89,13 +89,23 @@ REMEDIATION_HINTS_BY_FINDING: Mapping[
 ] = {
     (
         ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
-        "ASCII_M1_DUPLICATE_TIMESTAMP",
+        "ASCII_TICK_DUPLICATE_ROW",
     ): QualityRemediationHint(
-        code="inspect_duplicate_timestamp_rows",
-        message="inspect duplicate timestamp rows",
+        code="inspect_duplicate_tick_rows",
+        message="inspect duplicate tick rows",
         action_kind="inspect",
         rule_id=ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
-        finding_code="ASCII_M1_DUPLICATE_TIMESTAMP",
+        finding_code="ASCII_TICK_DUPLICATE_ROW",
+    ),
+    (
+        ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
+        "ASCII_TICK_PRECISION_MISMATCH",
+    ): QualityRemediationHint(
+        code="repair_tick_timestamp_precision",
+        message="repair tick timestamp millisecond precision",
+        action_kind="repair",
+        rule_id=ASCII_TIMESTAMP_SEQUENCE_RULE_ID,
+        finding_code="ASCII_TICK_PRECISION_MISMATCH",
     ),
     (
         ZIP_INVENTORY_RULE_ID,

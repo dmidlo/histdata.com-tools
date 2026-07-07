@@ -32,7 +32,7 @@ def install_fake_orchestration() -> dict[str, Any]:
             "path": str(cache_path),
             "metadata": {
                 "filename": CACHE_FILENAME,
-                "timeframe": "M1",
+                "timeframe": "T",
                 "pair": "eurusd",
                 "line_count": str(source.height),
                 "start": str(source.item(0, "datetime")),
@@ -67,14 +67,12 @@ def install_fake_orchestration() -> dict[str, Any]:
 
 
 def sample_polars_frame() -> pl.DataFrame:
-    """Return a tiny frame shaped like an M1 HistData API result."""
+    """Return a tiny frame shaped like a tick HistData API result."""
     return pl.DataFrame(
         {
-            "datetime": [1328072400000, 1328072460000],
-            "open": [1.3066, 1.3067],
-            "high": [1.3068, 1.3069],
-            "low": [1.3065, 1.3066],
-            "close": [1.3067, 1.3068],
-            "vol": [0, 0],
+            "datetime": [1328072403660, 1328072403973],
+            "bid": [1.3066, 1.30658],
+            "ask": [1.30677, 1.30675],
+            "vol": [0, 25],
         }
     )

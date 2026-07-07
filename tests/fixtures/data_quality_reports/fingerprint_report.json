@@ -170,7 +170,7 @@
                 "kind": "csv",
                 "period": "201202",
                 "symbol": "EURUSD",
-                "timeframe": "M1"
+                "timeframe": "T"
               }
             }
           ],
@@ -208,7 +208,7 @@
         "csv": 1
       },
       "timeframe_counts": {
-        "M1": 1
+        "T": 1
       },
       "unavailable_count": 0,
       "unavailable_reason_counts": {}
@@ -250,7 +250,7 @@
       "cache_backed_distribution_target_count": 0,
       "cache_source_counts": {},
       "distribution_kind_counts": {
-        "m1_bar": 1
+        "tick": 1
       },
       "distribution_source_counts": {
         "text": 1
@@ -270,7 +270,6 @@
           "unbounded": false
         }
       },
-      "m1_bar_distribution_target_count": 1,
       "missing_distribution_target_count": 0,
       "omitted_target_count": 0,
       "partial_row_target_count": 0,
@@ -289,7 +288,7 @@
       "target_summaries": [
         {
           "cache_source": null,
-          "distribution_kind": "m1_bar",
+          "distribution_kind": "tick",
           "distribution_source": "text",
           "invalid_row_count": 0,
           "invalid_row_rate": 0.0,
@@ -307,7 +306,7 @@
             "kind": "csv",
             "period": "201202",
             "symbol": "EURUSD",
-            "timeframe": "M1"
+            "timeframe": "T"
           },
           "truncated": false,
           "usable_row_count": 3,
@@ -316,7 +315,7 @@
         }
       ],
       "text_backed_distribution_target_count": 1,
-      "tick_distribution_target_count": 0,
+      "tick_distribution_target_count": 1,
       "total_invalid_row_count": 0,
       "total_partial_row_count": 0,
       "truncated": false,
@@ -357,6 +356,7 @@
       },
       "omitted_target_count": 0,
       "reason_counts": {
+        "conditional_distribution_absent": 1,
         "missing_regime_summary": 1,
         "not_emitted": 2
       },
@@ -381,8 +381,9 @@
       "schema_version": "histdatacom.time-series-fingerprint-readiness-risk.v1",
       "section_risk_counts": {
         "calendar_regimes": 1,
+        "conditional_distributions": 1,
         "dependence": 1,
-        "return_dynamics": 1
+        "microstructure_dynamics": 1
       },
       "section_status_counts": {
         "calendar_regimes": {
@@ -391,13 +392,13 @@
         "coverage": {
           "valid": 1
         },
-        "m1_bar_distribution": {
-          "valid": 1
-        },
-        "return_dynamics": {
+        "microstructure_dynamics": {
           "skipped": 1
         },
         "temporal_topology": {
+          "valid": 1
+        },
+        "tick_distribution": {
           "valid": 1
         }
       },
@@ -405,20 +406,22 @@
       "target_count": 1,
       "target_risks": [
         {
-          "included_section_risk_count": 3,
+          "included_section_risk_count": 4,
           "omitted_section_risk_count": 0,
           "rank": 1,
           "reason_codes": [
             "not_emitted",
+            "conditional_distribution_absent",
             "missing_regime_summary"
           ],
           "reason_counts": {
+            "conditional_distribution_absent": 1,
             "missing_regime_summary": 1,
             "not_emitted": 2
           },
           "risk_level": "high",
-          "risk_score": 105,
-          "section_risk_count": 3,
+          "risk_score": 125,
+          "section_risk_count": 4,
           "section_risks": [
             {
               "included_reason_count": 1,
@@ -450,8 +453,19 @@
                 "not_emitted"
               ],
               "score": 35,
-              "section": "return_dynamics",
+              "section": "microstructure_dynamics",
               "status": "skipped"
+            },
+            {
+              "included_reason_count": 1,
+              "omitted_reason_count": 0,
+              "reason_count": 1,
+              "reasons": [
+                "conditional_distribution_absent"
+              ],
+              "score": 20,
+              "section": "conditional_distributions",
+              "status": "absent"
             }
           ],
           "section_risks_truncated": false,
@@ -460,7 +474,7 @@
             "kind": "csv",
             "period": "201202",
             "symbol": "EURUSD",
-            "timeframe": "M1"
+            "timeframe": "T"
           }
         }
       ],
@@ -486,17 +500,11 @@
       "dynamics_limitation_counts": {},
       "dynamics_reason_counts": {
         "microstructure_dynamics": {
-          "unsupported_timeframe": 1
-        },
-        "return_dynamics": {
           "not_emitted": 1
         }
       },
       "dynamics_status_counts": {
         "microstructure_dynamics": {
-          "skipped": 1
-        },
-        "return_dynamics": {
           "skipped": 1
         }
       },
@@ -531,13 +539,13 @@
         "coverage": {
           "valid": 1
         },
-        "m1_bar_distribution": {
-          "valid": 1
-        },
-        "return_dynamics": {
+        "microstructure_dynamics": {
           "skipped": 1
         },
         "temporal_topology": {
+          "valid": 1
+        },
+        "tick_distribution": {
           "valid": 1
         }
       },
@@ -557,7 +565,7 @@
       "target_summaries": [
         {
           "applicable_dynamics_reason": "not_emitted",
-          "applicable_dynamics_section": "return_dynamics",
+          "applicable_dynamics_section": "microstructure_dynamics",
           "applicable_dynamics_status": "skipped",
           "dependence": {
             "acf_basis": "unknown",
@@ -605,7 +613,7 @@
             "invalid_row_count": 0,
             "limitations": [],
             "partial_row_count": 0,
-            "reason": "unsupported_timeframe",
+            "reason": "not_emitted",
             "regular_grid": false,
             "row_count": 0,
             "row_order": "unknown",
@@ -623,22 +631,6 @@
             "missing_optional_calendar_data": true,
             "source": "quality_profile"
           },
-          "return_dynamics": {
-            "basis": "unknown",
-            "cache_source": null,
-            "computed_from": "unknown",
-            "invalid_row_count": 0,
-            "limitations": [],
-            "partial_row_count": 0,
-            "reason": "not_emitted",
-            "regular_grid": false,
-            "row_count": 0,
-            "row_order": "unknown",
-            "sampled_row_count": 0,
-            "status": "skipped",
-            "truncated": false,
-            "usable_row_count": 0
-          },
           "section_skip_reasons": [
             "not_emitted",
             "not_emitted"
@@ -646,9 +638,9 @@
           "section_statuses": {
             "calendar_regimes": "skipped",
             "coverage": "valid",
-            "m1_bar_distribution": "valid",
-            "return_dynamics": "skipped",
-            "temporal_topology": "valid"
+            "microstructure_dynamics": "skipped",
+            "temporal_topology": "valid",
+            "tick_distribution": "valid"
           },
           "sections_emitted_count": 3,
           "sections_expected_count": 5,
@@ -689,13 +681,13 @@
             "kind": "csv",
             "period": "201202",
             "symbol": "EURUSD",
-            "timeframe": "M1"
+            "timeframe": "T"
           },
           "tick_spread_conditioning": {
-            "eligible": false,
+            "eligible": true,
             "emitted": false,
-            "reason": "unsupported_timeframe",
-            "status": "ineligible"
+            "reason": null,
+            "status": "eligible"
           },
           "topology": {
             "cache_source": null,
@@ -714,7 +706,7 @@
         }
       ],
       "tick_spread_conditioning_status_counts": {
-        "ineligible": 1
+        "eligible": 1
       },
       "topology_limitation_counts": {},
       "truncated": false
@@ -741,7 +733,7 @@
       },
       "conditional_distribution_target_count": 0,
       "conditional_status_counts": {
-        "not_applicable": 1
+        "absent": 1
       },
       "count_limit": 8,
       "included_target_count": 1,
@@ -797,7 +789,7 @@
           },
           "conditional_distributions": {
             "metric": "tick_spread",
-            "status": "not_applicable"
+            "status": "absent"
           },
           "source_kind": "csv_text",
           "target_axis": {
@@ -805,7 +797,7 @@
             "kind": "csv",
             "period": "201202",
             "symbol": "EURUSD",
-            "timeframe": "M1"
+            "timeframe": "T"
           }
         }
       ],
@@ -890,7 +882,7 @@
             "kind": "csv",
             "period": "201202",
             "symbol": "EURUSD",
-            "timeframe": "M1"
+            "timeframe": "T"
           },
           "weekend_activity_count": 0
         }
@@ -906,7 +898,7 @@
           "location": {
             "column": "time_series_fingerprint",
             "metadata": {},
-            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
             "row_number": null,
             "timestamp_source": "",
             "timestamp_utc_ms": null
@@ -924,17 +916,13 @@
               "fingerprint_audit": {
                 "conditional_distribution_eligibility": {
                   "tick_spread": {
-                    "eligible": false,
-                    "reason": "unsupported_timeframe",
-                    "status": "ineligible"
+                    "eligible": true,
+                    "reason": null,
+                    "status": "eligible"
                   }
                 },
                 "dynamics_readiness": {
                   "microstructure_dynamics": {
-                    "reason": "unsupported_timeframe",
-                    "status": "skipped"
-                  },
-                  "return_dynamics": {
                     "reason": "not_emitted",
                     "status": "skipped"
                   }
@@ -952,29 +940,29 @@
                 "section_statuses": {
                   "calendar_regimes": "skipped",
                   "coverage": "valid",
-                  "m1_bar_distribution": "valid",
-                  "return_dynamics": "skipped",
-                  "temporal_topology": "valid"
+                  "microstructure_dynamics": "skipped",
+                  "temporal_topology": "valid",
+                  "tick_distribution": "valid"
                 },
                 "sections_emitted": [
                   "coverage",
                   "temporal_topology",
-                  "m1_bar_distribution"
+                  "tick_distribution"
                 ],
                 "sections_expected": [
                   "coverage",
                   "temporal_topology",
                   "calendar_regimes",
-                  "m1_bar_distribution",
-                  "return_dynamics"
+                  "tick_distribution",
+                  "microstructure_dynamics"
                 ],
                 "sections_skipped": {
                   "calendar_regimes": {
                     "reason": "not_emitted"
                   },
-                  "return_dynamics": {
+                  "microstructure_dynamics": {
                     "details": {
-                      "timeframe": "M1"
+                      "timeframe": "T"
                     },
                     "reason": "not_emitted"
                   }
@@ -989,52 +977,24 @@
                   "unsupported_reason": null
                 }
               },
-              "fingerprint_id": "sha256:abf3b6bbec2617fe942f87b57c2e894640456b542a88293d801c12b95dc8338f",
-              "m1_bar_distribution": {
-                "invalid_row_count": 0,
-                "precision": {
-                  "column_decimal_place_counts": {
-                    "close": {
-                      "6": 3
-                    },
-                    "high": {
-                      "6": 3
-                    },
-                    "low": {
-                      "6": 3
-                    },
-                    "open": {
-                      "6": 3
-                    }
-                  },
-                  "decimal_place_counts": {
-                    "6": 12
-                  },
-                  "precision_source": "text"
-                },
-                "row_count": 3,
-                "sampled_row_count": 3,
-                "truncated": false,
-                "usable_row_count": 3
-              },
+              "fingerprint_id": "sha256:12c919fc872938c599980788b207700680013580935c6de1fcb0176475bd84bb",
               "schema_version": "histdatacom.time-series-fingerprint.v1",
               "source": {
                 "kind": "csv_text",
-                "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv"
+                "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv"
               },
               "target_axis": {
                 "data_format": "ascii",
                 "kind": "csv",
                 "period": "201202",
                 "symbol": "EURUSD",
-                "timeframe": "M1"
+                "timeframe": "T"
               },
               "temporal_topology": {
                 "cache_source": null,
                 "computed_from": "text_scan",
                 "duplicate_timestamp_count": 0,
                 "duplicate_timestamp_source_counts": {
-                  "m1_duplicate_timestamp": 0,
                   "tick_duplicate_row": 0
                 },
                 "expected_session_closure_count": 0,
@@ -1063,7 +1023,6 @@
                 },
                 "interval_count": 2,
                 "invalid_timestamp_count": 0,
-                "m1_duplicate_timestamp_count": 0,
                 "max_gap_ms": 60000,
                 "median_interval_ms": 60000,
                 "min_interval_ms": 60000,
@@ -1075,6 +1034,27 @@
                 "tick_duplicate_row_count": 0,
                 "timestamp_projection": "text_scan",
                 "weekend_activity_count": 0
+              },
+              "tick_distribution": {
+                "invalid_row_count": 0,
+                "precision": {
+                  "column_decimal_place_counts": {
+                    "ask": {
+                      "6": 3
+                    },
+                    "bid": {
+                      "6": 3
+                    }
+                  },
+                  "decimal_place_counts": {
+                    "6": 12
+                  },
+                  "precision_source": "text"
+                },
+                "row_count": 3,
+                "sampled_row_count": 3,
+                "truncated": false,
+                "usable_row_count": 3
               }
             }
           },
@@ -1084,12 +1064,12 @@
             "data_format": "ascii",
             "kind": "csv",
             "metadata": {
-              "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+              "filename": "DAT_ASCII_EURUSD_T_201202.csv"
             },
-            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
             "period": "201202",
             "symbol": "EURUSD",
-            "timeframe": "M1"
+            "timeframe": "T"
           }
         }
       ],
@@ -1100,12 +1080,12 @@
         "data_format": "ascii",
         "kind": "csv",
         "metadata": {
-          "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+          "filename": "DAT_ASCII_EURUSD_T_201202.csv"
         },
-        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
         "period": "201202",
         "symbol": "EURUSD",
-        "timeframe": "M1"
+        "timeframe": "T"
       }
     }
   ],
@@ -1132,12 +1112,12 @@
         "data_format": "ascii",
         "kind": "csv",
         "metadata": {
-          "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+          "filename": "DAT_ASCII_EURUSD_T_201202.csv"
         },
-        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
         "period": "201202",
         "symbol": "EURUSD",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     }
@@ -1147,12 +1127,12 @@
       "data_format": "ascii",
       "kind": "csv",
       "metadata": {
-        "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+        "filename": "DAT_ASCII_EURUSD_T_201202.csv"
       },
-      "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+      "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
       "period": "201202",
       "symbol": "EURUSD",
-      "timeframe": "M1"
+      "timeframe": "T"
     }
   ]
 }

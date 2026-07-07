@@ -22,9 +22,9 @@ from histdatacom.runtime_contracts import (
     status_has_csv_artifact,
 )
 
-ASCII_M1_URL = (
+ASCII_TICK_URL = (
     "http://www.histdata.com/download-free-forex-data/"
-    "?/ascii/1-minute-bar-quotes/eurusd/2022"
+    "?/ascii/tick-data-quotes/eurusd/2022/1"
 )
 
 
@@ -63,21 +63,21 @@ def test_work_status_normalizes_legacy_and_future_states() -> None:
 def test_work_item_round_trips_legacy_record_shape() -> None:
     """WorkItem should preserve current Record metadata for compatibility."""
     record = Record(
-        url=ASCII_M1_URL,
+        url=ASCII_TICK_URL,
         status="CSV_FILE",
         encoding="gzip",
         bytes_length="1024",
-        data_date="2022",
+        data_date="202201",
         data_year="2022",
-        data_month="",
-        data_datemonth="2022",
+        data_month="1",
+        data_datemonth="202201",
         data_format="ASCII",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
-        data_dir="/tmp/histdatacom/ASCII/M1/eurusd/2022/",
+        data_dir="/tmp/histdatacom/ASCII/T/eurusd/2022/1/",
         data_tk="token",
-        zip_filename="DAT_ASCII_EURUSD_M1_2022.zip",
-        csv_filename="DAT_ASCII_EURUSD_M1_2022.csv",
+        zip_filename="DAT_ASCII_EURUSD_T_202201.zip",
+        csv_filename="DAT_ASCII_EURUSD_T_202201.csv",
         cache_filename=".data",
         cache_line_count="100",
         cache_start="1643673600000",
@@ -89,11 +89,11 @@ def test_work_item_round_trips_legacy_record_shape() -> None:
     restored = WorkItem.from_dict(json.loads(json.dumps(item.to_dict())))
 
     assert item.work_id == derive_work_id(
-        ASCII_M1_URL,
+        ASCII_TICK_URL,
         "ASCII",
-        "M1",
+        "T",
         "eurusd",
-        "2022",
+        "202201",
     )
     assert restored == item
     assert restored.to_record_kwargs()["status"] == "CSV_FILE"
@@ -102,7 +102,7 @@ def test_work_item_round_trips_legacy_record_shape() -> None:
 
 def test_work_item_preserves_unknown_legacy_status_text() -> None:
     """Unknown legacy strings should not be discarded during migration."""
-    record = Record(url=ASCII_M1_URL, status="CUSTOM_STATUS")
+    record = Record(url=ASCII_TICK_URL, status="CUSTOM_STATUS")
 
     assert record.status is WorkStatus.UNKNOWN
     assert record.status_text == "CUSTOM_STATUS"
@@ -120,7 +120,7 @@ def test_run_request_round_trips_options_payload() -> None:
     options = Options()
     options.pairs = {"eurusd", "gbpusd"}
     options.formats = {"ascii"}
-    options.timeframes = {"M1", "T"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2020-01"
     options.end_yearmonth = "2020-02"
     options.data_directory = "~/histdata"
@@ -133,7 +133,7 @@ def test_run_request_round_trips_options_payload() -> None:
     options.extract_csvs = True
     options.build_cache = True
     options.data_quality = True
-    options.quality_paths = ("data/DAT_ASCII_EURUSD_M1_202001.csv",)
+    options.quality_paths = ("data/DAT_ASCII_EURUSD_T_202001.csv",)
     options.quality_check_groups = {"inventory", "time"}
     options.quality_report_path = "reports/quality.json"
     options.quality_fail_on = "warning"
@@ -160,7 +160,7 @@ def test_run_request_round_trips_options_payload() -> None:
     assert restored == request
     assert restored.request_id == "run-test"
     assert restored.pairs == ("eurusd", "gbpusd")
-    assert restored.timeframes == ("M1", "T")
+    assert restored.timeframes == ("T",)
     assert restored.batch_size == "2500"
     assert restored.metadata["repo_sort"] == "start_dsc"
     assert restored.validate_urls
@@ -168,7 +168,7 @@ def test_run_request_round_trips_options_payload() -> None:
     assert restored.extract_csvs
     assert restored.build_cache
     assert restored.data_quality
-    assert restored.quality_paths == ("data/DAT_ASCII_EURUSD_M1_202001.csv",)
+    assert restored.quality_paths == ("data/DAT_ASCII_EURUSD_T_202001.csv",)
     assert restored.quality_check_groups == ("inventory", "time")
     assert restored.quality_report_path == "reports/quality.json"
     assert restored.quality_fail_on == "warning"

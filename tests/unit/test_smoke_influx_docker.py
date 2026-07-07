@@ -124,7 +124,7 @@ def test_write_and_verify_influx_uses_real_writer_contract() -> None:
             return self.value
 
     class FakeTable:
-        records = [FakeRecord(4), FakeRecord(2)]
+        records = [FakeRecord(2)]
 
     class FakeQueryApi:
         def query(self, query: str, *, org: str) -> list[FakeTable]:
@@ -155,7 +155,7 @@ def test_write_and_verify_influx_uses_real_writer_contract() -> None:
 
     assert written_batches == [[line] for line in module.SMOKE_LINES]
     assert report["written_lines"] == 2
-    assert report["actual_field_count"] == 6
+    assert report["actual_field_count"] == 2
     assert query_calls[0][1] == "org"
     assert 'from(bucket: "bucket")' in query_calls[0][0]
     assert 'r._measurement == "eurusd"' in query_calls[0][0]

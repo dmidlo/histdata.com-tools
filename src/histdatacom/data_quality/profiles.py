@@ -8,15 +8,6 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
-from histdatacom.data_quality.bars import (
-    ASCII_M1_OUTLIER_RULE_ID,
-    ASCII_M1_PRECISION_RULE_ID,
-    ASCII_M1_TICK_RECONSTRUCTION_RULE_ID,
-    DEFAULT_M1_OUTLIER_THRESHOLDS,
-    DEFAULT_M1_TICK_RECONSTRUCTION_TOLERANCE,
-    HistDataM1OutlierThresholds,
-    HistDataM1TickReconstructionTolerance,
-)
 from histdatacom.data_quality.calendar import DOMAIN_CALENDAR_SESSION_RULE_ID
 from histdatacom.data_quality.calendar_profiles import (
     HistDataCalendarProfile,
@@ -79,9 +70,6 @@ CONFIGURABLE_QUALITY_RULE_IDS = frozenset(
         ASCII_ROW_COUNT_INGESTION_RULE_ID,
         ASCII_TIMESTAMP_GAP_RULE_ID,
         ASCII_TIMESTAMP_CONTINUITY_RULE_ID,
-        ASCII_M1_PRECISION_RULE_ID,
-        ASCII_M1_OUTLIER_RULE_ID,
-        ASCII_M1_TICK_RECONSTRUCTION_RULE_ID,
         ASCII_TICK_SPREAD_RULE_ID,
         ASCII_TICK_MICROSTRUCTURE_RULE_ID,
         ASCII_TICK_SPREAD_REGIME_RULE_ID,
@@ -239,128 +227,6 @@ class QualityProfile:
         return _gap_tolerance(
             _mapping_field(config, "tolerance", path=rule_id),
             path=f"{rule_id}.tolerance",
-        )
-
-    def m1_precision_rules_by_symbol(
-        self,
-    ) -> dict[str, HistDataSymbolPrecisionRule]:
-        """Return configured M1 precision overrides by symbol."""
-        config = self.rule_config(ASCII_M1_PRECISION_RULE_ID)
-        _reject_unknown_keys(
-            config,
-            {
-                "precision_rules_by_symbol",
-                "precision_rules_by_asset_class",
-                "warning_severity",
-            },
-            ASCII_M1_PRECISION_RULE_ID,
-        )
-        return _precision_rule_mapping(
-            _mapping_field(
-                config,
-                "precision_rules_by_symbol",
-                path=ASCII_M1_PRECISION_RULE_ID,
-            ),
-            key_normalizer=normalize_histdata_symbol,
-            path=f"{ASCII_M1_PRECISION_RULE_ID}.precision_rules_by_symbol",
-        )
-
-    def m1_precision_rules_by_asset_class(
-        self,
-    ) -> dict[str, HistDataSymbolPrecisionRule]:
-        """Return configured M1 precision overrides by asset class."""
-        config = self.rule_config(ASCII_M1_PRECISION_RULE_ID)
-        _reject_unknown_keys(
-            config,
-            {
-                "precision_rules_by_symbol",
-                "precision_rules_by_asset_class",
-                "warning_severity",
-            },
-            ASCII_M1_PRECISION_RULE_ID,
-        )
-        return _precision_rule_mapping(
-            _mapping_field(
-                config,
-                "precision_rules_by_asset_class",
-                path=ASCII_M1_PRECISION_RULE_ID,
-            ),
-            key_normalizer=_lower_key,
-            path=f"{ASCII_M1_PRECISION_RULE_ID}.precision_rules_by_asset_class",
-        )
-
-    def m1_outlier_thresholds(self) -> HistDataM1OutlierThresholds:
-        """Return default M1 outlier thresholds from the profile."""
-        config = self.rule_config(ASCII_M1_OUTLIER_RULE_ID)
-        _reject_unknown_keys(
-            config,
-            {
-                "thresholds",
-                "thresholds_by_symbol",
-                "thresholds_by_asset_class",
-                "warning_severity",
-            },
-            ASCII_M1_OUTLIER_RULE_ID,
-        )
-        return _m1_outlier_thresholds(
-            _mapping_field(config, "thresholds", path=ASCII_M1_OUTLIER_RULE_ID),
-            base=DEFAULT_M1_OUTLIER_THRESHOLDS,
-            path=f"{ASCII_M1_OUTLIER_RULE_ID}.thresholds",
-        )
-
-    def m1_outlier_thresholds_by_symbol(
-        self,
-    ) -> dict[str, HistDataM1OutlierThresholds]:
-        """Return configured M1 outlier thresholds by symbol."""
-        config = self.rule_config(ASCII_M1_OUTLIER_RULE_ID)
-        return _m1_outlier_threshold_mapping(
-            _mapping_field(
-                config,
-                "thresholds_by_symbol",
-                path=ASCII_M1_OUTLIER_RULE_ID,
-            ),
-            key_normalizer=normalize_histdata_symbol,
-            path=f"{ASCII_M1_OUTLIER_RULE_ID}.thresholds_by_symbol",
-        )
-
-    def m1_outlier_thresholds_by_asset_class(
-        self,
-    ) -> dict[str, HistDataM1OutlierThresholds]:
-        """Return configured M1 outlier thresholds by asset class."""
-        config = self.rule_config(ASCII_M1_OUTLIER_RULE_ID)
-        return _m1_outlier_threshold_mapping(
-            _mapping_field(
-                config,
-                "thresholds_by_asset_class",
-                path=ASCII_M1_OUTLIER_RULE_ID,
-            ),
-            key_normalizer=_lower_key,
-            path=f"{ASCII_M1_OUTLIER_RULE_ID}.thresholds_by_asset_class",
-        )
-
-    def m1_tick_reconstruction_tolerance(
-        self,
-    ) -> HistDataM1TickReconstructionTolerance:
-        """Return configured M1 tick reconstruction tolerance."""
-        config = self.rule_config(ASCII_M1_TICK_RECONSTRUCTION_RULE_ID)
-        _reject_unknown_keys(
-            config,
-            {"tolerance", "warning_severity"},
-            ASCII_M1_TICK_RECONSTRUCTION_RULE_ID,
-        )
-        tolerance = _mapping_field(
-            config,
-            "tolerance",
-            path=ASCII_M1_TICK_RECONSTRUCTION_RULE_ID,
-        )
-        return HistDataM1TickReconstructionTolerance(
-            price_tolerance=_float_field(
-                tolerance,
-                "price_tolerance",
-                DEFAULT_M1_TICK_RECONSTRUCTION_TOLERANCE.price_tolerance,
-                minimum=0.0,
-                path=f"{ASCII_M1_TICK_RECONSTRUCTION_RULE_ID}.tolerance",
-            )
         )
 
     def tick_spread_thresholds(self) -> HistDataTickSpreadThresholds:
@@ -790,12 +656,6 @@ def validate_quality_profile(profile: QualityProfile) -> None:
     profile.row_count_profile()
     profile.gap_tolerance(ASCII_TIMESTAMP_GAP_RULE_ID)
     profile.gap_tolerance(ASCII_TIMESTAMP_CONTINUITY_RULE_ID)
-    profile.m1_precision_rules_by_symbol()
-    profile.m1_precision_rules_by_asset_class()
-    profile.m1_outlier_thresholds()
-    profile.m1_outlier_thresholds_by_symbol()
-    profile.m1_outlier_thresholds_by_asset_class()
-    profile.m1_tick_reconstruction_tolerance()
     profile.tick_spread_thresholds()
     profile.tick_spread_thresholds_by_asset_class()
     profile.tick_microstructure_thresholds()
@@ -822,9 +682,6 @@ def _validate_configured_severities(profile: QualityProfile) -> None:
         ),
         ASCII_TIMESTAMP_GAP_RULE_ID: ("warning_severity",),
         ASCII_TIMESTAMP_CONTINUITY_RULE_ID: ("warning_severity",),
-        ASCII_M1_PRECISION_RULE_ID: ("warning_severity",),
-        ASCII_M1_OUTLIER_RULE_ID: ("warning_severity",),
-        ASCII_M1_TICK_RECONSTRUCTION_RULE_ID: ("warning_severity",),
         ASCII_TICK_SPREAD_RULE_ID: (
             "zero_spread_severity",
             "negative_spread_severity",
@@ -861,25 +718,6 @@ def _rules_mapping(value: Any) -> dict[str, Mapping[str, JSONValue]]:
             raise QualityProfileError(msg)
         rules[rule_id] = _json_mapping(config)
     return rules
-
-
-def _m1_outlier_threshold_mapping(
-    value: Mapping[str, JSONValue],
-    *,
-    key_normalizer: Any,
-    path: str,
-) -> dict[str, HistDataM1OutlierThresholds]:
-    result: dict[str, HistDataM1OutlierThresholds] = {}
-    for key, config in value.items():
-        profile_key = str(key_normalizer(str(key)))
-        if not profile_key:
-            continue
-        result[profile_key] = _m1_outlier_thresholds(
-            _expect_mapping(config, path=f"{path}.{key}"),
-            base=DEFAULT_M1_OUTLIER_THRESHOLDS,
-            path=f"{path}.{key}",
-        )
-    return result
 
 
 def _tick_spread_threshold_mapping(
@@ -955,74 +793,6 @@ def _precision_rule_mapping(
             path=f"{path}.{key}",
         )
     return result
-
-
-def _m1_outlier_thresholds(
-    value: Mapping[str, JSONValue],
-    *,
-    base: HistDataM1OutlierThresholds,
-    path: str,
-) -> HistDataM1OutlierThresholds:
-    _reject_unknown_keys(
-        value,
-        {
-            "max_range_ratio",
-            "max_open_jump_ratio",
-            "flatline_run_length",
-            "return_mad_multiplier",
-            "return_absolute_ratio",
-            "min_return_samples",
-        },
-        path,
-    )
-    return HistDataM1OutlierThresholds(
-        max_range_ratio=_float_field(
-            value,
-            "max_range_ratio",
-            base.max_range_ratio,
-            minimum=0.0,
-            minimum_exclusive=True,
-            path=path,
-        ),
-        max_open_jump_ratio=_float_field(
-            value,
-            "max_open_jump_ratio",
-            base.max_open_jump_ratio,
-            minimum=0.0,
-            minimum_exclusive=True,
-            path=path,
-        ),
-        flatline_run_length=_int_field(
-            value,
-            "flatline_run_length",
-            base.flatline_run_length,
-            minimum=2,
-            path=path,
-        ),
-        return_mad_multiplier=_float_field(
-            value,
-            "return_mad_multiplier",
-            base.return_mad_multiplier,
-            minimum=0.0,
-            minimum_exclusive=True,
-            path=path,
-        ),
-        return_absolute_ratio=_float_field(
-            value,
-            "return_absolute_ratio",
-            base.return_absolute_ratio,
-            minimum=0.0,
-            minimum_exclusive=True,
-            path=path,
-        ),
-        min_return_samples=_int_field(
-            value,
-            "min_return_samples",
-            base.min_return_samples,
-            minimum=2,
-            path=path,
-        ),
-    )
 
 
 def _tick_spread_thresholds(

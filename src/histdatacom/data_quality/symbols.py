@@ -24,7 +24,7 @@ from histdatacom.data_quality.polars_cache import (
     read_quality_polars_cache,
 )
 from histdatacom.fx_enums import Pairs
-from histdatacom.histdata_ascii import M1, TICK, read_ascii_file
+from histdatacom.histdata_ascii import TICK, read_ascii_file
 from histdatacom.runtime_contracts import JSONValue
 
 DOMAIN_SYMBOL_METADATA_RULE_ID = "domain.symbol_metadata"
@@ -43,7 +43,6 @@ METAL_PRECISION_RULE_NAME = "metal_three_decimal_bid"
 OIL_PRECISION_RULE_NAME = "oil_three_decimal_bid"
 INDEX_PRECISION_RULE_NAME = "index_three_decimal_bid"
 
-M1_BID_PRICE_COLUMNS = ("open", "high", "low", "close")
 TICK_BID_ASK_PRICE_COLUMNS = ("bid", "ask")
 
 CURRENCY_CODES = frozenset(
@@ -146,7 +145,6 @@ class HistDataSymbolMetadata:
             "pip_size": _precision_value(self.precision_rule, "pip_size"),
             "tick_size": _precision_value(self.precision_rule, "tick_size"),
             "quote_side": _precision_value(self.precision_rule, "quote_side"),
-            "m1_bid_only": True,
             "precision_rule": (
                 None
                 if self.precision_rule is None
@@ -722,8 +720,6 @@ def _quote_convention_metadata(
         "fx_quote_currency": (
             metadata.quote if metadata.asset_class == ASSET_CLASS_FX else ""
         ),
-        "m1_quote_side": "bid",
-        "m1_bid_only": True,
         "tick_quote_sides": list(TICK_BID_ASK_PRICE_COLUMNS),
         "tick_spread_definition": "ask - bid",
     }
@@ -734,9 +730,6 @@ def _format_assumptions_metadata(target: QualityTarget) -> dict[str, JSONValue]:
     return {
         "data_format": target.data_format,
         "timeframe": timeframe,
-        "m1_bid_ohlc": timeframe == M1,
-        "m1_bid_only": timeframe == M1,
-        "m1_price_columns": list(M1_BID_PRICE_COLUMNS),
         "tick_bid_ask": timeframe == TICK,
         "tick_price_columns": list(TICK_BID_ASK_PRICE_COLUMNS),
         "active_quote_side": _active_quote_side(timeframe),
@@ -744,8 +737,6 @@ def _format_assumptions_metadata(target: QualityTarget) -> dict[str, JSONValue]:
 
 
 def _active_quote_side(timeframe: str) -> str:
-    if timeframe == M1:
-        return "bid"
     if timeframe == TICK:
         return "bid/ask"
     return ""
@@ -897,7 +888,7 @@ def _scan_cross_instrument_consistency(
 def _is_ascii_text_target(target: QualityTarget) -> bool:
     return (
         target.data_format == "ascii"
-        and target.timeframe in {M1, TICK}
+        and target.timeframe == TICK
         and target.kind
         in {
             QualityTargetKind.CSV,
@@ -993,15 +984,7 @@ def _cross_instrument_series_from_polars_cache(
     ]
     | None
 ):
-    columns = (
-        ("datetime", "close")
-        if target.timeframe == M1
-        else (
-            "datetime",
-            "bid",
-            "ask",
-        )
-    )
+    columns = ("datetime", "bid", "ask")
     cache = read_quality_polars_cache(
         target,
         required_columns=columns,
@@ -1022,10 +1005,7 @@ def _cross_instrument_series_from_polars_cache(
         row_count += 1
         try:
             timestamp_utc_ms = int(row[0])
-            if target.timeframe == M1:
-                price = float(row[1])
-            else:
-                price = (float(row[1]) + float(row[2])) / 2.0
+            price = (float(row[1]) + float(row[2])) / 2.0
         except (TypeError, ValueError):
             invalid_price_count += 1
             continue
@@ -1075,9 +1055,7 @@ def _cross_instrument_price(
     row: tuple[object, ...],
 ) -> float | None:
     try:
-        if timeframe == M1:
-            price = float(str(row[4]))
-        elif timeframe == TICK:
+        if timeframe == TICK:
             price = (float(str(row[1])) + float(str(row[2]))) / 2.0
         else:
             return None
@@ -1089,8 +1067,6 @@ def _cross_instrument_price(
 
 
 def _cross_instrument_price_kind(timeframe: str) -> str:
-    if timeframe == M1:
-        return "close_bid"
     if timeframe == TICK:
         return "mid_bid_ask"
     return "unknown"
