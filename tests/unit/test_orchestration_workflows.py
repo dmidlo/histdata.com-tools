@@ -1301,7 +1301,7 @@ def test_workflow_summary_payload_bounds_large_result_sets() -> None:
                     kind="cache",
                     path=(
                         "/tmp/histdatacom/cache/"
-                        f"eurusd-m1-{stage_index:04d}-{artifact_index:04d}"
+                        f"eurusd-tick-{stage_index:04d}-{artifact_index:04d}"
                         ".data"
                     ),
                 )

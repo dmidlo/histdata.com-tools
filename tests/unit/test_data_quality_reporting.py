@@ -1803,7 +1803,7 @@ def _mixed_report(tmp_path: Path) -> QualityReport:
         severity=QualitySeverity.WARNING,
         code="TICK_DUPLICATE_ROW",
         message="duplicate tick row",
-        rule_id="m1.timestamp.unique",
+        rule_id="tick.timestamp.unique",
         target=warning,
         location=QualityLocation(
             path=warning.path,
@@ -1826,7 +1826,7 @@ def _mixed_report(tmp_path: Path) -> QualityReport:
         rule_results=(
             QualityRuleResult(rule_id="file.exists", target=clean),
             QualityRuleResult(
-                rule_id="m1.timestamp.unique",
+                rule_id="tick.timestamp.unique",
                 target=warning,
                 findings=(warning_finding,),
             ),
@@ -3013,7 +3013,7 @@ def _many_target_report(tmp_path: Path, *, clean_count: int) -> QualityReport:
         severity=QualitySeverity.WARNING,
         code="TICK_DUPLICATE_ROW",
         message="duplicate tick row",
-        rule_id="m1.timestamp.unique",
+        rule_id="tick.timestamp.unique",
         target=warning,
         location=QualityLocation(path=warning.path),
     )
@@ -3033,7 +3033,7 @@ def _many_target_report(tmp_path: Path, *, clean_count: int) -> QualityReport:
                 for target in clean_targets
             ),
             QualityRuleResult(
-                rule_id="m1.timestamp.unique",
+                rule_id="tick.timestamp.unique",
                 target=warning,
                 findings=(warning_finding,),
             ),

@@ -21,7 +21,7 @@ def test_extract_csv_rejects_xlsx_members(tmp_path: Path) -> None:
 
     archive_path = tmp_path / "spreadsheet.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:
-        archive.writestr("DAT_XLSX_EURUSD_M1_2022.xlsx", b"spreadsheet")
+        archive.writestr("DAT_XLSX_EURUSD_T_2022.xlsx", b"spreadsheet")
 
     record = Record(
         data_dir=str(tmp_path) + os.sep,

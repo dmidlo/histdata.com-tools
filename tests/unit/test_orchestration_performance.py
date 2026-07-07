@@ -232,7 +232,7 @@ def _batch_request() -> RunRequest:
 
 def _batch_work_item(datemonth: str) -> WorkItem:
     return WorkItem(
-        work_id=f"work-eurusd-m1-{datemonth}",
+        work_id=f"work-eurusd-tick-{datemonth}",
         status=WorkStatus.URL_NEW,
         url=f"https://example.test/eurusd/T/{datemonth}",
         data_format="ascii",

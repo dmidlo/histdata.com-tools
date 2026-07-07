@@ -463,7 +463,7 @@ def _run_request(
         request_id=request_id,
         pairs=("EURUSD",),
         formats=("ascii",),
-        timeframes=("m1",),
+        timeframes=("T",),
         data_directory=data_directory,
         validate_urls=True,
         download_data_archives=True,
@@ -546,7 +546,7 @@ def test_submit_run_request_uses_orchestration_queue(
         request_id="run-test",
         pairs=("EURUSD",),
         formats=("ascii",),
-        timeframes=("m1",),
+        timeframes=("T",),
     )
 
     handle = asyncio.run(
@@ -1084,7 +1084,7 @@ def test_submit_and_observe_logs_bounded_lifecycle_metadata(
         request_id="run-logs",
         pairs=("EURUSD",),
         formats=("ascii",),
-        timeframes=("m1",),
+        timeframes=("T",),
         validate_urls=True,
         metadata={"influx_config": {"INFLUX_TOKEN": "super-secret-token"}},
     )

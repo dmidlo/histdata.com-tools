@@ -94,7 +94,7 @@ def test_import_frame_with_headers_rejects_unsupported_timeframes() -> None:
     with pytest.raises(ValueError, match="unsupported ASCII timeframe"):
         Api._import_frame_with_headers(
             "M1",
-            FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+            FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
         )
 
 
@@ -157,7 +157,7 @@ def test_import_file_to_polars_preserves_system_exit_on_bad_timeframe() -> None:
     with pytest.raises(SystemExit):
         Api._import_file_to_polars(
             SimpleNamespace(data_timeframe="M1"),
-            FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+            FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
         )
 
 
