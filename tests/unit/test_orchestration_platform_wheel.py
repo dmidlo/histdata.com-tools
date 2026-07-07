@@ -124,7 +124,7 @@ def test_copy_source_tree_excludes_local_data_and_release_state(
         ".coverage.123",
         "build/temp.txt",
         "data/.repo",
-        "data/ASCII/M1/eurusd/2026/DAT_ASCII_EURUSD_M1_202606.csv",
+        "data/ASCII/T/eurusd/2026/DAT_ASCII_EURUSD_T_202606.csv",
         "dist/histdatacom-0.0.0.tar.gz",
         "src/histdatacom.egg-info/PKG-INFO",
         "venv/pyvenv.cfg",

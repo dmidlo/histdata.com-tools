@@ -14,9 +14,9 @@ from histdatacom.data_quality import (
     normalize_quality_check_groups,
     quality_target_from_path,
 )
-from histdatacom.histdata_ascii import CACHE_FILENAME, M1
+from histdatacom.histdata_ascii import CACHE_FILENAME, TICK
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
+    CLEAN_TICK_CASE,
     write_ascii_case,
     write_zip_case,
 )
@@ -27,11 +27,11 @@ def test_quality_discovery_recursively_finds_zip_csv_and_cache_targets(
 ) -> None:
     """Directory discovery should find supported local targets recursively."""
     nested = tmp_path / "nested"
-    csv_path = write_ascii_case(nested, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(nested, CLEAN_TICK_CASE)
     zip_path = write_zip_case(
         tmp_path,
-        CLEAN_M1_CASE,
-        zip_filename="DAT_ASCII_EURUSD_M1_201202.zip",
+        CLEAN_TICK_CASE,
+        zip_filename="DAT_ASCII_EURUSD_T_201202.zip",
     )
     cache_path = nested / CACHE_FILENAME
     cache_path.write_bytes(b"placeholder cache bytes")
@@ -60,11 +60,11 @@ def test_quality_discovery_recursively_finds_zip_csv_and_cache_targets(
     )
     assert csv_target.data_format == "ascii"
     assert csv_target.symbol == "EURUSD"
-    assert csv_target.timeframe == M1
+    assert csv_target.timeframe == TICK
     assert csv_target.period == "201202"
     assert zip_target.data_format == "ascii"
     assert zip_target.symbol == "EURUSD"
-    assert zip_target.timeframe == M1
+    assert zip_target.timeframe == TICK
     assert zip_target.period == "201202"
     assert (
         QualityDiscoveryResult.from_dict(result.to_dict()).to_dict()
@@ -75,30 +75,17 @@ def test_quality_discovery_recursively_finds_zip_csv_and_cache_targets(
 @pytest.mark.parametrize(
     ("filename", "kind", "expected_period"),
     (
-        ("DAT_ASCII_EURUSD_M1_201202.csv", QualityTargetKind.CSV, "201202"),
-        ("DAT_ASCII_EURUSD_M1_2012.csv", QualityTargetKind.CSV, "2012"),
-        ("DAT_ASCII_EURUSD_M1_201202.zip", QualityTargetKind.ZIP, "201202"),
+        ("DAT_ASCII_EURUSD_T_201202.csv", QualityTargetKind.CSV, "201202"),
+        ("DAT_ASCII_EURUSD_T_201202.zip", QualityTargetKind.ZIP, "201202"),
         (
-            "HISTDATA_COM_ASCII_EURUSD_M1201202.zip",
+            "HISTDATA_COM_ASCII_EURUSD_T201202.zip",
             QualityTargetKind.ZIP,
             "201202",
         ),
-        ("DAT_MT_EURUSD_M1_201202.csv", QualityTargetKind.CSV, "201202"),
         (
             "DAT_NT_AUDCAD_T_LAST_201212.csv",
             QualityTargetKind.CSV,
             "201212",
-        ),
-        ("DAT_MS_EURUSD_M1_201202.csv", QualityTargetKind.CSV, "201202"),
-        (
-            "DAT_XLSX_EURUSD_M1_2022.xlsx",
-            QualityTargetKind.SPREADSHEET,
-            "2022",
-        ),
-        (
-            "HISTDATA_COM_MT_EURUSD_M1201202.zip",
-            QualityTargetKind.ZIP,
-            "201202",
         ),
         (CACHE_FILENAME, QualityTargetKind.CACHE, ""),
     ),
@@ -124,12 +111,9 @@ def test_quality_target_from_path_classifies_supported_files(
 @pytest.mark.parametrize(
     ("filename", "expected_format", "expected_code", "expected_timeframe"),
     (
-        ("DAT_MT_EURUSD_M1_201202.csv", "metatrader", "MT", "M1"),
         ("DAT_NT_AUDCAD_T_LAST_201212.csv", "ninjatrader", "NT", "T_LAST"),
         ("DAT_NT_AUDCAD_T_BID_201212.csv", "ninjatrader", "NT", "T_BID"),
         ("DAT_NT_AUDCAD_T_ASK_201212.csv", "ninjatrader", "NT", "T_ASK"),
-        ("DAT_MS_EURUSD_M1_201202.csv", "metastock", "MS", "M1"),
-        ("DAT_XLSX_EURUSD_M1_2022.xlsx", "excel", "XLSX", "M1"),
     ),
 )
 def test_non_ascii_targets_expose_inventory_only_support_metadata(
@@ -158,9 +142,9 @@ def test_non_ascii_targets_expose_inventory_only_support_metadata(
 @pytest.mark.parametrize(
     ("path_parts", "expected_period"),
     (
-        (("data", "ASCII", "M1", "eurusd", "2012", CACHE_FILENAME), "2012"),
+        (("data", "ASCII", "T", "eurusd", "2012", CACHE_FILENAME), "2012"),
         (
-            ("data", "ASCII", "M1", "eurusd", "2026", "2", CACHE_FILENAME),
+            ("data", "ASCII", "T", "eurusd", "2026", "2", CACHE_FILENAME),
             "202602",
         ),
     ),
@@ -181,8 +165,23 @@ def test_cache_targets_derive_metadata_from_dataset_directory_layout(
     assert target.kind is QualityTargetKind.CACHE
     assert target.data_format == "ascii"
     assert target.symbol == "EURUSD"
-    assert target.timeframe == M1
+    assert target.timeframe == TICK
     assert target.period == expected_period
+
+
+def test_removed_m1_files_are_not_quality_targets(tmp_path: Path) -> None:
+    """M1 filenames should not classify as supported HistData dimensions."""
+    path = tmp_path / "DAT_ASCII_EURUSD_M1_201202.csv"
+    path.write_bytes(b"")
+
+    target = quality_target_from_path(path)
+
+    assert target is not None
+    assert target.data_format == ""
+    assert target.timeframe == ""
+    support = target.metadata["quality_support"]
+    assert support["inventory_supported"] is False
+    assert support["parser_supported"] is False
 
 
 def test_quality_discovery_rejects_missing_and_unsupported_paths(

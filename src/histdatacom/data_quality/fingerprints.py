@@ -49,7 +49,6 @@ from histdatacom.data_quality.ticks import (
     DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS,
 )
 from histdatacom.histdata_ascii import (
-    M1,
     TICK,
     columns_for_timeframe,
     delimiter_for_timeframe,
@@ -163,7 +162,7 @@ DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_COUNT = 1
 DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_RATE = 0.0
 DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_TRUNCATED = True
 DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_CACHE_FLOAT_PRECISION = True
-SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES = (M1, TICK)
+SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES = (TICK,)
 SUPPORTED_SERIES_FINGERPRINT_KINDS = (
     QualityTargetKind.CSV,
     QualityTargetKind.ZIP,
@@ -192,15 +191,13 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "coverage",
     "temporal_topology",
     "calendar_regimes",
-    "m1_bar_distribution",
     "tick_distribution",
     "conditional_distributions",
-    "return_dynamics",
     "microstructure_dynamics",
     "dependence",
     "stationarity_diagnostics",
 )
-FINGERPRINT_DYNAMICS_SECTIONS = ("return_dynamics", "microstructure_dynamics")
+FINGERPRINT_DYNAMICS_SECTIONS = ("microstructure_dynamics",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -566,7 +563,6 @@ def series_fingerprint_distribution_summary(
             for item in target_summaries
             if item.get("distribution_kind") != "missing"
         ),
-        "m1_bar_distribution_target_count": distribution_kind_counts["m1_bar"],
         "tick_distribution_target_count": distribution_kind_counts["tick"],
         "missing_distribution_target_count": status_counts["missing"],
         "unavailable_distribution_target_count": status_counts["unavailable"],
@@ -1365,9 +1361,7 @@ def _fingerprint_section_is_non_applicable(
 ) -> bool:
     timeframe = _summary_key(axis.get("timeframe"))
     return (
-        section == "return_dynamics"
-        and timeframe != M1
-        or section == "microstructure_dynamics"
+        section == "microstructure_dynamics"
         and timeframe != TICK
         or section == "stationarity_diagnostics"
         and timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
@@ -1755,12 +1749,6 @@ def _fingerprint_readiness_target_summary(
         for value in skipped_sections.values()
         if isinstance(value, Mapping)
     ]
-    return_readiness = _fingerprint_readiness_for_section(
-        "return_dynamics",
-        finding,
-        payload,
-        audit,
-    )
     microstructure_readiness = _fingerprint_readiness_for_section(
         "microstructure_dynamics",
         finding,
@@ -1771,16 +1759,12 @@ def _fingerprint_readiness_target_summary(
         _summary_key(target_axis.get("timeframe"))
     )
     applicable_readiness = (
-        return_readiness
-        if applicable_section == "return_dynamics"
-        else (
-            microstructure_readiness
-            if applicable_section == "microstructure_dynamics"
-            else {
-                "status": "unavailable",
-                "reason": "unsupported_timeframe",
-            }
-        )
+        microstructure_readiness
+        if applicable_section == "microstructure_dynamics"
+        else {
+            "status": "unavailable",
+            "reason": "unsupported_timeframe",
+        }
     )
     topology = _payload_mapping(payload.get("temporal_topology"))
     dependence_readiness = _fingerprint_readiness_dependence_summary(
@@ -1823,10 +1807,6 @@ def _fingerprint_readiness_target_summary(
         "profile_completeness": _fingerprint_readiness_profile_summary(audit),
         "tick_spread_conditioning": (
             _fingerprint_readiness_tick_spread_conditioning(audit)
-        ),
-        "return_dynamics": _fingerprint_readiness_return_summary(
-            payload,
-            return_readiness,
         ),
         "microstructure_dynamics": (
             _fingerprint_readiness_microstructure_summary(
@@ -1910,8 +1890,6 @@ def _fingerprint_readiness_for_section(
 
 
 def _applicable_dynamics_section(timeframe: str) -> str:
-    if timeframe == M1:
-        return "return_dynamics"
     if timeframe == TICK:
         return "microstructure_dynamics"
     return ""
@@ -1990,32 +1968,6 @@ def _fingerprint_readiness_tick_spread_conditioning(
         "reason": _optional_summary_key(eligibility.get("reason")),
         "emitted": eligibility.get("emitted") is True,
     }
-
-
-def _fingerprint_readiness_return_summary(
-    payload: Mapping[str, JSONValue],
-    readiness: Mapping[str, JSONValue],
-) -> dict[str, JSONValue]:
-    summary = dict(readiness)
-    dynamics = _payload_mapping(payload.get("return_dynamics"))
-    if not dynamics:
-        return summary
-    summary.update(
-        {
-            "close_log_return": _compact_numeric_summary(
-                dynamics.get("close_log_return")
-            ),
-            "absolute_return": _compact_numeric_summary(
-                dynamics.get("absolute_return")
-            ),
-            "squared_return": _compact_numeric_summary(
-                dynamics.get("squared_return")
-            ),
-            "open_jump": _compact_numeric_summary(dynamics.get("open_jump")),
-            "flatline": _compact_flatline_summary(dynamics.get("flatline")),
-        }
-    )
-    return summary
 
 
 def _fingerprint_readiness_microstructure_summary(
@@ -2831,12 +2783,10 @@ def _distribution_target_summary(
 ) -> dict[str, JSONValue]:
     target_axis = _payload_mapping(payload.get("target_axis"))
     source = _payload_mapping(payload.get("source"))
-    m1_distribution = _payload_mapping(payload.get("m1_bar_distribution"))
     tick_distribution = _payload_mapping(payload.get("tick_distribution"))
     distribution_kind, distribution = _distribution_kind_and_payload(
         target_axis,
         source,
-        m1_distribution=m1_distribution,
         tick_distribution=tick_distribution,
     )
     precision = _payload_mapping(distribution.get("precision"))
@@ -2898,12 +2848,9 @@ def _distribution_kind_and_payload(
     target_axis: Mapping[str, JSONValue],
     source: Mapping[str, JSONValue],
     *,
-    m1_distribution: Mapping[str, JSONValue],
     tick_distribution: Mapping[str, JSONValue],
 ) -> tuple[str, Mapping[str, JSONValue]]:
     timeframe = _summary_key(target_axis.get("timeframe"))
-    if timeframe == M1 and m1_distribution:
-        return "m1_bar", m1_distribution
     if timeframe == TICK and tick_distribution:
         return "tick", tick_distribution
     if _supported_readable_distribution_axis(target_axis, source):
@@ -2949,7 +2896,7 @@ def _distribution_precision_source(
     distribution_kind: str,
     precision: Mapping[str, JSONValue],
 ) -> str:
-    if distribution_kind != "m1_bar":
+    if distribution_kind != "tick" or not precision:
         return "unavailable"
     return _summary_key(precision.get("precision_source"))
 
@@ -3053,11 +3000,6 @@ def _distribution_attention_flags(
             flags.append("zero_tick_spread_rate_present")
     if profile.flag_truncated_distribution and target.get("truncated") is True:
         flags.append("truncated_distribution")
-    if (
-        distribution_kind == "m1_bar"
-        and _int_payload(target.get("precision_decimal_place_count")) == 0
-    ):
-        flags.append("missing_precision_counts")
     if (
         profile.flag_cache_float_precision
         and _summary_key(target.get("precision_source")) == "cache_float"
@@ -3353,11 +3295,6 @@ def _fingerprint_audit_payload(
         )
     }
     dynamics_readiness: dict[str, JSONValue] = {
-        "return_dynamics": _fingerprint_dynamics_readiness(
-            "return_dynamics",
-            payload,
-            target=target,
-        ),
         "microstructure_dynamics": _fingerprint_dynamics_readiness(
             "microstructure_dynamics",
             payload,
@@ -3395,16 +3332,7 @@ def _fingerprint_expected_sections(
     sections = ["coverage", "temporal_topology"]
     if target.timeframe in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES:
         sections.append("calendar_regimes")
-    if target.timeframe == M1:
-        sections.extend(
-            (
-                "m1_bar_distribution",
-                "return_dynamics",
-                "dependence",
-                "stationarity_diagnostics",
-            )
-        )
-    elif target.timeframe == TICK:
+    if target.timeframe == TICK:
         sections.extend(
             (
                 "tick_distribution",
@@ -3456,9 +3384,7 @@ def _fingerprint_section_skip_details(
             "grouped_by": ["active_session", "special_tag"],
         }
     if section in {
-        "m1_bar_distribution",
         "tick_distribution",
-        "return_dynamics",
         "microstructure_dynamics",
         "dependence",
         "stationarity_diagnostics",
@@ -3501,10 +3427,6 @@ def _section_timeframe_mismatch(
 ) -> bool:
     return (
         (
-            section in {"m1_bar_distribution", "return_dynamics"}
-            and target.timeframe != M1
-        )
-        or (
             section
             in {
                 "tick_distribution",
@@ -3548,13 +3470,13 @@ def _fingerprint_section_status(
         return _calendar_section_status(
             _payload_mapping(payload.get("calendar_regimes"))
         )
-    if section in {"m1_bar_distribution", "tick_distribution"}:
+    if section == "tick_distribution":
         return _distribution_section_status(_payload_mapping(payload[section]))
     if section == "conditional_distributions":
         return _conditional_distribution_section_status(
             _payload_mapping(payload.get("conditional_distributions"))
         )
-    if section in {"return_dynamics", "microstructure_dynamics"}:
+    if section == "microstructure_dynamics":
         return _dynamics_section_status(_payload_mapping(payload[section]))
     if section == "dependence":
         return _dependence_section_status(_payload_mapping(payload[section]))
@@ -4242,15 +4164,6 @@ class _TextPayload:
 
 
 @dataclass(frozen=True, slots=True)
-class _M1DynamicsRow:
-    timestamp_utc_ms: int
-    open: float
-    high: float
-    low: float
-    close: float
-
-
-@dataclass(frozen=True, slots=True)
 class _TickDynamicsRow:
     timestamp_utc_ms: int
     bid: float
@@ -4354,9 +4267,7 @@ def _add_distribution_payload(
     timeframe: str,
     distribution: dict[str, JSONValue],
 ) -> None:
-    if timeframe == M1:
-        payload["m1_bar_distribution"] = distribution
-    elif timeframe == TICK:
+    if timeframe == TICK:
         payload["tick_distribution"] = distribution
 
 
@@ -4368,17 +4279,7 @@ def _add_dynamics_payload(
     text: str | None,
     profile: HistDataFingerprintProfile,
 ) -> None:
-    if target.timeframe == M1:
-        return_dynamics, dependence, stationarity = _m1_sequence_payloads(
-            payload,
-            frame=frame,
-            text=text,
-            profile=profile,
-        )
-        payload["return_dynamics"] = return_dynamics
-        payload["dependence"] = dependence
-        payload["stationarity_diagnostics"] = stationarity
-    elif target.timeframe == TICK:
+    if target.timeframe == TICK:
         microstructure_dynamics, dependence, stationarity = (
             _tick_sequence_payloads(
                 payload,
@@ -4390,53 +4291,6 @@ def _add_dynamics_payload(
         payload["microstructure_dynamics"] = microstructure_dynamics
         payload["dependence"] = dependence
         payload["stationarity_diagnostics"] = stationarity
-
-
-def _m1_sequence_payloads(
-    payload: Mapping[str, JSONValue],
-    *,
-    frame: Any | None,
-    text: str | None,
-    profile: HistDataFingerprintProfile,
-) -> tuple[dict[str, JSONValue], dict[str, JSONValue], dict[str, JSONValue]]:
-    if frame is not None:
-        rows, row_count, usable_row_count, invalid_row_count = (
-            _m1_dynamics_rows_from_frame(frame, profile)
-        )
-        row_order = "cache_order"
-        partial_row_count = 0
-    elif text is not None:
-        (
-            rows,
-            row_count,
-            usable_row_count,
-            invalid_row_count,
-            partial_row_count,
-        ) = _m1_dynamics_rows_from_text(text, profile)
-        row_order = "source_text_order"
-    else:
-        rows = []
-        row_count = 0
-        usable_row_count = 0
-        invalid_row_count = 0
-        partial_row_count = 0
-        row_order = "none"
-
-    base = _sequence_dynamics_base(
-        payload,
-        row_order=row_order,
-        row_count=row_count,
-        sampled_row_count=len(rows),
-        usable_row_count=usable_row_count,
-        invalid_row_count=invalid_row_count,
-        partial_row_count=partial_row_count,
-        profile=profile,
-    )
-    return (
-        _m1_return_dynamics_payload(rows, base=base, profile=profile),
-        _m1_dependence_payload(rows, base=base, profile=profile),
-        _m1_stationarity_payload(rows, base=base, profile=profile),
-    )
 
 
 def _tick_sequence_payloads(
@@ -4566,102 +4420,6 @@ def _sequence_dynamics_status(limitations: Iterable[str]) -> str:
     return "ok"
 
 
-def _m1_dynamics_rows_from_frame(
-    frame: Any,
-    profile: HistDataFingerprintProfile,
-) -> tuple[list[_M1DynamicsRow], int, int, int]:
-    row_count = int(getattr(frame, "height", 0) or 0)
-    sample_limit = min(row_count, _profile_max_rows(profile))
-    usable_row_count = _frame_numeric_usable_row_count(
-        frame,
-        ("datetime", "open", "high", "low", "close"),
-    )
-    rows: list[_M1DynamicsRow] = []
-    for row in _iter_frame_head_rows(frame, sample_limit):
-        timestamp = _finite_int(row.get("datetime"))
-        open_value = _finite_float(row.get("open"))
-        high_value = _finite_float(row.get("high"))
-        low_value = _finite_float(row.get("low"))
-        close_value = _finite_float(row.get("close"))
-        if (
-            timestamp is None
-            or open_value is None
-            or high_value is None
-            or low_value is None
-            or close_value is None
-        ):
-            continue
-        rows.append(
-            _M1DynamicsRow(
-                timestamp_utc_ms=timestamp,
-                open=open_value,
-                high=high_value,
-                low=low_value,
-                close=close_value,
-            )
-        )
-    return (
-        rows,
-        row_count,
-        usable_row_count,
-        max(0, row_count - usable_row_count),
-    )
-
-
-def _m1_dynamics_rows_from_text(
-    text: str,
-    profile: HistDataFingerprintProfile,
-) -> tuple[list[_M1DynamicsRow], int, int, int, int]:
-    row_count = 0
-    usable_row_count = 0
-    invalid_row_count = 0
-    partial_row_count = 0
-    rows: list[_M1DynamicsRow] = []
-    sample_limit = _profile_max_rows(profile)
-    expected_field_count = len(columns_for_timeframe(M1))
-    reader = csv.reader(
-        text.splitlines(),
-        delimiter=delimiter_for_timeframe(M1),
-    )
-    for row in reader:
-        if not row or not any(cell.strip() for cell in row):
-            continue
-        row_count += 1
-        if len(row) != expected_field_count:
-            invalid_row_count += 1
-            partial_row_count += 1
-            continue
-        try:
-            parsed = normalize_ascii_row(M1, row)
-        except (TypeError, ValueError, OverflowError):
-            invalid_row_count += 1
-            continue
-        timestamp = int(parsed[0])
-        prices = tuple(float(parsed[index]) for index in range(1, 5))
-        if not all(_is_finite(value) for value in prices):
-            invalid_row_count += 1
-            continue
-        usable_row_count += 1
-        if len(rows) >= sample_limit:
-            continue
-        rows.append(
-            _M1DynamicsRow(
-                timestamp_utc_ms=timestamp,
-                open=prices[0],
-                high=prices[1],
-                low=prices[2],
-                close=prices[3],
-            )
-        )
-    return (
-        rows,
-        row_count,
-        usable_row_count,
-        invalid_row_count,
-        partial_row_count,
-    )
-
-
 def _tick_dynamics_rows_from_frame(
     frame: Any,
     profile: HistDataFingerprintProfile,
@@ -4765,121 +4523,6 @@ def _iter_frame_head_rows(
     )
     for index in range(scanned_count):
         yield {column: column_values[column][index] for column in columns}
-
-
-def _m1_return_dynamics_payload(
-    rows: list[_M1DynamicsRow],
-    *,
-    base: dict[str, JSONValue],
-    profile: HistDataFingerprintProfile,
-) -> dict[str, JSONValue]:
-    close_log_returns: list[float] = []
-    absolute_returns: list[float] = []
-    squared_returns: list[float] = []
-    open_jumps: list[float] = []
-    zero_return_count = 0
-    zero_return_run_lengths: list[int] = []
-    ohlc_flatline_row_count = 0
-    ohlc_flatline_run_lengths: list[int] = []
-    same_close_run_length = 1 if rows else 0
-    ohlc_flatline_run_length = 0
-    previous: _M1DynamicsRow | None = None
-
-    for row in rows:
-        if row.open == row.high == row.low == row.close:
-            ohlc_flatline_row_count += 1
-            ohlc_flatline_run_length += 1
-        else:
-            _append_minimum_run(
-                ohlc_flatline_run_lengths,
-                ohlc_flatline_run_length,
-                minimum=2,
-            )
-            ohlc_flatline_run_length = 0
-
-        if previous is None:
-            previous = row
-            continue
-
-        if previous.close > 0.0 and row.close > 0.0:
-            log_return = math.log(row.close / previous.close)
-            close_log_returns.append(log_return)
-            absolute_returns.append(abs(log_return))
-            squared_returns.append(log_return * log_return)
-            if row.close == previous.close:
-                zero_return_count += 1
-                same_close_run_length += 1
-            else:
-                _append_minimum_run(
-                    zero_return_run_lengths,
-                    same_close_run_length,
-                    minimum=2,
-                )
-                same_close_run_length = 1
-        else:
-            _append_minimum_run(
-                zero_return_run_lengths,
-                same_close_run_length,
-                minimum=2,
-            )
-            same_close_run_length = 1
-
-        if previous.close > 0.0:
-            open_jumps.append(abs(row.open - previous.close) / previous.close)
-        previous = row
-
-    _append_minimum_run(
-        zero_return_run_lengths,
-        same_close_run_length,
-        minimum=2,
-    )
-    _append_minimum_run(
-        ohlc_flatline_run_lengths,
-        ohlc_flatline_run_length,
-        minimum=2,
-    )
-
-    result = dict(base)
-    result.update(
-        {
-            "close_log_return": _numeric_summary(close_log_returns, profile),
-            "absolute_return": _numeric_summary(absolute_returns, profile),
-            "squared_return": _numeric_summary(squared_returns, profile),
-            "open_jump": _numeric_summary(open_jumps, profile),
-            "flatline": {
-                "zero_return_count": zero_return_count,
-                "zero_return_rate": _rate(
-                    zero_return_count,
-                    len(close_log_returns),
-                    profile,
-                ),
-                "zero_return_run_count": len(zero_return_run_lengths),
-                "zero_return_run_length_counts": (
-                    _run_length_counts_payload(
-                        zero_return_run_lengths,
-                        profile,
-                    )
-                ),
-                "ohlc_flatline_row_count": ohlc_flatline_row_count,
-                "ohlc_flatline_rate": _rate(
-                    ohlc_flatline_row_count,
-                    len(rows),
-                    profile,
-                ),
-                "ohlc_flatline_run_count": len(ohlc_flatline_run_lengths),
-                "ohlc_flatline_affected_row_count": sum(
-                    ohlc_flatline_run_lengths
-                ),
-                "ohlc_flatline_run_length_counts": (
-                    _run_length_counts_payload(
-                        ohlc_flatline_run_lengths,
-                        profile,
-                    )
-                ),
-            },
-        }
-    )
-    return result
 
 
 def _tick_microstructure_dynamics_payload(
@@ -5102,44 +4745,6 @@ def _tick_microstructure_dynamics_payload(
     return result
 
 
-def _m1_dependence_payload(
-    rows: list[_M1DynamicsRow],
-    *,
-    base: dict[str, JSONValue],
-    profile: HistDataFingerprintProfile,
-) -> dict[str, JSONValue]:
-    close_log_returns: list[float] = []
-    absolute_returns: list[float] = []
-    squared_returns: list[float] = []
-    range_ratios: list[float] = []
-    previous: _M1DynamicsRow | None = None
-
-    for row in rows:
-        range_ratio = _m1_range_ratio(row)
-        if range_ratio is not None:
-            range_ratios.append(range_ratio)
-        if previous is None:
-            previous = row
-            continue
-        if previous.close > 0.0 and row.close > 0.0:
-            log_return = math.log(row.close / previous.close)
-            close_log_returns.append(log_return)
-            absolute_returns.append(abs(log_return))
-            squared_returns.append(log_return * log_return)
-        previous = row
-
-    return _dependence_payload(
-        base,
-        profile=profile,
-        acf_series={
-            "close_log_return_acf": close_log_returns,
-            "absolute_return_acf": absolute_returns,
-            "squared_return_acf": squared_returns,
-            "range_ratio_acf": range_ratios,
-        },
-    )
-
-
 def _tick_dependence_payload(
     rows: list[_TickDynamicsRow],
     *,
@@ -5168,28 +4773,6 @@ def _tick_dependence_payload(
             "spread_change_acf": spread_changes,
             "absolute_spread_change_acf": absolute_spread_changes,
         },
-    )
-
-
-def _m1_stationarity_payload(
-    rows: list[_M1DynamicsRow],
-    *,
-    base: dict[str, JSONValue],
-    profile: HistDataFingerprintProfile,
-) -> dict[str, JSONValue]:
-    levels = [row.close for row in rows]
-    returns: list[float] = []
-    previous: _M1DynamicsRow | None = None
-    for row in rows:
-        if previous is not None and previous.close > 0.0 and row.close > 0.0:
-            returns.append(math.log(row.close / previous.close))
-        previous = row
-    return _stationarity_payload(
-        base,
-        profile=profile,
-        metric="close_price",
-        level_values=levels,
-        return_values=returns,
     )
 
 
@@ -5650,19 +5233,6 @@ def _population_variance(values: list[float]) -> float:
     )
 
 
-def _m1_range_ratio(row: _M1DynamicsRow) -> float | None:
-    decimal_values = tuple(
-        Decimal(str(value))
-        for value in (row.open, row.high, row.low, row.close)
-    )
-    _open_decimal, high_decimal, low_decimal, _close_decimal = decimal_values
-    range_decimal = high_decimal - low_decimal
-    midpoint_decimal = (high_decimal + low_decimal) / Decimal("2")
-    if not midpoint_decimal:
-        return None
-    return float(range_decimal / midpoint_decimal)
-
-
 def _dependence_payload(
     base: Mapping[str, JSONValue],
     *,
@@ -6019,8 +5589,6 @@ def _distribution_from_frame(
     timeframe: str,
     profile: HistDataFingerprintProfile,
 ) -> dict[str, JSONValue]:
-    if timeframe == M1:
-        return _m1_bar_distribution_from_frame(frame, profile)
     if timeframe == TICK:
         return _tick_distribution_from_frame(frame, profile)
     return {}
@@ -6032,258 +5600,9 @@ def _distribution_from_text(
     timeframe: str,
     profile: HistDataFingerprintProfile,
 ) -> dict[str, JSONValue]:
-    if timeframe == M1:
-        return _m1_bar_distribution_from_text(text, profile)
     if timeframe == TICK:
         return _tick_distribution_from_text(text, profile)
     return {}
-
-
-def _m1_bar_distribution_from_frame(
-    frame: Any,
-    profile: HistDataFingerprintProfile,
-) -> dict[str, JSONValue]:
-    row_count = int(getattr(frame, "height", 0) or 0)
-    sample_limit = min(row_count, _profile_max_rows(profile))
-    usable_row_count = _frame_numeric_usable_row_count(
-        frame,
-        ("open", "high", "low", "close"),
-    )
-    columns = _frame_sampled_valid_column_values(
-        frame,
-        ("open", "high", "low", "close"),
-        sample_limit,
-    )
-    return _m1_bar_distribution_from_column_values(
-        columns,
-        row_count=row_count,
-        usable_row_count=usable_row_count,
-        sample_limit=sample_limit,
-        profile=profile,
-        precision_source="cache_float",
-    )
-
-
-def _m1_bar_distribution_from_text(
-    text: str,
-    profile: HistDataFingerprintProfile,
-) -> dict[str, JSONValue]:
-    row_count = 0
-    invalid_row_count = 0
-    partial_row_count = 0
-    usable_row_count = 0
-    sample_limit = _profile_max_rows(profile)
-    sampled_rows: list[tuple[float, float, float, float]] = []
-    precision_counts: Counter[str] = Counter()
-    column_precision_counts: dict[str, Counter[str]] = {
-        "open": Counter(),
-        "high": Counter(),
-        "low": Counter(),
-        "close": Counter(),
-    }
-    reader = csv.reader(
-        text.splitlines(), delimiter=delimiter_for_timeframe(M1)
-    )
-    expected_field_count = len(columns_for_timeframe(M1))
-    for row in reader:
-        if not row or not any(cell.strip() for cell in row):
-            continue
-        row_count += 1
-        if len(row) != expected_field_count:
-            invalid_row_count += 1
-            partial_row_count += 1
-            continue
-        try:
-            parsed = normalize_ascii_row(M1, row)
-        except (TypeError, ValueError, OverflowError):
-            invalid_row_count += 1
-            continue
-        prices = tuple(float(parsed[index]) for index in range(1, 5))
-        if not all(_is_finite(value) for value in prices):
-            invalid_row_count += 1
-            continue
-        usable_row_count += 1
-        if len(sampled_rows) >= sample_limit:
-            continue
-        sampled_rows.append(cast(tuple[float, float, float, float], prices))
-        for column_name, raw_value in zip(
-            ("open", "high", "low", "close"),
-            row[1:5],
-            strict=True,
-        ):
-            places = _decimal_places_from_text(raw_value)
-            key = str(places)
-            precision_counts[key] += 1
-            column_precision_counts[column_name][key] += 1
-
-    payload = _m1_bar_distribution_from_rows(
-        sampled_rows,
-        row_count=row_count,
-        usable_row_count=usable_row_count,
-        invalid_row_count=invalid_row_count,
-        partial_row_count=partial_row_count,
-        truncated=usable_row_count > len(sampled_rows),
-        profile=profile,
-    )
-    precision = cast(dict[str, JSONValue], payload["precision"])
-    precision["precision_source"] = "text"
-    precision["decimal_place_counts"] = _counter_payload(precision_counts)
-    precision["column_decimal_place_counts"] = {
-        column: _counter_payload(counts)
-        for column, counts in column_precision_counts.items()
-    }
-    return payload
-
-
-def _m1_bar_distribution_from_column_values(
-    columns: Mapping[str, list[Any]],
-    *,
-    row_count: int,
-    usable_row_count: int,
-    sample_limit: int,
-    profile: HistDataFingerprintProfile,
-    precision_source: str,
-) -> dict[str, JSONValue]:
-    sampled_rows: list[tuple[float, float, float, float]] = []
-    sampled_invalid_row_count = 0
-    sampled_count = min(
-        sample_limit,
-        *(
-            len(columns.get(name, ()))
-            for name in ("open", "high", "low", "close")
-        ),
-    )
-    precision_counts: Counter[str] = Counter()
-    column_precision_counts: dict[str, Counter[str]] = {
-        "open": Counter(),
-        "high": Counter(),
-        "low": Counter(),
-        "close": Counter(),
-    }
-    for index in range(sampled_count):
-        prices: list[float] = []
-        for column_name in ("open", "high", "low", "close"):
-            value = _finite_float(columns[column_name][index])
-            if value is None:
-                prices = []
-                break
-            prices.append(value)
-        if len(prices) != 4:
-            sampled_invalid_row_count += 1
-            continue
-        sampled_rows.append((prices[0], prices[1], prices[2], prices[3]))
-        for column_name, value in zip(
-            ("open", "high", "low", "close"),
-            prices,
-            strict=True,
-        ):
-            key = str(_decimal_places_from_float(value, profile))
-            precision_counts[key] += 1
-            column_precision_counts[column_name][key] += 1
-
-    payload = _m1_bar_distribution_from_rows(
-        sampled_rows,
-        row_count=row_count,
-        usable_row_count=len(sampled_rows),
-        invalid_row_count=sampled_invalid_row_count,
-        truncated=usable_row_count > len(sampled_rows),
-        profile=profile,
-    )
-    payload["usable_row_count"] = usable_row_count
-    payload["invalid_row_count"] = max(0, row_count - usable_row_count)
-    precision = cast(dict[str, JSONValue], payload["precision"])
-    precision["precision_source"] = precision_source
-    precision["decimal_place_counts"] = _counter_payload(precision_counts)
-    precision["column_decimal_place_counts"] = {
-        column: _counter_payload(counts)
-        for column, counts in column_precision_counts.items()
-    }
-    return payload
-
-
-def _m1_bar_distribution_from_rows(
-    rows: list[tuple[float, float, float, float]],
-    *,
-    row_count: int,
-    usable_row_count: int,
-    invalid_row_count: int,
-    partial_row_count: int = 0,
-    truncated: bool,
-    profile: HistDataFingerprintProfile,
-) -> dict[str, JSONValue]:
-    open_values = [row[0] for row in rows]
-    high_values = [row[1] for row in rows]
-    low_values = [row[2] for row in rows]
-    close_values = [row[3] for row in rows]
-    range_ratios: list[float] = []
-    body_ratios: list[float] = []
-    upper_wick_ratios: list[float] = []
-    lower_wick_ratios: list[float] = []
-    for open_value, high_value, low_value, close_value in rows:
-        decimal_values = tuple(
-            Decimal(str(value))
-            for value in (open_value, high_value, low_value, close_value)
-        )
-        open_decimal, high_decimal, low_decimal, close_decimal = decimal_values
-        range_decimal = high_decimal - low_decimal
-        midpoint_decimal = (high_decimal + low_decimal) / Decimal("2")
-        if midpoint_decimal:
-            range_ratios.append(float(range_decimal / midpoint_decimal))
-        if range_decimal <= 0:
-            body_ratios.append(0.0)
-            upper_wick_ratios.append(0.0)
-            lower_wick_ratios.append(0.0)
-            continue
-        body_ratios.append(
-            float(abs(close_decimal - open_decimal) / range_decimal)
-        )
-        upper_wick_ratios.append(
-            float(
-                (high_decimal - max(open_decimal, close_decimal))
-                / range_decimal
-            )
-        )
-        lower_wick_ratios.append(
-            float(
-                (min(open_decimal, close_decimal) - low_decimal) / range_decimal
-            )
-        )
-    return {
-        "row_count": row_count,
-        "sampled_row_count": len(rows),
-        "usable_row_count": usable_row_count,
-        "invalid_row_count": invalid_row_count,
-        "partial_row_count": partial_row_count,
-        "truncated": truncated,
-        "price": {
-            "open": _numeric_summary(open_values, profile),
-            "high": _numeric_summary(high_values, profile),
-            "low": _numeric_summary(low_values, profile),
-            "close": _numeric_summary(close_values, profile),
-        },
-        "range_ratio": _numeric_summary(range_ratios, profile),
-        "ohlc_shape": {
-            "body_ratio": _numeric_summary(body_ratios, profile),
-            "upper_wick_ratio": _numeric_summary(
-                upper_wick_ratios,
-                profile,
-            ),
-            "lower_wick_ratio": _numeric_summary(
-                lower_wick_ratios,
-                profile,
-            ),
-        },
-        "precision": {
-            "precision_source": "unknown",
-            "decimal_place_counts": {},
-            "column_decimal_place_counts": {
-                "open": {},
-                "high": {},
-                "low": {},
-                "close": {},
-            },
-        },
-    }
 
 
 def _tick_distribution_from_frame(

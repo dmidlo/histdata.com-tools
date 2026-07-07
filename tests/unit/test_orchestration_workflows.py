@@ -838,15 +838,15 @@ class _ThreadingChildExecutor:
 
 def _planned_work_items() -> tuple[WorkItem, ...]:
     return (
-        _work_item("EURUSD", "M1", "2022-01"),
-        _work_item("GBPUSD", "M1", "2022-01"),
+        _work_item("EURUSD", "T", "2022-01"),
+        _work_item("GBPUSD", "T", "2022-01"),
     )
 
 
 def _multi_period_work_items(
     pair: str = "EURUSD",
     *,
-    timeframe: str = "M1",
+    timeframe: str = "T",
     data_format: str = "ascii",
     count: int = 5,
 ) -> tuple[WorkItem, ...]:
@@ -1022,7 +1022,7 @@ def _request(**overrides: object) -> RunRequest:
         "request_id": "run-topology",
         "pairs": ("EURUSD", "GBPUSD"),
         "formats": ("ascii",),
-        "timeframes": ("M1",),
+        "timeframes": ("T",),
         "validate_urls": True,
         "download_data_archives": True,
         "extract_csvs": True,
@@ -1444,7 +1444,7 @@ def test_period_batch_partitions_split_by_format_period_and_size() -> None:
         *_multi_period_work_items(count=5),
         *_multi_period_work_items(
             pair="EURUSD",
-            timeframe="M1",
+            timeframe="T",
             data_format="zip",
             count=2,
         ),
@@ -1856,7 +1856,7 @@ def test_symbol_timeframe_workflow_composes_operation_children() -> None:
         workflow.run(
             {
                 "request": request.to_dict(),
-                "partition": {"pair": "EURUSD", "timeframe": "M1"},
+                "partition": {"pair": "EURUSD", "timeframe": "T"},
                 "work_items": [_planned_work_items()[0].to_dict()],
             }
         )
@@ -1878,7 +1878,7 @@ def test_symbol_timeframe_workflow_composes_operation_children() -> None:
         "queue-cpu-file",
         "queue-influx",
     ]
-    assert summary["partition"] == {"pair": "EURUSD", "timeframe": "M1"}
+    assert summary["partition"] == {"pair": "EURUSD", "timeframe": "T"}
     assert summary["progress"]["completed_children"] == 6
     assert workflow.status()["planned_children"] == [
         "ValidateUrlsWorkflow",
@@ -1903,7 +1903,7 @@ def test_cache_only_request_builds_cache_without_merge() -> None:
 
     invocations = workflows.build_symbol_child_invocations(
         request,
-        {"pair": "EURUSD", "timeframe": "M1"},
+        {"pair": "EURUSD", "timeframe": "T"},
     )
 
     assert [item.workflow_name for item in invocations] == [
@@ -2027,7 +2027,7 @@ def test_symbol_timeframe_workflow_stops_after_cancelled_child() -> None:
         workflow.run(
             {
                 "request": request.to_dict(),
-                "partition": {"pair": "EURUSD", "timeframe": "M1"},
+                "partition": {"pair": "EURUSD", "timeframe": "T"},
                 "work_items": [_planned_work_items()[0].to_dict()],
             }
         )
@@ -2051,7 +2051,7 @@ def test_symbol_timeframe_workflow_skips_after_no_forwardable_items() -> None:
         workflow.run(
             {
                 "request": request.to_dict(),
-                "partition": {"pair": "EURUSD", "timeframe": "M1"},
+                "partition": {"pair": "EURUSD", "timeframe": "T"},
                 "work_items": [_planned_work_items()[0].to_dict()],
             }
         )
@@ -2083,7 +2083,7 @@ def test_symbol_timeframe_workflow_does_not_rehydrate_after_empty_plan_ref_hando
         workflow.run(
             {
                 "request": request.to_dict(),
-                "partition": {"pair": "EURUSD", "timeframe": "M1"},
+                "partition": {"pair": "EURUSD", "timeframe": "T"},
                 DATASET_PLAN_REF_KEY: {
                     "kind": "dataset_plan",
                     "plan_id": "plan-spilled",
@@ -2115,7 +2115,7 @@ def test_symbol_timeframe_workflow_fails_without_empty_downstream() -> None:
         workflow.run(
             {
                 "request": request.to_dict(),
-                "partition": {"pair": "EURUSD", "timeframe": "M1"},
+                "partition": {"pair": "EURUSD", "timeframe": "T"},
                 "work_items": [_planned_work_items()[0].to_dict()],
             }
         )
@@ -2137,7 +2137,7 @@ def test_leaf_workflow_uses_mocked_activity_executor() -> None:
     request = _request()
     invocation = workflows.build_symbol_child_invocations(
         request,
-        {"pair": "EURUSD", "timeframe": "M1"},
+        {"pair": "EURUSD", "timeframe": "T"},
     )[0]
 
     summary = asyncio.run(workflow.run(invocation.payload))
@@ -2188,7 +2188,7 @@ def test_leaf_workflow_defaults_to_temporal_activity_executor(
     request = _request()
     invocation = workflows.build_symbol_child_invocations(
         request,
-        {"pair": "EURUSD", "timeframe": "M1"},
+        {"pair": "EURUSD", "timeframe": "T"},
     )[0]
     workflow = workflows.ValidateUrlsWorkflow()
 
@@ -2219,7 +2219,7 @@ def test_extract_csv_workflow_uses_activity_executor() -> None:
     )
     [invocation] = workflows.build_symbol_child_invocations(
         request,
-        {"pair": "EURUSD", "timeframe": "M1"},
+        {"pair": "EURUSD", "timeframe": "T"},
     )
 
     summary = asyncio.run(workflow.run(invocation.payload))
@@ -2253,7 +2253,7 @@ def test_build_cache_workflow_uses_activity_executor() -> None:
     )
     invocation = workflows.build_symbol_child_invocations(
         request,
-        {"pair": "EURUSD", "timeframe": "M1"},
+        {"pair": "EURUSD", "timeframe": "T"},
     )[0]
 
     summary = asyncio.run(workflow.run(invocation.payload))
@@ -2287,7 +2287,7 @@ def test_merge_cache_workflow_uses_activity_executor() -> None:
     )
     invocation = workflows.build_symbol_child_invocations(
         request,
-        {"pair": "EURUSD", "timeframe": "M1"},
+        {"pair": "EURUSD", "timeframe": "T"},
     )[0]
 
     summary = asyncio.run(workflow.run(invocation.payload))
@@ -2321,7 +2321,7 @@ def test_import_workflow_uses_activity_executor() -> None:
     )
     invocation = workflows.build_symbol_child_invocations(
         request,
-        {"pair": "EURUSD", "timeframe": "M1"},
+        {"pair": "EURUSD", "timeframe": "T"},
     )[0]
 
     summary = asyncio.run(workflow.run(invocation.payload))
@@ -2409,7 +2409,7 @@ def test_download_archives_workflow_uses_activity_executor() -> None:
     request = _request()
     invocation = workflows.build_symbol_child_invocations(
         request,
-        {"pair": "EURUSD", "timeframe": "M1"},
+        {"pair": "EURUSD", "timeframe": "T"},
     )[1]
 
     summary = asyncio.run(workflow.run(invocation.payload))

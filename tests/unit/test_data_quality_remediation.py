@@ -12,7 +12,7 @@ from histdatacom.data_quality import (
     remediation_hints_for_flags,
 )
 
-TARGET = QualityTarget(path="DAT_ASCII_EURUSD_M1_201202.csv")
+TARGET = QualityTarget(path="DAT_ASCII_EURUSD_T_201202.csv")
 
 
 def test_remediation_catalog_reproduces_topology_hint_codes_and_messages() -> (
@@ -107,23 +107,23 @@ def test_remediation_catalog_preserves_input_order_and_ignores_unknowns() -> (
 def test_remediation_catalog_maps_representative_time_finding() -> None:
     finding = QualityFinding(
         severity=QualitySeverity.WARNING,
-        code="ASCII_M1_DUPLICATE_TIMESTAMP",
-        message="M1 file contains duplicate normalized timestamps.",
+        code="ASCII_TICK_DUPLICATE_ROW",
+        message="Tick file contains exact duplicate rows.",
         rule_id="time.ascii.sequence",
         target=TARGET,
     )
 
     assert remediation_hint_payloads_for_finding(finding) == [
         {
-            "code": "inspect_duplicate_timestamp_rows",
-            "message": "inspect duplicate timestamp rows",
+            "code": "inspect_duplicate_tick_rows",
+            "message": "inspect duplicate tick rows",
             "action_kind": "inspect",
             "rule_id": "time.ascii.sequence",
-            "finding_code": "ASCII_M1_DUPLICATE_TIMESTAMP",
+            "finding_code": "ASCII_TICK_DUPLICATE_ROW",
         }
     ]
     assert (
-        remediation_hints_for_finding_code("ASCII_M1_DUPLICATE_TIMESTAMP")[
+        remediation_hints_for_finding_code("ASCII_TICK_DUPLICATE_ROW")[
             0
         ].rule_id
         == "time.ascii.sequence"
@@ -204,7 +204,7 @@ def test_remediation_catalog_maps_inventory_zip_findings() -> None:
 def test_remediation_catalog_ignores_unknown_finding_codes() -> None:
     assert (
         remediation_hints_for_finding_code(
-            "ASCII_M1_DUPLICATE_TIMESTAMP",
+            "ASCII_TICK_DUPLICATE_ROW",
             rule_id="other.rule",
         )
         == ()

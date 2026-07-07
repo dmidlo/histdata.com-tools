@@ -11,11 +11,6 @@ from histdatacom.histdata_ascii import CACHE_FILENAME
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
 
-EXPECTED_M1_LINE = (
-    "eurusd,source=histdata.com,format=ascii,timeframe=M1 "
-    "openbid=1.3066,highbid=1.3066,lowbid=1.30656,closebid=1.30656 "
-    "1328072400000"
-)
 EXPECTED_TICK_LINE = (
     "eurusd,source=histdata.com,format=ascii,timeframe=T "
     "bidquote=1.3066,askquote=1.30677 1328072403660"
@@ -42,10 +37,7 @@ def _read_cache_frame(tmp_path: Path, timeframe: str, filename: str) -> object:
 
 @pytest.mark.parametrize(
     ("timeframe", "filename", "expected_line"),
-    (
-        ("M1", "DAT_ASCII_EURUSD_M1_201202.csv", EXPECTED_M1_LINE),
-        ("T", "DAT_ASCII_EURUSD_T_201202.csv", EXPECTED_TICK_LINE),
-    ),
+    (("T", "DAT_ASCII_EURUSD_T_201202.csv", EXPECTED_TICK_LINE),),
 )
 def test_influx_parser_accepts_rows_from_polars_cache(
     tmp_path: Path, timeframe: str, filename: str, expected_line: str
@@ -71,17 +63,17 @@ def test_influx_polars_row_batches_honor_integer_batch_size(
 
     frame = _read_cache_frame(
         tmp_path,
-        "M1",
-        "DAT_ASCII_EURUSD_M1_201202.csv",
+        "T",
+        "DAT_ASCII_EURUSD_T_201202.csv",
     )
 
     batches = list(_iter_polars_row_batches(frame, _coerce_batch_size("2")))
 
     assert [len(batch) for batch in batches] == [2, 1]
     assert [row[0] for batch in batches for row in batch] == [
-        1328072400000,
-        1328072460000,
-        1328072520000,
+        1328072403660,
+        1328072403973,
+        1328072414990,
     ]
 
 
@@ -111,8 +103,8 @@ def test_import_cache_batches_polars_rows_into_influx_sink(
 
     frame = _read_cache_frame(
         tmp_path,
-        "M1",
-        "DAT_ASCII_EURUSD_M1_201202.csv",
+        "T",
+        "DAT_ASCII_EURUSD_T_201202.csv",
     )
     assert frame.height == 3
     sink = FakeSink()
@@ -121,7 +113,7 @@ def test_import_cache_batches_polars_rows_into_influx_sink(
         cache_filename=CACHE_FILENAME,
         data_fxpair="eurusd",
         data_format="ascii",
-        data_timeframe="M1",
+        data_timeframe="T",
     )
     args = {"batch_size": "2"}
 
@@ -132,7 +124,7 @@ def test_import_cache_batches_polars_rows_into_influx_sink(
     )
 
     assert [len(item) for item in sink.items] == [2, 1]
-    assert sink.items[0][0] == EXPECTED_M1_LINE
+    assert sink.items[0][0] == EXPECTED_TICK_LINE
 
 
 def test_influx_batch_writer_writes_direct_synchronous_batches(

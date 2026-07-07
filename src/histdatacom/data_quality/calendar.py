@@ -33,7 +33,6 @@ from histdatacom.data_quality.time import (
 )
 from histdatacom.histdata_ascii import (
     EST_NO_DST_OFFSET_MS,
-    M1,
     TICK,
     columns_for_timeframe,
     delimiter_for_timeframe,
@@ -1738,7 +1737,7 @@ def _read_text_payload(target: QualityTarget) -> _TextPayload:
 def _is_ascii_text_target(target: QualityTarget) -> bool:
     return (
         target.data_format == "ascii"
-        and target.timeframe in {M1, TICK}
+        and target.timeframe == TICK
         and target.kind
         in {
             QualityTargetKind.CSV,

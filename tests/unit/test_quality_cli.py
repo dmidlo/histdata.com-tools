@@ -363,7 +363,7 @@ def test_quality_fingerprint_schema_cli_reports_human_output(
     assert exit_code == 0
     assert "Fingerprint Schema Discovery" in output
     assert "Implemented Sections" in output
-    assert "- return_dynamics: implemented; timeframes=[M1]" in output
+    assert "- microstructure_dynamics: implemented; timeframes=[T]" in output
 
 
 def test_quality_fingerprint_schema_cli_verifies_contract_json(
@@ -551,7 +551,7 @@ def test_quality_fingerprint_readiness_cli_reports_human_output(
     assert "Fingerprint readiness risk command" in output
     assert "Report: fingerprint-quality.json" in output
     assert "Fingerprint readiness risk" in output
-    assert "#1 ascii GBPUSD M1 201202 csv: high" in output
+    assert "#1 ascii GBPUSD T 201202 csv: high" in output
     assert "invalid_timestamps_skipped" in output
     assert str(tmp_path) not in output
 
@@ -615,10 +615,10 @@ def _write_tick_cache(
 
 def _write_fingerprint_quality_report(tmp_path: Path) -> Path:
     target = QualityTarget(
-        path=str(tmp_path / "DAT_ASCII_GBPUSD_M1_201202.csv"),
+        path=str(tmp_path / "DAT_ASCII_GBPUSD_T_201202.csv"),
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe="M1",
+        timeframe="T",
         symbol="GBPUSD",
         period="201202",
     )
@@ -626,7 +626,7 @@ def _write_fingerprint_quality_report(tmp_path: Path) -> Path:
         "schema_version": TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
         "target_axis": {
             "data_format": "ascii",
-            "timeframe": "M1",
+            "timeframe": "T",
             "symbol": "GBPUSD",
             "period": "201202",
             "kind": "csv",
@@ -648,7 +648,7 @@ def _write_fingerprint_quality_report(tmp_path: Path) -> Path:
                 "suspicious_gaps",
             ],
         },
-        "return_dynamics": {
+        "microstructure_dynamics": {
             "basis": "text",
             "row_order": "source_text_order",
             "computed_from": "text",
@@ -659,7 +659,7 @@ def _write_fingerprint_quality_report(tmp_path: Path) -> Path:
             "invalid_row_count": 1,
             "partial_row_count": 0,
             "limitations": ["invalid_timestamps_skipped"],
-            "close_log_return": {"count": 2},
+            "spread_change": {"count": 2},
         },
         "dependence": {
             "basis": "text",
@@ -675,7 +675,7 @@ def _write_fingerprint_quality_report(tmp_path: Path) -> Path:
             "lags": [1, 3],
             "computed_lag_count": 1,
             "skipped_lag_count": 1,
-            "close_log_return_acf": {
+            "spread_acf": {
                 "sample_count": 2,
                 "computed_lag_count": 1,
                 "skipped_lag_count": 1,
@@ -689,23 +689,23 @@ def _write_fingerprint_quality_report(tmp_path: Path) -> Path:
             "sections_expected": [
                 "coverage",
                 "temporal_topology",
-                "return_dynamics",
+                "microstructure_dynamics",
                 "dependence",
             ],
             "sections_emitted": [
                 "temporal_topology",
-                "return_dynamics",
+                "microstructure_dynamics",
                 "dependence",
             ],
             "sections_skipped": {},
             "section_statuses": {
                 "coverage": "valid",
                 "temporal_topology": "limited",
-                "return_dynamics": "limited",
+                "microstructure_dynamics": "limited",
                 "dependence": "limited",
             },
             "dynamics_readiness": {
-                "return_dynamics": {
+                "microstructure_dynamics": {
                     "status": "limited",
                     "reason": "invalid_timestamps_skipped",
                     "basis": "text",

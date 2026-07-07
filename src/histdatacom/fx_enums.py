@@ -446,7 +446,6 @@ class Timeframe(Enum):  # noqa:H601
                 Timeframe.list_values()
     """
 
-    M1 = "1-minute-bar-quotes"
     T = "tick-data-quotes"  # noqa:WPS121
     T_LAST = "tick-last-quotes"
     T_BID = "tick-bid-quotes"
@@ -504,14 +503,10 @@ class TimeFormat(Enum):  # noqa:H601
                 TimeFormat.list_values()
     """
 
-    MT_M1 = "%Y.%m.%d %H:%M"
-    ASCII_M1 = "%Y%m%d %H%M%S"
     ASCII_T = "%Y%m%d %H%M%S%f"
-    NT_M1 = "%Y%m%d %H%M%S"  # noqa:PIE796
     NT_T_LAST = "%Y%m%d %H%M%S"  # noqa:PIE796
     NT_T_BID = "%Y%m%d %H%M%S"  # noqa:PIE796
     NT_T_ASK = "%Y%m%d %H%M%S"  # noqa:PIE796
-    MS_M1 = "%Y%m%d%H%M"
 
     @classmethod
     def list_keys(cls) -> set:
@@ -544,14 +539,10 @@ class TimePrecision(Enum):  # noqa:H601
                 TimePrecision.list_values()
     """
 
-    MT_M1 = "s"
-    ASCII_M1 = "s"
     ASCII_T = "ms"
-    NT_M1 = "s"
     NT_T_LAST = "s"
     NT_T_BID = "s"
     NT_T_ASK = "s"
-    MS_M1 = "s"
 
     @classmethod
     def list_keys(cls) -> set:
@@ -584,15 +575,9 @@ def get_valid_format_timeframes(file_format: str) -> list:
     timeframes = []
 
     match file_format:
-        case "metatrader":
-            timeframes.extend(["M1"])
         case "ninjatrader":
-            timeframes.extend(["M1", "T_LAST", "T_BID", "T_ASK"])
-        case "metastock":
-            timeframes.extend(["M1"])
+            timeframes.extend(["T_LAST", "T_BID", "T_ASK"])
         case "ascii":
-            timeframes.extend(["M1", "T"])
-        case "excel":
-            timeframes.extend(["M1"])
+            timeframes.extend(["T"])
 
     return timeframes

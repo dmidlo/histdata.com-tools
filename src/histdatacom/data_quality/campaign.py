@@ -386,7 +386,7 @@ def _deferred_scope(
                 "scope": "non-ascii and inventory-only format coverage",
                 "reason": (
                     "Deep parser-level quality is currently limited to "
-                    "ASCII M1 and ASCII tick artifacts."
+                    "ASCII tick artifacts."
                 ),
                 "issue": follow_up_issues.get("non_ascii_quality_boundary"),
             }

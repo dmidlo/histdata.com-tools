@@ -9,22 +9,22 @@ import pytest
 from histdatacom.records import LegacyManifestStatusAliasWarning, Record
 from histdatacom.runtime_contracts import WorkStatus
 
-ASCII_M1_URL = (
+ASCII_TICK_URL = (
     "http://www.histdata.com/download-free-forex-data/"
-    "?/ascii/1-minute-bar-quotes/eurusd/2022"
+    "?/ascii/tick-data-quotes/eurusd/2022"
 )
 
 
-def _expected_ascii_m1_dir(base_dir: Path) -> str:
-    """Return the canonical ASCII M1 test data directory.
+def _expected_ascii_tick_dir(base_dir: Path) -> str:
+    """Return the canonical ASCII tick test data directory.
 
     Args:
         base_dir (Path): base data directory.
 
     Returns:
-        str: canonical ASCII M1 test data directory.
+        str: canonical ASCII tick test data directory.
     """
-    data_path = Path("ASCII", "M1", "eurusd", "2022")
+    data_path = Path("ASCII", "T", "eurusd", "2022")
     record_path = base_dir / data_path
     return f"{record_path}{os.sep}"
 
@@ -42,16 +42,16 @@ def test_record_data_dir_accepts_base_dir_without_trailing_separator(
     Args:
         tmp_path (Path): temporary test directory.
     """
-    record = Record(url=ASCII_M1_URL)
+    record = Record(url=ASCII_TICK_URL)
 
     record.write_manifest_status(base_dir=str(tmp_path))
 
-    assert record.data_dir == _expected_ascii_m1_dir(tmp_path)
+    assert record.data_dir == _expected_ascii_tick_dir(tmp_path)
 
 
 def test_record_status_is_normalized_to_work_status() -> None:
     """Record status should no longer be stored as an untyped string."""
-    record = Record(url=ASCII_M1_URL, status="CSV_FILE")
+    record = Record(url=ASCII_TICK_URL, status="CSV_FILE")
 
     assert record.status is WorkStatus.CSV_FILE
     assert record == record(status="url_valid")
@@ -61,7 +61,7 @@ def test_record_status_is_normalized_to_work_status() -> None:
 
 def test_record_preserves_unknown_legacy_status_text() -> None:
     """Unknown legacy statuses should stay serializable for migration."""
-    record = Record(url=ASCII_M1_URL, status="CUSTOM_STATUS")
+    record = Record(url=ASCII_TICK_URL, status="CUSTOM_STATUS")
 
     assert record.status is WorkStatus.UNKNOWN
     assert record.status_text == "CUSTOM_STATUS"
@@ -77,11 +77,11 @@ def test_manifest_status_writes_do_not_create_legacy_meta_file(
     Args:
         tmp_path (Path): temporary test directory.
     """
-    record = Record(url=ASCII_M1_URL, status="CSV_FILE")
+    record = Record(url=ASCII_TICK_URL, status="CSV_FILE")
 
     record.write_manifest_status(base_dir=f"{tmp_path}{os.sep}")
 
-    meta_path = tmp_path / "ASCII" / "M1" / "eurusd" / "2022" / ".meta"
+    meta_path = tmp_path / "ASCII" / "T" / "eurusd" / "2022" / ".meta"
 
     assert not meta_path.exists()
 
@@ -90,7 +90,7 @@ def test_legacy_manifest_status_aliases_remain_compatible(
     tmp_path: Path,
 ) -> None:
     """Deprecated memento/momento aliases should forward with warnings."""
-    record = Record(url=ASCII_M1_URL, status=WorkStatus.CSV_FILE)
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.CSV_FILE)
 
     with pytest.warns(
         LegacyManifestStatusAliasWarning,
@@ -110,7 +110,7 @@ def test_legacy_manifest_status_aliases_remain_compatible(
     assert not meta_path.exists()
 
     record.write_manifest_status(base_dir=str(tmp_path))
-    restored = Record(url=ASCII_M1_URL)
+    restored = Record(url=ASCII_TICK_URL)
 
     with pytest.warns(
         LegacyManifestStatusAliasWarning,
@@ -120,7 +120,7 @@ def test_legacy_manifest_status_aliases_remain_compatible(
 
     assert restored_ok
     assert restored.status is WorkStatus.CSV_FILE
-    assert restored.data_dir == _expected_ascii_m1_dir(tmp_path)
+    assert restored.data_dir == _expected_ascii_tick_dir(tmp_path)
 
 
 def test_restore_manifest_status_ignores_stale_persisted_data_dir(
@@ -133,15 +133,15 @@ def test_restore_manifest_status_ignores_stale_persisted_data_dir(
     """
     current_base = tmp_path / "current"
     stale_base = tmp_path / "stale"
-    restored = Record(url=ASCII_M1_URL)
-    current_data_dir = _expected_ascii_m1_dir(current_base)
-    stale_data_dir = _expected_ascii_m1_dir(stale_base)
+    restored = Record(url=ASCII_TICK_URL)
+    current_data_dir = _expected_ascii_tick_dir(current_base)
+    stale_data_dir = _expected_ascii_tick_dir(stale_base)
     meta_path = Path(current_data_dir) / ".meta"
     meta_path.parent.mkdir(parents=True)
     meta_path.write_text(
         json.dumps(
             {
-                "url": ASCII_M1_URL,
+                "url": ASCII_TICK_URL,
                 "status": "CSV_FILE",
                 "data_dir": stale_data_dir,
                 "zip_filename": "stale.zip",

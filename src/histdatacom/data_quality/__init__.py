@@ -2,20 +2,6 @@
 
 from __future__ import annotations
 
-from histdatacom.data_quality.bars import (
-    ASCII_M1_BAR_INTEGRITY_RULE_ID,
-    ASCII_M1_OUTLIER_RULE_ID,
-    ASCII_M1_PRECISION_RULE_ID,
-    ASCII_M1_TICK_RECONSTRUCTION_RULE_ID,
-    HistDataAsciiM1BarIntegrityRule,
-    HistDataAsciiM1OutlierRule,
-    HistDataAsciiM1PrecisionRule,
-    HistDataAsciiM1TickReconstructionRule,
-    HistDataM1OutlierThresholds,
-    HistDataM1TickReconstructionTolerance,
-    bars_quality_rules,
-    bars_quality_run_rules,
-)
 from histdatacom.data_quality.calendar import (
     DOMAIN_CALENDAR_SESSION_RULE_ID,
     HistDataCalendarClassification,
@@ -321,10 +307,6 @@ from histdatacom.data_quality.ticks import (
 
 __all__ = [
     "ASCII_EST_NO_DST_TIME_RULE_ID",
-    "ASCII_M1_BAR_INTEGRITY_RULE_ID",
-    "ASCII_M1_OUTLIER_RULE_ID",
-    "ASCII_M1_PRECISION_RULE_ID",
-    "ASCII_M1_TICK_RECONSTRUCTION_RULE_ID",
     "ASCII_ROW_COUNT_INGESTION_RULE_ID",
     "ASCII_SCHEMA_INGESTION_RULE_ID",
     "ASCII_TEXT_INGESTION_RULE_ID",
@@ -410,10 +392,6 @@ __all__ = [
     "TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION",
     "DEEP_QUALITY_DIMENSIONS",
     "CoverageDimension",
-    "HistDataAsciiM1BarIntegrityRule",
-    "HistDataAsciiM1OutlierRule",
-    "HistDataAsciiM1PrecisionRule",
-    "HistDataAsciiM1TickReconstructionRule",
     "HistDataAsciiTimestampContinuityRule",
     "HistDataAsciiTimestampGapRule",
     "HistDataAsciiEstNoDstTimeRule",
@@ -438,8 +416,6 @@ __all__ = [
     "HistDataFingerprintDistributionAttentionProfile",
     "HistDataFingerprintProfile",
     "HistDataGapTolerance",
-    "HistDataM1OutlierThresholds",
-    "HistDataM1TickReconstructionTolerance",
     "HistDataModelingReadinessRule",
     "HistDataProvenanceManifestRule",
     "HistDataRowCountProfile",
@@ -485,8 +461,6 @@ __all__ = [
     "QUALITY_REPORTING_METADATA_KEY",
     "BoundedReportLimit",
     "BOUNDED_PAYLOAD_CONTRACT_AUDIT_SCHEMA_VERSION",
-    "bars_quality_rules",
-    "bars_quality_run_rules",
     "bounded_payload_contract_audit",
     "bounded_quality_payload",
     "bounded_report_limit",

@@ -170,7 +170,7 @@
                 "kind": "directory",
                 "period": "unknown",
                 "symbol": "unknown",
-                "timeframe": "M1"
+                "timeframe": "T"
               }
             }
           ],
@@ -201,9 +201,9 @@
             "metadata": {
               "direct_symbol": "AUDCAD",
               "period": "2008",
-              "timeframe": "M1"
+              "timeframe": "T"
             },
-            "path": "data/ASCII/M1",
+            "path": "data/ASCII/T",
             "row_number": null,
             "timestamp_source": "",
             "timestamp_utc_ms": null
@@ -221,7 +221,7 @@
                 "period": "2008",
                 "relationship": "AUDCHF / CADCHF ~= AUDCAD",
                 "relative_difference": 0.088171312437192,
-                "timeframe": "M1",
+                "timeframe": "T",
                 "timestamp_utc_ms": 1212357720000
               }
             ]
@@ -232,12 +232,12 @@
             "data_format": "ascii",
             "kind": "directory",
             "metadata": {
-              "root": "data/ASCII/M1"
+              "root": "data/ASCII/T"
             },
-            "path": "data/ASCII/M1",
+            "path": "data/ASCII/T",
             "period": "",
             "symbol": "",
-            "timeframe": "M1"
+            "timeframe": "T"
           }
         }
       ],
@@ -248,12 +248,12 @@
         "data_format": "ascii",
         "kind": "directory",
         "metadata": {
-          "root": "data/ASCII/M1"
+          "root": "data/ASCII/T"
         },
-        "path": "data/ASCII/M1",
+        "path": "data/ASCII/T",
         "period": "",
         "symbol": "",
-        "timeframe": "M1"
+        "timeframe": "T"
       }
     }
   ],
@@ -280,12 +280,12 @@
         "data_format": "ascii",
         "kind": "directory",
         "metadata": {
-          "root": "data/ASCII/M1"
+          "root": "data/ASCII/T"
         },
-        "path": "data/ASCII/M1",
+        "path": "data/ASCII/T",
         "period": "",
         "symbol": "",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     }
@@ -295,12 +295,12 @@
       "data_format": "ascii",
       "kind": "directory",
       "metadata": {
-        "root": "data/ASCII/M1"
+        "root": "data/ASCII/T"
       },
-      "path": "data/ASCII/M1",
+      "path": "data/ASCII/T",
       "period": "",
       "symbol": "",
-      "timeframe": "M1"
+      "timeframe": "T"
     }
   ]
 }

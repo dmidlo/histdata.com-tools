@@ -929,7 +929,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
         formats = {str(item).lower() for item in self.arg_namespace.formats}
         timeframes = {str(item) for item in self.arg_namespace.timeframes}
-        cache_timeframes = {"M1", "T"}
+        cache_timeframes = {"T"}
         selected_cache_timeframes = timeframes & cache_timeframes
         if "ascii" in formats and selected_cache_timeframes:
             self.arg_namespace.formats = {"ascii"}
@@ -943,7 +943,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         )
         print(  # noqa:T201
             "ERROR: --build-cache can only build canonical Polars caches "
-            "for ascii/M1 or ascii/T datasets.\n"
+            "for ascii/T datasets.\n"
             f"Requested: {requested}"
         )
         raise SystemExit(1)
@@ -1501,7 +1501,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             choices=Timeframe.list_keys(),
             help=(
                 "space separated Timeframes. -t "  # noqa:BLK100
-                "tick-data-quotes 1-minute-bar-quotes"
+                "tick-data-quotes"
             ),
             metavar="TIMEFRAME",
         )

@@ -17,9 +17,7 @@ from histdatacom.legacy_boundary import LegacyHelperSideEffectWarning
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
 
-EXPECTED_M1_COLUMNS = ["datetime", "open", "high", "low", "close", "vol"]
 EXPECTED_TICK_COLUMNS = ["datetime", "bid", "ask", "vol"]
-EXPECTED_M1_DATETIMES = [1328072400000, 1328072460000, 1328072520000]
 EXPECTED_TICK_DATETIMES = [1328072403660, 1328072403973, 1328072414990]
 
 
@@ -61,10 +59,7 @@ def test_api_module_imports_cleanly() -> None:
 
 @pytest.mark.parametrize(
     ("timeframe", "filename", "expected_columns"),
-    (
-        ("M1", "DAT_ASCII_EURUSD_M1_201202.csv", EXPECTED_M1_COLUMNS),
-        ("T", "DAT_ASCII_EURUSD_T_201202.csv", EXPECTED_TICK_COLUMNS),
-    ),
+    (("T", "DAT_ASCII_EURUSD_T_201202.csv", EXPECTED_TICK_COLUMNS),),
 )
 def test_import_frame_with_headers_returns_polars_raw_ingest_frame(
     timeframe: str,
@@ -96,6 +91,11 @@ def test_import_frame_with_headers_rejects_unsupported_timeframes() -> None:
             "T_LAST",
             FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
         )
+    with pytest.raises(ValueError, match="unsupported ASCII timeframe"):
+        Api._import_frame_with_headers(
+            "M1",
+            FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+        )
 
 
 def test_import_file_to_polars_wraps_raw_ingest_for_records() -> None:
@@ -104,17 +104,18 @@ def test_import_file_to_polars_wraps_raw_ingest_for_records() -> None:
 
     from histdatacom.api import Api
 
-    record = SimpleNamespace(data_timeframe="M1")
+    record = SimpleNamespace(data_timeframe="T")
     frame = Api._import_file_to_polars(
         record,
-        FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
     )
 
     assert isinstance(frame, pl.DataFrame)
-    assert frame.columns == EXPECTED_M1_COLUMNS
+    assert frame.columns == EXPECTED_TICK_COLUMNS
     assert frame.schema["datetime"] == pl.Int64
     assert (
-        frame.select("datetime").to_series().to_list() == EXPECTED_M1_DATETIMES
+        frame.select("datetime").to_series().to_list()
+        == EXPECTED_TICK_DATETIMES
     )
 
 
@@ -153,6 +154,11 @@ def test_import_file_to_polars_preserves_system_exit_on_bad_timeframe() -> None:
             record,
             FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
         )
+    with pytest.raises(SystemExit):
+        Api._import_file_to_polars(
+            SimpleNamespace(data_timeframe="M1"),
+            FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+        )
 
 
 def test_create_cache_writes_polars_cache_and_record_metadata(
@@ -166,13 +172,13 @@ def test_create_cache_writes_polars_cache_and_record_metadata(
     from histdatacom.records import Record
     from histdatacom.runtime_contracts import WorkStatus
 
-    filename = "DAT_ASCII_EURUSD_M1_201202.csv"
+    filename = "DAT_ASCII_EURUSD_T_201202.csv"
     shutil.copyfile(FIXTURES / filename, tmp_path / filename)
     record = Record(
         data_dir=str(tmp_path) + os.sep,
         csv_filename=filename,
         zip_filename="missing.zip",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_format="ascii",
         data_fxpair="eurusd",
         status="CSV",
@@ -186,8 +192,8 @@ def test_create_cache_writes_polars_cache_and_record_metadata(
 
     assert record.cache_filename == CACHE_FILENAME
     assert record.cache_line_count == 3
-    assert record.cache_start == str(EXPECTED_M1_DATETIMES[0])
-    assert record.cache_end == str(EXPECTED_M1_DATETIMES[-1])
+    assert record.cache_start == str(EXPECTED_TICK_DATETIMES[0])
+    assert record.cache_end == str(EXPECTED_TICK_DATETIMES[-1])
     assert (tmp_path / CACHE_FILENAME).exists()
     assert not (tmp_path / ".meta").exists()
     [item] = ManifestStatusStore(tmp_path).list_work_items()
@@ -197,7 +203,7 @@ def test_create_cache_writes_polars_cache_and_record_metadata(
     assert isinstance(cache_frame, pl.DataFrame)
     assert cache_frame.schema["datetime"] == pl.Int64
     assert cache_frame.select("datetime").to_series().to_list() == (
-        EXPECTED_M1_DATETIMES
+        EXPECTED_TICK_DATETIMES
     )
 
 
@@ -229,27 +235,27 @@ def test_merge_records_reads_polars_cache_files(
 
     api = Api(return_type="polars")
     source = Api._import_file_to_polars(
-        SimpleNamespace(data_timeframe="M1"),
-        FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+        SimpleNamespace(data_timeframe="T"),
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
     )
     first = _write_cache_record(
         tmp_path,
         "first",
         source.slice(0, 1),
         pair="eurusd",
-        timeframe="M1",
-        start=EXPECTED_M1_DATETIMES[0],
+        timeframe="T",
+        start=EXPECTED_TICK_DATETIMES[0],
     )
     second = _write_cache_record(
         tmp_path,
         "second",
         source.slice(1, 2),
         pair="eurusd",
-        timeframe="M1",
-        start=EXPECTED_M1_DATETIMES[1],
+        timeframe="T",
+        start=EXPECTED_TICK_DATETIMES[1],
     )
     tp_set = {
-        "timeframe": "M1",
+        "timeframe": "T",
         "pair": "eurusd",
         "records": [second, first],
         "data": None,
@@ -258,7 +264,7 @@ def test_merge_records_reads_polars_cache_files(
 
     assert isinstance(tp_set["data"], pl.DataFrame)
     assert tp_set["data"].select("datetime").to_series().to_list() == (
-        EXPECTED_M1_DATETIMES
+        EXPECTED_TICK_DATETIMES
     )
 
 
@@ -271,30 +277,30 @@ def test_merge_records_accepts_explicit_records_without_queue(
     from histdatacom.api import Api
 
     source = Api._import_file_to_polars(
-        SimpleNamespace(data_timeframe="M1"),
-        FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+        SimpleNamespace(data_timeframe="T"),
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
     )
     first = _write_cache_record(
         tmp_path,
         "explicit-first",
         source.slice(0, 1),
         pair="eurusd",
-        timeframe="M1",
-        start=EXPECTED_M1_DATETIMES[0],
+        timeframe="T",
+        start=EXPECTED_TICK_DATETIMES[0],
     )
     second = _write_cache_record(
         tmp_path,
         "explicit-second",
         source.slice(1, 2),
         pair="eurusd",
-        timeframe="M1",
-        start=EXPECTED_M1_DATETIMES[1],
+        timeframe="T",
+        start=EXPECTED_TICK_DATETIMES[1],
     )
     result = Api(return_type="polars").merge_records([second, first])
 
     assert isinstance(result, pl.DataFrame)
     assert result.select("datetime").to_series().to_list() == (
-        EXPECTED_M1_DATETIMES
+        EXPECTED_TICK_DATETIMES
     )
 
 
@@ -307,16 +313,16 @@ def test_merge_records_uses_explicit_return_type_without_parser_globals(
     from histdatacom.api import Api
 
     source = Api._import_file_to_polars(
-        SimpleNamespace(data_timeframe="M1"),
-        FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+        SimpleNamespace(data_timeframe="T"),
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
     )
     record = _write_cache_record(
         tmp_path,
         "stale-global",
         source.slice(0, 1),
         pair="eurusd",
-        timeframe="M1",
-        start=EXPECTED_M1_DATETIMES[0],
+        timeframe="T",
+        start=EXPECTED_TICK_DATETIMES[0],
     )
 
     result = Api(return_type="polars").merge_records([record])
@@ -331,7 +337,7 @@ def test_merge_records_empty_set_returns_empty_polars_dataframe() -> None:
     from histdatacom.api import Api
 
     tp_set = {
-        "timeframe": "M1",
+        "timeframe": "T",
         "pair": "eurusd",
         "records": [],
         "data": None,
@@ -357,24 +363,24 @@ def test_merge_caches_converts_single_pair_timeframe_return_types(
     from histdatacom.api import Api
 
     source = Api._import_file_to_polars(
-        SimpleNamespace(data_timeframe="M1"),
-        FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
+        SimpleNamespace(data_timeframe="T"),
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
     )
     first = _write_cache_record(
         tmp_path,
         "single-first",
         source.slice(0, 1),
         pair="eurusd",
-        timeframe="M1",
-        start=EXPECTED_M1_DATETIMES[0],
+        timeframe="T",
+        start=EXPECTED_TICK_DATETIMES[0],
     )
     second = _write_cache_record(
         tmp_path,
         "single-second",
         source.slice(1, 2),
         pair="eurusd",
-        timeframe="M1",
-        start=EXPECTED_M1_DATETIMES[1],
+        timeframe="T",
+        start=EXPECTED_TICK_DATETIMES[1],
     )
     with pytest.warns(
         LegacyHelperSideEffectWarning,
@@ -392,7 +398,7 @@ def test_merge_caches_converts_single_pair_timeframe_return_types(
         assert isinstance(result, pa.Table)
         values = result.column("datetime").to_pylist()
 
-    assert values == EXPECTED_M1_DATETIMES
+    assert values == EXPECTED_TICK_DATETIMES
 
 
 def test_merge_caches_returns_only_observed_pair_timeframe_sets(
@@ -403,10 +409,6 @@ def test_merge_caches_returns_only_observed_pair_timeframe_sets(
 
     from histdatacom.api import Api
 
-    m1_source = Api._import_file_to_polars(
-        SimpleNamespace(data_timeframe="M1"),
-        FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
-    )
     tick_source = Api._import_file_to_polars(
         SimpleNamespace(data_timeframe="T"),
         FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
@@ -419,26 +421,26 @@ def test_merge_caches_returns_only_observed_pair_timeframe_sets(
         timeframe="T",
         start=EXPECTED_TICK_DATETIMES[0],
     )
-    m1_record = _write_cache_record(
+    eurusd_record = _write_cache_record(
         tmp_path,
-        "eurusd-m1",
-        m1_source,
+        "eurusd-tick",
+        tick_source,
         pair="eurusd",
-        timeframe="M1",
-        start=EXPECTED_M1_DATETIMES[0],
+        timeframe="T",
+        start=EXPECTED_TICK_DATETIMES[0],
     )
     with pytest.warns(
         LegacyHelperSideEffectWarning,
         match="Api.merge_caches",
     ):
         result = Api(return_type="polars").merge_caches(
-            [tick_record, m1_record]
+            [tick_record, eurusd_record]
         )
 
     assert isinstance(result, list)
     assert [(item["timeframe"], item["pair"]) for item in result] == [
         ("T", "gbpusd"),
-        ("M1", "eurusd"),
+        ("T", "eurusd"),
     ]
     assert all(
         set(item) == {"timeframe", "pair", "records", "data"} for item in result
@@ -457,7 +459,7 @@ def test_merge_caches_returns_empty_list_when_no_cache_records(
         data_dir=str(tmp_path) + os.sep,
         cache_filename=CACHE_FILENAME,
         data_fxpair="eurusd",
-        data_timeframe="M1",
+        data_timeframe="T",
     )
     with pytest.warns(
         LegacyHelperSideEffectWarning,

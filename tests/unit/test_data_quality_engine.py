@@ -20,9 +20,9 @@ from histdatacom.data_quality import (
     QualityTargetSummary,
     run_quality_assessment,
 )
-from histdatacom.histdata_ascii import M1
+from histdatacom.histdata_ascii import TICK
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
+    CLEAN_TICK_CASE,
     HistDataAsciiCase,
     case_by_name,
     write_ascii_case,
@@ -63,12 +63,12 @@ def test_quality_target_and_finding_round_trip_preserves_context(
     tmp_path: Path,
 ) -> None:
     """Findings should carry file, row, timestamp, symbol, and check context."""
-    target = _target_for_case(tmp_path, CLEAN_M1_CASE)
+    target = _target_for_case(tmp_path, CLEAN_TICK_CASE)
     finding = QualityFinding(
         severity=QualitySeverity.WARNING,
-        code="M1_DUPLICATE_TIMESTAMP",
-        message="duplicate minute bar timestamp",
-        rule_id="m1.timestamp.unique",
+        code="TICK_DUPLICATE_TIMESTAMP",
+        message="duplicate tick timestamp",
+        rule_id="tick.timestamp.unique",
         target=target,
         location=QualityLocation(
             path=target.path,
@@ -87,7 +87,7 @@ def test_quality_target_and_finding_round_trip_preserves_context(
     assert restored_target == target
     assert restored_finding == finding
     assert restored_finding.target.symbol == "EURUSD"
-    assert restored_finding.target.timeframe == M1
+    assert restored_finding.target.timeframe == TICK
     assert restored_finding.location.row_number == 2
     assert restored_finding.location.metadata["source_timezone"] == "EST-no-DST"
 
@@ -96,33 +96,33 @@ def test_quality_engine_runs_multiple_rules_and_aggregates_status(
     tmp_path: Path,
 ) -> None:
     """One engine path should aggregate clean, warning, and error findings."""
-    clean = _target_for_case(tmp_path, CLEAN_M1_CASE)
+    clean = _target_for_case(tmp_path, CLEAN_TICK_CASE)
     duplicate = _target_for_case(
         tmp_path,
-        case_by_name("m1_duplicate_timestamp"),
+        case_by_name("tick_duplicate_row"),
     )
-    missing = _target_for_case(tmp_path, case_by_name("m1_missing_file"))
+    missing = _target_for_case(tmp_path, case_by_name("tick_missing_file"))
     rules = (
         _StaticRule(
             rule_id="manifest.case-observed",
             description="records that each case was checked",
             severity_by_case={
-                "clean_m1": QualitySeverity.INFO,
-                "m1_duplicate_timestamp": QualitySeverity.INFO,
-                "m1_missing_file": QualitySeverity.INFO,
+                "clean_tick": QualitySeverity.INFO,
+                "tick_duplicate_row": QualitySeverity.INFO,
+                "tick_missing_file": QualitySeverity.INFO,
             },
         ),
         _StaticRule(
-            rule_id="m1.timestamp.unique",
+            rule_id="tick.timestamp.unique",
             description="flags duplicate timestamps",
             severity_by_case={
-                "m1_duplicate_timestamp": QualitySeverity.WARNING,
+                "tick_duplicate_row": QualitySeverity.WARNING,
             },
         ),
         _StaticRule(
             rule_id="file.exists",
             description="flags missing files",
-            severity_by_case={"m1_missing_file": QualitySeverity.ERROR},
+            severity_by_case={"tick_missing_file": QualitySeverity.ERROR},
         ),
     )
 
@@ -186,19 +186,19 @@ def test_quality_engine_runs_multiple_rules_and_aggregates_status(
 def test_quality_engine_skips_duplicate_archive_semantic_scans() -> None:
     """Matching CSV targets should own non-inventory checks for same data."""
     archive = QualityTarget(
-        path="/tmp/DAT_ASCII_EURUSD_M1_201202.zip",
+        path="/tmp/DAT_ASCII_EURUSD_T_201202.zip",
         kind=QualityTargetKind.ZIP,
         data_format="ascii",
-        timeframe=M1,
+        timeframe=TICK,
         symbol="EURUSD",
         period="201202",
         metadata={"case": "archive"},
     )
     csv = QualityTarget(
-        path="/tmp/DAT_ASCII_EURUSD_M1_201202.csv",
+        path="/tmp/DAT_ASCII_EURUSD_T_201202.csv",
         kind=QualityTargetKind.CSV,
         data_format="ascii",
-        timeframe=M1,
+        timeframe=TICK,
         symbol="EURUSD",
         period="201202",
         metadata={"case": "csv"},
@@ -247,10 +247,10 @@ def test_quality_engine_skips_duplicate_archive_semantic_scans() -> None:
 
 def test_quality_engine_reports_bounded_progress(tmp_path: Path) -> None:
     """Long quality runs should expose progress without local file paths."""
-    clean = _target_for_case(tmp_path, CLEAN_M1_CASE)
+    clean = _target_for_case(tmp_path, CLEAN_TICK_CASE)
     duplicate = _target_for_case(
         tmp_path,
-        case_by_name("m1_duplicate_timestamp"),
+        case_by_name("tick_duplicate_row"),
     )
     events: list[dict] = []
 
@@ -261,15 +261,15 @@ def test_quality_engine_reports_bounded_progress(tmp_path: Path) -> None:
                 rule_id="manifest.case-observed",
                 description="records that each case was checked",
                 severity_by_case={
-                    "clean_m1": QualitySeverity.INFO,
-                    "m1_duplicate_timestamp": QualitySeverity.INFO,
+                    "clean_tick": QualitySeverity.INFO,
+                    "tick_duplicate_row": QualitySeverity.INFO,
                 },
             ),
             _StaticRule(
-                rule_id="m1.timestamp.unique",
+                rule_id="tick.timestamp.unique",
                 description="flags duplicate timestamps",
                 severity_by_case={
-                    "m1_duplicate_timestamp": QualitySeverity.WARNING,
+                    "tick_duplicate_row": QualitySeverity.WARNING,
                 },
             ),
         ),
@@ -292,14 +292,16 @@ def test_quality_report_round_trip_recomputes_summary_state(
     tmp_path: Path,
 ) -> None:
     """Serialized reports should restore findings and aggregate status."""
-    target = _target_for_case(tmp_path, case_by_name("m1_ohlc_violation"))
+    target = _target_for_case(tmp_path, case_by_name("tick_negative_spread"))
     report = run_quality_assessment(
         targets=(target,),
         rules=(
             _StaticRule(
-                rule_id="m1.ohlc.valid",
-                description="flags invalid OHLC ordering",
-                severity_by_case={"m1_ohlc_violation": QualitySeverity.ERROR},
+                rule_id="tick.spread.valid",
+                description="flags invalid tick spreads",
+                severity_by_case={
+                    "tick_negative_spread": QualitySeverity.ERROR
+                },
             ),
         ),
     )

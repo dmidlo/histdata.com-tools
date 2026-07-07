@@ -43,7 +43,7 @@ from histdatacom.data_quality.profiles import (
     QualityProfile,
     quality_profile_from_value,
 )
-from histdatacom.histdata_ascii import M1, TICK
+from histdatacom.histdata_ascii import TICK
 from histdatacom.publication_safety import (
     publish_safe_json_mapping,
     publish_safe_path,
@@ -1015,7 +1015,7 @@ def _audit_examples(
     series = _mapping(examples.get("series_fingerprint_fragment"))
     source = _mapping(series.get("source"))
     audit = _mapping(series.get("fingerprint_audit"))
-    expected_sections = list(_target_section_names_for_timeframe(M1))
+    expected_sections = list(_target_section_names_for_timeframe(TICK))
     emitted_sections = _string_values(audit.get("sections_emitted"))
     expected_skipped = {
         section: {"reason": "not_emitted"}
@@ -1044,7 +1044,7 @@ def _audit_examples(
         expected=expected_sections,
         actual=audit.get("sections_expected"),
         code="example_expected_sections_mismatch",
-        message="example expected sections must follow implemented M1 contracts",
+        message="example expected sections must follow implemented TICK contracts",
     )
     _compare_value(
         findings,
@@ -1258,7 +1258,7 @@ def _target_capability_payload() -> dict[str, JSONValue]:
     return {
         "supported_target_kinds": _json_strings(("csv", "zip", "cache")),
         "supported_data_format": "ascii",
-        "supported_timeframes": _json_strings((M1, TICK)),
+        "supported_timeframes": _json_strings((TICK,)),
         "series_rule_id": SERIES_FINGERPRINT_RULE_ID,
         "run_rule_status": {
             "rule_id": run_contract.rule_id,
@@ -1356,7 +1356,7 @@ def _vocabulary_payload() -> dict[str, JSONValue]:
 
 
 def _example_payload() -> dict[str, JSONValue]:
-    expected_sections = _target_section_names_for_timeframe(M1)
+    expected_sections = _target_section_names_for_timeframe(TICK)
     emitted_sections = ("coverage", "temporal_topology")
     skipped_sections = tuple(
         section
@@ -1366,7 +1366,7 @@ def _example_payload() -> dict[str, JSONValue]:
     return {
         "target_axis": {
             "data_format": "ascii",
-            "timeframe": M1,
+            "timeframe": TICK,
             "symbol": "EURUSD",
             "period": "201202",
             "kind": "csv",
@@ -1376,7 +1376,7 @@ def _example_payload() -> dict[str, JSONValue]:
             "fingerprint_id": "sha256:example",
             "target_axis": {
                 "data_format": "ascii",
-                "timeframe": M1,
+                "timeframe": TICK,
                 "symbol": "EURUSD",
                 "period": "201202",
                 "kind": "csv",
@@ -1390,7 +1390,7 @@ def _example_payload() -> dict[str, JSONValue]:
             },
             "source": {
                 "kind": "csv_text",
-                "path": "data/ASCII/M1/EURUSD/2012/02/DAT_ASCII_EURUSD_M1_201202.csv",
+                "path": "data/ASCII/T/EURUSD/2012/02/DAT_ASCII_EURUSD_T_201202.csv",
             },
             "fingerprint_audit": {
                 "schema_version": TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
@@ -1424,12 +1424,12 @@ def _example_payload() -> dict[str, JSONValue]:
                 {
                     "target_axis": {
                         "data_format": "ascii",
-                        "timeframe": M1,
+                        "timeframe": TICK,
                         "symbol": "EURUSD",
                         "period": "201202",
                         "kind": "csv",
                     },
-                    "applicable_dynamics_section": "return_dynamics",
+                    "applicable_dynamics_section": "microstructure_dynamics",
                     "applicable_dynamics_status": "unavailable",
                 }
             ],

@@ -8,10 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from histdatacom.histdata_ascii import M1, TICK
+from histdatacom.histdata_ascii import TICK
 
 FIXTURE_ROOT = Path(__file__).resolve().parent
-CLEAN_M1_FIXTURE = FIXTURE_ROOT / "DAT_ASCII_EURUSD_M1_201202.csv"
 CLEAN_TICK_FIXTURE = FIXTURE_ROOT / "DAT_ASCII_EURUSD_T_201202.csv"
 
 
@@ -49,143 +48,17 @@ class EstNoDstTimestampCase:
     description: str
 
 
-CLEAN_M1_ROWS = (
-    "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
-    "20120201 000100;1.306570;1.306570;1.306470;1.306560;17",
-    "20120201 000200;1.306520;1.306560;1.306520;1.306560;2147483647",
-)
 CLEAN_TICK_ROWS = (
     "20120201 000003660,1.306600,1.306770,0",
     "20120201 000003973,1.306580,1.306750,25",
     "20120201 000014990,1.306570,1.306740,2147483647",
 )
 
-CLEAN_M1_CASE = HistDataAsciiCase(
-    name="clean_m1",
-    timeframe=M1,
-    filename="DAT_ASCII_EURUSD_M1_201202.csv",
-    rows=CLEAN_M1_ROWS,
-)
 CLEAN_TICK_CASE = HistDataAsciiCase(
     name="clean_tick",
     timeframe=TICK,
     filename="DAT_ASCII_EURUSD_T_201202.csv",
     rows=CLEAN_TICK_ROWS,
-)
-
-DIRTY_M1_CASES = (
-    HistDataAsciiCase(
-        name="m1_malformed_row",
-        timeframe=M1,
-        filename="DAT_ASCII_EURUSD_M1_201202_MALFORMED.csv",
-        rows=(
-            CLEAN_M1_ROWS[0],
-            "20120201 000100;1.306570;1.306570",
-        ),
-        anomalies=("malformed_row",),
-    ),
-    HistDataAsciiCase(
-        name="m1_bad_timestamp",
-        timeframe=M1,
-        filename="DAT_ASCII_EURUSD_M1_201202_BAD_TIMESTAMP.csv",
-        rows=(
-            CLEAN_M1_ROWS[0],
-            "20120230 000000;1.306570;1.306570;1.306470;1.306560;17",
-        ),
-        anomalies=("bad_timestamp",),
-    ),
-    HistDataAsciiCase(
-        name="m1_bad_numeric",
-        timeframe=M1,
-        filename="DAT_ASCII_EURUSD_M1_201202_BAD_NUMERIC.csv",
-        rows=(
-            CLEAN_M1_ROWS[0],
-            "20120201 000100;$1.306570;1.306570;1.306470;1.306560;17",
-        ),
-        anomalies=("bad_numeric",),
-    ),
-    HistDataAsciiCase(
-        name="m1_shifted_column",
-        timeframe=M1,
-        filename="DAT_ASCII_EURUSD_M1_201202_SHIFTED.csv",
-        rows=(
-            CLEAN_M1_ROWS[0],
-            "1.306570;20120201 000100;1.306570;1.306470;1.306560;17",
-        ),
-        anomalies=("shifted_column",),
-    ),
-    HistDataAsciiCase(
-        name="m1_bad_volume",
-        timeframe=M1,
-        filename="DAT_ASCII_EURUSD_M1_201202_BAD_VOLUME.csv",
-        rows=(
-            CLEAN_M1_ROWS[0],
-            "20120201 000100;1.306570;1.306570;1.306470;1.306560;2147483648",
-        ),
-        anomalies=("bad_volume",),
-    ),
-    HistDataAsciiCase(
-        name="m1_duplicate_timestamp",
-        timeframe=M1,
-        filename="DAT_ASCII_EURUSD_M1_201202_DUPLICATE.csv",
-        rows=(
-            CLEAN_M1_ROWS[0],
-            "20120201 000000;1.306570;1.306570;1.306470;1.306560;17",
-            CLEAN_M1_ROWS[2],
-        ),
-        anomalies=("duplicate_timestamp",),
-    ),
-    HistDataAsciiCase(
-        name="m1_non_monotonic_timestamp",
-        timeframe=M1,
-        filename="DAT_ASCII_EURUSD_M1_201202_NON_MONOTONIC.csv",
-        rows=(
-            CLEAN_M1_ROWS[1],
-            CLEAN_M1_ROWS[0],
-            CLEAN_M1_ROWS[2],
-        ),
-        anomalies=("non_monotonic_timestamp",),
-    ),
-    HistDataAsciiCase(
-        name="m1_ohlc_violation",
-        timeframe=M1,
-        filename="DAT_ASCII_EURUSD_M1_201202_BAD_OHLC.csv",
-        rows=(
-            CLEAN_M1_ROWS[0],
-            "20120201 000100;1.306570;1.306500;1.306470;1.306560;17",
-        ),
-        anomalies=("ohlc_violation",),
-    ),
-    HistDataAsciiCase(
-        name="m1_header_row",
-        timeframe=M1,
-        filename="DAT_ASCII_EURUSD_M1_201202_HEADER.csv",
-        rows=(
-            "datetime;open;high;low;close;vol",
-            CLEAN_M1_ROWS[0],
-        ),
-        anomalies=("header_row", "bad_timestamp"),
-    ),
-    HistDataAsciiCase(
-        name="m1_bad_delimiter",
-        timeframe=M1,
-        filename="DAT_ASCII_EURUSD_M1_201202_BAD_DELIMITER.csv",
-        rows=("20120201 000000,1.306600,1.306600,1.306560,1.306560,0",),
-        anomalies=("bad_delimiter", "malformed_row"),
-    ),
-    HistDataAsciiCase(
-        name="m1_empty_file",
-        timeframe=M1,
-        filename="DAT_ASCII_EURUSD_M1_201202_EMPTY.csv",
-        anomalies=("empty_file",),
-    ),
-    HistDataAsciiCase(
-        name="m1_missing_file",
-        timeframe=M1,
-        filename="DAT_ASCII_EURUSD_M1_201202_MISSING.csv",
-        anomalies=("missing_file",),
-        missing=True,
-    ),
 )
 
 DIRTY_TICK_CASES = (
@@ -303,29 +176,11 @@ DIRTY_TICK_CASES = (
     ),
 )
 
-ALL_CLEAN_CASES = (CLEAN_M1_CASE, CLEAN_TICK_CASE)
-ALL_DIRTY_CASES = (*DIRTY_M1_CASES, *DIRTY_TICK_CASES)
+ALL_CLEAN_CASES = (CLEAN_TICK_CASE,)
+ALL_DIRTY_CASES = DIRTY_TICK_CASES
 ALL_ASCII_CASES = (*ALL_CLEAN_CASES, *ALL_DIRTY_CASES)
 
 EST_NO_DST_CALENDAR_CASES = (
-    EstNoDstTimestampCase(
-        timeframe=M1,
-        raw="20120229 235900",
-        expected_utc_ms=1330577940000,
-        description="leap-day minute bar",
-    ),
-    EstNoDstTimestampCase(
-        timeframe=M1,
-        raw="20220313 023000",
-        expected_utc_ms=1647156600000,
-        description="US spring DST transition treated as fixed EST",
-    ),
-    EstNoDstTimestampCase(
-        timeframe=M1,
-        raw="20221106 013000",
-        expected_utc_ms=1667716200000,
-        description="US fall DST transition treated as fixed EST",
-    ),
     EstNoDstTimestampCase(
         timeframe=TICK,
         raw="20120229 235959999",
@@ -363,10 +218,7 @@ def write_ascii_case(directory: Path, case: HistDataAsciiCase) -> Path:
 
 def copy_clean_fixture(directory: Path, timeframe: str) -> Path:
     """Copy the static clean fixture for a supported timeframe."""
-    source = {
-        M1: CLEAN_M1_FIXTURE,
-        TICK: CLEAN_TICK_FIXTURE,
-    }[timeframe]
+    source = {TICK: CLEAN_TICK_FIXTURE}[timeframe]
     target = directory / source.name
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, target)
@@ -395,7 +247,7 @@ def write_zip_case(
 
 def write_corrupt_zip(
     directory: Path,
-    filename: str = "DAT_ASCII_EURUSD_M1_201202_CORRUPT.zip",
+    filename: str = "DAT_ASCII_EURUSD_T_201202_CORRUPT.zip",
 ) -> Path:
     """Write bytes that should fail ZIP integrity checks."""
     target = directory / filename

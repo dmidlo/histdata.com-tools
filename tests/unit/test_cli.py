@@ -326,7 +326,7 @@ def test_build_cache_cli_filters_default_dimensions(
 
     assert options.build_cache
     assert options.formats == {"ascii"}
-    assert options.timeframes == {"M1", "T"}
+    assert options.timeframes == {"T"}
 
 
 def test_build_cache_cli_rejects_non_cacheable_dimensions(
@@ -344,7 +344,7 @@ def test_build_cache_cli_rejects_non_cacheable_dimensions(
             "-f",
             "metatrader",
             "-t",
-            "1-minute-bar-quotes",
+            "tick-data-quotes",
             "-s",
             "2022-12",
         ],
@@ -612,7 +612,7 @@ histdatacom:
             "-p",
             "usdjpy",
             "-t",
-            "1-minute-bar-quotes",
+            "tick-data-quotes",
             "-s",
             "2022-12",
             "-v",
@@ -623,7 +623,7 @@ histdatacom:
 
     assert options.pairs == ["usdjpy"]
     assert options.formats == ["ascii"]
-    assert options.timeframes == ["M1"]
+    assert options.timeframes == ["T"]
     assert options.start_yearmonth == "202212"
     assert options.verbosity == 1
     assert options.validate_urls
@@ -1405,7 +1405,7 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
             "-f",
             "ascii",
             "-t",
-            "1-minute-bar-quotes",
+            "tick-data-quotes",
             "-s",
             "2022-12",
             "--data-directory",
@@ -1437,7 +1437,7 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
 
     assert first_options.pairs == ["eurusd"]
     assert first_options.formats == ["ascii"]
-    assert first_options.timeframes == ["M1"]
+    assert first_options.timeframes == ["T"]
     assert first_options.data_directory == str(first_data_dir)
     assert first_options.validate_urls
     assert first_options.download_data_archives

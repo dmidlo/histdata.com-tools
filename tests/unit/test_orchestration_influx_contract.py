@@ -20,10 +20,9 @@ from histdatacom.orchestration import activities, workflows
 from histdatacom.orchestration.workflow_metadata import TASK_QUEUE_METADATA_KEY
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
-EXPECTED_M1_LINE = (
-    "eurusd,source=histdata.com,format=ascii,timeframe=M1 "
-    "openbid=1.3066,highbid=1.3066,lowbid=1.30656,closebid=1.30656 "
-    "1328072400000"
+EXPECTED_T_LINE = (
+    "eurusd,source=histdata.com,format=ascii,timeframe=T "
+    "bidquote=1.3066,askquote=1.30677 1328072403660"
 )
 
 
@@ -107,7 +106,7 @@ def test_import_workflow_contract_writes_batches_without_live_influx(
     assert writer.args["batch_size"] == "2"
     assert writer.args["delete_after_influx"] is True
     assert [len(batch) for batch in writer.batches] == [2, 1]
-    assert writer.batches[0][0] == EXPECTED_M1_LINE
+    assert writer.batches[0][0] == EXPECTED_T_LINE
     assert writer.closed
     assert summary["status"] == WorkStatus.INFLUX_UPLOAD.value
     assert summary["progress"]["completed_children"] == 1
@@ -118,7 +117,7 @@ def test_import_workflow_contract_writes_batches_without_live_influx(
     assert result["metrics"]["heartbeat_count"] == 2
     assert result["metrics"]["idempotency_key"].endswith(":2")
     assert not (tmp_path / CACHE_FILENAME).exists()
-    assert not (tmp_path / "DAT_ASCII_EURUSD_M1_201202.zip").exists()
+    assert not (tmp_path / "DAT_ASCII_EURUSD_T_201202.zip").exists()
 
 
 def test_import_workflow_contract_classifies_retryable_influx_failures(
@@ -164,14 +163,14 @@ def _influx_workflow_payload(
     delete_after_influx: bool = False,
 ) -> dict[str, Any]:
     _write_fixture_cache(tmp_path)
-    zip_filename = "DAT_ASCII_EURUSD_M1_201202.zip"
+    zip_filename = "DAT_ASCII_EURUSD_T_201202.zip"
     if delete_after_influx:
         (tmp_path / zip_filename).write_bytes(b"zip placeholder")
     request = RunRequest(
         request_id="run-influx-contract",
         pairs=("eurusd",),
         formats=("ascii",),
-        timeframes=("M1",),
+        timeframes=("T",),
         data_directory=str(tmp_path),
         batch_size=batch_size,
         import_to_influxdb=True,
@@ -192,7 +191,7 @@ def _influx_workflow_payload(
         "workflow_id": "run-influx-contract-import",
         "partition": {
             "pair": "EURUSD",
-            "timeframe": "M1",
+            "timeframe": "T",
             "format": "ascii",
         },
         "work_items": [
@@ -206,7 +205,7 @@ def _influx_workflow_payload(
                 "cache_end": "1328072520000",
                 "zip_filename": zip_filename,
                 "data_format": "ascii",
-                "data_timeframe": "M1",
+                "data_timeframe": "T",
                 "data_fxpair": "eurusd",
             }
         ],
@@ -216,9 +215,9 @@ def _influx_workflow_payload(
 def _write_fixture_cache(tmp_path: Path) -> None:
     source = convert_polars_datetime_to_utc_ms(
         read_ascii_file_to_polars(
-            FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv",
-            "M1",
+            FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
+            "T",
         ),
-        "M1",
+        "T",
     )
     write_polars_cache(source, tmp_path / CACHE_FILENAME)

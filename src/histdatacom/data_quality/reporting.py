@@ -2195,7 +2195,6 @@ def format_fingerprint_distribution_summary_lines(
             f"{_int_metadata(summary, 'target_count')} "
             "with distributions: "
             f"{_int_metadata(summary, 'distribution_target_count')} "
-            f"m1: {_int_metadata(summary, 'm1_bar_distribution_target_count')} "
             f"tick: {_int_metadata(summary, 'tick_distribution_target_count')} "
             "missing: "
             f"{_int_metadata(summary, 'missing_distribution_target_count')}"
@@ -2590,7 +2589,6 @@ def format_fingerprint_readiness_summary_lines(
     if status_counts:
         lines.append(f"- applicable dynamics statuses: {status_counts}")
     for label, section in (
-        ("return dynamics", "return_dynamics"),
         ("microstructure dynamics", "microstructure_dynamics"),
     ):
         counts = _format_nested_count_metadata(
@@ -2787,8 +2785,6 @@ def _format_fingerprint_readiness_target_line(
     axis = _mapping_payload(summary.get("target_axis"))
     section = _string_metadata(summary, "applicable_dynamics_section")
     dynamics = _mapping_payload(summary.get(section))
-    if not dynamics:
-        dynamics = _mapping_payload(summary.get("return_dynamics"))
     status = _string_metadata(summary, "applicable_dynamics_status")
     reason = _optional_string_metadata(summary, "applicable_dynamics_reason")
     reason_text = f", reason={reason}" if reason else ""
@@ -2838,29 +2834,6 @@ def _format_fingerprint_readiness_dynamics_details(
     section: str,
     dynamics: Mapping[str, JSONValue],
 ) -> str:
-    if section == "return_dynamics":
-        close_return = _mapping_payload(dynamics.get("close_log_return"))
-        absolute_return = _mapping_payload(dynamics.get("absolute_return"))
-        open_jump = _mapping_payload(dynamics.get("open_jump"))
-        flatline = _mapping_payload(dynamics.get("flatline"))
-        if not any((close_return, absolute_return, open_jump, flatline)):
-            return ""
-        return (
-            "close_returns="
-            f"{_int_metadata(close_return, 'count')} "
-            f"median={_format_rate(close_return.get('median'))}; "
-            "abs_returns="
-            f"{_int_metadata(absolute_return, 'count')} "
-            f"p95={_format_rate(absolute_return.get('p95'))}; "
-            "open_jumps="
-            f"{_int_metadata(open_jump, 'count')} "
-            f"p95={_format_rate(open_jump.get('p95'))}; "
-            "zero_returns="
-            f"{_int_metadata(flatline, 'zero_return_count')} "
-            f"rate={_format_rate(flatline.get('zero_return_rate'))}; "
-            "flatline_runs="
-            f"{_int_metadata(flatline, 'ohlc_flatline_run_count')}"
-        )
     if section == "microstructure_dynamics":
         interarrival = _mapping_payload(dynamics.get("interarrival_ms"))
         spread = _mapping_payload(dynamics.get("spread"))

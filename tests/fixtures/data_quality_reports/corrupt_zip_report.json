@@ -49,7 +49,7 @@
                 "kind": "zip",
                 "period": "201202",
                 "symbol": "EURUSD",
-                "timeframe": "M1"
+                "timeframe": "T"
               }
             }
           ],
@@ -242,7 +242,7 @@
           "location": {
             "column": "",
             "metadata": {},
-            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.zip",
             "row_number": null,
             "timestamp_source": "",
             "timestamp_utc_ms": null
@@ -258,12 +258,12 @@
             "data_format": "ascii",
             "kind": "zip",
             "metadata": {
-              "filename": "DAT_ASCII_EURUSD_M1_201202.zip"
+              "filename": "DAT_ASCII_EURUSD_T_201202.zip"
             },
-            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.zip",
             "period": "201202",
             "symbol": "EURUSD",
-            "timeframe": "M1"
+            "timeframe": "T"
           }
         }
       ],
@@ -274,12 +274,12 @@
         "data_format": "ascii",
         "kind": "zip",
         "metadata": {
-          "filename": "DAT_ASCII_EURUSD_M1_201202.zip"
+          "filename": "DAT_ASCII_EURUSD_T_201202.zip"
         },
-        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.zip",
         "period": "201202",
         "symbol": "EURUSD",
-        "timeframe": "M1"
+        "timeframe": "T"
       }
     }
   ],
@@ -306,12 +306,12 @@
         "data_format": "ascii",
         "kind": "zip",
         "metadata": {
-          "filename": "DAT_ASCII_EURUSD_M1_201202.zip"
+          "filename": "DAT_ASCII_EURUSD_T_201202.zip"
         },
-        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.zip",
         "period": "201202",
         "symbol": "EURUSD",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     }
@@ -321,12 +321,12 @@
       "data_format": "ascii",
       "kind": "zip",
       "metadata": {
-        "filename": "DAT_ASCII_EURUSD_M1_201202.zip"
+        "filename": "DAT_ASCII_EURUSD_T_201202.zip"
       },
-      "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.zip",
+      "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.zip",
       "period": "201202",
       "symbol": "EURUSD",
-      "timeframe": "M1"
+      "timeframe": "T"
     }
   ]
 }

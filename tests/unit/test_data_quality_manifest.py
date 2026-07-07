@@ -14,8 +14,9 @@ from histdatacom.data_quality import (
     quality_run_rules_for_groups,
     run_quality_assessment,
 )
+from histdatacom.histdata_ascii import TICK
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
+    CLEAN_TICK_CASE,
     write_ascii_case,
     write_zip_case,
 )
@@ -25,7 +26,7 @@ def test_complete_coverage_manifest_is_serialized(
     tmp_path: Path,
 ) -> None:
     """Expected present files should produce a clean JSON manifest."""
-    path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     discovery = discover_quality_targets((path,))
 
     report = run_quality_assessment(
@@ -62,7 +63,7 @@ def test_coverage_manifest_reports_missing_period(
     tmp_path: Path,
 ) -> None:
     """Expected dimensions without local targets should be hard failures."""
-    path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     discovery = discover_quality_targets((path,))
 
     report = run_quality_assessment(
@@ -95,9 +96,9 @@ def test_coverage_manifest_reports_duplicate_same_kind_files(
     tmp_path: Path,
 ) -> None:
     """Same dataset dimension and artifact kind should be reported once."""
-    write_ascii_case(tmp_path, CLEAN_M1_CASE)
-    duplicate = tmp_path / "DAT_ASCII_EURUSD_M1_201202_COPY.csv"
-    duplicate.write_text(CLEAN_M1_CASE.text, encoding="utf-8")
+    write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    duplicate = tmp_path / "DAT_ASCII_EURUSD_T_201202_COPY.csv"
+    duplicate.write_text(CLEAN_TICK_CASE.text, encoding="utf-8")
     discovery = discover_quality_targets((tmp_path,))
 
     report = run_quality_assessment(
@@ -126,9 +127,9 @@ def test_coverage_manifest_reports_unexpected_extra_file(
     tmp_path: Path,
 ) -> None:
     """Observed dimensions outside the expected set should be warnings."""
-    write_ascii_case(tmp_path, CLEAN_M1_CASE)
-    extra = tmp_path / "DAT_ASCII_GBPUSD_M1_201202.csv"
-    extra.write_text(CLEAN_M1_CASE.text, encoding="utf-8")
+    write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    extra = tmp_path / "DAT_ASCII_GBPUSD_T_201202.csv"
+    extra.write_text(CLEAN_TICK_CASE.text, encoding="utf-8")
     discovery = discover_quality_targets((tmp_path,))
 
     report = run_quality_assessment(
@@ -160,7 +161,7 @@ def test_coverage_manifest_uses_local_repo_ranges_offline(
     tmp_path: Path,
 ) -> None:
     """Local .repo metadata should expand expected periods without network."""
-    write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     (tmp_path / ".repo").write_text(
         json.dumps({"eurusd": {"start": "201202", "end": "201203"}}),
         encoding="utf-8",
@@ -189,8 +190,8 @@ def test_archive_and_csv_for_same_dimension_are_not_duplicates(
     tmp_path: Path,
 ) -> None:
     """A retained ZIP plus extracted CSV should not look like duplicate files."""
-    write_ascii_case(tmp_path, CLEAN_M1_CASE)
-    write_zip_case(tmp_path, CLEAN_M1_CASE)
+    write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    write_zip_case(tmp_path, CLEAN_TICK_CASE)
     discovery = discover_quality_targets((tmp_path,))
 
     report = run_quality_assessment(
@@ -217,7 +218,7 @@ def _dimension(
     symbol: str,
     period: str,
     data_format: str = "ascii",
-    timeframe: str = "M1",
+    timeframe: str = TICK,
 ) -> dict[str, str]:
     return {
         "data_format": data_format,

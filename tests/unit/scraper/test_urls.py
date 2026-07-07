@@ -8,22 +8,22 @@ def test_urls() -> None:
     assert True  # noqa:S101 # sourcery skip # act
 
 
-def test_generate_form_urls_preserves_historical_m1_year_units() -> None:
-    """Historical M1 ranges should generate yearly archive URLs."""
-    urls = list(
-        Urls().generate_form_urls(
-            "202201",
-            "202203",
-            {"ascii"},
-            {"eurusd"},
-            {"M1"},
+def test_generate_form_urls_rejects_removed_m1_timeframe() -> None:
+    """M1 is no longer a supported raw HistData timeframe."""
+    try:
+        list(
+            Urls().generate_form_urls(
+                "202201",
+                "202203",
+                {"ascii"},
+                {"eurusd"},
+                {"M1"},
+            )
         )
-    )
-
-    assert urls == [
-        "http://www.histdata.com/download-free-forex-data/"
-        "?/ascii/1-minute-bar-quotes/eurusd/2022"
-    ]
+    except ValueError as exc:
+        assert "'M1' is not a valid Timeframe" in str(exc)
+    else:
+        raise AssertionError("M1 URL generation should fail")
 
 
 def test_generate_form_urls_preserves_tick_month_units() -> None:
@@ -56,13 +56,13 @@ def test_generate_form_urls_is_deterministic_for_set_inputs() -> None:
             "202201",
             {"ascii"},
             {"gbpusd", "eurusd"},
-            {"M1"},
+            {"T"},
         )
     )
 
     assert urls == [
         "http://www.histdata.com/download-free-forex-data/"
-        "?/ascii/1-minute-bar-quotes/eurusd/2022",
+        "?/ascii/tick-data-quotes/eurusd/2022/1",
         "http://www.histdata.com/download-free-forex-data/"
-        "?/ascii/1-minute-bar-quotes/gbpusd/2022",
+        "?/ascii/tick-data-quotes/gbpusd/2022/1",
     ]

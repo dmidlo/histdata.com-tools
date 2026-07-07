@@ -2,7 +2,7 @@
   "metadata": {
     "check_groups": [
       "time",
-      "bars"
+      "ticks"
     ],
     "operation": "data-quality",
     "remediation_coverage": {
@@ -89,7 +89,7 @@
       "finding_code_counts": [
         {
           "count": 1,
-          "finding_code": "ASCII_M1_OHLC_INVALID"
+          "finding_code": "ASCII_TICK_NEGATIVE_SPREAD"
         },
         {
           "count": 1,
@@ -128,7 +128,7 @@
       "rule_id_counts": [
         {
           "count": 1,
-          "rule_id": "bars.ascii.m1.ohlc"
+          "rule_id": "ticks.ascii.spread"
         },
         {
           "count": 1,
@@ -143,7 +143,7 @@
       "unmapped_finding_code_counts": [
         {
           "count": 1,
-          "finding_code": "ASCII_M1_OHLC_INVALID"
+          "finding_code": "ASCII_TICK_NEGATIVE_SPREAD"
         },
         {
           "count": 1,
@@ -154,7 +154,7 @@
       "unmapped_group_count": 2,
       "unmapped_groups": [
         {
-          "finding_code": "ASCII_M1_OHLC_INVALID",
+          "finding_code": "ASCII_TICK_NEGATIVE_SPREAD",
           "included_target_axis_count": 1,
           "limit_metadata": {
             "target_axes": {
@@ -171,7 +171,7 @@
           "max_severity": "error",
           "occurrence_count": 1,
           "omitted_target_axis_count": 0,
-          "rule_id": "bars.ascii.m1.ohlc",
+          "rule_id": "ticks.ascii.spread",
           "severity_counts": {
             "error": 1
           },
@@ -184,7 +184,7 @@
                 "kind": "csv",
                 "period": "201202",
                 "symbol": "EURUSD",
-                "timeframe": "M1"
+                "timeframe": "T"
               }
             }
           ],
@@ -221,7 +221,7 @@
                 "kind": "csv",
                 "period": "201202",
                 "symbol": "EURUSD",
-                "timeframe": "M1"
+                "timeframe": "T"
               }
             }
           ],
@@ -231,7 +231,7 @@
       "unmapped_rule_id_counts": [
         {
           "count": 1,
-          "rule_id": "bars.ascii.m1.ohlc"
+          "rule_id": "ticks.ascii.spread"
         },
         {
           "count": 1,
@@ -257,12 +257,12 @@
             "metadata": {
               "duplicate_of_row": 1
             },
-            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202_DIRTY.csv",
             "row_number": 2,
             "timestamp_source": "20120201 000000",
             "timestamp_utc_ms": 1328072400000
           },
-          "message": "Duplicate timestamp found in M1 rows.",
+          "message": "Duplicate timestamp found in T rows.",
           "metadata": {},
           "rule_id": "time.ascii.timestamp",
           "severity": "warning",
@@ -270,12 +270,12 @@
             "data_format": "ascii",
             "kind": "csv",
             "metadata": {
-              "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
+              "filename": "DAT_ASCII_EURUSD_T_201202_DIRTY.csv"
             },
-            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202_DIRTY.csv",
             "period": "201202",
             "symbol": "EURUSD",
-            "timeframe": "M1"
+            "timeframe": "T"
           }
         }
       ],
@@ -286,61 +286,60 @@
         "data_format": "ascii",
         "kind": "csv",
         "metadata": {
-          "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
+          "filename": "DAT_ASCII_EURUSD_T_201202_DIRTY.csv"
         },
-        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202_DIRTY.csv",
         "period": "201202",
         "symbol": "EURUSD",
-        "timeframe": "M1"
+        "timeframe": "T"
       }
     },
     {
       "findings": [
         {
-          "code": "ASCII_M1_OHLC_INVALID",
+          "code": "ASCII_TICK_NEGATIVE_SPREAD",
           "location": {
-            "column": "high",
+            "column": "spread",
             "metadata": {},
-            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202_DIRTY.csv",
             "row_number": 3,
-            "timestamp_source": "20120201 000100",
-            "timestamp_utc_ms": 1328072460000
+            "timestamp_source": "20120201 000003973",
+            "timestamp_utc_ms": 1328072403973
           },
-          "message": "M1 OHLC values violate high/low ordering.",
+          "message": "Tick bid is greater than ask.",
           "metadata": {
-            "close": 1.30656,
-            "high": 1.30647,
-            "low": 1.30656,
-            "open": 1.30657
+            "ask": 1.30675,
+            "bid": 1.3068,
+            "spread": -5e-05
           },
-          "rule_id": "bars.ascii.m1.ohlc",
+          "rule_id": "ticks.ascii.spread",
           "severity": "error",
           "target": {
             "data_format": "ascii",
             "kind": "csv",
             "metadata": {
-              "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
+              "filename": "DAT_ASCII_EURUSD_T_201202_DIRTY.csv"
             },
-            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202_DIRTY.csv",
             "period": "201202",
             "symbol": "EURUSD",
-            "timeframe": "M1"
+            "timeframe": "T"
           }
         }
       ],
       "max_severity": "error",
-      "rule_id": "bars.ascii.m1.ohlc",
+      "rule_id": "ticks.ascii.spread",
       "status": "failed",
       "target": {
         "data_format": "ascii",
         "kind": "csv",
         "metadata": {
-          "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
+          "filename": "DAT_ASCII_EURUSD_T_201202_DIRTY.csv"
         },
-        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202_DIRTY.csv",
         "period": "201202",
         "symbol": "EURUSD",
-        "timeframe": "M1"
+        "timeframe": "T"
       }
     }
   ],
@@ -367,12 +366,12 @@
         "data_format": "ascii",
         "kind": "csv",
         "metadata": {
-          "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
+          "filename": "DAT_ASCII_EURUSD_T_201202_DIRTY.csv"
         },
-        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202_DIRTY.csv",
         "period": "201202",
         "symbol": "EURUSD",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 1
     }
@@ -382,12 +381,12 @@
       "data_format": "ascii",
       "kind": "csv",
       "metadata": {
-        "filename": "DAT_ASCII_EURUSD_M1_201202_DIRTY.csv"
+        "filename": "DAT_ASCII_EURUSD_T_201202_DIRTY.csv"
       },
-      "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202_DIRTY.csv",
+      "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202_DIRTY.csv",
       "period": "201202",
       "symbol": "EURUSD",
-      "timeframe": "M1"
+      "timeframe": "T"
     }
   ]
 }

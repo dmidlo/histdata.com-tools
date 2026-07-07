@@ -188,7 +188,7 @@ def _snapshot_with_progress(
         workflow_name="HistDataRunWorkflow",
         request_id="run-cli",
         status=status,
-        current_stage="download EURUSD M1 2024",
+        current_stage="download EURUSD T 2024",
         total_children=4,
         completed_children=2,
         unit="datasets",
@@ -197,7 +197,7 @@ def _snapshot_with_progress(
         rate_per_second=1.0,
         planned_children=(
             "plan",
-            "download EURUSD M1 2024",
+            "download EURUSD T 2024",
             "quality",
             "cache",
         ),
@@ -211,7 +211,7 @@ def _snapshot_with_progress(
             ),
             StatusEvent(
                 status=WorkStatus.UNKNOWN,
-                stage="download EURUSD M1 2024",
+                stage="download EURUSD T 2024",
                 message="Downloading CSV ZIP.",
                 timestamp_utc="2026-06-25T12:00:02Z",
             ),
@@ -691,7 +691,7 @@ def test_orchestration_jobs_progress_cli_renders_rich_dashboard(
 
     assert exit_code == 0
     assert "HistData job progress" in output
-    assert "download EURUSD M1 2024" in output
+    assert "download EURUSD T 2024" in output
     assert "2/4 datasets" in output
     assert "Recent Events" in output
     assert "/tmp/histdatacom/EURUSD.csv" in output
@@ -720,7 +720,7 @@ def test_orchestration_jobs_progress_json_keeps_machine_payload(
     assert exit_code == 0
     assert payload["workflow_id"] == "histdatacom-run-cli"
     assert payload["progress"]["completed_children"] == 2
-    assert payload["progress"]["current_stage"] == "download EURUSD M1 2024"
+    assert payload["progress"]["current_stage"] == "download EURUSD T 2024"
 
 
 def test_orchestration_jobs_progress_watch_uses_live_renderer(

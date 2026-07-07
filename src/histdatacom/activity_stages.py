@@ -1747,7 +1747,7 @@ def valid_dataset_dimensions(
             not cache_only
             or (
                 csv_format == Format.ASCII.value
-                and timeframe in {Timeframe.M1.name, Timeframe.T.name}
+                and timeframe == Timeframe.T.name
             )
         )
     )
@@ -2703,7 +2703,7 @@ def _existing_archive_artifact_on_disk(record: Record) -> bool:
 
 def _supports_cache(record: Record) -> bool:
     return str.lower(record.data_format) == "ascii" and (
-        record.data_timeframe in ["T", "M1"]
+        record.data_timeframe == "T"
     )
 
 
@@ -3001,8 +3001,6 @@ def _same_year_paths(
     start_month: int,
     end_month: int,
 ) -> tuple[str, ...]:
-    if timeframe == "M1":
-        return (f"{year}",)
     return tuple(
         f"{year}/{month}" for month in range(start_month, end_month + 1)
     )
@@ -3013,8 +3011,6 @@ def _start_year_paths(
     year: int,
     start_month: int,
 ) -> tuple[str, ...]:
-    if timeframe == "M1":
-        return (f"{year}",)
     return tuple(f"{year}/{month}" for month in range(start_month, 12 + 1))
 
 
@@ -3023,14 +3019,10 @@ def _end_year_paths(
     year: int,
     end_month: int,
 ) -> tuple[str, ...]:
-    if timeframe == "M1":
-        return (f"{year}",)
     return tuple(f"{year}/{month}" for month in range(1, end_month + 1))
 
 
 def _year_paths(timeframe: str, year: int) -> tuple[str, ...]:
-    if timeframe == "M1":
-        return (f"{year}",)
     return tuple(f"{year}/{month}" for month in range(1, 12 + 1))
 
 
@@ -3054,8 +3046,6 @@ def _single_year_or_month_paths(
 
     if start_year == current_year:
         return (f"{start_year}/{start_month}",)
-    if timeframe == "M1":
-        return (f"{start_year}",)
     return (f"{start_year}/{start_month}",)
 
 

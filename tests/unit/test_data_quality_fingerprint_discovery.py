@@ -98,10 +98,8 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "coverage",
         "temporal_topology",
         "calendar_regimes",
-        "m1_bar_distribution",
         "tick_distribution",
         "conditional_distributions",
-        "return_dynamics",
         "microstructure_dynamics",
         "dependence",
         "stationarity_diagnostics",
@@ -476,11 +474,9 @@ def test_format_fingerprint_schema_discovery_renders_human_summary() -> None:
     assert (
         "series_fingerprint: histdatacom.time-series-fingerprint.v1" in output
     )
-    assert "- return_dynamics: implemented; timeframes=[M1]" in output
-    assert "- dependence: implemented; timeframes=[M1, T]" in output
-    assert (
-        "- stationarity_diagnostics: implemented; timeframes=[M1, T]" in output
-    )
+    assert "- microstructure_dynamics: implemented; timeframes=[T]" in output
+    assert "- dependence: implemented; timeframes=[T]" in output
+    assert "- stationarity_diagnostics: implemented; timeframes=[T]" in output
     assert "without reading source or running data quality checks" in output
 
 

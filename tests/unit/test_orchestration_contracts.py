@@ -61,7 +61,7 @@ def test_orchestration_contracts_run_request_round_trip(
         request_id="run-contract",
         pairs=("eurusd",),
         formats=("ascii",),
-        timeframes=("1-minute-bar-quotes",),
+        timeframes=("tick-data-quotes",),
         start_yearmonth="202201",
         end_yearmonth="202202",
         data_directory="data",

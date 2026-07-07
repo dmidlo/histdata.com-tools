@@ -17,10 +17,10 @@
           "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
           "rule_id": "domain.cross_instrument_consistency"
         },
-        "path": "data/ASCII/M1",
+        "path": "data/ASCII/T",
         "period": "2008",
         "symbol": "AUDCAD",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     },
@@ -38,10 +38,10 @@
           "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
           "rule_id": "domain.cross_instrument_consistency"
         },
-        "path": "data/ASCII/M1",
+        "path": "data/ASCII/T",
         "period": "2008",
         "symbol": "AUDCHF",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     },
@@ -59,10 +59,10 @@
           "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
           "rule_id": "domain.cross_instrument_consistency"
         },
-        "path": "data/ASCII/M1",
+        "path": "data/ASCII/T",
         "period": "2008",
         "symbol": "CADCHF",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     }
@@ -76,7 +76,7 @@
       ]
     },
     "roots": [
-      "data/ASCII/M1"
+      "data/ASCII/T"
     ],
     "target_count": 3
   },
@@ -344,7 +344,7 @@
               "kind": "directory",
               "period": "unknown",
               "symbol": "unknown",
-              "timeframe": "M1"
+              "timeframe": "T"
             }
           }
         ],
@@ -407,12 +407,12 @@
         "data_format": "ascii",
         "kind": "directory",
         "metadata": {
-          "root": "data/ASCII/M1"
+          "root": "data/ASCII/T"
         },
-        "path": "data/ASCII/M1",
+        "path": "data/ASCII/T",
         "period": "",
         "symbol": "",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     }

@@ -8,7 +8,7 @@ from typing import Any
 
 from histdatacom.runtime_contracts import JSONValue
 
-DEEP_QUALITY_DIMENSIONS = (("ascii", "M1"), ("ascii", "T"))
+DEEP_QUALITY_DIMENSIONS = (("ascii", "T"),)
 HISTDATA_FORMAT_SUPPORT_RULE_ID = "inventory.format_support"
 
 _FORMAT_CODE_TO_VALUE = {
@@ -22,22 +22,17 @@ _FORMAT_VALUE_TO_CODE = {
     value: code for code, value in _FORMAT_CODE_TO_VALUE.items()
 }
 _SUPPORTED_TIMEFRAMES = {
-    "ascii": ("M1", "T"),
-    "metatrader": ("M1",),
-    "ninjatrader": ("M1", "T_ASK", "T_BID", "T_LAST"),
-    "metastock": ("M1",),
-    "excel": ("M1",),
+    "ascii": ("T",),
+    "metatrader": (),
+    "ninjatrader": ("T_ASK", "T_BID", "T_LAST"),
+    "metastock": (),
+    "excel": (),
 }
 _TIMEFRAME_SCHEMAS = {
-    ("ascii", "M1"): "ascii-m1-bid-ohlcv",
     ("ascii", "T"): "ascii-tick-bid-ask-volume",
-    ("metatrader", "M1"): "metatrader-m1-bid-ohlcv",
-    ("ninjatrader", "M1"): "ninjatrader-m1-bid-ohlcv",
     ("ninjatrader", "T_LAST"): "ninjatrader-tick-last-volume",
     ("ninjatrader", "T_BID"): "ninjatrader-tick-bid-volume",
     ("ninjatrader", "T_ASK"): "ninjatrader-tick-ask-volume",
-    ("metastock", "M1"): "metastock-m1-bid-ohlcv",
-    ("excel", "M1"): "excel-m1-workbook",
 }
 _PAYLOAD_EXTENSIONS = {
     "ASCII": "csv",
@@ -189,10 +184,10 @@ def quality_support_for_target(
             supported_check_groups=(
                 "ingestion",
                 "time",
-                "bars",
                 "ticks",
                 "domain",
                 "modeling",
+                "fingerprint",
             ),
             message=(
                 "Canonical ASCII cache metadata and typed columns are "
@@ -217,10 +212,10 @@ def quality_support_for_target(
                 "inventory",
                 "ingestion",
                 "time",
-                "bars",
                 "ticks",
                 "domain",
                 "modeling",
+                "fingerprint",
             ),
             message="Parser-level data-quality checks are supported.",
         )
