@@ -472,6 +472,24 @@
       },
       "cache_source_counts": {},
       "computed_from_counts": {},
+      "decomposition_basis_counts": {},
+      "decomposition_computed_window_count": 0,
+      "decomposition_limitation_counts": {},
+      "decomposition_reason_counts": {
+        "not_emitted": 1
+      },
+      "decomposition_skipped_window_count": 0,
+      "decomposition_skipped_window_reason_counts": {},
+      "decomposition_stationarity_status_counts": {
+        "unknown": 1
+      },
+      "decomposition_status_counts": {
+        "skipped": 1
+      },
+      "decomposition_structural_break_candidate_count": 0,
+      "decomposition_structural_break_status_counts": {
+        "unknown": 1
+      },
       "dependence_acf_basis_counts": {},
       "dependence_computed_lag_count": 0,
       "dependence_limitation_counts": {},
@@ -559,6 +577,34 @@
           "applicable_dynamics_reason": "not_emitted",
           "applicable_dynamics_section": "return_dynamics",
           "applicable_dynamics_status": "skipped",
+          "decomposition": {
+            "basis": "unknown",
+            "cache_source": null,
+            "calculation_basis": "unknown",
+            "computed_from": "unknown",
+            "computed_window_count": 0,
+            "invalid_row_count": 0,
+            "level_sample_count": 0,
+            "limitations": [],
+            "metric": "unknown",
+            "partial_row_count": 0,
+            "reason": "not_emitted",
+            "regular_grid": false,
+            "return_sample_count": 0,
+            "rounding_digits": 0,
+            "row_count": 0,
+            "row_order": "unknown",
+            "sampled_row_count": 0,
+            "skipped_window_count": 0,
+            "skipped_window_reason_counts": {},
+            "stationarity": {},
+            "status": "skipped",
+            "structural_break": {},
+            "trend": {},
+            "truncated": false,
+            "usable_row_count": 0,
+            "windows": []
+          },
           "dependence": {
             "acf_basis": "unknown",
             "basis": "unknown",

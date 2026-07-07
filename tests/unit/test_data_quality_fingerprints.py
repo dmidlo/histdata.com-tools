@@ -22,6 +22,7 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
@@ -168,6 +169,7 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
         "return_dynamics",
         "dependence",
         "stationarity_diagnostics",
+        "decomposition",
     ]
     assert _list(audit["sections_emitted"]) == [
         "coverage",
@@ -177,6 +179,7 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
         "return_dynamics",
         "dependence",
         "stationarity_diagnostics",
+        "decomposition",
     ]
     assert _mapping(audit["sections_skipped"]) == {}
     statuses = _mapping(audit["section_statuses"])
@@ -187,6 +190,7 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
     assert statuses["return_dynamics"] == "valid"
     assert statuses["dependence"] == "limited"
     assert statuses["stationarity_diagnostics"] == "limited"
+    assert statuses["decomposition"] == "limited"
     stationarity = _mapping(payload["stationarity_diagnostics"])
     assert stationarity["schema_version"] == (
         TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION
@@ -204,6 +208,25 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
         "insufficient_sample_count": 3,
     }
     assert "log_return" in _list(stationarity["recommended_transforms"])
+    decomposition = _mapping(payload["decomposition"])
+    assert decomposition["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
+    )
+    assert decomposition["decomposition_status"] == "limited"
+    assert decomposition["calculation_basis"] == "observed_sequence"
+    assert decomposition["metric"] == "close_price"
+    assert _mapping(decomposition["sample_counts"]) == {
+        "level": 3,
+        "return": 2,
+    }
+    assert _mapping(decomposition["stationarity_basis"])["status"] == (
+        "limited"
+    )
+    assert _mapping(decomposition["trend_proxy"])["status"] == "computed"
+    assert _mapping(decomposition["seasonality_proxy"])["status"] == "computed"
+    assert _mapping(decomposition["structural_break_proxy"])["status"] == (
+        "skipped"
+    )
     eligibility = _mapping(
         _mapping(audit["conditional_distribution_eligibility"])["tick_spread"]
     )
@@ -226,6 +249,7 @@ def test_fingerprint_rule_emits_m1_csv_payload(tmp_path: Path) -> None:
         "status": "skipped",
         "reason": "unsupported_timeframe",
     }
+    assert _mapping(audit["decomposition_readiness"])["status"] == "limited"
 
 
 def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
@@ -269,6 +293,7 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
         "microstructure_dynamics",
         "dependence",
         "stationarity_diagnostics",
+        "decomposition",
     ]
     assert _mapping(audit["sections_skipped"]) == {}
     statuses = _mapping(audit["section_statuses"])
@@ -277,6 +302,7 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
     assert statuses["microstructure_dynamics"] == "valid"
     assert statuses["dependence"] == "limited"
     assert statuses["stationarity_diagnostics"] == "limited"
+    assert statuses["decomposition"] == "limited"
     stationarity = _mapping(payload["stationarity_diagnostics"])
     assert stationarity["schema_version"] == (
         TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION
@@ -286,6 +312,14 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
         "level": 3,
         "return": 2,
     }
+    decomposition = _mapping(payload["decomposition"])
+    assert decomposition["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
+    )
+    assert decomposition["metric"] == "mid_price"
+    assert _mapping(decomposition["stationarity_basis"])["status"] == (
+        "limited"
+    )
     eligibility = _mapping(
         _mapping(audit["conditional_distribution_eligibility"])["tick_spread"]
     )
@@ -729,6 +763,150 @@ def test_fingerprint_stationarity_diagnostics_report_insufficient_data(
         ]
         == "unavailable"
     )
+    decomposition = _mapping(payload["decomposition"])
+    assert decomposition["decomposition_status"] == "unavailable"
+    assert decomposition["reason"] == "insufficient_sample_count"
+    assert _mapping(decomposition["stationarity_basis"])["status"] == (
+        "unavailable"
+    )
+    assert _mapping(decomposition["skipped_window_reason_counts"]) == {
+        "insufficient_sample_count": 2,
+    }
+
+
+def test_fingerprint_decomposition_describes_flat_series(
+    tmp_path: Path,
+) -> None:
+    """Flat series should preserve zero-variance facts as advisory limits."""
+    case = _m1_case_from_closes("m1-flat-decomposition", tuple([1.0] * 9))
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2, 3),
+        rounding_digits=6,
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target, profile))
+    decomposition = _mapping(payload["decomposition"])
+
+    assert decomposition["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
+    )
+    assert decomposition["decomposition_status"] == "limited"
+    assert decomposition["reason"] == "zero_variance"
+    assert _list(decomposition["limitations"]) == ["zero_variance"]
+    stationarity_basis = _mapping(decomposition["stationarity_basis"])
+    assert stationarity_basis["status"] == "valid"
+    assert _list(stationarity_basis["zero_variance_metrics"]) == [
+        "level",
+        "return",
+    ]
+    trend = _mapping(decomposition["trend_proxy"])
+    assert trend["direction"] == "flat"
+    assert trend["slope_per_observation"] == 0.0
+    structural = _mapping(decomposition["structural_break_proxy"])
+    strongest = _mapping(structural["strongest_candidate"])
+    assert structural["candidate_count"] == 6
+    assert strongest["score"] == 0.0
+
+
+def test_fingerprint_decomposition_describes_simple_trend(
+    tmp_path: Path,
+) -> None:
+    """Decomposition should expose deterministic trend and smoothing proxies."""
+    case = _m1_case_from_closes(
+        "m1-trend-decomposition",
+        (1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8),
+    )
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2, 3),
+        rounding_digits=6,
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target, profile))
+    decomposition = _mapping(payload["decomposition"])
+
+    assert decomposition["decomposition_status"] == "ok"
+    trend = _mapping(decomposition["trend_proxy"])
+    assert trend["direction"] == "increasing"
+    assert trend["slope_per_observation"] == 0.1
+    assert trend["trend_strength"] == 1.0
+    assert (
+        _mapping(trend["fitted_change_first_to_last"])["absolute_change"] == 0.8
+    )
+    smoothing = _mapping(decomposition["smoothing_windows"])
+    window_three = _mapping(smoothing["3"])
+    assert window_three["status"] == "computed"
+    assert _mapping(window_three["level_smoothed_mean_drift"])["first"] == 1.1
+    assert _mapping(window_three["level_smoothed_mean_drift"])["last"] == 1.7
+    assert "differencing" in _list(
+        _mapping(decomposition["stationarity_basis"])["recommended_transforms"]
+    )
+
+
+def test_fingerprint_decomposition_conditions_hour_and_session_patterns(
+    tmp_path: Path,
+) -> None:
+    """Calendar buckets should expose hour and active-session regime means."""
+    case = HistDataAsciiCase(
+        name="m1-seasonal-decomposition",
+        timeframe=M1,
+        filename="DAT_ASCII_EURUSD_M1_201202.csv",
+        rows=(
+            *(
+                f"20120201 080{minute}00;1.200000;1.200000;1.200000;1.200000;0"
+                for minute in range(6)
+            ),
+            *(
+                f"20120201 120{minute}00;1.000000;1.000000;1.000000;1.000000;0"
+                for minute in range(6)
+            ),
+        ),
+    )
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2, 3),
+        rounding_digits=6,
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target, profile))
+    decomposition = _mapping(payload["decomposition"])
+    seasonality = _mapping(decomposition["seasonality_proxy"])
+
+    by_hour = _mapping(_mapping(seasonality["by_source_hour"])["buckets"])
+    assert _mapping(by_hour["08"])["level_mean"] == 1.2
+    assert _mapping(by_hour["12"])["level_mean"] == 1.0
+    by_session = _mapping(_mapping(seasonality["by_active_session"])["buckets"])
+    assert _mapping(by_session["london"])["level_mean"] == 1.2
+    assert _mapping(by_session["new_york"])["level_mean"] == 1.1
+    assert decomposition["decomposition_status"] == "limited"
+    assert "suspicious_gaps" in _list(decomposition["limitations"])
+
+
+def test_fingerprint_decomposition_structural_break_is_deterministic(
+    tmp_path: Path,
+) -> None:
+    """Structural-break proxy should produce stable ranked candidates."""
+    case = _m1_case_from_closes(
+        "m1-structural-break-decomposition",
+        (1.0, 1.0, 1.0, 1.0, 1.5, 1.5, 1.5, 1.5),
+    )
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2, 3),
+        rounding_digits=6,
+        histogram_bins=3,
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    payload = _fingerprint_payload(_fingerprint_finding(target, profile))
+    decomposition = _mapping(payload["decomposition"])
+    structural = _mapping(decomposition["structural_break_proxy"])
+    strongest = _mapping(structural["strongest_candidate"])
+
+    assert structural["basis"] == "two_segment_mean_shift"
+    assert structural["candidate_count"] == 5
+    assert structural["included_candidate_count"] == 3
+    assert structural["truncated"] is True
+    assert strongest["split_index"] == 4
+    assert strongest["before_mean"] == 1.0
+    assert strongest["after_mean"] == 1.5
+    assert strongest["score"] == 4.0
 
 
 def test_fingerprint_dynamics_mark_non_monotonic_sequences_limited(
@@ -960,6 +1138,7 @@ def test_fingerprint_audit_marks_absent_conditioning_ineligible(
         "microstructure_dynamics",
         "dependence",
         "stationarity_diagnostics",
+        "decomposition",
     ]
     assert _mapping(audit["sections_skipped"]) == {
         "conditional_distributions": {
@@ -978,6 +1157,9 @@ def test_fingerprint_audit_marks_absent_conditioning_ineligible(
     )
     assert _mapping(audit["section_statuses"])["dependence"] == "unavailable"
     assert _mapping(audit["section_statuses"])["stationarity_diagnostics"] == (
+        "unavailable"
+    )
+    assert _mapping(audit["section_statuses"])["decomposition"] == (
         "unavailable"
     )
     eligibility = _mapping(
@@ -1453,6 +1635,7 @@ def test_fingerprint_rule_reports_unsupported_target(
         "return_dynamics",
         "dependence",
         "stationarity_diagnostics",
+        "decomposition",
     ]
     assert _list(audit["sections_emitted"]) == [
         "coverage",
@@ -1473,6 +1656,10 @@ def test_fingerprint_rule_reports_unsupported_target(
             "details": {"timeframe": "M1"},
         },
         "stationarity_diagnostics": {
+            "reason": "unsupported_target_kind",
+            "details": {"timeframe": "M1"},
+        },
+        "decomposition": {
             "reason": "unsupported_target_kind",
             "details": {"timeframe": "M1"},
         },
@@ -2303,6 +2490,10 @@ def test_fingerprint_constants_are_stable() -> None:
     assert (
         TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION
         == "histdatacom.time-series-fingerprint-stationarity.v1"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-decomposition.v1"
     )
     assert (
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION

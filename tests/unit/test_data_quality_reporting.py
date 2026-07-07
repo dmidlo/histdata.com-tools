@@ -653,8 +653,8 @@ def test_fingerprint_readiness_risk_summary_handles_missing_sections(
     assert summary is not None
     assert summary["target_count"] == 2
     assert summary["risk_target_count"] == 2
-    assert summary["reason_counts"]["not_emitted"] == 4
-    assert summary["reason_counts"]["unsupported_target_kind"] == 3
+    assert summary["reason_counts"]["not_emitted"] == 5
+    assert summary["reason_counts"]["unsupported_target_kind"] == 4
     assert summary["target_risks"][0]["target_axis"]["kind"] == "spreadsheet"
     assert (
         "unsupported_target_kind" in summary["target_risks"][0]["reason_codes"]
