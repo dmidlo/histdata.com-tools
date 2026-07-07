@@ -31,7 +31,7 @@ _ZIP_SUFFIX = ".zip"
 _HISTDATA_DATA_FILENAME_RE = re.compile(
     r"^DAT_(?P<format>ASCII)_(?P<symbol>[A-Z0-9]+)_"
     r"(?P<timeframe>[A-Z0-9]+)_(?P<period>\d{4}(?:\d{2})?)"
-    r"(?:_[A-Z0-9_]+)?(?:\.(?:csv|xlsx))?$",
+    r"(?:_[A-Z0-9_]+)?(?:\.csv)?$",
     re.IGNORECASE,
 )
 _HISTDATA_ARCHIVE_FILENAME_RE = re.compile(

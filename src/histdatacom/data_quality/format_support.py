@@ -13,33 +13,18 @@ HISTDATA_FORMAT_SUPPORT_RULE_ID = "inventory.format_support"
 
 _FORMAT_CODE_TO_VALUE = {
     "ASCII": "ascii",
-    "MT": "metatrader",
-    "NT": "ninjatrader",
-    "MS": "metastock",
-    "XLSX": "excel",
 }
 _FORMAT_VALUE_TO_CODE = {
     value: code for code, value in _FORMAT_CODE_TO_VALUE.items()
 }
 _SUPPORTED_TIMEFRAMES = {
     "ascii": ("T",),
-    "metatrader": (),
-    "ninjatrader": ("T_ASK", "T_BID", "T_LAST"),
-    "metastock": (),
-    "excel": (),
 }
 _TIMEFRAME_SCHEMAS = {
     ("ascii", "T"): "ascii-tick-bid-ask-volume",
-    ("ninjatrader", "T_LAST"): "ninjatrader-tick-last-volume",
-    ("ninjatrader", "T_BID"): "ninjatrader-tick-bid-volume",
-    ("ninjatrader", "T_ASK"): "ninjatrader-tick-ask-volume",
 }
 _PAYLOAD_EXTENSIONS = {
     "ASCII": "csv",
-    "MT": "csv",
-    "NT": "csv",
-    "MS": "csv",
-    "XLSX": "xlsx",
 }
 
 
@@ -218,30 +203,6 @@ def quality_support_for_target(
                 "fingerprint",
             ),
             message="Parser-level data-quality checks are supported.",
-        )
-
-    if (
-        normalized_format in _SUPPORTED_TIMEFRAMES
-        and normalized_timeframe in supported_timeframes
-    ):
-        return HistDataFormatSupport(
-            data_format=normalized_format,
-            format_code=format_code,
-            timeframe=normalized_timeframe,
-            status="inventory-only",
-            level="inventory",
-            inventory_supported=True,
-            parser_supported=False,
-            canonical_cache_supported=False,
-            payload_extension=payload_extension,
-            schema=schema,
-            supported_timeframes=supported_timeframes,
-            supported_check_groups=("inventory",),
-            message=(
-                "This HistData format/timeframe is recognized for filename "
-                "and ZIP-member inventory only; parser-level content checks "
-                "are not implemented yet."
-            ),
         )
 
     if normalized_format in _SUPPORTED_TIMEFRAMES:

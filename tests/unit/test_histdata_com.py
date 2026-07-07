@@ -1484,7 +1484,7 @@ def test_data_quality_console_summary_reports_scratch_and_sources() -> None:
     )
 
     assert "quality report: scratch report deleted after validation" in output
-    assert "source artifacts: dirty (2 transient ZIP/CSV/XLS/XLSX)" in output
+    assert "source artifacts: dirty (2 transient ZIP/CSV)" in output
 
 
 def test_data_quality_console_summary_reports_remediation_coverage() -> None:

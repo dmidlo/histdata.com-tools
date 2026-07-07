@@ -315,7 +315,7 @@ class ArchiveDownloadResult:
 
 @dataclass(frozen=True, slots=True)
 class ArchiveExtractionResult:
-    """An extracted or reused CSV/XLSX artifact."""
+    """An extracted or reused CSV artifact."""
 
     filename: str
     path: str
@@ -928,7 +928,7 @@ def existing_extraction_artifact(
     *,
     zip_persist: bool,
 ) -> ArchiveExtractionResult | None:
-    """Return an existing CSV/XLSX artifact and safe ZIP cleanup outcome."""
+    """Return an existing CSV artifact and safe ZIP cleanup outcome."""
     if not record.data_dir or not record.csv_filename:
         return None
 
@@ -951,7 +951,7 @@ def extract_csv_work_item(
     *,
     args: Mapping[str, Any],
 ) -> ActivityStageOutput:
-    """Extract one CSV/XLSX payload through an explicit work item."""
+    """Extract one CSV payload through an explicit work item."""
     record = _record_from_work_item(work_item)
     try:
         _ensure_record_data_dir(record, args)
@@ -974,7 +974,7 @@ def extract_csv_work_item(
                     "decision": "reuse_existing",
                     **existing.to_dict(),
                 },
-                message="Existing CSV/XLSX artifact reused.",
+                message="Existing CSV artifact reused.",
             )
 
         if record.status is WorkStatus.CSV_ZIP:
@@ -1035,7 +1035,7 @@ def extract_archive_to_record(
     *,
     zip_persist: bool,
 ) -> ArchiveExtractionResult:
-    """Extract the single CSV/XLSX member from a ZIP into record.data_dir."""
+    """Extract the single CSV member from a ZIP into record.data_dir."""
     _validate_extraction_request(record)
     zip_path = Path(record.data_dir, record.zip_filename)
     if not zip_path.exists():
@@ -1099,7 +1099,7 @@ def archive_extraction_result_for_path(
     reused_existing: bool = False,
     zip_deleted: bool = False,
 ) -> ArchiveExtractionResult:
-    """Return extracted artifact metadata for a CSV/XLSX path."""
+    """Return extracted artifact metadata for a CSV path."""
     return ArchiveExtractionResult(
         filename=path.name,
         path=str(path),
@@ -2488,7 +2488,7 @@ def _single_data_member(zip_ref: zipfile.ZipFile, zip_path: Path) -> str:
     if len(data_members) != 1:
         raise ArchiveExtractionError(
             "INVALID_ARCHIVE_PAYLOAD",
-            "Archive must contain exactly one CSV/XLSX data member.",
+            "Archive must contain exactly one CSV data member.",
             retryable=False,
             detail={
                 "path": str(zip_path),
@@ -2504,7 +2504,7 @@ def _is_data_archive_member(member: str) -> bool:
     if member_name.endswith("/"):
         return False
     filename = PurePosixPath(member_name).name
-    return filename.lower().endswith((".csv", ".xlsx"))
+    return filename.lower().endswith(".csv")
 
 
 def _safe_data_member_filename(member: str) -> str:
@@ -2512,11 +2512,11 @@ def _safe_data_member_filename(member: str) -> str:
     if (
         not filename
         or filename in {".", ".."}
-        or not filename.lower().endswith((".csv", ".xlsx"))
+        or not filename.lower().endswith(".csv")
     ):
         raise ArchiveExtractionError(
             "INVALID_ARCHIVE_PAYLOAD",
-            "Archive data member does not have a safe CSV/XLSX filename.",
+            "Archive data member does not have a safe CSV filename.",
             retryable=False,
             detail={"member": member},
         )

@@ -8,7 +8,7 @@ from typing import Any, Iterable
 
 from histdatacom.publication_safety import publish_safe_path
 
-TRANSIENT_SOURCE_SUFFIXES = (".zip", ".csv", ".xls", ".xlsx")
+TRANSIENT_SOURCE_SUFFIXES = (".zip", ".csv")
 DEFAULT_SOURCE_ARTIFACT_PATH_LIMIT = 50
 
 

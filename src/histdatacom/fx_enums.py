@@ -398,7 +398,7 @@ def expand_pair_selection(
 
 
 class Format(Enum):  # noqa:H601
-    """Enumerate list of public formats published on histdata.com.
+    """Enumerate raw formats supported by the application.
 
     Args:
         Enum (Enum): Parent Class
@@ -409,11 +409,7 @@ class Format(Enum):  # noqa:H601
                 Format.list_values()
     """
 
-    MT = "metatrader"
-    NT = "ninjatrader"
-    MS = "metastock"
     ASCII = "ascii"
-    XLSX = "excel"
 
     @classmethod
     def list_keys(cls) -> set:
@@ -435,7 +431,7 @@ class Format(Enum):  # noqa:H601
 
 
 class Timeframe(Enum):  # noqa:H601
-    """Enumerate list of public Timeframes published on histdata.com.
+    """Enumerate raw timeframes supported by the application.
 
     Args:
         Enum (Enum): Parent Class
@@ -447,9 +443,6 @@ class Timeframe(Enum):  # noqa:H601
     """
 
     T = "tick-data-quotes"  # noqa:WPS121
-    T_LAST = "tick-last-quotes"
-    T_BID = "tick-bid-quotes"
-    T_ASK = "tick-ask-quotes"
 
     @classmethod
     def list_keys(cls) -> set:
@@ -490,7 +483,7 @@ class Timeframe(Enum):  # noqa:H601
 
 
 class TimeFormat(Enum):  # noqa:H601
-    """Enumerate list of public Timeformats for strptime histdata.com.
+    """Enumerate supported raw HistData strptime formats.
 
         from histdata.com csv sources.
 
@@ -504,9 +497,6 @@ class TimeFormat(Enum):  # noqa:H601
     """
 
     ASCII_T = "%Y%m%d %H%M%S%f"
-    NT_T_LAST = "%Y%m%d %H%M%S"  # noqa:PIE796
-    NT_T_BID = "%Y%m%d %H%M%S"  # noqa:PIE796
-    NT_T_ASK = "%Y%m%d %H%M%S"  # noqa:PIE796
 
     @classmethod
     def list_keys(cls) -> set:
@@ -528,7 +518,7 @@ class TimeFormat(Enum):  # noqa:H601
 
 
 class TimePrecision(Enum):  # noqa:H601
-    """Enumerate list of public InfluxDB write precisions.
+    """Enumerate supported InfluxDB write precisions.
 
     Args:
         Enum (Enum): Parent Class
@@ -540,9 +530,6 @@ class TimePrecision(Enum):  # noqa:H601
     """
 
     ASCII_T = "ms"
-    NT_T_LAST = "s"
-    NT_T_BID = "s"
-    NT_T_ASK = "s"
 
     @classmethod
     def list_keys(cls) -> set:
@@ -574,10 +561,7 @@ def get_valid_format_timeframes(file_format: str) -> list:
     """
     timeframes = []
 
-    match file_format:
-        case "ninjatrader":
-            timeframes.extend(["T_LAST", "T_BID", "T_ASK"])
-        case "ascii":
-            timeframes.extend(["T"])
+    if file_format == "ascii":
+        timeframes.append("T")
 
     return timeframes

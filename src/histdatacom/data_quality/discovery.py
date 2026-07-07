@@ -41,7 +41,7 @@ _HISTDATA_DATA_FILENAME_RE = re.compile(
     rf"^DAT_(?P<format>{_FORMAT_CODE_PATTERN})_"
     rf"(?P<symbol>[A-Z0-9]+)_(?P<timeframe>{_TIMEFRAME_PATTERN})_"
     r"(?P<period>\d{4}(?:\d{2})?)(?:_[A-Z0-9_]+)?"
-    r"(?:\.(?:csv|xlsx))?$",
+    r"(?:\.csv)?$",
     re.IGNORECASE,
 )
 _HISTDATA_ARCHIVE_FILENAME_RE = re.compile(
@@ -209,8 +209,6 @@ def _target_kind(path: Path) -> QualityTargetKind | None:
         return QualityTargetKind.ZIP
     if suffix == ".csv":
         return QualityTargetKind.CSV
-    if suffix == ".xlsx":
-        return QualityTargetKind.SPREADSHEET
     return None
 
 
@@ -294,6 +292,5 @@ def _period_from_path_parts(parts: tuple[str, ...]) -> str:
 _TARGET_KINDS = (
     QualityTargetKind.ZIP,
     QualityTargetKind.CSV,
-    QualityTargetKind.SPREADSHEET,
     QualityTargetKind.CACHE,
 )

@@ -392,7 +392,7 @@ def test_quality_report_payload_adds_fingerprint_topology_attention_metadata(
         "timeframe": "T",
         "symbol": "EURUSD",
         "period": "201202",
-        "kind": "spreadsheet",
+        "kind": "unknown",
     }
     assert target_summaries[0]["attention_level"] == "unavailable"
     assert target_summaries[0]["attention_flags"] == [
@@ -643,7 +643,7 @@ def test_fingerprint_readiness_risk_summary_handles_missing_sections(
     assert summary["risk_target_count"] == 2
     assert summary["reason_counts"]["not_emitted"] == 4
     assert summary["reason_counts"]["unsupported_target_kind"] == 3
-    assert summary["target_risks"][0]["target_axis"]["kind"] == "spreadsheet"
+    assert summary["target_risks"][0]["target_axis"]["kind"] == "unknown"
     assert (
         "unsupported_target_kind" in summary["target_risks"][0]["reason_codes"]
     )
@@ -1079,7 +1079,7 @@ def test_fingerprint_console_summary_reports_coverage_counts(
     assert "- source kinds: cache=1, unavailable=1" in output
     assert "- cache sources: direct=1" in output
     assert "- unavailable reasons: unsupported_target_kind=1" in output
-    assert "- target kinds: cache=1, spreadsheet=1" in output
+    assert "- target kinds: cache=1, unknown=1" in output
     assert "- timeframes: T=2" in output
 
 
@@ -1096,7 +1096,7 @@ def test_fingerprint_console_summary_reports_topology_lines(
     assert "Fingerprint topology attention" in output
     assert "- targets needing attention: 1 included: 1 omitted: 0" in output
     assert (
-        "- ascii EURUSD T 201202 spreadsheet: unavailable, "
+        "- ascii EURUSD T 201202 unknown: unavailable, "
         "unavailable_topology, invalid=0, duplicates=0, non-monotonic=0, "
         "suspicious gaps=0, weekend activity=0, max gap unavailable, "
         "computed_from=unavailable, "
@@ -1113,7 +1113,7 @@ def test_fingerprint_console_summary_reports_topology_lines(
         "computed_from=direct_cache, cache=direct"
     ) in output
     assert (
-        "- ascii EURUSD T 201202 spreadsheet: unavailable, unavailable, "
+        "- ascii EURUSD T 201202 unknown: unavailable, unavailable, "
         "0 rows, unknown parsed, no duplicates, non-monotonic=0, "
         "median interval unavailable, max gap unavailable, "
         "0 expected closures, 0 suspicious gaps, weekend activity=0, "
@@ -1898,8 +1898,8 @@ def _fingerprint_report(tmp_path: Path) -> QualityReport:
         period="201202",
     )
     unavailable = QualityTarget(
-        path=str(tmp_path / "unsupported.xlsx"),
-        kind=QualityTargetKind.SPREADSHEET,
+        path=str(tmp_path / "unsupported.bin"),
+        kind=QualityTargetKind.UNKNOWN,
         data_format="ascii",
         timeframe="T",
         symbol="EURUSD",
@@ -1963,7 +1963,7 @@ def _fingerprint_report(tmp_path: Path) -> QualityReport:
         metadata={
             "time_series_fingerprint": {
                 "target_axis": {
-                    "kind": "spreadsheet",
+                    "kind": "unknown",
                     "timeframe": "T",
                 },
                 "coverage": {

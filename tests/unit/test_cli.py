@@ -23,7 +23,7 @@ def test_cli() -> None:
 def test_unsupported_format_timeframe_combination_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reject CLI requests that would generate zero supported URLs."""
+    """Reject retired formats at argument parsing."""
     monkeypatch.setattr(
         sys,
         "argv",
@@ -44,7 +44,7 @@ def test_unsupported_format_timeframe_combination_exits_nonzero(
     with pytest.raises(SystemExit) as err:
         ArgParser(Options())()
 
-    assert err.value.code == 1
+    assert err.value.code == 2
 
 
 @pytest.mark.parametrize(
@@ -332,7 +332,7 @@ def test_build_cache_cli_filters_default_dimensions(
 def test_build_cache_cli_rejects_non_cacheable_dimensions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cache-only mode should fail clearly when nothing can produce .data."""
+    """Cache-only mode rejects retired formats at argument parsing."""
     monkeypatch.setattr(
         sys,
         "argv",
@@ -353,7 +353,7 @@ def test_build_cache_cli_rejects_non_cacheable_dimensions(
     with pytest.raises(SystemExit) as err:
         ArgParser(Options())()
 
-    assert err.value.code == 1
+    assert err.value.code == 2
 
 
 def test_pair_groups_cli_expands_without_defaulting_to_all_pairs(

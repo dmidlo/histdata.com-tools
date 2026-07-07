@@ -25,16 +25,13 @@ def test_campaign_report_uses_repo_ranges_for_work_surface() -> None:
     )
 
     assert report["schema_version"] == CAMPAIGN_REPORT_SCHEMA_VERSION
-    assert report["status"] == "deferred"
+    assert report["status"] == "preflighted"
     assert report["repo"]["pair_count"] == 2
-    assert report["totals"]["work_item_count"] == 20
+    assert report["totals"]["work_item_count"] == 5
     assert report["totals"]["deep_quality_work_item_count"] == 5
-    assert report["totals"]["deferred_work_item_count"] == 15
+    assert report["totals"]["deferred_work_item_count"] == 0
     assert report["totals"]["work_items_by_dimension"] == [
         {"format": "ascii", "timeframe": "T", "work_item_count": 5},
-        {"format": "ninjatrader", "timeframe": "T_ASK", "work_item_count": 5},
-        {"format": "ninjatrader", "timeframe": "T_BID", "work_item_count": 5},
-        {"format": "ninjatrader", "timeframe": "T_LAST", "work_item_count": 5},
     ]
 
 

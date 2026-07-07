@@ -14,12 +14,12 @@ def test_csvs() -> None:
     assert True  # noqa:S101 # sourcery skip # act
 
 
-def test_extract_csv_accepts_xlsx_members(tmp_path: Path) -> None:
-    """Excel archives should extract their XLSX payload and update metadata."""
+def test_extract_csv_rejects_xlsx_members(tmp_path: Path) -> None:
+    """Spreadsheet archives should fail instead of becoming raw artifacts."""
     from histdatacom.csvs import Csv
     from histdatacom.records import Record
 
-    archive_path = tmp_path / "excel.zip"
+    archive_path = tmp_path / "spreadsheet.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("DAT_XLSX_EURUSD_M1_2022.xlsx", b"spreadsheet")
 
@@ -33,11 +33,10 @@ def test_extract_csv_accepts_xlsx_members(tmp_path: Path) -> None:
         {"default_download_dir": str(tmp_path) + os.sep},
     )
 
-    assert result is record
-    assert record.status is WorkStatus.CSV_FILE
-    assert record.csv_filename == "DAT_XLSX_EURUSD_M1_2022.xlsx"
-    assert (tmp_path / record.csv_filename).read_bytes() == b"spreadsheet"
-    assert not archive_path.exists()
+    assert result is None
+    assert record.status is WorkStatus.FAILED
+    assert record.csv_filename == ""
+    assert archive_path.exists()
 
 
 def test_extract_csv_rejects_archives_without_data_members(

@@ -80,10 +80,10 @@ def test_live_histdata_download_zip_name_passes_inventory(
     )
 
 
-def test_non_ascii_zip_passes_inventory_with_boundary_warning(
+def test_non_ascii_zip_fails_inventory_as_unsupported(
     tmp_path: Path,
 ) -> None:
-    """Recognized non-ASCII archives should be inventory-only, not clean."""
+    """Retired non-ASCII archives should fail closed, not inventory-pass."""
     archive = tmp_path / "HISTDATA_COM_NT_AUDCAD_T_LAST201212.zip"
     with zipfile.ZipFile(archive, "w") as zip_file:
         zip_file.writestr("DAT_NT_AUDCAD_T_LAST_201212.csv", "rows")
@@ -94,50 +94,42 @@ def test_non_ascii_zip_passes_inventory_with_boundary_warning(
         quality_rules_for_groups(("inventory",)),
     )
 
-    finding = _finding(report, "HISTDATA_FORMAT_INVENTORY_ONLY")
-    assert report.status is QualityStatus.WARNING
-    assert finding.severity is QualitySeverity.WARNING
-    assert finding.rule_id == "inventory.format_support"
-    assert finding.metadata["quality_support"]["data_format"] == "ninjatrader"
-    assert finding.metadata["quality_support"]["status"] == "inventory-only"
-    assert finding.metadata["quality_support"]["parser_supported"] is False
+    assert report.status is QualityStatus.FAILED
+    filename = _finding(report, "HISTDATA_ZIP_FILENAME_INVALID")
+    member = _finding(report, "HISTDATA_ZIP_MEMBER_FILENAME_INVALID")
+    assert filename.severity is QualitySeverity.ERROR
+    assert member.severity is QualitySeverity.ERROR
+    assert filename.rule_id == "inventory.zip.integrity"
+    assert member.rule_id == "inventory.zip.integrity"
     assert not any(
-        item.rule_id == "inventory.zip.integrity" and item.findings
+        item.rule_id == "inventory.format_support" and item.findings
         for item in report.rule_results
     )
 
 
 @pytest.mark.parametrize(
-    ("zip_filename", "member_filename", "data_format", "timeframe"),
+    ("zip_filename", "member_filename"),
     (
         (
             "HISTDATA_COM_NT_AUDCAD_T_LAST201212.zip",
             "DAT_NT_AUDCAD_T_LAST_201212.csv",
-            "ninjatrader",
-            "T_LAST",
         ),
         (
             "HISTDATA_COM_NT_AUDCAD_T_BID201212.zip",
             "DAT_NT_AUDCAD_T_BID_201212.csv",
-            "ninjatrader",
-            "T_BID",
         ),
         (
             "HISTDATA_COM_NT_AUDCAD_T_ASK201212.zip",
             "DAT_NT_AUDCAD_T_ASK_201212.csv",
-            "ninjatrader",
-            "T_ASK",
         ),
     ),
 )
-def test_advertised_non_ascii_formats_are_inventory_only(
+def test_retired_non_ascii_formats_are_unsupported(
     tmp_path: Path,
     zip_filename: str,
     member_filename: str,
-    data_format: str,
-    timeframe: str,
 ) -> None:
-    """Every advertised non-ASCII format should have an explicit boundary."""
+    """Every retired non-ASCII format should fail closed."""
     archive = tmp_path / zip_filename
     with zipfile.ZipFile(archive, "w") as zip_file:
         zip_file.writestr(member_filename, "rows")
@@ -148,18 +140,19 @@ def test_advertised_non_ascii_formats_are_inventory_only(
         quality_rules_for_groups(("inventory",)),
     )
 
-    assert target.data_format == data_format
-    assert target.timeframe == timeframe
-    assert report.status is QualityStatus.WARNING
-    assert report.findings == (
-        _finding(report, "HISTDATA_FORMAT_INVENTORY_ONLY"),
-    )
+    assert target.data_format == ""
+    assert target.timeframe == ""
+    assert report.status is QualityStatus.FAILED
+    assert {finding.code for finding in report.findings} == {
+        "HISTDATA_ZIP_FILENAME_INVALID",
+        "HISTDATA_ZIP_MEMBER_FILENAME_INVALID",
+    }
 
 
-def test_extracted_ninjatrader_tick_payload_is_inventory_only(
+def test_extracted_ninjatrader_tick_payload_is_unsupported(
     tmp_path: Path,
 ) -> None:
-    """Direct non-ASCII tick payloads should be discovered and bounded explicitly."""
+    """Direct non-ASCII tick payloads should not be accepted."""
     payload = tmp_path / "DAT_NT_EURUSD_T_LAST_202202.csv"
     payload.write_text("rows", encoding="utf-8")
 
@@ -169,18 +162,18 @@ def test_extracted_ninjatrader_tick_payload_is_inventory_only(
         quality_rules_for_groups(("inventory",)),
     )
 
-    finding = _finding(report, "HISTDATA_FORMAT_INVENTORY_ONLY")
+    finding = _finding(report, "HISTDATA_FORMAT_UNSUPPORTED")
     assert target.kind is QualityTargetKind.CSV
-    assert target.data_format == "ninjatrader"
-    assert target.timeframe == "T_LAST"
-    assert report.status is QualityStatus.WARNING
+    assert target.data_format == ""
+    assert target.timeframe == ""
+    assert report.status is QualityStatus.FAILED
     assert finding.metadata["quality_support"]["payload_extension"] == "csv"
 
 
-def test_unsupported_known_format_timeframe_fails_explicitly(
+def test_retired_format_timeframe_fails_explicitly(
     tmp_path: Path,
 ) -> None:
-    """Known formats used with unsupported timeframes should not look clean."""
+    """Retired formats should not look clean."""
     path = tmp_path / "DAT_MT_EURUSD_T_201202.csv"
     path.write_text("rows", encoding="utf-8")
 
@@ -194,7 +187,7 @@ def test_unsupported_known_format_timeframe_fails_explicitly(
     assert report.status is QualityStatus.FAILED
     assert finding.severity is QualitySeverity.ERROR
     assert finding.metadata["quality_support"]["status"] == "unsupported"
-    assert finding.metadata["quality_support"]["data_format"] == "metatrader"
+    assert finding.metadata["quality_support"]["data_format"] == ""
 
 
 def test_corrupt_zip_fails_with_clear_error_finding(tmp_path: Path) -> None:

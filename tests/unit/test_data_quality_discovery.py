@@ -82,11 +82,6 @@ def test_quality_discovery_recursively_finds_zip_csv_and_cache_targets(
             QualityTargetKind.ZIP,
             "201202",
         ),
-        (
-            "DAT_NT_AUDCAD_T_LAST_201212.csv",
-            QualityTargetKind.CSV,
-            "201212",
-        ),
         (CACHE_FILENAME, QualityTargetKind.CACHE, ""),
     ),
 )
@@ -109,34 +104,40 @@ def test_quality_target_from_path_classifies_supported_files(
 
 
 @pytest.mark.parametrize(
-    ("filename", "expected_format", "expected_code", "expected_timeframe"),
+    "filename",
     (
-        ("DAT_NT_AUDCAD_T_LAST_201212.csv", "ninjatrader", "NT", "T_LAST"),
-        ("DAT_NT_AUDCAD_T_BID_201212.csv", "ninjatrader", "NT", "T_BID"),
-        ("DAT_NT_AUDCAD_T_ASK_201212.csv", "ninjatrader", "NT", "T_ASK"),
+        "DAT_NT_AUDCAD_T_LAST_201212.csv",
+        "DAT_MT_AUDCAD_T_201212.csv",
+        "DAT_MS_AUDCAD_T_201212.csv",
     ),
 )
-def test_non_ascii_targets_expose_inventory_only_support_metadata(
+def test_removed_non_ascii_files_are_not_quality_targets(
     tmp_path: Path,
     filename: str,
-    expected_format: str,
-    expected_code: str,
-    expected_timeframe: str,
 ) -> None:
-    """Non-ASCII HistData artifacts should not look deeply supported."""
+    """Non-ASCII HistData artifacts should not classify as supported dimensions."""
     path = tmp_path / filename
     path.write_bytes(b"fixture")
 
     target = quality_target_from_path(path)
 
     assert target is not None
-    assert target.data_format == expected_format
-    assert target.timeframe == expected_timeframe
-    assert target.metadata["format_code"] == expected_code
+    assert target.data_format == ""
+    assert target.timeframe == ""
     support = target.metadata["quality_support"]
-    assert support["status"] == "inventory-only"
-    assert support["inventory_supported"] is True
+    assert support["status"] == "unsupported"
+    assert support["inventory_supported"] is False
     assert support["parser_supported"] is False
+
+
+def test_removed_spreadsheet_files_are_not_quality_targets(
+    tmp_path: Path,
+) -> None:
+    """Spreadsheet payloads should not be discovered as quality targets."""
+    path = tmp_path / "DAT_XLSX_AUDCAD_T_201212.xlsx"
+    path.write_bytes(b"fixture")
+
+    assert quality_target_from_path(path) is None
 
 
 @pytest.mark.parametrize(

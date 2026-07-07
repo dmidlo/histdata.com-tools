@@ -6,10 +6,10 @@ engine for durable planning, downloads, extraction, cache builds, imports, job
 telemetry, and live Rich progress, while normal PyPI artifacts stay lean by
 provisioning the pinned Temporal executable through a verified first-run cache.
 
-Data-quality checks cover ZIP/file inventory, CSV/XLSX ingestion, timestamp
-continuity, tick and spread behavior, symbol/domain calendars, modeling
-readiness, and orchestration provenance with JSON reports and CI-friendly exit
-policies.
+Data-quality checks cover ASCII tick ZIP/file inventory, CSV ingestion,
+timestamp continuity, tick and spread behavior, symbol/domain calendars,
+modeling readiness, and orchestration provenance with JSON reports and
+CI-friendly exit policies.
 
 InfluxDB imports, Jupyter tooling, and optional pandas/Arrow return formats are
 available through extras.
@@ -154,8 +154,7 @@ Config:
                         groups: majors, minors, crosses, exotics, major-
                         triangles, metals, commodities, indices
   -f, --formats FORMAT [FORMAT ...]
-                        space separated formats. -f metatrader ascii
-                        ninjatrader metastock
+                        space separated formats. -f ascii
   -t, --timeframes TIMEFRAME [TIMEFRAME ...]
                         space separated Timeframes. -t tick-data-quotes
   -s, --start_yearmonth START_YEARMONTH
@@ -218,8 +217,8 @@ Data quality:
                         caches before running a cache-scale quality battery
   --quality-target, --quality-path PATH [PATH ...]
                         local file or directory to assess; supports
-                        directories, HistData ZIP archives, CSV files, XLSX
-                        payloads, and .data cache files
+                        directories, HistData ZIP archives, CSV files, and
+                        .data cache files
   --quality-checks GROUP [GROUP ...]
                         quality check groups to run; defaults to all.
                         Supported: all, inventory, ingestion, time, ticks,
@@ -364,7 +363,7 @@ python scripts/closure_readiness.py \
 
 The helper checks branch/upstream alignment, dirty and untracked files, linked
 GitHub issue state, lingering pytest/pre-commit/Temporal/histdatacom tool
-processes before and after gates, transient ZIP/CSV/XLS/XLSX source artifacts
+processes before and after gates, transient ZIP/CSV source artifacts
 under `data/`, README help synchronization, `git diff --check`, main help smoke
 output, pytest, and pre-commit. Reports are publish-safe JSON and Markdown with
 a GitHub-ready close comment block. `--commit-readiness` validates the current
@@ -435,16 +434,16 @@ not-applicable.
 
 ### Basic Use
 
-#### Download and extract the current month's available EURUSD data for metatrader 4/5into the default data directory ./data
+#### Download and extract the current month's available EURUSD ASCII tick data into the default data directory ./data
 
 ```sh
-histdatacom -p eurusd -f metatrader -s now
+histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
 ```
 
 #### include the `-D` flag to download but NOT extract to csv
 
 ```sh
-histdatacom -D -p usdcad -f metastock -s now
+histdatacom -D -p usdcad -f ascii -t tick-data-quotes -s now
 ```
 
 #### include the `-C` flag to build internal Polars caches and discard ZIP/CSV sources
@@ -467,11 +466,11 @@ histdatacom cleanup status --data-directory data --pair-groups majors -f ascii -
 ```
 
 Cleanup mode is a dry run unless `--apply` is present. It removes downloaded
-ZIP, CSV, XLS, and XLSX source artifacts while preserving internal `.data`
-caches. Use `cleanup status` to inspect cache counts, pending source cleanup,
-disk pressure, runtime state, and offline workflow snapshots for a symbol or
-instrument group without shelling out to `find`, `df`, `ps`, or raw Temporal
-commands. Add `--json` for the stable scriptable payload.
+ZIP and CSV source artifacts while preserving internal `.data` caches. Use
+`cleanup status` to inspect cache counts, pending source cleanup, disk pressure,
+runtime state, and offline workflow snapshots for a symbol or instrument group
+without shelling out to `find`, `df`, `ps`, or raw Temporal commands. Add
+`--json` for the stable scriptable payload.
 
 ---
 
@@ -574,37 +573,24 @@ supported ASCII tick quote datasets.
 
 #### Available Formats
 
-The formats available are:
+The raw HistData dimension currently supported by the application is:
 
-||
-|-----------|
-|metatrader|
-|metastock|
-|ninjatrader|
-|excel|
-|ascii|
+| Format | Timeframe |
+| --- | --- |
+| `ascii` | `tick-data-quotes` |
 
- histdata.com provides different resolutions of time
- depending on the format.
-
- The following format/timeframe combinations are available:
-
-|||
-|------------------|:-----------:|
-|tick-data-quotes|all formats|
-|tick-data-quotes |ascii|
-|tick-last-quotes|ninjatrader|
-|tick-bid-quotes|ninjatrader|
-|tick-ask-quotes|ninjatrader|
+Other HistData platform formats and raw bar timeframes were intentionally
+removed. Downsampling and platform-specific formatting will be added back as
+derived outputs after the ASCII tick substrate is stable.
 
 ##### CSV Dialect and Format Specifications
 
 - *For Detailed specifications for the CSVs that the histdata.com repo provides see [histdata.com_data_specs.md](https://github.com/dmidlo/histdata.com-tools/blob/main/histdata.com_data_specs.md)*
 
-##### To download tick-data-quotes for both metastock and excel
+##### To download ASCII tick-data-quotes
 
 ```sh
-histdatacom -p usdjpy -f metastock excel -s now
+histdatacom -p usdjpy -f ascii -t tick-data-quotes -s now
 ```
 
 ---
@@ -681,7 +667,7 @@ group with its readable relationship rule.
     fetch data for all 66 available instruments
 
 ```txt
-histdatacom -f metatrader -s 2012-07
+histdatacom -f ascii -t tick-data-quotes -s 2012-07
 ```
 
 #### `Start` & `Now` Keywords
@@ -694,22 +680,20 @@ you may have noticed that two special year-month keywords exist
    to indicate a range of data
 
 ```txt
-histdatacom -p audusd -f metatrader -s start -e 2008-12
+histdatacom -p audusd -f ascii -t tick-data-quotes -s start -e 2008-12
 ```
 
 - `now` used alone will return the current year-month
 - when used with as `-s now` it will return the most current month's data
 
 ```txt
-histdatacom -p frxeur -f ninjatrader -s now
+histdatacom -p frxeur -f ascii -t tick-data-quotes -s now
 ```
-
-in the above example, no `-t --timeframe` flag was specified. This will return all time resolutions available for the specified format(s)
 
 `now` when used with the `-e --end_yearmonth` flag is intended to be the end of a range. Rather, if the flags were to be `-s 2019-04 -e now` the request would return data from April 2019-04 to the present.
 
 ```txt
-histdatacom -p xagusd -f ascii -tick-data-quotes -s 2019-04 -e now
+histdatacom -p xagusd -f ascii -t tick-data-quotes -s 2019-04 -e now
 ```
 
 ---
@@ -723,7 +707,7 @@ this example with use the `-e --end_yearmonth` flag to request a range of data f
 - note: Large requests like these are to be avoided. remember to sign up with histdata.com to help them pay for network costs
 
 ```txt
-histdatacom -p eurusd usdcad udxusd -f metatrader -s start -e 2017-04
+histdatacom -p eurusd usdcad udxusd -f ascii -t tick-data-quotes -s start -e 2017-04
 ```
 
 ---
@@ -738,7 +722,7 @@ One can set a cap on CPU Utilization with `-c --cpu_utilization`
   eg. `-c 100` is equal to `-c high`
 
 ```sh
-histdatacom -c medium -p udxusd -f metatrader -s 2015-04 -e 2016-04
+histdatacom -c medium -p udxusd -f ascii -t tick-data-quotes -s 2015-04 -e 2016-04
 ```
 
 ---
@@ -810,9 +794,9 @@ histdatacom --quality --quality-target data/ --quality-report reports/quality.js
 
 The command prints a human summary, source-artifact cleanliness, and scratch
 report cleanup status. If no `--quality-target` is passed, quality mode uses
-the configured data directory. Targets can be plain HistData CSV files,
-extracted Excel `.xlsx` payloads, HistData ZIP archives, directories containing
-those files, or the canonical `.data` cache file.
+the configured data directory. Targets can be plain HistData CSV files, HistData
+ZIP archives, directories containing those files, or the canonical `.data`
+cache file.
 
 Use `--repo-quality` when the same quality run should also update the local
 repo helper file with bounded per-instrument quality summaries:
@@ -942,8 +926,8 @@ the transient ZIP/CSV sources as each cache completes. Run cleanup only after
 reports.
 
 For interrupted cache builds or older local source artifacts, use
-`histdatacom cleanup sources` to inspect removable ZIP, CSV, XLS, and XLSX files,
-then repeat with `--apply` when the report is expected. The cleanup command
+`histdatacom cleanup sources` to inspect removable ZIP and CSV files, then
+repeat with `--apply` when the report is expected. The cleanup command
 preserves internal `.data` cache files. Use `histdatacom cleanup status` first
 when an operator needs the cache count, pending cleanup count, disk pressure,
 runtime state, and durable workflow status in one report.
@@ -1284,12 +1268,10 @@ metadata. The current quality boundary is:
 | Format | Timeframes | Quality support |
 | --- | --- | --- |
 | `ascii` | `T` | Deep parser-level checks for ZIP, CSV, and canonical `.data` cache artifacts |
-| `ninjatrader` | `T_LAST`, `T_BID`, `T_ASK` | Inventory-only: filename, ZIP integrity, and expected member checks |
 
-Inventory-only targets emit a warning with code
-`HISTDATA_FORMAT_INVENTORY_ONLY`; they are intentionally not reported as deeply
-clean. Recognized formats used with unsupported timeframes emit
-`HISTDATA_FORMAT_UNSUPPORTED`.
+Retired formats and timeframes emit `HISTDATA_FORMAT_UNSUPPORTED` when they are
+encountered as direct CSV inputs and fail ZIP inventory naming checks when they
+arrive as unsupported archive/member names.
 
 HistData-specific assumptions are reported directly in findings:
 
@@ -1521,7 +1503,7 @@ contract: base installs include the Temporal SDK needed by clients and workers.
 
 The runtime stores Temporal process state, SQLite history, logs, and runtime
 manifests under a per-user, per-workspace runtime directory. Downloaded ZIP
-files, extracted CSV/XLSX files, cache IPC files, and merged API artifacts stay
+files, extracted CSV files, cache IPC files, and merged API artifacts stay
 under the existing HistData data-directory policy.
 
 Record status metadata is manifest-only for new writes. Normal CLI/API paths
@@ -1758,7 +1740,7 @@ add `--apply` only when the cleanup policy is understood for that data root.
 # Record cache/source cleanup status each morning.
 30 6 * * * cd "$HISTDATACOM_PROJECT" && histdatacom cleanup status --data-directory "$HISTDATACOM_DATA" --pair-groups majors -f ascii -t tick-data-quotes --json >> "$HISTDATACOM_LOG_DIR/cleanup-status.jsonl" 2>&1
 
-# Remove transient ZIP/CSV/XLS/XLSX sources while preserving .data caches.
+# Remove transient ZIP/CSV sources while preserving .data caches.
 45 6 * * 0 cd "$HISTDATACOM_PROJECT" && flock -n /tmp/histdatacom-cleanup.lock histdatacom cleanup sources --data-directory "$HISTDATACOM_DATA" --apply >> "$HISTDATACOM_LOG_DIR/source-cleanup.log" 2>&1
 ```
 

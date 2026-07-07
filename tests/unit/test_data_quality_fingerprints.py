@@ -603,11 +603,11 @@ def test_fingerprint_temporal_topology_reports_suspicious_gap(
 
 def test_fingerprint_rule_reports_unsupported_target(tmp_path: Path) -> None:
     """Unsupported targets should emit bounded source metadata, not crash."""
-    path = tmp_path / "DAT_ASCII_EURUSD_T_201202.xlsx"
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202.bin"
     path.write_text("not a supported fingerprint source", encoding="utf-8")
     target = QualityTarget(
         path=str(path),
-        kind=QualityTargetKind.SPREADSHEET,
+        kind=QualityTargetKind.UNKNOWN,
         data_format="ascii",
         timeframe=TICK,
         symbol="EURUSD",
@@ -673,8 +673,8 @@ def test_series_fingerprint_coverage_summary_counts_mixed_sources(
     )
     sibling_cache_target = _discovered_target(sibling_csv_path)
     unsupported_target = QualityTarget(
-        path=str(tmp_path / "unsupported.xlsx"),
-        kind=QualityTargetKind.SPREADSHEET,
+        path=str(tmp_path / "unsupported.bin"),
+        kind=QualityTargetKind.UNKNOWN,
         data_format="ascii",
         timeframe=TICK,
         symbol="EURUSD",
@@ -887,8 +887,8 @@ def test_series_fingerprint_topology_summary_reports_actionable_targets(
         ),
         _cache_target(tmp_path / "direct-cache"),
         QualityTarget(
-            path=str(tmp_path / "unsupported.xlsx"),
-            kind=QualityTargetKind.SPREADSHEET,
+            path=str(tmp_path / "unsupported.bin"),
+            kind=QualityTargetKind.UNKNOWN,
             data_format="ascii",
             timeframe=TICK,
             symbol="EURUSD",
