@@ -1529,6 +1529,7 @@ def emit_influx_cache_batches(
     batch_size = coerce_batch_size(args["batch_size"])
     batch_count = 0
     line_count = 0
+    columns = tuple(cache.columns)
     for rows in iter_polars_row_batches(cache, batch_size):
         lines = [
             format_influx_line(
@@ -1536,6 +1537,7 @@ def emit_influx_cache_batches(
                 work_item.data_format,
                 work_item.data_timeframe,
                 row,
+                columns=columns,
             )
             for row in rows
         ]
@@ -2772,13 +2774,22 @@ def create_cache_file(record: Record, args: Mapping[str, Any]) -> None:
 
 
 def _import_source_to_polars(record: Record, source_path: Path) -> Any:
+    from histdatacom.data_quality.training_features import (
+        enrich_tick_cache_with_training_features,
+    )
+
     try:
         raw_frame = read_ascii_file_to_polars(
             source_path, record.data_timeframe
         )
-        return convert_polars_datetime_to_utc_ms(
+        normalized = convert_polars_datetime_to_utc_ms(
             raw_frame,
             record.data_timeframe,
+        )
+        return enrich_tick_cache_with_training_features(
+            normalized,
+            target=record,
+            source="histdata.com",
         )
     except ValueError as err:
         raise CacheBuildError(

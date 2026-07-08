@@ -7,12 +7,13 @@ semantics that must survive the backend migration to Polars.
 from __future__ import annotations
 
 import csv
+import math
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 EST_NO_DST_OFFSET_MS = 18_000_000
 UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -390,15 +391,120 @@ def merge_batches(
 
 
 def format_influx_line(
-    pair: str, data_format: str, timeframe: str, row: Sequence[Any]
+    pair: str,
+    data_format: str,
+    timeframe: str,
+    row: Sequence[Any],
+    *,
+    columns: Sequence[str] | None = None,
 ) -> str:
-    """Return the line protocol string currently emitted for a parsed row."""
-    tags = (
-        f"source=histdata.com,format={data_format},timeframe={timeframe}"
-    ).replace(" ", "")
-
+    """Return line protocol for a raw or enriched ASCII tick cache row."""
     if timeframe != TICK:
         raise ValueError(f"unsupported ASCII timeframe: {timeframe}")
-    fields = f"bidquote={row[1]},askquote={row[2]}".replace(" ", "")
 
-    return f"{pair},{tags} {fields} {row[0]}"
+    if columns is None:
+        tags = (
+            f"source=histdata.com,format={data_format},timeframe={timeframe}"
+        ).replace(" ", "")
+        fields = f"bidquote={row[1]},askquote={row[2]}".replace(" ", "")
+        return f"{pair},{tags} {fields} {row[0]}"
+
+    values = _row_values(row, columns)
+    tags = _influx_tags(values, data_format, timeframe)
+    fields = _influx_fields(values)
+    timestamp = values.get("datetime", row[0])
+    return f"{_escape_influx_key(pair)},{tags} {fields} {timestamp}"
+
+
+def _row_values(
+    row: Sequence[Any],
+    columns: Sequence[str],
+) -> dict[str, Any]:
+    return dict(zip(columns, row, strict=False))
+
+
+def _influx_tags(
+    values: Mapping[str, Any],
+    data_format: str,
+    timeframe: str,
+) -> str:
+    source = str(values.get("source") or "histdata.com")
+    tags = {
+        "source": source,
+        "format": str(values.get("format") or data_format),
+        "timeframe": str(values.get("timeframe") or timeframe),
+    }
+    period = values.get("period")
+    if period not in (None, ""):
+        tags["period"] = str(period)
+    row_id = values.get("row_id")
+    if row_id not in (None, ""):
+        tags["row_id"] = str(row_id)
+    return ",".join(
+        f"{_escape_influx_key(key)}={_escape_influx_key(value)}"
+        for key, value in tags.items()
+    )
+
+
+def _influx_fields(values: Mapping[str, Any]) -> str:
+    fields: list[str] = []
+    _append_influx_field(fields, "bidquote", values.get("bid"))
+    _append_influx_field(fields, "askquote", values.get("ask"))
+    excluded = {
+        "datetime",
+        "bid",
+        "ask",
+        "vol",
+        "training_schema_version",
+        "series_id",
+        "symbol",
+        "format",
+        "timeframe",
+        "source",
+        "period",
+    }
+    for name, value in values.items():
+        if name in excluded:
+            continue
+        _append_influx_field(fields, name, value)
+    return ",".join(fields)
+
+
+def _append_influx_field(
+    fields: list[str],
+    name: str,
+    value: Any,
+) -> None:
+    formatted = _format_influx_field_value(value)
+    if formatted is None:
+        return
+    fields.append(f"{_escape_influx_key(name)}={formatted}")
+
+
+def _format_influx_field_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return f"{value}i"
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return str(value)
+    return _format_influx_string_field(str(value))
+
+
+def _format_influx_string_field(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _escape_influx_key(value: Any) -> str:
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace(" ", "\\ ")
+        .replace(",", "\\,")
+        .replace("=", "\\=")
+    )

@@ -457,6 +457,15 @@ canonical `.data` cache files, and removes transient ZIP/CSV sources after each
 cache is ready. It is intentionally limited to cache-capable ASCII tick quote
 datasets, and it does not merge the caches into memory.
 
+The `.data` cache is also the canonical training substrate. Cache builds
+materialize one flat row-aligned ASCII tick table with observed bid/ask data,
+explicit row identity, timestamp features, data-quality issue columns,
+classification codes, training controls, and nullable `synth_*` placeholders.
+The durable training row key is `series_id`, `period`, and `row_id`;
+`datetime`/`timestamp_utc_ms` remains an observed time-axis feature and is not
+the only identity value. This lets later training stages mask or bucket
+timestamps without losing deterministic row identity.
+
 #### clean up transient source artifacts without removing internal caches
 
 ```sh
@@ -739,6 +748,11 @@ pip install "histdatacom[influx]"
 - all histdata.com datetime data is in EST (Eastern Standard Time) with no adjustments for daylight savings.
 - Influxdb does not adjust for timezone and all datetime data is recorded as UTC epoch timestamps (nano-seconds since midnight 00:00, January, 1st, 1970)
 - this tool converts histdata.com ESTnoDST to UTC Epoch milli-second timestamps as part of the import-to-influx process
+- enriched ASCII tick `.data` columns are projected onto the same tick point:
+  observed quote fields, quality issue flags, quality/classification codes,
+  training controls, and populated synthetic fields when present. Duplicate
+  tick timestamps keep distinct Influx point identity with deterministic
+  `row_id` tags; the `.data` row key remains the source of truth.
 
 ```txt
 histdatacom -I -p eurusd -f ascii -t tick-data-quotes -s start -e now
@@ -797,6 +811,14 @@ report cleanup status. If no `--quality-target` is passed, quality mode uses
 the configured data directory. Targets can be plain HistData CSV files, HistData
 ZIP archives, directories containing those files, or the canonical `.data`
 cache file.
+
+Quality reports remain audit artifacts. Training-facing quality semantics are
+row columns on enriched ASCII tick `.data` caches, including explicit
+`dq_issue_*` indicators, quality counts, classification labels, training
+usability/weight, and synthetic placeholders. Report and bounded summary
+surfaces should derive from or stay consistent with those row-level columns, so
+downstream training code does not need to parse report JSON or join separate
+quality tables to assemble a training row.
 
 Use `--repo-quality` when the same quality run should also update the local
 repo helper file with bounded per-instrument quality summaries:

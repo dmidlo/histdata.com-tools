@@ -30,6 +30,9 @@ from histdatacom.activity_stages import (
     validate_url_work_item,
     write_repository_data_file,
 )
+from histdatacom.data_quality.training_features import (
+    required_training_feature_columns,
+)
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     LEGACY_CACHE_ERROR,
@@ -804,12 +807,14 @@ def test_build_cache_work_item_writes_cache_from_csv(
     assert output.result.metrics["start"] == str(EXPECTED_TICK_DATETIMES[0])
     assert output.result.metrics["end"] == str(EXPECTED_TICK_DATETIMES[-1])
     assert output.result.metrics["timeframe"] == "T"
-    assert output.result.metrics["schema"] == {
+    schema = output.result.metrics["schema"]
+    assert {
         "datetime": "Int64",
         "bid": "Float64",
         "ask": "Float64",
         "vol": "Int32",
-    }
+    }.items() <= schema.items()
+    assert set(required_training_feature_columns()).issubset(schema)
     assert output.result.artifacts[0].path == str(tmp_path / CACHE_FILENAME)
     assert output.result.artifacts[0].sha256
 
