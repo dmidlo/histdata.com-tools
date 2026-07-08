@@ -128,7 +128,63 @@ def test_import_cache_batches_polars_rows_into_influx_sink(
     )
 
     assert [len(item) for item in sink.items] == [2, 1]
-    assert sink.items[0][0] == EXPECTED_TICK_LINE
+    first_line = sink.items[0][0]
+    assert "row_id=1" in first_line.split(" ", maxsplit=1)[0]
+    assert "bidquote=1.3066" in first_line
+    assert "askquote=1.30677" in first_line
+    assert "quality_status_code=0i" in first_line
+    assert "training_usable=true" in first_line
+    assert first_line.endswith(" 1328072403660")
+
+
+def test_import_cache_enriches_legacy_raw_cache_before_projection(
+    tmp_path: Path,
+) -> None:
+    """Existing raw .data caches should project enriched training fields."""
+    from histdatacom.api import Api
+    from histdatacom.influx import Influx
+
+    class FakeSink:
+        def __init__(self) -> None:
+            self.items: list[list[str]] = []
+
+        def put(self, item: list[str]) -> None:
+            self.items.append(item)
+
+    source_record = SimpleNamespace(data_timeframe="T")
+    raw_frame = Api._import_file_to_polars(
+        source_record,
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
+    )
+    Api._write_cache_data(raw_frame, str(tmp_path / CACHE_FILENAME))
+    sink = FakeSink()
+    record = SimpleNamespace(
+        data_dir=str(tmp_path) + "/",
+        cache_filename=CACHE_FILENAME,
+        data_fxpair="eurusd",
+        data_format="ascii",
+        data_timeframe="T",
+        data_datemonth="201202",
+    )
+
+    Influx()._import_cache(
+        record,
+        {"batch_size": "2"},
+        sink,  # type: ignore[arg-type]
+    )
+
+    [first_batch, second_batch] = sink.items
+    first_line = first_batch[0]
+    assert [len(first_batch), len(second_batch)] == [2, 1]
+    assert "row_id=1" in first_line.split(" ", maxsplit=1)[0]
+    assert "period=201202" in first_line.split(" ", maxsplit=1)[0]
+    assert "bidquote=1.3066" in first_line
+    assert "askquote=1.30677" in first_line
+    assert "spread=" in first_line
+    assert "quality_status_code=0i" in first_line
+    assert "dq_issue_negative_spread=false" in first_line
+    assert "training_usable=true" in first_line
+    assert first_line.endswith(" 1328072403660")
 
 
 def test_enriched_influx_line_projects_training_fields_on_tick_point() -> None:
@@ -167,6 +223,7 @@ def test_enriched_influx_line_projects_training_fields_on_tick_point() -> None:
     assert "period=201202" in line.split(" ", maxsplit=1)[0]
     assert "bidquote=1.0" in line
     assert "askquote=1.0002" in line
+    assert ",row_id=1i" not in line.split(" ", maxsplit=2)[1]
     assert "spread=" in line
     assert "mid=1.0001" in line
     assert "quality_status_code=0i" in line

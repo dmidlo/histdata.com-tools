@@ -1524,8 +1524,13 @@ def emit_influx_cache_batches(
     emit_lines: LineSink,
 ) -> tuple[int, int]:
     """Emit bounded Influx line-protocol batches for one cache artifact."""
+    from histdatacom.data_quality.training_features import (
+        ensure_tick_training_features,
+    )
+
     cache_filename = work_item.cache_filename or CACHE_FILENAME
     cache = read_polars_cache(Path(work_item.data_dir, cache_filename))
+    cache = ensure_tick_training_features(cache, target=work_item)
     batch_size = coerce_batch_size(args["batch_size"])
     batch_count = 0
     line_count = 0

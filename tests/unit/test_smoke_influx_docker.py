@@ -124,7 +124,7 @@ def test_write_and_verify_influx_uses_real_writer_contract() -> None:
             return self.value
 
     class FakeTable:
-        records = [FakeRecord(2)]
+        records = [FakeRecord(module.EXPECTED_FIELD_COUNT)]
 
     class FakeQueryApi:
         def query(self, query: str, *, org: str) -> list[FakeTable]:
@@ -155,7 +155,11 @@ def test_write_and_verify_influx_uses_real_writer_contract() -> None:
 
     assert written_batches == [[line] for line in module.SMOKE_LINES]
     assert report["written_lines"] == 2
-    assert report["actual_field_count"] == 2
+    assert report["actual_field_count"] == module.EXPECTED_FIELD_COUNT
+    assert "row_id=1" in module.SMOKE_LINES[0].split(" ", maxsplit=1)[0]
+    assert "quality_status_code=0i" in module.SMOKE_LINES[0]
+    assert "class_training_action_code=0i" in module.SMOKE_LINES[0]
+    assert "synth_bid" not in module.SMOKE_LINES[0]
     assert query_calls[0][1] == "org"
     assert 'from(bucket: "bucket")' in query_calls[0][0]
     assert 'r._measurement == "eurusd"' in query_calls[0][0]
@@ -182,7 +186,9 @@ def test_run_docker_influx_smoke_cleans_up_container_on_success() -> None:
         run_command=fake_run,
         wait_for_health=lambda url, timeout: {"status": "pass"},
         writer_factory=lambda args: _NoopWriter(),
-        client_factory=lambda **kwargs: _CountClient(6),
+        client_factory=lambda **kwargs: _CountClient(
+            module.EXPECTED_FIELD_COUNT
+        ),
     )
 
     assert report["status"] == "passed"

@@ -477,12 +477,12 @@ def quality_report_from_training_features(
             "schema_version": TRAINING_FEATURE_REPORT_SCHEMA_VERSION,
             "training_schema_version": TRAINING_SCHEMA_VERSION,
             "row_count": int(getattr(frame, "height", 0) or 0),
-            "issue_counts": issue_counts,
-            "training_action_counts": _value_counts(
-                frame, "class_training_action_code"
+            "issue_counts": _json_int_counts(issue_counts),
+            "training_action_counts": _json_int_counts(
+                _value_counts(frame, "class_training_action_code")
             ),
-            "quality_state_counts": _value_counts(
-                frame, "class_quality_state_code"
+            "quality_state_counts": _json_int_counts(
+                _value_counts(frame, "class_quality_state_code")
             ),
         },
     )
@@ -1143,3 +1143,7 @@ def _value_counts(frame: Any, column: str) -> dict[str, int]:
         count = row["count"]
         counts[str(value)] = int(count)
     return counts
+
+
+def _json_int_counts(values: Mapping[str, int]) -> dict[str, JSONValue]:
+    return {str(key): int(value) for key, value in values.items()}

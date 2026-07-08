@@ -1047,7 +1047,13 @@ def test_import_to_influx_work_item_emits_batches_without_writer(
     assert output.result.status is WorkStatus.INFLUX_UPLOAD
     assert output.result.metrics == {"batch_count": 2, "line_count": 3}
     assert [len(batch) for batch in emitted] == [2, 1]
-    assert emitted[0][0] == EXPECTED_TICK_LINE
+    first_line = emitted[0][0]
+    assert "row_id=1" in first_line.split(" ", maxsplit=1)[0]
+    assert "bidquote=1.3066" in first_line
+    assert "askquote=1.30677" in first_line
+    assert "quality_status_code=0i" in first_line
+    assert "training_usable=true" in first_line
+    assert first_line.endswith(" 1328072403660")
 
 
 def test_dataset_plan_stage_emits_stable_historical_tick_work_items(

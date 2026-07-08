@@ -457,6 +457,7 @@ def _influx_fields(values: Mapping[str, Any]) -> str:
         "vol",
         "training_schema_version",
         "series_id",
+        "row_id",
         "symbol",
         "format",
         "timeframe",
