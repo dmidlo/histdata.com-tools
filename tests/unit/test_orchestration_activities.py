@@ -972,7 +972,13 @@ def test_import_to_influx_activity_writes_tick_batches(
     [writer] = FakeInfluxWriter.instances
     assert writer.args["batch_size"] == "2"
     assert [len(batch) for batch in writer.batches] == [2, 1]
-    assert writer.batches[0][0] == EXPECTED_T_LINE
+    first_line = writer.batches[0][0]
+    assert "row_id=1" in first_line.split(" ", maxsplit=1)[0]
+    assert "bidquote=1.3066" in first_line
+    assert "askquote=1.30677" in first_line
+    assert "quality_status_code=0i" in first_line
+    assert "training_usable=true" in first_line
+    assert first_line.endswith(" 1328072403660")
     assert writer.closed
     assert result["work_item"]["status"] == WorkStatus.INFLUX_UPLOAD.value
     assert result["result"]["stage"] == "import_to_influx"

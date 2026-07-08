@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 DEFAULT_INFLUX_IMAGE = "influxdb:2.7-alpine"
 DEFAULT_ORG = "histdatacom"
@@ -24,13 +24,16 @@ DEFAULT_TOKEN = "histdatacom-smoke-token"
 DEFAULT_STARTUP_TIMEOUT = 60.0
 INFLUX_PORT = "8086/tcp"
 SMOKE_MEASUREMENT = "eurusd"
-SMOKE_LINES = (
+SMOKE_ROWS = (
+    (1328072403660, 1.3066, 1.30677, 0),
+    (1328072403973, 1.30658, 1.30675, 25),
+)
+LEGACY_SMOKE_LINES = (
     "eurusd,source=histdata.com,format=ascii,timeframe=T "
     "bidquote=1.3066,askquote=1.30677 1328072403660",
     "eurusd,source=histdata.com,format=ascii,timeframe=T "
     "bidquote=1.30658,askquote=1.30675 1328072403973",
 )
-EXPECTED_FIELD_COUNT = 2
 
 RunCommand = Callable[..., subprocess.CompletedProcess[str]]
 HealthWaiter = Callable[[str, float], Mapping[str, Any]]
@@ -42,6 +45,56 @@ class DockerInfluxSmokeError(RuntimeError):
     def __init__(self, message: str, diagnostics: Mapping[str, Any]) -> None:
         super().__init__(message)
         self.diagnostics = dict(diagnostics)
+
+
+def build_enriched_smoke_lines() -> tuple[str, ...]:
+    """Return representative enriched ASCII tick line-protocol rows."""
+    import polars as pl
+
+    from histdatacom.data_quality.training_features import (
+        enrich_tick_cache_with_training_features,
+    )
+    from histdatacom.histdata_ascii import format_influx_line
+
+    frame = enrich_tick_cache_with_training_features(
+        pl.DataFrame(
+            {
+                "datetime": [row[0] for row in SMOKE_ROWS],
+                "bid": [row[1] for row in SMOKE_ROWS],
+                "ask": [row[2] for row in SMOKE_ROWS],
+                "vol": [row[3] for row in SMOKE_ROWS],
+            },
+            schema={
+                "datetime": pl.Int64,
+                "bid": pl.Float64,
+                "ask": pl.Float64,
+                "vol": pl.Int32,
+            },
+        ),
+        symbol="EURUSD",
+        data_format="ascii",
+        timeframe="T",
+        period="201202",
+    )
+    return tuple(
+        format_influx_line(
+            SMOKE_MEASUREMENT,
+            "ascii",
+            "T",
+            row,
+            columns=frame.columns,
+        )
+        for row in frame.iter_rows()
+    )
+
+
+def line_field_count(line: str) -> int:
+    """Return the number of fields in one Influx line-protocol row."""
+    return len(line.split(" ", maxsplit=2)[1].split(","))
+
+
+SMOKE_LINES = build_enriched_smoke_lines()
+EXPECTED_FIELD_COUNT = sum(line_field_count(line) for line in SMOKE_LINES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,13 +354,13 @@ def _sum_query_record_values(tables: Any) -> int:
 def _influx_batch_writer_factory() -> Callable[[Mapping[str, Any]], Any]:
     from histdatacom.influx import InfluxBatchWriter
 
-    return InfluxBatchWriter
+    return cast(Callable[[Mapping[str, Any]], Any], InfluxBatchWriter)
 
 
 def _influx_client_factory() -> Callable[..., Any]:
     from influxdb_client import InfluxDBClient
 
-    return InfluxDBClient
+    return cast(Callable[..., Any], InfluxDBClient)
 
 
 def run_docker_influx_smoke(
