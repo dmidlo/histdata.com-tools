@@ -36,7 +36,7 @@ def test_data_quality_publication_report_sanitizes_existing_json(
                                 "code": "FILE_MISSING",
                                 "path": (
                                     "/Users/alice/projects/"
-                                    "histdata.com-tools/data/ASCII/M1/"
+                                    "histdata.com-tools/data/ASCII/T/"
                                     "eurusd/2012/missing.csv"
                                 ),
                             }
@@ -71,6 +71,6 @@ def test_data_quality_publication_report_sanitizes_existing_json(
     cleaned = report.read_text(encoding="utf-8")
     assert completed.returncode == 0
     assert "/Users/" not in cleaned
-    assert "data/ASCII/M1/eurusd/2012/missing.csv" in cleaned
+    assert "data/ASCII/T/eurusd/2012/missing.csv" in cleaned
     assert "/Users/" not in index.read_text(encoding="utf-8")
     assert "Data Quality Executive Report" in output.read_text(encoding="utf-8")

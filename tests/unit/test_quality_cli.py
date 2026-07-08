@@ -11,10 +11,30 @@ import pytest
 
 import histdatacom.histdata_com as histdata_com
 import histdatacom.quality_cli as quality_cli
+from histdatacom.data_quality import (
+    QualityFinding,
+    QualityReport,
+    QualityRuleResult,
+    QualitySeverity,
+    QualityTarget,
+    QualityTargetKind,
+    write_quality_report,
+)
 from histdatacom.data_quality.preflight import (
     run_cache_quality_preflight,
     write_quality_preflight_report,
 )
+from histdatacom.data_quality.fingerprint_discovery import (
+    TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.fingerprints import (
+    SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.profiles import QUALITY_PROFILE_SCHEMA_VERSION
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     TICK,
@@ -157,6 +177,395 @@ histdatacom:
     assert payload["status"] == "accepted"
 
 
+def test_quality_remediation_catalog_cli_reports_json(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The remediation-catalog command should expose JSON audit output."""
+    captured: dict[str, object] = {}
+
+    def fake_audit(
+        report_paths: list[str], **kwargs: object
+    ) -> dict[str, object]:
+        captured["report_paths"] = report_paths
+        captured.update(kwargs)
+        return _catalog_payload(gap_count=1)
+
+    monkeypatch.setattr(
+        quality_cli,
+        "audit_remediation_catalog_report_paths",
+        fake_audit,
+    )
+
+    exit_code = main(
+        [
+            "remediation-catalog",
+            "--report",
+            "reports/quality.json",
+            "--code-limit",
+            "2",
+            "--rule-limit",
+            "3",
+            "--source-limit",
+            "1",
+            "--target-axis-limit",
+            "4",
+            "--json",
+        ]
+    )
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 1
+    assert payload["status"] == "needs-remediation-guidance"
+    assert captured["report_paths"] == ["reports/quality.json"]
+    assert captured["code_limit"] == 2
+    assert captured["rule_limit"] == 3
+    assert captured["source_limit"] == 1
+    assert captured["target_axis_limit"] == 4
+
+
+def test_quality_remediation_catalog_cli_reports_ranked_human_output(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The text command should expose the ranked remediation backlog."""
+
+    def fake_audit(
+        report_paths: list[str], **kwargs: object
+    ) -> dict[str, object]:
+        return _catalog_payload(gap_count=1, ranked_gap=True)
+
+    monkeypatch.setattr(
+        quality_cli,
+        "audit_remediation_catalog_report_paths",
+        fake_audit,
+    )
+
+    exit_code = main(["remediation-catalog"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "Ranked remediation gaps" in output
+    assert "#1 warning CLI_GAP family=time" in output
+    assert "report_occurrences=3" in output
+
+
+def test_quality_remediation_catalog_cli_applies_yaml_defaults(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """YAML defaults should support remediation-catalog audit options."""
+    captured: dict[str, object] = {}
+
+    def fake_audit(
+        report_paths: list[str], **kwargs: object
+    ) -> dict[str, object]:
+        captured["report_paths"] = report_paths
+        captured.update(kwargs)
+        return _catalog_payload(gap_count=0)
+
+    monkeypatch.setattr(
+        quality_cli,
+        "audit_remediation_catalog_report_paths",
+        fake_audit,
+    )
+    config_path = tmp_path / "quality.yaml"
+    config_path.write_text(
+        """
+histdatacom:
+  quality:
+    command: remediation-catalog
+    reports:
+      - reports/one.json
+      - reports/two.json
+    code_limit: 5
+    rule_limit: 6
+    source_limit: 7
+    target_axis_limit: 8
+    json: true
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["--config", str(config_path)])
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["status"] == "covered"
+    assert captured["report_paths"] == [
+        "reports/one.json",
+        "reports/two.json",
+    ]
+    assert captured["code_limit"] == 5
+    assert captured["rule_limit"] == 6
+    assert captured["source_limit"] == 7
+    assert captured["target_axis_limit"] == 8
+
+
+def test_quality_fingerprint_schema_cli_reports_json(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The fingerprint schema command should expose machine-readable JSON."""
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "cli-fingerprint-profile",
+                "rules": {
+                    SERIES_FINGERPRINT_RULE_ID: {
+                        "quantiles": [0.2, 0.5, 0.8],
+                        "lags": [1, 2],
+                        "max_rows": 25,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "fingerprint-schema",
+            "--quality-profile",
+            str(profile_path),
+            "--json",
+        ]
+    )
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert (
+        payload["schema_version"]
+        == TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION
+    )
+    assert payload["profile"]["name"] == "cli-fingerprint-profile"
+    assert payload["profile"]["source_path"] == "quality-profile.json"
+    assert payload["profile"]["effective_fingerprint_profile"]["lags"] == [
+        1,
+        2,
+    ]
+    assert str(tmp_path) not in output
+
+
+def test_quality_fingerprint_schema_cli_reports_human_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Default fingerprint schema output should be concise text."""
+    exit_code = main(["fingerprint-schema"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Fingerprint Schema Discovery" in output
+    assert "Implemented Sections" in output
+    assert "- microstructure_dynamics: implemented; timeframes=[T]" in output
+
+
+def test_quality_fingerprint_schema_cli_verifies_contract_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fingerprint schema verify mode should emit machine-readable audit."""
+    exit_code = main(["fingerprint-schema", "--verify", "--json"])
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == (
+        "histdatacom.time-series-fingerprint-contract-audit.v1"
+    )
+    assert payload["status"] == "pass"
+    assert payload["error_count"] == 0
+    assert payload["findings"] == []
+
+
+def test_quality_fingerprint_schema_cli_verifies_contract_text(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fingerprint schema verify mode should render human audit text."""
+    exit_code = main(["fingerprint-schema", "--verify"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Fingerprint Contract Audit" in output
+    assert "status: pass" in output
+    assert "No contract drift detected." in output
+
+
+def test_quality_bounded_payload_contract_cli_reports_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bounded payload contract command should emit machine-readable audit."""
+    exit_code = main(["bounded-payload-contract", "--json"])
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == (
+        "histdatacom.bounded-payload-contract-audit.v1"
+    )
+    assert payload["status"] == "pass"
+    assert payload["finding_count"] == 0
+    assert payload["payload_source"] == "representative"
+
+
+def test_quality_bounded_payload_contract_cli_reports_human_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bounded payload contract command should render concise text."""
+    exit_code = main(["bounded-payload-contract"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Bounded Payload Contract Audit" in output
+    assert "status: pass" in output
+    assert "No bounded payload contract drift detected." in output
+
+
+def test_quality_fingerprint_schema_cli_applies_yaml_defaults(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """YAML defaults should support fingerprint-schema discovery."""
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "yaml-fingerprint-profile",
+                "rules": {SERIES_FINGERPRINT_RULE_ID: {"rounding_digits": 4}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "quality.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality:
+    command: fingerprint_schema
+    quality_profile: {profile_path}
+    json: true
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["--config", str(config_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["profile"]["name"] == "yaml-fingerprint-profile"
+    assert (
+        payload["profile"]["effective_fingerprint_profile"]["rounding_digits"]
+        == 4
+    )
+
+
+def test_quality_fingerprint_schema_cli_accepts_yaml_verify(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """YAML defaults should support fingerprint-schema contract verification."""
+    config_path = tmp_path / "quality.yaml"
+    config_path.write_text(
+        """
+histdatacom:
+  quality:
+    command: fingerprint_schema
+    verify: true
+    json: true
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["--config", str(config_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == (
+        "histdatacom.time-series-fingerprint-contract-audit.v1"
+    )
+    assert payload["status"] == "pass"
+
+
+def test_quality_fingerprint_readiness_cli_reports_json(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The readiness command should rank risks from a saved report."""
+    report_path = _write_fingerprint_quality_report(tmp_path)
+
+    exit_code = main(
+        [
+            "fingerprint-readiness",
+            "--report",
+            str(report_path),
+            "--target-limit",
+            "1",
+            "--section-limit",
+            "2",
+            "--reason-limit",
+            "3",
+            "--json",
+        ]
+    )
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    summary = payload["reports"][0]["summary"]
+
+    assert exit_code == 0
+    assert payload["schema_version"] == (
+        quality_cli.FINGERPRINT_READINESS_RISK_COMMAND_SCHEMA_VERSION
+    )
+    assert payload["report_count"] == 1
+    assert payload["risk_report_count"] == 1
+    assert payload["reports"][0]["report_path"] == "fingerprint-quality.json"
+    assert (
+        summary["schema_version"]
+        == TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION
+    )
+    assert summary["included_target_count"] == 1
+    assert summary["target_risks"][0]["target_axis"]["symbol"] == "GBPUSD"
+    assert (
+        "invalid_timestamps_skipped"
+        in summary["target_risks"][0]["reason_codes"]
+    )
+    assert str(tmp_path) not in output
+
+
+def test_quality_fingerprint_readiness_cli_reports_human_output(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The readiness command should render a concise text ranking."""
+    report_path = _write_fingerprint_quality_report(tmp_path)
+
+    exit_code = main(["fingerprint-readiness", "--report", str(report_path)])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Fingerprint readiness risk command" in output
+    assert "Report: fingerprint-quality.json" in output
+    assert "Fingerprint readiness risk" in output
+    assert "#1 ascii GBPUSD T 201202 csv: high" in output
+    assert "invalid_timestamps_skipped" in output
+    assert str(tmp_path) not in output
+
+
+def test_quality_help_advertises_fingerprint_schema_command() -> None:
+    """The quality utility help should expose fingerprint schema discovery."""
+    help_text = quality_cli.build_parser().format_help()
+
+    assert "fingerprint-schema" in help_text
+    assert "discover fingerprint schemas" in help_text
+    assert "fingerprint-readiness" in help_text
+    assert "rank fingerprint readiness risks" in help_text
+
+
 def _write_preflight_evidence(
     data_dir: Path,
     *,
@@ -202,3 +611,187 @@ def _write_tick_cache(
         cache_path,
     )
     return cache_path
+
+
+def _write_fingerprint_quality_report(tmp_path: Path) -> Path:
+    target = QualityTarget(
+        path=str(tmp_path / "DAT_ASCII_GBPUSD_T_201202.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="T",
+        symbol="GBPUSD",
+        period="201202",
+    )
+    payload = {
+        "schema_version": TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
+        "target_axis": {
+            "data_format": "ascii",
+            "timeframe": "T",
+            "symbol": "GBPUSD",
+            "period": "201202",
+            "kind": "csv",
+        },
+        "source": {"kind": "text"},
+        "temporal_topology": {
+            "row_count": 4,
+            "parsed_row_count": 3,
+            "invalid_timestamp_count": 1,
+            "duplicate_timestamp_count": 1,
+            "non_monotonic_count": 1,
+            "suspicious_gap_count": 1,
+            "expected_session_closure_count": 0,
+            "weekend_activity_count": 0,
+            "sequence_status": "limited",
+            "limitations": [
+                "invalid_timestamps_skipped",
+                "duplicate_timestamps",
+                "suspicious_gaps",
+            ],
+        },
+        "microstructure_dynamics": {
+            "basis": "text",
+            "row_order": "source_text_order",
+            "computed_from": "text",
+            "regular_grid": False,
+            "row_count": 4,
+            "sampled_row_count": 4,
+            "usable_row_count": 3,
+            "invalid_row_count": 1,
+            "partial_row_count": 0,
+            "limitations": ["invalid_timestamps_skipped"],
+            "spread_change": {"count": 2},
+        },
+        "dependence": {
+            "basis": "text",
+            "acf_basis": "observed_sequence",
+            "row_order": "source_text_order",
+            "computed_from": "text",
+            "regular_grid": False,
+            "reason": "invalid_timestamps_skipped",
+            "limitations": ["invalid_timestamps_skipped"],
+            "row_count": 4,
+            "sampled_row_count": 4,
+            "usable_row_count": 3,
+            "lags": [1, 3],
+            "computed_lag_count": 1,
+            "skipped_lag_count": 1,
+            "spread_acf": {
+                "sample_count": 2,
+                "computed_lag_count": 1,
+                "skipped_lag_count": 1,
+                "skipped_lag_reason_counts": {
+                    "insufficient_sample_count": 1,
+                },
+            },
+        },
+        "fingerprint_audit": {
+            "schema_version": TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
+            "sections_expected": [
+                "coverage",
+                "temporal_topology",
+                "microstructure_dynamics",
+                "dependence",
+            ],
+            "sections_emitted": [
+                "temporal_topology",
+                "microstructure_dynamics",
+                "dependence",
+            ],
+            "sections_skipped": {},
+            "section_statuses": {
+                "coverage": "valid",
+                "temporal_topology": "limited",
+                "microstructure_dynamics": "limited",
+                "dependence": "limited",
+            },
+            "dynamics_readiness": {
+                "microstructure_dynamics": {
+                    "status": "limited",
+                    "reason": "invalid_timestamps_skipped",
+                    "basis": "text",
+                    "row_order": "source_text_order",
+                    "computed_from": "text",
+                    "regular_grid": False,
+                    "limitations": ["invalid_timestamps_skipped"],
+                    "row_count": 4,
+                    "sampled_row_count": 4,
+                    "usable_row_count": 3,
+                    "invalid_row_count": 1,
+                    "partial_row_count": 0,
+                }
+            },
+        },
+    }
+    finding = QualityFinding(
+        severity=QualitySeverity.INFO,
+        code="FINGERPRINT_SERIES_SUMMARY",
+        message="Canonical target time-series fingerprint.",
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        target=target,
+        metadata={TIME_SERIES_FINGERPRINT_METADATA_KEY: payload},
+    )
+    report = QualityReport(
+        targets=(target,),
+        rule_results=(
+            QualityRuleResult(
+                rule_id=SERIES_FINGERPRINT_RULE_ID,
+                target=target,
+                findings=(finding,),
+            ),
+        ),
+        metadata={"operation": "data-quality", "check_groups": ["fingerprint"]},
+    )
+    report_path = tmp_path / "fingerprint-quality.json"
+    write_quality_report(report, report_path)
+    return report_path
+
+
+def _catalog_payload(
+    *,
+    gap_count: int,
+    ranked_gap: bool = False,
+) -> dict[str, object]:
+    ranked_gaps: list[dict[str, object]] = []
+    if ranked_gap:
+        ranked_gaps.append(
+            {
+                "finding_code": "CLI_GAP",
+                "known_source_occurrence_count": 0,
+                "mapped": False,
+                "max_severity": "warning",
+                "rank": 1,
+                "rank_reasons": [
+                    "severity=warning",
+                    "source_family=time",
+                    "report_occurrences=3",
+                    "known_sources=0",
+                ],
+                "report_occurrence_count": 3,
+                "rule_id": "time.ascii.sequence",
+                "source_family": "time",
+            }
+        )
+    return {
+        "schema_version": "histdatacom.quality-remediation-catalog-audit.v1",
+        "status": ("needs-remediation-guidance" if gap_count else "covered"),
+        "summary": {
+            "known_code_count": 1,
+            "known_finding_occurrence_count": 1,
+            "known_warning_error_code_count": 1,
+            "mapped_known_code_count": 0 if gap_count else 1,
+            "report_count": 0,
+            "report_finding_count": 0,
+            "report_mapped_finding_count": 0,
+            "report_unmapped_finding_count": 0,
+            "report_unmapped_warning_error_group_count": 0,
+            "unmapped_info_only_code_count": 0,
+            "unmapped_known_code_count": 1 if gap_count else 0,
+            "unmapped_warning_error_code_count": gap_count,
+            "unmapped_warning_error_gap_count": gap_count,
+        },
+        "known_code_counts": {},
+        "known_unmapped_codes": [],
+        "ranked_gaps": ranked_gaps,
+        "report_coverage": [],
+        "payload_limits": {},
+    }

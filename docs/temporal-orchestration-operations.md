@@ -36,7 +36,7 @@ no healthy runtime is running, waits for completion by default, and materializes
 the same user-facing output shape that the command promises.
 
 ```sh
-histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
 ```
 
 The runtime never silently falls back to a foreground execution path. If
@@ -74,7 +74,7 @@ maintainer runtime commands and local state layout, see the runtime runbook.
 Submit work and wait for the result:
 
 ```sh
-histdatacom -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+histdatacom -p eurusd -f ascii -t tick-data-quotes -s now
 ```
 
 Interactive waited CLI requests render a live Rich progress view while the
@@ -85,14 +85,14 @@ Require an already-running healthy runtime:
 
 ```sh
 histdatacom --no-orchestration-start \
-  -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+  -p eurusd -f ascii -t tick-data-quotes -s now
 ```
 
 Submit work without waiting for the workflow result:
 
 ```sh
 histdatacom --submit-only --no-overlap --schedule-key eurusd-cache \
-  -p eurusd -f ascii -t 1-minute-bar-quotes -s now
+  -p eurusd -f ascii -t tick-data-quotes -s now
 ```
 
 `--no-overlap` is opt-in and checks persisted job state in the current runtime
@@ -133,7 +133,7 @@ submitted:
 - `-I` / `--import_to_influxdb`
 
 Use `--build-cache` for low-disk cache-building runs. It validates and
-downloads supported ASCII `M1` or tick quote datasets, builds canonical Polars
+downloads supported ASCII tick quote datasets, builds canonical Polars
 `.data` caches, removes transient ZIP/CSV sources after each cache is ready,
 and does not merge the caches into a dataframe result.
 
@@ -153,7 +153,7 @@ options = Options()
 options.orchestration_wait_result = True
 options.api_return_type = "polars"
 options.formats = {"ascii"}
-options.timeframes = {"1-minute-bar-quotes"}
+options.timeframes = {"tick-data-quotes"}
 options.pairs = {"eurusd"}
 options.start_yearmonth = "now"
 
@@ -277,7 +277,7 @@ histdatacom jobs resume histdatacom-<request-id> --reason "continue run"
 
 Retry and resume are executable control operations. The client reads the
 persisted `RunRequest` snapshot and starts a deterministic replacement workflow.
-Complete ZIP, CSV/XLSX, and Polars cache artifacts are reused by default through
+Complete ZIP, CSV, and Polars cache artifacts are reused by default through
 the normal stage helpers. Pass `--recompute-complete` only when the operator
 intentionally wants a recompute-oriented replacement run.
 
@@ -293,7 +293,7 @@ HistData.com or InfluxDB.
 
 ```sh
 histdatacom --quality \
-  --quality-target data/DAT_ASCII_EURUSD_M1_201202.csv \
+  --quality-target data/DAT_ASCII_EURUSD_T_201202.csv \
   --quality-checks ingestion \
   --quality-report reports/quality-clean.json
 ```
@@ -303,7 +303,7 @@ summary metadata back to the local `.repo` helper file:
 
 ```sh
 histdatacom --repo-quality \
-  --quality-target data/ASCII/M1/EURUSD \
+  --quality-target data/ASCII/T/EURUSD \
   --quality-report reports/eurusd-quality.json
 ```
 
@@ -335,9 +335,9 @@ that want warnings to fail should pass
 `--quality-fail-on warning --quality-max-warnings 0`; report-only jobs can pass
 `--quality-fail-on never`.
 
-The checks encode HistData-specific assumptions: ASCII M1 files are bid OHLC
-bars, ASCII tick files include bid and ask, and source timestamps are fixed EST
-with no daylight-saving adjustment before UTC normalization.
+The checks encode HistData-specific assumptions: ASCII tick files include bid
+and ask, and source timestamps are fixed EST with no daylight-saving adjustment
+before UTC normalization.
 
 ## Common User Failures
 

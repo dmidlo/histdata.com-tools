@@ -80,7 +80,7 @@ def test_api_cache_validation_helpers_warn_without_cache_work(
     """Direct Api cache helpers should make orchestration bypass explicit."""
     from histdatacom.api import Api
 
-    record = SimpleNamespace(data_format="zip", data_timeframe="M1")
+    record = SimpleNamespace(data_format="zip", data_timeframe="T")
     monkeypatch.setattr(
         Api,
         "_validate_cache",

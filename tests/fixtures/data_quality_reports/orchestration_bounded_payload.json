@@ -17,10 +17,10 @@
           "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
           "rule_id": "domain.cross_instrument_consistency"
         },
-        "path": "data/ASCII/M1",
+        "path": "data/ASCII/T",
         "period": "2008",
         "symbol": "AUDCAD",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     },
@@ -38,10 +38,10 @@
           "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
           "rule_id": "domain.cross_instrument_consistency"
         },
-        "path": "data/ASCII/M1",
+        "path": "data/ASCII/T",
         "period": "2008",
         "symbol": "AUDCHF",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     },
@@ -59,10 +59,10 @@
           "code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
           "rule_id": "domain.cross_instrument_consistency"
         },
-        "path": "data/ASCII/M1",
+        "path": "data/ASCII/T",
         "period": "2008",
         "symbol": "CADCHF",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     }
@@ -76,7 +76,7 @@
       ]
     },
     "roots": [
-      "data/ASCII/M1"
+      "data/ASCII/T"
     ],
     "target_count": 3
   },
@@ -92,28 +92,278 @@
   "operation": "data-quality",
   "payload_limits": {
     "cross_target_summaries": {
+      "default_limit": 128,
+      "effective_limit": 128,
       "included_count": 3,
       "limit": 128,
+      "maximum_limit": null,
+      "minimum_limit": 0,
       "omitted_count": 0,
+      "requested_limit": 128,
       "total_count": 3,
-      "truncated": false
+      "truncated": false,
+      "unbounded": false
     },
     "discovery_targets": {
+      "default_limit": 128,
+      "effective_limit": 128,
       "included_count": 0,
       "limit": 128,
+      "maximum_limit": null,
+      "minimum_limit": 0,
       "omitted_count": 0,
+      "requested_limit": 128,
       "total_count": 0,
-      "truncated": false
+      "truncated": false,
+      "unbounded": false
+    },
+    "next_actions": {
+      "default_limit": 16,
+      "effective_limit": 16,
+      "included_count": 0,
+      "limit": 16,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 16,
+      "target_axes": {
+        "default_limit": 8,
+        "effective_limit": 8,
+        "limit": 8,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "requested_limit": 8,
+        "unbounded": false
+      },
+      "target_axis_limit": 8,
+      "total_count": 0,
+      "truncated": false,
+      "unbounded": false
+    },
+    "remediation_coverage": {
+      "default_limit": 16,
+      "effective_limit": 16,
+      "included_count": 1,
+      "limit": 16,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 16,
+      "target_axes": {
+        "default_limit": 8,
+        "effective_limit": 8,
+        "limit": 8,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "requested_limit": 8,
+        "unbounded": false
+      },
+      "target_axis_limit": 8,
+      "total_count": 1,
+      "truncated": false,
+      "unbounded": false
     },
     "target_summaries": {
+      "default_limit": 128,
+      "effective_limit": 128,
       "included_count": 1,
       "limit": 128,
+      "maximum_limit": null,
+      "minimum_limit": 0,
       "omitted_count": 0,
+      "requested_limit": 128,
       "total_count": 1,
-      "truncated": false
+      "truncated": false,
+      "unbounded": false
     }
   },
   "quality_profile": {},
+  "remediation_coverage": {
+    "count_limits": {
+      "finding_code_counts": {
+        "default_limit": 16,
+        "effective_limit": 16,
+        "included_count": 1,
+        "limit": 16,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "omitted_count": 0,
+        "requested_limit": 16,
+        "total_count": 1,
+        "truncated": false,
+        "unbounded": false
+      },
+      "mapped_finding_code_counts": {
+        "default_limit": 16,
+        "effective_limit": 16,
+        "included_count": 0,
+        "limit": 16,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "omitted_count": 0,
+        "requested_limit": 16,
+        "total_count": 0,
+        "truncated": false,
+        "unbounded": false
+      },
+      "mapped_rule_id_counts": {
+        "default_limit": 16,
+        "effective_limit": 16,
+        "included_count": 0,
+        "limit": 16,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "omitted_count": 0,
+        "requested_limit": 16,
+        "total_count": 0,
+        "truncated": false,
+        "unbounded": false
+      },
+      "rule_id_counts": {
+        "default_limit": 16,
+        "effective_limit": 16,
+        "included_count": 1,
+        "limit": 16,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "omitted_count": 0,
+        "requested_limit": 16,
+        "total_count": 1,
+        "truncated": false,
+        "unbounded": false
+      },
+      "unmapped_finding_code_counts": {
+        "default_limit": 16,
+        "effective_limit": 16,
+        "included_count": 1,
+        "limit": 16,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "omitted_count": 0,
+        "requested_limit": 16,
+        "total_count": 1,
+        "truncated": false,
+        "unbounded": false
+      },
+      "unmapped_rule_id_counts": {
+        "default_limit": 16,
+        "effective_limit": 16,
+        "included_count": 1,
+        "limit": 16,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "omitted_count": 0,
+        "requested_limit": 16,
+        "total_count": 1,
+        "truncated": false,
+        "unbounded": false
+      }
+    },
+    "finding_code_counts": [
+      {
+        "count": 1,
+        "finding_code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR"
+      }
+    ],
+    "finding_count": 1,
+    "included_unmapped_group_count": 1,
+    "included_unmapped_warning_error_group_count": 1,
+    "limit_metadata": {
+      "groups": {
+        "default_limit": 16,
+        "effective_limit": 16,
+        "limit": 16,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "requested_limit": 16,
+        "unbounded": false
+      },
+      "target_axes": {
+        "default_limit": 8,
+        "effective_limit": 8,
+        "limit": 8,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "requested_limit": 8,
+        "unbounded": false
+      }
+    },
+    "mapped_finding_code_counts": [],
+    "mapped_finding_count": 0,
+    "mapped_rule_id_counts": [],
+    "mapped_severity_counts": {},
+    "omitted_unmapped_group_count": 0,
+    "omitted_unmapped_warning_error_group_count": 0,
+    "rule_id_counts": [
+      {
+        "count": 1,
+        "rule_id": "domain.cross_instrument_consistency"
+      }
+    ],
+    "schema_version": "histdatacom.quality-remediation-coverage.v1",
+    "severity_counts": {
+      "error": 1
+    },
+    "unmapped_finding_code_counts": [
+      {
+        "count": 1,
+        "finding_code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR"
+      }
+    ],
+    "unmapped_finding_count": 1,
+    "unmapped_group_count": 1,
+    "unmapped_groups": [
+      {
+        "finding_code": "DOMAIN_CROSS_INSTRUMENT_TRIANGULAR_ERROR",
+        "included_target_axis_count": 1,
+        "limit_metadata": {
+          "target_axes": {
+            "default_limit": 8,
+            "effective_limit": 8,
+            "limit": 8,
+            "maximum_limit": null,
+            "minimum_limit": 0,
+            "requested_limit": 8,
+            "unbounded": false
+          }
+        },
+        "mapped": false,
+        "max_severity": "error",
+        "occurrence_count": 1,
+        "omitted_target_axis_count": 0,
+        "rule_id": "domain.cross_instrument_consistency",
+        "severity_counts": {
+          "error": 1
+        },
+        "target_axis_count": 1,
+        "target_axis_counts": [
+          {
+            "count": 1,
+            "target_axis": {
+              "data_format": "ascii",
+              "kind": "directory",
+              "period": "unknown",
+              "symbol": "unknown",
+              "timeframe": "T"
+            }
+          }
+        ],
+        "target_axis_truncated": false
+      }
+    ],
+    "unmapped_rule_id_counts": [
+      {
+        "count": 1,
+        "rule_id": "domain.cross_instrument_consistency"
+      }
+    ],
+    "unmapped_severity_counts": {
+      "error": 1
+    },
+    "unmapped_truncated": false,
+    "unmapped_warning_error_finding_count": 1,
+    "unmapped_warning_error_group_count": 1
+  },
   "report_artifact": {
     "kind": "quality-report",
     "metadata": {
@@ -157,12 +407,12 @@
         "data_format": "ascii",
         "kind": "directory",
         "metadata": {
-          "root": "data/ASCII/M1"
+          "root": "data/ASCII/T"
         },
-        "path": "data/ASCII/M1",
+        "path": "data/ASCII/T",
         "period": "",
         "symbol": "",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     }

@@ -154,7 +154,7 @@ def test_rich_progress_renders_operational_health_without_paths() -> None:
     assert "8 .data cache(s)" in rendered
     assert "3/4 symbols cached" in rendered
     assert "Sources" in rendered
-    assert "2 transient ZIP/CSV/XLS/XLSX artifact(s)" in rendered
+    assert "2 transient ZIP/CSV artifact(s)" in rendered
     assert "major-triangles: partial-cache" in rendered
     assert "ETA:" in rendered
     assert "3s" in rendered

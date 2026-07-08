@@ -474,10 +474,7 @@ def _source_state(
 def _source_detail(summary: Mapping[str, Any]) -> str:
     count = _int_value(summary.get("source_artifact_count"))
     size = _int_value(summary.get("source_artifact_size_bytes"))
-    return (
-        f"{count} transient ZIP/CSV/XLS/XLSX artifact(s), "
-        f"{_format_size(size)}"
-    )
+    return f"{count} transient ZIP/CSV artifact(s), " f"{_format_size(size)}"
 
 
 def _workflow_detail(workflows: Mapping[str, Any]) -> str:

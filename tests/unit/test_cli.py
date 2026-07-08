@@ -23,7 +23,7 @@ def test_cli() -> None:
 def test_unsupported_format_timeframe_combination_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reject CLI requests that would generate zero supported URLs."""
+    """Reject retired formats at argument parsing."""
     monkeypatch.setattr(
         sys,
         "argv",
@@ -44,7 +44,7 @@ def test_unsupported_format_timeframe_combination_exits_nonzero(
     with pytest.raises(SystemExit) as err:
         ArgParser(Options())()
 
-    assert err.value.code == 1
+    assert err.value.code == 2
 
 
 @pytest.mark.parametrize(
@@ -212,6 +212,11 @@ def test_help_advertises_quality_preflight_mode() -> None:
     assert "latest" in help_text
     assert "--quality-preflight-run-validation" in help_text
     assert "--quality-preflight-sample-size" in help_text
+    assert "--quality-profile-preview" in help_text
+    assert "--quality-profile-preview-format" in help_text
+    assert "--quality-profile-preview-output" in help_text
+    assert "--quality-profile-explain" in help_text
+    assert "--quality-remediation-catalog-audit" in help_text
 
 
 def test_help_advertises_request_json_export() -> None:
@@ -321,13 +326,13 @@ def test_build_cache_cli_filters_default_dimensions(
 
     assert options.build_cache
     assert options.formats == {"ascii"}
-    assert options.timeframes == {"M1", "T"}
+    assert options.timeframes == {"T"}
 
 
 def test_build_cache_cli_rejects_non_cacheable_dimensions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cache-only mode should fail clearly when nothing can produce .data."""
+    """Cache-only mode rejects retired formats at argument parsing."""
     monkeypatch.setattr(
         sys,
         "argv",
@@ -339,7 +344,7 @@ def test_build_cache_cli_rejects_non_cacheable_dimensions(
             "-f",
             "metatrader",
             "-t",
-            "1-minute-bar-quotes",
+            "tick-data-quotes",
             "-s",
             "2022-12",
         ],
@@ -348,7 +353,7 @@ def test_build_cache_cli_rejects_non_cacheable_dimensions(
     with pytest.raises(SystemExit) as err:
         ArgParser(Options())()
 
-    assert err.value.code == 1
+    assert err.value.code == 2
 
 
 def test_pair_groups_cli_expands_without_defaulting_to_all_pairs(
@@ -607,7 +612,7 @@ histdatacom:
             "-p",
             "usdjpy",
             "-t",
-            "1-minute-bar-quotes",
+            "tick-data-quotes",
             "-s",
             "2022-12",
             "-v",
@@ -618,7 +623,7 @@ histdatacom:
 
     assert options.pairs == ["usdjpy"]
     assert options.formats == ["ascii"]
-    assert options.timeframes == ["M1"]
+    assert options.timeframes == ["T"]
     assert options.start_yearmonth == "202212"
     assert options.verbosity == 1
     assert options.validate_urls
@@ -729,6 +734,7 @@ def test_config_file_applies_quality_command_defaults(
     """YAML config should support data-quality command options too."""
     config_path = tmp_path / "quality.yaml"
     report_path = tmp_path / "reports" / "quality.json"
+    preview_path = tmp_path / "reports" / "quality-preview.txt"
     config_path.write_text(
         f"""
 histdatacom:
@@ -739,6 +745,10 @@ histdatacom:
   quality_preflight_evidence: {tmp_path / "preflight.json"}
   quality_preflight_evidence_max_age: 120
   quality_preflight_evidence_stale_ok: true
+  quality_profile_preview: true
+  quality_profile_preview_format: text
+  quality_profile_preview_output: {preview_path}
+  remediation_catalog_audit: true
   quality_fail_on: never
   quality_max_errors: 2
   quality_max_warnings: 5
@@ -762,6 +772,12 @@ histdatacom:
     )
     assert options.quality_preflight_evidence_max_age_seconds == 120
     assert options.quality_preflight_evidence_allow_stale
+    assert options.quality_profile_preview
+    assert options.quality_profile_preview_format == "text"
+    assert options.quality_profile_preview_output_path == str(preview_path)
+    assert options.quality_profile["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
     assert options.quality_fail_on == "never"
     assert options.quality_max_errors == 2
     assert options.quality_max_warnings == 5
@@ -775,6 +791,7 @@ def test_config_file_applies_quality_preflight_defaults(
     """YAML config should support cache-scale quality preflight options."""
     config_path = tmp_path / "quality-preflight.yaml"
     report_path = tmp_path / "reports" / "preflight.json"
+    preview_path = tmp_path / "reports" / "preflight-profile.md"
     config_path.write_text(
         f"""
 histdatacom:
@@ -782,6 +799,8 @@ histdatacom:
   data_directory: {tmp_path}
   quality_checks: [ticks]
   quality_preflight_report: {report_path}
+  quality_preflight_profile_preview_output: {preview_path}
+  quality_preflight_profile_preview_format: markdown
   quality_preflight_validation_report: latest
   quality_preflight_run_validation: true
   quality_preflight_sample_size: 2
@@ -803,6 +822,10 @@ histdatacom:
     assert options.quality_paths == (str(tmp_path),)
     assert options.quality_check_groups == ["ticks"]
     assert options.quality_preflight_report_path == str(report_path)
+    assert options.quality_preflight_profile_preview_output_path == str(
+        preview_path
+    )
+    assert options.quality_preflight_profile_preview_format == "markdown"
     assert options.quality_preflight_validation_report_path == "latest"
     assert options.quality_preflight_run_validation
     assert options.quality_preflight_sample_size == 2
@@ -999,15 +1022,136 @@ def test_data_quality_cli_loads_quality_profile_file(
             str(tmp_path),
             "--quality-profile",
             str(profile_path),
+            "--quality-profile-preview",
+            "--quality-profile-preview-format",
+            "text",
+            "--quality-profile-preview-output",
+            str(tmp_path / "preview.txt"),
         ],
     )
 
     options = ArgParser(Options())()
 
+    assert options.quality_profile_preview
+    assert options.quality_profile_preview_format == "text"
+    assert options.quality_profile_preview_output_path == str(
+        tmp_path / "preview.txt"
+    )
     assert options.quality_profile_path == str(profile_path)
     assert options.quality_profile["name"] == "cli-profile"
     assert options.quality_profile["source"] == "file"
     assert options.quality_profile["source_path"] == str(profile_path)
+
+
+def test_data_quality_cli_enables_remediation_catalog_audit_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The audit flag should materialize as validated profile reporting."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-remediation-catalog-audit",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.quality_remediation_catalog_audit
+    assert options.quality_profile["source"] == "cli-options"
+    assert options.quality_profile["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+
+
+def test_data_quality_cli_merges_remediation_catalog_audit_with_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """CLI reporting opt-in should preserve unrelated profile settings."""
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "audit-merge",
+                "reporting": {
+                    "remediation_catalog_audit": {
+                        "enabled": False,
+                    }
+                },
+                "modeling_assumptions": {
+                    "target_horizon_minutes": 5,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile",
+            str(profile_path),
+            "--quality-profile-preview",
+            "--quality-remediation-catalog-audit",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.quality_profile_preview
+    assert options.quality_profile["name"] == "audit-merge"
+    assert options.quality_profile["source"] == "file"
+    assert options.quality_profile["source_path"] == str(profile_path)
+    assert options.quality_profile["modeling_assumptions"] == {
+        "target_horizon_minutes": 5
+    }
+    assert options.quality_profile["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+
+
+def test_quality_profile_preview_uses_normal_profile_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Preview mode should fail with the same invalid-profile errors."""
+    profile_path = tmp_path / "bad-quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "rules": {"not.a.real.rule": {"warning_severity": "error"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-profile-preview",
+            "--quality-profile",
+            str(profile_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        ArgParser(Options())()
+
+    assert err.value.code == 1
 
 
 def test_data_quality_cli_defaults_to_data_directory(
@@ -1031,6 +1175,30 @@ def test_data_quality_cli_defaults_to_data_directory(
     assert options.data_quality
     assert options.quality_paths == (str(tmp_path),)
     assert not options.validate_urls
+
+
+def test_data_quality_cli_accepts_fingerprint_check_group(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The fingerprint quality group should be a first-class CLI choice."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-checks",
+            "fingerprint",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.data_quality
+    assert options.quality_check_groups == ["fingerprint"]
 
 
 def test_repo_quality_cli_refresh_defaults_to_data_directory(
@@ -1090,6 +1258,22 @@ def test_repo_quality_columns_are_display_only_for_repo_table(
         ["histdatacom", "--quality-max-errors", "1"],
         ["histdatacom", "--quality-max-warnings", "1"],
         ["histdatacom", "--quality-profile", "quality-profile.json"],
+        ["histdatacom", "--quality-profile-preview"],
+        ["histdatacom", "--quality-profile-preview-format", "text"],
+        ["histdatacom", "--quality-profile-preview-output", "preview.md"],
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-profile-preview-format",
+            "text",
+        ],
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-profile-preview-output",
+            "preview.md",
+        ],
+        ["histdatacom", "--quality-remediation-catalog-audit"],
         ["histdatacom", "--quality-preflight-evidence", "preflight.json"],
         ["histdatacom", "--quality-preflight-evidence-max-age-seconds", "60"],
         ["histdatacom", "--quality-preflight-evidence-stale-ok"],
@@ -1165,6 +1349,12 @@ def test_api_quality_options_accept_inline_profile(
     options.quality_preflight_evidence_path = str(tmp_path / "preflight.json")
     options.quality_preflight_evidence_max_age_seconds = 120
     options.quality_preflight_evidence_allow_stale = True
+    options.quality_remediation_catalog_audit = True
+    options.quality_profile_preview = True
+    options.quality_profile_preview_format = "markdown"
+    options.quality_profile_preview_output_path = str(
+        tmp_path / "api-preview.md"
+    )
     options.quality_profile = {
         "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
         "name": "api-profile",
@@ -1174,6 +1364,11 @@ def test_api_quality_options_accept_inline_profile(
     parsed = ArgParser(options)()
 
     assert parsed.data_quality is True
+    assert parsed.quality_profile_preview is True
+    assert parsed.quality_profile_preview_format == "markdown"
+    assert parsed.quality_profile_preview_output_path == str(
+        tmp_path / "api-preview.md"
+    )
     assert parsed.quality_preflight_evidence_path == str(
         tmp_path / "preflight.json"
     )
@@ -1183,6 +1378,9 @@ def test_api_quality_options_accept_inline_profile(
     assert parsed.quality_profile["source"] == "api-options"
     assert parsed.quality_profile["modeling_assumptions"] == {
         "target_horizon_minutes": 5
+    }
+    assert parsed.quality_profile["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
     }
 
 
@@ -1207,7 +1405,7 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
             "-f",
             "ascii",
             "-t",
-            "1-minute-bar-quotes",
+            "tick-data-quotes",
             "-s",
             "2022-12",
             "--data-directory",
@@ -1239,7 +1437,7 @@ def test_argparser_bare_construction_uses_fresh_option_namespace(
 
     assert first_options.pairs == ["eurusd"]
     assert first_options.formats == ["ascii"]
-    assert first_options.timeframes == ["M1"]
+    assert first_options.timeframes == ["T"]
     assert first_options.data_directory == str(first_data_dir)
     assert first_options.validate_urls
     assert first_options.download_data_archives

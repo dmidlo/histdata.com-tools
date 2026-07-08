@@ -863,7 +863,7 @@ def test_check_quality_runtime_smoke_runs_installed_quality_cli(
                         target=tmp_path
                         / "data"
                         / "quality-smoke-fixtures"
-                        / "DAT_ASCII_EURUSD_M1_201202.csv",
+                        / "DAT_ASCII_EURUSD_T_201202.csv",
                         report=tmp_path
                         / "data"
                         / "quality-smoke-reports"
@@ -874,7 +874,7 @@ def test_check_quality_runtime_smoke_runs_installed_quality_cli(
                         target=tmp_path
                         / "data"
                         / "quality-smoke-fixtures"
-                        / "DAT_ASCII_EURUSD_M1_201202_BAD_NUMERIC.csv",
+                        / "DAT_ASCII_EURUSD_T_201202_BAD_NUMERIC.csv",
                         report=tmp_path
                         / "data"
                         / "quality-smoke-reports"

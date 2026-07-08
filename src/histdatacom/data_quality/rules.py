@@ -10,15 +10,9 @@ from histdatacom.data_quality.contracts import (
     QualityRunRule,
     QualitySeverity,
 )
-from histdatacom.data_quality.bars import (
-    DEFAULT_M1_OUTLIER_THRESHOLDS_BY_ASSET_CLASS,
-    HistDataAsciiM1BarIntegrityRule,
-    HistDataAsciiM1OutlierRule,
-    HistDataAsciiM1PrecisionRule,
-    HistDataAsciiM1TickReconstructionRule,
-)
 from histdatacom.data_quality.calendar import calendar_quality_rules
 from histdatacom.data_quality.discovery import normalize_quality_check_groups
+from histdatacom.data_quality.fingerprints import HistDataSeriesFingerprintRule
 from histdatacom.data_quality.ingestion import (
     HistDataAsciiRowCountIngestionRule,
     HistDataAsciiSchemaIngestionRule,
@@ -28,6 +22,7 @@ from histdatacom.data_quality.inventory import inventory_quality_rules
 from histdatacom.data_quality.manifest import manifest_quality_run_rules
 from histdatacom.data_quality.modeling import HistDataModelingReadinessRule
 from histdatacom.data_quality.profiles import (
+    QUALITY_REPORTING_METADATA_KEY,
     QualityProfile,
     quality_profile_from_value,
 )
@@ -70,8 +65,6 @@ def quality_rules_for_groups(
         rules.extend(_ingestion_quality_rules(quality_profile))
     if "all" in normalized or "time" in normalized:
         rules.extend(_time_quality_rules(quality_profile))
-    if "all" in normalized or "bars" in normalized:
-        rules.extend(_bars_quality_rules(quality_profile))
     if "all" in normalized or "ticks" in normalized:
         rules.extend(_ticks_quality_rules(quality_profile))
     if "all" in normalized or "domain" in normalized:
@@ -79,6 +72,8 @@ def quality_rules_for_groups(
         rules.extend(_calendar_quality_rules(quality_profile))
     if "all" in normalized or "modeling" in normalized:
         rules.extend(_modeling_quality_rules(quality_profile))
+    if "all" in normalized or "fingerprint" in normalized:
+        rules.extend(_fingerprint_quality_rules(quality_profile))
     return tuple(rules)
 
 
@@ -95,8 +90,6 @@ def quality_run_rules_for_groups(
         rules.extend(manifest_quality_run_rules())
     if "all" in normalized or "time" in normalized:
         rules.extend(_time_quality_run_rules(quality_profile))
-    if "all" in normalized or "bars" in normalized:
-        rules.extend(_bars_quality_run_rules(quality_profile))
     if "all" in normalized or "domain" in normalized:
         rules.extend(_domain_quality_run_rules(quality_profile))
     if "all" in normalized or "provenance" in normalized:
@@ -112,9 +105,16 @@ def quality_profile_report_metadata(
     profile: Mapping[str, Any] | QualityProfile | None,
 ) -> dict[str, JSONValue]:
     """Return report metadata for a normalized quality profile."""
-    return {
-        "quality_profile": quality_profile_from_value(profile).to_metadata()
+    quality_profile = quality_profile_from_value(profile)
+    metadata: dict[str, JSONValue] = {
+        "quality_profile": quality_profile.to_metadata()
     }
+    reporting_profile = quality_profile.reporting_profile()
+    if reporting_profile.remediation_catalog_audit.enabled:
+        metadata[QUALITY_REPORTING_METADATA_KEY] = (
+            reporting_profile.to_metadata()
+        )
+    return metadata
 
 
 def _ingestion_quality_rules(
@@ -162,7 +162,7 @@ def _time_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
 
 
 def _calendar_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
-    return calendar_quality_rules(
+    rules: tuple[QualityRule, ...] = calendar_quality_rules(
         profile.calendar_profile(),
         profile_missing_severity=profile.severity(
             "domain.calendar_sessions",
@@ -170,6 +170,7 @@ def _calendar_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
             QualitySeverity.INFO,
         ),
     )
+    return rules
 
 
 def _time_quality_run_rules(
@@ -180,51 +181,6 @@ def _time_quality_run_rules(
             tolerance=profile.gap_tolerance("time.ascii.continuity"),
             warning_severity=profile.severity(
                 "time.ascii.continuity",
-                "warning_severity",
-                QualitySeverity.WARNING,
-            ),
-        ),
-    )
-
-
-def _bars_quality_rules(profile: QualityProfile) -> tuple[QualityRule, ...]:
-    return (
-        HistDataAsciiM1BarIntegrityRule(),
-        HistDataAsciiM1PrecisionRule(
-            precision_rules_by_symbol=(profile.m1_precision_rules_by_symbol()),
-            precision_rules_by_asset_class=(
-                profile.m1_precision_rules_by_asset_class()
-            ),
-            warning_severity=profile.severity(
-                "bars.ascii.m1_precision",
-                "warning_severity",
-                QualitySeverity.WARNING,
-            ),
-        ),
-        HistDataAsciiM1OutlierRule(
-            thresholds=profile.m1_outlier_thresholds(),
-            thresholds_by_symbol=profile.m1_outlier_thresholds_by_symbol(),
-            thresholds_by_asset_class=_merged_thresholds(
-                DEFAULT_M1_OUTLIER_THRESHOLDS_BY_ASSET_CLASS,
-                profile.m1_outlier_thresholds_by_asset_class(),
-            ),
-            warning_severity=profile.severity(
-                "bars.ascii.m1_outliers",
-                "warning_severity",
-                QualitySeverity.WARNING,
-            ),
-        ),
-    )
-
-
-def _bars_quality_run_rules(
-    profile: QualityProfile,
-) -> tuple[QualityRunRule, ...]:
-    return (
-        HistDataAsciiM1TickReconstructionRule(
-            tolerance=profile.m1_tick_reconstruction_tolerance(),
-            warning_severity=profile.severity(
-                "bars.ascii.m1_tick_reconstruction",
                 "warning_severity",
                 QualitySeverity.WARNING,
             ),
@@ -342,5 +298,15 @@ def _modeling_quality_rules(
                 "warning_severity",
                 QualitySeverity.WARNING,
             ),
+        ),
+    )
+
+
+def _fingerprint_quality_rules(
+    profile: QualityProfile,
+) -> tuple[QualityRule, ...]:
+    return (
+        HistDataSeriesFingerprintRule(
+            profile=profile.fingerprint_profile(),
         ),
     )

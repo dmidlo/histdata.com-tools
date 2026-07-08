@@ -46,13 +46,13 @@ EXPECTED_CONSOLE_SCRIPTS = {
 }
 QUALITY_REPORT_SCHEMA_VERSION = "histdatacom.quality-report.v1"
 QUALITY_SMOKE_CLEAN_ROWS = (
-    "20120201 000000;1.306600;1.306600;1.306560;1.306560;0",
-    "20120201 000100;1.306570;1.306570;1.306470;1.306560;17",
-    "20120201 000200;1.306520;1.306560;1.306520;1.306560;2147483647",
+    "20120201 000003660,1.306600,1.306770,0",
+    "20120201 000003973,1.306580,1.306750,25",
+    "20120201 000014990,1.306570,1.306740,2147483647",
 )
 QUALITY_SMOKE_DIRTY_ROWS = (
     QUALITY_SMOKE_CLEAN_ROWS[0],
-    "20120201 000100;$1.306570;1.306570;1.306470;1.306560;17",
+    "20120201 000003973,$1.306580,1.306750,25",
 )
 
 
@@ -1537,8 +1537,8 @@ def _quality_runtime_env(
 def _write_quality_smoke_fixtures(data_directory: Path) -> dict[str, Path]:
     fixture_dir = data_directory / "quality-smoke-fixtures"
     fixture_dir.mkdir(parents=True, exist_ok=True)
-    clean = fixture_dir / "DAT_ASCII_EURUSD_M1_201202.csv"
-    dirty = fixture_dir / "DAT_ASCII_EURUSD_M1_201202_BAD_NUMERIC.csv"
+    clean = fixture_dir / "DAT_ASCII_EURUSD_T_201202.csv"
+    dirty = fixture_dir / "DAT_ASCII_EURUSD_T_201202_BAD_NUMERIC.csv"
     clean.write_text(
         "\n".join(QUALITY_SMOKE_CLEAN_ROWS) + "\n",
         encoding="ascii",

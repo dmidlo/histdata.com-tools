@@ -116,7 +116,7 @@ def import_pair_to_influx(pair, start, end):
     data_options.formats = {"ascii"}  # Must be {"ascii"}
     data_options.timeframes = {
         "tick-data-quotes"
-    }  # can be tick-data-quotes or 1-minute-bar-quotes
+    }  # Must be tick-data-quotes
     histdatacom(data_options)
 
 

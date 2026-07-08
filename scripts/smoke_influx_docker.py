@@ -25,13 +25,12 @@ DEFAULT_STARTUP_TIMEOUT = 60.0
 INFLUX_PORT = "8086/tcp"
 SMOKE_MEASUREMENT = "eurusd"
 SMOKE_LINES = (
-    "eurusd,source=histdata.com,format=ascii,timeframe=M1 "
-    "openbid=1.30657,highbid=1.30657,lowbid=1.30647,closebid=1.30656 "
-    "1328072460000",
+    "eurusd,source=histdata.com,format=ascii,timeframe=T "
+    "bidquote=1.3066,askquote=1.30677 1328072403660",
     "eurusd,source=histdata.com,format=ascii,timeframe=T "
     "bidquote=1.30658,askquote=1.30675 1328072403973",
 )
-EXPECTED_FIELD_COUNT = 6
+EXPECTED_FIELD_COUNT = 2
 
 RunCommand = Callable[..., subprocess.CompletedProcess[str]]
 HealthWaiter = Callable[[str, float], Mapping[str, Any]]

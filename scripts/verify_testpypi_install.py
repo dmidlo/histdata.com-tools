@@ -587,7 +587,7 @@ def _download_smoke_probe(
         "-f",
         "ascii",
         "-t",
-        "1-minute-bar-quotes",
+        "tick-data-quotes",
         "-s",
         "202201",
         "-e",

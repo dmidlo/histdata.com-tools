@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 
 from histdatacom.data_quality.contracts import (
@@ -10,6 +11,21 @@ from histdatacom.data_quality.contracts import (
     QualityRuleResult,
     QualityRunRule,
     QualityTarget,
+)
+from histdatacom.data_quality.fingerprints import (
+    HistDataFingerprintProfile,
+    HistDataSeriesFingerprintRule,
+    SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
+    series_fingerprint_coverage_summary,
+    series_fingerprint_distribution_attention_summary,
+    series_fingerprint_distribution_summary,
+    series_fingerprint_topology_attention_summary,
+    series_fingerprint_topology_summary,
 )
 from histdatacom.data_quality.ticks import (
     can_evaluate_tick_quality_bundle,
@@ -47,6 +63,7 @@ def run_quality_assessment(
     base_metadata = dict(metadata or {})
     csv_dimensions = _csv_target_dimensions(target_tuple)
     skipped_duplicate_archive_rule_count = 0
+    skipped_duplicate_archive_rule_counts: Counter[str] = Counter()
     evaluation_plan: list[
         tuple[int, QualityTarget, tuple[tuple[int, QualityRule], ...]]
     ] = []
@@ -61,6 +78,7 @@ def run_quality_assessment(
                 csv_dimensions,
             ):
                 skipped_duplicate_archive_rule_count += 1
+                skipped_duplicate_archive_rule_counts[str(rule.rule_id)] += 1
                 rule_offset += 1
                 continue
             bundle_candidates = rule_tuple[rule_offset : rule_offset + 3]
@@ -199,6 +217,60 @@ def run_quality_assessment(
             ),
         }
     rule_results = tuple(rule_results_list)
+    skipped_fingerprint_target_count = skipped_duplicate_archive_rule_counts[
+        SERIES_FINGERPRINT_RULE_ID
+    ]
+    fingerprint_coverage_summary = series_fingerprint_coverage_summary(
+        (finding for result in rule_results for finding in result.findings),
+        discovered_target_count=len(target_tuple),
+        skipped_fingerprint_target_count=skipped_fingerprint_target_count,
+        skipped_reason_counts=(
+            {
+                "duplicate_archive_preferred_csv": (
+                    skipped_fingerprint_target_count
+                )
+            }
+            if skipped_fingerprint_target_count
+            else None
+        ),
+    )
+    if fingerprint_coverage_summary is not None:
+        base_metadata[TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY] = (
+            fingerprint_coverage_summary
+        )
+    fingerprint_distribution_summary = series_fingerprint_distribution_summary(
+        (finding for result in rule_results for finding in result.findings)
+    )
+    if fingerprint_distribution_summary is not None:
+        base_metadata[
+            TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY
+        ] = fingerprint_distribution_summary
+    fingerprint_distribution_attention = (
+        series_fingerprint_distribution_attention_summary(
+            (finding for result in rule_results for finding in result.findings),
+            profile=_fingerprint_profile_for_rules(rule_tuple),
+        )
+    )
+    if fingerprint_distribution_attention is not None:
+        base_metadata[
+            TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY
+        ] = fingerprint_distribution_attention
+    fingerprint_topology_summary = series_fingerprint_topology_summary(
+        (finding for result in rule_results for finding in result.findings)
+    )
+    if fingerprint_topology_summary is not None:
+        base_metadata[TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY] = (
+            fingerprint_topology_summary
+        )
+    fingerprint_topology_attention = (
+        series_fingerprint_topology_attention_summary(
+            (finding for result in rule_results for finding in result.findings)
+        )
+    )
+    if fingerprint_topology_attention is not None:
+        base_metadata[
+            TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY
+        ] = fingerprint_topology_attention
     run_reports_list: list[QualityReport] = []
     for run_rule_index, run_rule in enumerate(run_rule_tuple, start=1):
         _emit_quality_progress(
@@ -278,6 +350,15 @@ def _csv_target_dimensions(
         for target in targets
         if target.kind.value == "csv" and all(_target_dimension(target))
     }
+
+
+def _fingerprint_profile_for_rules(
+    rules: Iterable[QualityRule],
+) -> HistDataFingerprintProfile:
+    for rule in rules:
+        if isinstance(rule, HistDataSeriesFingerprintRule):
+            return rule.profile
+    return HistDataFingerprintProfile()
 
 
 def _should_skip_duplicate_archive_rule(

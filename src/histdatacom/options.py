@@ -42,6 +42,8 @@ class Options:
         "quality_preflight_evidence_path",
         "quality_preflight_markdown",
         "quality_preflight_markdown_report_path",
+        "quality_preflight_profile_preview_format",
+        "quality_preflight_profile_preview_output_path",
         "quality_preflight_report_path",
         "quality_preflight_run_validation",
         "quality_preflight_sample_size",
@@ -49,6 +51,10 @@ class Options:
         "quality_paths",
         "quality_profile",
         "quality_profile_path",
+        "quality_profile_preview",
+        "quality_profile_preview_format",
+        "quality_profile_preview_output_path",
+        "quality_remediation_catalog_audit",
         "quality_report_path",
         "repo_quality_columns",
         "repo_quality_refresh",
@@ -108,12 +114,18 @@ class Options:
         self.quality_preflight_evidence_path: str | None = None
         self.quality_preflight_markdown: bool = False
         self.quality_preflight_markdown_report_path: str | None = None
+        self.quality_preflight_profile_preview_format: str = "json"
+        self.quality_preflight_profile_preview_output_path: str | None = None
         self.quality_preflight_sample_size: int = 4
         self.quality_preflight_report_path: str | None = None
         self.quality_preflight_run_validation: bool = False
         self.quality_preflight_validation_report_path: str | None = None
         self.quality_profile_path: str | None = None
         self.quality_profile: dict = {}
+        self.quality_profile_preview: bool = False
+        self.quality_profile_preview_format: str = "json"
+        self.quality_profile_preview_output_path: str | None = None
+        self.quality_remediation_catalog_audit: bool = False
         self.repo_quality_refresh: bool = False
         self.repo_quality_columns: bool = False
         self.request_bundle_out: str | None = None

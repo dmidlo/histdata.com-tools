@@ -17,10 +17,8 @@ from typing import Any, Iterable, Sequence
 EST_NO_DST_OFFSET_MS = 18_000_000
 UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
-M1 = "M1"
 TICK = "T"
 
-M1_COLUMNS = ("datetime", "open", "high", "low", "close", "vol")
 TICK_COLUMNS = ("datetime", "bid", "ask", "vol")
 CACHE_FILENAME = ".data"
 CACHE_FORMAT = "Polars Arrow IPC"
@@ -60,8 +58,6 @@ def _column_values(
 def columns_for_timeframe(timeframe: str) -> tuple[str, ...]:
     """Return the canonical ASCII columns for a supported timeframe."""
     match timeframe:
-        case "M1":
-            return M1_COLUMNS
         case "T":
             return TICK_COLUMNS
         case _:
@@ -71,8 +67,6 @@ def columns_for_timeframe(timeframe: str) -> tuple[str, ...]:
 def delimiter_for_timeframe(timeframe: str) -> str:
     """Return HistData's delimiter for a supported ASCII timeframe."""
     match timeframe:
-        case "M1":
-            return ";"
         case "T":
             return ","
         case _:
@@ -83,8 +77,6 @@ def parse_histdata_datetime_to_utc_ms(value: str, timeframe: str) -> int:
     """Convert HistData EST-no-DST datetime text to UTC epoch milliseconds."""
     value = value.strip()
     match timeframe:
-        case "M1":
-            parsed = _parse_m1_datetime(value)
         case "T":
             parsed = _parse_tick_datetime(value)
         case _:
@@ -97,23 +89,6 @@ def parse_histdata_datetime_to_utc_ms(value: str, timeframe: str) -> int:
         + delta.microseconds // 1_000
     )
     return epoch_ms + EST_NO_DST_OFFSET_MS
-
-
-def _parse_m1_datetime(value: str) -> datetime:
-    if len(value) != 15 or value[8] != " ":
-        raise ValueError(f"time data {value!r} does not match M1 format")
-    compact = value[:8] + value[9:]
-    if not compact.isdigit():
-        raise ValueError(f"time data {value!r} does not match M1 format")
-    return datetime(
-        int(value[:4]),
-        int(value[4:6]),
-        int(value[6:8]),
-        int(value[9:11]),
-        int(value[11:13]),
-        int(value[13:15]),
-        tzinfo=timezone.utc,
-    )
 
 
 def _parse_tick_datetime(value: str) -> datetime:
@@ -136,25 +111,10 @@ def _parse_tick_datetime(value: str) -> datetime:
 
 def normalize_ascii_row(
     timeframe: str, row: Sequence[str]
-) -> (
-    tuple[int, float, float, float, float, int] | tuple[int, float, float, int]
-):
+) -> tuple[int, float, float, int]:
     """Normalize a raw HistData ASCII row into typed values."""
     values = tuple(cell.strip() for cell in row)
     match timeframe:
-        case "M1":
-            if len(values) != 6:
-                raise ValueError(
-                    f"M1 rows must have 6 fields, got {len(values)}"
-                )
-            return (
-                parse_histdata_datetime_to_utc_ms(values[0], timeframe),
-                float(values[1]),
-                float(values[2]),
-                float(values[3]),
-                float(values[4]),
-                int(values[5]),
-            )
         case "T":
             if len(values) != 4:
                 raise ValueError(
@@ -274,17 +234,13 @@ def polars_datetime_to_utc_ms_expr(
         raw.str.slice(11, 2).cast(pl.Int32),
         raw.str.slice(13, 2).cast(pl.Int32),
     ]
-    match timeframe:
-        case "M1":
-            parsed = pl.datetime(*args, time_unit="ms")
-        case "T":
-            parsed = pl.datetime(
-                *args,
-                raw.str.slice(15, 3).cast(pl.Int32) * 1_000,
-                time_unit="ms",
-            )
-        case _:
-            raise ValueError(f"unsupported ASCII timeframe: {timeframe}")
+    if timeframe != TICK:
+        raise ValueError(f"unsupported ASCII timeframe: {timeframe}")
+    parsed = pl.datetime(
+        *args,
+        raw.str.slice(15, 3).cast(pl.Int32) * 1_000,
+        time_unit="ms",
+    )
 
     return (
         (parsed.cast(pl.Int64) + EST_NO_DST_OFFSET_MS)
@@ -441,17 +397,8 @@ def format_influx_line(
         f"source=histdata.com,format={data_format},timeframe={timeframe}"
     ).replace(" ", "")
 
-    match timeframe:
-        case "M1":
-            fields = (
-                f"openbid={row[1]},"
-                f"highbid={row[2]},"
-                f"lowbid={row[3]},"
-                f"closebid={row[4]}"
-            ).replace(" ", "")
-        case "T":
-            fields = f"bidquote={row[1]},askquote={row[2]}".replace(" ", "")
-        case _:
-            raise ValueError(f"unsupported ASCII timeframe: {timeframe}")
+    if timeframe != TICK:
+        raise ValueError(f"unsupported ASCII timeframe: {timeframe}")
+    fields = f"bidquote={row[1]},askquote={row[2]}".replace(" ", "")
 
     return f"{pair},{tags} {fields} {row[0]}"

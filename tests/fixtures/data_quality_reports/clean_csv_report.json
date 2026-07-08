@@ -3,7 +3,193 @@
     "check_groups": [
       "ingestion"
     ],
-    "operation": "data-quality"
+    "operation": "data-quality",
+    "remediation_coverage": {
+      "count_limits": {
+        "finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "included_count": 1,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": 16,
+          "total_count": 1,
+          "truncated": false,
+          "unbounded": false
+        },
+        "mapped_finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "included_count": 0,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": 16,
+          "total_count": 0,
+          "truncated": false,
+          "unbounded": false
+        },
+        "mapped_rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "included_count": 0,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": 16,
+          "total_count": 0,
+          "truncated": false,
+          "unbounded": false
+        },
+        "rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "included_count": 1,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": 16,
+          "total_count": 1,
+          "truncated": false,
+          "unbounded": false
+        },
+        "unmapped_finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "included_count": 1,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": 16,
+          "total_count": 1,
+          "truncated": false,
+          "unbounded": false
+        },
+        "unmapped_rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "included_count": 1,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": 16,
+          "total_count": 1,
+          "truncated": false,
+          "unbounded": false
+        }
+      },
+      "finding_code_counts": [
+        {
+          "count": 1,
+          "finding_code": "ASCII_SCHEMA_SUMMARY"
+        }
+      ],
+      "finding_count": 1,
+      "included_unmapped_group_count": 1,
+      "included_unmapped_warning_error_group_count": 0,
+      "limit_metadata": {
+        "groups": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 16,
+          "unbounded": false
+        },
+        "target_axes": {
+          "default_limit": 8,
+          "effective_limit": 8,
+          "limit": 8,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 8,
+          "unbounded": false
+        }
+      },
+      "mapped_finding_code_counts": [],
+      "mapped_finding_count": 0,
+      "mapped_rule_id_counts": [],
+      "mapped_severity_counts": {},
+      "omitted_unmapped_group_count": 0,
+      "omitted_unmapped_warning_error_group_count": 0,
+      "rule_id_counts": [
+        {
+          "count": 1,
+          "rule_id": "ingestion.ascii.schema"
+        }
+      ],
+      "schema_version": "histdatacom.quality-remediation-coverage.v1",
+      "severity_counts": {
+        "info": 1
+      },
+      "unmapped_finding_code_counts": [
+        {
+          "count": 1,
+          "finding_code": "ASCII_SCHEMA_SUMMARY"
+        }
+      ],
+      "unmapped_finding_count": 1,
+      "unmapped_group_count": 1,
+      "unmapped_groups": [
+        {
+          "finding_code": "ASCII_SCHEMA_SUMMARY",
+          "included_target_axis_count": 1,
+          "limit_metadata": {
+            "target_axes": {
+              "default_limit": 8,
+              "effective_limit": 8,
+              "limit": 8,
+              "maximum_limit": null,
+              "minimum_limit": 0,
+              "requested_limit": 8,
+              "unbounded": false
+            }
+          },
+          "mapped": false,
+          "max_severity": "info",
+          "occurrence_count": 1,
+          "omitted_target_axis_count": 0,
+          "rule_id": "ingestion.ascii.schema",
+          "severity_counts": {
+            "info": 1
+          },
+          "target_axis_count": 1,
+          "target_axis_counts": [
+            {
+              "count": 1,
+              "target_axis": {
+                "data_format": "ascii",
+                "kind": "csv",
+                "period": "201202",
+                "symbol": "EURUSD",
+                "timeframe": "T"
+              }
+            }
+          ],
+          "target_axis_truncated": false
+        }
+      ],
+      "unmapped_rule_id_counts": [
+        {
+          "count": 1,
+          "rule_id": "ingestion.ascii.schema"
+        }
+      ],
+      "unmapped_severity_counts": {
+        "info": 1
+      },
+      "unmapped_truncated": false,
+      "unmapped_warning_error_finding_count": 0,
+      "unmapped_warning_error_group_count": 0
+    }
   },
   "rule_results": [
     {
@@ -13,19 +199,17 @@
           "location": {
             "column": "",
             "metadata": {},
-            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
             "row_number": null,
             "timestamp_source": "",
             "timestamp_utc_ms": null
           },
-          "message": "ASCII M1 schema profile.",
+          "message": "ASCII T schema profile.",
           "metadata": {
             "columns": [
               "datetime",
-              "open",
-              "high",
-              "low",
-              "close",
+              "bid",
+              "ask",
               "vol"
             ],
             "row_count": 3
@@ -36,12 +220,12 @@
             "data_format": "ascii",
             "kind": "csv",
             "metadata": {
-              "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+              "filename": "DAT_ASCII_EURUSD_T_201202.csv"
             },
-            "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
             "period": "201202",
             "symbol": "EURUSD",
-            "timeframe": "M1"
+            "timeframe": "T"
           }
         }
       ],
@@ -52,12 +236,12 @@
         "data_format": "ascii",
         "kind": "csv",
         "metadata": {
-          "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+          "filename": "DAT_ASCII_EURUSD_T_201202.csv"
         },
-        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
         "period": "201202",
         "symbol": "EURUSD",
-        "timeframe": "M1"
+        "timeframe": "T"
       }
     }
   ],
@@ -84,12 +268,12 @@
         "data_format": "ascii",
         "kind": "csv",
         "metadata": {
-          "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+          "filename": "DAT_ASCII_EURUSD_T_201202.csv"
         },
-        "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
         "period": "201202",
         "symbol": "EURUSD",
-        "timeframe": "M1"
+        "timeframe": "T"
       },
       "warning_count": 0
     }
@@ -99,12 +283,12 @@
       "data_format": "ascii",
       "kind": "csv",
       "metadata": {
-        "filename": "DAT_ASCII_EURUSD_M1_201202.csv"
+        "filename": "DAT_ASCII_EURUSD_T_201202.csv"
       },
-      "path": "quality-fixtures/DAT_ASCII_EURUSD_M1_201202.csv",
+      "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
       "period": "201202",
       "symbol": "EURUSD",
-      "timeframe": "M1"
+      "timeframe": "T"
     }
   ]
 }

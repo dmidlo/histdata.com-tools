@@ -22,17 +22,28 @@ from histdatacom.data_quality.contracts import (
     QualityTargetKind,
     QualityStatus,
 )
+from histdatacom.data_quality.bounded_payload_contracts import (
+    bounded_payload_contract_audit,
+)
 from histdatacom.data_quality.discovery import (
     QualityDiscoveryError,
     discover_quality_targets,
     normalize_quality_check_groups,
 )
 from histdatacom.data_quality.engine import run_quality_assessment
+from histdatacom.data_quality.fingerprint_discovery import (
+    FINGERPRINT_REPORT_SURFACE_EVIDENCE_TABLE_HEADERS,
+    fingerprint_contract_audit,
+    fingerprint_report_surface_evidence_table_rows,
+)
 from histdatacom.data_quality.polars_cache import read_quality_polars_cache
 from histdatacom.data_quality.rules import (
     quality_profile_report_metadata,
     quality_rules_for_groups,
     quality_run_rules_for_groups,
+)
+from histdatacom.data_quality.reporting import (
+    quality_remediation_catalog_audit_summary,
 )
 from histdatacom.fx_enums import (
     Format,
@@ -53,6 +64,7 @@ QUALITY_PREFLIGHT_SCHEMA_VERSION = "histdatacom.quality-preflight.v1"
 QUALITY_PREFLIGHT_EVIDENCE_SCHEMA_VERSION = (
     "histdatacom.quality-preflight-evidence.v1"
 )
+QUALITY_PREFLIGHT_EVIDENCE_ARTIFACTS_METADATA_KEY = "artifacts"
 QUALITY_PREFLIGHT_INSPECTION_SCHEMA_VERSION = (
     "histdatacom.quality-preflight-inspection.v1"
 )
@@ -62,6 +74,14 @@ QUALITY_PREFLIGHT_WARN_FRACTION = 0.80
 QUALITY_PREFLIGHT_LARGE_CACHE_TARGET_COUNT = 32
 QUALITY_PREFLIGHT_VALIDATION_TEXT_LIMIT = 1200
 QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST = "latest"
+QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY = (
+    "fail-preflight-on-error"
+)
+QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY = (
+    "fail-preflight-on-error"
+)
+QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_FINDING_DISPLAY_LIMIT = 8
+QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_FINDING_DISPLAY_LIMIT = 8
 DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR = (
     Path(".histdatacom") / "closure-readiness"
 )
@@ -186,11 +206,88 @@ def write_quality_preflight_report(
     return output.resolve(strict=False)
 
 
+def write_quality_preflight_evidence_artifact(
+    content: str | bytes,
+    destination: str | Path,
+    *,
+    kind: str,
+    output_format: str,
+    schema_version: str,
+    label: str = "",
+    console_label: str = "",
+    ensure_trailing_newline: bool = True,
+) -> dict[str, JSONValue]:
+    """Write one preflight evidence artifact and return stable metadata."""
+    if str(destination) == "-":
+        raise ValueError(
+            "quality preflight evidence artifact requires a file path"
+        )
+    encoded = _artifact_content_bytes(
+        content,
+        ensure_trailing_newline=ensure_trailing_newline,
+    )
+    output = Path(destination).expanduser()
+    if output.parent != Path("."):
+        output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(encoded)
+    metadata: dict[str, JSONValue] = {
+        "state": "written",
+        "kind": kind,
+        "path": str(publish_safe_path(str(output.resolve(strict=False)))),
+        "format": output_format,
+        "schema_version": schema_version,
+        "hash_algorithm": "sha256",
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "size_bytes": len(encoded),
+    }
+    if label:
+        metadata["label"] = label
+    if console_label:
+        metadata["console_label"] = console_label
+    return metadata
+
+
+def register_quality_preflight_evidence_artifact(
+    payload: dict[str, Any],
+    key: str,
+    artifact: Mapping[str, JSONValue],
+    *,
+    legacy_key: str = "",
+) -> dict[str, JSONValue]:
+    """Register one preflight evidence artifact in the shared artifact map."""
+    evidence_value = payload.get("evidence")
+    if not isinstance(evidence_value, dict):
+        evidence_value = {}
+        payload["evidence"] = evidence_value
+    artifact_payload = dict(artifact)
+    artifacts_value = evidence_value.get(
+        QUALITY_PREFLIGHT_EVIDENCE_ARTIFACTS_METADATA_KEY
+    )
+    if not isinstance(artifacts_value, dict):
+        artifacts_value = {}
+        evidence_value[QUALITY_PREFLIGHT_EVIDENCE_ARTIFACTS_METADATA_KEY] = (
+            artifacts_value
+        )
+    artifacts_value[key] = artifact_payload
+    if legacy_key:
+        evidence_value[legacy_key] = artifact_payload
+    return artifact_payload
+
+
 def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
     """Return publish-safe Markdown evidence for a quality preflight payload."""
     safe_payload = publish_safe_json_mapping(payload)
     evidence = _mapping(safe_payload.get("evidence"))
     commands = _mapping(evidence.get("commands"))
+    fingerprint_contract = _mapping(evidence.get("fingerprint_contract_audit"))
+    bounded_payload_contract = _mapping(
+        evidence.get("bounded_payload_contract_audit")
+    )
+    profile_preview = _evidence_artifact(
+        evidence,
+        "quality_profile_preview",
+        legacy_key="quality_profile_preview",
+    )
     operational = _mapping(evidence.get("operational"))
     runtime_cleanup = _mapping(evidence.get("runtime_cleanup"))
     release = _mapping(evidence.get("release_preflight"))
@@ -203,6 +300,8 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
     budget = _mapping(safe_payload.get("temporal_budget"))
     quality = _mapping(safe_payload.get("sample_quality"))
     quality_summary = _mapping(quality.get("summary"))
+    remediation_audit = _mapping(quality.get("remediation_catalog_audit"))
+    remediation_audit_summary = _mapping(remediation_audit.get("summary"))
     decision = _mapping(safe_payload.get("decision"))
     cache_inventory = _mapping(safe_payload.get("cache_inventory"))
     lines = [
@@ -230,6 +329,10 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
             (
                 ("Preflight command", str(commands.get("preflight", ""))),
                 ("Quality command", str(commands.get("quality", ""))),
+                (
+                    "Profile preview artifact",
+                    _profile_preview_artifact_label(profile_preview),
+                ),
                 ("Checks", _join_or_all(filters.get("checks"))),
                 ("Pair groups", _join_or_all(filters.get("pair_groups"))),
                 ("Pairs", _join_or_all(filters.get("pairs"))),
@@ -292,6 +395,19 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
         ),
         "",
     ]
+    artifact_rows = _evidence_artifact_rows(evidence)
+    if artifact_rows:
+        lines.extend(
+            [
+                "## Evidence Artifacts",
+                "",
+                *_markdown_table(
+                    ("Artifact", "State", "Path", "Format", "Schema"),
+                    artifact_rows,
+                ),
+                "",
+            ]
+        )
     sample_rows = _sample_target_rows(sample)
     if sample_rows:
         lines.extend(
@@ -364,6 +480,108 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
             "",
         ]
     )
+    lines.extend(
+        [
+            "## Fingerprint Contract Audit",
+            "",
+            *_markdown_table(
+                ("Measure", "Value"),
+                _fingerprint_contract_audit_markdown_rows(fingerprint_contract),
+            ),
+            "",
+        ]
+    )
+    surface_rows = fingerprint_report_surface_evidence_table_rows(
+        _mapping(fingerprint_contract.get("report_surface_evidence"))
+    )
+    if surface_rows:
+        lines.extend(
+            [
+                "### Fingerprint Report Surface Evidence",
+                "",
+                *_markdown_table(
+                    FINGERPRINT_REPORT_SURFACE_EVIDENCE_TABLE_HEADERS,
+                    surface_rows,
+                ),
+                "",
+            ]
+        )
+    finding_rows = _fingerprint_contract_finding_rows(fingerprint_contract)
+    if finding_rows:
+        lines.extend(
+            [
+                "### Fingerprint Contract Findings",
+                "",
+                *_markdown_table(
+                    ("Severity", "Code", "Path", "Message"),
+                    finding_rows,
+                ),
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Bounded Payload Contract Audit",
+            "",
+            *_markdown_table(
+                ("Measure", "Value"),
+                _bounded_payload_contract_audit_markdown_rows(
+                    bounded_payload_contract
+                ),
+            ),
+            "",
+        ]
+    )
+    bounded_finding_rows = _bounded_payload_contract_finding_rows(
+        bounded_payload_contract
+    )
+    if bounded_finding_rows:
+        lines.extend(
+            [
+                "### Bounded Payload Contract Findings",
+                "",
+                *_markdown_table(
+                    ("Severity", "Code", "Path", "Message"),
+                    bounded_finding_rows,
+                ),
+                "",
+            ]
+        )
+    if remediation_audit_summary:
+        lines.extend(
+            [
+                "### Sample Remediation Catalog Audit",
+                "",
+                *_markdown_table(
+                    ("Measure", "Value"),
+                    (
+                        (
+                            "Status",
+                            str(remediation_audit.get("status", "unknown")),
+                        ),
+                        (
+                            "Known warning/error gaps",
+                            str(
+                                remediation_audit_summary.get(
+                                    "unmapped_warning_error_gap_count",
+                                    0,
+                                )
+                            ),
+                        ),
+                        (
+                            "Observed report unmapped warning/error groups",
+                            str(
+                                remediation_audit_summary.get(
+                                    "report_unmapped_warning_error_group_count",
+                                    0,
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+                "",
+            ]
+        )
     lines.extend(_operational_markdown_lines(operational, runtime_cleanup))
     lines.extend(
         [
@@ -752,8 +970,15 @@ def format_quality_preflight_console_summary(
     budget = _mapping(payload.get("temporal_budget"))
     quality = _mapping(payload.get("sample_quality"))
     quality_summary = _mapping(quality.get("summary"))
+    remediation_audit = _mapping(quality.get("remediation_catalog_audit"))
+    remediation_audit_summary = _mapping(remediation_audit.get("summary"))
     decision = _mapping(payload.get("decision"))
     diagnostics = _mapping(payload.get("diagnostics"))
+    evidence = _mapping(payload.get("evidence"))
+    fingerprint_contract = _mapping(evidence.get("fingerprint_contract_audit"))
+    bounded_payload_contract = _mapping(
+        evidence.get("bounded_payload_contract_audit")
+    )
     lines = [
         "Data quality cache preflight",
         "status: " + str(payload.get("status", "unknown")),
@@ -797,6 +1022,36 @@ def format_quality_preflight_console_summary(
             f"warnings={quality_summary.get('warning_count', 0)} "
             f"errors={quality_summary.get('error_count', 0)}"
         )
+    if remediation_audit_summary:
+        lines.append(
+            "sample remediation audit: "
+            f"{remediation_audit.get('status', 'unknown')} "
+            "known_warning_error_gaps="
+            f"{remediation_audit_summary.get('unmapped_warning_error_gap_count', 0)} "
+            "observed_unmapped_warning_error_groups="
+            f"{remediation_audit_summary.get('report_unmapped_warning_error_group_count', 0)}"
+        )
+    if fingerprint_contract:
+        lines.append(
+            "fingerprint contract audit: "
+            f"{fingerprint_contract.get('status', 'unknown')} "
+            f"checks={fingerprint_contract.get('check_count', 0)} "
+            f"findings={fingerprint_contract.get('finding_count', 0)} "
+            f"errors={fingerprint_contract.get('error_count', 0)} "
+            f"warnings={fingerprint_contract.get('warning_count', 0)} "
+            f"policy={fingerprint_contract.get('preflight_status_policy', '')}"
+        )
+    if bounded_payload_contract:
+        lines.append(
+            "bounded payload contract audit: "
+            f"{bounded_payload_contract.get('status', 'unknown')} "
+            f"checks={bounded_payload_contract.get('check_count', 0)} "
+            f"findings={bounded_payload_contract.get('finding_count', 0)} "
+            f"errors={bounded_payload_contract.get('error_count', 0)} "
+            f"warnings={bounded_payload_contract.get('warning_count', 0)} "
+            f"policy={bounded_payload_contract.get('preflight_status_policy', '')}"
+        )
+    lines.extend(_evidence_artifact_console_lines(evidence))
     if decision.get("reason"):
         lines.append(f"reason: {decision['reason']}")
     if decision.get("next_command"):
@@ -955,6 +1210,11 @@ def _sample_quality_payload(report: QualityReport) -> dict[str, JSONValue]:
             },
         }
     )
+    remediation_catalog_audit = quality_remediation_catalog_audit_summary(
+        report
+    )
+    if remediation_catalog_audit is not None:
+        payload["remediation_catalog_audit"] = remediation_catalog_audit
     return payload
 
 
@@ -1087,6 +1347,22 @@ def _payload(
             "status": "fail",
             "reason": "no cache targets matched the requested scope",
         }
+    payload["evidence"] = _quality_preflight_evidence_payload(
+        root_path=root_path,
+        check_groups=check_groups,
+        selected_groups=selected_groups,
+        selected_pairs=selected_pairs,
+        selected_formats=selected_formats,
+        selected_timeframes=selected_timeframes,
+        quality_profile=quality_profile,
+        validation_report_path=validation_report_path,
+        run_validation=run_validation,
+        validation_runner=validation_runner,
+    )
+    if _fingerprint_contract_audit_failed(
+        payload["evidence"]
+    ) or _bounded_payload_contract_audit_failed(payload["evidence"]):
+        payload["status"] = "fail"
     payload["decision"] = _decision_payload(
         payload,
         root_path=root_path,
@@ -1095,17 +1371,6 @@ def _payload(
         selected_pairs=selected_pairs,
         selected_formats=selected_formats,
         selected_timeframes=selected_timeframes,
-    )
-    payload["evidence"] = _quality_preflight_evidence_payload(
-        root_path=root_path,
-        check_groups=check_groups,
-        selected_groups=selected_groups,
-        selected_pairs=selected_pairs,
-        selected_formats=selected_formats,
-        selected_timeframes=selected_timeframes,
-        validation_report_path=validation_report_path,
-        run_validation=run_validation,
-        validation_runner=validation_runner,
     )
     safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
     return safe_payload
@@ -1119,6 +1384,7 @@ def _quality_preflight_evidence_payload(
     selected_pairs: tuple[str, ...],
     selected_formats: tuple[str, ...],
     selected_timeframes: tuple[str, ...],
+    quality_profile: Mapping[str, Any] | None,
     validation_report_path: str | Path | None,
     run_validation: bool,
     validation_runner: ValidationRunner | None,
@@ -1166,6 +1432,12 @@ def _quality_preflight_evidence_payload(
         ),
         "validation_source": validation_source,
         "validation_commands": validation,
+        "fingerprint_contract_audit": _fingerprint_contract_audit_payload(
+            quality_profile
+        ),
+        "bounded_payload_contract_audit": (
+            _bounded_payload_contract_audit_payload()
+        ),
         "runtime_cleanup": _preflight_runtime_cleanup_payload(),
         "operational": _preflight_operational_payload(
             root_path=root_path,
@@ -1191,6 +1463,94 @@ def _quality_preflight_evidence_payload(
     }
     safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(payload)
     return safe_payload
+
+
+def _fingerprint_contract_audit_payload(
+    quality_profile: Mapping[str, Any] | None,
+) -> dict[str, JSONValue]:
+    audit = dict(fingerprint_contract_audit(quality_profile))
+    audit["preflight_status_policy"] = (
+        QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY
+    )
+    audit["preflight_gate"] = {
+        "status": "fail" if audit.get("status") == "fail" else "pass",
+        "policy": QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY,
+        "reason": _fingerprint_contract_gate_reason(audit),
+        "standalone_command": (
+            "histdatacom quality fingerprint-schema --verify --json"
+        ),
+        "data_dependency": "representative-generated-report",
+    }
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(audit)
+    return safe_payload
+
+
+def _bounded_payload_contract_audit_payload() -> dict[str, JSONValue]:
+    audit = dict(bounded_payload_contract_audit())
+    audit["preflight_status_policy"] = (
+        QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY
+    )
+    audit["preflight_gate"] = {
+        "status": "fail" if audit.get("status") == "fail" else "pass",
+        "policy": (
+            QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY
+        ),
+        "reason": _bounded_payload_contract_gate_reason(audit),
+        "standalone_command": (
+            "histdatacom quality bounded-payload-contract --json"
+        ),
+        "data_dependency": "representative-generated-report",
+    }
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(audit)
+    return safe_payload
+
+
+def _fingerprint_contract_gate_reason(
+    audit: Mapping[str, JSONValue],
+) -> str:
+    if audit.get("status") == "fail":
+        return (
+            "fingerprint contract audit failed with "
+            f"{_int_value(audit.get('error_count'))} errors and "
+            f"{_int_value(audit.get('warning_count'))} warnings"
+        )
+    return "fingerprint contract audit passed"
+
+
+def _bounded_payload_contract_gate_reason(
+    audit: Mapping[str, JSONValue],
+) -> str:
+    if audit.get("status") == "fail":
+        return (
+            "bounded payload contract audit failed with "
+            f"{_int_value(audit.get('error_count'))} errors and "
+            f"{_int_value(audit.get('warning_count'))} warnings"
+        )
+    return "bounded payload contract audit passed"
+
+
+def _fingerprint_contract_audit_failed(
+    evidence: JSONValue,
+) -> bool:
+    audit = _mapping(_mapping(evidence).get("fingerprint_contract_audit"))
+    gate = _mapping(audit.get("preflight_gate"))
+    return (
+        audit.get("status") == "fail"
+        and gate.get("policy")
+        == QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY
+    )
+
+
+def _bounded_payload_contract_audit_failed(
+    evidence: JSONValue,
+) -> bool:
+    audit = _mapping(_mapping(evidence).get("bounded_payload_contract_audit"))
+    gate = _mapping(audit.get("preflight_gate"))
+    return (
+        audit.get("status") == "fail"
+        and gate.get("policy")
+        == QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY
+    )
 
 
 def _evidence_commands_payload(
@@ -1860,6 +2220,26 @@ def _decision_payload(
             "reason": reason or "no cache targets matched the requested scope",
             "next_command": "",
         }
+    fingerprint_gate = _fingerprint_contract_audit_gate(payload)
+    if fingerprint_gate.get("status") == "fail":
+        return {
+            "state": "fail",
+            "label": "do not run full quality battery",
+            "action": "fix fingerprint contract drift",
+            "reason": str(fingerprint_gate.get("reason", "")),
+            "next_command": str(fingerprint_gate.get("standalone_command", "")),
+        }
+    bounded_payload_gate = _bounded_payload_contract_audit_gate(payload)
+    if bounded_payload_gate.get("status") == "fail":
+        return {
+            "state": "fail",
+            "label": "do not run full quality battery",
+            "action": "fix bounded payload contract drift",
+            "reason": str(bounded_payload_gate.get("reason", "")),
+            "next_command": str(
+                bounded_payload_gate.get("standalone_command", "")
+            ),
+        }
     if status == "pass":
         return {
             "state": "safe",
@@ -1897,6 +2277,22 @@ def _decision_payload(
         "reason": reason,
         "next_command": "",
     }
+
+
+def _fingerprint_contract_audit_gate(
+    payload: Mapping[str, JSONValue],
+) -> dict[str, Any]:
+    evidence = _mapping(payload.get("evidence"))
+    audit = _mapping(evidence.get("fingerprint_contract_audit"))
+    return _mapping(audit.get("preflight_gate"))
+
+
+def _bounded_payload_contract_audit_gate(
+    payload: Mapping[str, JSONValue],
+) -> dict[str, Any]:
+    evidence = _mapping(payload.get("evidence"))
+    audit = _mapping(evidence.get("bounded_payload_contract_audit"))
+    return _mapping(audit.get("preflight_gate"))
 
 
 def _quality_preflight_evidence_state(
@@ -2196,6 +2592,26 @@ def _preflight_policy_payload(
                 DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS
             )
         },
+        "fingerprint_contract_audit": {
+            "mode": "always",
+            "status_policy": (
+                QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY
+            ),
+            "data_dependency": "representative-generated-report",
+            "standalone_command": (
+                "histdatacom quality fingerprint-schema --verify --json"
+            ),
+        },
+        "bounded_payload_contract_audit": {
+            "mode": "always",
+            "status_policy": (
+                QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY
+            ),
+            "data_dependency": "representative-generated-report",
+            "standalone_command": (
+                "histdatacom quality bounded-payload-contract --json"
+            ),
+        },
     }
 
 
@@ -2224,6 +2640,38 @@ def _policy_mismatch_reason(
         QUALITY_PREFLIGHT_WARN_FRACTION
     ):
         return "Temporal budget warning policy differs"
+    fingerprint_policy = _mapping(policy.get("fingerprint_contract_audit"))
+    if fingerprint_policy.get("mode") != "always":
+        return "fingerprint contract audit policy differs"
+    if fingerprint_policy.get("status_policy") != (
+        QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY
+    ):
+        return "fingerprint contract audit status policy differs"
+    if fingerprint_policy.get("data_dependency") != (
+        "representative-generated-report"
+    ):
+        return "fingerprint contract audit data dependency differs"
+    if fingerprint_policy.get("standalone_command") != (
+        "histdatacom quality fingerprint-schema --verify --json"
+    ):
+        return "fingerprint contract audit standalone command differs"
+    bounded_payload_policy = _mapping(
+        policy.get("bounded_payload_contract_audit")
+    )
+    if bounded_payload_policy.get("mode") != "always":
+        return "bounded payload contract audit policy differs"
+    if bounded_payload_policy.get("status_policy") != (
+        QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY
+    ):
+        return "bounded payload contract audit status policy differs"
+    if bounded_payload_policy.get("data_dependency") != (
+        "representative-generated-report"
+    ):
+        return "bounded payload contract audit data dependency differs"
+    if bounded_payload_policy.get("standalone_command") != (
+        "histdatacom quality bounded-payload-contract --json"
+    ):
+        return "bounded payload contract audit standalone command differs"
     return ""
 
 
@@ -2360,6 +2808,20 @@ def _rate(numerator: int, elapsed_seconds: float) -> float:
 
 def _rounded_optional(value: float | None) -> float | None:
     return None if value is None else round(value, 6)
+
+
+def _artifact_content_bytes(
+    content: str | bytes,
+    *,
+    ensure_trailing_newline: bool,
+) -> bytes:
+    if isinstance(content, bytes):
+        encoded = content
+    else:
+        encoded = content.encode("utf-8")
+    if ensure_trailing_newline and not encoded.endswith(b"\n"):
+        return encoded + b"\n"
+    return encoded
 
 
 def _mapping(value: object) -> dict[str, Any]:
@@ -2529,6 +2991,214 @@ def _source_artifact_state(operational: Mapping[str, Any]) -> str:
         f"{cleanup.get('state', 'unknown')} "
         f"({cleanup.get('source_artifact_count', 0)} artifacts)"
     )
+
+
+def _fingerprint_contract_audit_markdown_rows(
+    audit: Mapping[str, Any],
+) -> tuple[tuple[str, str], ...]:
+    if not audit:
+        return (
+            ("Status", "not-run"),
+            (
+                "Policy",
+                QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_AUDIT_STATUS_POLICY,
+            ),
+            ("Reason", "fingerprint contract audit was not emitted"),
+        )
+    gate = _mapping(audit.get("preflight_gate"))
+    return (
+        ("Status", str(audit.get("status", "unknown"))),
+        ("Checks", str(audit.get("check_count", 0))),
+        ("Findings", str(audit.get("finding_count", 0))),
+        ("Errors", str(audit.get("error_count", 0))),
+        ("Warnings", str(audit.get("warning_count", 0))),
+        ("Policy", str(audit.get("preflight_status_policy", ""))),
+        ("Reason", str(gate.get("reason", ""))),
+        ("Standalone command", str(gate.get("standalone_command", ""))),
+    )
+
+
+def _fingerprint_contract_finding_rows(
+    audit: Mapping[str, Any],
+) -> tuple[tuple[str, str, str, str], ...]:
+    findings = _list_of_mappings(audit.get("findings"))
+    rows: list[tuple[str, str, str, str]] = []
+    for finding in findings[
+        :QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_FINDING_DISPLAY_LIMIT
+    ]:
+        rows.append(
+            (
+                str(finding.get("severity", "")),
+                str(finding.get("code", "")),
+                str(finding.get("path", "")),
+                str(finding.get("message", "")),
+            )
+        )
+    finding_count = _int_value(audit.get("finding_count"))
+    if finding_count > len(rows):
+        rows.append(
+            (
+                "info",
+                "truncated",
+                "findings",
+                (
+                    f"{finding_count - len(rows)} additional fingerprint "
+                    "contract findings omitted from Markdown summary"
+                ),
+            )
+        )
+    return tuple(rows)
+
+
+def _bounded_payload_contract_audit_markdown_rows(
+    audit: Mapping[str, Any],
+) -> tuple[tuple[str, str], ...]:
+    if not audit:
+        return (
+            ("Status", "not-run"),
+            (
+                "Policy",
+                QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY,
+            ),
+            ("Reason", "bounded payload contract audit was not emitted"),
+        )
+    gate = _mapping(audit.get("preflight_gate"))
+    return (
+        ("Status", str(audit.get("status", "unknown"))),
+        ("Checks", str(audit.get("check_count", 0))),
+        ("Findings", str(audit.get("finding_count", 0))),
+        ("Errors", str(audit.get("error_count", 0))),
+        ("Warnings", str(audit.get("warning_count", 0))),
+        ("Policy", str(audit.get("preflight_status_policy", ""))),
+        ("Reason", str(gate.get("reason", ""))),
+        ("Standalone command", str(gate.get("standalone_command", ""))),
+    )
+
+
+def _bounded_payload_contract_finding_rows(
+    audit: Mapping[str, Any],
+) -> tuple[tuple[str, str, str, str], ...]:
+    findings = _list_of_mappings(audit.get("findings"))
+    rows: list[tuple[str, str, str, str]] = []
+    for finding in findings[
+        :QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_FINDING_DISPLAY_LIMIT
+    ]:
+        rows.append(
+            (
+                str(finding.get("severity", "")),
+                str(finding.get("code", "")),
+                str(finding.get("path", "")),
+                str(finding.get("message", "")),
+            )
+        )
+    finding_count = _int_value(audit.get("finding_count"))
+    if finding_count > len(rows):
+        rows.append(
+            (
+                "info",
+                "truncated",
+                "findings",
+                (
+                    f"{finding_count - len(rows)} additional bounded payload "
+                    "contract findings omitted from Markdown summary"
+                ),
+            )
+        )
+    return tuple(rows)
+
+
+def _evidence_artifact(
+    evidence: Mapping[str, Any],
+    key: str,
+    *,
+    legacy_key: str = "",
+) -> dict[str, Any]:
+    artifacts = _mapping(
+        evidence.get(QUALITY_PREFLIGHT_EVIDENCE_ARTIFACTS_METADATA_KEY)
+    )
+    artifact = _mapping(artifacts.get(key))
+    if artifact:
+        return artifact
+    if legacy_key:
+        return _mapping(evidence.get(legacy_key))
+    return {}
+
+
+def _iter_evidence_artifacts(
+    evidence: Mapping[str, Any],
+) -> tuple[tuple[str, dict[str, Any]], ...]:
+    artifacts = _mapping(
+        evidence.get(QUALITY_PREFLIGHT_EVIDENCE_ARTIFACTS_METADATA_KEY)
+    )
+    if not artifacts:
+        legacy_preview = _mapping(evidence.get("quality_profile_preview"))
+        if legacy_preview:
+            artifacts = {"quality_profile_preview": legacy_preview}
+    rows: list[tuple[str, dict[str, Any]]] = []
+    for key in sorted(str(item) for item in artifacts):
+        artifact = _mapping(artifacts.get(key))
+        if artifact:
+            rows.append((key, artifact))
+    return tuple(rows)
+
+
+def _evidence_artifact_rows(
+    evidence: Mapping[str, Any],
+) -> tuple[tuple[str, str, str, str, str], ...]:
+    rows: list[tuple[str, str, str, str, str]] = []
+    for key, artifact in _iter_evidence_artifacts(evidence):
+        rows.append(
+            (
+                _evidence_artifact_display_name(key, artifact),
+                str(artifact.get("state", "unknown")),
+                str(artifact.get("path", "")),
+                str(artifact.get("format", "")),
+                str(artifact.get("schema_version", "")),
+            )
+        )
+    return tuple(rows)
+
+
+def _evidence_artifact_console_lines(
+    evidence: Mapping[str, Any],
+) -> list[str]:
+    lines: list[str] = []
+    for key, artifact in _iter_evidence_artifacts(evidence):
+        label = str(
+            artifact.get("console_label")
+            or artifact.get("label")
+            or key.replace("_", " ")
+        )
+        lines.append(f"{label}: {_evidence_artifact_label(artifact)}")
+    return lines
+
+
+def _evidence_artifact_display_name(
+    key: str,
+    artifact: Mapping[str, Any],
+) -> str:
+    return str(artifact.get("label") or key.replace("_", " ").title())
+
+
+def _evidence_artifact_label(
+    artifact: Mapping[str, Any],
+) -> str:
+    """Return a compact Markdown/console label for evidence artifacts."""
+    if not artifact:
+        return "not requested"
+    state = str(artifact.get("state", "unknown"))
+    path = str(artifact.get("path", ""))
+    output_format = str(artifact.get("format", ""))
+    if path:
+        return f"{state}: {path} ({output_format})"
+    return state
+
+
+def _profile_preview_artifact_label(
+    profile_preview: Mapping[str, Any],
+) -> str:
+    """Return a compact Markdown/console label for preview artifacts."""
+    return _evidence_artifact_label(profile_preview)
 
 
 def _validation_command_rows(

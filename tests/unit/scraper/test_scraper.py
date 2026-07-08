@@ -17,9 +17,9 @@ from histdatacom.runtime_contracts import WorkStatus
 from histdatacom.scraper.scraper import Scraper
 from histdatacom.scraper.urls import Urls
 
-ASCII_M1_URL = (
+ASCII_TICK_URL = (
     "http://www.histdata.com/download-free-forex-data/"
-    "?/ascii/1-minute-bar-quotes/eurusd/2022"
+    "?/ascii/tick-data-quotes/eurusd/2022/1"
 )
 
 
@@ -30,9 +30,9 @@ def _form_html(*, token: str = "token") -> str:
       <form id="file_down">
         <input id="tk" value="{token}">
         <input id="date" value="2022">
-        <input id="datemonth" value="2022">
+        <input id="datemonth" value="202201">
         <input id="platform" value="ASCII">
-        <input id="timeframe" value="M1">
+        <input id="timeframe" value="T">
         <input id="fxpair" value="eurusd">
       </form>
     </html>
@@ -69,7 +69,7 @@ def test_validate_url_transitions_new_record_to_valid_manifest(
     """Validate stage success should return the forwarded record."""
     args = _stage_args(tmp_path)
     scraper = _scraper_without_init(args)
-    record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.URL_NEW.value)
 
     scraper._get_page_data = lambda url, timeout: {  # type: ignore[method-assign]
         "html": _form_html(),
@@ -96,7 +96,7 @@ def test_validate_url_transitions_missing_record_without_requeue(
     args = _stage_args(tmp_path)
     scraper = _scraper_without_init(args)
     scraper.check_for_repo_action = lambda: False
-    record = Record(url=ASCII_M1_URL, status=WorkStatus.URL_NEW.value)
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.URL_NEW.value)
     scraper._get_page_data = lambda url, timeout: {  # type: ignore[method-assign]
         "html": _form_html(token=""),
         "encoding": "gzip",
@@ -131,12 +131,12 @@ def test_request_file_uses_local_post_headers(monkeypatch) -> None:
 
     monkeypatch.setattr("histdatacom.scraper.scraper.requests.post", post)
     record = Record(
-        url=ASCII_M1_URL,
+        url=ASCII_TICK_URL,
         data_tk="token",
         data_date="2022",
-        data_datemonth="2022",
+        data_datemonth="202201",
         data_format="ASCII",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
     )
 
@@ -144,7 +144,7 @@ def test_request_file_uses_local_post_headers(monkeypatch) -> None:
 
     assert config.POST_HEADERS == original_headers
     assert captured[0] is not config.POST_HEADERS
-    assert captured[0]["Referer"] == ASCII_M1_URL
+    assert captured[0]["Referer"] == ASCII_TICK_URL
 
 
 def test_download_zip_transitions_valid_record_to_csv_zip(
@@ -152,16 +152,16 @@ def test_download_zip_transitions_valid_record_to_csv_zip(
 ) -> None:
     """Download stage success should return the forwarded record."""
     scraper = _scraper_without_init()
-    data_dir = tmp_path / "ASCII" / "M1" / "eurusd" / "2022"
+    data_dir = tmp_path / "ASCII" / "T" / "eurusd" / "2022" / "1"
     data_dir.mkdir(parents=True)
     record = Record(
-        url=ASCII_M1_URL,
+        url=ASCII_TICK_URL,
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{data_dir}{os.sep}",
-        zip_filename="DAT_ASCII_EURUSD_M1_2022.zip",
+        zip_filename="DAT_ASCII_EURUSD_T_202201.zip",
     )
     with zipfile.ZipFile(data_dir / record.zip_filename, "w") as archive:
-        archive.writestr("DAT_ASCII_EURUSD_M1_2022.csv", "rows")
+        archive.writestr("DAT_ASCII_EURUSD_T_202201.csv", "rows")
     args = _stage_args(tmp_path)
     scraper.args = helper_runtime_args(args)
 

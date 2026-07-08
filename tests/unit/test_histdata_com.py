@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 import histdatacom
+from histdatacom.data_quality import QUALITY_PROFILE_SCHEMA_VERSION
 from histdatacom.exceptions import InfluxConfigurationError
 from histdatacom.fx_enums import (
     MAJOR_TRIANGLE_PAIR_GROUPS,
@@ -25,7 +26,7 @@ from histdatacom.orchestration.client import (
     RuntimeDependencyError,
 )
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
+    CLEAN_TICK_CASE,
     write_ascii_case,
     write_corrupt_zip,
     write_zip_case,
@@ -42,7 +43,7 @@ def _orchestration_options(api_return_type: str = "polars") -> Options:
     options = Options()
     options.pairs = {"eurusd"}
     options.formats = {"ascii"}
-    options.timeframes = {"M1"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2022-12"
     options.api_return_type = api_return_type
     return options
@@ -129,6 +130,13 @@ def _orchestration_quality_result(
     exit_code: int = 0,
     report_path: str = "/tmp/quality.json",
     error: str = "",
+    check_groups: list[str] | None = None,
+    next_actions: dict[str, object] | None = None,
+    remediation_coverage: dict[str, object] | None = None,
+    fingerprint_distribution: dict[str, object] | None = None,
+    fingerprint_distribution_attention: dict[str, object] | None = None,
+    fingerprint_topology: dict[str, object] | None = None,
+    fingerprint_topology_attention: dict[str, object] | None = None,
 ) -> JobResult:
     """Return an orchestration result containing bounded quality metadata."""
     quality_status = (
@@ -139,7 +147,7 @@ def _orchestration_quality_result(
     )
     quality = {
         "operation": "data-quality",
-        "check_groups": ["inventory"],
+        "check_groups": check_groups or ["inventory"],
         "summary": {
             "target_count": target_count,
             "rule_count": 0,
@@ -153,10 +161,10 @@ def _orchestration_quality_result(
         "target_summaries": [
             {
                 "target": {
-                    "path": "/tmp/DAT_ASCII_EURUSD_M1_201202.csv",
+                    "path": "/tmp/DAT_ASCII_EURUSD_T_201202.csv",
                     "kind": "csv",
                     "data_format": "ascii",
-                    "timeframe": "M1",
+                    "timeframe": "T",
                     "symbol": "EURUSD",
                     "period": "201202",
                     "metadata": {},
@@ -198,6 +206,22 @@ def _orchestration_quality_result(
             },
         },
     }
+    if next_actions is not None:
+        quality["next_actions"] = next_actions
+    if remediation_coverage is not None:
+        quality["remediation_coverage"] = remediation_coverage
+    if fingerprint_distribution is not None:
+        quality["fingerprint_distribution"] = fingerprint_distribution
+    if fingerprint_distribution_attention is not None:
+        quality["fingerprint_distribution_attention"] = (
+            fingerprint_distribution_attention
+        )
+    if fingerprint_topology is not None:
+        quality["fingerprint_topology"] = fingerprint_topology
+    if fingerprint_topology_attention is not None:
+        quality["fingerprint_topology_attention"] = (
+            fingerprint_topology_attention
+        )
     if error:
         quality = {
             "operation": "data-quality",
@@ -238,8 +262,8 @@ def _orchestration_cache_result(tmp_path: Path) -> JobResult:
     from histdatacom.histdata_ascii import CACHE_FILENAME, write_polars_cache
 
     source = Api._import_file_to_polars(
-        SimpleNamespace(data_timeframe="M1"),
-        Path("tests/fixtures/histdata_ascii/DAT_ASCII_EURUSD_M1_201202.csv"),
+        SimpleNamespace(data_timeframe="T"),
+        Path("tests/fixtures/histdata_ascii/DAT_ASCII_EURUSD_T_201202.csv"),
     )
     cache_path = tmp_path / CACHE_FILENAME
     write_polars_cache(source, cache_path)
@@ -248,7 +272,7 @@ def _orchestration_cache_result(tmp_path: Path) -> JobResult:
         "path": str(cache_path),
         "metadata": {
             "filename": CACHE_FILENAME,
-            "timeframe": "M1",
+            "timeframe": "T",
             "pair": "eurusd",
             "line_count": str(source.height),
             "start": str(source.item(0, "datetime")),
@@ -799,8 +823,8 @@ def test_data_quality_cli_submits_quality_request_to_orchestration(
 
     root = tmp_path / target_kind
     root.mkdir()
-    csv_path = write_ascii_case(root, CLEAN_M1_CASE)
-    zip_path = write_zip_case(root, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(root, CLEAN_TICK_CASE)
+    zip_path = write_zip_case(root, CLEAN_TICK_CASE)
     target_path = {
         "directory": root,
         "csv": csv_path,
@@ -849,6 +873,263 @@ def test_data_quality_cli_submits_quality_request_to_orchestration(
     }
     assert "Data quality assessment" in output
     assert f"targets: {expected_count}" in output
+
+
+def test_data_quality_cli_renders_fingerprint_topology_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Quality CLI should render bounded fingerprint topology summaries."""
+    import histdatacom.histdata_com as histdata_com
+
+    root = tmp_path / "quality"
+    root.mkdir()
+    write_ascii_case(root, CLEAN_TICK_CASE)
+
+    def fake_submit(request, **kwargs: object) -> JobResult:
+        return _orchestration_quality_result(
+            check_groups=["fingerprint"],
+            next_actions={
+                "schema_version": "histdatacom.quality-next-actions.v1",
+                "action_count": 1,
+                "included_action_count": 1,
+                "omitted_action_count": 0,
+                "truncated": False,
+                "source_counts": {"fingerprint_topology_attention": 1},
+                "actions": [
+                    {
+                        "code": "inspect_duplicate_timestamp_rows",
+                        "message": "inspect duplicate timestamp rows",
+                        "action_kind": "inspect",
+                        "rule_id": "fingerprint.series",
+                        "urgency": "medium",
+                        "max_severity": None,
+                        "max_attention_level": "sequence",
+                        "occurrence_count": 1,
+                        "affected_target_count": 1,
+                        "target_axis_count": 1,
+                        "included_target_axis_count": 1,
+                        "omitted_target_axis_count": 0,
+                        "target_axis_truncated": False,
+                        "severity_counts": {},
+                        "attention_level_counts": {"sequence": 1},
+                        "source_counts": {"fingerprint_topology_attention": 1},
+                        "finding_code_counts": {},
+                        "flag_counts": {"duplicate_timestamps": 1},
+                        "target_axis_counts": [
+                            {
+                                "target_axis": {
+                                    "data_format": "ascii",
+                                    "timeframe": "T",
+                                    "symbol": "EURUSD",
+                                    "period": "201202",
+                                    "kind": "csv",
+                                },
+                                "count": 1,
+                            }
+                        ],
+                    }
+                ],
+            },
+            fingerprint_distribution={
+                "schema_version": (
+                    "histdatacom.time-series-fingerprint-distribution-summary.v1"
+                ),
+                "rule_id": "fingerprint.series",
+                "target_count": 1,
+                "included_target_count": 1,
+                "omitted_target_count": 0,
+                "truncated": False,
+                "distribution_target_count": 1,
+                "tick_distribution_target_count": 1,
+                "missing_distribution_target_count": 0,
+                "unavailable_distribution_target_count": 0,
+                "empty_distribution_target_count": 0,
+                "invalid_row_target_count": 0,
+                "partial_row_target_count": 0,
+                "truncated_distribution_target_count": 0,
+                "cache_backed_distribution_target_count": 0,
+                "text_backed_distribution_target_count": 1,
+                "total_invalid_row_count": 0,
+                "total_partial_row_count": 0,
+                "distribution_kind_counts": {"tick": 1},
+                "status_counts": {"available": 1},
+                "source_kind_counts": {"csv_text": 1},
+                "distribution_source_counts": {"text": 1},
+                "cache_source_counts": {},
+                "precision_source_counts": {"text": 1},
+                "target_summaries": [
+                    {
+                        "target_axis": {
+                            "data_format": "ascii",
+                            "timeframe": "T",
+                            "symbol": "EURUSD",
+                            "period": "201202",
+                            "kind": "csv",
+                        },
+                        "distribution_kind": "tick",
+                        "status": "available",
+                        "row_count": 3,
+                        "sampled_row_count": 3,
+                        "usable_row_count": 3,
+                        "invalid_row_count": 0,
+                        "partial_row_count": 0,
+                        "invalid_row_rate": 0.0,
+                        "truncated": False,
+                        "source_kind": "csv_text",
+                        "distribution_source": "text",
+                        "cache_source": None,
+                        "precision_source": "text",
+                        "precision_decimal_place_count": 1,
+                        "zero_spread_count": 0,
+                        "negative_spread_count": 0,
+                        "zero_spread_rate": None,
+                        "negative_spread_rate": None,
+                    }
+                ],
+            },
+            fingerprint_distribution_attention={
+                "schema_version": (
+                    "histdatacom.time-series-fingerprint-distribution-attention.v1"
+                ),
+                "rule_id": "fingerprint.series",
+                "distribution_target_count": 1,
+                "attention_target_count": 0,
+                "included_attention_target_count": 0,
+                "omitted_attention_target_count": 0,
+                "truncated": False,
+                "attention_level_counts": {},
+                "attention_flag_counts": {},
+                "target_summaries": [],
+            },
+            fingerprint_topology={
+                "target_count": 1,
+                "included_target_count": 1,
+                "omitted_target_count": 0,
+                "status_counts": {"irregular": 1},
+                "target_summaries": [
+                    {
+                        "target_axis": {
+                            "data_format": "ascii",
+                            "timeframe": "T",
+                            "symbol": "EURUSD",
+                            "period": "201202",
+                            "kind": "csv",
+                        },
+                        "row_count": 3,
+                        "parsed_row_count": 3,
+                        "duplicate_timestamp_count": 1,
+                        "non_monotonic_count": 0,
+                        "median_interval_ms": 60_000,
+                        "max_gap_ms": 60_000,
+                        "suspicious_gap_count": 0,
+                        "expected_session_closure_count": 0,
+                        "weekend_activity_count": 0,
+                        "sampling_basis": "observed_sequence",
+                        "computed_from": "text_scan",
+                        "cache_source": None,
+                        "status": "irregular",
+                        "flags": ["duplicate_timestamps"],
+                    }
+                ],
+            },
+            fingerprint_topology_attention={
+                "topology_target_count": 1,
+                "attention_target_count": 1,
+                "included_attention_target_count": 1,
+                "omitted_attention_target_count": 0,
+                "target_summaries": [
+                    {
+                        "target_axis": {
+                            "data_format": "ascii",
+                            "timeframe": "T",
+                            "symbol": "EURUSD",
+                            "period": "201202",
+                            "kind": "csv",
+                        },
+                        "attention_level": "sequence",
+                        "attention_flags": ["duplicate_timestamps"],
+                        "remediation_hints": [
+                            {
+                                "code": "inspect_duplicate_timestamp_rows",
+                                "message": "inspect duplicate timestamp rows",
+                                "action_kind": "inspect",
+                                "rule_id": "fingerprint.series",
+                                "flag": "duplicate_timestamps",
+                            }
+                        ],
+                        "flags": ["duplicate_timestamps"],
+                        "status": "irregular",
+                        "invalid_timestamp_count": 0,
+                        "duplicate_timestamp_count": 1,
+                        "non_monotonic_count": 0,
+                        "suspicious_gap_count": 0,
+                        "weekend_activity_count": 0,
+                        "expected_session_closure_count": 0,
+                        "max_gap_ms": 60_000,
+                        "computed_from": "text_scan",
+                        "cache_source": None,
+                    }
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-checks",
+            "fingerprint",
+            "--quality-target",
+            str(root),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert "Next actions" in output
+    assert (
+        "- medium inspect: inspect duplicate timestamp rows "
+        "(inspect_duplicate_timestamp_rows, rule=fingerprint.series, "
+        "targets=1, attention=sequence)"
+    ) in output
+    assert "Fingerprint distribution attention" in output
+    assert "- targets needing attention: 0 included: 0 omitted: 0" in output
+    assert "Fingerprint distributions" in output
+    assert "- targets: 1 with distributions: 1 tick: 1 missing: 0" in output
+    assert (
+        "- ascii EURUSD T 201202 csv: available, tick, 3 rows, "
+        "3 usable, 0 invalid, 3 sampled, truncated=false, "
+        "precision=text, source=text"
+    ) in output
+    assert "Fingerprint topology attention" in output
+    assert "- targets needing attention: 1 included: 1 omitted: 0" in output
+    assert (
+        "- ascii EURUSD T 201202 csv: sequence, "
+        "duplicate_timestamps, invalid=0, duplicates=1, "
+        "non-monotonic=0, suspicious gaps=0, weekend activity=0, "
+        "max gap 60s, computed_from=text_scan, "
+        "next=inspect duplicate timestamp rows"
+    ) in output
+    assert "Fingerprint topology" in output
+    assert (
+        "- targets: 1 included: 1 regular: 0 irregular: 1 unavailable: 0"
+    ) in output
+    assert (
+        "- ascii EURUSD T 201202 csv: irregular, observed_sequence, "
+        "3 rows, 3 parsed, duplicates=1, non-monotonic=0, "
+        "median interval 60s, max gap 60s, 0 expected closures, "
+        "0 suspicious gaps, weekend activity=0, computed_from=text_scan"
+    ) in output
 
 
 def test_data_quality_cli_missing_path_reports_orchestration_failure(
@@ -971,7 +1252,7 @@ def test_data_quality_api_returns_orchestration_quality_payload(
     """API quality runs should return the bounded orchestration quality payload."""
     import histdatacom.histdata_com as histdata_com
 
-    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     options = Options()
     options.data_quality = True
     options.quality_paths = (str(csv_path),)
@@ -1012,7 +1293,7 @@ def test_data_quality_api_runs_inventory_rules_for_corrupt_zip(
 
     archive = write_corrupt_zip(
         tmp_path,
-        filename="DAT_ASCII_EURUSD_M1_201202.zip",
+        filename="DAT_ASCII_EURUSD_T_201202.zip",
     )
     options = Options()
     options.data_quality = True
@@ -1060,7 +1341,7 @@ def test_data_quality_api_writes_coverage_manifest_from_metadata(
     """API quality runs should carry expected coverage into report output."""
     import histdatacom.histdata_com as histdata_com
 
-    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     options = Options()
     options.data_quality = True
     options.quality_paths = (str(csv_path),)
@@ -1071,13 +1352,13 @@ def test_data_quality_api_writes_coverage_manifest_from_metadata(
             "expected_dimensions": [
                 {
                     "data_format": "ascii",
-                    "timeframe": "M1",
+                    "timeframe": "T",
                     "symbol": "EURUSD",
                     "period": "201202",
                 },
                 {
                     "data_format": "ascii",
-                    "timeframe": "M1",
+                    "timeframe": "T",
                     "symbol": "EURUSD",
                     "period": "201203",
                 },
@@ -1127,7 +1408,7 @@ def test_data_quality_cli_writes_json_report_artifact(
     """Quality CLI should write a full JSON report when requested."""
     import histdatacom.histdata_com as histdata_com
 
-    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
     report_path = tmp_path / "reports" / "quality.json"
 
     captured: dict[str, object] = {}
@@ -1203,7 +1484,68 @@ def test_data_quality_console_summary_reports_scratch_and_sources() -> None:
     )
 
     assert "quality report: scratch report deleted after validation" in output
-    assert "source artifacts: dirty (2 transient ZIP/CSV/XLS/XLSX)" in output
+    assert "source artifacts: dirty (2 transient ZIP/CSV)" in output
+
+
+def test_data_quality_console_summary_reports_remediation_coverage() -> None:
+    """Quality console output should surface remediation coverage gaps."""
+    import histdatacom.histdata_com as histdata_com
+
+    output = histdata_com._format_orchestration_quality_console_summary(
+        {
+            "operation": "data-quality",
+            "check_groups": ["time"],
+            "summary": {
+                "target_count": 1,
+                "finding_count": 2,
+                "info_count": 0,
+                "warning_count": 1,
+                "error_count": 1,
+                "status": "failed",
+            },
+            "target_status_counts": {
+                "clean": 0,
+                "warning": 0,
+                "failed": 1,
+            },
+            "target_summaries": [],
+            "remediation_coverage": {
+                "schema_version": (
+                    "histdatacom.quality-remediation-coverage.v1"
+                ),
+                "finding_count": 2,
+                "mapped_finding_count": 0,
+                "unmapped_finding_count": 2,
+                "unmapped_warning_error_group_count": 2,
+                "included_unmapped_warning_error_group_count": 2,
+                "omitted_unmapped_warning_error_group_count": 0,
+                "unmapped_groups": [
+                    {
+                        "rule_id": "file.exists",
+                        "finding_code": "FILE_MISSING",
+                        "max_severity": "error",
+                        "occurrence_count": 1,
+                        "target_axis_count": 1,
+                    },
+                    {
+                        "rule_id": "ticks.spread",
+                        "finding_code": "NEGATIVE_SPREAD",
+                        "max_severity": "warning",
+                        "occurrence_count": 1,
+                        "target_axis_count": 1,
+                    },
+                ],
+            },
+            "exit_decision": {"exit_code": 1, "reason": "quality failed"},
+        }
+    )
+
+    assert "Remediation coverage" in output
+    assert "- findings: 2 mapped: 0 unmapped: 2" in output
+    assert "- error file.exists:FILE_MISSING findings=1 targets=1" in output
+    assert (
+        "- warning ticks.spread:NEGATIVE_SPREAD findings=1 targets=1" in output
+    )
 
 
 def test_data_quality_cli_exit_policy_fails_on_errors(
@@ -1214,7 +1556,7 @@ def test_data_quality_cli_exit_policy_fails_on_errors(
     """Quality CLI should exit non-zero when findings exceed policy."""
     import histdatacom.histdata_com as histdata_com
 
-    csv_path = write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
 
     captured: dict[str, object] = {}
 
@@ -1256,6 +1598,676 @@ def test_data_quality_cli_exit_policy_fails_on_errors(
     assert "status: failed" in output
     assert "findings: 1 info: 0 warning: 0 error: 1" in output
     assert "decision: quality error threshold exceeded" in output
+
+
+def test_quality_profile_preview_prints_resolved_profile_without_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Preview should print JSON and stop before orchestration submission."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "preview-profile",
+                "rules": {"ingestion.ascii.row_count": {"min_row_count": 10}},
+                "reporting": {"remediation_catalog_audit": {"enabled": False}},
+                "modeling_assumptions": {"target_horizon_minutes": 5},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile",
+            str(profile_path),
+            "--quality-remediation-catalog-audit",
+            "--quality-profile-preview",
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema_version"] == "histdatacom.quality-profile-preview.v1"
+    assert payload["quality_modes"] == {
+        "quality": True,
+        "repo_quality": False,
+        "quality_preflight": False,
+    }
+    assert payload["profile_inputs"]["quality_profile_path"] == str(
+        profile_path
+    )
+    assert payload["profile_inputs"]["quality_profile_preview_format"] == "json"
+    assert (
+        payload["profile_inputs"]["quality_profile_preview_output_path"] == ""
+    )
+    assert (
+        payload["profile_inputs"]["quality_remediation_catalog_audit"] is True
+    )
+    assert payload["cli_overrides"] == {
+        "reporting.remediation_catalog_audit.enabled": True
+    }
+    assert payload["quality_profile"]["name"] == "preview-profile"
+    assert payload["quality_profile"]["source"] == "file"
+    assert payload["quality_profile"]["source_path"] == str(profile_path)
+    assert payload["quality_profile"]["configured_rule_ids"] == [
+        "ingestion.ascii.row_count"
+    ]
+    assert payload["quality_profile"]["configured_modeling_assumptions"] == {
+        "target_horizon_minutes": 5
+    }
+    assert payload["quality_profile"]["configured_reporting_keys"] == [
+        "remediation_catalog_audit"
+    ]
+    assert payload["resolved_profile"]["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+    explanation = payload["profile_explanation"]
+    assert explanation["schema_version"] == (
+        "histdatacom.quality-profile-preview-explanation.v1"
+    )
+    assert explanation["profile_source"] == {
+        "kind": "profile_file",
+        "profile_name": "preview-profile",
+        "profile_source": "file",
+        "source_path": str(profile_path),
+        "is_default": False,
+    }
+    assert [channel["kind"] for channel in explanation["input_channels"]] == [
+        "built_in_default",
+        "profile_file",
+        "cli_override",
+    ]
+    value_sources = {
+        item["path"]: item
+        for item in explanation["effective_value_sources"]["values"]
+    }
+    assert (
+        value_sources["/rules/ingestion.ascii.row_count/min_row_count"][
+            "source"
+        ]
+        == "profile_file"
+    )
+    assert (
+        value_sources["/modeling_assumptions/target_horizon_minutes"]["source"]
+        == "profile_file"
+    )
+    assert value_sources["/reporting/remediation_catalog_audit/enabled"] == {
+        "path": "/reporting/remediation_catalog_audit/enabled",
+        "value": True,
+        "source": "cli_override",
+        "overridden_source": "profile_file",
+        "override": True,
+    }
+    diff = explanation["effective_diff"]
+    assert diff["schema_version"] == (
+        "histdatacom.quality-profile-preview-diff.v1"
+    )
+    assert diff["base"] == "built_in_default"
+    assert diff["truncated"] is False
+    diff_sources = {
+        change["path"]: change["source"] for change in diff["changes"]
+    }
+    assert (
+        diff_sources.items()
+        >= {
+            "/rules/ingestion.ascii.row_count/min_row_count": "profile_file",
+            "/modeling_assumptions/target_horizon_minutes": "profile_file",
+            "/reporting/remediation_catalog_audit/enabled": "cli_override",
+        }.items()
+    )
+
+
+def test_quality_profile_preview_writes_json_artifact_without_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Preview output paths should write deterministic JSON artifacts."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    preview_path = tmp_path / "reports" / "quality-preview.json"
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile-preview",
+            "--quality-profile-preview-output",
+            str(preview_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    assert capsys.readouterr().out == ""
+    payload = json.loads(preview_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "histdatacom.quality-profile-preview.v1"
+    assert payload["profile_inputs"]["quality_profile_preview_format"] == "json"
+    assert payload["profile_inputs"]["quality_profile_preview_output_path"] == (
+        str(preview_path)
+    )
+
+
+def test_quality_profile_preview_writes_text_artifact_without_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Text preview output should create parent directories."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    preview_path = tmp_path / "reports" / "quality-preview.txt"
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile-preview",
+            "--quality-profile-preview-format",
+            "text",
+            "--quality-profile-preview-output",
+            str(preview_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    assert capsys.readouterr().out == ""
+    output = preview_path.read_text(encoding="utf-8")
+    assert output.startswith("Quality Profile Preview\n")
+    assert '- quality_profile_preview_format: "text"' in output
+    assert "- quality_profile_preview_output_path: " in output
+
+
+def test_quality_profile_preview_output_dash_writes_stdout_once(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The existing '-' output convention should mean stdout, not a file."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile-preview",
+            "--quality-profile-preview-format",
+            "markdown",
+            "--quality-profile-preview-output",
+            "-",
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert output.count("# Quality Profile Preview") == 1
+    assert output.startswith("# Quality Profile Preview\n")
+    assert '| quality_profile_preview_output_path | "-" |' in output
+
+
+def test_quality_profile_preview_text_format_renders_explanation_without_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Text preview should render bounded explanation rows and stop."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "preview-text",
+                "rules": {"ingestion.ascii.row_count": {"min_row_count": 10}},
+                "reporting": {"remediation_catalog_audit": {"enabled": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-target",
+            str(tmp_path),
+            "--quality-profile",
+            str(profile_path),
+            "--quality-remediation-catalog-audit",
+            "--quality-profile-preview",
+            "--quality-profile-preview-format",
+            "text",
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert output.startswith("Quality Profile Preview")
+    assert "modes: quality" in output
+    assert (
+        f"profile: profile_file name=preview-text path={profile_path}" in output
+    )
+    assert "Profile Inputs" in output
+    assert '- quality_profile_preview_format: "text"' in output
+    assert "Input Channels" in output
+    assert "- profile_file:" in output
+    assert "- cli_override:" in output
+    assert "Explicit Overrides" in output
+    assert "- reporting.remediation_catalog_audit.enabled: true" in output
+    assert "Effective Diff From Built-In Defaults" in output
+    assert (
+        "- /rules/ingestion.ascii.row_count/min_row_count "
+        "[profile_file]: null -> 10"
+    ) in output
+    assert (
+        "- /reporting/remediation_catalog_audit/enabled "
+        "[cli_override]: false -> true"
+    ) in output
+    assert "Value Sources" in output
+    assert (
+        "- /reporting/remediation_catalog_audit/enabled "
+        "[cli_override override]: true"
+    ) in output
+
+
+@pytest.mark.parametrize(
+    ("mode_flag", "expected_modes"),
+    [
+        (
+            "--repo-quality",
+            {
+                "quality": False,
+                "repo_quality": True,
+                "quality_preflight": False,
+            },
+        ),
+        (
+            "--quality-preflight",
+            {
+                "quality": False,
+                "repo_quality": False,
+                "quality_preflight": True,
+            },
+        ),
+    ],
+)
+def test_quality_profile_preview_supports_quality_modes_without_work(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode_flag: str,
+    expected_modes: dict[str, bool],
+) -> None:
+    """Preview should support every quality mode without running work."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    def fail_preflight(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not run preflight")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "run_cache_quality_preflight",
+        fail_preflight,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            mode_flag,
+            "--quality-profile-preview",
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema_version"] == "histdatacom.quality-profile-preview.v1"
+    assert payload["quality_modes"] == expected_modes
+    assert payload["quality_profile"]["source"] == "default"
+    assert payload["resolved_profile"]["reporting"] == {
+        "remediation_catalog_audit": {"enabled": False}
+    }
+    assert payload["profile_explanation"]["profile_source"]["kind"] == (
+        "built_in_default"
+    )
+    assert (
+        payload["profile_explanation"]["effective_diff"]["changed_value_count"]
+        == 0
+    )
+
+
+def test_api_quality_profile_preview_returns_payload_without_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """API callers should receive the same resolved profile preview payload."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    options = Options()
+    options.data_quality = True
+    options.quality_profile_preview = True
+    options.quality_profile_preview_format = "text"
+    options.quality_remediation_catalog_audit = True
+    options.quality_profile = {
+        "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+        "name": "api-preview",
+        "modeling_assumptions": {"target_horizon_minutes": 15},
+    }
+    preview_path = tmp_path / "api-preview.txt"
+    options.quality_profile_preview_output_path = str(preview_path)
+
+    payload = histdata_com.main(options)
+
+    assert payload["schema_version"] == "histdatacom.quality-profile-preview.v1"
+    assert payload["profile_inputs"]["from_api"] is True
+    assert payload["profile_inputs"]["quality_profile_preview_format"] == "text"
+    assert payload["profile_inputs"]["quality_profile_preview_output_path"] == (
+        str(preview_path)
+    )
+    assert payload["quality_profile"]["source"] == "api-options"
+    assert payload["quality_profile"]["configured_modeling_assumptions"] == {
+        "target_horizon_minutes": 15
+    }
+    assert payload["resolved_profile"]["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+    explanation = payload["profile_explanation"]
+    assert explanation["profile_source"]["kind"] == "api_options"
+    assert [channel["kind"] for channel in explanation["input_channels"]] == [
+        "built_in_default",
+        "api_options",
+        "cli_override",
+    ]
+    value_sources = {
+        item["path"]: item
+        for item in explanation["effective_value_sources"]["values"]
+    }
+    assert (
+        value_sources["/modeling_assumptions/target_horizon_minutes"]["source"]
+        == "api_options"
+    )
+    assert (
+        value_sources["/reporting/remediation_catalog_audit/enabled"]["source"]
+        == "cli_override"
+    )
+    assert preview_path.read_text(encoding="utf-8").startswith(
+        "Quality Profile Preview\n"
+    )
+
+
+def test_config_quality_profile_preview_explains_yaml_and_profile_sources(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Preview should show YAML config and profile-file input channels."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "config-profile",
+                "rules": {
+                    "fingerprint.series": {
+                        "max_rows": 50,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality: true
+  quality_target: {tmp_path}
+  quality_profile: {profile_path}
+  quality_profile_preview: true
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["profile_inputs"]["config_path"] == str(config_path)
+    explanation = payload["profile_explanation"]
+    assert [channel["kind"] for channel in explanation["input_channels"]] == [
+        "built_in_default",
+        "yaml_config",
+        "profile_file",
+    ]
+    value_sources = {
+        item["path"]: item
+        for item in explanation["effective_value_sources"]["values"]
+    }
+    assert (
+        value_sources["/rules/fingerprint.series/max_rows"]["source"]
+        == "profile_file"
+    )
+
+
+def test_config_quality_profile_preview_markdown_renders_tables(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """YAML-configured Markdown preview should render explanation tables."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "markdown-profile",
+                "rules": {"fingerprint.series": {"max_rows": 50}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality: true
+  quality_target: {tmp_path}
+  quality_profile: {profile_path}
+  quality_profile_preview: true
+  quality_profile_preview_format: markdown
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert output.startswith("# Quality Profile Preview")
+    assert "| Field | Value |" in output
+    assert "| Modes | quality |" in output
+    assert "| Profile | profile_file name=markdown-profile" in output
+    assert "## Profile Inputs" in output
+    assert '| quality_profile_preview_format | "markdown" |' in output
+    assert "## Input Channels" in output
+    assert "| yaml_config | path=" in output
+    assert '| profile_file | profile_name="markdown-profile"' in output
+    assert "## Effective Diff From Built-In Defaults" in output
+    assert (
+        "| /rules/fingerprint.series/max_rows | profile_file | null | 50 |"
+        in output
+    )
+    assert "## Value Sources" in output
+    assert (
+        "| /rules/fingerprint.series/max_rows | profile_file | 50 |" in output
+    )
+
+
+def test_config_quality_profile_preview_markdown_writes_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """YAML-configured Markdown preview should write an artifact path."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    preview_path = tmp_path / "reports" / "profile-preview.md"
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality: true
+  quality_target: {tmp_path}
+  quality_profile_preview: true
+  quality_profile_preview_format: markdown
+  quality_profile_preview_output: {preview_path}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    assert capsys.readouterr().out == ""
+    output = preview_path.read_text(encoding="utf-8")
+    assert output.startswith("# Quality Profile Preview\n")
+    assert "| Modes | quality |" in output
+    assert "| quality_profile_preview_output_path | " in output
 
 
 def test_back_to_back_orchestration_api_calls_do_not_leak_global_args(
@@ -1321,7 +2333,7 @@ def test_api_default_runtime_uses_orchestration(
     options = Options()
     options.pairs = {"eurusd"}
     options.formats = {"ascii"}
-    options.timeframes = {"M1"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2022-12"
 
     result = histdata_com.main(options)
@@ -1355,7 +2367,7 @@ def test_api_pair_groups_submit_expanded_pairs(
     options = Options()
     options.pair_groups = {"majors"}
     options.formats = {"ascii"}
-    options.timeframes = {"M1"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2022-12"
 
     result = histdata_com.main(options)
@@ -1393,7 +2405,7 @@ def test_api_major_triangle_group_submits_expanded_pairs(
     options = Options()
     options.pair_groups = {"major triangles"}
     options.formats = {"ascii"}
-    options.timeframes = {"M1"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2022-12"
 
     result = histdata_com.main(options)
@@ -1424,7 +2436,7 @@ def test_api_individual_triangle_group_submits_expanded_pairs(
     options = Options()
     options.pair_groups = {group}
     options.formats = {"ascii"}
-    options.timeframes = {"M1"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2022-12"
 
     result = histdata_com.main(options)
@@ -1593,7 +2605,7 @@ def test_back_to_back_cli_orchestration_requests_use_fresh_parser_state(
             "-f",
             "ascii",
             "-t",
-            "1-minute-bar-quotes",
+            "tick-data-quotes",
             "-s",
             "2022-12",
             "--data-directory",
@@ -1629,7 +2641,7 @@ def test_back_to_back_cli_orchestration_requests_use_fresh_parser_state(
     first_request, first_kwargs = captured[0]
     second_request, second_kwargs = captured[1]
     assert first_request.pairs == ("eurusd",)
-    assert first_request.timeframes == ("M1",)
+    assert first_request.timeframes == ("T",)
     assert first_request.data_directory == str(tmp_path / "first")
     assert first_request.validate_urls
     assert first_request.download_data_archives
@@ -1711,7 +2723,7 @@ def test_api_foreground_opt_out_is_rejected(
     options.use_orchestration = False
     options.pairs = {"eurusd"}
     options.formats = {"ascii"}
-    options.timeframes = {"M1"}
+    options.timeframes = {"T"}
     options.start_yearmonth = "2022-12"
 
     with pytest.raises(ValueError, match="foreground compatibility runtime"):

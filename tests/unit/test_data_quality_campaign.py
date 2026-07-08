@@ -25,21 +25,13 @@ def test_campaign_report_uses_repo_ranges_for_work_surface() -> None:
     )
 
     assert report["schema_version"] == CAMPAIGN_REPORT_SCHEMA_VERSION
-    assert report["status"] == "deferred"
+    assert report["status"] == "preflighted"
     assert report["repo"]["pair_count"] == 2
-    assert report["totals"]["work_item_count"] == 45
-    assert report["totals"]["deep_quality_work_item_count"] == 10
-    assert report["totals"]["deferred_work_item_count"] == 35
+    assert report["totals"]["work_item_count"] == 5
+    assert report["totals"]["deep_quality_work_item_count"] == 5
+    assert report["totals"]["deferred_work_item_count"] == 0
     assert report["totals"]["work_items_by_dimension"] == [
-        {"format": "ascii", "timeframe": "M1", "work_item_count": 5},
         {"format": "ascii", "timeframe": "T", "work_item_count": 5},
-        {"format": "excel", "timeframe": "M1", "work_item_count": 5},
-        {"format": "metastock", "timeframe": "M1", "work_item_count": 5},
-        {"format": "metatrader", "timeframe": "M1", "work_item_count": 5},
-        {"format": "ninjatrader", "timeframe": "M1", "work_item_count": 5},
-        {"format": "ninjatrader", "timeframe": "T_ASK", "work_item_count": 5},
-        {"format": "ninjatrader", "timeframe": "T_BID", "work_item_count": 5},
-        {"format": "ninjatrader", "timeframe": "T_LAST", "work_item_count": 5},
     ]
 
 
@@ -89,7 +81,7 @@ def test_storage_backed_campaign_plan_updates_repo_before_cache_cleanup() -> (
         data_directory="data",
         reports_directory="data/.quality/issue-240",
         formats=("ascii",),
-        timeframes=("M1",),
+        timeframes=("T",),
         current_yearmonth="202202",
         slice_symbol_count=1,
         cleanup_mode="cache",
@@ -108,7 +100,7 @@ def test_storage_backed_campaign_plan_updates_repo_before_cache_cleanup() -> (
     assert commands[0] == {
         "step": "download_extract_slice",
         "command": (
-            "histdatacom -D -X -p audusd -f ascii -t 1-minute-bar-quotes "
+            "histdatacom -D -X -p audusd -f ascii -t tick-data-quotes "
             "--data-directory data"
         ),
     }
@@ -116,15 +108,15 @@ def test_storage_backed_campaign_plan_updates_repo_before_cache_cleanup() -> (
     assert commands[1]["updates_repo"] is True
     assert commands[1]["repo_path"] == "data/.repo"
     assert commands[1]["command"] == (
-        "histdatacom --repo-quality --quality-target data/ASCII/M1/audusd "
+        "histdatacom --repo-quality --quality-target data/ASCII/T/audusd "
         "--quality-checks all --quality-report "
         "data/.quality/issue-240/"
-        "issue-240-001-ascii-m1-audusd-quality.json "
+        "issue-240-001-ascii-t-audusd-quality.json "
         "--data-directory data"
     )
     assert commands[2] == {
         "step": "cleanup_after_repo_quality",
-        "command": "find data/ASCII/M1/audusd -name .data -type f -delete",
+        "command": "find data/ASCII/T/audusd -name .data -type f -delete",
         "preserves_repo": True,
         "preserves_quality_reports": True,
     }
@@ -139,7 +131,7 @@ def test_storage_backed_campaign_plan_preserves_cache_by_default() -> None:
         data_directory="data",
         reports_directory="data/.quality/issue-240",
         formats=("ascii",),
-        timeframes=("M1",),
+        timeframes=("T",),
         current_yearmonth="202201",
         platform_executable_bundled=True,
     )
@@ -194,7 +186,7 @@ def test_storage_backed_campaign_plan_marks_source_checkout_boundary() -> None:
         data_directory="data",
         reports_directory="data/.quality/issue-240",
         formats=("ascii",),
-        timeframes=("M1",),
+        timeframes=("T",),
         current_yearmonth="202201",
         cleanup_mode="cache",
         platform_executable_bundled=False,

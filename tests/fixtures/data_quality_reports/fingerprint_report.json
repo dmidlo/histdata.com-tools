@@ -1,0 +1,1138 @@
+{
+  "metadata": {
+    "check_groups": [
+      "fingerprint"
+    ],
+    "operation": "data-quality",
+    "remediation_coverage": {
+      "count_limits": {
+        "finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "included_count": 1,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": 16,
+          "total_count": 1,
+          "truncated": false,
+          "unbounded": false
+        },
+        "mapped_finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "included_count": 0,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": 16,
+          "total_count": 0,
+          "truncated": false,
+          "unbounded": false
+        },
+        "mapped_rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "included_count": 0,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": 16,
+          "total_count": 0,
+          "truncated": false,
+          "unbounded": false
+        },
+        "rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "included_count": 1,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": 16,
+          "total_count": 1,
+          "truncated": false,
+          "unbounded": false
+        },
+        "unmapped_finding_code_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "included_count": 1,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": 16,
+          "total_count": 1,
+          "truncated": false,
+          "unbounded": false
+        },
+        "unmapped_rule_id_counts": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "included_count": 1,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": 16,
+          "total_count": 1,
+          "truncated": false,
+          "unbounded": false
+        }
+      },
+      "finding_code_counts": [
+        {
+          "count": 1,
+          "finding_code": "FINGERPRINT_SERIES_SUMMARY"
+        }
+      ],
+      "finding_count": 1,
+      "included_unmapped_group_count": 1,
+      "included_unmapped_warning_error_group_count": 0,
+      "limit_metadata": {
+        "groups": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 16,
+          "unbounded": false
+        },
+        "target_axes": {
+          "default_limit": 8,
+          "effective_limit": 8,
+          "limit": 8,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 8,
+          "unbounded": false
+        }
+      },
+      "mapped_finding_code_counts": [],
+      "mapped_finding_count": 0,
+      "mapped_rule_id_counts": [],
+      "mapped_severity_counts": {},
+      "omitted_unmapped_group_count": 0,
+      "omitted_unmapped_warning_error_group_count": 0,
+      "rule_id_counts": [
+        {
+          "count": 1,
+          "rule_id": "fingerprint.series"
+        }
+      ],
+      "schema_version": "histdatacom.quality-remediation-coverage.v1",
+      "severity_counts": {
+        "info": 1
+      },
+      "unmapped_finding_code_counts": [
+        {
+          "count": 1,
+          "finding_code": "FINGERPRINT_SERIES_SUMMARY"
+        }
+      ],
+      "unmapped_finding_count": 1,
+      "unmapped_group_count": 1,
+      "unmapped_groups": [
+        {
+          "finding_code": "FINGERPRINT_SERIES_SUMMARY",
+          "included_target_axis_count": 1,
+          "limit_metadata": {
+            "target_axes": {
+              "default_limit": 8,
+              "effective_limit": 8,
+              "limit": 8,
+              "maximum_limit": null,
+              "minimum_limit": 0,
+              "requested_limit": 8,
+              "unbounded": false
+            }
+          },
+          "mapped": false,
+          "max_severity": "info",
+          "occurrence_count": 1,
+          "omitted_target_axis_count": 0,
+          "rule_id": "fingerprint.series",
+          "severity_counts": {
+            "info": 1
+          },
+          "target_axis_count": 1,
+          "target_axis_counts": [
+            {
+              "count": 1,
+              "target_axis": {
+                "data_format": "ascii",
+                "kind": "csv",
+                "period": "201202",
+                "symbol": "EURUSD",
+                "timeframe": "T"
+              }
+            }
+          ],
+          "target_axis_truncated": false
+        }
+      ],
+      "unmapped_rule_id_counts": [
+        {
+          "count": 1,
+          "rule_id": "fingerprint.series"
+        }
+      ],
+      "unmapped_severity_counts": {
+        "info": 1
+      },
+      "unmapped_truncated": false,
+      "unmapped_warning_error_finding_count": 0,
+      "unmapped_warning_error_group_count": 0
+    },
+    "time_series_fingerprint_coverage": {
+      "cache_source_counts": {},
+      "discovered_target_count": 1,
+      "evaluated_fingerprint_target_count": 1,
+      "fingerprint_target_count": 1,
+      "parsed_non_empty_coverage_count": 1,
+      "rule_id": "fingerprint.series",
+      "schema_version": "histdatacom.time-series-fingerprint-coverage.v1",
+      "skipped_fingerprint_target_count": 0,
+      "skipped_reason_counts": {},
+      "source_kind_counts": {
+        "csv_text": 1
+      },
+      "supported_readable_count": 1,
+      "target_kind_counts": {
+        "csv": 1
+      },
+      "timeframe_counts": {
+        "T": 1
+      },
+      "unavailable_count": 0,
+      "unavailable_reason_counts": {}
+    },
+    "time_series_fingerprint_distribution_attention": {
+      "attention_flag_counts": {},
+      "attention_level_counts": {},
+      "attention_target_count": 0,
+      "attention_thresholds": {
+        "flag_cache_float_precision": true,
+        "flag_truncated_distribution": true,
+        "invalid_row_min_count": 1,
+        "invalid_row_min_rate": 0.0,
+        "negative_spread_min_count": 1,
+        "negative_spread_min_rate": 0.0,
+        "zero_spread_min_count": 1,
+        "zero_spread_min_rate": 0.0
+      },
+      "distribution_target_count": 1,
+      "included_attention_target_count": 0,
+      "limit_metadata": {
+        "targets": {
+          "default_limit": 32,
+          "effective_limit": 32,
+          "limit": 32,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 32,
+          "unbounded": false
+        }
+      },
+      "omitted_attention_target_count": 0,
+      "rule_id": "fingerprint.series",
+      "schema_version": "histdatacom.time-series-fingerprint-distribution-attention.v1",
+      "target_summaries": [],
+      "truncated": false
+    },
+    "time_series_fingerprint_distribution_summary": {
+      "cache_backed_distribution_target_count": 0,
+      "cache_source_counts": {},
+      "distribution_kind_counts": {
+        "tick": 1
+      },
+      "distribution_source_counts": {
+        "text": 1
+      },
+      "distribution_target_count": 1,
+      "empty_distribution_target_count": 0,
+      "included_target_count": 1,
+      "invalid_row_target_count": 0,
+      "limit_metadata": {
+        "targets": {
+          "default_limit": 128,
+          "effective_limit": 128,
+          "limit": 128,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 128,
+          "unbounded": false
+        }
+      },
+      "missing_distribution_target_count": 0,
+      "omitted_target_count": 0,
+      "partial_row_target_count": 0,
+      "precision_source_counts": {
+        "text": 1
+      },
+      "rule_id": "fingerprint.series",
+      "schema_version": "histdatacom.time-series-fingerprint-distribution-summary.v1",
+      "source_kind_counts": {
+        "csv_text": 1
+      },
+      "status_counts": {
+        "available": 1
+      },
+      "target_count": 1,
+      "target_summaries": [
+        {
+          "cache_source": null,
+          "distribution_kind": "tick",
+          "distribution_source": "text",
+          "invalid_row_count": 0,
+          "invalid_row_rate": 0.0,
+          "negative_spread_count": 0,
+          "negative_spread_rate": null,
+          "partial_row_count": 0,
+          "precision_decimal_place_count": 1,
+          "precision_source": "text",
+          "row_count": 3,
+          "sampled_row_count": 3,
+          "source_kind": "csv_text",
+          "status": "available",
+          "target_axis": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "T"
+          },
+          "truncated": false,
+          "usable_row_count": 3,
+          "zero_spread_count": 0,
+          "zero_spread_rate": null
+        }
+      ],
+      "text_backed_distribution_target_count": 1,
+      "tick_distribution_target_count": 1,
+      "total_invalid_row_count": 0,
+      "total_partial_row_count": 0,
+      "truncated": false,
+      "truncated_distribution_target_count": 0,
+      "unavailable_distribution_target_count": 0
+    },
+    "time_series_fingerprint_readiness_risk": {
+      "clean_target_count": 0,
+      "included_target_count": 1,
+      "limit_metadata": {
+        "reasons": {
+          "default_limit": 8,
+          "effective_limit": 8,
+          "limit": 8,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": null,
+          "unbounded": false
+        },
+        "sections": {
+          "default_limit": 8,
+          "effective_limit": 8,
+          "limit": 8,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": null,
+          "unbounded": false
+        },
+        "targets": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": null,
+          "unbounded": false
+        }
+      },
+      "omitted_target_count": 0,
+      "reason_counts": {
+        "conditional_distribution_absent": 1,
+        "missing_regime_summary": 1,
+        "not_emitted": 2
+      },
+      "report_surface_evidence": {
+        "bounded_payload_state_counts": {
+          "present": 8
+        },
+        "cli_summary_state_counts": {
+          "present": 8
+        },
+        "report_metadata_state_counts": {
+          "present": 8
+        },
+        "schema_version": "histdatacom.time-series-fingerprint-report-surface-evidence.v1",
+        "surface_count": 8
+      },
+      "risk_level_counts": {
+        "high": 1
+      },
+      "risk_target_count": 1,
+      "rule_id": "fingerprint.series",
+      "schema_version": "histdatacom.time-series-fingerprint-readiness-risk.v1",
+      "section_risk_counts": {
+        "calendar_regimes": 1,
+        "conditional_distributions": 1,
+        "dependence": 1,
+        "microstructure_dynamics": 1
+      },
+      "section_status_counts": {
+        "calendar_regimes": {
+          "skipped": 1
+        },
+        "coverage": {
+          "valid": 1
+        },
+        "microstructure_dynamics": {
+          "skipped": 1
+        },
+        "temporal_topology": {
+          "valid": 1
+        },
+        "tick_distribution": {
+          "valid": 1
+        }
+      },
+      "source_schema_version": "histdatacom.time-series-fingerprint-readiness-summary.v1",
+      "target_count": 1,
+      "target_risks": [
+        {
+          "included_section_risk_count": 4,
+          "omitted_section_risk_count": 0,
+          "rank": 1,
+          "reason_codes": [
+            "not_emitted",
+            "conditional_distribution_absent",
+            "missing_regime_summary"
+          ],
+          "reason_counts": {
+            "conditional_distribution_absent": 1,
+            "missing_regime_summary": 1,
+            "not_emitted": 2
+          },
+          "risk_level": "high",
+          "risk_score": 125,
+          "section_risk_count": 4,
+          "section_risks": [
+            {
+              "included_reason_count": 1,
+              "omitted_reason_count": 0,
+              "reason_count": 1,
+              "reasons": [
+                "missing_regime_summary"
+              ],
+              "score": 35,
+              "section": "calendar_regimes",
+              "status": "missing"
+            },
+            {
+              "included_reason_count": 1,
+              "omitted_reason_count": 0,
+              "reason_count": 1,
+              "reasons": [
+                "not_emitted"
+              ],
+              "score": 35,
+              "section": "dependence",
+              "status": "skipped"
+            },
+            {
+              "included_reason_count": 1,
+              "omitted_reason_count": 0,
+              "reason_count": 1,
+              "reasons": [
+                "not_emitted"
+              ],
+              "score": 35,
+              "section": "microstructure_dynamics",
+              "status": "skipped"
+            },
+            {
+              "included_reason_count": 1,
+              "omitted_reason_count": 0,
+              "reason_count": 1,
+              "reasons": [
+                "conditional_distribution_absent"
+              ],
+              "score": 20,
+              "section": "conditional_distributions",
+              "status": "absent"
+            }
+          ],
+          "section_risks_truncated": false,
+          "target_axis": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "T"
+          }
+        }
+      ],
+      "truncated": false
+    },
+    "time_series_fingerprint_readiness_summary": {
+      "applicable_dynamics_status_counts": {
+        "skipped": 1
+      },
+      "cache_source_counts": {},
+      "computed_from_counts": {},
+      "dependence_acf_basis_counts": {},
+      "dependence_computed_lag_count": 0,
+      "dependence_limitation_counts": {},
+      "dependence_reason_counts": {
+        "not_emitted": 1
+      },
+      "dependence_skipped_lag_count": 0,
+      "dependence_skipped_lag_reason_counts": {},
+      "dependence_status_counts": {
+        "skipped": 1
+      },
+      "dynamics_limitation_counts": {},
+      "dynamics_reason_counts": {
+        "microstructure_dynamics": {
+          "not_emitted": 1
+        }
+      },
+      "dynamics_status_counts": {
+        "microstructure_dynamics": {
+          "skipped": 1
+        }
+      },
+      "included_target_count": 1,
+      "limit_metadata": {
+        "targets": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 16,
+          "unbounded": false
+        }
+      },
+      "omitted_target_count": 0,
+      "profile_completeness": {
+        "calendar_profile_complete_count": 0,
+        "calendar_profile_incomplete_count": 1,
+        "calendar_profile_static_advisory_count": 1
+      },
+      "row_order_counts": {},
+      "rule_id": "fingerprint.series",
+      "schema_version": "histdatacom.time-series-fingerprint-readiness-summary.v1",
+      "section_skip_reason_counts": {
+        "not_emitted": 2
+      },
+      "section_status_counts": {
+        "calendar_regimes": {
+          "skipped": 1
+        },
+        "coverage": {
+          "valid": 1
+        },
+        "microstructure_dynamics": {
+          "skipped": 1
+        },
+        "temporal_topology": {
+          "valid": 1
+        },
+        "tick_distribution": {
+          "valid": 1
+        }
+      },
+      "stationarity_basis_counts": {},
+      "stationarity_computed_window_count": 0,
+      "stationarity_limitation_counts": {},
+      "stationarity_reason_counts": {
+        "not_emitted": 1
+      },
+      "stationarity_recommended_transform_counts": {},
+      "stationarity_skipped_window_count": 0,
+      "stationarity_skipped_window_reason_counts": {},
+      "stationarity_status_counts": {
+        "skipped": 1
+      },
+      "target_count": 1,
+      "target_summaries": [
+        {
+          "applicable_dynamics_reason": "not_emitted",
+          "applicable_dynamics_section": "microstructure_dynamics",
+          "applicable_dynamics_status": "skipped",
+          "dependence": {
+            "acf_basis": "unknown",
+            "basis": "unknown",
+            "cache_source": null,
+            "computed_from": "unknown",
+            "computed_lag_count": 0,
+            "included_lag_count": 0,
+            "invalid_row_count": 0,
+            "lag_count": 0,
+            "lag_limit": 16,
+            "lags": [],
+            "lags_truncated": false,
+            "limit_metadata": {
+              "lags": {
+                "default_limit": 16,
+                "effective_limit": 16,
+                "limit": 16,
+                "maximum_limit": null,
+                "minimum_limit": 0,
+                "requested_limit": null,
+                "unbounded": false
+              }
+            },
+            "limitations": [],
+            "omitted_lag_count": 0,
+            "partial_row_count": 0,
+            "reason": "not_emitted",
+            "regular_grid": false,
+            "row_count": 0,
+            "row_order": "unknown",
+            "sampled_row_count": 0,
+            "series": {},
+            "series_count": 0,
+            "skipped_lag_count": 0,
+            "skipped_lag_reason_counts": {},
+            "status": "skipped",
+            "truncated": false,
+            "usable_row_count": 0
+          },
+          "microstructure_dynamics": {
+            "basis": "unknown",
+            "cache_source": null,
+            "computed_from": "unknown",
+            "invalid_row_count": 0,
+            "limitations": [],
+            "partial_row_count": 0,
+            "reason": "not_emitted",
+            "regular_grid": false,
+            "row_count": 0,
+            "row_order": "unknown",
+            "sampled_row_count": 0,
+            "status": "skipped",
+            "truncated": false,
+            "usable_row_count": 0
+          },
+          "profile_completeness": {
+            "calendar_profile_complete": false,
+            "calendar_profile_name": "static-major-holidays",
+            "calendar_profile_source": "static_month_day_major_holidays",
+            "calendar_profile_static_advisory": true,
+            "calendar_profile_version": "1",
+            "missing_optional_calendar_data": true,
+            "source": "quality_profile"
+          },
+          "section_skip_reasons": [
+            "not_emitted",
+            "not_emitted"
+          ],
+          "section_statuses": {
+            "calendar_regimes": "skipped",
+            "coverage": "valid",
+            "microstructure_dynamics": "skipped",
+            "temporal_topology": "valid",
+            "tick_distribution": "valid"
+          },
+          "sections_emitted_count": 3,
+          "sections_expected_count": 5,
+          "sections_skipped_count": 2,
+          "source_kind": "csv_text",
+          "source_reason": null,
+          "stationarity_diagnostics": {
+            "basis": "unknown",
+            "cache_source": null,
+            "calculation_basis": "unknown",
+            "computed_from": "unknown",
+            "computed_window_count": 0,
+            "distribution_shift": {},
+            "invalid_row_count": 0,
+            "level_sample_count": 0,
+            "limitations": [],
+            "metric": "unknown",
+            "partial_row_count": 0,
+            "reason": "not_emitted",
+            "recommended_transforms": [],
+            "regular_grid": false,
+            "return_sample_count": 0,
+            "rolling_windows": {},
+            "rounding_digits": 0,
+            "row_count": 0,
+            "row_order": "unknown",
+            "sampled_row_count": 0,
+            "skipped_window_count": 0,
+            "skipped_window_reason_counts": {},
+            "status": "skipped",
+            "truncated": false,
+            "usable_row_count": 0,
+            "windows": [],
+            "zero_variance_metrics": []
+          },
+          "target_axis": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "T"
+          },
+          "tick_spread_conditioning": {
+            "eligible": true,
+            "emitted": false,
+            "reason": null,
+            "status": "eligible"
+          },
+          "topology": {
+            "cache_source": null,
+            "computed_from": "text_scan",
+            "duplicate_timestamp_count": 0,
+            "expected_session_closure_count": 0,
+            "invalid_timestamp_count": 0,
+            "non_monotonic_count": 0,
+            "parsed_row_count": 3,
+            "row_count": 3,
+            "sampling_basis": "observed_sequence",
+            "suspicious_gap_count": 0,
+            "weekend_activity_count": 0
+          },
+          "topology_limitations": []
+        }
+      ],
+      "tick_spread_conditioning_status_counts": {
+        "eligible": 1
+      },
+      "topology_limitation_counts": {},
+      "truncated": false
+    },
+    "time_series_fingerprint_regime_summary": {
+      "cache_source_counts": {},
+      "calendar_profile": {
+        "complete_count": 0,
+        "incomplete_count": 1,
+        "source_counts": {
+          "unknown": 1
+        },
+        "static_advisory_count": 0,
+        "version_counts": {
+          "unknown": 1
+        }
+      },
+      "calendar_regime_target_count": 0,
+      "calendar_status_counts": {
+        "missing": 1
+      },
+      "computed_from_counts": {
+        "unknown": 1
+      },
+      "conditional_distribution_target_count": 0,
+      "conditional_status_counts": {
+        "absent": 1
+      },
+      "count_limit": 8,
+      "included_target_count": 1,
+      "limit_metadata": {
+        "counts": {
+          "default_limit": 8,
+          "effective_limit": 8,
+          "limit": 8,
+          "maximum_limit": null,
+          "minimum_limit": 1,
+          "requested_limit": 8,
+          "unbounded": false
+        },
+        "targets": {
+          "default_limit": 16,
+          "effective_limit": 16,
+          "limit": 16,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 16,
+          "unbounded": false
+        }
+      },
+      "omitted_target_count": 0,
+      "rule_id": "fingerprint.series",
+      "schema_version": "histdatacom.time-series-fingerprint-regime-summary.v1",
+      "target_count": 1,
+      "target_summaries": [
+        {
+          "calendar_regimes": {
+            "active_session_counts": {},
+            "cache_source": null,
+            "calendar_profile": {
+              "complete": false,
+              "missing_optional_calendar_data": false,
+              "name": "unknown",
+              "source": "unknown",
+              "static_advisory": false,
+              "version": "unknown"
+            },
+            "computed_from": "unknown",
+            "day_of_week_counts": {},
+            "event_tag_counts": {},
+            "holiday_tag_counts": {},
+            "hour_of_day_counts": {},
+            "invalid_timestamp_count": 0,
+            "parsed_row_count": 0,
+            "raw_status": "missing",
+            "row_count": 0,
+            "session_state_counts": {},
+            "special_tag_counts": {},
+            "status": "missing"
+          },
+          "conditional_distributions": {
+            "metric": "tick_spread",
+            "status": "absent"
+          },
+          "source_kind": "csv_text",
+          "target_axis": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "T"
+          }
+        }
+      ],
+      "top_active_session_counts": [],
+      "top_day_of_week_counts": [],
+      "top_event_tag_counts": [],
+      "top_holiday_tag_counts": [],
+      "top_hour_of_day_counts": [],
+      "top_session_state_counts": [],
+      "top_special_tag_counts": [],
+      "truncated": false
+    },
+    "time_series_fingerprint_topology_attention": {
+      "attention_flag_counts": {},
+      "attention_level_counts": {},
+      "attention_target_count": 0,
+      "included_attention_target_count": 0,
+      "limit_metadata": {
+        "targets": {
+          "default_limit": 32,
+          "effective_limit": 32,
+          "limit": 32,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 32,
+          "unbounded": false
+        }
+      },
+      "omitted_attention_target_count": 0,
+      "rule_id": "fingerprint.series",
+      "schema_version": "histdatacom.time-series-fingerprint-topology-attention.v1",
+      "target_summaries": [],
+      "topology_target_count": 1,
+      "truncated": false
+    },
+    "time_series_fingerprint_topology_summary": {
+      "cache_source_counts": {},
+      "computed_from_counts": {
+        "text_scan": 1
+      },
+      "flag_counts": {},
+      "included_target_count": 1,
+      "limit_metadata": {
+        "targets": {
+          "default_limit": 128,
+          "effective_limit": 128,
+          "limit": 128,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 128,
+          "unbounded": false
+        }
+      },
+      "omitted_target_count": 0,
+      "rule_id": "fingerprint.series",
+      "sampling_basis_counts": {
+        "observed_sequence": 1
+      },
+      "schema_version": "histdatacom.time-series-fingerprint-topology-summary.v1",
+      "status_counts": {
+        "regular": 1
+      },
+      "target_count": 1,
+      "target_summaries": [
+        {
+          "cache_source": null,
+          "computed_from": "text_scan",
+          "duplicate_timestamp_count": 0,
+          "expected_session_closure_count": 0,
+          "flags": [],
+          "invalid_timestamp_count": 0,
+          "max_gap_ms": 60000,
+          "median_interval_ms": 60000,
+          "non_monotonic_count": 0,
+          "parsed_row_count": 3,
+          "row_count": 3,
+          "sampling_basis": "observed_sequence",
+          "status": "regular",
+          "suspicious_gap_count": 0,
+          "target_axis": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "T"
+          },
+          "weekend_activity_count": 0
+        }
+      ],
+      "truncated": false
+    }
+  },
+  "rule_results": [
+    {
+      "findings": [
+        {
+          "code": "FINGERPRINT_SERIES_SUMMARY",
+          "location": {
+            "column": "time_series_fingerprint",
+            "metadata": {},
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
+            "row_number": null,
+            "timestamp_source": "",
+            "timestamp_utc_ms": null
+          },
+          "message": "Canonical target time-series fingerprint.",
+          "metadata": {
+            "time_series_fingerprint": {
+              "coverage": {
+                "duration_ms": 120000,
+                "end_timestamp_utc_ms": 1328072520000,
+                "parsed_row_count": 3,
+                "row_count": 3,
+                "start_timestamp_utc_ms": 1328072400000
+              },
+              "fingerprint_audit": {
+                "conditional_distribution_eligibility": {
+                  "tick_spread": {
+                    "eligible": true,
+                    "reason": null,
+                    "status": "eligible"
+                  }
+                },
+                "dynamics_readiness": {
+                  "microstructure_dynamics": {
+                    "reason": "not_emitted",
+                    "status": "skipped"
+                  }
+                },
+                "profile_completeness": {
+                  "calendar_profile_complete": false,
+                  "calendar_profile_name": "static-major-holidays",
+                  "calendar_profile_source": "static_month_day_major_holidays",
+                  "calendar_profile_static_advisory": true,
+                  "calendar_profile_version": "1",
+                  "missing_optional_calendar_data": true,
+                  "source": "quality_profile"
+                },
+                "schema_version": "histdatacom.time-series-fingerprint-audit.v1",
+                "section_statuses": {
+                  "calendar_regimes": "skipped",
+                  "coverage": "valid",
+                  "microstructure_dynamics": "skipped",
+                  "temporal_topology": "valid",
+                  "tick_distribution": "valid"
+                },
+                "sections_emitted": [
+                  "coverage",
+                  "temporal_topology",
+                  "tick_distribution"
+                ],
+                "sections_expected": [
+                  "coverage",
+                  "temporal_topology",
+                  "calendar_regimes",
+                  "tick_distribution",
+                  "microstructure_dynamics"
+                ],
+                "sections_skipped": {
+                  "calendar_regimes": {
+                    "reason": "not_emitted"
+                  },
+                  "microstructure_dynamics": {
+                    "details": {
+                      "timeframe": "T"
+                    },
+                    "reason": "not_emitted"
+                  }
+                },
+                "source_status": {
+                  "kind": "csv_text",
+                  "readable": true,
+                  "reason": null
+                },
+                "target_capability": {
+                  "supported": true,
+                  "unsupported_reason": null
+                }
+              },
+              "fingerprint_id": "sha256:12c919fc872938c599980788b207700680013580935c6de1fcb0176475bd84bb",
+              "schema_version": "histdatacom.time-series-fingerprint.v1",
+              "source": {
+                "kind": "csv_text",
+                "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv"
+              },
+              "target_axis": {
+                "data_format": "ascii",
+                "kind": "csv",
+                "period": "201202",
+                "symbol": "EURUSD",
+                "timeframe": "T"
+              },
+              "temporal_topology": {
+                "cache_source": null,
+                "computed_from": "text_scan",
+                "duplicate_timestamp_count": 0,
+                "duplicate_timestamp_source_counts": {
+                  "tick_duplicate_row": 0
+                },
+                "expected_session_closure_count": 0,
+                "gap_bucket_counts": {
+                  "gt_1d": 0,
+                  "gt_1h": 0,
+                  "gt_1m": 0,
+                  "gt_30m": 0,
+                  "gt_5m": 0
+                },
+                "gap_tolerance": {
+                  "bucket_thresholds_ms": [
+                    60000,
+                    300000,
+                    1800000,
+                    3600000,
+                    86400000
+                  ],
+                  "dynamic_window_growth_factor": 2.0,
+                  "dynamic_window_initial_ms": 300000,
+                  "dynamic_window_max_ms": 3600000,
+                  "dynamic_window_shrink_factor": 0.5,
+                  "expected_interval_ms": 60000,
+                  "session_boundary_grace_ms": 3600000,
+                  "suspicious_gap_ms": 300000
+                },
+                "interval_count": 2,
+                "invalid_timestamp_count": 0,
+                "max_gap_ms": 60000,
+                "median_interval_ms": 60000,
+                "min_interval_ms": 60000,
+                "non_monotonic_count": 0,
+                "parsed_row_count": 3,
+                "row_count": 3,
+                "sampling_basis": "observed_sequence",
+                "suspicious_gap_count": 0,
+                "tick_duplicate_row_count": 0,
+                "timestamp_projection": "text_scan",
+                "weekend_activity_count": 0
+              },
+              "tick_distribution": {
+                "invalid_row_count": 0,
+                "precision": {
+                  "column_decimal_place_counts": {
+                    "ask": {
+                      "6": 3
+                    },
+                    "bid": {
+                      "6": 3
+                    }
+                  },
+                  "decimal_place_counts": {
+                    "6": 12
+                  },
+                  "precision_source": "text"
+                },
+                "row_count": 3,
+                "sampled_row_count": 3,
+                "truncated": false,
+                "usable_row_count": 3
+              }
+            }
+          },
+          "rule_id": "fingerprint.series",
+          "severity": "info",
+          "target": {
+            "data_format": "ascii",
+            "kind": "csv",
+            "metadata": {
+              "filename": "DAT_ASCII_EURUSD_T_201202.csv"
+            },
+            "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "T"
+          }
+        }
+      ],
+      "max_severity": "info",
+      "rule_id": "fingerprint.series",
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {
+          "filename": "DAT_ASCII_EURUSD_T_201202.csv"
+        },
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "T"
+      }
+    }
+  ],
+  "schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 0,
+    "finding_count": 1,
+    "info_count": 1,
+    "max_severity": "info",
+    "rule_count": 1,
+    "status": "clean",
+    "target_count": 1,
+    "warning_count": 0
+  },
+  "target_summaries": [
+    {
+      "error_count": 0,
+      "finding_count": 1,
+      "info_count": 1,
+      "max_severity": "info",
+      "rule_count": 1,
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {
+          "filename": "DAT_ASCII_EURUSD_T_201202.csv"
+        },
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "T"
+      },
+      "warning_count": 0
+    }
+  ],
+  "targets": [
+    {
+      "data_format": "ascii",
+      "kind": "csv",
+      "metadata": {
+        "filename": "DAT_ASCII_EURUSD_T_201202.csv"
+      },
+      "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
+      "period": "201202",
+      "symbol": "EURUSD",
+      "timeframe": "T"
+    }
+  ]
+}

@@ -158,7 +158,7 @@ class Influx:  # noqa:H601
         """Return influxdb line-protocol line (str) for each from a map function.
 
             Applies different fields for line in line-protocol on Timeframe
-                M1 or T.
+                T.
 
         Args:
             row (Tuple[Any]): row from cached dataframe

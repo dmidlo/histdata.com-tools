@@ -1,0 +1,323 @@
+{
+  "known_code_counts": {
+    "finding_code_counts": [
+      {
+        "count": 1,
+        "finding_code": "ASCII_TICK_DUPLICATE_ROW"
+      },
+      {
+        "count": 1,
+        "finding_code": "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH"
+      },
+      {
+        "count": 1,
+        "finding_code": "FINGERPRINT_SERIES_SUMMARY"
+      }
+    ],
+    "rule_id_counts": [
+      {
+        "count": 1,
+        "rule_id": "fingerprint.series"
+      },
+      {
+        "count": 1,
+        "rule_id": "time.ascii.est_no_dst"
+      },
+      {
+        "count": 1,
+        "rule_id": "time.ascii.sequence"
+      }
+    ],
+    "severity_counts": {
+      "error": 1,
+      "info": 1,
+      "warning": 1
+    },
+    "source_family_counts": [
+      {
+        "count": 2,
+        "source_family": "time"
+      },
+      {
+        "count": 1,
+        "source_family": "fingerprint"
+      }
+    ],
+    "unmapped_finding_code_counts": [
+      {
+        "count": 1,
+        "finding_code": "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH"
+      },
+      {
+        "count": 1,
+        "finding_code": "FINGERPRINT_SERIES_SUMMARY"
+      }
+    ],
+    "unmapped_rule_id_counts": [
+      {
+        "count": 1,
+        "rule_id": "fingerprint.series"
+      },
+      {
+        "count": 1,
+        "rule_id": "time.ascii.est_no_dst"
+      }
+    ],
+    "unmapped_source_family_counts": [
+      {
+        "count": 1,
+        "source_family": "fingerprint"
+      },
+      {
+        "count": 1,
+        "source_family": "time"
+      }
+    ]
+  },
+  "known_unmapped_codes": [
+    {
+      "finding_code": "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH",
+      "included_source_count": 1,
+      "mapped": false,
+      "max_severity": "error",
+      "occurrence_count": 1,
+      "omitted_source_count": 0,
+      "rule_id": "time.ascii.est_no_dst",
+      "severity_counts": {
+        "error": 1
+      },
+      "source_count": 1,
+      "source_family": "time",
+      "source_family_counts": [
+        {
+          "count": 1,
+          "source_family": "time"
+        }
+      ],
+      "sources": [
+        {
+          "count": 1,
+          "source": "data_quality/time.ascii.est_no_dst.py:1"
+        }
+      ]
+    },
+    {
+      "finding_code": "FINGERPRINT_SERIES_SUMMARY",
+      "included_source_count": 1,
+      "mapped": false,
+      "max_severity": "info",
+      "occurrence_count": 1,
+      "omitted_source_count": 0,
+      "rule_id": "fingerprint.series",
+      "severity_counts": {
+        "info": 1
+      },
+      "source_count": 1,
+      "source_family": "fingerprint",
+      "source_family_counts": [
+        {
+          "count": 1,
+          "source_family": "fingerprint"
+        }
+      ],
+      "sources": [
+        {
+          "count": 1,
+          "source": "data_quality/fingerprint.series.py:1"
+        }
+      ]
+    }
+  ],
+  "payload_limits": {
+    "known_code_sources": {
+      "applies_per_code": true,
+      "default_limit": 8,
+      "effective_limit": 2,
+      "limit": 2,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "requested_limit": 2,
+      "unbounded": false
+    },
+    "known_finding_code_counts": {
+      "default_limit": 16,
+      "effective_limit": 4,
+      "included_count": 3,
+      "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 4,
+      "total_count": 3,
+      "truncated": false,
+      "unbounded": false
+    },
+    "known_rule_id_counts": {
+      "default_limit": 16,
+      "effective_limit": 4,
+      "included_count": 3,
+      "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 4,
+      "total_count": 3,
+      "truncated": false,
+      "unbounded": false
+    },
+    "known_unmapped_codes": {
+      "default_limit": 16,
+      "effective_limit": 4,
+      "included_count": 2,
+      "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 4,
+      "total_count": 2,
+      "truncated": false,
+      "unbounded": false
+    },
+    "ranked_gap_report_sources": {
+      "applies_per_gap": true,
+      "default_limit": 8,
+      "effective_limit": 2,
+      "limit": 2,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "requested_limit": 2,
+      "unbounded": false
+    },
+    "ranked_gap_sources": {
+      "applies_per_gap": true,
+      "default_limit": 8,
+      "effective_limit": 2,
+      "limit": 2,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "requested_limit": 2,
+      "unbounded": false
+    },
+    "ranked_gaps": {
+      "default_limit": 16,
+      "effective_limit": 4,
+      "included_count": 2,
+      "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 4,
+      "total_count": 2,
+      "truncated": false,
+      "unbounded": false
+    },
+    "report_unmapped_groups": {
+      "applies_per_report": true,
+      "default_limit": 16,
+      "effective_limit": 4,
+      "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "requested_limit": 4,
+      "target_axes": {
+        "default_limit": 8,
+        "effective_limit": 8,
+        "limit": 8,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "requested_limit": 8,
+        "unbounded": false
+      },
+      "target_axis_limit": 8,
+      "unbounded": false
+    }
+  },
+  "ranked_gaps": [
+    {
+      "finding_code": "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH",
+      "included_source_count": 1,
+      "known_source_occurrence_count": 1,
+      "mapped": false,
+      "max_severity": "error",
+      "omitted_source_count": 0,
+      "rank": 1,
+      "rank_reasons": [
+        "severity=error",
+        "source_family=time",
+        "known_sources=1"
+      ],
+      "report_group_count": 0,
+      "report_occurrence_count": 0,
+      "rule_id": "time.ascii.est_no_dst",
+      "severity_counts": {
+        "error": 1
+      },
+      "source_count": 1,
+      "source_family": "time",
+      "source_family_counts": [
+        {
+          "count": 1,
+          "source_family": "time"
+        }
+      ],
+      "sources": [
+        {
+          "count": 1,
+          "source": "data_quality/time.ascii.est_no_dst.py:1"
+        }
+      ]
+    },
+    {
+      "finding_code": "FINGERPRINT_SERIES_SUMMARY",
+      "included_source_count": 1,
+      "known_source_occurrence_count": 1,
+      "mapped": false,
+      "max_severity": "info",
+      "omitted_source_count": 0,
+      "rank": 2,
+      "rank_reasons": [
+        "severity=info",
+        "source_family=fingerprint",
+        "known_sources=1"
+      ],
+      "report_group_count": 0,
+      "report_occurrence_count": 0,
+      "rule_id": "fingerprint.series",
+      "severity_counts": {
+        "info": 1
+      },
+      "source_count": 1,
+      "source_family": "fingerprint",
+      "source_family_counts": [
+        {
+          "count": 1,
+          "source_family": "fingerprint"
+        }
+      ],
+      "sources": [
+        {
+          "count": 1,
+          "source": "data_quality/fingerprint.series.py:1"
+        }
+      ]
+    }
+  ],
+  "report_coverage": [],
+  "schema_version": "histdatacom.quality-remediation-catalog-audit.v1",
+  "status": "needs-remediation-guidance",
+  "summary": {
+    "known_code_count": 3,
+    "known_finding_occurrence_count": 3,
+    "known_warning_error_code_count": 2,
+    "mapped_known_code_count": 1,
+    "report_count": 0,
+    "report_finding_count": 0,
+    "report_mapped_finding_count": 0,
+    "report_unmapped_finding_count": 0,
+    "report_unmapped_warning_error_group_count": 0,
+    "unmapped_info_only_code_count": 1,
+    "unmapped_known_code_count": 2,
+    "unmapped_warning_error_code_count": 1,
+    "unmapped_warning_error_gap_count": 1
+  }
+}

@@ -9,9 +9,10 @@ import pytest
 
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
+    CacheSummary,
     EST_NO_DST_OFFSET_MS,
     LEGACY_CACHE_ERROR,
-    M1_COLUMNS,
+    ParsedAsciiBatch,
     TICK_COLUMNS,
     convert_polars_datetime_to_utc_ms,
     convert_batch_for_api,
@@ -32,43 +33,10 @@ from histdatacom.histdata_ascii import (
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
 
-EXPECTED_M1_ROWS = (
-    (1328072400000, 1.3066, 1.3066, 1.30656, 1.30656, 0),
-    (1328072460000, 1.30657, 1.30657, 1.30647, 1.30656, 17),
-    (1328072520000, 1.30652, 1.30656, 1.30652, 1.30656, 2147483647),
-)
-
 EXPECTED_TICK_ROWS = (
     (1328072403660, 1.3066, 1.30677, 0),
     (1328072403973, 1.30658, 1.30675, 25),
     (1328072414990, 1.30657, 1.30674, 2147483647),
-)
-
-EXPECTED_RAW_M1_RECORDS = (
-    {
-        "datetime": "20120201 000000",
-        "open": 1.3066,
-        "high": 1.3066,
-        "low": 1.30656,
-        "close": 1.30656,
-        "vol": 0,
-    },
-    {
-        "datetime": "20120201 000100",
-        "open": 1.30657,
-        "high": 1.30657,
-        "low": 1.30647,
-        "close": 1.30656,
-        "vol": 17,
-    },
-    {
-        "datetime": "20120201 000200",
-        "open": 1.30652,
-        "high": 1.30656,
-        "low": 1.30652,
-        "close": 1.30656,
-        "vol": 2147483647,
-    },
 )
 
 EXPECTED_RAW_TICK_RECORDS = (
@@ -96,22 +64,24 @@ EXPECTED_RAW_TICK_RECORDS = (
 def test_columns_and_delimiters_are_locked_for_supported_ascii_timeframes() -> (
     None
 ):
-    """Document the two HistData ASCII layouts the API pipeline supports."""
-    assert M1_COLUMNS == ("datetime", "open", "high", "low", "close", "vol")
+    """Document the HistData ASCII layout the API pipeline supports."""
     assert TICK_COLUMNS == ("datetime", "bid", "ask", "vol")
-    assert delimiter_for_timeframe("M1") == ";"
     assert delimiter_for_timeframe("T") == ","
+
+
+def test_ascii_helpers_reject_removed_m1_timeframe() -> None:
+    """M1 is no longer a raw base timeframe accepted by ASCII helpers."""
+    with pytest.raises(ValueError, match="unsupported ASCII timeframe"):
+        delimiter_for_timeframe("M1")
+    with pytest.raises(ValueError, match="unsupported ASCII timeframe"):
+        raw_polars_schema_for_timeframe("M1")
+    with pytest.raises(ValueError, match="unsupported ASCII timeframe"):
+        parse_histdata_datetime_to_utc_ms("20120201 000000", "M1")
 
 
 @pytest.mark.parametrize(
     ("timeframe", "filename", "expected_columns", "expected_rows"),
     (
-        (
-            "M1",
-            "DAT_ASCII_EURUSD_M1_201202.csv",
-            M1_COLUMNS,
-            EXPECTED_M1_ROWS,
-        ),
         (
             "T",
             "DAT_ASCII_EURUSD_T_201202.csv",
@@ -141,10 +111,7 @@ def test_ascii_csv_fixtures_parse_to_current_domain_values(
 
 @pytest.mark.parametrize(
     ("timeframe", "filename", "expected_rows"),
-    (
-        ("M1", "DAT_ASCII_EURUSD_M1_201202.csv", EXPECTED_M1_ROWS),
-        ("T", "DAT_ASCII_EURUSD_T_201202.csv", EXPECTED_TICK_ROWS),
-    ),
+    (("T", "DAT_ASCII_EURUSD_T_201202.csv", EXPECTED_TICK_ROWS),),
 )
 def test_ascii_zip_fixtures_parse_like_direct_csv_files(
     tmp_path: Path,
@@ -170,12 +137,6 @@ def test_ascii_zip_fixtures_parse_like_direct_csv_files(
         "expected_records",
     ),
     (
-        (
-            "M1",
-            "DAT_ASCII_EURUSD_M1_201202.csv",
-            M1_COLUMNS,
-            EXPECTED_RAW_M1_RECORDS,
-        ),
         (
             "T",
             "DAT_ASCII_EURUSD_T_201202.csv",
@@ -207,20 +168,6 @@ def test_polars_ingest_reads_csv_fixtures_with_stable_raw_schema(
 @pytest.mark.parametrize(
     ("timeframe", "content", "expected_records"),
     (
-        (
-            "M1",
-            "20040307 170500;85.37     ;85.37     ;85.36     ;85.36     ;0   \n",
-            (
-                {
-                    "datetime": "20040307 170500",
-                    "open": 85.37,
-                    "high": 85.37,
-                    "low": 85.36,
-                    "close": 85.36,
-                    "vol": 0,
-                },
-            ),
-        ),
         (
             "T",
             "20120201 000003660 ,1.3066    ,1.30677   ,0   \n",
@@ -260,11 +207,6 @@ def test_polars_ingest_trims_legacy_fixed_width_padding(
 @pytest.mark.parametrize(
     ("timeframe", "filename", "expected_records"),
     (
-        (
-            "M1",
-            "DAT_ASCII_EURUSD_M1_201202.csv",
-            EXPECTED_RAW_M1_RECORDS,
-        ),
         (
             "T",
             "DAT_ASCII_EURUSD_T_201202.csv",
@@ -308,15 +250,12 @@ def test_polars_zip_ingest_requires_exactly_one_csv_member(
         archive.writestr("second.csv", "")
 
     with pytest.raises(ValueError, match="one CSV file"):
-        read_ascii_file_to_polars(archive_path, "M1")
+        read_ascii_file_to_polars(archive_path, "T")
 
 
 @pytest.mark.parametrize(
     ("timeframe", "filename"),
-    (
-        ("M1", "DAT_ASCII_EURUSD_M1_201202.csv"),
-        ("T", "DAT_ASCII_EURUSD_T_201202.csv"),
-    ),
+    (("T", "DAT_ASCII_EURUSD_T_201202.csv"),),
 )
 def test_polars_cache_round_trip_preserves_schema_and_values(
     tmp_path: Path, timeframe: str, filename: str
@@ -350,10 +289,7 @@ def test_polars_cache_rejects_legacy_cache_payloads(
 
 @pytest.mark.parametrize(
     ("timeframe", "filename", "expected_rows"),
-    (
-        ("M1", "DAT_ASCII_EURUSD_M1_201202.csv", EXPECTED_M1_ROWS),
-        ("T", "DAT_ASCII_EURUSD_T_201202.csv", EXPECTED_TICK_ROWS),
-    ),
+    (("T", "DAT_ASCII_EURUSD_T_201202.csv", EXPECTED_TICK_ROWS),),
 )
 def test_polars_timestamp_conversion_matches_characterization_values(
     timeframe: str,
@@ -381,25 +317,6 @@ def test_polars_timestamp_conversion_matches_characterization_values(
 @pytest.mark.parametrize(
     ("timeframe", "raw_values", "expected_values"),
     (
-        (
-            "M1",
-            (
-                "20120201 000000",
-                "20120229 235900",
-                "20161231 235900",
-                "20170101 000000",
-                "20220313 023000",
-                "20221106 013000",
-            ),
-            (
-                1328072400000,
-                1330577940000,
-                1483246740000,
-                1483246800000,
-                1647156600000,
-                1667716200000,
-            ),
-        ),
         (
             "T",
             (
@@ -443,18 +360,11 @@ def test_polars_timestamp_expression_rejects_unsupported_timeframes() -> None:
 @pytest.mark.parametrize(
     ("timeframe", "raw_value", "expected_ms"),
     (
-        ("M1", "20120201 000000", 1328072400000),
-        ("M1", "20120201 000100", 1328072460000),
         ("T", "20120201 000003660", 1328072403660),
         ("T", "20120201 000014990", 1328072414990),
-        ("M1", "20120229 235900", 1330577940000),
         ("T", "20120229 235959999", 1330577999999),
-        ("M1", "20161231 235900", 1483246740000),
         ("T", "20161231 235959999", 1483246799999),
-        ("M1", "20170101 000000", 1483246800000),
         ("T", "20170101 000000000", 1483246800000),
-        ("M1", "20220313 023000", 1647156600000),
-        ("M1", "20221106 013000", 1667716200000),
     ),
 )
 def test_timestamp_conversion_uses_fixed_est_no_dst_offset(
@@ -476,7 +386,7 @@ def test_summarize_rows_rejects_empty_inputs() -> None:
 @pytest.mark.parametrize(
     ("timeframe", "raw_row", "error"),
     (
-        ("M1", ("20120201 000000", "1.0"), "6 fields"),
+        ("M1", ("20120201 000000", "1.0"), "unsupported"),
         ("T", ("20120201 000003660", "1.0", "1.1"), "4 fields"),
         ("T_LAST", ("20120201 000003660", "1.0", "0"), "unsupported"),
     ),
@@ -491,18 +401,33 @@ def test_invalid_or_unsupported_ascii_rows_fail_fast(
 
 def test_merge_batches_orders_by_cache_start_and_preserves_rows() -> None:
     """Current merge behavior sorts record batches by the cached start value."""
-    first = read_ascii_file(FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv", "M1")
-    second = read_ascii_file(FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv", "T")
+    first = ParsedAsciiBatch(
+        timeframe="T",
+        columns=TICK_COLUMNS,
+        rows=(EXPECTED_TICK_ROWS[1],),
+        summary=CacheSummary(
+            line_count=1,
+            start=EXPECTED_TICK_ROWS[1][0],
+            end=EXPECTED_TICK_ROWS[1][0],
+        ),
+    )
+    second = ParsedAsciiBatch(
+        timeframe="T",
+        columns=TICK_COLUMNS,
+        rows=(EXPECTED_TICK_ROWS[0],),
+        summary=CacheSummary(
+            line_count=1,
+            start=EXPECTED_TICK_ROWS[0][0],
+            end=EXPECTED_TICK_ROWS[0][0],
+        ),
+    )
 
-    assert merge_batches((second, first)) == (*first.rows, *second.rows)
+    assert merge_batches((first, second)) == (*second.rows, *first.rows)
 
 
 @pytest.mark.parametrize(
     ("timeframe", "filename", "expected_rows"),
-    (
-        ("M1", "DAT_ASCII_EURUSD_M1_201202.csv", EXPECTED_M1_ROWS),
-        ("T", "DAT_ASCII_EURUSD_T_201202.csv", EXPECTED_TICK_ROWS),
-    ),
+    (("T", "DAT_ASCII_EURUSD_T_201202.csv", EXPECTED_TICK_ROWS),),
 )
 def test_records_api_return_adapter_preserves_schema_order_and_values(
     timeframe: str,
@@ -521,10 +446,7 @@ def test_records_api_return_adapter_preserves_schema_order_and_values(
 
 @pytest.mark.parametrize(
     ("timeframe", "filename"),
-    (
-        ("M1", "DAT_ASCII_EURUSD_M1_201202.csv"),
-        ("T", "DAT_ASCII_EURUSD_T_201202.csv"),
-    ),
+    (("T", "DAT_ASCII_EURUSD_T_201202.csv"),),
 )
 def test_pandas_api_return_adapter_preserves_values_and_dtype_intent(
     timeframe: str, filename: str
@@ -544,10 +466,7 @@ def test_pandas_api_return_adapter_preserves_values_and_dtype_intent(
 
 @pytest.mark.parametrize(
     ("timeframe", "filename"),
-    (
-        ("M1", "DAT_ASCII_EURUSD_M1_201202.csv"),
-        ("T", "DAT_ASCII_EURUSD_T_201202.csv"),
-    ),
+    (("T", "DAT_ASCII_EURUSD_T_201202.csv"),),
 )
 def test_polars_api_return_adapter_preserves_values_and_dtype_intent(
     timeframe: str, filename: str
@@ -569,10 +488,7 @@ def test_polars_api_return_adapter_preserves_values_and_dtype_intent(
 
 @pytest.mark.parametrize(
     ("timeframe", "filename"),
-    (
-        ("M1", "DAT_ASCII_EURUSD_M1_201202.csv"),
-        ("T", "DAT_ASCII_EURUSD_T_201202.csv"),
-    ),
+    (("T", "DAT_ASCII_EURUSD_T_201202.csv"),),
 )
 def test_arrow_api_return_adapter_preserves_values_and_dtype_intent(
     timeframe: str, filename: str
@@ -596,21 +512,10 @@ def test_arrow_api_return_adapter_preserves_values_and_dtype_intent(
 
 def test_api_return_adapter_rejects_unsupported_return_types() -> None:
     """The adapter seam should fail clearly for unported return types."""
-    batch = read_ascii_file(FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv", "M1")
+    batch = read_ascii_file(FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv", "T")
 
     with pytest.raises(ValueError, match="unsupported API return type: numpy"):
         convert_batch_for_api(batch, "numpy")
-
-
-def test_influx_line_protocol_for_m1_matches_current_fields() -> None:
-    """M1 rows become bid OHLC fields and keep millisecond timestamps."""
-    line = format_influx_line("eurusd", "ascii", "M1", EXPECTED_M1_ROWS[1])
-
-    assert line == (
-        "eurusd,source=histdata.com,format=ascii,timeframe=M1 "
-        "openbid=1.30657,highbid=1.30657,lowbid=1.30647,closebid=1.30656 "
-        "1328072460000"
-    )
 
 
 def test_influx_line_protocol_for_ticks_matches_current_fields() -> None:
@@ -621,3 +526,9 @@ def test_influx_line_protocol_for_ticks_matches_current_fields() -> None:
         "eurusd,source=histdata.com,format=ascii,timeframe=T "
         "bidquote=1.30658,askquote=1.30675 1328072403973"
     )
+
+
+def test_influx_line_protocol_rejects_removed_m1_timeframe() -> None:
+    """M1 rows should not be accepted by the tick-only line protocol."""
+    with pytest.raises(ValueError, match="unsupported ASCII timeframe"):
+        format_influx_line("eurusd", "ascii", "M1", EXPECTED_TICK_ROWS[1])

@@ -8,21 +8,23 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
-from histdatacom.data_quality.bars import (
-    ASCII_M1_OUTLIER_RULE_ID,
-    ASCII_M1_PRECISION_RULE_ID,
-    ASCII_M1_TICK_RECONSTRUCTION_RULE_ID,
-    DEFAULT_M1_OUTLIER_THRESHOLDS,
-    DEFAULT_M1_TICK_RECONSTRUCTION_TOLERANCE,
-    HistDataM1OutlierThresholds,
-    HistDataM1TickReconstructionTolerance,
-)
 from histdatacom.data_quality.calendar import DOMAIN_CALENDAR_SESSION_RULE_ID
 from histdatacom.data_quality.calendar_profiles import (
     HistDataCalendarProfile,
     calendar_profile_from_mapping,
 )
 from histdatacom.data_quality.contracts import QualitySeverity
+from histdatacom.data_quality.fingerprints import (
+    DEFAULT_FINGERPRINT_HISTOGRAM_BINS,
+    DEFAULT_FINGERPRINT_LAGS,
+    DEFAULT_FINGERPRINT_MAX_ROWS,
+    DEFAULT_FINGERPRINT_QUANTILES,
+    DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
+    DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
+    SERIES_FINGERPRINT_RULE_ID,
+    HistDataFingerprintDistributionAttentionProfile,
+    HistDataFingerprintProfile,
+)
 from histdatacom.data_quality.ingestion import (
     ASCII_ROW_COUNT_INGESTION_RULE_ID,
     DEFAULT_MIN_ROW_COUNT,
@@ -61,21 +63,20 @@ DEFAULT_QUALITY_PROFILE_SOURCE = "default"
 OPERATOR_QUALITY_PROFILE_SOURCE = "operator-config"
 
 QUALITY_PROFILE_METADATA_KEY = "quality_profile"
+QUALITY_REPORTING_METADATA_KEY = "quality_reporting"
 
 CONFIGURABLE_QUALITY_RULE_IDS = frozenset(
     {
         ASCII_ROW_COUNT_INGESTION_RULE_ID,
         ASCII_TIMESTAMP_GAP_RULE_ID,
         ASCII_TIMESTAMP_CONTINUITY_RULE_ID,
-        ASCII_M1_PRECISION_RULE_ID,
-        ASCII_M1_OUTLIER_RULE_ID,
-        ASCII_M1_TICK_RECONSTRUCTION_RULE_ID,
         ASCII_TICK_SPREAD_RULE_ID,
         ASCII_TICK_MICROSTRUCTURE_RULE_ID,
         ASCII_TICK_SPREAD_REGIME_RULE_ID,
         DOMAIN_CROSS_INSTRUMENT_RULE_ID,
         DOMAIN_CALENDAR_SESSION_RULE_ID,
         MODELING_READINESS_RULE_ID,
+        SERIES_FINGERPRINT_RULE_ID,
     }
 )
 
@@ -86,6 +87,7 @@ _TOP_LEVEL_KEYS = frozenset(
         "source",
         "source_path",
         "rules",
+        "reporting",
         "modeling_assumptions",
     }
 )
@@ -104,6 +106,34 @@ class HistDataRowCountProfile:
 
 
 @dataclass(frozen=True, slots=True)
+class QualityRemediationCatalogAuditProfile:
+    """Configured publication behavior for remediation-catalog audits."""
+
+    enabled: bool = False
+
+    def to_metadata(self) -> dict[str, JSONValue]:
+        """Return a JSON-compatible representation."""
+        return {"enabled": self.enabled}
+
+
+@dataclass(frozen=True, slots=True)
+class QualityReportingProfile:
+    """Configured quality report publication behavior."""
+
+    remediation_catalog_audit: QualityRemediationCatalogAuditProfile = field(
+        default_factory=QualityRemediationCatalogAuditProfile
+    )
+
+    def to_metadata(self) -> dict[str, JSONValue]:
+        """Return a JSON-compatible representation."""
+        return {
+            "remediation_catalog_audit": (
+                self.remediation_catalog_audit.to_metadata()
+            )
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class QualityProfile:
     """Versioned operator profile for data-quality rule construction."""
 
@@ -112,15 +142,13 @@ class QualityProfile:
     source: str = DEFAULT_QUALITY_PROFILE_SOURCE
     source_path: str = ""
     rules: Mapping[str, Mapping[str, JSONValue]] = field(default_factory=dict)
+    reporting: Mapping[str, JSONValue] = field(default_factory=dict)
     modeling_assumptions: Mapping[str, JSONValue] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate static profile metadata and configured rule IDs."""
         if self.schema_version != QUALITY_PROFILE_SCHEMA_VERSION:
-            msg = (
-                "unsupported quality profile schema_version: "
-                f"{self.schema_version!r}"
-            )
+            msg = f"unsupported quality profile schema_version: {self.schema_version!r}"
             raise QualityProfileError(msg)
         unknown = sorted(set(self.rules) - CONFIGURABLE_QUALITY_RULE_IDS)
         if unknown:
@@ -132,6 +160,7 @@ class QualityProfile:
         """Return whether no operator profile settings are configured."""
         return (
             not self.rules
+            and not self.reporting
             and not self.modeling_assumptions
             and self.source == DEFAULT_QUALITY_PROFILE_SOURCE
         )
@@ -198,128 +227,6 @@ class QualityProfile:
         return _gap_tolerance(
             _mapping_field(config, "tolerance", path=rule_id),
             path=f"{rule_id}.tolerance",
-        )
-
-    def m1_precision_rules_by_symbol(
-        self,
-    ) -> dict[str, HistDataSymbolPrecisionRule]:
-        """Return configured M1 precision overrides by symbol."""
-        config = self.rule_config(ASCII_M1_PRECISION_RULE_ID)
-        _reject_unknown_keys(
-            config,
-            {
-                "precision_rules_by_symbol",
-                "precision_rules_by_asset_class",
-                "warning_severity",
-            },
-            ASCII_M1_PRECISION_RULE_ID,
-        )
-        return _precision_rule_mapping(
-            _mapping_field(
-                config,
-                "precision_rules_by_symbol",
-                path=ASCII_M1_PRECISION_RULE_ID,
-            ),
-            key_normalizer=normalize_histdata_symbol,
-            path=f"{ASCII_M1_PRECISION_RULE_ID}.precision_rules_by_symbol",
-        )
-
-    def m1_precision_rules_by_asset_class(
-        self,
-    ) -> dict[str, HistDataSymbolPrecisionRule]:
-        """Return configured M1 precision overrides by asset class."""
-        config = self.rule_config(ASCII_M1_PRECISION_RULE_ID)
-        _reject_unknown_keys(
-            config,
-            {
-                "precision_rules_by_symbol",
-                "precision_rules_by_asset_class",
-                "warning_severity",
-            },
-            ASCII_M1_PRECISION_RULE_ID,
-        )
-        return _precision_rule_mapping(
-            _mapping_field(
-                config,
-                "precision_rules_by_asset_class",
-                path=ASCII_M1_PRECISION_RULE_ID,
-            ),
-            key_normalizer=_lower_key,
-            path=f"{ASCII_M1_PRECISION_RULE_ID}.precision_rules_by_asset_class",
-        )
-
-    def m1_outlier_thresholds(self) -> HistDataM1OutlierThresholds:
-        """Return default M1 outlier thresholds from the profile."""
-        config = self.rule_config(ASCII_M1_OUTLIER_RULE_ID)
-        _reject_unknown_keys(
-            config,
-            {
-                "thresholds",
-                "thresholds_by_symbol",
-                "thresholds_by_asset_class",
-                "warning_severity",
-            },
-            ASCII_M1_OUTLIER_RULE_ID,
-        )
-        return _m1_outlier_thresholds(
-            _mapping_field(config, "thresholds", path=ASCII_M1_OUTLIER_RULE_ID),
-            base=DEFAULT_M1_OUTLIER_THRESHOLDS,
-            path=f"{ASCII_M1_OUTLIER_RULE_ID}.thresholds",
-        )
-
-    def m1_outlier_thresholds_by_symbol(
-        self,
-    ) -> dict[str, HistDataM1OutlierThresholds]:
-        """Return configured M1 outlier thresholds by symbol."""
-        config = self.rule_config(ASCII_M1_OUTLIER_RULE_ID)
-        return _m1_outlier_threshold_mapping(
-            _mapping_field(
-                config,
-                "thresholds_by_symbol",
-                path=ASCII_M1_OUTLIER_RULE_ID,
-            ),
-            key_normalizer=normalize_histdata_symbol,
-            path=f"{ASCII_M1_OUTLIER_RULE_ID}.thresholds_by_symbol",
-        )
-
-    def m1_outlier_thresholds_by_asset_class(
-        self,
-    ) -> dict[str, HistDataM1OutlierThresholds]:
-        """Return configured M1 outlier thresholds by asset class."""
-        config = self.rule_config(ASCII_M1_OUTLIER_RULE_ID)
-        return _m1_outlier_threshold_mapping(
-            _mapping_field(
-                config,
-                "thresholds_by_asset_class",
-                path=ASCII_M1_OUTLIER_RULE_ID,
-            ),
-            key_normalizer=_lower_key,
-            path=f"{ASCII_M1_OUTLIER_RULE_ID}.thresholds_by_asset_class",
-        )
-
-    def m1_tick_reconstruction_tolerance(
-        self,
-    ) -> HistDataM1TickReconstructionTolerance:
-        """Return configured M1 tick reconstruction tolerance."""
-        config = self.rule_config(ASCII_M1_TICK_RECONSTRUCTION_RULE_ID)
-        _reject_unknown_keys(
-            config,
-            {"tolerance", "warning_severity"},
-            ASCII_M1_TICK_RECONSTRUCTION_RULE_ID,
-        )
-        tolerance = _mapping_field(
-            config,
-            "tolerance",
-            path=ASCII_M1_TICK_RECONSTRUCTION_RULE_ID,
-        )
-        return HistDataM1TickReconstructionTolerance(
-            price_tolerance=_float_field(
-                tolerance,
-                "price_tolerance",
-                DEFAULT_M1_TICK_RECONSTRUCTION_TOLERANCE.price_tolerance,
-                minimum=0.0,
-                path=f"{ASCII_M1_TICK_RECONSTRUCTION_RULE_ID}.tolerance",
-            )
         )
 
     def tick_spread_thresholds(self) -> HistDataTickSpreadThresholds:
@@ -432,8 +339,7 @@ class QualityProfile:
             ),
             key_normalizer=_lower_key,
             path=(
-                f"{ASCII_TICK_MICROSTRUCTURE_RULE_ID}."
-                "thresholds_by_asset_class"
+                f"{ASCII_TICK_MICROSTRUCTURE_RULE_ID}.thresholds_by_asset_class"
             ),
         )
 
@@ -450,8 +356,7 @@ class QualityProfile:
             ),
             key_normalizer=_symbol_session_key,
             path=(
-                f"{ASCII_TICK_MICROSTRUCTURE_RULE_ID}."
-                "thresholds_by_symbol_session"
+                f"{ASCII_TICK_MICROSTRUCTURE_RULE_ID}.thresholds_by_symbol_session"
             ),
         )
 
@@ -498,8 +403,7 @@ class QualityProfile:
             ),
             key_normalizer=_lower_key,
             path=(
-                f"{ASCII_TICK_SPREAD_REGIME_RULE_ID}."
-                "thresholds_by_asset_class"
+                f"{ASCII_TICK_SPREAD_REGIME_RULE_ID}.thresholds_by_asset_class"
             ),
         )
 
@@ -558,9 +462,82 @@ class QualityProfile:
         )
         return assumptions
 
+    def fingerprint_profile(self) -> HistDataFingerprintProfile:
+        """Return configured deterministic fingerprint controls."""
+        config = self.rule_config(SERIES_FINGERPRINT_RULE_ID)
+        _reject_unknown_keys(
+            config,
+            {
+                "quantiles",
+                "lags",
+                "rolling_windows",
+                "histogram_bins",
+                "max_rows",
+                "rounding_digits",
+                "distribution_attention",
+            },
+            SERIES_FINGERPRINT_RULE_ID,
+        )
+        return HistDataFingerprintProfile(
+            quantiles=_fingerprint_quantiles(
+                config,
+                "quantiles",
+                DEFAULT_FINGERPRINT_QUANTILES,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            lags=_fingerprint_int_sequence(
+                config,
+                "lags",
+                DEFAULT_FINGERPRINT_LAGS,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            rolling_windows=_fingerprint_int_sequence(
+                config,
+                "rolling_windows",
+                DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            histogram_bins=_int_field(
+                config,
+                "histogram_bins",
+                DEFAULT_FINGERPRINT_HISTOGRAM_BINS,
+                minimum=1,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            max_rows=_int_field(
+                config,
+                "max_rows",
+                DEFAULT_FINGERPRINT_MAX_ROWS,
+                minimum=1,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            rounding_digits=_int_field(
+                config,
+                "rounding_digits",
+                DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
+                minimum=0,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            calendar_profile=self.calendar_profile(),
+            distribution_attention=(
+                _fingerprint_distribution_attention_profile(
+                    _mapping_field(
+                        config,
+                        "distribution_attention",
+                        path=SERIES_FINGERPRINT_RULE_ID,
+                    ),
+                    path=f"{SERIES_FINGERPRINT_RULE_ID}.distribution_attention",
+                )
+            ),
+        )
+
+    def reporting_profile(self) -> QualityReportingProfile:
+        """Return configured quality report publication controls."""
+        return _quality_reporting_profile(self.reporting)
+
     def to_request_payload(self) -> dict[str, JSONValue]:
         """Return a JSON-safe profile payload for runtime requests."""
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "name": self.name,
             "source": self.source,
@@ -568,10 +545,13 @@ class QualityProfile:
             "rules": _json_mapping(self.rules),
             "modeling_assumptions": dict(self.modeling_assumptions),
         }
+        if self.reporting:
+            payload["reporting"] = _json_mapping(self.reporting)
+        return payload
 
     def to_metadata(self) -> dict[str, JSONValue]:
         """Return report metadata describing the active quality profile."""
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "name": self.name,
             "source": self.source,
@@ -584,6 +564,13 @@ class QualityProfile:
             "rules": _json_mapping(self.rules),
             "is_default": self.is_default,
         }
+        if self.reporting:
+            payload["configured_reporting_keys"] = cast(
+                JSONValue,
+                sorted(str(key) for key in self.reporting),
+            )
+            payload["reporting"] = self.reporting_profile().to_metadata()
+        return payload
 
 
 def default_quality_profile() -> QualityProfile:
@@ -631,6 +618,11 @@ def quality_profile_from_mapping(
         source=str(payload.get("source") or source),
         source_path=str(payload.get("source_path") or source_path),
         rules=rules,
+        reporting=_mapping_field(
+            payload,
+            "reporting",
+            path="quality_profile",
+        ),
         modeling_assumptions=_mapping_field(
             payload,
             "modeling_assumptions",
@@ -664,12 +656,6 @@ def validate_quality_profile(profile: QualityProfile) -> None:
     profile.row_count_profile()
     profile.gap_tolerance(ASCII_TIMESTAMP_GAP_RULE_ID)
     profile.gap_tolerance(ASCII_TIMESTAMP_CONTINUITY_RULE_ID)
-    profile.m1_precision_rules_by_symbol()
-    profile.m1_precision_rules_by_asset_class()
-    profile.m1_outlier_thresholds()
-    profile.m1_outlier_thresholds_by_symbol()
-    profile.m1_outlier_thresholds_by_asset_class()
-    profile.m1_tick_reconstruction_tolerance()
     profile.tick_spread_thresholds()
     profile.tick_spread_thresholds_by_asset_class()
     profile.tick_microstructure_thresholds()
@@ -682,6 +668,8 @@ def validate_quality_profile(profile: QualityProfile) -> None:
     profile.cross_instrument_tolerance()
     profile.calendar_profile()
     profile.modeling_profile_assumptions()
+    profile.fingerprint_profile()
+    profile.reporting_profile()
     _validate_configured_severities(profile)
 
 
@@ -694,9 +682,6 @@ def _validate_configured_severities(profile: QualityProfile) -> None:
         ),
         ASCII_TIMESTAMP_GAP_RULE_ID: ("warning_severity",),
         ASCII_TIMESTAMP_CONTINUITY_RULE_ID: ("warning_severity",),
-        ASCII_M1_PRECISION_RULE_ID: ("warning_severity",),
-        ASCII_M1_OUTLIER_RULE_ID: ("warning_severity",),
-        ASCII_M1_TICK_RECONSTRUCTION_RULE_ID: ("warning_severity",),
         ASCII_TICK_SPREAD_RULE_ID: (
             "zero_spread_severity",
             "negative_spread_severity",
@@ -733,25 +718,6 @@ def _rules_mapping(value: Any) -> dict[str, Mapping[str, JSONValue]]:
             raise QualityProfileError(msg)
         rules[rule_id] = _json_mapping(config)
     return rules
-
-
-def _m1_outlier_threshold_mapping(
-    value: Mapping[str, JSONValue],
-    *,
-    key_normalizer: Any,
-    path: str,
-) -> dict[str, HistDataM1OutlierThresholds]:
-    result: dict[str, HistDataM1OutlierThresholds] = {}
-    for key, config in value.items():
-        profile_key = str(key_normalizer(str(key)))
-        if not profile_key:
-            continue
-        result[profile_key] = _m1_outlier_thresholds(
-            _expect_mapping(config, path=f"{path}.{key}"),
-            base=DEFAULT_M1_OUTLIER_THRESHOLDS,
-            path=f"{path}.{key}",
-        )
-    return result
 
 
 def _tick_spread_threshold_mapping(
@@ -827,74 +793,6 @@ def _precision_rule_mapping(
             path=f"{path}.{key}",
         )
     return result
-
-
-def _m1_outlier_thresholds(
-    value: Mapping[str, JSONValue],
-    *,
-    base: HistDataM1OutlierThresholds,
-    path: str,
-) -> HistDataM1OutlierThresholds:
-    _reject_unknown_keys(
-        value,
-        {
-            "max_range_ratio",
-            "max_open_jump_ratio",
-            "flatline_run_length",
-            "return_mad_multiplier",
-            "return_absolute_ratio",
-            "min_return_samples",
-        },
-        path,
-    )
-    return HistDataM1OutlierThresholds(
-        max_range_ratio=_float_field(
-            value,
-            "max_range_ratio",
-            base.max_range_ratio,
-            minimum=0.0,
-            minimum_exclusive=True,
-            path=path,
-        ),
-        max_open_jump_ratio=_float_field(
-            value,
-            "max_open_jump_ratio",
-            base.max_open_jump_ratio,
-            minimum=0.0,
-            minimum_exclusive=True,
-            path=path,
-        ),
-        flatline_run_length=_int_field(
-            value,
-            "flatline_run_length",
-            base.flatline_run_length,
-            minimum=2,
-            path=path,
-        ),
-        return_mad_multiplier=_float_field(
-            value,
-            "return_mad_multiplier",
-            base.return_mad_multiplier,
-            minimum=0.0,
-            minimum_exclusive=True,
-            path=path,
-        ),
-        return_absolute_ratio=_float_field(
-            value,
-            "return_absolute_ratio",
-            base.return_absolute_ratio,
-            minimum=0.0,
-            minimum_exclusive=True,
-            path=path,
-        ),
-        min_return_samples=_int_field(
-            value,
-            "min_return_samples",
-            base.min_return_samples,
-            minimum=2,
-            path=path,
-        ),
-    )
 
 
 def _tick_spread_thresholds(
@@ -1116,8 +1014,7 @@ def _gap_tolerance(
     )
     if tolerance.dynamic_window_initial_ms > tolerance.dynamic_window_max_ms:
         msg = (
-            f"{path}.dynamic_window_initial_ms must be <= "
-            "dynamic_window_max_ms"
+            f"{path}.dynamic_window_initial_ms must be <= dynamic_window_max_ms"
         )
         raise QualityProfileError(msg)
     return tolerance
@@ -1224,6 +1121,117 @@ def _precision_rule(
     )
 
 
+def _fingerprint_distribution_attention_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> HistDataFingerprintDistributionAttentionProfile:
+    base = HistDataFingerprintDistributionAttentionProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "invalid_row_min_count",
+            "invalid_row_min_rate",
+            "zero_spread_min_count",
+            "zero_spread_min_rate",
+            "negative_spread_min_count",
+            "negative_spread_min_rate",
+            "flag_truncated_distribution",
+            "flag_cache_float_precision",
+        },
+        path,
+    )
+    return HistDataFingerprintDistributionAttentionProfile(
+        invalid_row_min_count=_int_field(
+            value,
+            "invalid_row_min_count",
+            base.invalid_row_min_count,
+            minimum=1,
+            path=path,
+        ),
+        invalid_row_min_rate=_float_field(
+            value,
+            "invalid_row_min_rate",
+            base.invalid_row_min_rate,
+            minimum=0.0,
+            maximum=1.0,
+            path=path,
+        ),
+        zero_spread_min_count=_int_field(
+            value,
+            "zero_spread_min_count",
+            base.zero_spread_min_count,
+            minimum=1,
+            path=path,
+        ),
+        zero_spread_min_rate=_float_field(
+            value,
+            "zero_spread_min_rate",
+            base.zero_spread_min_rate,
+            minimum=0.0,
+            maximum=1.0,
+            path=path,
+        ),
+        negative_spread_min_count=_int_field(
+            value,
+            "negative_spread_min_count",
+            base.negative_spread_min_count,
+            minimum=1,
+            path=path,
+        ),
+        negative_spread_min_rate=_float_field(
+            value,
+            "negative_spread_min_rate",
+            base.negative_spread_min_rate,
+            minimum=0.0,
+            maximum=1.0,
+            path=path,
+        ),
+        flag_truncated_distribution=_bool_field(
+            value,
+            "flag_truncated_distribution",
+            base.flag_truncated_distribution,
+            path=path,
+        ),
+        flag_cache_float_precision=_bool_field(
+            value,
+            "flag_cache_float_precision",
+            base.flag_cache_float_precision,
+            path=path,
+        ),
+    )
+
+
+def _quality_reporting_profile(
+    value: Mapping[str, JSONValue],
+) -> QualityReportingProfile:
+    _reject_unknown_keys(
+        value,
+        {"remediation_catalog_audit"},
+        "quality_profile.reporting",
+    )
+    remediation_catalog_audit = _mapping_field(
+        value,
+        "remediation_catalog_audit",
+        path="quality_profile.reporting",
+    )
+    _reject_unknown_keys(
+        remediation_catalog_audit,
+        {"enabled"},
+        "quality_profile.reporting.remediation_catalog_audit",
+    )
+    return QualityReportingProfile(
+        remediation_catalog_audit=QualityRemediationCatalogAuditProfile(
+            enabled=_bool_field(
+                remediation_catalog_audit,
+                "enabled",
+                False,
+                path="quality_profile.reporting.remediation_catalog_audit",
+            )
+        )
+    )
+
+
 def _mapping_field(
     mapping: Mapping[str, Any],
     key: str,
@@ -1316,6 +1324,64 @@ def _int_tuple_field(
     return tuple(parsed)
 
 
+def _fingerprint_int_sequence(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: tuple[int, ...],
+    *,
+    path: str,
+) -> tuple[int, ...]:
+    values = _int_tuple_field(mapping, key, default, minimum=1, path=path)
+    if key not in mapping:
+        return values
+    if not values:
+        msg = f"{path}.{key} must not be empty"
+        raise QualityProfileError(msg)
+    if tuple(sorted(values)) != values or len(set(values)) != len(values):
+        msg = f"{path}.{key} must be a strictly increasing list"
+        raise QualityProfileError(msg)
+    return values
+
+
+def _fingerprint_quantiles(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: tuple[float, ...],
+    *,
+    path: str,
+) -> tuple[float, ...]:
+    if key not in mapping:
+        return default
+    value = mapping[key]
+    if not isinstance(value, list):
+        msg = f"{path}.{key} must be a list of numbers"
+        raise QualityProfileError(msg)
+    parsed: list[float] = []
+    for index, item in enumerate(value):
+        if isinstance(item, bool):
+            msg = f"{path}.{key}[{index}] must be a number"
+            raise QualityProfileError(msg)
+        try:
+            float_item = float(item)  # type: ignore[arg-type]
+        except (TypeError, ValueError) as exc:
+            msg = f"{path}.{key}[{index}] must be a number"
+            raise QualityProfileError(msg) from exc
+        if float_item <= 0.0 or float_item >= 1.0:
+            msg = f"{path}.{key}[{index}] must be > 0.0 and < 1.0"
+            raise QualityProfileError(msg)
+        parsed.append(float_item)
+    quantiles = tuple(parsed)
+    if not quantiles:
+        msg = f"{path}.{key} must not be empty"
+        raise QualityProfileError(msg)
+    if tuple(sorted(quantiles)) != quantiles or len(set(quantiles)) != len(
+        quantiles
+    ):
+        msg = f"{path}.{key} must be a strictly increasing list"
+        raise QualityProfileError(msg)
+    return quantiles
+
+
 def _float_field(
     mapping: Mapping[str, JSONValue],
     key: str,
@@ -1347,6 +1413,22 @@ def _float_field(
         msg = f"{path}.{key} must be <= {maximum}"
         raise QualityProfileError(msg)
     return parsed
+
+
+def _bool_field(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: bool,
+    *,
+    path: str,
+) -> bool:
+    if key not in mapping:
+        return default
+    value = mapping[key]
+    if not isinstance(value, bool):
+        msg = f"{path}.{key} must be a boolean"
+        raise QualityProfileError(msg)
+    return value
 
 
 def _reject_unknown_keys(

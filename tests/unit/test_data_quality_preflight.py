@@ -4,15 +4,25 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sys
 
 import histdatacom
+import histdatacom.data_quality.preflight as preflight_module
 import pytest
 
 from histdatacom import Options
 from histdatacom.cli import ArgParser
+from histdatacom.data_quality.fingerprint_contracts import (
+    FingerprintReportSurfaceContract,
+)
+from histdatacom.data_quality.fingerprint_discovery import (
+    TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION,
+    fingerprint_report_surface_evidence,
+)
 from histdatacom.data_quality.preflight import (
     DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR,
     QUALITY_PREFLIGHT_SCHEMA_VERSION,
@@ -24,7 +34,9 @@ from histdatacom.data_quality.preflight import (
     inspect_quality_preflight_evidence,
     quality_preflight_to_markdown,
     quality_run_preflight_warning,
+    register_quality_preflight_evidence_artifact,
     run_cache_quality_preflight,
+    write_quality_preflight_evidence_artifact,
     write_quality_preflight_markdown_report,
     write_quality_preflight_report,
 )
@@ -86,6 +98,22 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
         ]
         == 1000
     )
+    assert payload["preflight_policy"]["fingerprint_contract_audit"] == {
+        "mode": "always",
+        "status_policy": "fail-preflight-on-error",
+        "data_dependency": "representative-generated-report",
+        "standalone_command": (
+            "histdatacom quality fingerprint-schema --verify --json"
+        ),
+    }
+    assert payload["preflight_policy"]["bounded_payload_contract_audit"] == {
+        "mode": "always",
+        "status_policy": "fail-preflight-on-error",
+        "data_dependency": "representative-generated-report",
+        "standalone_command": (
+            "histdatacom quality bounded-payload-contract --json"
+        ),
+    }
     assert payload["decision"]["state"] == "safe"
     assert payload["decision"]["next_command"].startswith(
         "histdatacom --quality"
@@ -103,6 +131,30 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
         == 0
     )
     assert payload["evidence"]["validation_commands"][0]["status"] == "not-run"
+    contract_audit = payload["evidence"]["fingerprint_contract_audit"]
+    assert contract_audit["schema_version"] == (
+        "histdatacom.time-series-fingerprint-contract-audit.v1"
+    )
+    assert contract_audit["status"] == "pass"
+    assert contract_audit["preflight_status_policy"] == (
+        "fail-preflight-on-error"
+    )
+    assert contract_audit["preflight_gate"]["status"] == "pass"
+    assert contract_audit["preflight_gate"]["data_dependency"] == (
+        "representative-generated-report"
+    )
+    bounded_audit = payload["evidence"]["bounded_payload_contract_audit"]
+    assert bounded_audit["schema_version"] == (
+        "histdatacom.bounded-payload-contract-audit.v1"
+    )
+    assert bounded_audit["status"] == "pass"
+    assert bounded_audit["preflight_status_policy"] == (
+        "fail-preflight-on-error"
+    )
+    assert bounded_audit["preflight_gate"]["status"] == "pass"
+    assert bounded_audit["preflight_gate"]["data_dependency"] == (
+        "representative-generated-report"
+    )
     assert "--pair-groups majors" in payload["decision"]["next_command"]
     assert payload["sample_quality"]["summary"]["target_count"] == 3
     encoded = json.dumps(payload, sort_keys=True)
@@ -110,6 +162,292 @@ def test_quality_preflight_samples_cache_quantiles_and_estimates_runtime(
     assert "/Users/" not in encoded
     assert "/private/" not in encoded
     assert "/var/folders/" not in encoded
+
+
+def test_quality_preflight_surfaces_fingerprint_contract_audit(
+    tmp_path: Path,
+) -> None:
+    """Preflight output should include contract self-audits."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+    console = format_quality_preflight_console_summary(payload)
+    markdown = quality_preflight_to_markdown(payload)
+    audit = payload["evidence"]["fingerprint_contract_audit"]
+    bounded_audit = payload["evidence"]["bounded_payload_contract_audit"]
+
+    assert audit["status"] == "pass"
+    assert audit["finding_count"] == 0
+    assert bounded_audit["status"] == "pass"
+    assert bounded_audit["finding_count"] == 0
+    assert "fingerprint contract audit: pass" in console
+    assert "bounded payload contract audit: pass" in console
+    assert "policy=fail-preflight-on-error" in console
+    assert "## Fingerprint Contract Audit" in markdown
+    assert "### Fingerprint Report Surface Evidence" in markdown
+    assert "coverage_summary" in markdown
+    assert "regime_summary" in markdown
+    assert "present (Fingerprint regimes)" in markdown
+    assert "## Bounded Payload Contract Audit" in markdown
+    assert "| Status | pass |" in markdown
+    assert "histdatacom quality fingerprint-schema --verify --json" in markdown
+    assert "histdatacom quality bounded-payload-contract --json" in markdown
+    assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
+    assert str(tmp_path) not in markdown
+
+
+def test_quality_preflight_markdown_renders_intentional_cli_absence() -> None:
+    """Markdown evidence should explain intentionally absent CLI surfaces."""
+    contract = FingerprintReportSurfaceContract(
+        key="readiness_api_only",
+        summary_schema_key="fingerprint_readiness_summary",
+        report_metadata_key="time_series_fingerprint_readiness_summary",
+        bounded_payload_key="fingerprint_readiness",
+        cli_summary_section="",
+        cli_summary_heading="",
+        intentional_absence_reason="covered by machine-readable API only",
+    )
+    evidence = fingerprint_report_surface_evidence(contracts=(contract,))
+    payload = {
+        "schema_version": QUALITY_PREFLIGHT_SCHEMA_VERSION,
+        "evidence": {
+            "fingerprint_contract_audit": {
+                "schema_version": (
+                    TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION
+                ),
+                "status": "pass",
+                "check_count": 0,
+                "finding_count": 0,
+                "error_count": 0,
+                "warning_count": 0,
+                "preflight_status_policy": "fail-preflight-on-error",
+                "preflight_gate": {
+                    "reason": "fingerprint contract audit passed",
+                    "standalone_command": (
+                        "histdatacom quality fingerprint-schema --verify --json"
+                    ),
+                },
+                "report_surface_evidence": evidence,
+            }
+        },
+    }
+
+    markdown = quality_preflight_to_markdown(payload)
+
+    assert "### Fingerprint Report Surface Evidence" in markdown
+    assert "readiness_api_only" in markdown
+    assert "intentionally_absent" in markdown
+    assert "covered by machine-readable API only" in markdown
+
+
+def test_quality_preflight_fails_on_fingerprint_contract_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Contract audit errors should fail preflight with bounded findings."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    def fake_contract_audit(profile: object | None = None) -> dict[str, object]:
+        return {
+            "schema_version": (
+                "histdatacom.time-series-fingerprint-contract-audit.v1"
+            ),
+            "status": "fail",
+            "check_count": 1,
+            "finding_count": 1,
+            "error_count": 1,
+            "warning_count": 0,
+            "checks": [
+                {
+                    "name": "schema_contracts",
+                    "status": "fail",
+                    "checked_count": 1,
+                    "error_count": 1,
+                    "warning_count": 0,
+                }
+            ],
+            "findings": [
+                {
+                    "severity": "error",
+                    "code": "missing_schema_contract",
+                    "path": "schemas.series_fingerprint",
+                    "message": "expected contract key is missing",
+                    "expected": {"status": "implemented"},
+                    "actual": None,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        preflight_module,
+        "fingerprint_contract_audit",
+        fake_contract_audit,
+    )
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+    console = format_quality_preflight_console_summary(payload)
+    markdown = quality_preflight_to_markdown(payload)
+
+    assert payload["status"] == "fail"
+    assert payload["temporal_budget"]["status"] == "pass"
+    assert payload["decision"]["action"] == "fix fingerprint contract drift"
+    assert payload["decision"]["next_command"] == (
+        "histdatacom quality fingerprint-schema --verify --json"
+    )
+    audit = payload["evidence"]["fingerprint_contract_audit"]
+    assert audit["preflight_gate"]["status"] == "fail"
+    assert audit["preflight_gate"]["reason"] == (
+        "fingerprint contract audit failed with 1 errors and 0 warnings"
+    )
+    assert "fingerprint contract audit: fail" in console
+    assert "missing_schema_contract" in markdown
+    assert "schemas.series_fingerprint" in markdown
+
+
+def test_quality_preflight_fails_on_bounded_payload_contract_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Bounded payload contract errors should fail preflight."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    def fake_bounded_payload_contract_audit() -> dict[str, object]:
+        return {
+            "schema_version": "histdatacom.bounded-payload-contract-audit.v1",
+            "status": "fail",
+            "check_count": 1,
+            "finding_count": 1,
+            "error_count": 1,
+            "warning_count": 0,
+            "checks": [
+                {
+                    "name": "sequence_counts",
+                    "status": "fail",
+                    "checked_count": 1,
+                    "error_count": 1,
+                    "warning_count": 0,
+                }
+            ],
+            "findings": [
+                {
+                    "severity": "error",
+                    "code": "bounded_payload_count_mismatch",
+                    "path": "payload_limits.target_summaries.included_count",
+                    "message": "included_count must match emitted length",
+                    "expected": 2,
+                    "actual": 99,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        preflight_module,
+        "bounded_payload_contract_audit",
+        fake_bounded_payload_contract_audit,
+    )
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+    console = format_quality_preflight_console_summary(payload)
+    markdown = quality_preflight_to_markdown(payload)
+
+    assert payload["status"] == "fail"
+    assert payload["decision"]["action"] == (
+        "fix bounded payload contract drift"
+    )
+    assert payload["decision"]["next_command"] == (
+        "histdatacom quality bounded-payload-contract --json"
+    )
+    audit = payload["evidence"]["bounded_payload_contract_audit"]
+    assert audit["preflight_gate"]["status"] == "fail"
+    assert audit["preflight_gate"]["reason"] == (
+        "bounded payload contract audit failed with 1 errors and 0 warnings"
+    )
+    assert "bounded payload contract audit: fail" in console
+    assert "bounded_payload_count_mismatch" in markdown
+    assert "payload_limits.target_summaries.included_count" in markdown
+
+
+def test_quality_preflight_passes_profile_to_fingerprint_contract_audit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Preflight should audit the same quality profile it benchmarks."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    profile = {
+        "schema_version": "histdatacom.quality-profile.v1",
+        "name": "fingerprint-contract-preflight-profile",
+        "rules": {
+            "fingerprint.series": {
+                "rounding_digits": 4,
+            }
+        },
+    }
+    seen_profiles: list[object | None] = []
+
+    def fake_contract_audit(
+        profile_value: object | None = None,
+    ) -> dict[str, object]:
+        seen_profiles.append(profile_value)
+        return {
+            "schema_version": (
+                "histdatacom.time-series-fingerprint-contract-audit.v1"
+            ),
+            "status": "pass",
+            "check_count": 1,
+            "finding_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+            "checks": [],
+            "findings": [],
+        }
+
+    monkeypatch.setattr(
+        preflight_module,
+        "fingerprint_contract_audit",
+        fake_contract_audit,
+    )
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        quality_profile=profile,
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+
+    assert seen_profiles == [profile]
+    assert payload["evidence"]["fingerprint_contract_audit"]["status"] == "pass"
 
 
 def test_quality_preflight_accepts_individual_triangle_group(
@@ -137,6 +475,44 @@ def test_quality_preflight_accepts_individual_triangle_group(
     assert payload["filters"]["pairs"] == sorted(
         MAJOR_TRIANGLE_PAIR_GROUPS[group]
     )
+
+
+def test_quality_preflight_embeds_enabled_remediation_catalog_audit(
+    tmp_path: Path,
+) -> None:
+    """Preflight evidence should include opt-in catalog audit summaries."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        quality_profile={
+            "schema_version": "histdatacom.quality-profile.v1",
+            "name": "catalog-audit-preflight",
+            "reporting": {
+                "remediation_catalog_audit": {
+                    "enabled": True,
+                }
+            },
+        },
+        sample_size=1,
+        activity_budget_seconds=100,
+    )
+    audit = payload["sample_quality"]["remediation_catalog_audit"]
+    encoded = json.dumps(payload, sort_keys=True)
+    console = format_quality_preflight_console_summary(payload)
+    markdown = quality_preflight_to_markdown(payload)
+
+    assert audit["summary"]["report_count"] == 1
+    assert audit["report_coverage"][0]["source"] == "current-report"
+    assert "sample remediation audit:" in console
+    assert "### Sample Remediation Catalog Audit" in markdown
+    assert str(tmp_path) not in encoded
+    assert str(tmp_path) not in markdown
 
 
 def test_quality_preflight_imports_validation_report_status(
@@ -525,6 +901,8 @@ def test_quality_preflight_markdown_evidence_is_publish_safe(
     assert "# Quality Preflight Evidence" in markdown
     assert "## GitHub Issue Evidence" in markdown
     assert "Runtime cleanup" in markdown
+    assert "Fingerprint Contract Audit" in markdown
+    assert "histdatacom quality fingerprint-schema --verify --json" in markdown
     assert "Source artifacts" in markdown
     assert "1 transient source artifacts" in markdown
     assert "python -m pytest" in markdown
@@ -883,6 +1261,7 @@ def test_quality_preflight_evidence_inspection_reports_stale_and_bypass(
     (
         ("version", "version-mismatch"),
         ("policy", "policy-mismatch"),
+        ("fingerprint-policy", "policy-mismatch"),
         ("root", "root-mismatch"),
         ("filter", "filter-mismatch"),
         ("count", "cache-count-mismatch"),
@@ -922,6 +1301,10 @@ def test_quality_preflight_evidence_inspection_reports_mismatch_classes(
     )
     if mutation == "version":
         evidence["package"]["version"] = "0.0.0"
+    if mutation == "fingerprint-policy":
+        evidence["preflight_policy"]["fingerprint_contract_audit"] = {
+            "mode": "manual"
+        }
     if mutation == "fingerprint":
         evidence["cache_inventory"]["fingerprint"] = "stale"
     report_path = tmp_path / "preflight.json"
@@ -975,6 +1358,10 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
             "--quality-preflight-markdown",
             "--quality-preflight-markdown-report",
             str(tmp_path / "preflight.md"),
+            "--quality-preflight-profile-preview-output",
+            str(tmp_path / "profile-preview.md"),
+            "--quality-preflight-profile-preview-format",
+            "markdown",
             "--quality-preflight-validation-report",
             "latest",
             "--quality-preflight-run-validation",
@@ -997,9 +1384,62 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
     assert options.quality_preflight_markdown_report_path == str(
         tmp_path / "preflight.md"
     )
+    assert options.quality_preflight_profile_preview_output_path == str(
+        tmp_path / "profile-preview.md"
+    )
+    assert options.quality_preflight_profile_preview_format == "markdown"
     assert options.quality_preflight_validation_report_path == "latest"
     assert options.quality_preflight_run_validation
     assert options.pair_groups == ["majors"]
+
+
+def test_cli_enabled_quality_preflight_embeds_remediation_catalog_audit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """CLI audit opt-in should reach the publish-safe preflight payload."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality-preflight",
+            "--quality-target",
+            str(data_dir),
+            "--quality-checks",
+            "inventory",
+            "--quality-preflight-sample-size",
+            "1",
+            "--quality-remediation-catalog-audit",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+        ],
+    )
+
+    options = ArgParser(Options())()
+    payload = run_cache_quality_preflight(
+        Path(options.quality_paths[0]),
+        pairs=tuple(options.pairs),
+        formats=tuple(options.formats),
+        timeframes=tuple(options.timeframes),
+        quality_check_groups=tuple(options.quality_check_groups),
+        quality_profile=options.quality_profile,
+        sample_size=options.quality_preflight_sample_size,
+        activity_budget_seconds=100,
+    )
+
+    audit = payload["sample_quality"]["remediation_catalog_audit"]
+    assert options.quality_profile["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+    assert audit["summary"]["report_count"] == 1
+    assert audit["report_coverage"][0]["source"] == "current-report"
 
 
 def test_api_quality_preflight_returns_payload_without_temporal_submit(
@@ -1085,8 +1525,205 @@ def test_api_quality_preflight_writes_markdown_report(
 
     assert payload["markdown_report_path"] == "reports/preflight.md"
     assert markdown_path.exists()
-    assert "Quality Preflight Evidence" in markdown_path.read_text(
-        encoding="utf-8"
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "Quality Preflight Evidence" in markdown
+    assert "Fingerprint Contract Audit" in markdown
+
+
+@pytest.mark.parametrize(
+    ("preview_format", "filename", "expected_prefix"),
+    (
+        ("json", "profile-preview.json", "{\n"),
+        ("text", "profile-preview.txt", "Quality Profile Preview\n"),
+        ("markdown", "profile-preview.md", "# Quality Profile Preview\n"),
+    ),
+)
+def test_api_quality_preflight_writes_profile_preview_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    preview_format: str,
+    filename: str,
+    expected_prefix: str,
+) -> None:
+    """API preflight should attach a verified profile-preview artifact."""
+    import histdatacom.histdata_com as histdata_com
+
+    data_dir = tmp_path / "data"
+    preview_path = tmp_path / "reports" / filename
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    def fail_submit(*args: object, **kwargs: object) -> None:
+        raise AssertionError("preflight should not submit to Temporal")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    options = Options()
+    options.quality_preflight = True
+    options.quality_paths = (str(data_dir),)
+    options.quality_check_groups = {"inventory"}
+    options.quality_preflight_sample_size = 1
+    options.quality_preflight_profile_preview_output_path = str(preview_path)
+    options.quality_preflight_profile_preview_format = preview_format
+    options.pairs = {"eurusd"}
+    options.formats = {"ascii"}
+    options.timeframes = {"T"}
+
+    payload = histdata_com.main(options)
+
+    artifact = payload["evidence"]["quality_profile_preview"]
+    artifact_bytes = preview_path.read_bytes()
+    artifact_text = artifact_bytes.decode("utf-8")
+    markdown = quality_preflight_to_markdown(payload)
+
+    assert artifact_text.startswith(expected_prefix)
+    assert artifact["state"] == "written"
+    assert artifact["kind"] == "quality-profile-preview"
+    assert artifact["path"] == f"reports/{filename}"
+    assert artifact["format"] == preview_format
+    assert artifact["schema_version"] == (
+        "histdatacom.quality-profile-preview.v1"
+    )
+    assert artifact["label"] == "Profile preview"
+    assert artifact["console_label"] == "profile preview"
+    assert artifact["size_bytes"] == len(artifact_bytes)
+    assert artifact["sha256"] == hashlib.sha256(artifact_bytes).hexdigest()
+    assert payload["evidence"]["artifacts"]["quality_profile_preview"] == (
+        artifact
+    )
+    assert "Profile preview artifact" in markdown
+    assert "## Evidence Artifacts" in markdown
+    assert "Profile preview" in markdown
+    assert f"written: reports/{filename} ({preview_format})" in markdown
+    assert str(tmp_path) not in artifact_text
+    assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
+    if preview_format == "json":
+        preview_payload = json.loads(artifact_text)
+        assert (
+            preview_payload["profile_inputs"]["quality_profile_preview_format"]
+            == "json"
+        )
+        assert (
+            preview_payload["profile_inputs"][
+                "quality_profile_preview_output_path"
+            ]
+            == f"reports/{filename}"
+        )
+
+
+def test_config_quality_preflight_profile_preview_writes_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """YAML-configured preflight should write preview evidence artifacts."""
+    import histdatacom.histdata_com as histdata_com
+
+    data_dir = tmp_path / "data"
+    preview_path = tmp_path / "reports" / "yaml-profile-preview.txt"
+    report_path = tmp_path / "reports" / "preflight.json"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality_preflight: true
+  quality_target: {data_dir}
+  quality_checks: [inventory]
+  quality_preflight_report: {report_path}
+  quality_preflight_sample_size: 1
+  quality_preflight_profile_preview_output: {preview_path}
+  quality_preflight_profile_preview_format: text
+  pairs: [eurusd]
+  formats: [ascii]
+  timeframes: [tick-data-quotes]
+""",
+        encoding="utf-8",
+    )
+
+    def fail_submit(*args: object, **kwargs: object) -> None:
+        raise AssertionError("preflight should not submit to Temporal")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    artifact = payload["evidence"]["quality_profile_preview"]
+
+    assert preview_path.read_text(encoding="utf-8").startswith(
+        "Quality Profile Preview\n"
+    )
+    assert artifact["state"] == "written"
+    assert artifact["path"] == "reports/yaml-profile-preview.txt"
+    assert artifact["format"] == "text"
+    assert payload["evidence"]["artifacts"]["quality_profile_preview"] == (
+        artifact
+    )
+    assert (
+        "profile preview: written: reports/yaml-profile-preview.txt (text)"
+        in output
+    )
+
+
+def test_quality_preflight_evidence_artifact_registry_writes_and_renders(
+    tmp_path: Path,
+) -> None:
+    """Preflight evidence should render any registered artifact generically."""
+    data_dir = tmp_path / "data"
+    artifact_path = tmp_path / "reports" / "fixture-artifact.txt"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+    )
+
+    artifact = write_quality_preflight_evidence_artifact(
+        "fixture artifact",
+        artifact_path,
+        kind="fixture-artifact",
+        output_format="text",
+        schema_version="histdatacom.fixture-artifact.v1",
+        label="Fixture artifact",
+        console_label="fixture artifact",
+    )
+    registered = register_quality_preflight_evidence_artifact(
+        payload,
+        "fixture_artifact",
+        artifact,
+    )
+    artifact_bytes = artifact_path.read_bytes()
+    markdown = quality_preflight_to_markdown(payload)
+    console = format_quality_preflight_console_summary(payload)
+
+    assert artifact_path.read_text(encoding="utf-8") == "fixture artifact\n"
+    assert registered == artifact
+    assert payload["evidence"]["artifacts"]["fixture_artifact"] == artifact
+    assert payload["evidence"].get("fixture_artifact") is None
+    assert artifact["path"] == "reports/fixture-artifact.txt"
+    assert artifact["size_bytes"] == len(artifact_bytes)
+    assert artifact["sha256"] == hashlib.sha256(artifact_bytes).hexdigest()
+    assert "## Evidence Artifacts" in markdown
+    assert "Fixture artifact" in markdown
+    assert "histdatacom.fixture-artifact.v1" in markdown
+    assert "fixture artifact: written: reports/fixture-artifact.txt (text)" in (
+        console
     )
 
 

@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import cast
 
 from histdatacom.cli_config import (
     CliConfigError,
@@ -13,10 +14,39 @@ from histdatacom.cli_config import (
     configured_quality_argv,
 )
 from histdatacom.data_quality import QUALITY_CHECK_GROUPS
+from histdatacom.data_quality.bounded_payload_contracts import (
+    bounded_payload_contract_audit,
+    format_bounded_payload_contract_audit,
+)
+from histdatacom.data_quality.fingerprint_discovery import (
+    fingerprint_contract_audit,
+    fingerprint_schema_discovery,
+    format_fingerprint_contract_audit,
+    format_fingerprint_schema_discovery,
+)
+from histdatacom.data_quality.reporting import (
+    fingerprint_readiness_risk_summary,
+    format_fingerprint_readiness_risk_lines,
+)
 from histdatacom.data_quality.preflight import (
     DEFAULT_QUALITY_PREFLIGHT_EVIDENCE_MAX_AGE_SECONDS,
     format_quality_preflight_evidence_inspection,
     inspect_quality_preflight_evidence,
+)
+from histdatacom.data_quality.profiles import (
+    QualityProfileError,
+    load_quality_profile_file,
+)
+from histdatacom.data_quality.remediation_audit import (
+    DEFAULT_REMEDIATION_CATALOG_AUDIT_CODE_LIMIT,
+    DEFAULT_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+    DEFAULT_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
+    DEFAULT_REMEDIATION_CATALOG_AUDIT_TARGET_AXIS_LIMIT,
+    audit_remediation_catalog_report_paths,
+    format_remediation_catalog_audit,
+    load_quality_report,
+    remediation_catalog_audit_has_warning_error_gaps,
+    remediation_catalog_audit_to_json,
 )
 from histdatacom.fx_enums import (
     Format,
@@ -25,7 +55,13 @@ from histdatacom.fx_enums import (
     normalize_pair_group,
     pair_group_names,
 )
+from histdatacom.publication_safety import publish_safe_path
+from histdatacom.runtime_contracts import JSONValue
 from histdatacom.verbosity import configure_logging
+
+FINGERPRINT_READINESS_RISK_COMMAND_SCHEMA_VERSION = (
+    "histdatacom.fingerprint-readiness-risk-command.v1"
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -137,6 +173,146 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit the machine-readable inspection payload",
     )
+    catalog = subparsers.add_parser(
+        "remediation-catalog",
+        aliases=("catalog", "remediation-audit"),
+        help="audit remediation catalog completeness",
+    )
+    catalog.add_argument(
+        "--report",
+        dest="report_paths",
+        action="extend",
+        nargs="+",
+        default=[],
+        metavar="PATH",
+        help=(
+            "saved quality JSON report to include as representative "
+            "remediation-coverage evidence; repeat for multiple reports"
+        ),
+    )
+    catalog.add_argument(
+        "--code-limit",
+        dest="code_limit",
+        type=_integer_limit,
+        default=DEFAULT_REMEDIATION_CATALOG_AUDIT_CODE_LIMIT,
+        metavar="N",
+        help=(
+            "maximum unmapped finding-code groups to include; use -1 for all"
+        ),
+    )
+    catalog.add_argument(
+        "--rule-limit",
+        dest="rule_limit",
+        type=_integer_limit,
+        default=DEFAULT_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT,
+        metavar="N",
+        help="maximum rule-id count groups to include; use -1 for all",
+    )
+    catalog.add_argument(
+        "--source-limit",
+        dest="source_limit",
+        type=_integer_limit,
+        default=DEFAULT_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT,
+        metavar="N",
+        help=(
+            "maximum source examples to include per finding code; use -1 for all"
+        ),
+    )
+    catalog.add_argument(
+        "--target-axis-limit",
+        dest="target_axis_limit",
+        type=_integer_limit,
+        default=DEFAULT_REMEDIATION_CATALOG_AUDIT_TARGET_AXIS_LIMIT,
+        metavar="N",
+        help=(
+            "maximum target-axis samples to keep from report coverage; use -1 for all"
+        ),
+    )
+    catalog.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the machine-readable audit payload",
+    )
+    fingerprint_schema = subparsers.add_parser(
+        "fingerprint-schema",
+        aliases=("fingerprint-contract", "fingerprint-discovery"),
+        help="discover fingerprint schemas, profile knobs, and vocabulary",
+    )
+    fingerprint_schema.add_argument(
+        "--quality-profile",
+        dest="quality_profile_path",
+        default="",
+        metavar="PATH",
+        help=(
+            "read a quality profile file and reflect effective fingerprint controls"
+        ),
+    )
+    fingerprint_schema.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the machine-readable discovery payload",
+    )
+    fingerprint_schema.add_argument(
+        "--verify",
+        action="store_true",
+        help="emit a data-free fingerprint contract drift audit",
+    )
+    fingerprint_readiness = subparsers.add_parser(
+        "fingerprint-readiness",
+        aliases=("fingerprint-risk", "readiness-risk"),
+        help="rank fingerprint readiness risks from saved quality reports",
+    )
+    fingerprint_readiness.add_argument(
+        "--report",
+        dest="report_paths",
+        action="extend",
+        nargs="+",
+        required=True,
+        metavar="PATH",
+        help=(
+            "saved quality JSON report to rank; repeat or pass multiple "
+            "paths to compare reports"
+        ),
+    )
+    fingerprint_readiness.add_argument(
+        "--target-limit",
+        dest="target_limit",
+        type=_integer_limit,
+        default=None,
+        metavar="N",
+        help="maximum ranked targets to include; use -1 for all",
+    )
+    fingerprint_readiness.add_argument(
+        "--section-limit",
+        dest="section_limit",
+        type=_integer_limit,
+        default=None,
+        metavar="N",
+        help="maximum section risks to include per target; use -1 for all",
+    )
+    fingerprint_readiness.add_argument(
+        "--reason-limit",
+        dest="reason_limit",
+        type=_integer_limit,
+        default=None,
+        metavar="N",
+        help="maximum reason codes to include; use -1 for all",
+    )
+    fingerprint_readiness.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the machine-readable readiness risk ranking payload",
+    )
+    bounded_payload = subparsers.add_parser(
+        "bounded-payload-contract",
+        aliases=("bounded-payload-audit", "report-payload-contract"),
+        help="audit bounded quality-report payload metadata semantics",
+    )
+    bounded_payload.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the machine-readable bounded payload contract audit",
+    )
     return parser
 
 
@@ -150,31 +326,199 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
         return 1
     configure_logging(args.verbosity)
-    if args.quality_command not in {
+    if args.quality_command in {
         "evidence",
         "inspect-evidence",
         "doctor-evidence",
     }:
-        parser.error(f"unsupported quality command: {args.quality_command}")
+        payload = inspect_quality_preflight_evidence(
+            args.target_root,
+            args.evidence_path,
+            pairs=args.pairs,
+            pair_groups=args.pair_groups,
+            formats=args.formats,
+            timeframes=args.timeframes,
+            quality_check_groups=args.quality_check_groups,
+            evidence_max_age_seconds=args.evidence_max_age_seconds,
+            allow_stale_evidence=args.allow_stale_evidence,
+        )
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+        else:
+            print(
+                format_quality_preflight_evidence_inspection(payload)
+            )  # noqa:T201
+        return 0 if payload.get("accepted") is True else 1
 
-    payload = inspect_quality_preflight_evidence(
-        args.target_root,
-        args.evidence_path,
-        pairs=args.pairs,
-        pair_groups=args.pair_groups,
-        formats=args.formats,
-        timeframes=args.timeframes,
-        quality_check_groups=args.quality_check_groups,
-        evidence_max_age_seconds=args.evidence_max_age_seconds,
-        allow_stale_evidence=args.allow_stale_evidence,
-    )
-    if args.json:
-        print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
-    else:
-        print(
-            format_quality_preflight_evidence_inspection(payload)
-        )  # noqa:T201
-    return 0 if payload.get("accepted") is True else 1
+    if args.quality_command in {
+        "remediation-catalog",
+        "catalog",
+        "remediation-audit",
+    }:
+        payload = audit_remediation_catalog_report_paths(
+            args.report_paths,
+            code_limit=args.code_limit,
+            rule_limit=args.rule_limit,
+            source_limit=args.source_limit,
+            target_axis_limit=args.target_axis_limit,
+        )
+        if args.json:
+            print(  # noqa:T201
+                remediation_catalog_audit_to_json(payload),
+                end="",
+            )
+        else:
+            print(format_remediation_catalog_audit(payload))  # noqa:T201
+        return (
+            1
+            if remediation_catalog_audit_has_warning_error_gaps(payload)
+            else 0
+        )
+
+    if args.quality_command in {
+        "fingerprint-schema",
+        "fingerprint-contract",
+        "fingerprint-discovery",
+    }:
+        try:
+            profile = (
+                load_quality_profile_file(args.quality_profile_path)
+                if args.quality_profile_path
+                else None
+            )
+        except QualityProfileError as exc:
+            print(f"quality profile error: {exc}", file=sys.stderr)  # noqa:T201
+            return 1
+        if args.verify:
+            audit_payload = fingerprint_contract_audit(profile)
+            if args.json:
+                print(
+                    json.dumps(audit_payload, indent=2, sort_keys=True)
+                )  # noqa:T201
+            else:
+                print(
+                    format_fingerprint_contract_audit(audit_payload)
+                )  # noqa:T201
+            return 1 if audit_payload.get("status") == "fail" else 0
+
+        payload = fingerprint_schema_discovery(profile)
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+        else:
+            print(format_fingerprint_schema_discovery(payload))  # noqa:T201
+        return 0
+
+    if args.quality_command in {
+        "fingerprint-readiness",
+        "fingerprint-risk",
+        "readiness-risk",
+    }:
+        try:
+            risk_payload = _fingerprint_readiness_risk_command_payload(
+                args.report_paths,
+                target_limit=args.target_limit,
+                section_limit=args.section_limit,
+                reason_limit=args.reason_limit,
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            print(f"quality report error: {exc}", file=sys.stderr)  # noqa:T201
+            return 1
+        if args.json:
+            print(
+                json.dumps(risk_payload, indent=2, sort_keys=True)
+            )  # noqa:T201
+        else:
+            print(
+                _format_fingerprint_readiness_risk_command(risk_payload)
+            )  # noqa:T201
+        return 0
+
+    if args.quality_command in {
+        "bounded-payload-contract",
+        "bounded-payload-audit",
+        "report-payload-contract",
+    }:
+        audit_payload = bounded_payload_contract_audit()
+        if args.json:
+            print(
+                json.dumps(audit_payload, indent=2, sort_keys=True)
+            )  # noqa:T201
+        else:
+            print(
+                format_bounded_payload_contract_audit(audit_payload)
+            )  # noqa:T201
+        return 1 if audit_payload.get("status") == "fail" else 0
+
+    parser.error(f"unsupported quality command: {args.quality_command}")
+
+
+def _fingerprint_readiness_risk_command_payload(
+    report_paths: Sequence[str],
+    *,
+    target_limit: int | None,
+    section_limit: int | None,
+    reason_limit: int | None,
+) -> dict[str, JSONValue]:
+    reports: list[dict[str, JSONValue]] = []
+    risk_report_count = 0
+    for path in report_paths:
+        report = load_quality_report(path)
+        summary = fingerprint_readiness_risk_summary(
+            report,
+            target_limit=target_limit,
+            section_limit=section_limit,
+            reason_limit=reason_limit,
+        )
+        risk_target_count = _json_int_value(
+            summary.get("risk_target_count") if summary else 0
+        )
+        if risk_target_count > 0:
+            risk_report_count += 1
+        reports.append(
+            {
+                "report_path": publish_safe_path(path),
+                "summary": summary or {},
+            }
+        )
+    return {
+        "schema_version": FINGERPRINT_READINESS_RISK_COMMAND_SCHEMA_VERSION,
+        "report_count": len(reports),
+        "risk_report_count": risk_report_count,
+        "reports": cast(JSONValue, reports),
+    }
+
+
+def _format_fingerprint_readiness_risk_command(
+    payload: Mapping[str, JSONValue],
+) -> str:
+    lines = [
+        "Fingerprint readiness risk command",
+        f"reports: {payload.get('report_count', 0)}",
+        f"reports with risks: {payload.get('risk_report_count', 0)}",
+    ]
+    reports = payload.get("reports")
+    if not isinstance(reports, list):
+        return "\n".join(lines)
+    for item in reports:
+        if not isinstance(item, dict):
+            continue
+        lines.append("")
+        lines.append(f"Report: {item.get('report_path', 'unknown')}")
+        summary = item.get("summary")
+        if isinstance(summary, dict) and summary:
+            lines.extend(format_fingerprint_readiness_risk_lines(summary))
+        else:
+            lines.append("Fingerprint readiness risk")
+            lines.append("- no fingerprint readiness data")
+    return "\n".join(lines)
+
+
+def _json_int_value(value: JSONValue | None) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    return 0
 
 
 def _non_negative_int(value: str) -> int:
@@ -186,4 +530,16 @@ def _non_negative_int(value: str) -> int:
         ) from exc
     if parsed < 0:
         raise argparse.ArgumentTypeError("value must be non-negative")
+    return parsed
+
+
+def _integer_limit(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} is not an integer"
+        ) from exc
+    if parsed < -1:
+        raise argparse.ArgumentTypeError("value must be -1 or greater")
     return parsed

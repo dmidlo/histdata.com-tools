@@ -29,9 +29,22 @@ _COMMAND_SECTION_KEYS = {
 _KEY_ALIASES = {
     "data_dir": "data_directory",
     "quality": "data_quality",
+    "quality_profile_explain": "quality_profile_preview",
+    "quality_profile_explain_format": "quality_profile_preview_format",
+    "quality_profile_explain_output": "quality_profile_preview_output_path",
+    "quality_profile_explain_output_path": (
+        "quality_profile_preview_output_path"
+    ),
+    "quality_profile_preview": "quality_profile_preview",
+    "quality_profile_preview_format": "quality_profile_preview_format",
+    "quality_profile_preview_output": "quality_profile_preview_output_path",
+    "quality_profile_preview_output_path": (
+        "quality_profile_preview_output_path"
+    ),
     "quality_profile": "quality_profile_path",
     "quality_path": "quality_paths",
     "quality_paths": "quality_paths",
+    "quality_remediation_catalog_audit": "quality_remediation_catalog_audit",
     "quality_report": "quality_report_path",
     "quality_preflight_report": "quality_preflight_report_path",
     "quality_preflight_markdown": "quality_preflight_markdown",
@@ -40,6 +53,15 @@ _KEY_ALIASES = {
     ),
     "quality_preflight_markdown_report_path": (
         "quality_preflight_markdown_report_path"
+    ),
+    "quality_preflight_profile_preview_format": (
+        "quality_preflight_profile_preview_format"
+    ),
+    "quality_preflight_profile_preview_output": (
+        "quality_preflight_profile_preview_output_path"
+    ),
+    "quality_preflight_profile_preview_output_path": (
+        "quality_preflight_profile_preview_output_path"
     ),
     "quality_preflight_run_validation": "quality_preflight_run_validation",
     "quality_preflight_sample": "quality_preflight_sample_size",
@@ -72,6 +94,7 @@ _KEY_ALIASES = {
     "request_json_output": "request_json_out",
     "run_request_json": "request_json_out",
     "scheduled_run_bundle": "request_bundle_out",
+    "remediation_catalog_audit": "quality_remediation_catalog_audit",
     "quality_preflight_evidence_stale_ok": (
         "quality_preflight_evidence_allow_stale"
     ),
@@ -127,6 +150,10 @@ _TRUE_FLAG_ARGS = {
     ),
     "quality_preflight_markdown": "--quality-preflight-markdown",
     "quality_preflight_run_validation": "--quality-preflight-run-validation",
+    "quality_profile_preview": "--quality-profile-preview",
+    "quality_remediation_catalog_audit": (
+        "--quality-remediation-catalog-audit"
+    ),
     "repo_quality_columns": "--repo-quality-columns",
     "no_overlap": "--no-overlap",
 }
@@ -143,11 +170,19 @@ _SCALAR_ARGS = {
         "--quality-preflight-markdown-report"
     ),
     "quality_preflight_report_path": "--quality-preflight-report",
+    "quality_preflight_profile_preview_format": (
+        "--quality-preflight-profile-preview-format"
+    ),
+    "quality_preflight_profile_preview_output_path": (
+        "--quality-preflight-profile-preview-output"
+    ),
     "quality_preflight_validation_report_path": (
         "--quality-preflight-validation-report"
     ),
     "quality_preflight_sample_size": "--quality-preflight-sample-size",
     "quality_profile_path": "--quality-profile",
+    "quality_profile_preview_format": "--quality-profile-preview-format",
+    "quality_profile_preview_output_path": "--quality-profile-preview-output",
     "quality_fail_on": "--quality-fail-on",
     "quality_max_errors": "--quality-max-errors",
     "quality_max_warnings": "--quality-max-warnings",
@@ -247,9 +282,20 @@ _CLEANUP_ALLOWED_KEYS = (
     | set(_CLEANUP_SCALAR_ARGS)
     | set(_CLEANUP_LIST_ARGS)
 )
-_QUALITY_COMMANDS = {"doctor-evidence", "evidence", "inspect-evidence"}
+_QUALITY_COMMANDS = {
+    "catalog",
+    "doctor-evidence",
+    "evidence",
+    "fingerprint-contract",
+    "fingerprint-discovery",
+    "fingerprint-schema",
+    "inspect-evidence",
+    "remediation-audit",
+    "remediation-catalog",
+}
 _QUALITY_ALIASES = {
     **_COMMAND_KEY_ALIASES,
+    "code_limit": "code_limit",
     "data_directory": "target_root",
     "evidence": "evidence_path",
     "instrument_group": "pair_groups",
@@ -260,32 +306,47 @@ _QUALITY_ALIASES = {
     "quality_check_groups": "quality_check_groups",
     "quality_checks": "quality_check_groups",
     "quality_path": "target_root",
+    "quality_profile": "quality_profile_path",
+    "quality_profile_path": "quality_profile_path",
     "quality_preflight_evidence": "evidence_path",
     "quality_preflight_evidence_max_age": ("evidence_max_age_seconds"),
     "quality_preflight_evidence_max_age_seconds": ("evidence_max_age_seconds"),
     "quality_preflight_evidence_path": "evidence_path",
     "quality_preflight_evidence_stale_ok": "allow_stale_evidence",
     "quality_target": "target_root",
+    "remediation_catalog_report": "report_paths",
+    "report": "report_paths",
+    "reports": "report_paths",
+    "rule_limit": "rule_limit",
+    "source_limit": "source_limit",
     "symbol_group": "pair_groups",
     "symbol_groups": "pair_groups",
     "target": "target_root",
+    "target_axis_limit": "target_axis_limit",
 }
 _QUALITY_TRUE_FLAG_ARGS = {
     "allow_stale_evidence": "--quality-preflight-evidence-stale-ok",
     "json": "--json",
+    "verify": "--verify",
 }
 _QUALITY_SCALAR_ARGS = {
+    "code_limit": "--code-limit",
     "evidence_max_age_seconds": (
         "--quality-preflight-evidence-max-age-seconds"
     ),
     "evidence_path": "--evidence",
+    "quality_profile_path": "--quality-profile",
+    "rule_limit": "--rule-limit",
+    "source_limit": "--source-limit",
     "target_root": "--target",
+    "target_axis_limit": "--target-axis-limit",
 }
 _QUALITY_LIST_ARGS = {
     "formats": "--formats",
     "pair_groups": "--pair-groups",
     "pairs": "--pairs",
     "quality_check_groups": "--quality-checks",
+    "report_paths": "--report",
     "timeframes": "--timeframes",
 }
 _QUALITY_ALLOWED_KEYS = (

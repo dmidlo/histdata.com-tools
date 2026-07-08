@@ -22,7 +22,7 @@ from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.runtime_contracts import ArtifactRef, StageResult, WorkItem
 from histdatacom.runtime_contracts import WorkStatus
 from tests.fixtures.histdata_ascii.quality_cases import (
-    CLEAN_M1_CASE,
+    CLEAN_TICK_CASE,
     write_ascii_case,
     write_zip_case,
 )
@@ -118,8 +118,8 @@ def test_provenance_reports_orphan_discovered_file(
 ) -> None:
     """Discovered files absent from orchestration artifacts should be warnings."""
     _write_lineage(tmp_path)
-    orphan = tmp_path / "DAT_ASCII_GBPUSD_M1_201202.csv"
-    orphan.write_text(CLEAN_M1_CASE.text, encoding="utf-8")
+    orphan = tmp_path / "DAT_ASCII_GBPUSD_T_201202.csv"
+    orphan.write_text(CLEAN_TICK_CASE.text, encoding="utf-8")
 
     report = _provenance_report(tmp_path)
 
@@ -134,7 +134,7 @@ def test_explicit_provenance_without_store_is_clean_info(
     tmp_path: Path,
 ) -> None:
     """File-only quality runs should not fail when no orchestration store exists."""
-    write_ascii_case(tmp_path, CLEAN_M1_CASE)
+    write_ascii_case(tmp_path, CLEAN_TICK_CASE)
 
     report = _provenance_report(tmp_path)
 
@@ -159,28 +159,28 @@ def _write_lineage(
     cache_sha256: str = "",
     cache_line_count: str = "3",
 ) -> _LineagePaths:
-    csv = write_ascii_case(tmp_path, CLEAN_M1_CASE).resolve()
-    archive = write_zip_case(tmp_path, CLEAN_M1_CASE).resolve()
+    csv = write_ascii_case(tmp_path, CLEAN_TICK_CASE).resolve()
+    archive = write_zip_case(tmp_path, CLEAN_TICK_CASE).resolve()
     cache = (
-        tmp_path / "ASCII" / "M1" / "eurusd" / "2012" / "02" / CACHE_FILENAME
+        tmp_path / "ASCII" / "T" / "eurusd" / "2012" / "02" / CACHE_FILENAME
     ).resolve()
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_bytes(b"canonical-polars-cache-placeholder")
 
     item = WorkItem(
-        work_id="work-eurusd-m1-201202",
+        work_id="work-eurusd-t-201202",
         status=WorkStatus.CACHE_READY,
         data_dir=str(tmp_path),
         data_format="ascii",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="EURUSD",
         data_datemonth="201202",
         zip_filename=archive.name,
         csv_filename=csv.name,
         cache_filename=CACHE_FILENAME,
         cache_line_count="3",
-        cache_start="1328072400000",
-        cache_end="1328072520000",
+        cache_start="1328072403660",
+        cache_end="1328072414990",
     )
     store = ManifestStatusStore(tmp_path)
     store.write_work_item(item, source="test", message="test work item")
@@ -199,8 +199,8 @@ def _write_lineage(
                     metadata={
                         "filename": CACHE_FILENAME,
                         "line_count": cache_line_count,
-                        "start": "1328072400000",
-                        "end": "1328072520000",
+                        "start": "1328072403660",
+                        "end": "1328072414990",
                         "work_id": item.work_id,
                     },
                 ),

@@ -29,7 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Mapping, Sequence, TypeGuard
+from typing import TYPE_CHECKING, Any, Mapping, Sequence, TypeGuard, cast
 
 import histdatacom
 from histdatacom import Options
@@ -48,9 +48,24 @@ from histdatacom.data_quality.preflight import (
     format_quality_run_preflight_warning,
     quality_preflight_to_markdown,
     quality_run_preflight_warning,
+    register_quality_preflight_evidence_artifact,
     run_cache_quality_preflight,
+    write_quality_preflight_evidence_artifact,
     write_quality_preflight_markdown_report,
     write_quality_preflight_report,
+)
+from histdatacom.data_quality.profiles import (
+    QualityProfile,
+    quality_profile_from_value,
+)
+from histdatacom.data_quality.reporting import (
+    format_fingerprint_distribution_attention_lines,
+    format_fingerprint_distribution_summary_lines,
+    format_fingerprint_readiness_risk_lines,
+    format_fingerprint_topology_attention_lines,
+    format_fingerprint_topology_summary_lines,
+    format_quality_next_action_lines,
+    format_quality_remediation_coverage_lines,
 )
 from histdatacom.fx_enums import expand_pair_selection
 from histdatacom.repository_output import (
@@ -59,6 +74,7 @@ from histdatacom.repository_output import (
 )
 from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.publication_safety import publish_safe_path
+from histdatacom.publication_safety import publish_safe_json_mapping
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import (
     FailureInfo,
@@ -96,6 +112,19 @@ if TYPE_CHECKING:
 WINDOWS_RUNTIME_REEXEC_ENV = "HISTDATACOM_WINDOWS_RUNTIME_REEXEC"
 WINDOWS_PYTHON_EXECUTABLE_NAMES = frozenset({"python.exe", "pythonw.exe"})
 WINDOWS_HISTDATACOM_LAUNCHER_NAMES = frozenset({"histdatacom.exe"})
+QUALITY_PROFILE_PREVIEW_SCHEMA_VERSION = (
+    "histdatacom.quality-profile-preview.v1"
+)
+QUALITY_PROFILE_PREVIEW_EXPLANATION_SCHEMA_VERSION = (
+    "histdatacom.quality-profile-preview-explanation.v1"
+)
+QUALITY_PROFILE_PREVIEW_DIFF_SCHEMA_VERSION = (
+    "histdatacom.quality-profile-preview-diff.v1"
+)
+QUALITY_PROFILE_PREVIEW_FORMATS = frozenset({"json", "text", "markdown"})
+QUALITY_PROFILE_PREVIEW_SOURCE_LIMIT = 128
+QUALITY_PROFILE_PREVIEW_DIFF_LIMIT = 128
+QUALITY_PROFILE_PREVIEW_DISPLAY_VALUE_LIMIT = 120
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,12 +152,17 @@ class RuntimeContext:
     quality_preflight_evidence_path: str | None
     quality_preflight_markdown: bool
     quality_preflight_markdown_report_path: str | None
+    quality_preflight_profile_preview_format: str
+    quality_preflight_profile_preview_output_path: str
     quality_preflight_report_path: str | None
     quality_preflight_run_validation: bool
     quality_preflight_sample_size: int
     quality_preflight_validation_report_path: str | None
     quality_profile_path: str
     quality_profile: Mapping[str, Any]
+    quality_profile_preview: bool
+    quality_profile_preview_format: str
+    quality_profile_preview_output_path: str
     repo_quality_refresh: bool
     repo_quality_columns: bool
     available_remote_data: bool
@@ -193,6 +227,21 @@ class _HistDataCom:  # noqa:R701
                 print(histdatacom.__version__)  # noqa:T201
             return histdatacom.__version__
 
+        if self.context.quality_profile_preview:
+            payload = _quality_profile_preview_payload(self.context)
+            rendered = _format_quality_profile_preview(
+                payload,
+                output_format=self.context.quality_profile_preview_format,
+            )
+            if self.context.quality_profile_preview_output_path:
+                _write_text_payload(
+                    rendered,
+                    self.context.quality_profile_preview_output_path,
+                )
+            elif not self.context.from_api:
+                print(rendered)  # noqa:T201
+            return payload
+
         if self.context.request_json_out or self.context.request_bundle_out:
             return self._export_run_artifacts()
 
@@ -208,8 +257,7 @@ class _HistDataCom:  # noqa:R701
             and self.context.request_bundle_out == "-"
         ):
             raise ValueError(
-                "request JSON and request bundle exports cannot both target "
-                "stdout"
+                "request JSON and request bundle exports cannot both target stdout"
             )
         request_payload: dict[str, JSONValue] = self.context.request.to_dict()
         if self.context.request_json_out:
@@ -256,6 +304,7 @@ class _HistDataCom:  # noqa:R701
                 run_validation=self.context.quality_preflight_run_validation,
             )
         )
+        _attach_quality_preflight_profile_preview(payload, self.context)
         if self.context.quality_preflight_report_path:
             report_path = Path(
                 self.context.quality_preflight_report_path
@@ -544,6 +593,12 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
             if args.get("quality_preflight_markdown_report_path") is None
             else str(args["quality_preflight_markdown_report_path"])
         ),
+        quality_preflight_profile_preview_format=str(
+            args.get("quality_preflight_profile_preview_format") or "json"
+        ),
+        quality_preflight_profile_preview_output_path=str(
+            args.get("quality_preflight_profile_preview_output_path") or ""
+        ),
         quality_preflight_report_path=(
             None
             if args.get("quality_preflight_report_path") is None
@@ -562,6 +617,13 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         ),
         quality_profile_path=str(args.get("quality_profile_path") or ""),
         quality_profile=dict(args.get("quality_profile") or {}),
+        quality_profile_preview=bool(args["quality_profile_preview"]),
+        quality_profile_preview_format=str(
+            args.get("quality_profile_preview_format") or "json"
+        ),
+        quality_profile_preview_output_path=str(
+            args.get("quality_profile_preview_output_path") or ""
+        ),
         repo_quality_refresh=bool(args["repo_quality_refresh"]),
         repo_quality_columns=bool(args["repo_quality_columns"]),
         available_remote_data=bool(args["available_remote_data"]),
@@ -594,6 +656,678 @@ def _write_json_payload(
     if path.parent != Path("."):
         path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _write_text_payload(content: str, destination: str) -> None:
+    """Write deterministic text content to stdout or a file."""
+    rendered = content if content.endswith("\n") else f"{content}\n"
+    if destination == "-":
+        print(rendered, end="")  # noqa:T201
+        return
+    path = Path(destination).expanduser()
+    if path.parent != Path("."):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(rendered, encoding="utf-8")
+
+
+def _attach_quality_preflight_profile_preview(
+    payload: dict[str, Any],
+    context: RuntimeContext,
+) -> None:
+    """Write an optional profile preview artifact into preflight evidence."""
+    destination = context.quality_preflight_profile_preview_output_path.strip()
+    if not destination:
+        return
+    output_format = context.quality_preflight_profile_preview_format
+    preview_payload = publish_safe_json_mapping(
+        _quality_profile_preview_payload(
+            context,
+            preview_format=output_format,
+            preview_output_path=destination,
+        )
+    )
+    rendered = _format_quality_profile_preview(
+        preview_payload,
+        output_format=output_format,
+    )
+    artifact = write_quality_preflight_evidence_artifact(
+        rendered,
+        destination,
+        kind="quality-profile-preview",
+        output_format=output_format,
+        schema_version=QUALITY_PROFILE_PREVIEW_SCHEMA_VERSION,
+        label="Profile preview",
+        console_label="profile preview",
+    )
+    register_quality_preflight_evidence_artifact(
+        payload,
+        "quality_profile_preview",
+        artifact,
+        legacy_key="quality_profile_preview",
+    )
+
+
+def _format_quality_profile_preview(
+    payload: Mapping[str, JSONValue],
+    *,
+    output_format: str,
+) -> str:
+    """Return a deterministic quality-profile preview rendering."""
+    normalized_format = output_format.strip().lower()
+    if normalized_format not in QUALITY_PROFILE_PREVIEW_FORMATS:
+        raise ValueError(
+            "quality profile preview format must be one of "
+            f"{sorted(QUALITY_PROFILE_PREVIEW_FORMATS)}"
+        )
+    if normalized_format == "json":
+        return json.dumps(payload, indent=2, sort_keys=True)
+    if normalized_format == "markdown":
+        return _format_quality_profile_preview_markdown(payload)
+    return _format_quality_profile_preview_text(payload)
+
+
+def _format_quality_profile_preview_text(
+    payload: Mapping[str, JSONValue],
+) -> str:
+    """Return a bounded text rendering of a quality-profile preview."""
+    explanation = _preview_mapping(payload.get("profile_explanation"))
+    profile_inputs = _preview_mapping(payload.get("profile_inputs"))
+    cli_overrides = _preview_mapping(payload.get("cli_overrides"))
+    lines = [
+        "Quality Profile Preview",
+        f"modes: {_preview_quality_modes_text(payload)}",
+        f"profile: {_preview_profile_source_text(payload)}",
+        "",
+        "Profile Inputs",
+    ]
+    for key, value in sorted(profile_inputs.items()):
+        lines.append(f"- {key}: {_preview_display_value(value)}")
+    lines.extend(["", "Input Channels"])
+    for channel in _preview_mapping_rows(explanation.get("input_channels")):
+        lines.append(f"- {_preview_channel_text(channel)}")
+    lines.extend(["", "Explicit Overrides"])
+    if cli_overrides:
+        for key, value in sorted(cli_overrides.items()):
+            lines.append(f"- {key}: {_preview_display_value(value)}")
+    else:
+        lines.append("- none")
+    lines.extend(["", "Effective Diff From Built-In Defaults"])
+    diff = _preview_mapping(explanation.get("effective_diff"))
+    lines.append(
+        f"- {_preview_bounded_summary_text(diff, row_label='changes')}"
+    )
+    for change in _preview_mapping_rows(diff.get("changes")):
+        lines.append(f"- {_preview_change_text(change)}")
+    lines.extend(["", "Value Sources"])
+    value_sources = _preview_mapping(explanation.get("effective_value_sources"))
+    lines.append(
+        f"- {_preview_bounded_summary_text(value_sources, row_label='values')}"
+    )
+    for row in _preview_mapping_rows(value_sources.get("values")):
+        lines.append(f"- {_preview_value_source_text(row)}")
+    return "\n".join(lines)
+
+
+def _format_quality_profile_preview_markdown(
+    payload: Mapping[str, JSONValue],
+) -> str:
+    """Return a bounded Markdown rendering of a quality-profile preview."""
+    explanation = _preview_mapping(payload.get("profile_explanation"))
+    profile_inputs = _preview_mapping(payload.get("profile_inputs"))
+    cli_overrides = _preview_mapping(payload.get("cli_overrides"))
+    diff = _preview_mapping(explanation.get("effective_diff"))
+    value_sources = _preview_mapping(explanation.get("effective_value_sources"))
+    lines = [
+        "# Quality Profile Preview",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Modes | {_markdown_cell(_preview_quality_modes_text(payload))} |",
+        (
+            f"| Profile | {_markdown_cell(_preview_profile_source_text(payload))} |"
+        ),
+        "",
+        "## Profile Inputs",
+        "",
+        "| Input | Value |",
+        "| --- | --- |",
+    ]
+    for key, value in sorted(profile_inputs.items()):
+        lines.append(
+            f"| {_markdown_cell(key)} | "
+            f"{_markdown_cell(_preview_display_value(value))} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Input Channels",
+            "",
+            "| Kind | Details |",
+            "| --- | --- |",
+        ]
+    )
+    for channel in _preview_mapping_rows(explanation.get("input_channels")):
+        lines.append(
+            f"| {_markdown_cell(str(channel.get('kind') or 'unknown'))} | "
+            f"{_markdown_cell(_preview_channel_detail_text(channel))} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Explicit Overrides",
+            "",
+            "| Path | Value |",
+            "| --- | --- |",
+        ]
+    )
+    if cli_overrides:
+        for key, value in sorted(cli_overrides.items()):
+            lines.append(
+                f"| {_markdown_cell(key)} | "
+                f"{_markdown_cell(_preview_display_value(value))} |"
+            )
+    else:
+        lines.append("| none |  |")
+    lines.extend(
+        [
+            "",
+            "## Effective Diff From Built-In Defaults",
+            "",
+            f"{_preview_bounded_summary_text(diff, row_label='changes')}.",
+            "",
+            "| Path | Source | Before | After |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for change in _preview_mapping_rows(diff.get("changes")):
+        lines.append(
+            f"| {_markdown_cell(str(change.get('path') or ''))} | "
+            f"{_markdown_cell(str(change.get('source') or 'unknown'))} | "
+            f"{_markdown_cell(_preview_display_value(change.get('before')))} | "
+            f"{_markdown_cell(_preview_display_value(change.get('after')))} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Value Sources",
+            "",
+            f"{_preview_bounded_summary_text(value_sources, row_label='values')}.",
+            "",
+            "| Path | Source | Value |",
+            "| --- | --- | --- |",
+        ]
+    )
+    for row in _preview_mapping_rows(value_sources.get("values")):
+        lines.append(
+            f"| {_markdown_cell(str(row.get('path') or ''))} | "
+            f"{_markdown_cell(str(row.get('source') or 'unknown'))} | "
+            f"{_markdown_cell(_preview_display_value(row.get('value')))} |"
+        )
+    return "\n".join(lines)
+
+
+def _preview_quality_modes_text(payload: Mapping[str, JSONValue]) -> str:
+    """Return active quality modes for a preview payload."""
+    modes = _preview_mapping(payload.get("quality_modes"))
+    active_modes = [key for key, active in sorted(modes.items()) if active]
+    return ", ".join(active_modes) if active_modes else "none"
+
+
+def _preview_profile_source_text(payload: Mapping[str, JSONValue]) -> str:
+    """Return a compact profile source summary."""
+    explanation = _preview_mapping(payload.get("profile_explanation"))
+    source = _preview_mapping(explanation.get("profile_source"))
+    quality_profile = _preview_mapping(payload.get("quality_profile"))
+    kind = str(source.get("kind") or quality_profile.get("source") or "")
+    name = str(source.get("profile_name") or quality_profile.get("name") or "")
+    source_path = str(
+        source.get("source_path") or quality_profile.get("source_path") or ""
+    )
+    pieces = [kind or "unknown"]
+    if name:
+        pieces.append(f"name={name}")
+    if source_path:
+        pieces.append(f"path={source_path}")
+    return " ".join(pieces)
+
+
+def _preview_channel_text(channel: Mapping[str, JSONValue]) -> str:
+    """Return one text row for an input channel."""
+    kind = str(channel.get("kind") or "unknown")
+    detail = _preview_channel_detail_text(channel)
+    return f"{kind}: {detail}" if detail else kind
+
+
+def _preview_channel_detail_text(channel: Mapping[str, JSONValue]) -> str:
+    """Return compact detail text for an input channel."""
+    parts: list[str] = []
+    for key in (
+        "description",
+        "path",
+        "profile_name",
+        "profile_source",
+        "source_path",
+        "paths",
+    ):
+        value = channel.get(key)
+        if value in (None, "", [], {}):
+            continue
+        parts.append(f"{key}={_preview_display_value(value)}")
+    return "; ".join(parts)
+
+
+def _preview_bounded_summary_text(
+    summary: Mapping[str, JSONValue],
+    *,
+    row_label: str,
+) -> str:
+    """Return a compact bounded-row summary."""
+    total = summary.get("changed_value_count", summary.get("value_count", 0))
+    included = summary.get(
+        "included_change_count", summary.get("included_value_count", 0)
+    )
+    omitted = summary.get(
+        "omitted_change_count", summary.get("omitted_value_count", 0)
+    )
+    return f"{total} {row_label}, {included} shown, {omitted} omitted"
+
+
+def _preview_change_text(change: Mapping[str, JSONValue]) -> str:
+    """Return one text row for a default-profile diff change."""
+    path = str(change.get("path") or "")
+    source = str(change.get("source") or "unknown")
+    before = _preview_display_value(change.get("before"))
+    after = _preview_display_value(change.get("after"))
+    return f"{path} [{source}]: {before} -> {after}"
+
+
+def _preview_value_source_text(row: Mapping[str, JSONValue]) -> str:
+    """Return one text row for a preview value source."""
+    path = str(row.get("path") or "")
+    source = str(row.get("source") or "unknown")
+    value = _preview_display_value(row.get("value"))
+    override = " override" if row.get("override") else ""
+    return f"{path} [{source}{override}]: {value}"
+
+
+def _preview_display_value(
+    value: JSONValue | None,
+    *,
+    limit: int = QUALITY_PROFILE_PREVIEW_DISPLAY_VALUE_LIMIT,
+) -> str:
+    """Return a bounded deterministic display value."""
+    rendered = json.dumps(value, sort_keys=True)
+    if len(rendered) <= limit:
+        return rendered
+    return f"{rendered[: max(0, limit - 3)]}..."
+
+
+def _markdown_cell(value: str) -> str:
+    """Escape minimal Markdown table control characters."""
+    return value.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
+
+
+def _preview_mapping(value: object) -> Mapping[str, JSONValue]:
+    """Return a JSON mapping or an empty mapping."""
+    if isinstance(value, Mapping):
+        return cast(Mapping[str, JSONValue], value)
+    return {}
+
+
+def _preview_mapping_rows(value: object) -> list[Mapping[str, JSONValue]]:
+    """Return mapping rows from a JSON array-like value."""
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [
+            cast(Mapping[str, JSONValue], item)
+            for item in value
+            if isinstance(item, Mapping)
+        ]
+    return []
+
+
+def _quality_profile_preview_payload(
+    context: RuntimeContext,
+    *,
+    preview_format: str | None = None,
+    preview_output_path: str | None = None,
+) -> dict[str, JSONValue]:
+    """Return a deterministic preview of the resolved quality profile."""
+    profile = quality_profile_from_value(context.quality_profile)
+    resolved_profile = profile.to_request_payload()
+    if "reporting" not in resolved_profile:
+        resolved_profile["reporting"] = (
+            profile.reporting_profile().to_metadata()
+        )
+
+    profile_metadata = profile.to_metadata()
+    profile_metadata.setdefault("configured_reporting_keys", [])
+    profile_metadata["configured_modeling_assumptions"] = dict(
+        profile.modeling_assumptions
+    )
+    profile_metadata["reporting"] = profile.reporting_profile().to_metadata()
+
+    audit_override_enabled = bool(
+        context.args.get("quality_remediation_catalog_audit")
+    )
+    cli_overrides: dict[str, JSONValue] = {}
+    if audit_override_enabled:
+        cli_overrides["reporting.remediation_catalog_audit.enabled"] = True
+    profile_inputs: dict[str, JSONValue] = {
+        "from_api": context.from_api,
+        "config_path": str(context.args.get("config_path") or ""),
+        "quality_profile_path": context.quality_profile_path,
+        "quality_profile_preview_format": (
+            preview_format or context.quality_profile_preview_format
+        ),
+        "quality_profile_preview_output_path": (
+            preview_output_path
+            if preview_output_path is not None
+            else context.quality_profile_preview_output_path
+        ),
+        "quality_remediation_catalog_audit": audit_override_enabled,
+    }
+    return {
+        "schema_version": QUALITY_PROFILE_PREVIEW_SCHEMA_VERSION,
+        "quality_modes": {
+            "quality": context.data_quality,
+            "repo_quality": context.repo_quality_refresh,
+            "quality_preflight": context.quality_preflight,
+        },
+        "profile_inputs": profile_inputs,
+        "cli_overrides": cli_overrides,
+        "quality_profile": profile_metadata,
+        "profile_explanation": _quality_profile_preview_explanation(
+            profile,
+            resolved_profile=resolved_profile,
+            profile_inputs=profile_inputs,
+            cli_overrides=cli_overrides,
+        ),
+        "resolved_profile": resolved_profile,
+    }
+
+
+def _quality_profile_preview_explanation(
+    profile: QualityProfile,
+    *,
+    resolved_profile: Mapping[str, JSONValue],
+    profile_inputs: Mapping[str, JSONValue],
+    cli_overrides: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    """Return deterministic provenance and default-diff metadata."""
+    default_profile = _resolved_default_quality_profile_payload()
+    source_kind = _quality_profile_source_kind(profile)
+    effective_sources = _quality_profile_value_sources(
+        resolved_profile,
+        profile=profile,
+        cli_overrides=cli_overrides,
+    )
+    effective_diff = _quality_profile_effective_diff(
+        default_profile,
+        resolved_profile,
+        effective_sources=effective_sources,
+    )
+    return {
+        "schema_version": QUALITY_PROFILE_PREVIEW_EXPLANATION_SCHEMA_VERSION,
+        "profile_source": {
+            "kind": source_kind,
+            "profile_name": profile.name,
+            "profile_source": profile.source,
+            "source_path": profile.source_path,
+            "is_default": profile.is_default,
+        },
+        "input_channels": _quality_profile_input_channels(
+            profile,
+            profile_inputs=profile_inputs,
+            cli_overrides=cli_overrides,
+        ),
+        "effective_value_sources": _bounded_source_items(
+            effective_sources,
+            limit=QUALITY_PROFILE_PREVIEW_SOURCE_LIMIT,
+        ),
+        "effective_diff": effective_diff,
+    }
+
+
+def _resolved_default_quality_profile_payload() -> dict[str, JSONValue]:
+    """Return the normalized built-in default preview profile payload."""
+    default_profile = quality_profile_from_value(None)
+    payload: dict[str, JSONValue] = default_profile.to_request_payload()
+    payload["reporting"] = default_profile.reporting_profile().to_metadata()
+    return payload
+
+
+def _quality_profile_input_channels(
+    profile: QualityProfile,
+    *,
+    profile_inputs: Mapping[str, JSONValue],
+    cli_overrides: Mapping[str, JSONValue],
+) -> list[JSONValue]:
+    """Return the input channels that shaped the resolved profile."""
+    config_path = str(profile_inputs.get("config_path") or "")
+    profile_path = str(profile_inputs.get("quality_profile_path") or "")
+    source_kind = _quality_profile_source_kind(profile)
+    channels: list[dict[str, JSONValue]] = [
+        {
+            "kind": "built_in_default",
+            "active": True,
+            "description": "Built-in quality profile defaults.",
+        },
+        {
+            "kind": "yaml_config",
+            "active": bool(config_path),
+            "path": config_path,
+        },
+        {
+            "kind": source_kind,
+            "active": not profile.is_default,
+            "profile_name": profile.name,
+            "profile_source": profile.source,
+            "source_path": profile.source_path or profile_path,
+        },
+        {
+            "kind": "api_options",
+            "active": (
+                bool(profile_inputs.get("from_api"))
+                and source_kind != "api_options"
+            ),
+        },
+        {
+            "kind": "cli_override",
+            "active": bool(cli_overrides),
+            "paths": cast(JSONValue, sorted(cli_overrides)),
+        },
+    ]
+    return [channel for channel in channels if channel["active"]]
+
+
+def _quality_profile_value_sources(
+    resolved_profile: Mapping[str, JSONValue],
+    *,
+    profile: QualityProfile,
+    cli_overrides: Mapping[str, JSONValue],
+) -> list[dict[str, JSONValue]]:
+    """Return per-value provenance for the resolved preview profile."""
+    source_by_path: dict[str, dict[str, JSONValue]] = {}
+    for path, value in _flatten_json_mapping(resolved_profile):
+        source_by_path[path] = {
+            "path": path,
+            "value": value,
+            "source": _quality_profile_path_source(path, profile=profile),
+        }
+    for dotted_path, value in sorted(cli_overrides.items()):
+        pointer = _json_pointer_from_dotted_path(dotted_path)
+        previous = source_by_path.get(pointer, {})
+        source_by_path[pointer] = {
+            "path": pointer,
+            "value": value,
+            "source": "cli_override",
+            "overridden_source": str(previous.get("source") or "unknown"),
+            "override": True,
+        }
+    return [source_by_path[path] for path in sorted(source_by_path)]
+
+
+def _quality_profile_effective_diff(
+    default_profile: Mapping[str, JSONValue],
+    resolved_profile: Mapping[str, JSONValue],
+    *,
+    effective_sources: Sequence[Mapping[str, JSONValue]],
+) -> dict[str, JSONValue]:
+    """Return a bounded diff from the built-in default profile."""
+    default_values = dict(_flatten_json_mapping(default_profile))
+    resolved_values = dict(_flatten_json_mapping(resolved_profile))
+    _prune_expanded_empty_mapping_values(default_values, resolved_values)
+    _prune_expanded_empty_mapping_values(resolved_values, default_values)
+    source_by_path = {
+        str(item.get("path")): str(item.get("source") or "unknown")
+        for item in effective_sources
+    }
+    changes: list[dict[str, JSONValue]] = []
+    for path in sorted(set(default_values) | set(resolved_values)):
+        before = default_values.get(path)
+        after = resolved_values.get(path)
+        if before == after:
+            continue
+        changes.append(
+            {
+                "path": path,
+                "before": before,
+                "after": after,
+                "source": source_by_path.get(path, "unknown"),
+            }
+        )
+    included = changes[:QUALITY_PROFILE_PREVIEW_DIFF_LIMIT]
+    omitted_count = max(0, len(changes) - len(included))
+    return {
+        "schema_version": QUALITY_PROFILE_PREVIEW_DIFF_SCHEMA_VERSION,
+        "base": "built_in_default",
+        "changed_value_count": len(changes),
+        "included_change_count": len(included),
+        "omitted_change_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "changes": cast(JSONValue, included),
+    }
+
+
+def _prune_expanded_empty_mapping_values(
+    values: dict[str, JSONValue],
+    other_values: Mapping[str, JSONValue],
+) -> None:
+    """Remove empty-object placeholders when the other side has child values."""
+    for path, value in tuple(values.items()):
+        if value != {}:
+            continue
+        child_prefix = f"{path}/"
+        if any(
+            other_path.startswith(child_prefix) for other_path in other_values
+        ):
+            del values[path]
+
+
+def _quality_profile_path_source(
+    path: str,
+    *,
+    profile: QualityProfile,
+) -> str:
+    """Return the source label for one resolved profile value path."""
+    if profile.is_default:
+        return "built_in_default"
+    if path.startswith("/rules/") or path.startswith("/modeling_assumptions/"):
+        return _quality_profile_source_kind(profile)
+    if path.startswith("/reporting/"):
+        reporting = profile.reporting
+        if _profile_has_json_pointer(
+            reporting, path.removeprefix("/reporting")
+        ):
+            return _quality_profile_source_kind(profile)
+        return "built_in_default"
+    if path in {"/name", "/source", "/source_path", "/schema_version"}:
+        return _quality_profile_source_kind(profile)
+    return "built_in_default"
+
+
+def _quality_profile_source_kind(profile: QualityProfile) -> str:
+    """Return a stable public source kind for a quality profile."""
+    source = str(getattr(profile, "source", "") or "")
+    if source == "default":
+        return "built_in_default"
+    if source == "file":
+        return "profile_file"
+    if source == "api-options":
+        return "api_options"
+    if source == "cli-options":
+        return "cli_options"
+    if source == "operator-config":
+        return "operator_config"
+    return source.replace("-", "_") or "unknown"
+
+
+def _bounded_source_items(
+    items: Sequence[dict[str, JSONValue]],
+    *,
+    limit: int,
+) -> dict[str, JSONValue]:
+    """Return bounded source items plus truncation metadata."""
+    included = list(items[:limit])
+    omitted_count = max(0, len(items) - len(included))
+    return {
+        "value_count": len(items),
+        "included_value_count": len(included),
+        "omitted_value_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "values": cast(JSONValue, included),
+    }
+
+
+def _flatten_json_mapping(
+    value: Mapping[str, JSONValue],
+    *,
+    prefix: str = "",
+) -> list[tuple[str, JSONValue]]:
+    """Return sorted JSON-pointer leaf values for a mapping."""
+    flattened: list[tuple[str, JSONValue]] = []
+    for key in sorted(value, key=str):
+        path = f"{prefix}/{_json_pointer_token(str(key))}"
+        item = value[key]
+        if isinstance(item, Mapping):
+            if item:
+                flattened.extend(_flatten_json_mapping(item, prefix=path))
+            else:
+                flattened.append((path, {}))
+        else:
+            flattened.append((path, item))
+    return flattened
+
+
+def _profile_has_json_pointer(
+    value: Mapping[str, JSONValue],
+    pointer: str,
+) -> bool:
+    """Return whether a profile mapping explicitly contains a pointer path."""
+    if not pointer:
+        return bool(value)
+    current: object = value
+    for raw_token in pointer.strip("/").split("/"):
+        token = _json_pointer_token_unescape(raw_token)
+        if not isinstance(current, Mapping) or token not in current:
+            return False
+        current = current[token]
+    return True
+
+
+def _json_pointer_from_dotted_path(path: str) -> str:
+    """Translate legacy dotted override paths into JSON pointers."""
+    return "/" + "/".join(_json_pointer_token(part) for part in path.split("."))
+
+
+def _json_pointer_token(value: str) -> str:
+    """Return a JSON Pointer token."""
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _json_pointer_token_unescape(value: str) -> str:
+    """Return an unescaped JSON Pointer token."""
+    return value.replace("~1", "/").replace("~0", "~")
 
 
 def _attach_influx_config_metadata(
@@ -1023,7 +1757,7 @@ def _format_orchestration_quality_console_summary(
         source_state = source_cleanliness.get("state", "unknown")
         lines.append(
             "source artifacts: "
-            f"{source_state} ({source_count} transient ZIP/CSV/XLS/XLSX)"
+            f"{source_state} ({source_count} transient ZIP/CSV)"
         )
     repo_quality = _mapping_from_payload(quality_payload.get("repo_quality"))
     repo_artifact = _mapping_from_payload(repo_quality.get("repo_artifact"))
@@ -1034,6 +1768,49 @@ def _format_orchestration_quality_console_summary(
         lines.append(f"decision: {decision['reason']}")
     if int(summary.get("target_count", 0) or 0) == 0:
         lines.append("No data quality targets discovered.")
+    lines.extend(
+        format_quality_next_action_lines(
+            _mapping_from_payload(quality_payload.get("next_actions"))
+        )
+    )
+    lines.extend(
+        format_quality_remediation_coverage_lines(
+            _mapping_from_payload(quality_payload.get("remediation_coverage"))
+        )
+    )
+    lines.extend(
+        format_fingerprint_distribution_attention_lines(
+            _mapping_from_payload(
+                quality_payload.get("fingerprint_distribution_attention")
+            )
+        )
+    )
+    lines.extend(
+        format_fingerprint_distribution_summary_lines(
+            _mapping_from_payload(
+                quality_payload.get("fingerprint_distribution")
+            )
+        )
+    )
+    lines.extend(
+        format_fingerprint_topology_attention_lines(
+            _mapping_from_payload(
+                quality_payload.get("fingerprint_topology_attention")
+            )
+        )
+    )
+    lines.extend(
+        format_fingerprint_topology_summary_lines(
+            _mapping_from_payload(quality_payload.get("fingerprint_topology"))
+        )
+    )
+    lines.extend(
+        format_fingerprint_readiness_risk_lines(
+            _mapping_from_payload(
+                quality_payload.get("fingerprint_readiness_risk")
+            )
+        )
+    )
     lines.extend(_format_quality_target_sections(quality_payload))
     return "\n".join(lines)
 

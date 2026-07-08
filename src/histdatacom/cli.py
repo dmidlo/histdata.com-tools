@@ -87,6 +87,7 @@ from histdatacom.data_quality.preflight import (
     DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE,
 )
 from histdatacom.data_quality.profiles import (
+    QualityProfile,
     QualityProfileError,
     load_quality_profile_file,
     quality_profile_from_mapping,
@@ -128,6 +129,23 @@ def _positive_int(value: str) -> int:
     if parsed < 1:
         raise argparse.ArgumentTypeError("value must be positive")
     return parsed
+
+
+def _enable_remediation_catalog_audit(
+    profile: QualityProfile,
+) -> QualityProfile:
+    """Return a profile with remediation-catalog audit reporting enabled."""
+    payload = profile.to_request_payload()
+    reporting_value = payload.get("reporting", {})
+    reporting = (
+        dict(reporting_value) if isinstance(reporting_value, dict) else {}
+    )
+    audit_value = reporting.get("remediation_catalog_audit", {})
+    audit = dict(audit_value) if isinstance(audit_value, dict) else {}
+    audit["enabled"] = True
+    reporting["remediation_catalog_audit"] = audit
+    payload["reporting"] = reporting
+    return quality_profile_from_mapping(payload)
 
 
 class ArgParser(argparse.ArgumentParser):  # noqa:H601
@@ -273,12 +291,38 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 raise SystemExit(1)
             if self.arg_namespace.quality_profile_path:
                 print(  # noqa:T201
-                    "--quality-profile requires --quality or --repo-quality"
+                    "--quality-profile requires --quality, --repo-quality, "
+                    "or --quality-preflight"
                 )
                 raise SystemExit(1)
             if self.arg_namespace.quality_profile:
                 print(  # noqa:T201
-                    "quality_profile requires --quality or --repo-quality"
+                    "quality_profile requires --quality, --repo-quality, "
+                    "or --quality-preflight"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_profile_preview:
+                print(  # noqa:T201
+                    "--quality-profile-preview requires --quality, "
+                    "--repo-quality, or --quality-preflight"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_profile_preview_format != "json":
+                print(  # noqa:T201
+                    "--quality-profile-preview-format requires "
+                    "--quality-profile-preview"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_profile_preview_output_path:
+                print(  # noqa:T201
+                    "--quality-profile-preview-output requires "
+                    "--quality-profile-preview"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_remediation_catalog_audit:
+                print(  # noqa:T201
+                    "--quality-remediation-catalog-audit requires --quality, "
+                    "--repo-quality, or --quality-preflight"
                 )
                 raise SystemExit(1)
             if self.arg_namespace.quality_preflight_evidence_path:
@@ -305,6 +349,21 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             if self.arg_namespace.quality_preflight_markdown_report_path:
                 print(  # noqa:T201
                     "--quality-preflight-markdown-report requires --quality-preflight"
+                )
+                raise SystemExit(1)
+            if (
+                self.arg_namespace.quality_preflight_profile_preview_format
+                != "json"
+            ):
+                print(  # noqa:T201
+                    "--quality-preflight-profile-preview-format requires "
+                    "--quality-preflight-profile-preview-output"
+                )
+                raise SystemExit(1)
+            if self.arg_namespace.quality_preflight_profile_preview_output_path:
+                print(  # noqa:T201
+                    "--quality-preflight-profile-preview-output requires "
+                    "--quality-preflight"
                 )
                 raise SystemExit(1)
             if self.arg_namespace.quality_preflight_validation_report_path:
@@ -334,6 +393,22 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             print(  # noqa:T201
                 "--quality-preflight cannot be combined with --quality or "
                 "--repo-quality"
+            )
+            raise SystemExit(1)
+        if (
+            self.arg_namespace.quality_profile_preview_format != "json"
+            and not self.arg_namespace.quality_profile_preview
+        ):
+            print(  # noqa:T201
+                "--quality-profile-preview-format requires --quality-profile-preview"
+            )
+            raise SystemExit(1)
+        if (
+            self.arg_namespace.quality_profile_preview_output_path
+            and not self.arg_namespace.quality_profile_preview
+        ):
+            print(  # noqa:T201
+                "--quality-profile-preview-output requires --quality-profile-preview"
             )
             raise SystemExit(1)
 
@@ -384,6 +459,45 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     "--quality-max-warnings requires --quality or --repo-quality"
                 )
                 raise SystemExit(1)
+            if (
+                self.arg_namespace.quality_preflight_profile_preview_format
+                != "json"
+                and not (
+                    self.arg_namespace.quality_preflight_profile_preview_output_path
+                )
+            ):
+                print(  # noqa:T201
+                    "--quality-preflight-profile-preview-format requires "
+                    "--quality-preflight-profile-preview-output"
+                )
+                raise SystemExit(1)
+            if (
+                self.arg_namespace.quality_preflight_profile_preview_output_path
+                == "-"
+            ):
+                print(  # noqa:T201
+                    "--quality-preflight-profile-preview-output requires a "
+                    "file path, not '-'"
+                )
+                raise SystemExit(1)
+            if (
+                self.arg_namespace.quality_profile_preview
+                and self.arg_namespace.quality_preflight_profile_preview_output_path
+            ):
+                print(  # noqa:T201
+                    "--quality-preflight-profile-preview-output cannot be "
+                    "combined with --quality-profile-preview"
+                )
+                raise SystemExit(1)
+        elif (
+            self.arg_namespace.quality_preflight_profile_preview_output_path
+            or self.arg_namespace.quality_preflight_profile_preview_format
+            != "json"
+        ):
+            print(  # noqa:T201
+                "quality preflight profile preview options require --quality-preflight"
+            )
+            raise SystemExit(1)
         elif (
             self.arg_namespace.quality_preflight_validation_report_path
             or self.arg_namespace.quality_preflight_run_validation
@@ -429,8 +543,25 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     self.arg_namespace.quality_profile,
                     source="api-options",
                 )
+            elif self.arg_namespace.quality_remediation_catalog_audit:
+                profile = quality_profile_from_mapping(
+                    {
+                        "reporting": {
+                            "remediation_catalog_audit": {
+                                "enabled": True,
+                            }
+                        }
+                    },
+                    source=(
+                        "api-options"
+                        if self.arg_namespace.from_api
+                        else "cli-options"
+                    ),
+                )
             else:
                 return
+            if self.arg_namespace.quality_remediation_catalog_audit:
+                profile = _enable_remediation_catalog_audit(profile)
         except QualityProfileError as exc:
             print(f"quality profile error: {exc}")  # noqa:T201
             raise SystemExit(1) from exc
@@ -458,6 +589,26 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 args.append("--repo-quality")
             if self.arg_namespace.quality_preflight:
                 args.append("--quality-preflight")
+            if self.arg_namespace.quality_profile_preview:
+                args.append("--quality-profile-preview")
+            if self.arg_namespace.quality_profile_preview_format != "json":
+                args.extend(
+                    [
+                        "--quality-profile-preview-format",
+                        self.arg_namespace.quality_profile_preview_format,
+                    ]
+                )
+            if self.arg_namespace.quality_profile_preview_output_path:
+                args.extend(
+                    [
+                        "--quality-profile-preview-output",
+                        str(
+                            self.arg_namespace.quality_profile_preview_output_path
+                        ),
+                    ]
+                )
+            if self.arg_namespace.quality_remediation_catalog_audit:
+                args.append("--quality-remediation-catalog-audit")
             if self.arg_namespace.quality_paths:
                 args.extend(
                     ["--quality-target", *self.arg_namespace.quality_paths]
@@ -522,6 +673,29 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                             ),
                         ]
                     )
+                if (
+                    self.arg_namespace.quality_preflight_profile_preview_output_path
+                ):
+                    args.extend(
+                        [
+                            "--quality-preflight-profile-preview-output",
+                            (
+                                self.arg_namespace.quality_preflight_profile_preview_output_path
+                            ),
+                        ]
+                    )
+                    if (
+                        self.arg_namespace.quality_preflight_profile_preview_format
+                        != "json"
+                    ):
+                        args.extend(
+                            [
+                                "--quality-preflight-profile-preview-format",
+                                (
+                                    self.arg_namespace.quality_preflight_profile_preview_format
+                                ),
+                            ]
+                        )
                 if self.arg_namespace.quality_preflight_validation_report_path:
                     args.extend(
                         [
@@ -755,7 +929,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
         formats = {str(item).lower() for item in self.arg_namespace.formats}
         timeframes = {str(item) for item in self.arg_namespace.timeframes}
-        cache_timeframes = {"M1", "T"}
+        cache_timeframes = {"T"}
         selected_cache_timeframes = timeframes & cache_timeframes
         if "ascii" in formats and selected_cache_timeframes:
             self.arg_namespace.formats = {"ascii"}
@@ -769,7 +943,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         )
         print(  # noqa:T201
             "ERROR: --build-cache can only build canonical Polars caches "
-            "for ascii/M1 or ascii/T datasets.\n"
+            "for ascii/T datasets.\n"
             f"Requested: {requested}"
         )
         raise SystemExit(1)
@@ -1311,10 +1485,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             nargs="+",
             type=str,
             choices=Format.list_values(),
-            help=(
-                "space separated formats. -f "  # noqa:BLK100
-                "metatrader ascii ninjatrader metastock"
-            ),
+            help=("space separated formats. -f ascii"),
             metavar="FORMAT",
         )
         config_args.add_argument(
@@ -1327,7 +1498,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             choices=Timeframe.list_keys(),
             help=(
                 "space separated Timeframes. -t "  # noqa:BLK100
-                "tick-data-quotes 1-minute-bar-quotes"
+                "tick-data-quotes"
             ),
             metavar="TIMEFRAME",
         )
@@ -1514,8 +1685,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             metavar="PATH",
             help=(
                 "local file or directory to assess; supports directories, "
-                "HistData ZIP archives, CSV files, XLSX payloads, and .data "
-                "cache files"
+                "HistData ZIP archives, CSV files, and .data cache files"
             ),
         )
         quality_args.add_argument(
@@ -1563,6 +1733,26 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "write the publish-safe Markdown quality preflight evidence "
                 "report to PATH"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-profile-preview-output",
+            dest="quality_preflight_profile_preview_output_path",
+            type=str,
+            metavar="PATH",
+            help=(
+                "write the resolved quality-profile preview to PATH and "
+                "reference it from quality preflight evidence"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-profile-preview-format",
+            dest="quality_preflight_profile_preview_format",
+            choices=("json", "text", "markdown"),
+            default="json",
+            help=(
+                "output format for --quality-preflight-profile-preview-output; "
+                "defaults to machine-readable json"
             ),
         )
         quality_args.add_argument(
@@ -1633,6 +1823,47 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "read a JSON quality profile with rule thresholds, "
                 "severities, and modeling assumptions"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-profile-preview",
+            "--quality-profile-explain",
+            dest="quality_profile_preview",
+            action="store_true",
+            help=(
+                "print the resolved quality profile JSON without running "
+                "quality checks, writing reports, or submitting work"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-profile-preview-format",
+            "--quality-profile-explain-format",
+            dest="quality_profile_preview_format",
+            choices=("json", "text", "markdown"),
+            default="json",
+            help=(
+                "output format for --quality-profile-preview; defaults to "
+                "machine-readable json"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-profile-preview-output",
+            "--quality-profile-explain-output",
+            dest="quality_profile_preview_output_path",
+            type=str,
+            metavar="PATH",
+            help=(
+                "write the selected --quality-profile-preview rendering to "
+                "PATH; use '-' for stdout"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-remediation-catalog-audit",
+            dest="quality_remediation_catalog_audit",
+            action="store_true",
+            help=(
+                "enable remediation-catalog audit reporting in quality "
+                "reports, bounded payloads, and preflight evidence"
             ),
         )
         quality_args.add_argument(

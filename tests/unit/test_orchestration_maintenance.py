@@ -43,7 +43,7 @@ def test_orchestration_maintenance_rotates_logs_and_prunes_status_store(
         _write_artifact(download_dir / f"archive-{index}.zip")
         for index in range(3)
     )
-    csv_path = _write_artifact(download_dir / "DAT_ASCII_EURUSD_M1_202201.csv")
+    csv_path = _write_artifact(download_dir / "DAT_ASCII_EURUSD_T_202201.csv")
     cache_path = _write_artifact(download_dir / ".data")
     store = ManifestStatusStore(runtime_policy.paths.manifests_dir)
     _write_retained_rows(store, archive_paths)

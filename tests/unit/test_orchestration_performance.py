@@ -124,7 +124,7 @@ def test_fixture_baseline_measurements_cover_representative_operations(
     tmp_path: Path,
 ) -> None:
     """Local fakes/fixtures should support validate/cache/import baselines."""
-    csv_path = FIXTURES / "DAT_ASCII_EURUSD_M1_201202.csv"
+    csv_path = FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv"
     source_csv = tmp_path / csv_path.name
     source_csv.write_bytes(csv_path.read_bytes())
     emitted_lines: list[list[str]] = []
@@ -134,7 +134,7 @@ def test_fixture_baseline_measurements_cover_representative_operations(
         status=WorkStatus.URL_NEW,
         url=(
             "http://www.histdata.com/download-free-forex-data/"
-            "?/ascii/1-minute-bar-quotes/eurusd/2022"
+            "?/ascii/tick-data-quotes/eurusd/2022"
         ),
     )
     cache_item = WorkItem(
@@ -144,7 +144,7 @@ def test_fixture_baseline_measurements_cover_representative_operations(
         csv_filename=source_csv.name,
         zip_filename="missing.zip",
         data_format="ascii",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="eurusd",
     )
     import_item = cache_item.with_status(WorkStatus.CACHE_READY)
@@ -213,7 +213,7 @@ def _form_html(*, token: str = "token") -> str:
         <input id="date" value="2022">
         <input id="datemonth" value="2022">
         <input id="platform" value="ASCII">
-        <input id="timeframe" value="M1">
+        <input id="timeframe" value="T">
         <input id="fxpair" value="eurusd">
       </form>
     </html>
@@ -225,18 +225,18 @@ def _batch_request() -> RunRequest:
         request_id="run-benchmark",
         pairs=("EURUSD",),
         formats=("ascii",),
-        timeframes=("M1",),
+        timeframes=("T",),
         validate_urls=True,
     )
 
 
 def _batch_work_item(datemonth: str) -> WorkItem:
     return WorkItem(
-        work_id=f"work-eurusd-m1-{datemonth}",
+        work_id=f"work-eurusd-tick-{datemonth}",
         status=WorkStatus.URL_NEW,
-        url=f"https://example.test/eurusd/M1/{datemonth}",
+        url=f"https://example.test/eurusd/T/{datemonth}",
         data_format="ascii",
-        data_timeframe="M1",
+        data_timeframe="T",
         data_fxpair="EURUSD",
         data_datemonth=datemonth,
     )

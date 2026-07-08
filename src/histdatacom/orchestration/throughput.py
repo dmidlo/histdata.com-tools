@@ -219,7 +219,7 @@ def default_throughput_benchmark_matrix(
             request_id=f"{request_id_prefix}-{name}",
             pairs=("eurusd",),
             formats=("ascii",),
-            timeframes=("M1",),
+            timeframes=("T",),
             start_yearmonth=period,
             end_yearmonth=period,
             data_directory=str(data_root / name),
@@ -263,7 +263,7 @@ def default_throughput_benchmark_matrix(
             request=request("validate-url", validate_urls=True),
             operations=("dataset_plan", "validate_urls"),
             work_item_count=1,
-            notes="One EURUSD M1 HistData archive page validation.",
+            notes="One EURUSD tick HistData archive page validation.",
         ),
         ThroughputBenchmarkScenario(
             name="multi-partition-validate-fanout",

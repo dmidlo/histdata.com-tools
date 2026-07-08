@@ -8,10 +8,11 @@ from pathlib import Path
 import pytest
 
 from histdatacom.data_quality import (
-    ASSET_CLASS_METAL,
     DEFAULT_QUALITY_PROFILE_SOURCE,
     QUALITY_PROFILE_SCHEMA_VERSION,
-    HistDataAsciiM1OutlierRule,
+    QUALITY_REPORTING_METADATA_KEY,
+    SERIES_FINGERPRINT_RULE_ID,
+    HistDataSeriesFingerprintRule,
     QualityFinding,
     QualityProfileError,
     QualityReport,
@@ -22,121 +23,18 @@ from histdatacom.data_quality import (
     quality_rules_for_groups,
     run_quality_assessment,
 )
-from histdatacom.histdata_ascii import M1, TICK
+from histdatacom.histdata_ascii import TICK
 from tests.fixtures.histdata_ascii.quality_cases import (
     HistDataAsciiCase,
     write_ascii_case,
 )
 
 
-def test_default_profile_keeps_rule_defaults() -> None:
-    """No profile should preserve deterministic rule defaults."""
-    rules = quality_rules_for_groups(("bars",))
-    outlier_rule = next(
-        rule for rule in rules if rule.rule_id == "bars.ascii.m1_outliers"
-    )
-
-    assert isinstance(outlier_rule, HistDataAsciiM1OutlierRule)
-    assert outlier_rule.thresholds.max_open_jump_ratio == 0.005
-    assert ASSET_CLASS_METAL in outlier_rule.thresholds_by_asset_class
-    assert (
-        outlier_rule.thresholds_by_asset_class[
-            ASSET_CLASS_METAL
-        ].max_open_jump_ratio
-        == 0.03
-    )
+def test_default_profile_keeps_profile_metadata_defaults() -> None:
+    """No profile should preserve deterministic profile metadata defaults."""
     metadata = quality_profile_report_metadata(None)["quality_profile"]
     assert metadata["source"] == DEFAULT_QUALITY_PROFILE_SOURCE
     assert metadata["is_default"] is True
-
-
-def test_profile_asset_outlier_override_suppresses_m1_jump_warning(
-    tmp_path: Path,
-) -> None:
-    """Asset-class thresholds should flow through the public rule factory."""
-    path = write_ascii_case(
-        tmp_path,
-        HistDataAsciiCase(
-            name="m1_profile_asset_open_jump_ok",
-            timeframe=M1,
-            filename="DAT_ASCII_EURUSD_M1_201202_OPEN_JUMP_OK.csv",
-            rows=(
-                "20120201 000000;1.000000;1.000010;0.999990;1.000000;0",
-                "20120201 000100;1.050000;1.050010;1.049990;1.050000;0",
-            ),
-        ),
-    )
-    profile = {
-        "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
-        "name": "loose-fx-profile",
-        "rules": {
-            "bars.ascii.m1_outliers": {
-                "thresholds_by_asset_class": {
-                    "fx": {"max_open_jump_ratio": 0.10}
-                }
-            }
-        },
-    }
-
-    report = _report_for_path(
-        path,
-        groups=("bars",),
-        profile=profile,
-    )
-
-    summary = _finding(report, "ASCII_M1_OUTLIER_SUMMARY")
-    assert report.status is QualityStatus.CLEAN
-    assert summary.metadata["open_jump_count"] == 0
-    assert summary.metadata["threshold_selection"]["source"] == "asset_class"
-    assert summary.metadata["threshold_selection"]["key"] == "fx"
-
-
-def test_profile_precision_asset_override_configures_non_fx_rule(
-    tmp_path: Path,
-) -> None:
-    """Precision profiles should make non-FX rules explicit and local."""
-    path = write_ascii_case(
-        tmp_path,
-        HistDataAsciiCase(
-            name="m1_xauusd_profiled_precision",
-            timeframe=M1,
-            filename="DAT_ASCII_XAUUSD_M1_201202.csv",
-            rows=("20120201 000000;1730.120;1730.125;1730.100;1730.110;0",),
-        ),
-    )
-    profile = {
-        "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
-        "name": "metal-precision",
-        "rules": {
-            "bars.ascii.m1_precision": {
-                "precision_rules_by_asset_class": {
-                    "metal": {
-                        "name": "operator_metal_three_decimal_bid",
-                        "expected_decimal_places": [3],
-                        "pip_size": "0.01",
-                        "tick_size": "0.001",
-                    }
-                }
-            }
-        },
-    }
-
-    report = _report_for_path(
-        path,
-        groups=("bars",),
-        profile=profile,
-    )
-
-    summary = _finding(report, "ASCII_M1_PRECISION_SUMMARY")
-    assert report.status is QualityStatus.CLEAN
-    assert summary.metadata["precision_rule_available"] is True
-    assert summary.metadata["symbol_metadata"]["precision_rule"]["name"] == (
-        "operator_metal_three_decimal_bid"
-    )
-    assert not any(
-        finding.code == "ASCII_M1_PRECISION_RULE_UNAVAILABLE"
-        for finding in report.findings
-    )
 
 
 def test_profile_symbol_session_microstructure_override(
@@ -192,10 +90,10 @@ def test_profile_modeling_assumptions_are_reported_in_metadata(
     path = write_ascii_case(
         tmp_path,
         HistDataAsciiCase(
-            name="m1_profiled_modeling_assumptions",
-            timeframe=M1,
-            filename="DAT_ASCII_EURUSD_M1_201202.csv",
-            rows=("20120201 000000;1.306600;1.306610;1.306590;1.306600;0",),
+            name="tick_profiled_modeling_assumptions",
+            timeframe=TICK,
+            filename="DAT_ASCII_EURUSD_T_201202.csv",
+            rows=("20120201 000003660,1.306600,1.306770,0",),
         ),
     )
     profile = {
@@ -228,6 +126,86 @@ def test_profile_modeling_assumptions_are_reported_in_metadata(
     assert summary.metadata["target_horizon"]["status"] == "feasible"
 
 
+def test_profile_reporting_enables_remediation_catalog_audit_metadata() -> None:
+    """Reporting profile switches should flow into report metadata."""
+    metadata = quality_profile_report_metadata(
+        {
+            "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+            "name": "catalog-audit-profile",
+            "reporting": {
+                "remediation_catalog_audit": {
+                    "enabled": True,
+                }
+            },
+        }
+    )
+
+    profile_metadata = metadata["quality_profile"]
+
+    assert metadata[QUALITY_REPORTING_METADATA_KEY] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+    assert profile_metadata["is_default"] is False
+    assert profile_metadata["configured_reporting_keys"] == [
+        "remediation_catalog_audit"
+    ]
+    assert profile_metadata["reporting"] == {
+        "remediation_catalog_audit": {"enabled": True}
+    }
+
+
+def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
+    """Fingerprint controls should validate and flow through rule factories."""
+    rules = quality_rules_for_groups(
+        ("fingerprint",),
+        profile={
+            "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+            "name": "fingerprint-profile",
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "quantiles": [0.1, 0.5, 0.9],
+                    "lags": [1, 5, 30],
+                    "rolling_windows": [60, 240],
+                    "histogram_bins": 16,
+                    "max_rows": 1000,
+                    "rounding_digits": 8,
+                    "distribution_attention": {
+                        "invalid_row_min_count": 2,
+                        "invalid_row_min_rate": 0.5,
+                        "zero_spread_min_count": 3,
+                        "zero_spread_min_rate": 0.25,
+                        "negative_spread_min_count": 4,
+                        "negative_spread_min_rate": 0.1,
+                        "flag_truncated_distribution": False,
+                        "flag_cache_float_precision": False,
+                    },
+                }
+            },
+        },
+    )
+
+    assert len(rules) == 1
+    assert isinstance(rules[0], HistDataSeriesFingerprintRule)
+    assert rules[0].profile.to_metadata() == {
+        "quantiles": [0.1, 0.5, 0.9],
+        "lags": [1, 5, 30],
+        "rolling_windows": [60, 240],
+        "histogram_bins": 16,
+        "max_rows": 1000,
+        "rounding_digits": 8,
+        "distribution_attention": {
+            "invalid_row_min_count": 2,
+            "invalid_row_min_rate": 0.5,
+            "zero_spread_min_count": 3,
+            "zero_spread_min_rate": 0.25,
+            "negative_spread_min_count": 4,
+            "negative_spread_min_rate": 0.1,
+            "flag_truncated_distribution": False,
+            "flag_cache_float_precision": False,
+        },
+    }
+
+
 @pytest.mark.parametrize(
     "profile",
     (
@@ -244,6 +222,42 @@ def test_profile_modeling_assumptions_are_reported_in_metadata(
                 }
             }
         },
+        {"rules": {SERIES_FINGERPRINT_RULE_ID: {"quantiles": [0.5, 0.1]}}},
+        {"rules": {SERIES_FINGERPRINT_RULE_ID: {"lags": [1, 1]}}},
+        {"rules": {SERIES_FINGERPRINT_RULE_ID: {"histogram_bins": 0}}},
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {"distribution_attention": "loose"}
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "distribution_attention": {"invalid_row_min_count": 0}
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "distribution_attention": {"zero_spread_min_rate": 1.5}
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "distribution_attention": {
+                        "flag_truncated_distribution": "yes"
+                    }
+                }
+            }
+        },
+        {"reporting": "enabled"},
+        {"reporting": {"unknown": {}}},
+        {"reporting": {"remediation_catalog_audit": True}},
+        {"reporting": {"remediation_catalog_audit": {"enabled": "yes"}}},
+        {"rules": {SERIES_FINGERPRINT_RULE_ID: {"unknown": True}}},
     ),
 )
 def test_invalid_profiles_fail_with_clear_errors(profile: dict) -> None:
@@ -277,32 +291,6 @@ def test_quality_profile_file_loads_json_payload(tmp_path: Path) -> None:
     assert profile.source == "file"
     assert profile.source_path == str(profile_path)
     assert profile.row_count_profile().min_row_count == 10
-
-
-def test_profile_runs_do_not_mutate_default_rule_state() -> None:
-    """A configured run must not leak thresholds into later default runs."""
-    configured = quality_rules_for_groups(
-        ("bars",),
-        profile={
-            "rules": {
-                "bars.ascii.m1_outliers": {
-                    "thresholds": {"max_open_jump_ratio": 0.25}
-                }
-            }
-        },
-    )
-    default = quality_rules_for_groups(("bars",))
-
-    configured_outlier = next(
-        rule for rule in configured if rule.rule_id == "bars.ascii.m1_outliers"
-    )
-    default_outlier = next(
-        rule for rule in default if rule.rule_id == "bars.ascii.m1_outliers"
-    )
-    assert isinstance(configured_outlier, HistDataAsciiM1OutlierRule)
-    assert isinstance(default_outlier, HistDataAsciiM1OutlierRule)
-    assert configured_outlier.thresholds.max_open_jump_ratio == 0.25
-    assert default_outlier.thresholds.max_open_jump_ratio == 0.005
 
 
 def _report_for_path(
