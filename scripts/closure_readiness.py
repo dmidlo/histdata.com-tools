@@ -338,7 +338,7 @@ class WorkflowProgressReporter:
         return round(now - self._started_at, 3)
 
 
-GATE_SPECS = (
+PRE_COVERAGE_GATE_SPECS = (
     GateSpec(
         "readme-help-sync",
         (sys.executable, "scripts/sync_readme_cli_help.py", "--check"),
@@ -350,13 +350,18 @@ GATE_SPECS = (
         (sys.executable, "-m", "histdatacom", "--help"),
         "python -m histdatacom --help",
     ),
-    GateSpec("pytest", (sys.executable, "-m", "pytest"), "python -m pytest"),
     GateSpec(
         "pre-commit",
         (sys.executable, "-m", "pre_commit", "run", "--all-files"),
         "python -m pre_commit run --all-files",
     ),
 )
+FINAL_COVERAGE_GATE = GateSpec(
+    "final-coverage",
+    (sys.executable, "scripts/run_final_coverage.py", "--ensure"),
+    "python scripts/run_final_coverage.py --ensure",
+)
+GATE_SPECS = (*PRE_COVERAGE_GATE_SPECS, FINAL_COVERAGE_GATE)
 FORMATTER_MUTATION_GATES = frozenset({"pre-commit", "readme-help-sync"})
 FORMATTER_MUTATION_SUFFIXES = frozenset(
     {
@@ -869,8 +874,8 @@ def build_closure_verification_report(
                 "README help sync",
                 "git diff --check",
                 "main CLI help smoke",
-                "full pytest",
                 "full pre-commit",
+                "final full-suite coverage (executed once or receipt-reused)",
                 "optional TestPyPI local simple-registry preflight",
                 "final git status",
                 "issue readback",
@@ -2189,17 +2194,54 @@ def collect_gate_summary(
             "state": "not-run",
             "reason": "run with --run-gates to execute closure gates",
             "required": [gate.display for gate in GATE_SPECS],
+            "final_coverage": {
+                "state": "not-run",
+                "reason": "closure gates were not requested",
+                "result": {},
+            },
             "results": [],
         }
-    results = [
-        _run_gate(
+    results = []
+    for gate in PRE_COVERAGE_GATE_SPECS:
+        results.append(
+            _run_gate(
+                repo_root,
+                gate,
+                runner=runner,
+                monitored_paths=monitored_paths,
+            )
+        )
+    pre_coverage_payload = {"results": results}
+    pre_coverage_changed = _gate_changed_paths(pre_coverage_payload)
+    pre_coverage_failed = [
+        str(_mapping(result).get("name", "unknown"))
+        for result in results
+        if _mapping(result).get("status") != "pass"
+    ]
+    if not pre_coverage_failed and not pre_coverage_changed:
+        final_coverage_result = _run_gate(
             repo_root,
-            gate,
+            FINAL_COVERAGE_GATE,
             runner=runner,
             monitored_paths=monitored_paths,
         )
-        for gate in GATE_SPECS
-    ]
+        results.append(final_coverage_result)
+        final_coverage = {
+            "state": str(final_coverage_result.get("status", "fail")),
+            "reason": "fast and mutating gates passed without file changes",
+            "result": final_coverage_result,
+        }
+    else:
+        reasons = []
+        if pre_coverage_failed:
+            reasons.append("an earlier gate failed")
+        if pre_coverage_changed:
+            reasons.append("an earlier gate changed repository files")
+        final_coverage = {
+            "state": "skipped",
+            "reason": " and ".join(reasons),
+            "result": {},
+        }
     gate_payload = {"results": results}
     changed_after = _gate_changed_paths(gate_payload)
     gate_sources = _gate_changed_path_sources(gate_payload)
@@ -2243,6 +2285,11 @@ def collect_gate_summary(
             runner=runner,
             blocker_prefix="standalone-gate-rerun",
         )
+        rerun_final_coverage = _mapping(
+            _mapping(rerun_report.get("gates")).get("final_coverage")
+        )
+        if rerun_final_coverage.get("state") in {"pass", "fail"}:
+            final_coverage = dict(rerun_final_coverage)
         required_rerun = _formatter_mutation_rerun_guidance(
             changed_after,
             mutation_summary=mutation_summary,
@@ -2275,6 +2322,7 @@ def collect_gate_summary(
         "mutation_summary": mutation_summary,
         "required_rerun": required_rerun,
         "rerun": rerun_report,
+        "final_coverage": final_coverage,
         "results": results,
     }
 
@@ -4677,7 +4725,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--run-gates",
         action="store_true",
-        help="run pytest, pre-commit, help sync, diff check, and help smoke",
+        help="run fast/mutating checks, then ensure final full-suite coverage",
     )
     parser.add_argument(
         "--rerun-standalone-formatter-mutations",
@@ -6236,6 +6284,11 @@ def _pre_mutation_gates_not_run(*, enabled: bool) -> dict[str, Any]:
             "state": "not-run",
             "reason": reason,
             "required": [gate.display for gate in GATE_SPECS],
+            "final_coverage": {
+                "state": "not-run",
+                "reason": reason,
+                "result": {},
+            },
             "results": [],
         },
         "results": [],
@@ -7012,8 +7065,8 @@ def _closure_verification_command_plan(
         "state": "ready",
         "execute_workflow": _shell_command(parts),
         "notes": [
-            "execute-workflow will rerun closure gates before mutation",
-            "execute-workflow will rerun closure gates after push before close",
+            "execute-workflow will ensure closure gates before mutation",
+            "post-push closure gates reuse matching final coverage evidence",
         ],
     }
 
@@ -7134,6 +7187,8 @@ def _workflow_command_name(command: Sequence[str]) -> str:
         return "git-log"
     if args[:3] == (sys.executable, "-m", "pytest"):
         return "gate-pytest"
+    if args[:2] == (sys.executable, "scripts/run_final_coverage.py"):
+        return "gate-final-coverage"
     if args[:3] == (sys.executable, "-m", "pre_commit"):
         return "gate-pre-commit"
     if args[:2] == (sys.executable, "scripts/sync_readme_cli_help.py"):

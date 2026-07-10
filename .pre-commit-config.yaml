@@ -87,45 +87,21 @@ repos:
     verbose: True
     stages:
       - pre-commit
-  - id: coverage-run
-    name: coverage-run
-    entry: scripts/run_dev_tool.py coverage
-    language: system
-    args: ["run"]
-    pass_filenames: false
-    always_run: True
-    types:
-      - python
-  - id: coverage-combine
-    name: coverage-combine
-    entry: scripts/run_dev_tool.py coverage
-    language: system
-    args: ["combine"]
-    pass_filenames: false
-    always_run: True
-    types:
-      - python
-  - id: coverage-report
-    name: coverage-report
-    entry: scripts/run_dev_tool.py coverage
-    language: system
-    args: ["report"]
-    pass_filenames: false
-    always_run: True
-    verbose: True
-    types:
-      - python
-  - id: coverage-rm
-    name: coverage-rm
-    entry: scripts/run_dev_tool.py
-    language: system
-    args: ["--remove", ".coverage"]
-    pass_filenames: false
-    always_run: True
   repo: local
 - repo: https://github.com/commitizen-tools/commitizen
   rev: v4.16.3
   hooks:
     - id: commitizen
     - id: commitizen-branch
+      stages: [pre-push]
+- repo: local
+  hooks:
+    - id: coverage-final
+      name: coverage-final
+      entry: scripts/run_dev_tool.py python
+      language: system
+      args: ["scripts/run_final_coverage.py", "--ensure"]
+      pass_filenames: false
+      always_run: true
+      verbose: true
       stages: [pre-push]
