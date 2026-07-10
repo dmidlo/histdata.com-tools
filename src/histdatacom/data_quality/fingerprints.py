@@ -2415,33 +2415,6 @@ def _compact_numeric_summary(value: JSONValue) -> dict[str, JSONValue]:
     }
 
 
-def _compact_flatline_summary(value: JSONValue) -> dict[str, JSONValue]:
-    flatline = _payload_mapping(value)
-    if not flatline:
-        return {}
-    return {
-        "zero_return_count": _int_payload(flatline.get("zero_return_count")),
-        "zero_return_rate": _optional_float_payload(
-            flatline.get("zero_return_rate")
-        ),
-        "zero_return_run_count": _int_payload(
-            flatline.get("zero_return_run_count")
-        ),
-        "ohlc_flatline_row_count": _int_payload(
-            flatline.get("ohlc_flatline_row_count")
-        ),
-        "ohlc_flatline_rate": _optional_float_payload(
-            flatline.get("ohlc_flatline_rate")
-        ),
-        "ohlc_flatline_run_count": _int_payload(
-            flatline.get("ohlc_flatline_run_count")
-        ),
-        "ohlc_flatline_affected_row_count": _int_payload(
-            flatline.get("ohlc_flatline_affected_row_count")
-        ),
-    }
-
-
 def _compact_event_summary(
     value: JSONValue,
     *,

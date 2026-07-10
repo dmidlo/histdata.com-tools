@@ -166,6 +166,7 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
     assert statuses["microstructure_dynamics"] == "valid"
     assert statuses["dependence"] == "limited"
     assert statuses["stationarity_diagnostics"] == "limited"
+    assert _retired_bar_schema_keys(payload) == set()
 
 
 def test_fingerprint_tick_microstructure_dynamics_describe_sequence(
@@ -1209,6 +1210,24 @@ def _mapping(value: Any) -> dict[str, Any]:
 def _list(value: Any) -> list[Any]:
     assert isinstance(value, list)
     return value
+
+
+def _retired_bar_schema_keys(value: Any) -> set[str]:
+    matches: set[str] = set()
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            normalized = str(key).lower()
+            if (
+                "m1" in normalized
+                or "ohlc" in normalized
+                or normalized.startswith("bar_")
+            ):
+                matches.add(str(key))
+            matches.update(_retired_bar_schema_keys(nested))
+    elif isinstance(value, list):
+        for nested in value:
+            matches.update(_retired_bar_schema_keys(nested))
+    return matches
 
 
 def _tick_case_from_mid_prices(
