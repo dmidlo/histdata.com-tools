@@ -11,6 +11,9 @@ from typing import Any
 import pytest
 
 from histdatacom.data_quality import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+    CROSS_SERIES_FINGERPRINT_RULE_ID,
+    CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
     QUALITY_ENGINE_METADATA_KEY,
     QUALITY_ENGINE_SCHEMA_VERSION,
     QUALITY_NEXT_ACTIONS_METADATA_KEY,
@@ -686,8 +689,186 @@ def _fingerprint_report() -> QualityReport:
         metadata={
             "operation": "data-quality",
             "check_groups": ["fingerprint"],
+            CROSS_SERIES_FINGERPRINT_METADATA_KEY: (
+                _cross_series_golden_payload()
+            ),
         },
     )
+
+
+def _cross_series_golden_payload() -> dict[str, JSONValue]:
+    limit = {
+        "limit": 32,
+        "effective_limit": 32,
+        "requested_limit": 32,
+        "default_limit": 32,
+        "minimum_limit": 0,
+        "maximum_limit": None,
+        "unbounded": False,
+    }
+    return {
+        "schema_version": CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
+        "rule_id": CROSS_SERIES_FINGERPRINT_RULE_ID,
+        "status": "limited",
+        "calculation_basis": "shared_cross_instrument_scan",
+        "data_format": "ascii",
+        "timeframe": "T",
+        "target_count": 3,
+        "ascii_tick_target_count": 3,
+        "fx_series_count": 3,
+        "group_count": 1,
+        "incomplete_group_count": 0,
+        "included_group_count": 1,
+        "omitted_group_count": 0,
+        "truncated": False,
+        "limit_metadata": {
+            "groups": limit,
+            "correlations_per_group": limit,
+        },
+        "source_basis_counts": {"text_scan": 3},
+        "cache_source_counts": {},
+        "row_identity": {
+            "columns": [
+                "series_id",
+                "period",
+                "row_id",
+                "source_row_number",
+                "event_seq",
+            ],
+            "timestamp_is_durable_identity": False,
+            "duplicate_timestamp_row_count": 2,
+            "legacy_cache_enrichment_required": True,
+            "training_schema_version": "histdatacom.tick-training-row.v1",
+        },
+        "topology_basis": {
+            "schema_version": TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
+            "target_count": 3,
+            "included_target_count": 3,
+            "truncated": False,
+        },
+        "return_correlation_status_counts": {
+            "unavailable": 1,
+            "valid": 2,
+        },
+        "triangular_consistency": {
+            "candidate_count": 1,
+            "compared_timestamp_count": 3,
+            "warning_count": 0,
+            "error_count": 0,
+            "warning_samples": [],
+            "error_samples": [],
+        },
+        "inverse_consistency": {
+            "candidate_count": 0,
+            "compared_timestamp_count": 0,
+            "warning_count": 0,
+            "error_count": 0,
+            "warning_samples": [],
+            "error_samples": [],
+        },
+        "stale_join_risk": {"risk_count": 0, "samples": []},
+        "unavailable": {"count": 1, "samples": []},
+        "panel_coverage": [
+            {
+                "timeframe": "T",
+                "symbols": ["EURGBP", "EURUSD", "GBPUSD"],
+                "union_period_count": 1,
+                "common_period_count": 1,
+                "common_first_period": "201202",
+                "common_last_period": "201202",
+                "unequal_period_ranges": False,
+                "limiting_start_symbols": [
+                    "EURGBP",
+                    "EURUSD",
+                    "GBPUSD",
+                ],
+                "limiting_end_symbols": [
+                    "EURGBP",
+                    "EURUSD",
+                    "GBPUSD",
+                ],
+                "first_period_by_symbol": {
+                    "EURGBP": "201202",
+                    "EURUSD": "201202",
+                    "GBPUSD": "201202",
+                },
+                "last_period_by_symbol": {
+                    "EURGBP": "201202",
+                    "EURUSD": "201202",
+                    "GBPUSD": "201202",
+                },
+                "missing_period_count_by_symbol": {
+                    "EURGBP": 0,
+                    "EURUSD": 0,
+                    "GBPUSD": 0,
+                },
+            }
+        ],
+        "tolerance": {
+            "triangular_warning_relative_tolerance": 0.005,
+            "triangular_error_relative_tolerance": 0.02,
+            "inverse_warning_relative_tolerance": 0.005,
+            "inverse_error_relative_tolerance": 0.02,
+            "minimum_common_timestamp_ratio": 0.8,
+            "stale_forward_fill_min_run": 2,
+        },
+        "groups": [
+            {
+                "group_id": "ascii:T:201202",
+                "target_axis": {
+                    "data_format": "ascii",
+                    "timeframe": "T",
+                    "period": "201202",
+                },
+                "symbols": ["EURGBP", "EURUSD", "GBPUSD"],
+                "expected_symbols": ["EURGBP", "EURUSD", "GBPUSD"],
+                "missing_symbols": [],
+                "complete": True,
+                "series_count": 3,
+                "series": [],
+                "timestamp_grid": {
+                    "union_timestamp_count": 4,
+                    "common_timestamp_count": 3,
+                    "common_timestamp_ratio": 0.75,
+                    "missing_by_symbol": {
+                        "EURGBP": 1,
+                        "EURUSD": 0,
+                        "GBPUSD": 0,
+                    },
+                },
+                "coverage_ranges": {
+                    "common_start_timestamp_utc_ms": 1328072401000,
+                    "common_end_timestamp_utc_ms": 1328072403000,
+                    "unequal_ranges": True,
+                    "limiting_start_symbols": ["EURGBP"],
+                    "limiting_end_symbols": [
+                        "EURGBP",
+                        "EURUSD",
+                        "GBPUSD",
+                    ],
+                },
+                "topology": {
+                    "target_count": 3,
+                    "source_series_count": 3,
+                    "duplicate_timestamp_row_count": 2,
+                    "computed_from_counts": {"text_scan": 3},
+                    "cache_source_counts": {},
+                    "topology_computed_from_counts": {"text_scan": 3},
+                    "topology_cache_source_counts": {},
+                    "mixed_computation_basis": False,
+                    "mixed_cache_source": False,
+                },
+                "return_correlation": {
+                    "pair_count": 3,
+                    "included_pair_count": 3,
+                    "omitted_pair_count": 0,
+                    "truncated": False,
+                    "limit_metadata": {"pairs": limit},
+                    "pairs": [],
+                },
+            }
+        ],
+    }
 
 
 def _run_scoped_report_payload() -> dict[str, JSONValue]:
@@ -931,6 +1112,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     }
     optional_keys = {
         "fingerprint_coverage",
+        "fingerprint_cross_series",
         "fingerprint_distribution",
         "fingerprint_distribution_attention",
         "fingerprint_readiness",

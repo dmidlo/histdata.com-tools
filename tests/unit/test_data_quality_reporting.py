@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from histdatacom.data_quality import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     QUALITY_ENGINE_METADATA_KEY,
     QUALITY_ENGINE_SCHEMA_VERSION,
     QUALITY_NEXT_ACTIONS_METADATA_KEY,
@@ -38,6 +39,7 @@ from histdatacom.data_quality import (
     QualityTarget,
     QualityTargetKind,
     bounded_quality_payload,
+    format_cross_series_fingerprint_lines,
     format_fingerprint_topology_attention_lines,
     format_quality_console_summary,
     format_quality_remediation_catalog_audit_lines,
@@ -54,6 +56,10 @@ from histdatacom.data_quality import (
     series_fingerprint_readiness_risk_summary,
     series_fingerprint_regime_summary,
     write_quality_report,
+)
+from histdatacom.data_quality.bounded_payload_contracts import (
+    representative_bounded_quality_payload,
+    representative_quality_report,
 )
 from histdatacom.runtime_contracts import ArtifactRef
 
@@ -88,6 +94,30 @@ def test_quality_json_report_is_deterministic_and_investigable(
     assert finding["location"]["timestamp_utc_ms"] == 1328072760000
     assert finding["target"]["symbol"] == "EURUSD"
     assert str(tmp_path) not in first
+
+
+def test_cross_series_fingerprint_has_report_bounded_and_console_surfaces() -> (
+    None
+):
+    """Cross-series metadata should remain visible on every report surface."""
+    report = representative_quality_report()
+    full = quality_report_payload(report)
+    bounded = representative_bounded_quality_payload()
+    summary = full["metadata"][CROSS_SERIES_FINGERPRINT_METADATA_KEY]
+
+    assert (
+        summary["schema_version"] == "histdatacom.cross-series-fingerprint.v1"
+    )
+    assert bounded["fingerprint_cross_series"] == summary
+    lines = format_cross_series_fingerprint_lines(summary)
+    assert lines[1] == "Cross-series fingerprint"
+    assert "groups=1" in lines[2]
+    console = format_quality_console_summary(
+        report,
+        check_groups=("fingerprint",),
+    )
+    assert "Cross-series fingerprint" in console
+    assert "ascii:T:201202" in console
 
 
 def test_quality_report_payload_is_publish_safe_by_default(

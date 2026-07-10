@@ -9,7 +9,9 @@ from histdatacom.data_quality.calendar import (
     TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
 )
 from histdatacom.data_quality.fingerprints import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     CROSS_SERIES_FINGERPRINT_RULE_ID,
+    CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
     DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT,
     DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_CACHE_FLOAT_PRECISION,
     DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_TRUNCATED,
@@ -96,6 +98,7 @@ FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY = (
 FINGERPRINT_REGIME_BOUNDED_PAYLOAD_KEY = "fingerprint_regime"
 FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY = "fingerprint_readiness"
 FINGERPRINT_READINESS_RISK_BOUNDED_PAYLOAD_KEY = "fingerprint_readiness_risk"
+FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY = "fingerprint_cross_series"
 
 FINGERPRINT_SECTION_STATUSES = ("valid", "limited", "skipped", "unavailable")
 FINGERPRINT_DYNAMICS_STATUSES = ("ok", "limited", "unavailable")
@@ -440,10 +443,11 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
     ),
     FingerprintSchemaContract(
         "cross_series_fingerprint",
-        None,
+        CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
         rule_id=CROSS_SERIES_FINGERPRINT_RULE_ID,
-        status="planned",
-        issue="#331",
+        metadata_key=CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+        bounded_payload_key=FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
     ),
 )
 
@@ -511,6 +515,14 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         FINGERPRINT_READINESS_RISK_BOUNDED_PAYLOAD_KEY,
         "readiness_risk",
         "Fingerprint readiness risk",
+    ),
+    FingerprintReportSurfaceContract(
+        "cross_series",
+        "cross_series_fingerprint",
+        CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+        FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY,
+        "cross_series",
+        "Cross-series fingerprint",
     ),
 )
 
@@ -632,14 +644,17 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
 PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
     FingerprintPlannedSectionContract("synthetic_constraints", "#333"),
 )
-PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS = (
+IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS = (
     FingerprintRunSectionContract(
         "cross_series_fingerprint",
-        "planned",
+        "implemented",
         CROSS_SERIES_FINGERPRINT_RULE_ID,
         "#331",
     ),
 )
+PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS: tuple[
+    FingerprintRunSectionContract, ...
+] = ()
 
 FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
     "topology_summary_target_limit": DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,

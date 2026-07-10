@@ -23,11 +23,14 @@ from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_SCHEMA_CONTRACTS,
     FINGERPRINT_SECTION_LIMIT_DEFAULTS,
     FingerprintReportSurfaceContract,
+    IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS,
     IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
     PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS,
     PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
 )
 from histdatacom.data_quality.fingerprints import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+    CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
     FINGERPRINT_AUDIT_SECTIONS,
     FINGERPRINT_DYNAMICS_SECTIONS,
     SERIES_FINGERPRINT_RULE_ID,
@@ -93,9 +96,16 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert schemas["fingerprint_readiness_risk"]["schema_version"] == (
         TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION
     )
-    assert schemas["cross_series_fingerprint"]["status"] == "planned"
+    assert schemas["cross_series_fingerprint"] == {
+        "schema_version": CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
+        "status": "implemented",
+        "rule_id": "fingerprint.cross_series",
+        "metadata_key": CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+        "bounded_payload_key": "fingerprint_cross_series",
+    }
     assert payload["metadata_keys"]["finding_metadata"] == {
-        "series_fingerprint": TIME_SERIES_FINGERPRINT_METADATA_KEY
+        "series_fingerprint": TIME_SERIES_FINGERPRINT_METADATA_KEY,
+        "cross_series_fingerprint": CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     }
     assert payload["metadata_keys"]["report_metadata"]["readiness_summary"] == (
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY
@@ -119,9 +129,23 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     ]
     planned = payload["sections"]["planned"]["target_sections"]
     assert [section["name"] for section in planned] == ["synthetic_constraints"]
+    assert payload["sections"]["planned"]["run_sections"] == []
+    assert payload["sections"]["implemented"]["run_sections"] == [
+        {
+            "name": "cross_series_fingerprint",
+            "status": "implemented",
+            "rule_id": "fingerprint.cross_series",
+            "issue": "#331",
+        }
+    ]
+    assert payload["target_capabilities"]["run_rule_status"]["status"] == (
+        "implemented"
+    )
     assert "observed_sequence" in payload["calculation_bases"]["basis"]
     assert "source_text_order" in payload["calculation_bases"]["row_order"]
     assert "not_emitted" in payload["vocabularies"]["skip_and_reason_codes"]
+    assert len(IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS) == 1
+    assert PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS == ()
 
 
 def test_fingerprint_schema_discovery_uses_contract_registry() -> None:

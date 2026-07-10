@@ -1021,7 +1021,7 @@ Supported groups:
 | `domain` | symbol metadata, quote conventions, calendar/session tags, cross-instrument consistency |
 | `modeling` | advisory modeling-readiness checks for leakage risk, spread-cost assumptions, and target horizon feasibility |
 | `provenance` | optional orchestration manifest/status lineage checks for artifact paths, sizes, checksums, cache metadata, stale caches, and orphan files |
-| `fingerprint` | deterministic INFO-only time-series fingerprints for target axis, coverage, timestamp topology, tick distributions, calendar regimes, microstructure dynamics, lag dependence, stationarity/drift diagnostics, decomposition and structural-regime proxies, and bounded tick spread conditioning |
+| `fingerprint` | deterministic INFO-only target and run-scoped time-series fingerprints for coverage, topology, distributions, regimes, dynamics, dependence, stationarity, decomposition, and cross-series FX relationships |
 
 `fingerprint.series` payloads include a `calendar_regimes` section for readable
 ASCII tick targets. It counts session states, active/clock sessions,
@@ -1063,6 +1063,22 @@ call `decomposition_training_projection(...)` for its flat scalar values and
 `project_decomposition_onto_training_frame(...)` to repeat those period facts
 onto an already enriched ASCII tick frame without parsing a report or performing
 a side join. Row count and identity columns are preserved.
+
+Fingerprint runs also emit `cross_series_fingerprint` metadata using
+`histdatacom.cross-series-fingerprint.v1`. It groups related ASCII tick series
+by timeframe and period, then reports bounded symbol membership, full timestamp
+grid overlap, missing counts, unequal coverage ranges and limiting legs,
+pairwise return correlations, inverse and triangular consistency, and stale
+forward-fill risk. Panel coverage also reports union/common periods, missing
+period counts, unequal symbol ranges, and the legs that limit the common start
+or end. The group topology rollup includes row/parsed counts,
+duplicate and non-monotonic timestamps, suspicious and expected-session gaps,
+weekend activity, and source/cache provenance. Legacy raw `.data` caches are
+enriched in memory before this projection, and any row-level evidence uses
+`series_id`, `period`, and `row_id`; timestamp alone is never treated as durable
+identity. Full reports expose `metadata.cross_series_fingerprint`, bounded
+runtime payloads expose `fingerprint_cross_series`, and the CLI renders a
+concise `Cross-series fingerprint` section.
 
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,

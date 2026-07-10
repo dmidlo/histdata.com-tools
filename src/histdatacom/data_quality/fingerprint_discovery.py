@@ -25,11 +25,13 @@ from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_SKIP_REASON_CODES,
     FINGERPRINT_TOPOLOGY_LIMITATIONS,
     FingerprintReportSurfaceContract,
+    IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS,
     IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
     PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS,
     PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
 )
 from histdatacom.data_quality.fingerprints import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     FINGERPRINT_AUDIT_SECTIONS,
     FINGERPRINT_DYNAMICS_SECTIONS,
     SERIES_FINGERPRINT_RULE_ID,
@@ -243,6 +245,9 @@ def fingerprint_contract_audit(
             "schema_contract_count": len(FINGERPRINT_SCHEMA_CONTRACTS),
             "implemented_target_section_count": len(
                 IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+            ),
+            "implemented_run_section_count": len(
+                IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS
             ),
             "planned_target_section_count": len(
                 PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS
@@ -595,6 +600,10 @@ def _audit_section_contracts(
         contract.to_discovery_payload()
         for contract in IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS
     ]
+    expected_implemented_runs = [
+        contract.to_discovery_payload()
+        for contract in IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS
+    ]
     expected_planned_targets = [
         contract.to_discovery_payload()
         for contract in PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS
@@ -610,6 +619,14 @@ def _audit_section_contracts(
         actual=implemented.get("target_sections"),
         code="implemented_target_sections_mismatch",
         message="implemented target section discovery must be generated from the registry",
+    )
+    _compare_value(
+        findings,
+        path="sections.implemented.run_sections",
+        expected=expected_implemented_runs,
+        actual=implemented.get("run_sections"),
+        code="implemented_run_sections_mismatch",
+        message="implemented run section discovery must be generated from the registry",
     )
     _compare_value(
         findings,
@@ -646,6 +663,9 @@ def _audit_section_contracts(
     implemented_names = {
         contract.name
         for contract in IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+    } | {
+        contract.name
+        for contract in IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS
     }
     planned_names = {
         contract.name
@@ -666,6 +686,7 @@ def _audit_section_contracts(
         )
     return (
         len(expected_implemented)
+        + len(expected_implemented_runs)
         + len(expected_planned_targets)
         + len(expected_planned_runs)
         + 2,
@@ -1240,7 +1261,8 @@ def _schema_payload() -> dict[str, JSONValue]:
 def _metadata_key_payload() -> dict[str, JSONValue]:
     return {
         "finding_metadata": {
-            "series_fingerprint": TIME_SERIES_FINGERPRINT_METADATA_KEY
+            "series_fingerprint": TIME_SERIES_FINGERPRINT_METADATA_KEY,
+            "cross_series_fingerprint": CROSS_SERIES_FINGERPRINT_METADATA_KEY,
         },
         "report_metadata": {
             surface.key: surface.report_metadata_key
@@ -1254,7 +1276,7 @@ def _metadata_key_payload() -> dict[str, JSONValue]:
 
 
 def _target_capability_payload() -> dict[str, JSONValue]:
-    run_contract = PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS[0]
+    run_contract = IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS[0]
     return {
         "supported_target_kinds": _json_strings(("csv", "zip", "cache")),
         "supported_data_format": "ascii",
@@ -1276,6 +1298,10 @@ def _section_payload() -> dict[str, JSONValue]:
             "target_sections": [
                 contract.to_discovery_payload()
                 for contract in IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS
+            ],
+            "run_sections": [
+                contract.to_discovery_payload()
+                for contract in IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS
             ],
         },
         "planned": {

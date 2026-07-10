@@ -21,6 +21,7 @@ from histdatacom.data_quality.contracts import (
 )
 from histdatacom.data_quality.engine import QUALITY_ENGINE_METADATA_KEY
 from histdatacom.data_quality.fingerprint_contracts import (
+    FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_COVERAGE_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_DISTRIBUTION_BOUNDED_PAYLOAD_KEY,
@@ -31,6 +32,7 @@ from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY,
 )
 from histdatacom.data_quality.fingerprints import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
@@ -489,6 +491,11 @@ def format_quality_console_summary(
                 _fingerprint_readiness_risk_summary(report)
             )
         )
+        lines.extend(
+            format_cross_series_fingerprint_lines(
+                _cross_series_fingerprint_summary(report)
+            )
+        )
 
     sections = (
         (QualityStatus.CLEAN, "Clean files"),
@@ -551,6 +558,7 @@ def bounded_quality_payload(
     )
     fingerprint_readiness = _fingerprint_readiness_summary(report)
     fingerprint_readiness_risk = _fingerprint_readiness_risk_summary(report)
+    cross_series_fingerprint = _cross_series_fingerprint_summary(report)
     next_actions = quality_next_actions_summary(report)
     remediation_coverage = quality_remediation_coverage_summary(report)
     remediation_catalog_audit = quality_remediation_catalog_audit_summary(
@@ -623,6 +631,10 @@ def bounded_quality_payload(
     if fingerprint_readiness_risk is not None:
         payload[FINGERPRINT_READINESS_RISK_BOUNDED_PAYLOAD_KEY] = (
             fingerprint_readiness_risk
+        )
+    if cross_series_fingerprint is not None:
+        payload[FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY] = (
+            cross_series_fingerprint
         )
     if next_actions is not None:
         payload["next_actions"] = next_actions
@@ -1929,6 +1941,15 @@ def _fingerprint_coverage_summary(
     )
 
 
+def _cross_series_fingerprint_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return run-scoped cross-series fingerprint report metadata."""
+    return _optional_mapping_payload(
+        report.metadata.get(CROSS_SERIES_FINGERPRINT_METADATA_KEY)
+    )
+
+
 def _quality_engine_summary(
     report: QualityReport,
 ) -> dict[str, JSONValue] | None:
@@ -2914,6 +2935,50 @@ def format_fingerprint_readiness_risk_lines(
                 lines.append(
                     f"- {_format_fingerprint_readiness_risk_target(item)}"
                 )
+    return lines
+
+
+def format_cross_series_fingerprint_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable cross-series fingerprint lines."""
+    if not summary:
+        return []
+    lines = [
+        "",
+        "Cross-series fingerprint",
+        (
+            "- status: "
+            f"{_string_metadata(summary, 'status')} "
+            f"series={_int_metadata(summary, 'fx_series_count')} "
+            f"groups={_int_metadata(summary, 'group_count')} "
+            f"included={_int_metadata(summary, 'included_group_count')} "
+            f"omitted={_int_metadata(summary, 'omitted_group_count')}"
+        ),
+    ]
+    triangular = _mapping_payload(summary.get("triangular_consistency"))
+    inverse = _mapping_payload(summary.get("inverse_consistency"))
+    stale = _mapping_payload(summary.get("stale_join_risk"))
+    lines.append(
+        "- consistency: "
+        f"triangles={_int_metadata(triangular, 'candidate_count')} "
+        f"triangle warnings={_int_metadata(triangular, 'warning_count')} "
+        f"triangle errors={_int_metadata(triangular, 'error_count')} "
+        f"inverse={_int_metadata(inverse, 'candidate_count')} "
+        f"stale joins={_int_metadata(stale, 'risk_count')}"
+    )
+    for group in _list_metadata(summary.get("groups")):
+        grid = _mapping_payload(group.get("timestamp_grid"))
+        ranges = _mapping_payload(group.get("coverage_ranges"))
+        lines.append(
+            "- "
+            f"{_string_metadata(group, 'group_id')}: "
+            f"symbols={','.join(_string_list_metadata(group.get('symbols')))} "
+            f"common={_int_metadata(grid, 'common_timestamp_count')}/"
+            f"{_int_metadata(grid, 'union_timestamp_count')} "
+            f"ratio={_format_rate(grid.get('common_timestamp_ratio'))} "
+            f"unequal_ranges={_bool_text(ranges.get('unequal_ranges'))}"
+        )
     return lines
 
 

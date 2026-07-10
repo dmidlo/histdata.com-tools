@@ -71,6 +71,20 @@ This is a compatible optional v1 metadata addition. The default payload remains
 publish-safe: timestamp and row-position evidence is allowed, while absolute
 paths, credentials, complete quote rows, and raw row excerpts are not.
 
+## Cross-Series Fingerprint
+
+Fingerprint runs may include optional `metadata.cross_series_fingerprint`
+using `histdatacom.cross-series-fingerprint.v1`. The bounded runtime equivalent
+is `fingerprint_cross_series`. Group and pair lists are deterministic and expose
+complete limit/truncation metadata. Group rows contain publish-safe target axes,
+symbol membership, timestamp-grid and coverage-range summaries, topology and
+cache provenance counts, and bounded return-correlation results. Consistency
+samples may include `series_id`, `period`, `row_id`, `source_row_number`, and
+`event_seq`, but never absolute paths or raw quote rows.
+
+This is a compatible optional v1 report addition. Consumers that do not use
+run-scoped fingerprints can ignore both keys.
+
 ## Golden Fixtures
 
 Representative payload fixtures live under

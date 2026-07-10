@@ -3,6 +3,221 @@
     "check_groups": [
       "fingerprint"
     ],
+    "cross_series_fingerprint": {
+      "ascii_tick_target_count": 3,
+      "cache_source_counts": {},
+      "calculation_basis": "shared_cross_instrument_scan",
+      "data_format": "ascii",
+      "fx_series_count": 3,
+      "group_count": 1,
+      "groups": [
+        {
+          "complete": true,
+          "coverage_ranges": {
+            "common_end_timestamp_utc_ms": 1328072403000,
+            "common_start_timestamp_utc_ms": 1328072401000,
+            "limiting_end_symbols": [
+              "EURGBP",
+              "EURUSD",
+              "GBPUSD"
+            ],
+            "limiting_start_symbols": [
+              "EURGBP"
+            ],
+            "unequal_ranges": true
+          },
+          "expected_symbols": [
+            "EURGBP",
+            "EURUSD",
+            "GBPUSD"
+          ],
+          "group_id": "ascii:T:201202",
+          "missing_symbols": [],
+          "return_correlation": {
+            "included_pair_count": 3,
+            "limit_metadata": {
+              "pairs": {
+                "default_limit": 32,
+                "effective_limit": 32,
+                "limit": 32,
+                "maximum_limit": null,
+                "minimum_limit": 0,
+                "requested_limit": 32,
+                "unbounded": false
+              }
+            },
+            "omitted_pair_count": 0,
+            "pair_count": 3,
+            "pairs": [],
+            "truncated": false
+          },
+          "series": [],
+          "series_count": 3,
+          "symbols": [
+            "EURGBP",
+            "EURUSD",
+            "GBPUSD"
+          ],
+          "target_axis": {
+            "data_format": "ascii",
+            "period": "201202",
+            "timeframe": "T"
+          },
+          "timestamp_grid": {
+            "common_timestamp_count": 3,
+            "common_timestamp_ratio": 0.75,
+            "missing_by_symbol": {
+              "EURGBP": 1,
+              "EURUSD": 0,
+              "GBPUSD": 0
+            },
+            "union_timestamp_count": 4
+          },
+          "topology": {
+            "cache_source_counts": {},
+            "computed_from_counts": {
+              "text_scan": 3
+            },
+            "duplicate_timestamp_row_count": 2,
+            "mixed_cache_source": false,
+            "mixed_computation_basis": false,
+            "source_series_count": 3,
+            "target_count": 3,
+            "topology_cache_source_counts": {},
+            "topology_computed_from_counts": {
+              "text_scan": 3
+            }
+          }
+        }
+      ],
+      "included_group_count": 1,
+      "incomplete_group_count": 0,
+      "inverse_consistency": {
+        "candidate_count": 0,
+        "compared_timestamp_count": 0,
+        "error_count": 0,
+        "error_samples": [],
+        "warning_count": 0,
+        "warning_samples": []
+      },
+      "limit_metadata": {
+        "correlations_per_group": {
+          "default_limit": 32,
+          "effective_limit": 32,
+          "limit": 32,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 32,
+          "unbounded": false
+        },
+        "groups": {
+          "default_limit": 32,
+          "effective_limit": 32,
+          "limit": 32,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 32,
+          "unbounded": false
+        }
+      },
+      "omitted_group_count": 0,
+      "panel_coverage": [
+        {
+          "common_first_period": "201202",
+          "common_last_period": "201202",
+          "common_period_count": 1,
+          "first_period_by_symbol": {
+            "EURGBP": "201202",
+            "EURUSD": "201202",
+            "GBPUSD": "201202"
+          },
+          "last_period_by_symbol": {
+            "EURGBP": "201202",
+            "EURUSD": "201202",
+            "GBPUSD": "201202"
+          },
+          "limiting_end_symbols": [
+            "EURGBP",
+            "EURUSD",
+            "GBPUSD"
+          ],
+          "limiting_start_symbols": [
+            "EURGBP",
+            "EURUSD",
+            "GBPUSD"
+          ],
+          "missing_period_count_by_symbol": {
+            "EURGBP": 0,
+            "EURUSD": 0,
+            "GBPUSD": 0
+          },
+          "symbols": [
+            "EURGBP",
+            "EURUSD",
+            "GBPUSD"
+          ],
+          "timeframe": "T",
+          "unequal_period_ranges": false,
+          "union_period_count": 1
+        }
+      ],
+      "return_correlation_status_counts": {
+        "unavailable": 1,
+        "valid": 2
+      },
+      "row_identity": {
+        "columns": [
+          "series_id",
+          "period",
+          "row_id",
+          "source_row_number",
+          "event_seq"
+        ],
+        "duplicate_timestamp_row_count": 2,
+        "legacy_cache_enrichment_required": true,
+        "timestamp_is_durable_identity": false,
+        "training_schema_version": "histdatacom.tick-training-row.v1"
+      },
+      "rule_id": "fingerprint.cross_series",
+      "schema_version": "histdatacom.cross-series-fingerprint.v1",
+      "source_basis_counts": {
+        "text_scan": 3
+      },
+      "stale_join_risk": {
+        "risk_count": 0,
+        "samples": []
+      },
+      "status": "limited",
+      "target_count": 3,
+      "timeframe": "T",
+      "tolerance": {
+        "inverse_error_relative_tolerance": 0.02,
+        "inverse_warning_relative_tolerance": 0.005,
+        "minimum_common_timestamp_ratio": 0.8,
+        "stale_forward_fill_min_run": 2,
+        "triangular_error_relative_tolerance": 0.02,
+        "triangular_warning_relative_tolerance": 0.005
+      },
+      "topology_basis": {
+        "included_target_count": 3,
+        "schema_version": "histdatacom.time-series-fingerprint-topology-summary.v1",
+        "target_count": 3,
+        "truncated": false
+      },
+      "triangular_consistency": {
+        "candidate_count": 1,
+        "compared_timestamp_count": 3,
+        "error_count": 0,
+        "error_samples": [],
+        "warning_count": 0,
+        "warning_samples": []
+      },
+      "truncated": false,
+      "unavailable": {
+        "count": 1,
+        "samples": []
+      }
+    },
     "operation": "data-quality",
     "quality_next_actions": {
       "action_count": 1,
@@ -444,16 +659,16 @@
       },
       "report_surface_evidence": {
         "bounded_payload_state_counts": {
-          "present": 8
+          "present": 9
         },
         "cli_summary_state_counts": {
-          "present": 8
+          "present": 9
         },
         "report_metadata_state_counts": {
-          "present": 8
+          "present": 9
         },
         "schema_version": "histdatacom.time-series-fingerprint-report-surface-evidence.v1",
-        "surface_count": 8
+        "surface_count": 9
       },
       "risk_level_counts": {
         "high": 1

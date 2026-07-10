@@ -7,7 +7,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import histdatacom.data_quality.symbols as symbols_module
+
 from histdatacom.data_quality import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+    CROSS_SERIES_FINGERPRINT_RULE_ID,
+    CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
     DEFAULT_FINGERPRINT_HISTOGRAM_BINS,
     DEFAULT_FINGERPRINT_LAGS,
     DEFAULT_FINGERPRINT_MAX_ROWS,
@@ -40,6 +45,7 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
     HistDataFingerprintDistributionAttentionProfile,
     HistDataFingerprintProfile,
+    HistDataCrossSeriesFingerprintRule,
     HistDataSeriesFingerprintRule,
     QualityFinding,
     QualitySeverity,
@@ -57,6 +63,8 @@ from histdatacom.data_quality import (
     series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
+from histdatacom.data_quality.reporting import quality_report_payload
+from histdatacom.data_quality.training_features import TRAINING_SCHEMA_VERSION
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     TICK,
@@ -95,7 +103,418 @@ def test_fingerprint_group_registers_series_rule_surface() -> None:
     assert SERIES_FINGERPRINT_RULE_ID in {
         rule.rule_id for rule in quality_rules_for_groups(("all",))
     }
-    assert quality_run_rules_for_groups(("fingerprint",)) == ()
+    run_rules = quality_run_rules_for_groups(("fingerprint",))
+    assert [rule.rule_id for rule in run_rules] == [
+        CROSS_SERIES_FINGERPRINT_RULE_ID
+    ]
+    assert isinstance(run_rules[0], HistDataCrossSeriesFingerprintRule)
+    all_run_rules = quality_run_rules_for_groups(("all",))
+    assert CROSS_SERIES_FINGERPRINT_RULE_ID in {
+        rule.rule_id for rule in all_run_rules
+    }
+    shared_domain_rule = next(
+        rule
+        for rule in all_run_rules
+        if rule.rule_id == "domain.cross_instrument_consistency"
+    )
+    shared_fingerprint_rule = next(
+        rule
+        for rule in all_run_rules
+        if rule.rule_id == CROSS_SERIES_FINGERPRINT_RULE_ID
+    )
+    assert shared_domain_rule.scan_provider is not None
+    assert shared_fingerprint_rule.scan_provider is (
+        shared_domain_rule.scan_provider
+    )
+
+
+def test_cross_series_fingerprint_profiles_unequal_triangle_and_identity(
+    tmp_path: Path,
+) -> None:
+    """Triangle fingerprints should preserve identity and limiting ranges."""
+    cases = (
+        _cross_series_case(
+            "EURUSD",
+            (
+                "20120201 000000000,1.200000,1.200200,0",
+                "20120201 000001000,1.210000,1.210200,0",
+                "20120201 000001000,1.211000,1.211200,0",
+                "20120201 000002000,1.220000,1.220200,0",
+                "20120201 000003000,1.240000,1.240200,0",
+            ),
+        ),
+        _cross_series_case(
+            "GBPUSD",
+            (
+                "20120201 000000000,1.500000,1.500200,0",
+                "20120201 000001000,1.510000,1.510200,0",
+                "20120201 000002000,1.525000,1.525200,0",
+                "20120201 000003000,1.540000,1.540200,0",
+            ),
+        ),
+        _cross_series_case(
+            "EURGBP",
+            (
+                "20120201 000001000,0.801000,0.801200,0",
+                "20120201 000002000,0.900000,0.900200,0",
+                "20120201 000003000,0.805000,0.805200,0",
+            ),
+        ),
+    )
+    targets = tuple(
+        _discovered_target(write_ascii_case(tmp_path / case.name, case))
+        for case in cases
+    )
+
+    report = run_quality_assessment(
+        targets,
+        quality_rules_for_groups(("fingerprint",)),
+        run_rules=quality_run_rules_for_groups(("fingerprint",)),
+        metadata={"roots": [str(tmp_path)]},
+    )
+    payload = _mapping(report.metadata[CROSS_SERIES_FINGERPRINT_METADATA_KEY])
+    group = _mapping(_list(payload["groups"])[0])
+    grid = _mapping(group["timestamp_grid"])
+    ranges = _mapping(group["coverage_ranges"])
+    series_by_symbol = {
+        str(item["symbol"]): item
+        for item in (_mapping(value) for value in _list(group["series"]))
+    }
+
+    assert payload["schema_version"] == CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION
+    assert payload["rule_id"] == CROSS_SERIES_FINGERPRINT_RULE_ID
+    assert payload["group_count"] == 1
+    triangular = _mapping(payload["triangular_consistency"])
+    assert triangular["candidate_count"] == 1
+    assert grid["union_timestamp_count"] == 4
+    assert grid["common_timestamp_count"] == 3
+    assert grid["common_timestamp_ratio"] == 0.75
+    assert ranges["unequal_ranges"] is True
+    assert ranges["limiting_start_symbols"] == ["EURGBP"]
+    assert series_by_symbol["EURUSD"]["row_count"] == 5
+    assert series_by_symbol["EURUSD"]["unique_timestamp_count"] == 4
+    assert series_by_symbol["EURUSD"]["duplicate_timestamp_row_count"] == 2
+    assert series_by_symbol["EURUSD"]["identity_columns"] == [
+        "series_id",
+        "period",
+        "row_id",
+        "source_row_number",
+        "event_seq",
+    ]
+    topology = _mapping(group["topology"])
+    assert topology["target_count"] == 3
+    assert topology["duplicate_timestamp_row_count"] == 2
+    correlation = _mapping(group["return_correlation"])
+    assert correlation["pair_count"] == 3
+    assert any(
+        _mapping(pair)["status"] == "valid"
+        for pair in _list(correlation["pairs"])
+    )
+    triangle_samples = [
+        *_list(triangular["warning_samples"]),
+        *_list(triangular["error_samples"]),
+    ]
+    assert triangle_samples
+    direct_identity = _mapping(
+        _mapping(_mapping(triangle_samples[0])["row_identity"])["direct"]
+    )
+    assert direct_identity["series_id"] == "ascii:T:EURGBP:histdata.com"
+    assert direct_identity["period"] == "201202"
+    assert int(direct_identity["row_id"]) > 0
+    cross_finding = next(
+        finding
+        for finding in report.findings
+        if finding.rule_id == CROSS_SERIES_FINGERPRINT_RULE_ID
+    )
+    assert cross_finding.severity is QualitySeverity.INFO
+    assert str(tmp_path) not in str(payload)
+    rerun = quality_run_rules_for_groups(("fingerprint",))[0].evaluate_run(
+        targets,
+        metadata={
+            TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY: (
+                report.metadata[
+                    TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY
+                ]
+            )
+        },
+    )
+    assert rerun.metadata[CROSS_SERIES_FINGERPRINT_METADATA_KEY] == payload
+
+
+def test_all_group_shares_cross_instrument_scan_between_rule_surfaces(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """The all group should not read the same panel twice."""
+    targets = tuple(
+        _discovered_target(
+            write_ascii_case(
+                tmp_path / symbol.lower(),
+                _cross_series_case(
+                    symbol,
+                    (
+                        "20120201 000000000,1.200000,1.200200,0",
+                        "20120201 000001000,1.210000,1.210200,0",
+                    ),
+                ),
+            )
+        )
+        for symbol in ("EURGBP", "EURUSD", "GBPUSD")
+    )
+    calls = 0
+    original_scan = symbols_module._scan_cross_instrument_consistency
+
+    def counted_scan(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return original_scan(*args, **kwargs)
+
+    monkeypatch.setattr(
+        symbols_module,
+        "_scan_cross_instrument_consistency",
+        counted_scan,
+    )
+    cross_rules = tuple(
+        rule
+        for rule in quality_run_rules_for_groups(("all",))
+        if rule.rule_id
+        in {
+            "domain.cross_instrument_consistency",
+            CROSS_SERIES_FINGERPRINT_RULE_ID,
+        }
+    )
+
+    report = run_quality_assessment(targets, (), run_rules=cross_rules)
+
+    assert calls == 1
+    assert "cross_instrument_consistency" in report.metadata
+    assert CROSS_SERIES_FINGERPRINT_METADATA_KEY in report.metadata
+
+
+def test_cross_series_fingerprint_reports_inverse_sparse_and_stale_risk(
+    tmp_path: Path,
+) -> None:
+    """Inverse and sparse panels should retain descriptive risk summaries."""
+    cases = (
+        _cross_series_case(
+            "EURUSD",
+            (
+                "20120201 000000000,1.250000,1.250000,0",
+                "20120201 000001000,1.260000,1.260000,0",
+                "20120201 000002000,1.270000,1.270000,0",
+                "20120201 000003000,1.280000,1.280000,0",
+            ),
+        ),
+        _cross_series_case(
+            "USDEUR",
+            ("20120201 000000000,0.800000,0.800000,0",),
+        ),
+    )
+    targets = tuple(
+        _discovered_target(write_ascii_case(tmp_path / case.name, case))
+        for case in cases
+    )
+
+    report = run_quality_assessment(
+        targets,
+        (),
+        run_rules=quality_run_rules_for_groups(("fingerprint",)),
+    )
+    payload = _mapping(report.metadata[CROSS_SERIES_FINGERPRINT_METADATA_KEY])
+    group = _mapping(_list(payload["groups"])[0])
+    pair = _mapping(_list(_mapping(group["return_correlation"])["pairs"])[0])
+
+    assert _mapping(payload["inverse_consistency"])["candidate_count"] == 1
+    assert _mapping(payload["stale_join_risk"])["risk_count"] == 1
+    assert _mapping(group["timestamp_grid"])["common_timestamp_ratio"] == 0.25
+    assert pair == {
+        "left_symbol": "EURUSD",
+        "right_symbol": "USDEUR",
+        "overlap_return_count": 0,
+        "status": "unavailable",
+        "reason": "insufficient_overlap",
+    }
+    assert payload["status"] == "limited"
+
+
+def test_cross_series_fingerprint_reports_limiting_triangle_period_range(
+    tmp_path: Path,
+) -> None:
+    """A later-starting triangle leg should limit common panel coverage."""
+    cases = (
+        _cross_series_case(
+            "EURUSD",
+            ("20000501 000000000,1.100000,1.100200,0",),
+            period="200005",
+        ),
+        _cross_series_case(
+            "GBPUSD",
+            ("20000501 000000000,1.500000,1.500200,0",),
+            period="200005",
+        ),
+        _cross_series_case(
+            "EURUSD",
+            ("20020301 000000000,1.200000,1.200200,0",),
+            period="200203",
+        ),
+        _cross_series_case(
+            "GBPUSD",
+            ("20020301 000000000,1.500000,1.500200,0",),
+            period="200203",
+        ),
+        _cross_series_case(
+            "EURGBP",
+            ("20020301 000000000,0.800000,0.800200,0",),
+            period="200203",
+        ),
+    )
+    targets = tuple(
+        _discovered_target(
+            write_ascii_case(tmp_path / f"{case.name}-{index}", case)
+        )
+        for index, case in enumerate(cases)
+    )
+
+    report = run_quality_assessment(
+        targets,
+        (),
+        run_rules=quality_run_rules_for_groups(("fingerprint",)),
+    )
+    payload = _mapping(report.metadata[CROSS_SERIES_FINGERPRINT_METADATA_KEY])
+    panel = _mapping(_list(payload["panel_coverage"])[0])
+    groups = {
+        str(_mapping(group)["group_id"]): _mapping(group)
+        for group in _list(payload["groups"])
+    }
+
+    assert panel["union_period_count"] == 2
+    assert panel["common_period_count"] == 1
+    assert panel["common_first_period"] == "200203"
+    assert panel["unequal_period_ranges"] is True
+    assert panel["limiting_start_symbols"] == ["EURGBP"]
+    assert _mapping(panel["missing_period_count_by_symbol"])["EURGBP"] == 1
+    assert groups["ascii:T:200005"]["complete"] is False
+    assert groups["ascii:T:200005"]["missing_symbols"] == ["EURGBP"]
+    assert groups["ascii:T:200203"]["complete"] is True
+    assert payload["incomplete_group_count"] == 1
+    assert payload["status"] == "limited"
+
+
+def test_cross_series_fingerprint_enriches_legacy_raw_cache_for_report(
+    tmp_path: Path,
+) -> None:
+    """Legacy raw caches should be enriched in memory before projection."""
+    targets: list[QualityTarget] = []
+    for symbol, prices in {
+        "EURUSD": ("1.200000", "1.210000", "1.220000"),
+        "GBPUSD": ("1.500000", "1.510000", "1.520000"),
+    }.items():
+        rows = tuple(
+            f"20120201 00000{index}000,{price},{price},0"
+            for index, price in enumerate(prices)
+        )
+        batch = parse_ascii_lines(TICK, rows)
+        cache_path = tmp_path / symbol.lower() / CACHE_FILENAME
+        cache_path.parent.mkdir(parents=True)
+        write_polars_cache(to_polars_frame(batch), cache_path)
+        targets.append(
+            QualityTarget(
+                path=str(cache_path),
+                kind=QualityTargetKind.CACHE,
+                data_format="ascii",
+                timeframe=TICK,
+                symbol=symbol,
+                period="201202",
+            )
+        )
+
+    report = run_quality_assessment(
+        targets,
+        (),
+        run_rules=quality_run_rules_for_groups(("fingerprint",)),
+    )
+    report_payload = quality_report_payload(report)
+    payload = _mapping(
+        _mapping(report_payload["metadata"])[
+            CROSS_SERIES_FINGERPRINT_METADATA_KEY
+        ]
+    )
+    series = [
+        _mapping(item)
+        for item in _list(_mapping(_list(payload["groups"])[0])["series"])
+    ]
+
+    assert {item["computed_from"] for item in series} == {"direct_cache"}
+    assert {item["cache_source"] for item in series} == {"direct"}
+    assert {item["training_schema_version"] for item in series} == {
+        TRAINING_SCHEMA_VERSION
+    }
+    assert all(str(item["series_id"]).startswith("ascii:T:") for item in series)
+    assert str(tmp_path) not in str(report_payload)
+
+
+def test_cross_series_fingerprint_reports_mixed_cache_provenance(
+    tmp_path: Path,
+) -> None:
+    """Group topology should expose direct, sibling, and text scan bases."""
+    rows = (
+        "20120201 000000000,1.200000,1.200200,0",
+        "20120201 000001000,1.210000,1.210200,0",
+        "20120201 000002000,1.220000,1.220200,0",
+    )
+    batch = parse_ascii_lines(TICK, rows)
+
+    direct_path = tmp_path / "eurusd" / CACHE_FILENAME
+    direct_path.parent.mkdir(parents=True)
+    write_polars_cache(to_polars_frame(batch), direct_path)
+    direct_target = QualityTarget(
+        path=str(direct_path),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe=TICK,
+        symbol="EURUSD",
+        period="201202",
+    )
+
+    sibling_case = _cross_series_case("GBPUSD", rows)
+    sibling_csv = write_ascii_case(tmp_path / "gbpusd", sibling_case)
+    sibling_cache = sibling_csv.with_name(CACHE_FILENAME)
+    write_polars_cache(to_polars_frame(batch), sibling_cache)
+    csv_mtime_ns = sibling_csv.stat().st_mtime_ns
+    os.utime(
+        sibling_cache,
+        ns=(csv_mtime_ns + 1_000_000, csv_mtime_ns + 1_000_000),
+    )
+    sibling_target = _discovered_target(sibling_csv)
+
+    text_target = _discovered_target(
+        write_ascii_case(
+            tmp_path / "eurgbp",
+            _cross_series_case("EURGBP", rows),
+        )
+    )
+
+    report = run_quality_assessment(
+        (direct_target, sibling_target, text_target),
+        quality_rules_for_groups(("fingerprint",)),
+        run_rules=quality_run_rules_for_groups(("fingerprint",)),
+    )
+    payload = _mapping(report.metadata[CROSS_SERIES_FINGERPRINT_METADATA_KEY])
+    topology = _mapping(_mapping(_list(payload["groups"])[0])["topology"])
+
+    assert topology["computed_from_counts"] == {
+        "direct_cache": 1,
+        "fresh_sibling_cache": 1,
+        "text_scan": 1,
+    }
+    assert topology["cache_source_counts"] == {"direct": 1, "sibling": 1}
+    assert topology["topology_computed_from_counts"] == {
+        "direct_cache": 1,
+        "fresh_sibling_cache": 1,
+        "text_scan": 1,
+    }
+    assert topology["mixed_computation_basis"] is True
+    assert topology["mixed_cache_source"] is True
 
 
 def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
@@ -1461,6 +1880,20 @@ def _payload_for_case(
 ) -> dict[str, Any]:
     target = _discovered_target(write_ascii_case(directory, case))
     return _fingerprint_payload(_fingerprint_finding(target, profile))
+
+
+def _cross_series_case(
+    symbol: str,
+    rows: tuple[str, ...],
+    *,
+    period: str = "201202",
+) -> HistDataAsciiCase:
+    return HistDataAsciiCase(
+        name=f"cross_series_{symbol.lower()}",
+        timeframe=TICK,
+        filename=f"DAT_ASCII_{symbol}_T_{period}.csv",
+        rows=rows,
+    )
 
 
 def _discovered_target(path: Path) -> QualityTarget:

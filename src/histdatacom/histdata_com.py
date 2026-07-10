@@ -62,6 +62,7 @@ from histdatacom.data_quality.profiles import (
     quality_profile_from_value,
 )
 from histdatacom.data_quality.reporting import (
+    format_cross_series_fingerprint_lines,
     format_fingerprint_distribution_attention_lines,
     format_fingerprint_distribution_summary_lines,
     format_fingerprint_readiness_risk_lines,
@@ -1852,6 +1853,13 @@ def _format_orchestration_quality_console_summary(
         format_fingerprint_readiness_risk_lines(
             _mapping_from_payload(
                 quality_payload.get("fingerprint_readiness_risk")
+            )
+        )
+    )
+    lines.extend(
+        format_cross_series_fingerprint_lines(
+            _mapping_from_payload(
+                quality_payload.get("fingerprint_cross_series")
             )
         )
     )

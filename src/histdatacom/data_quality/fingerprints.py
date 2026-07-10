@@ -43,7 +43,13 @@ from histdatacom.data_quality.polars_cache import read_quality_polars_cache
 from histdatacom.data_quality.remediation import (
     remediation_hint_payloads_for_flags,
 )
-from histdatacom.data_quality.symbols import symbol_metadata_for
+from histdatacom.data_quality.symbols import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY as CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+    CROSS_SERIES_FINGERPRINT_RULE_ID as CROSS_SERIES_FINGERPRINT_RULE_ID,
+    CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION as CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
+    HistDataCrossSeriesFingerprintRule as HistDataCrossSeriesFingerprintRule,
+    symbol_metadata_for,
+)
 from histdatacom.data_quality.time import (
     DEFAULT_TIMESTAMP_INSPECTION_SAMPLE_LIMIT,
     timestamp_topology_payload_for_target,
@@ -135,7 +141,6 @@ TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY = (
     "time_series_fingerprint_readiness_risk"
 )
 SERIES_FINGERPRINT_RULE_ID = "fingerprint.series"
-CROSS_SERIES_FINGERPRINT_RULE_ID = "fingerprint.cross_series"
 SERIES_FINGERPRINT_SUMMARY_CODE = "FINGERPRINT_SERIES_SUMMARY"
 SERIES_FINGERPRINT_SOURCE_UNAVAILABLE_CODE = "FINGERPRINT_SOURCE_UNAVAILABLE"
 
