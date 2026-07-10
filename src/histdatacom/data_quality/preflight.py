@@ -65,6 +65,9 @@ QUALITY_PREFLIGHT_EVIDENCE_SCHEMA_VERSION = (
     "histdatacom.quality-preflight-evidence.v1"
 )
 QUALITY_PREFLIGHT_EVIDENCE_ARTIFACTS_METADATA_KEY = "artifacts"
+QUALITY_PREFLIGHT_VALIDATION_EVIDENCE_SCHEMA_VERSION = (
+    "histdatacom.quality-preflight-validation-evidence.v1"
+)
 QUALITY_PREFLIGHT_INSPECTION_SCHEMA_VERSION = (
     "histdatacom.quality-preflight-inspection.v1"
 )
@@ -131,6 +134,7 @@ def run_cache_quality_preflight(
     run_validation: bool = False,
     validation_runner: ValidationRunner | None = None,
     clock: Callable[[], float] = perf_counter,
+    validation_clock: Callable[[], float] = perf_counter,
     utc_now: Callable[[], datetime] = _utc_now,
 ) -> dict[str, JSONValue]:
     """Benchmark a bounded cache sample and estimate full quality runtime."""
@@ -187,12 +191,90 @@ def run_cache_quality_preflight(
         validation_report_path=validation_report_path,
         run_validation=run_validation,
         validation_runner=validation_runner,
+        validation_clock=validation_clock,
     )
 
 
 def quality_preflight_to_json(payload: Mapping[str, JSONValue]) -> str:
     """Return deterministic JSON for a quality preflight payload."""
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def quality_preflight_validation_evidence_payload(
+    payload: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    """Return bounded validation evidence extracted from one preflight."""
+    evidence = _mapping(payload.get("evidence"))
+    source = _mapping(evidence.get("validation_source"))
+    commands = [
+        _validation_artifact_command(row)
+        for row in _list_of_mappings(evidence.get("validation_commands"))
+    ]
+    status_counts: dict[str, JSONValue] = {
+        status: sum(1 for row in commands if row.get("status") == status)
+        for status in ("pass", "fail", "skipped", "not-run")
+    }
+    command_payloads: list[JSONValue] = list(commands)
+    validation_payload: dict[str, JSONValue] = {
+        "schema_version": (
+            QUALITY_PREFLIGHT_VALIDATION_EVIDENCE_SCHEMA_VERSION
+        ),
+        "report_kind": "quality-preflight-validation-evidence",
+        "generated_at_utc": str(payload.get("generated_at_utc", "")),
+        "state": _validation_artifact_state(commands),
+        "source": source,
+        "command_count": len(commands),
+        "status_counts": status_counts,
+        "commands": command_payloads,
+    }
+    return publish_safe_json_mapping(validation_payload)
+
+
+def quality_preflight_validation_evidence_to_json(
+    payload: Mapping[str, JSONValue],
+) -> str:
+    """Return deterministic JSON for validation evidence."""
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def _validation_artifact_command(
+    row: Mapping[str, Any],
+) -> dict[str, JSONValue]:
+    """Normalize one validation row for the dedicated evidence artifact."""
+    return publish_safe_json_mapping(
+        {
+            "name": str(row.get("name", "")),
+            "command": str(row.get("command", "")),
+            "status": _normalized_validation_status(row.get("status")),
+            "exit_code": (
+                _int_value(row.get("returncode"))
+                if "returncode" in row
+                else None
+            ),
+            "duration_seconds": (
+                round(_float_value(row.get("duration_seconds")), 6)
+                if "duration_seconds" in row
+                else None
+            ),
+            "summary": _validation_summary(row),
+            "output_artifact_path": str(
+                row.get("output_artifact_path", "") or ""
+            ),
+        }
+    )
+
+
+def _validation_artifact_state(
+    commands: Sequence[Mapping[str, JSONValue]],
+) -> str:
+    statuses = {str(row.get("status", "")) for row in commands}
+    if "fail" in statuses:
+        return "fail"
+    if statuses == {"not-run"} or not statuses:
+        return "planned"
+    if statuses <= {"pass", "skipped"} and "pass" in statuses:
+        return "pass"
+    return "partial"
 
 
 def write_quality_preflight_report(
@@ -1264,6 +1346,7 @@ def _payload(
     validation_report_path: str | Path | None,
     run_validation: bool,
     validation_runner: ValidationRunner | None,
+    validation_clock: Callable[[], float],
 ) -> dict[str, JSONValue]:
     target_bytes = sum(item.size_bytes for item in cache_targets)
     sample_bytes = _int_value(benchmark.get("sample_cache_bytes"))
@@ -1358,6 +1441,7 @@ def _payload(
         validation_report_path=validation_report_path,
         run_validation=run_validation,
         validation_runner=validation_runner,
+        validation_clock=validation_clock,
     )
     if _fingerprint_contract_audit_failed(
         payload["evidence"]
@@ -1388,6 +1472,7 @@ def _quality_preflight_evidence_payload(
     validation_report_path: str | Path | None,
     run_validation: bool,
     validation_runner: ValidationRunner | None,
+    validation_clock: Callable[[], float],
 ) -> dict[str, JSONValue]:
     validation = _validation_commands_payload()
     validation_source: dict[str, JSONValue] = {
@@ -1408,7 +1493,8 @@ def _quality_preflight_evidence_payload(
         )
     if run_validation:
         bundle = _run_quality_preflight_validation_bundle(
-            runner=validation_runner
+            runner=validation_runner,
+            clock=validation_clock,
         )
         validation_source = _combine_validation_sources(
             validation_source,
@@ -1593,6 +1679,10 @@ def _validation_commands_payload() -> list[JSONValue]:
         ),
         ("full-pytest", "python -m pytest"),
         ("full-pre-commit", "python -m pre_commit run --all-files"),
+        (
+            "readme-help-sync",
+            "python scripts/sync_readme_cli_help.py --check",
+        ),
         ("git-diff-check", "git diff --check"),
     )
     return [
@@ -1928,8 +2018,10 @@ def _validation_row_from_result(
     )
     payload: dict[str, JSONValue] = {
         **row,
+        "command": str(result.get("command") or row.get("command") or ""),
         "status": status,
         "reason": _bounded_text(reason),
+        "summary": _validation_summary(result),
         "source": dict(source),
     }
     if "returncode" in result:
@@ -1940,7 +2032,37 @@ def _validation_row_from_result(
         payload["stdout_tail"] = stdout_tail
     if stderr_tail:
         payload["stderr_tail"] = stderr_tail
+    if "duration_seconds" in result:
+        payload["duration_seconds"] = round(
+            max(0.0, _float_value(result.get("duration_seconds"))), 6
+        )
+    output_artifact_path = str(
+        result.get("output_artifact_path") or result.get("log_path") or ""
+    )
+    if output_artifact_path:
+        payload["output_artifact_path"] = str(
+            publish_safe_path(output_artifact_path)
+        )
     return payload
+
+
+def _validation_summary(result: Mapping[str, Any]) -> str:
+    """Return one bounded, publish-safe validation summary."""
+    explicit = str(result.get("summary", "") or "")
+    if explicit:
+        return _bounded_text(explicit)
+    status = _normalized_validation_status(result.get("status"))
+    stream = (
+        str(result.get("stderr_tail", "") or "")
+        if status == "fail"
+        else str(result.get("stdout_tail", "") or "")
+    )
+    if stream:
+        return _bounded_text(stream)
+    reason = str(result.get("reason", "") or "")
+    if reason:
+        return _bounded_text(reason)
+    return f"validation command {status}"
 
 
 def _normalized_validation_status(value: object) -> str:
@@ -1966,8 +2088,10 @@ def _validation_target_name(result: Mapping[str, JSONValue]) -> str:
         "pre-commit": "full-pre-commit",
         "pre_commit": "full-pre-commit",
         "full-pre-commit": "full-pre-commit",
+        "readme-help-sync": "readme-help-sync",
         "git-diff-check": "git-diff-check",
         "focused-quality-preflight-tests": "focused-quality-preflight-tests",
+        "final-coverage": "full-pytest",
     }
     if normalized_name in aliases:
         return aliases[normalized_name]
@@ -1982,6 +2106,10 @@ def _validation_target_name(result: Mapping[str, JSONValue]) -> str:
         return "full-pytest"
     if "pre-commit" in command_key or "pre_commit" in command:
         return "full-pre-commit"
+    if "sync-readme-cli-help.py" in command_key and "--check" in command_key:
+        return "readme-help-sync"
+    if "run-final-coverage.py" in command_key:
+        return "full-pytest"
     if "git diff --check" in command_key:
         return "git-diff-check"
     return ""
@@ -1997,12 +2125,13 @@ def _validation_command_names() -> set[str]:
 def _run_quality_preflight_validation_bundle(
     *,
     runner: ValidationRunner | None = None,
+    clock: Callable[[], float] = perf_counter,
 ) -> dict[str, JSONValue]:
     source: dict[str, JSONValue] = {
         "state": "generated",
         "reason": (
-            "bounded quality preflight validation ran focused tests and "
-            "git diff check only"
+            "bounded quality preflight validation ran focused tests, README "
+            "help sync, and git diff checks only"
         ),
     }
     commands: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -2017,10 +2146,18 @@ def _run_quality_preflight_validation_bundle(
                 "-q",
             ),
         ),
+        (
+            "readme-help-sync",
+            (
+                sys.executable,
+                "scripts/sync_readme_cli_help.py",
+                "--check",
+            ),
+        ),
         ("git-diff-check", ("git", "diff", "--check")),
     )
     results: list[JSONValue] = [
-        _run_validation_command(name, command, runner=runner)
+        _run_validation_command(name, command, runner=runner, clock=clock)
         for name, command in commands
     ]
     return {"source": source, "results": results}
@@ -2031,7 +2168,9 @@ def _run_validation_command(
     command: Sequence[str],
     *,
     runner: ValidationRunner | None,
+    clock: Callable[[], float],
 ) -> dict[str, JSONValue]:
+    started_at = clock()
     if runner is None:
         result = subprocess.run(
             list(command),
@@ -2041,11 +2180,19 @@ def _run_validation_command(
         )
     else:
         result = runner(tuple(command))
+    duration_seconds = max(0.0, clock() - started_at)
+    status = "pass" if result.returncode == 0 else "fail"
+    summary = _bounded_text(
+        (result.stderr if status == "fail" else result.stdout)
+        or f"validation command {status}"
+    )
     return {
         "name": name,
         "command": _display_validation_command(name),
-        "status": "pass" if result.returncode == 0 else "fail",
+        "status": status,
         "returncode": result.returncode,
+        "duration_seconds": round(duration_seconds, 6),
+        "summary": summary,
         "stdout_tail": _bounded_text(result.stdout or ""),
         "stderr_tail": _bounded_text(result.stderr or ""),
     }
@@ -3294,6 +3441,7 @@ __all__ = [
     "QUALITY_PREFLIGHT_LARGE_CACHE_TARGET_COUNT",
     "QUALITY_PREFLIGHT_INSPECTION_SCHEMA_VERSION",
     "QUALITY_PREFLIGHT_SCHEMA_VERSION",
+    "QUALITY_PREFLIGHT_VALIDATION_EVIDENCE_SCHEMA_VERSION",
     "QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST",
     "QualityDiscoveryError",
     "discover_latest_quality_preflight_validation_report",
@@ -3304,8 +3452,12 @@ __all__ = [
     "load_quality_preflight_evidence",
     "quality_preflight_to_markdown",
     "quality_preflight_to_json",
+    "quality_preflight_validation_evidence_payload",
+    "quality_preflight_validation_evidence_to_json",
     "quality_run_preflight_warning",
     "run_cache_quality_preflight",
     "write_quality_preflight_markdown_report",
+    "write_quality_preflight_evidence_artifact",
     "write_quality_preflight_report",
+    "register_quality_preflight_evidence_artifact",
 ]

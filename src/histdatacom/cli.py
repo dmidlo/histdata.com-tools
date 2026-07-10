@@ -371,6 +371,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     "--quality-preflight-validation-report requires --quality-preflight"
                 )
                 raise SystemExit(1)
+            if self.arg_namespace.quality_preflight_validation_evidence_path:
+                print(  # noqa:T201
+                    "--quality-preflight-validation-evidence requires "
+                    "--quality-preflight"
+                )
+                raise SystemExit(1)
             if self.arg_namespace.quality_preflight_run_validation:
                 print(  # noqa:T201
                     "--quality-preflight-run-validation requires --quality-preflight"
@@ -481,6 +487,15 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 )
                 raise SystemExit(1)
             if (
+                self.arg_namespace.quality_preflight_validation_evidence_path
+                == "-"
+            ):
+                print(  # noqa:T201
+                    "--quality-preflight-validation-evidence requires a "
+                    "file path, not '-'"
+                )
+                raise SystemExit(1)
+            if (
                 self.arg_namespace.quality_profile_preview
                 and self.arg_namespace.quality_preflight_profile_preview_output_path
             ):
@@ -500,6 +515,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             raise SystemExit(1)
         elif (
             self.arg_namespace.quality_preflight_validation_report_path
+            or self.arg_namespace.quality_preflight_validation_evidence_path
             or self.arg_namespace.quality_preflight_run_validation
         ):
             print(  # noqa:T201
@@ -702,6 +718,17 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                             "--quality-preflight-validation-report",
                             (
                                 self.arg_namespace.quality_preflight_validation_report_path
+                            ),
+                        ]
+                    )
+                if (
+                    self.arg_namespace.quality_preflight_validation_evidence_path
+                ):
+                    args.extend(
+                        [
+                            "--quality-preflight-validation-evidence",
+                            (
+                                self.arg_namespace.quality_preflight_validation_evidence_path
                             ),
                         ]
                     )
@@ -1774,6 +1801,16 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "run bounded quality preflight validation commands before "
                 "rendering evidence"
+            ),
+        )
+        quality_args.add_argument(
+            "--quality-preflight-validation-evidence",
+            dest="quality_preflight_validation_evidence_path",
+            type=str,
+            metavar="PATH",
+            help=(
+                "write bounded machine-readable validation evidence to PATH "
+                "and reference it from quality preflight evidence"
             ),
         )
         quality_args.add_argument(

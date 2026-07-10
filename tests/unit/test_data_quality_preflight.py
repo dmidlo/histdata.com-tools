@@ -26,6 +26,7 @@ from histdatacom.data_quality.fingerprint_discovery import (
 from histdatacom.data_quality.preflight import (
     DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR,
     QUALITY_PREFLIGHT_SCHEMA_VERSION,
+    QUALITY_PREFLIGHT_VALIDATION_EVIDENCE_SCHEMA_VERSION,
     QUALITY_PREFLIGHT_VALIDATION_REPORT_LATEST,
     discover_latest_quality_preflight_validation_report,
     format_quality_preflight_evidence_inspection,
@@ -583,6 +584,52 @@ def test_quality_preflight_imports_validation_report_status(
     assert str(tmp_path) not in markdown
 
 
+def test_quality_preflight_imports_final_coverage_receipt_as_full_pytest(
+    tmp_path: Path,
+) -> None:
+    """The authoritative final-coverage gate should satisfy full pytest."""
+    data_dir = tmp_path / "data"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    validation_path = _write_validation_report(
+        tmp_path / "closure.json",
+        generated_at_utc="2026-07-10T12:00:00Z",
+        results=[
+            {
+                "name": "final-coverage",
+                "command": "python scripts/run_final_coverage.py --ensure",
+                "status": "pass",
+                "returncode": 0,
+                "duration_seconds": 0.04,
+                "stdout_tail": "Final coverage reused: receipt-key",
+                "log_path": str(tmp_path / "logs" / "coverage.log"),
+            }
+        ],
+    )
+
+    payload = run_cache_quality_preflight(
+        data_dir,
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        quality_check_groups=("inventory",),
+        sample_size=1,
+        validation_report_path=validation_path,
+    )
+    rows = {
+        str(row["name"]): row
+        for row in payload["evidence"]["validation_commands"]
+    }
+
+    assert rows["full-pytest"]["status"] == "pass"
+    assert rows["full-pytest"]["command"] == (
+        "python scripts/run_final_coverage.py --ensure"
+    )
+    assert rows["full-pytest"]["duration_seconds"] == 0.04
+    assert rows["full-pytest"]["output_artifact_path"] == "coverage.log"
+    assert "Final coverage reused" in str(rows["full-pytest"]["summary"])
+    assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
+
+
 def test_quality_preflight_discovers_latest_validation_report(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -738,6 +785,8 @@ def test_quality_preflight_runs_bounded_validation_bundle(
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, stdout="ok\n", stderr="")
 
+    validation_ticks = iter((1.0, 1.2, 2.0, 2.3, 3.0, 3.4))
+
     payload = run_cache_quality_preflight(
         data_dir,
         pairs=("eurusd",),
@@ -747,16 +796,26 @@ def test_quality_preflight_runs_bounded_validation_bundle(
         sample_size=1,
         run_validation=True,
         validation_runner=runner,
+        validation_clock=lambda: next(validation_ticks),
     )
     statuses = _validation_statuses(payload)
 
     assert payload["evidence"]["validation_source"]["state"] == "generated"
     assert statuses["focused-quality-preflight-tests"] == "pass"
     assert statuses["git-diff-check"] == "pass"
+    assert statuses["readme-help-sync"] == "pass"
     assert statuses["full-pytest"] == "skipped"
     assert statuses["full-pre-commit"] == "skipped"
     assert any(call[-3:] == ("git", "diff", "--check") for call in calls)
+    assert any("sync_readme_cli_help.py" in " ".join(call) for call in calls)
     assert not any("pre_commit" in " ".join(call) for call in calls)
+    durations = {
+        str(row["name"]): row.get("duration_seconds")
+        for row in payload["evidence"]["validation_commands"]
+    }
+    assert durations["focused-quality-preflight-tests"] == 0.2
+    assert durations["readme-help-sync"] == 0.3
+    assert durations["git-diff-check"] == 0.4
 
 
 def test_quality_preflight_flags_budget_failures(tmp_path: Path) -> None:
@@ -1364,6 +1423,8 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
             "markdown",
             "--quality-preflight-validation-report",
             "latest",
+            "--quality-preflight-validation-evidence",
+            str(tmp_path / "validation-evidence.json"),
             "--quality-preflight-run-validation",
             "--pair-groups",
             "majors",
@@ -1389,6 +1450,9 @@ def test_cli_accepts_quality_preflight_without_temporal_mode(
     )
     assert options.quality_preflight_profile_preview_format == "markdown"
     assert options.quality_preflight_validation_report_path == "latest"
+    assert options.quality_preflight_validation_evidence_path == str(
+        tmp_path / "validation-evidence.json"
+    )
     assert options.quality_preflight_run_validation
     assert options.pair_groups == ["majors"]
 
@@ -1528,6 +1592,124 @@ def test_api_quality_preflight_writes_markdown_report(
     markdown = markdown_path.read_text(encoding="utf-8")
     assert "Quality Preflight Evidence" in markdown
     assert "Fingerprint Contract Audit" in markdown
+
+
+def test_api_quality_preflight_writes_dry_validation_evidence_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Artifact output alone should inspect the plan without running gates."""
+    import histdatacom.histdata_com as histdata_com
+
+    data_dir = tmp_path / "data"
+    artifact_path = tmp_path / "reports" / "validation.json"
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+
+    def fail_run(*args: object, **kwargs: object) -> None:
+        raise AssertionError("dry validation evidence must not run commands")
+
+    monkeypatch.setattr(preflight_module.subprocess, "run", fail_run)
+    options = Options()
+    options.quality_preflight = True
+    options.quality_paths = (str(data_dir),)
+    options.quality_check_groups = {"inventory"}
+    options.quality_preflight_sample_size = 1
+    options.quality_preflight_validation_evidence_path = str(artifact_path)
+    options.pairs = {"eurusd"}
+    options.formats = {"ascii"}
+    options.timeframes = {"T"}
+
+    payload = histdata_com.main(options)
+    artifact_bytes = artifact_path.read_bytes()
+    validation = json.loads(artifact_bytes)
+    artifact = payload["evidence"]["artifacts"]["validation_evidence"]
+    markdown = quality_preflight_to_markdown(payload)
+    console = format_quality_preflight_console_summary(payload)
+
+    assert validation["schema_version"] == (
+        QUALITY_PREFLIGHT_VALIDATION_EVIDENCE_SCHEMA_VERSION
+    )
+    assert validation["state"] == "planned"
+    assert validation["status_counts"]["not-run"] == 5
+    assert all(row["exit_code"] is None for row in validation["commands"])
+    assert all(
+        row["duration_seconds"] is None for row in validation["commands"]
+    )
+    assert artifact["kind"] == "quality-preflight-validation-evidence"
+    assert artifact["path"] == "reports/validation.json"
+    assert artifact["format"] == "json"
+    assert artifact["schema_version"] == (
+        QUALITY_PREFLIGHT_VALIDATION_EVIDENCE_SCHEMA_VERSION
+    )
+    assert artifact["generated_at_utc"] == validation["generated_at_utc"]
+    assert artifact["validation_state"] == "planned"
+    assert artifact["size_bytes"] == len(artifact_bytes)
+    assert artifact["sha256"] == hashlib.sha256(artifact_bytes).hexdigest()
+    assert "Validation evidence" in markdown
+    assert "validation evidence: written: reports/validation.json (json)" in (
+        console
+    )
+    assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
+    assert str(tmp_path) not in artifact_bytes.decode("utf-8")
+
+
+def test_api_quality_preflight_validation_artifact_preserves_failure_bounded(
+    tmp_path: Path,
+) -> None:
+    """Imported failures should remain failed, bounded, and publish-safe."""
+    import histdatacom.histdata_com as histdata_com
+
+    data_dir = tmp_path / "data"
+    artifact_path = tmp_path / "reports" / "validation-fail.json"
+    validation_path = _write_validation_report(
+        tmp_path / "closure-fail.json",
+        generated_at_utc="2026-07-10T12:00:00Z",
+        results=[
+            {
+                "name": "pre-commit",
+                "command": "python -m pre_commit run --all-files",
+                "status": "fail",
+                "returncode": 1,
+                "duration_seconds": 2.75,
+                "stderr_tail": f"{tmp_path / 'secret.py'} " + "x" * 4000,
+                "log_path": str(tmp_path / "logs" / "pre-commit.log"),
+            },
+            {
+                "name": "readme-help-sync",
+                "command": "python scripts/sync_readme_cli_help.py --check",
+                "status": "pass",
+                "returncode": 0,
+                "duration_seconds": 0.25,
+                "stdout_tail": "README help is synchronized",
+            },
+        ],
+    )
+    _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
+    options = Options()
+    options.quality_preflight = True
+    options.quality_paths = (str(data_dir),)
+    options.quality_check_groups = {"inventory"}
+    options.quality_preflight_sample_size = 1
+    options.quality_preflight_validation_report_path = str(validation_path)
+    options.quality_preflight_validation_evidence_path = str(artifact_path)
+    options.pairs = {"eurusd"}
+    options.formats = {"ascii"}
+    options.timeframes = {"T"}
+
+    payload = histdata_com.main(options)
+    validation = json.loads(artifact_path.read_text(encoding="utf-8"))
+    rows = {row["name"]: row for row in validation["commands"]}
+
+    assert validation["state"] == "fail"
+    assert rows["full-pre-commit"]["status"] == "fail"
+    assert rows["full-pre-commit"]["exit_code"] == 1
+    assert rows["full-pre-commit"]["duration_seconds"] == 2.75
+    assert len(rows["full-pre-commit"]["summary"]) <= 1200
+    assert rows["full-pre-commit"]["output_artifact_path"] == ("pre-commit.log")
+    assert rows["readme-help-sync"]["status"] == "pass"
+    encoded = json.dumps(payload, sort_keys=True)
+    assert str(tmp_path) not in encoded
+    assert str(tmp_path) not in artifact_path.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(

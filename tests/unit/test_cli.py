@@ -209,6 +209,7 @@ def test_help_advertises_quality_preflight_mode() -> None:
     assert "--quality-preflight-evidence-max-age-seconds" in help_text
     assert "--quality-preflight-evidence-stale-ok" in help_text
     assert "--quality-preflight-validation-report" in help_text
+    assert "--quality-preflight-validation-evidence" in help_text
     assert "latest" in help_text
     assert "--quality-preflight-run-validation" in help_text
     assert "--quality-preflight-sample-size" in help_text
@@ -792,6 +793,7 @@ def test_config_file_applies_quality_preflight_defaults(
     config_path = tmp_path / "quality-preflight.yaml"
     report_path = tmp_path / "reports" / "preflight.json"
     preview_path = tmp_path / "reports" / "preflight-profile.md"
+    validation_path = tmp_path / "reports" / "validation.json"
     config_path.write_text(
         f"""
 histdatacom:
@@ -802,6 +804,7 @@ histdatacom:
   quality_preflight_profile_preview_output: {preview_path}
   quality_preflight_profile_preview_format: markdown
   quality_preflight_validation_report: latest
+  quality_preflight_validation_evidence: {validation_path}
   quality_preflight_run_validation: true
   quality_preflight_sample_size: 2
   pair_groups: [majors]
@@ -827,6 +830,9 @@ histdatacom:
     )
     assert options.quality_preflight_profile_preview_format == "markdown"
     assert options.quality_preflight_validation_report_path == "latest"
+    assert options.quality_preflight_validation_evidence_path == str(
+        validation_path
+    )
     assert options.quality_preflight_run_validation
     assert options.quality_preflight_sample_size == 2
     assert options.pair_groups == ["majors"]
@@ -1277,6 +1283,11 @@ def test_repo_quality_columns_are_display_only_for_repo_table(
         ["histdatacom", "--quality-preflight-evidence", "preflight.json"],
         ["histdatacom", "--quality-preflight-evidence-max-age-seconds", "60"],
         ["histdatacom", "--quality-preflight-evidence-stale-ok"],
+        [
+            "histdatacom",
+            "--quality-preflight-validation-evidence",
+            "validation.json",
+        ],
         ["histdatacom", "--quality", "--quality-preflight-evidence-stale-ok"],
         ["histdatacom", "--quality", "-D"],
         ["histdatacom", "--repo-quality", "-A"],

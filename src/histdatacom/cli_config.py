@@ -72,6 +72,12 @@ _KEY_ALIASES = {
     "quality_preflight_validation_report_path": (
         "quality_preflight_validation_report_path"
     ),
+    "quality_preflight_validation_evidence": (
+        "quality_preflight_validation_evidence_path"
+    ),
+    "quality_preflight_validation_evidence_path": (
+        "quality_preflight_validation_evidence_path"
+    ),
     "quality_target": "quality_paths",
     "quality_targets": "quality_paths",
     "quality_check_groups": "quality_check_groups",
@@ -178,6 +184,9 @@ _SCALAR_ARGS = {
     ),
     "quality_preflight_validation_report_path": (
         "--quality-preflight-validation-report"
+    ),
+    "quality_preflight_validation_evidence_path": (
+        "--quality-preflight-validation-evidence"
     ),
     "quality_preflight_sample_size": "--quality-preflight-sample-size",
     "quality_profile_path": "--quality-profile",

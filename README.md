@@ -117,6 +117,7 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--quality-preflight-profile-preview-format {json,text,markdown}]
                    [--quality-preflight-validation-report PATH]
                    [--quality-preflight-run-validation]
+                   [--quality-preflight-validation-evidence PATH]
                    [--quality-preflight-evidence PATH]
                    [--quality-preflight-evidence-max-age-seconds SECONDS]
                    [--quality-preflight-evidence-stale-ok]
@@ -249,6 +250,9 @@ Data quality:
   --quality-preflight-run-validation
                         run bounded quality preflight validation commands
                         before rendering evidence
+  --quality-preflight-validation-evidence PATH
+                        write bounded machine-readable validation evidence to
+                        PATH and reference it from quality preflight evidence
   --quality-preflight-evidence PATH
                         use a saved quality preflight JSON report as evidence
                         before a large cache-backed --quality run
@@ -853,6 +857,7 @@ histdatacom --quality-preflight \
   --quality-checks ticks \
   --quality-preflight-report reports/major-triangles-tick-preflight.json \
   --quality-preflight-markdown-report reports/major-triangles-tick-preflight.md \
+  --quality-preflight-validation-evidence reports/major-triangles-validation.json \
   --quality-preflight-profile-preview-output reports/major-triangles-quality-profile.md \
   --quality-preflight-profile-preview-format markdown
 ```
@@ -895,11 +900,30 @@ run repository gates. For release notes or GitHub issue evidence, pass
 `--quality-preflight-validation-report PATH` to merge command status from a
 closure/readiness JSON report. Use
 `--quality-preflight-validation-report latest` to resolve the newest compatible
-JSON report under `.histdatacom/closure-readiness` without running gates. Pass
+JSON report under `.histdatacom/closure-readiness` without running gates. The
+single authoritative `final-coverage` receipt is recognized as full-pytest
+evidence; importing it never starts coverage again. Pass
 `--quality-preflight-run-validation` to run only the bounded local validation
-bundle: focused quality-preflight tests and `git diff --check`. Full pytest,
-pre-commit, publishing, and GitHub issue closure remain explicit
-closure/release workflow responsibilities.
+bundle: focused quality-preflight tests, the README help-sync check, and
+`git diff --check`. It does not run full pytest/coverage or pre-commit.
+
+Pass `--quality-preflight-validation-evidence PATH` to write the validation
+rows as a dedicated bounded JSON artifact and register it under
+`evidence.artifacts.validation_evidence`. The artifact includes its schema and
+generated timestamp plus each configured command's status, exit code, duration,
+summary, and publish-safe output-artifact path when available. Its registry
+entry records the publish-safe path, SHA-256, and byte size. Using the artifact
+option alone is the dry inspection path: commands remain planned/`not-run` and
+no repository gates execute. Combine it with an imported report to serialize
+existing closure receipts, or with `--quality-preflight-run-validation` for the
+bounded checks. Output summaries are truncated and publish-safe; full logs stay
+in separately referenced artifacts.
+
+This application evidence supplements normal issue/PR validation notes and can
+be consumed by CI, but it does not replace CI or automate GitHub issues, pull
+requests, comments, or labels. Full repository gates, publishing, TestPyPI,
+PyPI, and GitHub issue closure remain explicit closure/release workflow
+responsibilities.
 
 When launching a large cache-backed `--quality` run, pass the saved report with
 `--quality-preflight-evidence PATH`. If no matching evidence is available, the

@@ -44,9 +44,12 @@ from histdatacom.exceptions import (
     InfluxConfigurationError,
 )
 from histdatacom.data_quality.preflight import (
+    QUALITY_PREFLIGHT_VALIDATION_EVIDENCE_SCHEMA_VERSION,
     format_quality_preflight_console_summary,
     format_quality_run_preflight_warning,
     quality_preflight_to_markdown,
+    quality_preflight_validation_evidence_payload,
+    quality_preflight_validation_evidence_to_json,
     quality_run_preflight_warning,
     register_quality_preflight_evidence_artifact,
     run_cache_quality_preflight,
@@ -158,6 +161,7 @@ class RuntimeContext:
     quality_preflight_run_validation: bool
     quality_preflight_sample_size: int
     quality_preflight_validation_report_path: str | None
+    quality_preflight_validation_evidence_path: str
     quality_profile_path: str
     quality_profile: Mapping[str, Any]
     quality_profile_preview: bool
@@ -305,6 +309,7 @@ class _HistDataCom:  # noqa:R701
             )
         )
         _attach_quality_preflight_profile_preview(payload, self.context)
+        _attach_quality_preflight_validation_evidence(payload, self.context)
         if self.context.quality_preflight_report_path:
             report_path = Path(
                 self.context.quality_preflight_report_path
@@ -615,6 +620,9 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
             if args.get("quality_preflight_validation_report_path") is None
             else str(args["quality_preflight_validation_report_path"])
         ),
+        quality_preflight_validation_evidence_path=str(
+            args.get("quality_preflight_validation_evidence_path") or ""
+        ),
         quality_profile_path=str(args.get("quality_profile_path") or ""),
         quality_profile=dict(args.get("quality_profile") or {}),
         quality_profile_preview=bool(args["quality_profile_preview"]),
@@ -704,6 +712,36 @@ def _attach_quality_preflight_profile_preview(
         "quality_profile_preview",
         artifact,
         legacy_key="quality_profile_preview",
+    )
+
+
+def _attach_quality_preflight_validation_evidence(
+    payload: dict[str, Any],
+    context: RuntimeContext,
+) -> None:
+    """Write optional bounded validation evidence into the artifact map."""
+    destination = context.quality_preflight_validation_evidence_path.strip()
+    if not destination:
+        return
+    validation_payload = quality_preflight_validation_evidence_payload(payload)
+    artifact = write_quality_preflight_evidence_artifact(
+        quality_preflight_validation_evidence_to_json(validation_payload),
+        destination,
+        kind="quality-preflight-validation-evidence",
+        output_format="json",
+        schema_version=(QUALITY_PREFLIGHT_VALIDATION_EVIDENCE_SCHEMA_VERSION),
+        label="Validation evidence",
+        console_label="validation evidence",
+    )
+    artifact["generated_at_utc"] = str(
+        validation_payload.get("generated_at_utc", "")
+    )
+    artifact["validation_state"] = str(validation_payload.get("state", ""))
+    register_quality_preflight_evidence_artifact(
+        payload,
+        "validation_evidence",
+        artifact,
+        legacy_key="validation_evidence",
     )
 
 
