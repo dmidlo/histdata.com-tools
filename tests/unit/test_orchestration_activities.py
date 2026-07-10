@@ -95,14 +95,14 @@ class FakeInfluxWriter:
         self.batches.append(list(lines))
 
 
-def _form_html(*, token: str = "token") -> str:
+def _form_html(*, token: str = "token", datemonth: str = "2022") -> str:
     """Return a minimal HistData download form."""
     return f"""
     <html>
       <form id="file_down">
         <input id="tk" value="{token}">
         <input id="date" value="2022">
-        <input id="datemonth" value="2022">
+        <input id="datemonth" value="{datemonth}">
         <input id="platform" value="ASCII">
         <input id="timeframe" value="T">
         <input id="fxpair" value="eurusd">
@@ -157,6 +157,8 @@ def _download_payload(tmp_path) -> dict:
             ),
             "data_dir": f"{tmp_path}/",
             "zip_filename": zip_path.name,
+            "data_format": "ASCII",
+            "data_timeframe": "T",
         },
     }
 
@@ -176,6 +178,8 @@ def _extraction_payload(tmp_path) -> dict:
             "status": WorkStatus.CSV_ZIP.value,
             "data_dir": f"{tmp_path}/",
             "zip_filename": zip_path.name,
+            "data_format": "ASCII",
+            "data_timeframe": "T",
         },
     }
 
@@ -451,7 +455,7 @@ def test_validate_urls_activity_loads_work_items_from_plan_ref(
     monkeypatch.setattr(
         "histdatacom.activity_stages.fetch_histdata_page_data",
         lambda url, timeout: {
-            "html": _form_html(),
+            "html": _form_html(datemonth="202202"),
             "encoding": "gzip",
             "bytes_length": "123",
         },

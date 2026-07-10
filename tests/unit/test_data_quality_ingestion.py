@@ -10,6 +10,8 @@ from histdatacom.data_quality import (
     ASCII_TEXT_INGESTION_RULE_ID,
     QualitySeverity,
     QualityStatus,
+    QualityTarget,
+    QualityTargetKind,
     discover_quality_targets,
     quality_rules_for_groups,
     run_quality_assessment,
@@ -40,6 +42,22 @@ def test_ingestion_group_registers_text_rule() -> None:
         ASCII_TEXT_INGESTION_RULE_ID,
         ASCII_SCHEMA_INGESTION_RULE_ID,
     ]
+
+
+def test_ingestion_rules_noop_unsupported_raw_dimensions() -> None:
+    """Private ingestion rules must not reopen retired raw dimensions."""
+    rules = quality_rules_for_groups(("ingestion",))
+    for data_format, timeframe in (
+        ("ascii", "M1"),
+        ("ninjatrader", "T"),
+    ):
+        target = QualityTarget(
+            path="/missing/retired.csv",
+            kind=QualityTargetKind.CSV,
+            data_format=data_format,
+            timeframe=timeframe,
+        )
+        assert all(rule.evaluate(target) == () for rule in rules)
 
 
 def test_clean_ascii_file_passes_ingestion_text_checks(
@@ -164,7 +182,10 @@ def test_cache_target_reports_row_count_size_schema_and_bounds(
     tmp_path: Path,
 ) -> None:
     """Readable Polars cache files should expose equivalent metadata."""
-    cache_path = tmp_path / CACHE_FILENAME
+    cache_path = (
+        tmp_path / "ASCII" / "T" / "eurusd" / "2012" / "02" / CACHE_FILENAME
+    )
+    cache_path.parent.mkdir(parents=True)
     batch = parse_ascii_lines(TICK, CLEAN_TICK_ROWS)
     write_polars_cache(to_polars_frame(batch), cache_path)
 

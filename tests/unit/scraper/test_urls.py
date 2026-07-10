@@ -26,6 +26,24 @@ def test_generate_form_urls_rejects_removed_m1_timeframe() -> None:
         raise AssertionError("M1 URL generation should fail")
 
 
+def test_generate_form_urls_rejects_removed_platform_format() -> None:
+    """Platform-specific formats must not reach private URL generation."""
+    try:
+        list(
+            Urls().generate_form_urls(
+                "202201",
+                "202203",
+                {"metatrader"},
+                {"eurusd"},
+                {"T"},
+            )
+        )
+    except ValueError as exc:
+        assert "metatrader" in str(exc)
+    else:
+        raise AssertionError("platform URL generation should fail")
+
+
 def test_generate_form_urls_preserves_tick_month_units() -> None:
     """Tick data ranges should generate one URL per month."""
     urls = list(

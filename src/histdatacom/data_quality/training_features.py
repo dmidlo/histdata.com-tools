@@ -458,6 +458,16 @@ def quality_report_from_training_features(
     target: Any | None = None,
 ) -> QualityReport:
     """Derive an audit QualityReport from row-aligned training issue columns."""
+    _require_ascii_tick_context(
+        _training_context(
+            target,
+            symbol="",
+            data_format="",
+            timeframe="",
+            period="",
+            source="histdata.com",
+        )
+    )
     quality_target = _quality_target_from_context(target)
     issue_counts = _issue_counts(frame)
     findings = tuple(

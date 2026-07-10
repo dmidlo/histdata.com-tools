@@ -25,9 +25,11 @@ from histdatacom.activity_stages import (
     fetch_histdata_page_data,
     plan_dataset_work_items,
     parse_histdata_form_metadata,
+    post_histdata_archive,
     validate_url_work_item,
 )
 from histdatacom.helper_args import helper_runtime_args
+from histdatacom.exceptions import ArchiveDownloadError
 from histdatacom.legacy_boundary import warn_legacy_side_effect
 from histdatacom.observability import ProgressState
 from histdatacom.records import Record
@@ -106,6 +108,19 @@ class Scraper:  # noqa:H601
             record (Record): a record to write
             zip_content (bytes): binary zip data
         """
+        if (
+            record.data_format.lower() != "ascii"
+            or record.data_timeframe != "T"
+        ):
+            raise ArchiveDownloadError(
+                "UNSUPPORTED_RAW_INPUT",
+                "Archive writes support HistData ASCII tick inputs only.",
+                retryable=False,
+                detail={
+                    "data_format": record.data_format,
+                    "timeframe": record.data_timeframe,
+                },
+            )
         atomic_write_zip_archive(
             Path(record.data_dir),
             record.zip_filename,
@@ -124,20 +139,13 @@ class Scraper:  # noqa:H601
         Returns:
             requests.Response: zip file response
         """
-        post_headers = config.default_post_headers()
-        post_headers["Referer"] = record.url
-        return requests.post(
-            "http://www.histdata.com/get.php",
-            data={
-                "tk": record.data_tk,
-                "date": record.data_date,
-                "datemonth": record.data_datemonth,
-                "platform": record.data_format,
-                "timeframe": record.data_timeframe,
-                "fxpair": record.data_fxpair,
-            },
-            headers=post_headers,
-            timeout=timeout,
+        return cast(
+            requests.Response,
+            post_histdata_archive(
+                record,
+                timeout=timeout,
+                post_headers=config.default_post_headers(),
+            ),
         )
 
     def plan_initial_records(

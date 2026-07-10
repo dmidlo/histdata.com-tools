@@ -149,6 +149,8 @@ def parse_ascii_lines(timeframe: str, lines: Iterable[str]) -> ParsedAsciiBatch:
 
 def read_ascii_file(path: Path, timeframe: str) -> ParsedAsciiBatch:
     """Parse a plain CSV file or a ZIP containing one HistData CSV file."""
+    if filename_has_unsupported_raw_dimensions(path):
+        raise ValueError("raw import supports ASCII tick inputs only")
     if path.suffix == ".zip":
         with zipfile.ZipFile(path) as archive:
             names = tuple(
@@ -156,6 +158,8 @@ def read_ascii_file(path: Path, timeframe: str) -> ParsedAsciiBatch:
             )
             if len(names) != 1:
                 raise ValueError("expected ZIP archive to contain one CSV file")
+            if filename_has_unsupported_raw_dimensions(names[0]):
+                raise ValueError("raw import supports ASCII tick inputs only")
             with archive.open(names[0]) as source:
                 text = source.read().decode("utf-8").splitlines()
         return parse_ascii_lines(timeframe, text)
@@ -298,11 +302,47 @@ def _single_csv_member_from_zip(path: Path) -> bytes:
         )
         if len(names) != 1:
             raise ValueError("expected ZIP archive to contain one CSV file")
+        if filename_has_unsupported_raw_dimensions(names[0]):
+            raise ValueError("raw import supports ASCII tick inputs only")
         return archive.read(names[0])
+
+
+def filename_has_unsupported_raw_dimensions(filename: str | Path) -> bool:
+    """Return whether a HistData filename declares a retired raw axis."""
+    name = Path(str(filename)).name.upper()
+    stem = name
+    for suffix in (".ZIP", ".CSV"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+    parts = stem.split("_")
+    if stem.startswith("DAT_"):
+        if len(parts) < 5:
+            return True
+        period = parts[4]
+        return (
+            parts[1] != "ASCII"
+            or parts[3] != TICK
+            or len(period) not in {4, 6}
+            or not period.isdigit()
+        )
+    if stem.startswith("HISTDATA_COM_"):
+        if len(parts) != 5:
+            return True
+        timeframe_period = parts[4]
+        period = timeframe_period[1:]
+        is_tick = (
+            len(period) in {4, 6}
+            and timeframe_period.startswith(TICK)
+            and period.isdigit()
+        )
+        return parts[2] != "ASCII" or not is_tick
+    return False
 
 
 def read_ascii_file_to_polars(path: Path, timeframe: str) -> Any:
     """Read a plain CSV file or ZIP archive into a raw Polars dataframe."""
+    if filename_has_unsupported_raw_dimensions(path):
+        raise ValueError("raw import supports ASCII tick inputs only")
     if path.suffix.lower() == ".zip":
         return _read_csv_to_polars(
             BytesIO(_single_csv_member_from_zip(path)),
@@ -314,6 +354,7 @@ def read_ascii_file_to_polars(path: Path, timeframe: str) -> Any:
 
 def write_polars_cache(frame: Any, path: Path) -> None:
     """Write a Polars dataframe cache using Arrow IPC payloads."""
+    _validate_cache_dimensions(frame)
     frame.write_ipc(path)
 
 
@@ -322,9 +363,30 @@ def read_polars_cache(path: Path) -> Any:
     import polars as pl
 
     try:
-        return pl.read_ipc(path)
+        frame = pl.read_ipc(path)
     except Exception as err:
         raise ValueError(LEGACY_CACHE_ERROR) from err
+    _validate_cache_dimensions(frame)
+    return frame
+
+
+def _validate_cache_dimensions(frame: Any) -> None:
+    """Reject enriched caches that declare retired raw dimensions."""
+    columns = set(getattr(frame, "columns", ()))
+    if "format" in columns:
+        formats = {
+            str(value).lower()
+            for value in frame.get_column("format").drop_nulls().unique()
+        }
+        if formats != {"ascii"}:
+            raise ValueError("cache supports ASCII tick inputs only")
+    if "timeframe" in columns:
+        timeframes = {
+            str(value)
+            for value in frame.get_column("timeframe").drop_nulls().unique()
+        }
+        if timeframes != {TICK}:
+            raise ValueError("cache supports ASCII tick inputs only")
 
 
 def to_arrow_table(batch: ParsedAsciiBatch) -> Any:
@@ -399,8 +461,7 @@ def format_influx_line(
     columns: Sequence[str] | None = None,
 ) -> str:
     """Return line protocol for a raw or enriched ASCII tick cache row."""
-    if timeframe != TICK:
-        raise ValueError(f"unsupported ASCII timeframe: {timeframe}")
+    _validate_influx_dimensions(data_format, timeframe)
 
     if columns is None:
         tags = (
@@ -410,10 +471,21 @@ def format_influx_line(
         return f"{pair},{tags} {fields} {row[0]}"
 
     values = _row_values(row, columns)
+    _validate_influx_dimensions(
+        str(values.get("format") or data_format),
+        str(values.get("timeframe") or timeframe),
+    )
     tags = _influx_tags(values, data_format, timeframe)
     fields = _influx_fields(values)
     timestamp = values.get("datetime", row[0])
     return f"{_escape_influx_key(pair)},{tags} {fields} {timestamp}"
+
+
+def _validate_influx_dimensions(data_format: str, timeframe: str) -> None:
+    if str(data_format).lower() != "ascii":
+        raise ValueError("Influx projection supports ASCII tick inputs only")
+    if timeframe != TICK:
+        raise ValueError(f"unsupported ASCII timeframe: {timeframe}")
 
 
 def _row_values(

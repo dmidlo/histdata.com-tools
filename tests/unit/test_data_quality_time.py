@@ -15,6 +15,8 @@ from histdatacom.data_quality import (
     HistDataGapTolerance,
     QualitySeverity,
     QualityStatus,
+    QualityTarget,
+    QualityTargetKind,
     discover_quality_targets,
     quality_run_rules_for_groups,
     quality_rules_for_groups,
@@ -48,6 +50,22 @@ def test_time_group_registers_continuity_run_rule() -> None:
     assert [
         rule.rule_id for rule in quality_run_rules_for_groups(("time",))
     ] == [ASCII_TIMESTAMP_CONTINUITY_RULE_ID]
+
+
+def test_time_rules_noop_unsupported_raw_dimensions() -> None:
+    """Timestamp rules must remain limited to ASCII tick targets."""
+    rules = quality_rules_for_groups(("time",))
+    for data_format, timeframe in (
+        ("ascii", "M1"),
+        ("metatrader", "T"),
+    ):
+        target = QualityTarget(
+            path="/missing/retired.csv",
+            kind=QualityTargetKind.CSV,
+            data_format=data_format,
+            timeframe=timeframe,
+        )
+        assert all(rule.evaluate(target) == () for rule in rules)
 
 
 def test_clean_ascii_file_reports_est_no_dst_conversion_summary(

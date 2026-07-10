@@ -16,6 +16,7 @@ from ssl import SSLCertVerificationError
 from typing import (
     Any,
     Callable,
+    cast,
     Iterable,
     Mapping,
     MutableMapping,
@@ -40,6 +41,7 @@ from histdatacom.fx_enums import Format, Timeframe, get_valid_format_timeframes
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     convert_polars_datetime_to_utc_ms,
+    filename_has_unsupported_raw_dimensions,
     format_influx_line,
     read_ascii_file_to_polars,
     read_polars_cache,
@@ -397,6 +399,11 @@ def validate_url_work_item(
                     _check_form_token(record.data_tk)
                 else:
                     check_for_valid_download(record)
+                _validate_url_raw_dimensions(
+                    record.data_format,
+                    record.data_timeframe,
+                    url=record.url,
+                )
                 updated = _work_item_from_record(record, work_item)
             else:
                 page_fetcher = fetch_page_data or fetch_histdata_page_data
@@ -592,6 +599,12 @@ def apply_form_metadata_to_work_item(
     metadata: UrlFormMetadata,
 ) -> WorkItem:
     """Return a validated work item with parsed form metadata applied."""
+    _validate_url_raw_dimensions(
+        metadata.data_format,
+        metadata.data_timeframe,
+        url=work_item.url,
+    )
+    _validate_form_metadata_matches_plan(work_item, metadata)
     return replace(
         work_item,
         status=WorkStatus.URL_VALID,
@@ -624,6 +637,7 @@ def download_archive_work_item(
     """Download one ZIP archive through an explicit work item."""
     record = _record_from_work_item(work_item)
     try:
+        _validate_archive_raw_dimensions(record)
         _ensure_record_data_dir(record, args)
         existing = existing_archive_artifact(record)
         if existing is not None:
@@ -665,6 +679,7 @@ def download_archive_work_item(
                 download_file(record)
                 download_result = archive_download_result_for_record(record)
 
+            _validate_archive_raw_dimensions(record)
             record.status = WorkStatus.CSV_ZIP
             record.write_manifest_status(base_dir=_default_download_dir(args))
             updated = _work_item_from_record(record, work_item)
@@ -747,6 +762,7 @@ def download_histdata_archive_to_record(
         post_archive=post_archive,
     )
     filename = archive_filename_from_response(response)
+    _validate_downloaded_archive_filename(filename, record)
     content = _response_content_bytes(response)
     target_path = atomic_write_zip_archive(
         Path(record.data_dir),
@@ -843,6 +859,13 @@ def atomic_write_zip_archive(
     work_id: str,
 ) -> Path:
     """Write a ZIP through a temp file, validate it, then rename."""
+    if filename_has_unsupported_raw_dimensions(filename):
+        raise ArchiveDownloadError(
+            "UNSUPPORTED_RAW_INPUT",
+            "Archive filename declares a retired raw dimension.",
+            retryable=False,
+            detail={"filename": filename},
+        )
     target_path = data_dir / filename
     temp_path = target_path.with_name(
         f".{target_path.name}.{derive_work_id(work_id).removeprefix('work-')}.tmp"
@@ -853,6 +876,9 @@ def atomic_write_zip_archive(
         _validate_zip_payload(temp_path)
         temp_path.replace(target_path)
         return target_path
+    except ArchiveDownloadError:
+        _unlink_path(temp_path)
+        raise
     except zipfile.BadZipFile as err:
         _unlink_path(temp_path)
         raise ArchiveDownloadError(
@@ -954,6 +980,7 @@ def extract_csv_work_item(
     """Extract one CSV payload through an explicit work item."""
     record = _record_from_work_item(work_item)
     try:
+        _validate_extraction_raw_dimensions(record)
         _ensure_record_data_dir(record, args)
         zip_persist = _zip_persist_enabled(args, record)
         existing = existing_extraction_artifact(
@@ -1050,6 +1077,7 @@ def extract_archive_to_record(
         with zipfile.ZipFile(zip_path, "r") as zip_ref:
             member = _single_data_member(zip_ref, zip_path)
             filename = _safe_data_member_filename(member)
+            _validate_extracted_csv_filename(filename, record)
             record.csv_filename = filename
             target_path = Path(record.data_dir, filename)
             reused_existing = target_path.exists()
@@ -1118,6 +1146,13 @@ def atomic_extract_archive_member(
     work_id: str,
 ) -> Path:
     """Extract one ZIP member through a temp file, then rename atomically."""
+    if filename_has_unsupported_raw_dimensions(target_path.name):
+        raise ArchiveExtractionError(
+            "UNSUPPORTED_RAW_INPUT",
+            "Archive member filename declares a retired raw dimension.",
+            retryable=False,
+            detail={"filename": target_path.name},
+        )
     temp_path = target_path.with_name(
         f".{target_path.name}.{derive_work_id(work_id).removeprefix('work-')}.tmp"
     )
@@ -1257,6 +1292,7 @@ def cache_build_result_for_record(
     reused_existing: bool = False,
 ) -> CacheBuildResult:
     """Validate a cache artifact and return bounded cache metadata."""
+    _validate_cache_raw_dimensions(record)
     if not record.data_dir:
         raise CacheBuildError(
             "INVALID_CACHE_REQUEST",
@@ -1327,6 +1363,16 @@ def merge_cache_work_items(
 ) -> MergeStageOutput:
     """Merge cache artifacts from explicit work items."""
     mergeable = _mergeable_cache_items(work_items)
+    unsupported_count = sum(
+        1
+        for item in work_items
+        if item.cache_filename == CACHE_FILENAME
+        and Path(item.data_dir, item.cache_filename).is_file()
+        and not _supports_raw_dimensions(
+            item.data_format,
+            item.data_timeframe,
+        )
+    )
     sets_to_merge = _collate_cache_sets(mergeable)
     merge_sets: list[CacheMergeSetSummary] = []
     for cache_set in sets_to_merge:
@@ -1384,6 +1430,7 @@ def merge_cache_work_items(
         ),
         metrics={
             "record_count": len(mergeable),
+            "unsupported_count": unsupported_count,
             "set_count": len(sets_to_merge),
             "materialized": materialize,
             "sets": merge_set_metrics,
@@ -1404,6 +1451,17 @@ def merge_cache_items(
 ) -> Any:
     """Merge one pair/timeframe cache set into the requested API type."""
     import polars as pl
+
+    unsupported = [
+        item
+        for item in work_items
+        if not _supports_raw_dimensions(
+            item.data_format,
+            item.data_timeframe,
+        )
+    ]
+    if unsupported:
+        raise ValueError("cache merge supports ASCII tick inputs only")
 
     ordered_items = (
         tuple(work_items) if already_ordered else order_cache_items(work_items)
@@ -1471,9 +1529,30 @@ def import_to_influx_work_item(
     batch_count = 0
     line_count = 0
     try:
+        if not _supports_raw_dimensions(
+            record.data_format,
+            record.data_timeframe,
+        ):
+            return _activity_output(
+                _work_item_from_record(record, work_item),
+                stage="import_to_influx",
+                status=WorkStatus.SKIPPED,
+                metrics={
+                    "batch_count": 0,
+                    "line_count": 0,
+                    "decision": "skipped_unsupported",
+                    "data_format": record.data_format,
+                    "timeframe": record.data_timeframe,
+                },
+                message="Influx projection supports ASCII tick inputs only.",
+            )
+
         if (
             record.status is not WorkStatus.INFLUX_UPLOAD
-            and str.lower(record.data_format) == "ascii"
+            and _supports_raw_dimensions(
+                record.data_format,
+                record.data_timeframe,
+            )
         ):
             cache_path = Path(record.data_dir, CACHE_FILENAME)
             if not cache_path.exists() and status_has_csv_artifact(
@@ -1527,6 +1606,12 @@ def emit_influx_cache_batches(
     from histdatacom.data_quality.training_features import (
         ensure_tick_training_features,
     )
+
+    if not _supports_raw_dimensions(
+        work_item.data_format,
+        work_item.data_timeframe,
+    ):
+        raise ValueError("Influx projection supports ASCII tick inputs only")
 
     cache_filename = work_item.cache_filename or CACHE_FILENAME
     cache = read_polars_cache(Path(work_item.data_dir, cache_filename))
@@ -2450,7 +2535,220 @@ def _cache_build_failure(
     )
 
 
+def _supports_raw_dimensions(data_format: str, timeframe: str) -> bool:
+    """Return whether a dimension is the sole supported raw input."""
+    try:
+        normalized_format = _format_value(data_format)
+        normalized_timeframe = _timeframe_key(timeframe)
+    except (KeyError, ValueError):
+        return False
+    return (
+        normalized_format == Format.ASCII.value
+        and normalized_timeframe == Timeframe.T.name
+        and normalized_timeframe
+        in get_valid_format_timeframes(normalized_format)
+    )
+
+
+def _raw_dimension_detail(
+    data_format: str,
+    timeframe: str,
+    *,
+    url: str = "",
+) -> dict[str, JSONValue]:
+    detail: dict[str, JSONValue] = {
+        "data_format": str(data_format),
+        "timeframe": str(timeframe),
+        "supported_data_format": Format.ASCII.value,
+        "supported_timeframe": Timeframe.T.name,
+    }
+    if url:
+        detail["url"] = url
+    return detail
+
+
+def _validate_url_raw_dimensions(
+    data_format: str,
+    timeframe: str,
+    *,
+    url: str,
+) -> None:
+    if _supports_raw_dimensions(data_format, timeframe):
+        return
+    raise UrlValidationError(
+        "UNSUPPORTED_RAW_INPUT",
+        "Only HistData ASCII tick data is accepted as a raw input.",
+        detail=_raw_dimension_detail(data_format, timeframe, url=url),
+    )
+
+
+def _validate_form_metadata_matches_plan(
+    work_item: WorkItem,
+    metadata: UrlFormMetadata,
+) -> None:
+    """Reject server form dimensions that differ from the planned target."""
+    mismatches: list[str] = []
+    try:
+        if work_item.data_format and (
+            _format_value(work_item.data_format)
+            != _format_value(metadata.data_format)
+        ):
+            mismatches.append("data_format")
+        if work_item.data_timeframe and (
+            _timeframe_key(work_item.data_timeframe)
+            != _timeframe_key(metadata.data_timeframe)
+        ):
+            mismatches.append("timeframe")
+    except (KeyError, ValueError) as err:
+        raise UrlValidationError(
+            "UNSUPPORTED_RAW_INPUT",
+            "The planned target contains an unsupported raw dimension.",
+            detail=_raw_dimension_detail(
+                work_item.data_format,
+                work_item.data_timeframe,
+                url=work_item.url,
+            ),
+        ) from err
+
+    if work_item.data_fxpair and (
+        work_item.data_fxpair.lower() != metadata.data_fxpair.lower()
+    ):
+        mismatches.append("fxpair")
+    if work_item.data_datemonth and (
+        work_item.data_datemonth != metadata.data_datemonth
+    ):
+        mismatches.append("datemonth")
+    if not mismatches:
+        return
+
+    raise UrlValidationError(
+        "FORM_DIMENSION_MISMATCH",
+        "HistData download form dimensions do not match the planned target.",
+        detail={
+            "url": work_item.url,
+            "mismatched_fields": cast(JSONValue, mismatches),
+            "planned_data_format": work_item.data_format,
+            "returned_data_format": metadata.data_format,
+            "planned_timeframe": work_item.data_timeframe,
+            "returned_timeframe": metadata.data_timeframe,
+            "planned_fxpair": work_item.data_fxpair,
+            "returned_fxpair": metadata.data_fxpair,
+            "planned_datemonth": work_item.data_datemonth,
+            "returned_datemonth": metadata.data_datemonth,
+        },
+    )
+
+
+def _retired_filename_detail(
+    record: Record,
+    filename: str,
+) -> dict[str, JSONValue]:
+    return {
+        **_raw_dimension_detail(
+            record.data_format,
+            record.data_timeframe,
+            url=record.url,
+        ),
+        "filename": filename,
+    }
+
+
+def _validate_downloaded_archive_filename(
+    filename: str,
+    record: Record,
+) -> None:
+    if not filename_has_unsupported_raw_dimensions(filename):
+        return
+    raise ArchiveDownloadError(
+        "UNSUPPORTED_RAW_INPUT",
+        "Downloaded archive filename declares a retired raw dimension.",
+        retryable=False,
+        detail=_retired_filename_detail(record, filename),
+    )
+
+
+def _validate_extracted_csv_filename(
+    filename: str,
+    record: Record,
+) -> None:
+    if not filename_has_unsupported_raw_dimensions(filename):
+        return
+    raise ArchiveExtractionError(
+        "UNSUPPORTED_RAW_INPUT",
+        "Archive member filename declares a retired raw dimension.",
+        retryable=False,
+        detail=_retired_filename_detail(record, filename),
+    )
+
+
+def _validate_archive_raw_dimensions(record: Record) -> None:
+    if not _supports_raw_dimensions(record.data_format, record.data_timeframe):
+        raise ArchiveDownloadError(
+            "UNSUPPORTED_RAW_INPUT",
+            "Archive download supports HistData ASCII tick inputs only.",
+            retryable=False,
+            detail=_raw_dimension_detail(
+                record.data_format,
+                record.data_timeframe,
+                url=record.url,
+            ),
+        )
+    for filename in (record.zip_filename, record.csv_filename):
+        if filename_has_unsupported_raw_dimensions(filename):
+            raise ArchiveDownloadError(
+                "UNSUPPORTED_RAW_INPUT",
+                "Local artifact filename declares a retired raw dimension.",
+                retryable=False,
+                detail=_retired_filename_detail(record, filename),
+            )
+
+
+def _validate_extraction_raw_dimensions(record: Record) -> None:
+    if not _supports_raw_dimensions(record.data_format, record.data_timeframe):
+        raise ArchiveExtractionError(
+            "UNSUPPORTED_RAW_INPUT",
+            "Archive extraction supports HistData ASCII tick inputs only.",
+            retryable=False,
+            detail=_raw_dimension_detail(
+                record.data_format,
+                record.data_timeframe,
+                url=record.url,
+            ),
+        )
+    for filename in (record.zip_filename, record.csv_filename):
+        if filename_has_unsupported_raw_dimensions(filename):
+            raise ArchiveExtractionError(
+                "UNSUPPORTED_RAW_INPUT",
+                "Local artifact filename declares a retired raw dimension.",
+                retryable=False,
+                detail=_retired_filename_detail(record, filename),
+            )
+
+
+def _validate_cache_raw_dimensions(record: Record) -> None:
+    if not _supports_raw_dimensions(record.data_format, record.data_timeframe):
+        raise CacheBuildError(
+            "UNSUPPORTED_RAW_INPUT",
+            "Cache creation and validation support ASCII tick inputs only.",
+            retryable=False,
+            detail=_raw_dimension_detail(
+                record.data_format,
+                record.data_timeframe,
+                url=record.url,
+            ),
+        )
+    for filename in (record.zip_filename, record.csv_filename):
+        if filename_has_unsupported_raw_dimensions(filename):
+            raise CacheBuildError(
+                "UNSUPPORTED_RAW_INPUT",
+                "Cache source filename declares a retired raw dimension.",
+                retryable=False,
+                detail=_retired_filename_detail(record, filename),
+            )
+
+
 def _validate_archive_request(record: Record) -> None:
+    _validate_archive_raw_dimensions(record)
     missing = [
         field_name
         for field_name in (
@@ -2474,6 +2772,7 @@ def _validate_archive_request(record: Record) -> None:
 
 
 def _validate_extraction_request(record: Record) -> None:
+    _validate_extraction_raw_dimensions(record)
     missing = [
         field_name
         for field_name in ("data_dir", "zip_filename")
@@ -2624,8 +2923,20 @@ def _response_content_bytes(response: Any) -> bytes:
 def _validate_zip_payload(path: Path) -> None:
     with zipfile.ZipFile(path, "r") as archive:
         bad_member = archive.testzip()
+        unsupported_members = [
+            name
+            for name in archive.namelist()
+            if filename_has_unsupported_raw_dimensions(name)
+        ]
     if bad_member:
         raise zipfile.BadZipFile(f"bad member in ZIP archive: {bad_member}")
+    if unsupported_members:
+        raise ArchiveDownloadError(
+            "UNSUPPORTED_RAW_INPUT",
+            "Archive contains a member with a retired raw dimension.",
+            retryable=False,
+            detail={"filename": unsupported_members[0]},
+        )
 
 
 def _unlink_path(path: Path) -> None:
@@ -2649,6 +2960,10 @@ def _mergeable_cache_items(
         for item in work_items
         if item.cache_filename == CACHE_FILENAME
         and Path(item.data_dir, item.cache_filename).is_file()
+        and _supports_raw_dimensions(
+            item.data_format,
+            item.data_timeframe,
+        )
     ]
 
 
@@ -2709,8 +3024,9 @@ def _existing_archive_artifact_on_disk(record: Record) -> bool:
 
 
 def _supports_cache(record: Record) -> bool:
-    return str.lower(record.data_format) == "ascii" and (
-        record.data_timeframe == "T"
+    return _supports_raw_dimensions(
+        record.data_format,
+        record.data_timeframe,
     )
 
 
@@ -2731,6 +3047,7 @@ def _source_artifact_path(record: Record, filename: str) -> Path | None:
 
 
 def create_cache_file(record: Record, args: Mapping[str, Any]) -> None:
+    _validate_cache_raw_dimensions(record)
     zip_path = _source_artifact_path(record, record.zip_filename)
     csv_path = _source_artifact_path(record, record.csv_filename)
 

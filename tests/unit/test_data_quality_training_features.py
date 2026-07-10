@@ -179,6 +179,28 @@ def test_training_enrichment_rejects_non_tick_training_inputs() -> None:
         )
 
 
+def test_training_report_rejects_unsupported_target_dimensions() -> None:
+    """Direct report derivation must not bypass training input validation."""
+    enriched = enrich_tick_cache_with_training_features(
+        _tick_frame([(1_000, 1.0, 1.2, 0)]),
+        symbol="EURUSD",
+        data_format="ascii",
+        timeframe="T",
+        period="201202",
+    )
+    target = QualityTarget(
+        path="/tmp/retired.csv",
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="M1",
+        symbol="EURUSD",
+        period="201202",
+    )
+
+    with pytest.raises(ValueError, match="ASCII tick"):
+        quality_report_from_training_features(enriched, target=target)
+
+
 def test_cache_build_writes_enriched_ascii_tick_data_as_canonical_cache(
     tmp_path: Path,
 ) -> None:

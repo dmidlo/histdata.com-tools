@@ -39,6 +39,7 @@ def _write_cache_record(
         cache_filename=CACHE_FILENAME,
         cache_start=str(start),
         data_fxpair=pair,
+        data_format="ascii",
         data_timeframe=timeframe,
     )
 
@@ -96,6 +97,20 @@ def test_import_frame_with_headers_rejects_unsupported_timeframes() -> None:
             "M1",
             FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
         )
+
+
+def test_import_frame_with_headers_rejects_retired_platform_filename(
+    tmp_path: Path,
+) -> None:
+    """The private API import seam must reject platform raw filenames."""
+    from histdatacom.api import Api
+
+    source = FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv"
+    retired = tmp_path / "DAT_NT_EURUSD_T_LAST_201202.csv"
+    shutil.copyfile(source, retired)
+
+    with pytest.raises(ValueError, match="ASCII tick"):
+        Api._import_frame_with_headers("T", retired)
 
 
 def test_import_file_to_polars_wraps_raw_ingest_for_records() -> None:

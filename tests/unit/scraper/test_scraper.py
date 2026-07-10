@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import zipfile
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from histdatacom import config
+from histdatacom.exceptions import ArchiveDownloadError
 from histdatacom.helper_args import helper_runtime_args
 from histdatacom.legacy_boundary import LegacyHelperSideEffectWarning
 from histdatacom.manifest_store import ManifestStatusStore
@@ -129,7 +131,7 @@ def test_request_file_uses_local_post_headers(monkeypatch) -> None:
         captured.append(headers)
         return Response()
 
-    monkeypatch.setattr("histdatacom.scraper.scraper.requests.post", post)
+    monkeypatch.setattr("histdatacom.activity_stages.requests.post", post)
     record = Record(
         url=ASCII_TICK_URL,
         data_tk="token",
@@ -138,6 +140,7 @@ def test_request_file_uses_local_post_headers(monkeypatch) -> None:
         data_format="ASCII",
         data_timeframe="T",
         data_fxpair="eurusd",
+        data_dir="/tmp/",
     )
 
     Scraper._request_file(record, 1)
@@ -145,6 +148,63 @@ def test_request_file_uses_local_post_headers(monkeypatch) -> None:
     assert config.POST_HEADERS == original_headers
     assert captured[0] is not config.POST_HEADERS
     assert captured[0]["Referer"] == ASCII_TICK_URL
+
+
+def test_request_file_rejects_unsupported_raw_dimensions(monkeypatch) -> None:
+    """The legacy private request seam must fail before network access."""
+    monkeypatch.setattr(
+        "histdatacom.activity_stages.requests.post",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unsupported input reached network")
+        ),
+    )
+    record = Record(
+        url=ASCII_TICK_URL,
+        data_tk="token",
+        data_date="2022",
+        data_datemonth="202201",
+        data_format="METATRADER",
+        data_timeframe="T",
+        data_fxpair="eurusd",
+        data_dir="/tmp",
+    )
+
+    with pytest.raises(ArchiveDownloadError) as exc_info:
+        Scraper._request_file(record, 1)
+
+    assert exc_info.value.code == "UNSUPPORTED_RAW_INPUT"
+
+
+def test_write_file_rejects_retired_archive_member(tmp_path: Path) -> None:
+    """The legacy private writer must not persist platform raw payloads."""
+    record = Record(
+        url=ASCII_TICK_URL,
+        data_dir=f"{tmp_path}{os.sep}",
+        zip_filename="opaque.zip",
+        data_format="ASCII",
+        data_timeframe="T",
+    )
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("DAT_NT_EURUSD_T_LAST_2022.csv", "rows")
+
+    with pytest.raises(ArchiveDownloadError) as exc_info:
+        Scraper._write_file(record, stream.getvalue())
+
+    assert exc_info.value.code == "UNSUPPORTED_RAW_INPUT"
+    assert not (tmp_path / record.zip_filename).exists()
+
+    record.data_format = "METATRADER"
+    record.zip_filename = "DAT_ASCII_EURUSD_T_2022.zip"
+    supported_stream = io.BytesIO()
+    with zipfile.ZipFile(supported_stream, "w") as archive:
+        archive.writestr("DAT_ASCII_EURUSD_T_2022.csv", "rows")
+
+    with pytest.raises(ArchiveDownloadError) as exc_info:
+        Scraper._write_file(record, supported_stream.getvalue())
+
+    assert exc_info.value.code == "UNSUPPORTED_RAW_INPUT"
+    assert not (tmp_path / record.zip_filename).exists()
 
 
 def test_download_zip_transitions_valid_record_to_csv_zip(
@@ -159,6 +219,8 @@ def test_download_zip_transitions_valid_record_to_csv_zip(
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{data_dir}{os.sep}",
         zip_filename="DAT_ASCII_EURUSD_T_202201.zip",
+        data_format="ASCII",
+        data_timeframe="T",
     )
     with zipfile.ZipFile(data_dir / record.zip_filename, "w") as archive:
         archive.writestr("DAT_ASCII_EURUSD_T_202201.csv", "rows")
