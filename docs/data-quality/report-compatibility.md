@@ -55,6 +55,22 @@ metadata, and bounded runtime consumers receive the same contract at the
 top-level `quality_engine` key. Reports without intentional rule skips do not
 add `quality_engine`, preserving the prior optional-metadata behavior.
 
+## Fingerprint Topology Inspection Context
+
+Fingerprint topology-attention target summaries may include optional
+`inspection_context` using
+`histdatacom.timestamp-topology-inspection.v1`. Each evidence section contains
+`total_count`, `included_count`, `omitted_count`, `truncated`, a bounded
+`samples` list, and complete sample `limit_metadata`. Actionable sections link
+to the same stable remediation identity used by `quality_next_actions` through
+`code`, `action_kind`, `rule_id`, `flag`, and the copied target axis. Expected
+session closures are
+marked non-actionable and only provide context for suspicious gaps.
+
+This is a compatible optional v1 metadata addition. The default payload remains
+publish-safe: timestamp and row-position evidence is allowed, while absolute
+paths, credentials, complete quote rows, and raw row excerpts are not.
+
 ## Golden Fixtures
 
 Representative payload fixtures live under
@@ -70,6 +86,8 @@ The golden suite covers:
 - canonical cache target detailed report;
 - duplicate ZIP/CSV quality-engine skip detailed report;
 - bounded runtime payload with structured quality-engine skips;
+- fingerprint detailed and bounded reports with action-linked topology
+  inspection context;
 - run-scoped finding detailed report;
 - bounded runtime payload with quality-report artifact metadata.
 

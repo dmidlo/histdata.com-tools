@@ -21,6 +21,7 @@ from histdatacom.data_quality.fingerprints import (
     DEFAULT_FINGERPRINT_QUANTILES,
     DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
     DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
+    DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT,
     SERIES_FINGERPRINT_RULE_ID,
     HistDataFingerprintDistributionAttentionProfile,
     HistDataFingerprintProfile,
@@ -474,6 +475,7 @@ class QualityProfile:
                 "histogram_bins",
                 "max_rows",
                 "rounding_digits",
+                "topology_inspection_sample_limit",
                 "distribution_attention",
             },
             SERIES_FINGERPRINT_RULE_ID,
@@ -516,6 +518,14 @@ class QualityProfile:
                 "rounding_digits",
                 DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
                 minimum=0,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
+            topology_inspection_sample_limit=_int_field(
+                config,
+                "topology_inspection_sample_limit",
+                DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT,
+                minimum=0,
+                maximum=DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT,
                 path=SERIES_FINGERPRINT_RULE_ID,
             ),
             calendar_profile=self.calendar_profile(),
@@ -1274,6 +1284,7 @@ def _int_field(
     default: int,
     *,
     minimum: int | None = None,
+    maximum: int | None = None,
     path: str,
 ) -> int:
     if key not in mapping:
@@ -1289,6 +1300,9 @@ def _int_field(
         raise QualityProfileError(msg) from exc
     if minimum is not None and parsed < minimum:
         msg = f"{path}.{key} must be >= {minimum}"
+        raise QualityProfileError(msg)
+    if maximum is not None and parsed > maximum:
+        msg = f"{path}.{key} must be <= {maximum}"
         raise QualityProfileError(msg)
     return parsed
 

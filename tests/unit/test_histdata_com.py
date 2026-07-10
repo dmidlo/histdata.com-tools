@@ -1130,6 +1130,25 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                         "max_gap_ms": 60_000,
                         "computed_from": "text_scan",
                         "cache_source": None,
+                        "inspection_context": {
+                            "duplicate_timestamps": {
+                                "total_count": 1,
+                                "included_count": 1,
+                                "omitted_count": 0,
+                                "samples": [
+                                    {
+                                        "row_number": 2,
+                                        "timestamp_source": (
+                                            "20120201 000000000"
+                                        ),
+                                        "occurrence_count": 2,
+                                    }
+                                ],
+                                "next_action": {
+                                    "code": ("inspect_duplicate_timestamp_rows")
+                                },
+                            }
+                        },
                     }
                 ],
             },
@@ -1179,6 +1198,11 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
         "non-monotonic=0, suspicious gaps=0, weekend activity=0, "
         "max gap 60s, computed_from=text_scan, "
         "next=inspect duplicate timestamp rows"
+    ) in output
+    assert (
+        "  - context duplicate_timestamps: samples=1/1 omitted=0 "
+        "action=inspect_duplicate_timestamp_rows "
+        "20120201 000000000 x2"
     ) in output
     assert "Fingerprint topology" in output
     assert (

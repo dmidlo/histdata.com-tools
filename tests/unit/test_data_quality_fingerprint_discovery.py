@@ -421,6 +421,7 @@ def test_fingerprint_schema_discovery_reflects_profile_overrides() -> None:
                     "histogram_bins": 12,
                     "max_rows": 250,
                     "rounding_digits": 6,
+                    "topology_inspection_sample_limit": 2,
                     "distribution_attention": {
                         "zero_spread_min_rate": 0.25,
                         "negative_spread_min_count": 2,
@@ -440,6 +441,7 @@ def test_fingerprint_schema_discovery_reflects_profile_overrides() -> None:
     assert effective["histogram_bins"] == 12
     assert effective["max_rows"] == 250
     assert effective["rounding_digits"] == 6
+    assert effective["topology_inspection_sample_limit"] == 2
     assert effective["distribution_attention"]["zero_spread_min_rate"] == 0.25
     assert effective["distribution_attention"]["negative_spread_min_count"] == 2
 

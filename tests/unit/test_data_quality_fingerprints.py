@@ -47,6 +47,7 @@ from histdatacom.data_quality import (
     QualityTargetKind,
     discover_quality_targets,
     quality_rules_for_groups,
+    quality_next_actions_summary,
     quality_run_rules_for_groups,
     quality_target_from_path,
     run_quality_assessment,
@@ -657,6 +658,35 @@ def test_fingerprint_rule_prefers_direct_cache_payload(tmp_path: Path) -> None:
     assert dynamics["cache_source"] == "direct"
 
 
+def test_direct_cache_topology_inspection_counts_duplicate_timestamps(
+    tmp_path: Path,
+) -> None:
+    """Polars-backed topology should retain bounded duplicate evidence."""
+    cache_path = tmp_path / CACHE_FILENAME
+    rows = (CLEAN_TICK_ROWS[0], CLEAN_TICK_ROWS[0], CLEAN_TICK_ROWS[1])
+    batch = parse_ascii_lines(TICK, rows)
+    write_polars_cache(to_polars_frame(batch), cache_path)
+    target = QualityTarget(
+        path=str(cache_path),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe=TICK,
+        symbol="EURUSD",
+        period="201202",
+    )
+
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    topology = _mapping(payload["temporal_topology"])
+    duplicate = _mapping(
+        _mapping(topology["inspection_context"])["duplicate_timestamps"]
+    )
+
+    assert topology["computed_from"] == "direct_cache"
+    assert topology["duplicate_timestamp_count"] == 1
+    assert duplicate["duplicate_row_count"] == 1
+    assert _mapping(_list(duplicate["samples"])[0])["occurrence_count"] == 2
+
+
 def test_fingerprint_rule_prefers_fresh_sibling_cache(tmp_path: Path) -> None:
     """CSV targets should reuse fresh sibling cache data when available."""
     csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
@@ -1207,6 +1237,73 @@ def test_series_fingerprint_topology_attention_orders_mixed_remediation_hints(
         "verify_weekend_session_policy",
     )
     assert "expected_session_closures" in _list(target_summary["flags"])
+
+
+def test_topology_inspection_context_links_bounded_evidence_to_next_actions(
+    tmp_path: Path,
+) -> None:
+    """Attention evidence should link to stable run-level action identities."""
+    case = HistDataAsciiCase(
+        name="tick_topology_inspection",
+        timeframe=TICK,
+        filename="DAT_ASCII_EURUSD_T_201202_INSPECTION.csv",
+        rows=(
+            "20120203 165900000,1.306600,1.306770,0",
+            "bad-timestamp,1.306600,1.306770,0",
+            "20120205 170100000,1.306570,1.306740,17",
+            "20120205 172000000,1.306580,1.306750,18",
+            "20120205 172000000,1.306580,1.306750,18",
+            "20120205 171000000,1.306590,1.306760,19",
+        ),
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    report = run_quality_assessment(
+        (target,),
+        quality_rules_for_groups(
+            ("fingerprint",),
+            profile={
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "inspection-limit",
+                "rules": {
+                    SERIES_FINGERPRINT_RULE_ID: {
+                        "topology_inspection_sample_limit": 1,
+                    }
+                },
+            },
+        ),
+    )
+    attention = _mapping(
+        report.metadata[TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY]
+    )
+    target_summary = _mapping(_list(attention["target_summaries"])[0])
+    context = _mapping(target_summary["inspection_context"])
+    next_actions = _mapping(quality_next_actions_summary(report))
+    action_codes = {
+        _mapping(action)["code"] for action in _list(next_actions["actions"])
+    }
+
+    expected_links = {
+        "invalid_timestamps": "inspect_invalid_timestamp_rows",
+        "non_monotonic_timestamps": "repair_timestamp_order",
+        "duplicate_timestamps": "inspect_duplicate_timestamp_rows",
+        "suspicious_gaps": "inspect_gap_boundaries",
+    }
+    for section_name, action_code in expected_links.items():
+        section = _mapping(context[section_name])
+        next_action = _mapping(section["next_action"])
+        assert section["actionable"] is True
+        assert next_action["code"] == action_code
+        assert next_action["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+        assert next_action["flag"] == section_name
+        assert _mapping(section["target_axis"])["symbol"] == "EURUSD"
+        assert action_code in action_codes
+        assert section["included_count"] <= 1
+    closure = _mapping(context["expected_session_closures"])
+    assert closure["actionable"] is False
+    assert closure["contextual_for"] == "suspicious_gaps"
+    assert "next_action" not in closure
+    assert str(tmp_path) not in str(context)
+    assert "duplicate_row_values" not in str(context)
 
 
 def test_series_fingerprint_topology_attention_ignores_context_only_targets(

@@ -116,6 +116,29 @@ def test_bounded_payload_contract_audit_checks_quality_skip_events() -> None:
     )
 
 
+def test_bounded_payload_contract_audit_checks_topology_inspection_limits() -> (
+    None
+):
+    """Nested inspection samples should share bounded count invariants."""
+    payload = _representative_payload_copy()
+    targets = payload["fingerprint_topology_attention"]["target_summaries"]
+    inspected = next(
+        target for target in targets if "inspection_context" in target
+    )
+    sample_limits = inspected["inspection_context"]["duplicate_timestamps"][
+        "limit_metadata"
+    ]["samples"]
+    sample_limits["included_count"] = 7
+
+    audit = bounded_payload_contract_audit(payload)
+
+    assert audit["status"] == "fail"
+    finding = _first_finding(audit, "bounded_payload_count_mismatch")
+    assert "inspection_context.duplicate_timestamps.limit_metadata.samples" in (
+        finding["path"]
+    )
+
+
 def test_format_bounded_payload_contract_audit_renders_human_summary() -> None:
     """Human output should expose pass/fail audit state."""
     output = format_bounded_payload_contract_audit(

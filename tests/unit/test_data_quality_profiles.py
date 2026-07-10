@@ -169,6 +169,7 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
                     "histogram_bins": 16,
                     "max_rows": 1000,
                     "rounding_digits": 8,
+                    "topology_inspection_sample_limit": 2,
                     "distribution_attention": {
                         "invalid_row_min_count": 2,
                         "invalid_row_min_rate": 0.5,
@@ -193,6 +194,7 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
         "histogram_bins": 16,
         "max_rows": 1000,
         "rounding_digits": 8,
+        "topology_inspection_sample_limit": 2,
         "distribution_attention": {
             "invalid_row_min_count": 2,
             "invalid_row_min_rate": 0.5,
@@ -225,6 +227,13 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
         {"rules": {SERIES_FINGERPRINT_RULE_ID: {"quantiles": [0.5, 0.1]}}},
         {"rules": {SERIES_FINGERPRINT_RULE_ID: {"lags": [1, 1]}}},
         {"rules": {SERIES_FINGERPRINT_RULE_ID: {"histogram_bins": 0}}},
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "topology_inspection_sample_limit": 6
+                }
+            }
+        },
         {
             "rules": {
                 SERIES_FINGERPRINT_RULE_ID: {"distribution_attention": "loose"}

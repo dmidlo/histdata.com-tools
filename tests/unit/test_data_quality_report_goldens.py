@@ -516,11 +516,11 @@ def _fingerprint_report() -> QualityReport:
                 "parsed_row_count": 3,
                 "invalid_timestamp_count": 0,
                 "non_monotonic_count": 0,
-                "duplicate_timestamp_count": 0,
+                "duplicate_timestamp_count": 1,
                 "duplicate_timestamp_source_counts": {
-                    "tick_duplicate_row": 0,
+                    "tick_duplicate_row": 1,
                 },
-                "tick_duplicate_row_count": 0,
+                "tick_duplicate_row_count": 1,
                 "min_interval_ms": 60000,
                 "median_interval_ms": 60000,
                 "interval_count": 2,
@@ -554,6 +554,44 @@ def _fingerprint_report() -> QualityReport:
                     "dynamic_window_max_ms": 3600000,
                     "dynamic_window_growth_factor": 2.0,
                     "dynamic_window_shrink_factor": 0.5,
+                },
+                "inspection_context": {
+                    "schema_version": (
+                        "histdatacom.timestamp-topology-inspection.v1"
+                    ),
+                    "duplicate_timestamps": {
+                        "total_count": 1,
+                        "included_count": 1,
+                        "omitted_count": 0,
+                        "truncated": False,
+                        "limit_metadata": {
+                            "samples": {
+                                "limit": 5,
+                                "effective_limit": 5,
+                                "requested_limit": 5,
+                                "default_limit": 5,
+                                "minimum_limit": 0,
+                                "maximum_limit": 5,
+                                "unbounded": False,
+                                "total_count": 1,
+                                "included_count": 1,
+                                "omitted_count": 0,
+                                "truncated": False,
+                            }
+                        },
+                        "duplicate_row_count": 1,
+                        "samples": [
+                            {
+                                "row_number": 2,
+                                "timestamp_source": "20120201 000000000",
+                                "timestamp_source_truncated": False,
+                                "timestamp_utc_ms": 1328072400000,
+                                "utc_timestamp": "2012-02-01T05:00:00Z",
+                                "occurrence_count": 2,
+                                "exact_row_group_count": 1,
+                            }
+                        ],
+                    },
                 },
             },
             "fingerprint_audit": {
@@ -1549,7 +1587,7 @@ def _assert_fingerprint_topology(payload: dict[str, JSONValue]) -> None:
 def _assert_fingerprint_topology_target(
     payload: dict[str, JSONValue],
 ) -> None:
-    assert set(payload) == {
+    expected_keys = {
         "cache_source",
         "computed_from",
         "duplicate_timestamp_count",
@@ -1567,6 +1605,8 @@ def _assert_fingerprint_topology_target(
         "target_axis",
         "weekend_activity_count",
     }
+    assert expected_keys <= set(payload)
+    assert set(payload) <= expected_keys | {"inspection_context"}
     axis = _mapping(payload["target_axis"])
     assert set(axis) == {
         "data_format",
@@ -1587,6 +1627,10 @@ def _assert_fingerprint_topology_target(
         "weekend_activity_count",
     ):
         assert isinstance(payload[key], int)
+    if "inspection_context" in payload:
+        _assert_fingerprint_topology_inspection_context(
+            _mapping(payload["inspection_context"])
+        )
 
 
 def _assert_fingerprint_topology_attention(
@@ -1628,7 +1672,7 @@ def _assert_fingerprint_topology_attention(
 def _assert_fingerprint_topology_attention_target(
     payload: dict[str, JSONValue],
 ) -> None:
-    assert set(payload) == {
+    expected_keys = {
         "attention_flags",
         "attention_level",
         "cache_source",
@@ -1645,6 +1689,8 @@ def _assert_fingerprint_topology_attention_target(
         "target_axis",
         "weekend_activity_count",
     }
+    assert expected_keys <= set(payload)
+    assert set(payload) <= expected_keys | {"inspection_context"}
     axis = _mapping(payload["target_axis"])
     assert set(axis) == {
         "data_format",
@@ -1663,6 +1709,11 @@ def _assert_fingerprint_topology_attention_target(
     assert isinstance(payload["flags"], list)
     for hint in _list(payload["remediation_hints"]):
         _assert_fingerprint_remediation_hint(_mapping(hint))
+    if "inspection_context" in payload:
+        _assert_fingerprint_topology_inspection_context(
+            _mapping(payload["inspection_context"]),
+            action_linked=True,
+        )
     assert payload["status"] in {"regular", "irregular", "unavailable"}
     for key in (
         "duplicate_timestamp_count",
@@ -1677,6 +1728,52 @@ def _assert_fingerprint_topology_attention_target(
         payload["max_gap_ms"],
         int,
     )
+
+
+def _assert_fingerprint_topology_inspection_context(
+    payload: dict[str, JSONValue],
+    *,
+    action_linked: bool = False,
+) -> None:
+    assert payload["schema_version"] == (
+        "histdatacom.timestamp-topology-inspection.v1"
+    )
+    section_names = set(payload) - {"schema_version"}
+    assert section_names
+    assert section_names <= {
+        "invalid_timestamps",
+        "non_monotonic_timestamps",
+        "duplicate_timestamps",
+        "suspicious_gaps",
+        "expected_session_closures",
+        "weekend_activity",
+    }
+    for section_name in section_names:
+        section = _mapping(payload[section_name])
+        for key in (
+            "total_count",
+            "included_count",
+            "omitted_count",
+        ):
+            assert isinstance(section[key], int)
+        assert isinstance(section["truncated"], bool)
+        assert isinstance(section["samples"], list)
+        _assert_limit_metadata_map(
+            section["limit_metadata"],
+            keys=("samples",),
+        )
+        if action_linked and section_name != "expected_session_closures":
+            assert section["actionable"] is True
+            assert set(_mapping(section["target_axis"])) == {
+                "data_format",
+                "kind",
+                "period",
+                "symbol",
+                "timeframe",
+            }
+            _assert_fingerprint_remediation_hint(
+                _mapping(section["next_action"])
+            )
 
 
 def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:

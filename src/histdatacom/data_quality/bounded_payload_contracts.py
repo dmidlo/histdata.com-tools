@@ -22,6 +22,7 @@ from histdatacom.data_quality.engine import (
 from histdatacom.data_quality.fingerprints import (
     SERIES_FINGERPRINT_RULE_ID,
 )
+from histdatacom.data_quality.limits import bounded_report_limit
 from histdatacom.data_quality.profiles import QUALITY_REPORTING_METADATA_KEY
 from histdatacom.data_quality.reporting import (
     QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY,
@@ -1037,7 +1038,7 @@ def _topology_payload(
     non_monotonic_count: int = 0,
     suspicious_gap_count: int = 0,
 ) -> dict[str, JSONValue]:
-    return {
+    payload: dict[str, JSONValue] = {
         "row_count": 4,
         "parsed_row_count": 4 - invalid_timestamp_count,
         "invalid_timestamp_count": invalid_timestamp_count,
@@ -1052,6 +1053,38 @@ def _topology_payload(
         "computed_from": computed_from,
         "cache_source": None,
     }
+    if duplicate_timestamp_count:
+        payload["inspection_context"] = {
+            "schema_version": "histdatacom.timestamp-topology-inspection.v1",
+            "duplicate_timestamps": {
+                "total_count": 1,
+                "included_count": 1,
+                "omitted_count": 0,
+                "truncated": False,
+                "limit_metadata": {
+                    "samples": bounded_report_limit(
+                        1,
+                        default_limit=5,
+                        minimum_limit=0,
+                        maximum_limit=5,
+                        allow_unbounded=False,
+                    ).count_payload(1)
+                },
+                "duplicate_row_count": duplicate_timestamp_count,
+                "samples": [
+                    {
+                        "row_number": 2,
+                        "timestamp_source": "20120201 000000000",
+                        "timestamp_source_truncated": False,
+                        "timestamp_utc_ms": 1328072400000,
+                        "utc_timestamp": "2012-02-01T05:00:00Z",
+                        "occurrence_count": duplicate_timestamp_count + 1,
+                        "exact_row_group_count": 1,
+                    }
+                ],
+            },
+        }
+    return payload
 
 
 def _calendar_regimes_payload() -> dict[str, JSONValue]:

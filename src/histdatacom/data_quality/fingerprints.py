@@ -44,7 +44,10 @@ from histdatacom.data_quality.remediation import (
     remediation_hint_payloads_for_flags,
 )
 from histdatacom.data_quality.symbols import symbol_metadata_for
-from histdatacom.data_quality.time import timestamp_topology_payload_for_target
+from histdatacom.data_quality.time import (
+    DEFAULT_TIMESTAMP_INSPECTION_SAMPLE_LIMIT,
+    timestamp_topology_payload_for_target,
+)
 from histdatacom.data_quality.ticks import (
     DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS,
     DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS,
@@ -150,6 +153,9 @@ DEFAULT_FINGERPRINT_ROLLING_WINDOWS = (60, 240, 1440)
 DEFAULT_FINGERPRINT_HISTOGRAM_BINS = 32
 DEFAULT_FINGERPRINT_MAX_ROWS = 1_000_000
 DEFAULT_FINGERPRINT_ROUNDING_DIGITS = 12
+DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT = (
+    DEFAULT_TIMESTAMP_INSPECTION_SAMPLE_LIMIT
+)
 DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT = 128
 DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT = 32
 DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT = 128
@@ -261,6 +267,9 @@ class HistDataFingerprintProfile:
     histogram_bins: int = DEFAULT_FINGERPRINT_HISTOGRAM_BINS
     max_rows: int = DEFAULT_FINGERPRINT_MAX_ROWS
     rounding_digits: int = DEFAULT_FINGERPRINT_ROUNDING_DIGITS
+    topology_inspection_sample_limit: int = (
+        DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT
+    )
     calendar_profile: HistDataCalendarProfile = field(
         default_factory=default_calendar_profile,
         repr=False,
@@ -279,6 +288,9 @@ class HistDataFingerprintProfile:
             "histogram_bins": self.histogram_bins,
             "max_rows": self.max_rows,
             "rounding_digits": self.rounding_digits,
+            "topology_inspection_sample_limit": (
+                self.topology_inspection_sample_limit
+            ),
             "distribution_attention": (
                 self.distribution_attention.to_metadata()
             ),
@@ -3376,7 +3388,10 @@ def _series_fingerprint_payload(
         "schema_version": TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
         "target_axis": _target_axis(target),
         "coverage": _empty_coverage(parsed_row_count=None),
-        "temporal_topology": timestamp_topology_payload_for_target(target),
+        "temporal_topology": timestamp_topology_payload_for_target(
+            target,
+            inspection_sample_limit=profile.topology_inspection_sample_limit,
+        ),
         "source": _unavailable_source(
             target,
             reason=_unsupported_reason(target),
@@ -4298,7 +4313,7 @@ def _topology_target_summary(
     topology: Mapping[str, JSONValue],
 ) -> dict[str, JSONValue]:
     flags = _topology_flags(topology)
-    return {
+    summary: dict[str, JSONValue] = {
         "target_axis": _topology_target_axis(finding, target_axis),
         "row_count": _int_payload(topology.get("row_count")),
         "parsed_row_count": _optional_int_payload(
@@ -4332,6 +4347,10 @@ def _topology_target_summary(
         "status": _topology_status(topology),
         "flags": flags,
     }
+    inspection_context = _payload_mapping(topology.get("inspection_context"))
+    if inspection_context:
+        summary["inspection_context"] = dict(inspection_context)
+    return summary
 
 
 def _topology_target_axis(
@@ -4450,7 +4469,7 @@ def _topology_attention_target_summary(
     if not attention_flags:
         return None
     attention_level = _topology_attention_level(attention_flags)
-    return {
+    summary: dict[str, JSONValue] = {
         "target_axis": _topology_attention_axis(target),
         "attention_level": attention_level,
         "attention_flags": list(attention_flags),
@@ -4479,6 +4498,56 @@ def _topology_attention_target_summary(
         "computed_from": _summary_key(target.get("computed_from")),
         "cache_source": _optional_summary_key(target.get("cache_source")),
     }
+    inspection_context = _topology_attention_inspection_context(
+        target,
+        attention_flags,
+    )
+    if inspection_context:
+        summary["inspection_context"] = inspection_context
+    return summary
+
+
+def _topology_attention_inspection_context(
+    target: Mapping[str, JSONValue],
+    attention_flags: list[str],
+) -> dict[str, JSONValue]:
+    raw = _payload_mapping(target.get("inspection_context"))
+    if not raw:
+        return {}
+    context: dict[str, JSONValue] = {}
+    schema_version = raw.get("schema_version")
+    if schema_version is not None:
+        context["schema_version"] = schema_version
+    section_flags = (
+        ("invalid_timestamps", "invalid_timestamps"),
+        ("non_monotonic_timestamps", "non_monotonic_timestamps"),
+        ("duplicate_timestamps", "duplicate_timestamps"),
+        ("suspicious_gaps", "suspicious_gaps"),
+        ("weekend_activity", "weekend_activity"),
+    )
+    attention_flag_set = set(attention_flags)
+    target_axis = _topology_attention_axis(target)
+    for section_name, flag in section_flags:
+        section = _payload_mapping(raw.get(section_name))
+        if flag not in attention_flag_set or not section:
+            continue
+        hints = remediation_hint_payloads_for_flags((flag,))
+        linked = dict(section)
+        linked["actionable"] = True
+        linked["target_axis"] = target_axis
+        if hints:
+            linked["next_action"] = hints[0]
+        context[section_name] = linked
+    expected_closures = _payload_mapping(raw.get("expected_session_closures"))
+    if "suspicious_gaps" in attention_flag_set and expected_closures:
+        contextual = dict(expected_closures)
+        contextual["actionable"] = False
+        contextual["contextual_for"] = "suspicious_gaps"
+        contextual["target_axis"] = target_axis
+        context["expected_session_closures"] = contextual
+    if len(context) == int("schema_version" in context):
+        return {}
+    return context
 
 
 def _topology_attention_axis(

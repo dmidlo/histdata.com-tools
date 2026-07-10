@@ -38,6 +38,7 @@ from histdatacom.data_quality import (
     QualityTarget,
     QualityTargetKind,
     bounded_quality_payload,
+    format_fingerprint_topology_attention_lines,
     format_quality_console_summary,
     format_quality_remediation_catalog_audit_lines,
     format_quality_remediation_coverage_lines,
@@ -457,6 +458,61 @@ def test_quality_report_payload_adds_fingerprint_topology_attention_metadata(
     ]
     assert target_summaries[0]["status"] == "unavailable"
     assert target_summaries[0]["computed_from"] == "unavailable"
+
+
+def test_topology_attention_cli_lines_render_bounded_inspection_context() -> (
+    None
+):
+    """CLI drill-down should render compact rows, counts, and action links."""
+    lines = format_fingerprint_topology_attention_lines(
+        {
+            "attention_target_count": 1,
+            "included_attention_target_count": 1,
+            "omitted_attention_target_count": 0,
+            "target_summaries": [
+                {
+                    "target_axis": {
+                        "data_format": "ascii",
+                        "timeframe": "T",
+                        "symbol": "EURUSD",
+                        "period": "201202",
+                        "kind": "csv",
+                    },
+                    "attention_level": "structural",
+                    "attention_flags": ["invalid_timestamps"],
+                    "remediation_hints": [],
+                    "invalid_timestamp_count": 2,
+                    "duplicate_timestamp_count": 0,
+                    "non_monotonic_count": 0,
+                    "suspicious_gap_count": 0,
+                    "weekend_activity_count": 0,
+                    "max_gap_ms": 60_000,
+                    "computed_from": "text_scan",
+                    "inspection_context": {
+                        "invalid_timestamps": {
+                            "total_count": 2,
+                            "included_count": 1,
+                            "omitted_count": 1,
+                            "samples": [
+                                {
+                                    "row_number": 7,
+                                    "timestamp_source": "bad-timestamp",
+                                }
+                            ],
+                            "next_action": {
+                                "code": "inspect_invalid_timestamp_rows",
+                            },
+                        }
+                    },
+                }
+            ],
+        }
+    )
+
+    assert lines[-1] == (
+        "  - context invalid_timestamps: samples=1/2 omitted=1 "
+        "action=inspect_invalid_timestamp_rows row 7=bad-timestamp"
+    )
 
 
 def test_quality_report_payload_adds_fingerprint_distribution_metadata(
@@ -1408,6 +1464,77 @@ def test_bounded_quality_payload_includes_fingerprint_topology_attention(
             "flag": "unavailable_topology",
         }
     ]
+
+
+def test_bounded_quality_payload_preserves_topology_inspection_context(
+    tmp_path: Path,
+) -> None:
+    """Orchestration payloads should retain bounded, action-linked evidence."""
+    report = _fingerprint_report(tmp_path)
+    fingerprint = (
+        report.rule_results[0].findings[0].metadata["time_series_fingerprint"]
+    )
+    topology = fingerprint["temporal_topology"]
+    topology["duplicate_timestamp_count"] = 1
+    topology["inspection_context"] = {
+        "schema_version": "histdatacom.timestamp-topology-inspection.v1",
+        "duplicate_timestamps": {
+            "total_count": 1,
+            "included_count": 1,
+            "omitted_count": 0,
+            "truncated": False,
+            "limit_metadata": {
+                "samples": {
+                    "limit": 5,
+                    "effective_limit": 5,
+                    "requested_limit": 5,
+                    "default_limit": 5,
+                    "minimum_limit": 0,
+                    "maximum_limit": 5,
+                    "unbounded": False,
+                    "total_count": 1,
+                    "included_count": 1,
+                    "omitted_count": 0,
+                    "truncated": False,
+                }
+            },
+            "duplicate_row_count": 1,
+            "samples": [
+                {
+                    "row_number": 2,
+                    "timestamp_source": "20120201 000000000",
+                    "timestamp_source_truncated": False,
+                    "timestamp_utc_ms": 1328072400000,
+                    "utc_timestamp": "2012-02-01T05:00:00Z",
+                    "occurrence_count": 2,
+                    "exact_row_group_count": 1,
+                }
+            ],
+        },
+    }
+
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("fingerprint",),
+        discovery={"roots": [str(tmp_path)], "target_count": 2},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+    targets = payload["fingerprint_topology_attention"]["target_summaries"]
+    duplicate_target = next(
+        target
+        for target in targets
+        if "duplicate_timestamps" in target["attention_flags"]
+    )
+    context = duplicate_target["inspection_context"]["duplicate_timestamps"]
+
+    assert context["samples"][0]["occurrence_count"] == 2
+    assert context["next_action"]["code"] == (
+        "inspect_duplicate_timestamp_rows"
+    )
+    assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
+    assert "duplicate_row_values" not in json.dumps(context, sort_keys=True)
 
 
 def test_bounded_quality_payload_includes_fingerprint_readiness(

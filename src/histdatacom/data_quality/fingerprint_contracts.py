@@ -28,6 +28,7 @@ from histdatacom.data_quality.fingerprints import (
     DEFAULT_FINGERPRINT_REGIME_COUNT_LIMIT,
     DEFAULT_FINGERPRINT_REGIME_SUMMARY_LIMIT,
     DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT,
+    DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT,
     DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
@@ -56,6 +57,9 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.time import (
+    TIMESTAMP_TOPOLOGY_INSPECTION_SCHEMA_VERSION,
+)
 from histdatacom.histdata_ascii import TICK
 from histdatacom.runtime_contracts import JSONValue
 
@@ -66,6 +70,7 @@ FINGERPRINT_SERIES_CONFIG_KEYS = (
     "histogram_bins",
     "max_rows",
     "rounding_digits",
+    "topology_inspection_sample_limit",
     "distribution_attention",
 )
 FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
@@ -331,6 +336,13 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_topology_inspection",
+        TIMESTAMP_TOPOLOGY_INSPECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="temporal_topology.inspection_context",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_distribution_summary",
         TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -521,6 +533,10 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         target_timeframes=(TICK,),
         schema_key="series_fingerprint",
         basis_values=("observed_sequence",),
+        extra={
+            "optional_nested_schema_key": "fingerprint_topology_inspection",
+            "profile_controlled_by": ["topology_inspection_sample_limit"],
+        },
     ),
     FingerprintTargetSectionContract(
         "calendar_regimes",
@@ -628,6 +644,9 @@ PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS = (
 FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
     "topology_summary_target_limit": DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
     "topology_attention_target_limit": DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT,
+    "topology_inspection_sample_limit": (
+        DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT
+    ),
     "distribution_summary_target_limit": DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT,
     "distribution_attention_target_limit": (
         DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT

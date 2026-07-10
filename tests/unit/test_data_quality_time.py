@@ -509,6 +509,158 @@ def test_unexpected_weekend_activity_warns_without_hard_failure(
     assert summary.metadata["weekend_activity_count"] == 1
 
 
+def test_timestamp_topology_inspection_context_is_bounded_and_publish_safe(
+    tmp_path: Path,
+) -> None:
+    """Topology evidence should expose row context without raw rows or paths."""
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_INSPECTION.csv"
+    path.write_text(
+        "\n".join(
+            (
+                _tick_row("20120201 000000000"),
+                "not-a-timestamp,1.306600,1.306770,0",
+                _tick_row("20120201 000000000"),
+                _tick_row("20120201 001000000", volume=1),
+                _tick_row("20120201 000500000", volume=2),
+                _tick_row("20120204 120000000", volume=3),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    target = discover_quality_targets((path,)).targets[0]
+
+    payload = time_quality.timestamp_topology_payload_for_target(
+        target,
+        inspection_sample_limit=1,
+    )
+    context = payload["inspection_context"]
+
+    invalid = context["invalid_timestamps"]
+    assert invalid["parse_failure_count"] == 1
+    assert invalid["samples"] == [
+        {
+            "row_number": 2,
+            "timestamp_source": "not-a-timestamp",
+            "timestamp_source_truncated": False,
+            "timestamp_utc_ms": None,
+            "utc_timestamp": "",
+            "metadata": {"reason_code": "timestamp_parse_failure"},
+        }
+    ]
+    transition = context["non_monotonic_timestamps"]["samples"][0]
+    assert transition["row_number"] == 5
+    assert transition["metadata"]["previous_row_number"] == 4
+    duplicate = context["duplicate_timestamps"]
+    assert duplicate["duplicate_row_count"] == 1
+    assert duplicate["samples"][0]["timestamp_source"] == ("20120201 000000000")
+    assert duplicate["samples"][0]["occurrence_count"] == 2
+    assert (
+        context["suspicious_gaps"]["samples"][0]["expected_session_related"]
+        is False
+    )
+    weekend = context["weekend_activity"]
+    assert weekend["session_bucket_counts"] == {"weekend_closure": 1}
+    assert weekend["samples"][0]["session_state"] == "weekend_closure"
+    assert str(tmp_path) not in str(context)
+    assert "duplicate_row_values" not in str(context)
+
+
+def test_timestamp_topology_inspection_ranks_largest_gaps_and_truncates(
+    tmp_path: Path,
+) -> None:
+    """Gap drill-downs should rank largest boundaries with explicit limits."""
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_RANKED_GAPS.csv"
+    path.write_text(
+        "\n".join(
+            (
+                _tick_row("20120201 000000000"),
+                _tick_row("20120201 001000000", volume=1),
+                _tick_row("20120201 003000000", volume=2),
+                _tick_row("20120201 004500000", volume=3),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    target = discover_quality_targets((path,)).targets[0]
+
+    payload = time_quality.timestamp_topology_payload_for_target(
+        target,
+        inspection_sample_limit=2,
+    )
+    gaps = payload["inspection_context"]["suspicious_gaps"]
+
+    assert [sample["gap_ms"] for sample in gaps["samples"]] == [
+        1_200_000,
+        900_000,
+    ]
+    assert gaps["total_count"] == 3
+    assert gaps["included_count"] == 2
+    assert gaps["omitted_count"] == 1
+    assert gaps["truncated"] is True
+    assert gaps["limit_metadata"]["samples"] == {
+        "limit": 2,
+        "effective_limit": 2,
+        "requested_limit": 2,
+        "default_limit": 5,
+        "minimum_limit": 0,
+        "maximum_limit": 5,
+        "unbounded": False,
+        "total_count": 3,
+        "included_count": 2,
+        "omitted_count": 1,
+        "truncated": True,
+    }
+
+
+def test_timestamp_topology_inspection_truncates_oversized_timestamp_text(
+    tmp_path: Path,
+) -> None:
+    """Malformed timestamp cells must not become large raw-row excerpts."""
+    oversized = "sensitive-looking-value-" + ("x" * 120)
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_LONG_INVALID.csv"
+    path.write_text(
+        f"{oversized},1.306600,1.306770,0\n",
+        encoding="utf-8",
+    )
+    target = discover_quality_targets((path,)).targets[0]
+
+    payload = time_quality.timestamp_topology_payload_for_target(target)
+    sample = payload["inspection_context"]["invalid_timestamps"]["samples"][0]
+
+    assert sample["timestamp_source_truncated"] is True
+    assert len(sample["timestamp_source"]) == 80
+    assert oversized not in str(payload["inspection_context"])
+
+
+def test_timestamp_topology_expected_closure_context_is_non_actionable(
+    tmp_path: Path,
+) -> None:
+    """Expected market closures should remain diagnostic context only."""
+    path = tmp_path / "DAT_ASCII_EURUSD_T_201202_EXPECTED_CONTEXT.csv"
+    path.write_text(
+        "\n".join(
+            (
+                _tick_row("20120203 165900000"),
+                _tick_row("20120205 170100000", volume=17),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    target = discover_quality_targets((path,)).targets[0]
+
+    payload = time_quality.timestamp_topology_payload_for_target(target)
+    closure = payload["inspection_context"]["expected_session_closures"]
+
+    assert closure["actionable"] is False
+    assert closure["samples"][0]["expected_session_related"] is True
+    assert closure["samples"][0]["classification"] == (
+        "expected_session_closure"
+    )
+
+
 def test_gap_tolerance_windows_are_adjustable(
     tmp_path: Path,
 ) -> None:

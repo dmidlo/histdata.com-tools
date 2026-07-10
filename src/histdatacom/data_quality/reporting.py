@@ -2511,6 +2511,9 @@ def format_fingerprint_topology_attention_lines(
                 lines.append(
                     f"- {_format_fingerprint_topology_attention_target_line(item)}"
                 )
+                lines.extend(
+                    _format_fingerprint_topology_inspection_context_lines(item)
+                )
     return lines
 
 
@@ -2544,6 +2547,77 @@ def _format_fingerprint_topology_attention_target_line(
         f"{cache_text}"
         f"{hint_text}"
     )
+
+
+def _format_fingerprint_topology_inspection_context_lines(
+    summary: Mapping[str, JSONValue],
+) -> list[str]:
+    context = _mapping_payload(summary.get("inspection_context"))
+    if not context:
+        return []
+    lines: list[str] = []
+    for section_name in (
+        "invalid_timestamps",
+        "non_monotonic_timestamps",
+        "duplicate_timestamps",
+        "suspicious_gaps",
+        "expected_session_closures",
+        "weekend_activity",
+    ):
+        section = _mapping_payload(context.get(section_name))
+        if not section:
+            continue
+        samples = _list_metadata(section.get("samples"))
+        evidence = "; ".join(
+            _format_fingerprint_topology_inspection_sample(
+                section_name,
+                sample,
+            )
+            for sample in samples
+        )
+        action = _mapping_payload(section.get("next_action"))
+        action_code = _optional_string_metadata(action, "code")
+        action_text = f" action={action_code}" if action_code else " contextual"
+        evidence_text = f" {evidence}" if evidence else ""
+        lines.append(
+            "  - context "
+            f"{section_name}: "
+            f"samples={_int_metadata(section, 'included_count')}/"
+            f"{_int_metadata(section, 'total_count')} "
+            f"omitted={_int_metadata(section, 'omitted_count')}"
+            f"{action_text}{evidence_text}"
+        )
+    return lines
+
+
+def _format_fingerprint_topology_inspection_sample(
+    section_name: str,
+    sample: Mapping[str, JSONValue],
+) -> str:
+    timestamp = _optional_string_metadata(sample, "timestamp_source")
+    row_number = _optional_int_text(sample.get("row_number"))
+    if section_name == "invalid_timestamps":
+        return f"row {row_number}={timestamp or 'unknown'}"
+    if section_name == "non_monotonic_timestamps":
+        metadata = _mapping_payload(sample.get("metadata"))
+        previous_row = _optional_int_text(metadata.get("previous_row_number"))
+        return f"rows {previous_row}->{row_number} at {timestamp or 'unknown'}"
+    if section_name == "duplicate_timestamps":
+        occurrences = _optional_int_text(sample.get("occurrence_count"))
+        return f"{timestamp or 'unknown'} x{occurrences}"
+    if section_name in {"suspicious_gaps", "expected_session_closures"}:
+        previous = _optional_string_metadata(
+            sample,
+            "previous_timestamp_source",
+        )
+        expected = bool(sample.get("expected_session_related"))
+        session_text = "expected-session" if expected else "unexpected"
+        return (
+            f"{previous or 'unknown'}->{timestamp or 'unknown'} "
+            f"({_format_duration_ms(sample.get('gap_ms'))}, {session_text})"
+        )
+    session_state = _optional_string_metadata(sample, "session_state")
+    return f"{timestamp or 'unknown'} ({session_state or 'unknown'})"
 
 
 def format_fingerprint_topology_summary_lines(

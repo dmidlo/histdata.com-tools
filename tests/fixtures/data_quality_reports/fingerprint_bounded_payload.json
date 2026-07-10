@@ -416,7 +416,7 @@
         "topology": {
           "cache_source": null,
           "computed_from": "text_scan",
-          "duplicate_timestamp_count": 0,
+          "duplicate_timestamp_count": 1,
           "expected_session_closure_count": 0,
           "invalid_timestamp_count": 0,
           "non_monotonic_count": 0,
@@ -426,13 +426,17 @@
           "suspicious_gap_count": 0,
           "weekend_activity_count": 0
         },
-        "topology_limitations": []
+        "topology_limitations": [
+          "duplicate_timestamps"
+        ]
       }
     ],
     "tick_spread_conditioning_status_counts": {
       "eligible": 1
     },
-    "topology_limitation_counts": {},
+    "topology_limitation_counts": {
+      "duplicate_timestamps": 1
+    },
     "truncated": false
   },
   "fingerprint_readiness_risk": {
@@ -470,6 +474,7 @@
     "omitted_target_count": 0,
     "reason_counts": {
       "conditional_distribution_absent": 1,
+      "duplicate_timestamps": 1,
       "missing_regime_summary": 1,
       "not_emitted": 2
     },
@@ -496,7 +501,8 @@
       "calendar_regimes": 1,
       "conditional_distributions": 1,
       "dependence": 1,
-      "microstructure_dynamics": 1
+      "microstructure_dynamics": 1,
+      "temporal_topology": 1
     },
     "section_status_counts": {
       "calendar_regimes": {
@@ -519,22 +525,24 @@
     "target_count": 1,
     "target_risks": [
       {
-        "included_section_risk_count": 4,
+        "included_section_risk_count": 5,
         "omitted_section_risk_count": 0,
         "rank": 1,
         "reason_codes": [
           "not_emitted",
           "conditional_distribution_absent",
+          "duplicate_timestamps",
           "missing_regime_summary"
         ],
         "reason_counts": {
           "conditional_distribution_absent": 1,
+          "duplicate_timestamps": 1,
           "missing_regime_summary": 1,
           "not_emitted": 2
         },
         "risk_level": "high",
-        "risk_score": 125,
-        "section_risk_count": 4,
+        "risk_score": 160,
+        "section_risk_count": 5,
         "section_risks": [
           {
             "included_reason_count": 1,
@@ -568,6 +576,17 @@
             "score": 35,
             "section": "microstructure_dynamics",
             "status": "skipped"
+          },
+          {
+            "included_reason_count": 1,
+            "omitted_reason_count": 0,
+            "reason_count": 1,
+            "reasons": [
+              "duplicate_timestamps"
+            ],
+            "score": 35,
+            "section": "temporal_topology",
+            "status": "limited"
           },
           {
             "included_reason_count": 1,
@@ -697,7 +716,9 @@
     "computed_from_counts": {
       "text_scan": 1
     },
-    "flag_counts": {},
+    "flag_counts": {
+      "duplicate_timestamps": 1
+    },
     "included_target_count": 1,
     "limit_metadata": {
       "targets": {
@@ -717,16 +738,54 @@
     },
     "schema_version": "histdatacom.time-series-fingerprint-topology-summary.v1",
     "status_counts": {
-      "regular": 1
+      "irregular": 1
     },
     "target_count": 1,
     "target_summaries": [
       {
         "cache_source": null,
         "computed_from": "text_scan",
-        "duplicate_timestamp_count": 0,
+        "duplicate_timestamp_count": 1,
         "expected_session_closure_count": 0,
-        "flags": [],
+        "flags": [
+          "duplicate_timestamps"
+        ],
+        "inspection_context": {
+          "duplicate_timestamps": {
+            "duplicate_row_count": 1,
+            "included_count": 1,
+            "limit_metadata": {
+              "samples": {
+                "default_limit": 5,
+                "effective_limit": 5,
+                "included_count": 1,
+                "limit": 5,
+                "maximum_limit": 5,
+                "minimum_limit": 0,
+                "omitted_count": 0,
+                "requested_limit": 5,
+                "total_count": 1,
+                "truncated": false,
+                "unbounded": false
+              }
+            },
+            "omitted_count": 0,
+            "samples": [
+              {
+                "exact_row_group_count": 1,
+                "occurrence_count": 2,
+                "row_number": 2,
+                "timestamp_source": "20120201 000000000",
+                "timestamp_source_truncated": false,
+                "timestamp_utc_ms": 1328072400000,
+                "utc_timestamp": "2012-02-01T05:00:00Z"
+              }
+            ],
+            "total_count": 1,
+            "truncated": false
+          },
+          "schema_version": "histdatacom.timestamp-topology-inspection.v1"
+        },
         "invalid_timestamp_count": 0,
         "max_gap_ms": 60000,
         "median_interval_ms": 60000,
@@ -734,7 +793,7 @@
         "parsed_row_count": 3,
         "row_count": 3,
         "sampling_basis": "observed_sequence",
-        "status": "regular",
+        "status": "irregular",
         "suspicious_gap_count": 0,
         "target_axis": {
           "data_format": "ascii",
@@ -749,10 +808,14 @@
     "truncated": false
   },
   "fingerprint_topology_attention": {
-    "attention_flag_counts": {},
-    "attention_level_counts": {},
-    "attention_target_count": 0,
-    "included_attention_target_count": 0,
+    "attention_flag_counts": {
+      "duplicate_timestamps": 1
+    },
+    "attention_level_counts": {
+      "sequence": 1
+    },
+    "attention_target_count": 1,
+    "included_attention_target_count": 1,
     "limit_metadata": {
       "targets": {
         "default_limit": 32,
@@ -767,8 +830,176 @@
     "omitted_attention_target_count": 0,
     "rule_id": "fingerprint.series",
     "schema_version": "histdatacom.time-series-fingerprint-topology-attention.v1",
-    "target_summaries": [],
+    "target_summaries": [
+      {
+        "attention_flags": [
+          "duplicate_timestamps"
+        ],
+        "attention_level": "sequence",
+        "cache_source": null,
+        "computed_from": "text_scan",
+        "duplicate_timestamp_count": 1,
+        "expected_session_closure_count": 0,
+        "flags": [
+          "duplicate_timestamps"
+        ],
+        "inspection_context": {
+          "duplicate_timestamps": {
+            "actionable": true,
+            "duplicate_row_count": 1,
+            "included_count": 1,
+            "limit_metadata": {
+              "samples": {
+                "default_limit": 5,
+                "effective_limit": 5,
+                "included_count": 1,
+                "limit": 5,
+                "maximum_limit": 5,
+                "minimum_limit": 0,
+                "omitted_count": 0,
+                "requested_limit": 5,
+                "total_count": 1,
+                "truncated": false,
+                "unbounded": false
+              }
+            },
+            "next_action": {
+              "action_kind": "inspect",
+              "code": "inspect_duplicate_timestamp_rows",
+              "flag": "duplicate_timestamps",
+              "message": "inspect duplicate timestamp rows",
+              "rule_id": "fingerprint.series"
+            },
+            "omitted_count": 0,
+            "samples": [
+              {
+                "exact_row_group_count": 1,
+                "occurrence_count": 2,
+                "row_number": 2,
+                "timestamp_source": "20120201 000000000",
+                "timestamp_source_truncated": false,
+                "timestamp_utc_ms": 1328072400000,
+                "utc_timestamp": "2012-02-01T05:00:00Z"
+              }
+            ],
+            "target_axis": {
+              "data_format": "ascii",
+              "kind": "csv",
+              "period": "201202",
+              "symbol": "EURUSD",
+              "timeframe": "T"
+            },
+            "total_count": 1,
+            "truncated": false
+          },
+          "schema_version": "histdatacom.timestamp-topology-inspection.v1"
+        },
+        "invalid_timestamp_count": 0,
+        "max_gap_ms": 60000,
+        "non_monotonic_count": 0,
+        "remediation_hints": [
+          {
+            "action_kind": "inspect",
+            "code": "inspect_duplicate_timestamp_rows",
+            "flag": "duplicate_timestamps",
+            "message": "inspect duplicate timestamp rows",
+            "rule_id": "fingerprint.series"
+          }
+        ],
+        "status": "irregular",
+        "suspicious_gap_count": 0,
+        "target_axis": {
+          "data_format": "ascii",
+          "kind": "csv",
+          "period": "201202",
+          "symbol": "EURUSD",
+          "timeframe": "T"
+        },
+        "weekend_activity_count": 0
+      }
+    ],
     "topology_target_count": 1,
+    "truncated": false
+  },
+  "next_actions": {
+    "action_count": 1,
+    "actions": [
+      {
+        "action_kind": "inspect",
+        "affected_target_count": 1,
+        "attention_level_counts": {
+          "sequence": 1
+        },
+        "code": "inspect_duplicate_timestamp_rows",
+        "finding_code_counts": {},
+        "flag_counts": {
+          "duplicate_timestamps": 1
+        },
+        "included_target_axis_count": 1,
+        "limit_metadata": {
+          "target_axes": {
+            "default_limit": 8,
+            "effective_limit": 8,
+            "limit": 8,
+            "maximum_limit": null,
+            "minimum_limit": 0,
+            "requested_limit": 8,
+            "unbounded": false
+          }
+        },
+        "max_attention_level": "sequence",
+        "max_severity": null,
+        "message": "inspect duplicate timestamp rows",
+        "occurrence_count": 1,
+        "omitted_target_axis_count": 0,
+        "rule_id": "fingerprint.series",
+        "severity_counts": {},
+        "source_counts": {
+          "fingerprint_topology_attention": 1
+        },
+        "target_axis_count": 1,
+        "target_axis_counts": [
+          {
+            "count": 1,
+            "target_axis": {
+              "data_format": "ascii",
+              "kind": "csv",
+              "period": "201202",
+              "symbol": "EURUSD",
+              "timeframe": "T"
+            }
+          }
+        ],
+        "target_axis_truncated": false,
+        "urgency": "medium"
+      }
+    ],
+    "included_action_count": 1,
+    "limit_metadata": {
+      "actions": {
+        "default_limit": 16,
+        "effective_limit": 16,
+        "limit": 16,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "requested_limit": 16,
+        "unbounded": false
+      },
+      "target_axes": {
+        "default_limit": 8,
+        "effective_limit": 8,
+        "limit": 8,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "requested_limit": 8,
+        "unbounded": false
+      }
+    },
+    "omitted_action_count": 0,
+    "schema_version": "histdatacom.quality-next-actions.v1",
+    "source_counts": {
+      "fingerprint_topology_attention": 1
+    },
     "truncated": false
   },
   "operation": "data-quality",
@@ -802,7 +1033,7 @@
     "next_actions": {
       "default_limit": 16,
       "effective_limit": 16,
-      "included_count": 0,
+      "included_count": 1,
       "limit": 16,
       "maximum_limit": null,
       "minimum_limit": 0,
@@ -818,7 +1049,7 @@
         "unbounded": false
       },
       "target_axis_limit": 8,
-      "total_count": 0,
+      "total_count": 1,
       "truncated": false,
       "unbounded": false
     },

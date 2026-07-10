@@ -1072,6 +1072,19 @@ decomposition readiness. This is machine-readable contract metadata for report
 consumers; the full fingerprint sections remain the source of the detailed
 statistics.
 
+Topology attention targets include bounded `inspection_context` when a mapped
+remediation action has focused evidence. Invalid timestamps expose row positions
+and parse-failure counts; non-monotonic timestamps expose offending transitions;
+exact duplicate rows expose their timestamp values and occurrence counts;
+suspicious gaps expose largest boundaries, durations, and expected-session
+classification; and weekend activity exposes timestamp/session buckets. These
+records do not include raw quote rows or absolute paths. Each context section
+reports included, omitted, and truncated counts with full `limit_metadata`.
+Expected session closures remain non-actionable context and only accompany a
+suspicious-gap drill-down. Set
+`fingerprint.series.topology_inspection_sample_limit` in a quality profile from
+`0` through `5` to control the per-section sample count.
+
 Quality JSON reports and CLI summaries also include bounded regime and
 readiness summaries when fingerprint findings are present. Use
 `time_series_fingerprint_regime_summary` to scan dominant session states, active
@@ -1126,7 +1139,8 @@ histdatacom quality fingerprint-schema --json
 Use `histdatacom quality fingerprint-schema` for a concise human-readable
 summary, or add `--quality-profile profiles/strict-ci.json` to reflect
 profile-overridden fingerprint knobs such as quantiles, lags, rolling windows,
-histogram bins, max rows, rounding, and distribution-attention thresholds. This
+histogram bins, max rows, rounding, topology-inspection samples, and
+distribution-attention thresholds. This
 discovery command is for downstream parsers, validators, and schema review: it
 lists schema versions, metadata keys, target capabilities, implemented/planned
 sections, basis/status/reason vocabularies, and publish-safe example fragments.
