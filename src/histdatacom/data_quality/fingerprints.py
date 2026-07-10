@@ -26,6 +26,7 @@ from histdatacom.data_quality.calendar import (
     SESSION_MARKET_CLOSED,
     SESSION_NO_ACTIVE_WINDOW,
     SESSION_STATE_WEEKEND_CLOSURE,
+    SOURCE_WEEKDAY_NAMES,
     calendar_regime_payload_for_target,
     classify_histdata_source_timestamp,
     classify_histdata_timestamp,
@@ -89,6 +90,12 @@ TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION = (
 )
 TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-stationarity.v1"
+)
+TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-decomposition.v1"
+)
+TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-decomposition-training-projection.v1"
 )
 TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-audit.v1"
@@ -196,6 +203,7 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "microstructure_dynamics",
     "dependence",
     "stationarity_diagnostics",
+    "decomposition",
 )
 FINGERPRINT_DYNAMICS_SECTIONS = ("microstructure_dynamics",)
 
@@ -898,6 +906,16 @@ def series_fingerprint_readiness_summary(
     stationarity_recommended_transform_counts: Counter[str] = Counter()
     stationarity_computed_window_count = 0
     stationarity_skipped_window_count = 0
+    decomposition_status_counts: Counter[str] = Counter()
+    decomposition_reason_counts: Counter[str] = Counter()
+    decomposition_basis_counts: Counter[str] = Counter()
+    decomposition_limitation_counts: Counter[str] = Counter()
+    decomposition_skipped_window_reason_counts: Counter[str] = Counter()
+    decomposition_stationarity_status_counts: Counter[str] = Counter()
+    decomposition_structural_break_status_counts: Counter[str] = Counter()
+    decomposition_computed_window_count = 0
+    decomposition_skipped_window_count = 0
+    decomposition_structural_break_candidate_count = 0
     topology_limitation_counts: Counter[str] = Counter()
     dynamics_limitation_counts: Counter[str] = Counter()
     row_order_counts: Counter[str] = Counter()
@@ -991,6 +1009,53 @@ def series_fingerprint_readiness_summary(
         stationarity_skipped_window_count += _int_payload(
             stationarity.get("skipped_window_count")
         )
+        decomposition = _payload_mapping(item.get("decomposition"))
+        decomposition_status_counts[
+            _summary_key(decomposition.get("status"))
+        ] += 1
+        decomposition_reason = _optional_summary_key(
+            decomposition.get("reason")
+        )
+        if decomposition_reason:
+            decomposition_reason_counts[decomposition_reason] += 1
+        decomposition_basis = _summary_key(
+            decomposition.get("calculation_basis")
+        )
+        if decomposition_basis != "unknown":
+            decomposition_basis_counts[decomposition_basis] += 1
+        decomposition_limitation_counts.update(
+            _summary_key(value)
+            for value in _string_list(decomposition.get("limitations"))
+        )
+        decomposition_skipped_window_reason_counts.update(
+            _counter_from_mapping(
+                _payload_mapping(
+                    decomposition.get("skipped_window_reason_counts")
+                )
+            )
+        )
+        decomposition_computed_window_count += _int_payload(
+            decomposition.get("computed_window_count")
+        )
+        decomposition_skipped_window_count += _int_payload(
+            decomposition.get("skipped_window_count")
+        )
+        decomposition_stationarity_status_counts[
+            _summary_key(
+                _payload_mapping(decomposition.get("stationarity")).get(
+                    "status"
+                )
+            )
+        ] += 1
+        structural_break = _payload_mapping(
+            decomposition.get("structural_break")
+        )
+        decomposition_structural_break_status_counts[
+            _summary_key(structural_break.get("status"))
+        ] += 1
+        decomposition_structural_break_candidate_count += _int_payload(
+            structural_break.get("candidate_count")
+        )
 
     profile_complete_count = sum(
         1
@@ -1066,6 +1131,36 @@ def series_fingerprint_readiness_summary(
         ),
         "stationarity_skipped_window_count": (
             stationarity_skipped_window_count
+        ),
+        "decomposition_status_counts": _counter_payload(
+            decomposition_status_counts
+        ),
+        "decomposition_reason_counts": _counter_payload(
+            decomposition_reason_counts
+        ),
+        "decomposition_basis_counts": _counter_payload(
+            decomposition_basis_counts
+        ),
+        "decomposition_limitation_counts": _counter_payload(
+            decomposition_limitation_counts
+        ),
+        "decomposition_skipped_window_reason_counts": _counter_payload(
+            decomposition_skipped_window_reason_counts
+        ),
+        "decomposition_stationarity_status_counts": _counter_payload(
+            decomposition_stationarity_status_counts
+        ),
+        "decomposition_structural_break_status_counts": _counter_payload(
+            decomposition_structural_break_status_counts
+        ),
+        "decomposition_computed_window_count": (
+            decomposition_computed_window_count
+        ),
+        "decomposition_skipped_window_count": (
+            decomposition_skipped_window_count
+        ),
+        "decomposition_structural_break_candidate_count": (
+            decomposition_structural_break_candidate_count
         ),
         "topology_limitation_counts": _counter_payload(
             topology_limitation_counts
@@ -1249,6 +1344,7 @@ def _fingerprint_readiness_risk_target(
             "conditional_distributions",
             "dependence",
             "stationarity_diagnostics",
+            "decomposition",
             "temporal_topology",
             *FINGERPRINT_DYNAMICS_SECTIONS,
         }:
@@ -1269,6 +1365,7 @@ def _fingerprint_readiness_risk_target(
     _add_dynamics_risks(section_risks, reason_counts, target, axis)
     _add_dependence_risks(section_risks, reason_counts, target)
     _add_stationarity_risks(section_risks, reason_counts, target)
+    _add_decomposition_risks(section_risks, reason_counts, target)
     _add_regime_risks(section_risks, reason_counts, regime or {})
     compact_sections = _bounded_section_risks(
         section_risks,
@@ -1365,6 +1462,8 @@ def _fingerprint_section_is_non_applicable(
         and timeframe != TICK
         or section == "stationarity_diagnostics"
         and timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
+        or section == "decomposition"
+        and timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
     )
 
 
@@ -1446,6 +1545,53 @@ def _add_stationarity_risks(
         section_risks,
         reason_counts,
         section="stationarity_diagnostics",
+        status=status,
+        reasons=tuple(_ordered_unique(reasons)),
+        base_score=(
+            _fingerprint_status_risk_score(status)
+            + min(20, skipped_window_count * 2)
+        ),
+    )
+
+
+def _add_decomposition_risks(
+    section_risks: list[dict[str, JSONValue]],
+    reason_counts: Counter[str],
+    target: Mapping[str, JSONValue],
+) -> None:
+    section_statuses = _payload_mapping(target.get("section_statuses"))
+    if "decomposition" not in section_statuses:
+        return
+    decomposition = _payload_mapping(target.get("decomposition"))
+    status = _summary_key(decomposition.get("status"))
+    reasons: list[str] = []
+    primary_reason = _optional_summary_key(decomposition.get("reason"))
+    if primary_reason:
+        reasons.append(primary_reason)
+    reasons.extend(
+        _summary_key(reason)
+        for reason in _string_list(decomposition.get("limitations"))
+    )
+    skipped_window_count = _int_payload(
+        decomposition.get("skipped_window_count")
+    )
+    if skipped_window_count:
+        reasons.append("skipped_rolling_windows")
+        reasons.extend(
+            _counter_from_mapping(
+                _payload_mapping(
+                    decomposition.get("skipped_window_reason_counts")
+                )
+            ).elements()
+        )
+    if status in {"valid", "ok"} and not reasons:
+        return
+    if status == "skipped" and not reasons:
+        reasons.append("not_emitted")
+    _add_section_risk(
+        section_risks,
+        reason_counts,
+        section="decomposition",
         status=status,
         reasons=tuple(_ordered_unique(reasons)),
         base_score=(
@@ -1779,6 +1925,12 @@ def _fingerprint_readiness_target_summary(
         section_statuses=section_statuses,
         skipped_sections=skipped_sections,
     )
+    decomposition_readiness = _fingerprint_readiness_decomposition_summary(
+        finding,
+        payload,
+        section_statuses=section_statuses,
+        skipped_sections=skipped_sections,
+    )
 
     return {
         "target_axis": target_axis,
@@ -1816,6 +1968,7 @@ def _fingerprint_readiness_target_summary(
         ),
         "dependence": dependence_readiness,
         "stationarity_diagnostics": stationarity_readiness,
+        "decomposition": decomposition_readiness,
     }
 
 
@@ -2287,6 +2440,156 @@ def _empty_stationarity_readiness(
     }
 
 
+def _fingerprint_readiness_decomposition_summary(
+    finding: QualityFinding,
+    payload: Mapping[str, JSONValue],
+    *,
+    section_statuses: Mapping[str, JSONValue],
+    skipped_sections: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    decomposition = _payload_mapping(payload.get("decomposition"))
+    if not decomposition:
+        status = _summary_key(
+            section_statuses.get("decomposition") or "skipped"
+        )
+        if status not in {"skipped", "unavailable"}:
+            status = "skipped"
+        skipped = _payload_mapping(skipped_sections.get("decomposition"))
+        reason = _optional_summary_key(skipped.get("reason"))
+        if reason is None:
+            reason = _fingerprint_section_skip_reason(
+                "decomposition",
+                payload,
+                target=finding.target,
+            )
+        return _empty_decomposition_readiness(status=status, reason=reason)
+
+    sample_counts = _payload_mapping(decomposition.get("sample_counts"))
+    stationarity_basis = _payload_mapping(
+        decomposition.get("stationarity_basis")
+    )
+    structural_break = _payload_mapping(
+        decomposition.get("structural_break_proxy")
+    )
+    trend = _payload_mapping(decomposition.get("trend_proxy"))
+    strongest = _payload_mapping(structural_break.get("strongest_candidate"))
+    return {
+        "status": _decomposition_section_status(decomposition),
+        "reason": _optional_summary_key(decomposition.get("reason")),
+        "basis": _summary_key(decomposition.get("basis")),
+        "calculation_basis": _summary_key(
+            decomposition.get("calculation_basis")
+        ),
+        "row_order": _summary_key(decomposition.get("row_order")),
+        "computed_from": _summary_key(decomposition.get("computed_from")),
+        "cache_source": _optional_summary_key(
+            decomposition.get("cache_source")
+        ),
+        "regular_grid": decomposition.get("regular_grid") is True,
+        "metric": _summary_key(decomposition.get("metric")),
+        "limitations": _string_list(decomposition.get("limitations")),
+        "row_count": _int_payload(decomposition.get("row_count")),
+        "sampled_row_count": _int_payload(
+            decomposition.get("sampled_row_count")
+        ),
+        "usable_row_count": _int_payload(decomposition.get("usable_row_count")),
+        "invalid_row_count": _int_payload(
+            decomposition.get("invalid_row_count")
+        ),
+        "partial_row_count": _int_payload(
+            decomposition.get("partial_row_count")
+        ),
+        "truncated": decomposition.get("truncated") is True,
+        "level_sample_count": _int_payload(sample_counts.get("level")),
+        "return_sample_count": _int_payload(sample_counts.get("return")),
+        "windows": list(_int_sequence_payload(decomposition.get("windows"))),
+        "rounding_digits": _int_payload(decomposition.get("rounding_digits")),
+        "computed_window_count": _int_payload(
+            decomposition.get("computed_window_count")
+        ),
+        "skipped_window_count": _int_payload(
+            decomposition.get("skipped_window_count")
+        ),
+        "skipped_window_reason_counts": _counter_payload(
+            _counter_from_mapping(
+                _payload_mapping(
+                    decomposition.get("skipped_window_reason_counts")
+                )
+            )
+        ),
+        "stationarity": {
+            "status": _summary_key(stationarity_basis.get("status")),
+            "reason": _optional_summary_key(stationarity_basis.get("reason")),
+            "stationarity_status": _summary_key(
+                stationarity_basis.get("stationarity_status")
+            ),
+            "zero_variance_metrics": _string_list(
+                stationarity_basis.get("zero_variance_metrics")
+            ),
+            "recommended_transforms": _string_list(
+                stationarity_basis.get("recommended_transforms")
+            ),
+        },
+        "trend": {
+            "status": _summary_key(trend.get("status")),
+            "direction": _summary_key(trend.get("direction")),
+            "trend_strength": _optional_float_payload(
+                trend.get("trend_strength")
+            ),
+        },
+        "structural_break": {
+            "status": _summary_key(structural_break.get("status")),
+            "candidate_count": _int_payload(
+                structural_break.get("candidate_count")
+            ),
+            "strongest_score": (
+                _optional_float_payload(strongest.get("score"))
+                if strongest
+                else None
+            ),
+        },
+        "training_projection": dict(
+            _payload_mapping(decomposition.get("training_projection"))
+        ),
+    }
+
+
+def _empty_decomposition_readiness(
+    *,
+    status: str,
+    reason: str | None,
+) -> dict[str, JSONValue]:
+    return {
+        "status": status,
+        "reason": reason,
+        "basis": "unknown",
+        "calculation_basis": "unknown",
+        "row_order": "unknown",
+        "computed_from": "unknown",
+        "cache_source": None,
+        "regular_grid": False,
+        "metric": "unknown",
+        "limitations": [],
+        "row_count": 0,
+        "sampled_row_count": 0,
+        "usable_row_count": 0,
+        "invalid_row_count": 0,
+        "partial_row_count": 0,
+        "truncated": False,
+        "level_sample_count": 0,
+        "return_sample_count": 0,
+        "windows": [],
+        "rounding_digits": 0,
+        "computed_window_count": 0,
+        "skipped_window_count": 0,
+        "skipped_window_reason_counts": {},
+        "stationarity": {},
+        "trend": {},
+        "structural_break": {},
+        "training_projection": {},
+    }
+
+
 def _compact_stationarity_window_summary(
     value: JSONValue,
 ) -> dict[str, JSONValue]:
@@ -2443,6 +2746,7 @@ def _fingerprint_readiness_target_sort_key(
     axis = _payload_mapping(target.get("target_axis"))
     dependence = _payload_mapping(target.get("dependence"))
     stationarity = _payload_mapping(target.get("stationarity_diagnostics"))
+    decomposition = _payload_mapping(target.get("decomposition"))
     readiness_rank = min(
         _fingerprint_readiness_status_rank(
             _summary_key(target.get("applicable_dynamics_status"))
@@ -2452,6 +2756,9 @@ def _fingerprint_readiness_target_sort_key(
         ),
         _fingerprint_readiness_status_rank(
             _summary_key(stationarity.get("status"))
+        ),
+        _fingerprint_readiness_status_rank(
+            _summary_key(decomposition.get("status"))
         ),
     )
     return (
@@ -3278,6 +3585,10 @@ def _fingerprint_audit_payload(
         payload,
         target=target,
     )
+    decomposition_readiness = _fingerprint_decomposition_readiness(
+        payload,
+        target=target,
+    )
     audit_payload: dict[str, JSONValue] = {
         "schema_version": TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         "sections_expected": [section for section in expected],
@@ -3295,6 +3606,7 @@ def _fingerprint_audit_payload(
         ),
         "dynamics_readiness": dynamics_readiness,
         "stationarity_readiness": stationarity_readiness,
+        "decomposition_readiness": decomposition_readiness,
     }
     return audit_payload
 
@@ -3313,6 +3625,7 @@ def _fingerprint_expected_sections(
                 "microstructure_dynamics",
                 "dependence",
                 "stationarity_diagnostics",
+                "decomposition",
             )
         )
     return tuple(sections)
@@ -3361,6 +3674,7 @@ def _fingerprint_section_skip_details(
         "microstructure_dynamics",
         "dependence",
         "stationarity_diagnostics",
+        "decomposition",
     }:
         return {"timeframe": target.timeframe}
     return {}
@@ -3416,6 +3730,10 @@ def _section_timeframe_mismatch(
             section == "stationarity_diagnostics"
             and target.timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
         )
+        or (
+            section == "decomposition"
+            and target.timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
+        )
     )
 
 
@@ -3455,6 +3773,8 @@ def _fingerprint_section_status(
         return _dependence_section_status(_payload_mapping(payload[section]))
     if section == "stationarity_diagnostics":
         return _stationarity_section_status(_payload_mapping(payload[section]))
+    if section == "decomposition":
+        return _decomposition_section_status(_payload_mapping(payload[section]))
     return "valid"
 
 
@@ -3539,6 +3859,17 @@ def _stationarity_section_status(
     stationarity: Mapping[str, JSONValue],
 ) -> str:
     status = _summary_key(stationarity.get("stationarity_status"))
+    if status == "ok":
+        return "valid"
+    if status == "unavailable":
+        return "unavailable"
+    return "limited"
+
+
+def _decomposition_section_status(
+    decomposition: Mapping[str, JSONValue],
+) -> str:
+    status = _summary_key(decomposition.get("decomposition_status"))
     if status == "ok":
         return "valid"
     if status == "unavailable":
@@ -3749,6 +4080,120 @@ def _fingerprint_stationarity_readiness(
             _string_list(stationarity.get("limitations"))[0]
             if _string_list(stationarity.get("limitations"))
             else stationarity.get("stationarity_status")
+        )
+    return readiness
+
+
+def _fingerprint_decomposition_readiness(
+    payload: Mapping[str, JSONValue],
+    *,
+    target: QualityTarget,
+) -> dict[str, JSONValue]:
+    section = "decomposition"
+    if section not in payload:
+        return {
+            "status": "skipped",
+            "reason": _fingerprint_section_skip_reason(
+                section,
+                payload,
+                target=target,
+            ),
+        }
+    decomposition = _payload_mapping(payload.get(section))
+    sample_counts = _payload_mapping(decomposition.get("sample_counts"))
+    stationarity = _payload_mapping(decomposition.get("stationarity_basis"))
+    structural_break = _payload_mapping(
+        decomposition.get("structural_break_proxy")
+    )
+    trend = _payload_mapping(decomposition.get("trend_proxy"))
+    readiness: dict[str, JSONValue] = {
+        "status": _decomposition_section_status(decomposition),
+        "reason": _optional_summary_key(decomposition.get("reason")),
+        "basis": _summary_key(decomposition.get("basis")),
+        "calculation_basis": _summary_key(
+            decomposition.get("calculation_basis")
+        ),
+        "row_order": _summary_key(decomposition.get("row_order")),
+        "computed_from": _summary_key(decomposition.get("computed_from")),
+        "cache_source": _optional_summary_key(
+            decomposition.get("cache_source")
+        ),
+        "regular_grid": decomposition.get("regular_grid") is True,
+        "metric": _summary_key(decomposition.get("metric")),
+        "limitations": _string_list(decomposition.get("limitations")),
+        "row_count": _int_payload(decomposition.get("row_count")),
+        "sampled_row_count": _int_payload(
+            decomposition.get("sampled_row_count")
+        ),
+        "usable_row_count": _int_payload(decomposition.get("usable_row_count")),
+        "invalid_row_count": _int_payload(
+            decomposition.get("invalid_row_count")
+        ),
+        "partial_row_count": _int_payload(
+            decomposition.get("partial_row_count")
+        ),
+        "truncated": decomposition.get("truncated") is True,
+        "level_sample_count": _int_payload(sample_counts.get("level")),
+        "return_sample_count": _int_payload(sample_counts.get("return")),
+        "windows": list(_int_sequence_payload(decomposition.get("windows"))),
+        "rounding_digits": _int_payload(decomposition.get("rounding_digits")),
+        "computed_window_count": _int_payload(
+            decomposition.get("computed_window_count")
+        ),
+        "skipped_window_count": _int_payload(
+            decomposition.get("skipped_window_count")
+        ),
+        "skipped_window_reason_counts": _counter_payload(
+            _counter_from_mapping(
+                _payload_mapping(
+                    decomposition.get("skipped_window_reason_counts")
+                )
+            )
+        ),
+        "stationarity": {
+            "status": _summary_key(stationarity.get("status")),
+            "stationarity_status": _summary_key(
+                stationarity.get("stationarity_status")
+            ),
+            "computed_window_count": _int_payload(
+                stationarity.get("computed_window_count")
+            ),
+            "skipped_window_count": _int_payload(
+                stationarity.get("skipped_window_count")
+            ),
+            "zero_variance_metrics": _string_list(
+                stationarity.get("zero_variance_metrics")
+            ),
+            "recommended_transforms": _string_list(
+                stationarity.get("recommended_transforms")
+            ),
+        },
+        "trend": {
+            "status": _summary_key(trend.get("status")),
+            "direction": _summary_key(trend.get("direction")),
+            "slope_per_observation": trend.get("slope_per_observation"),
+            "trend_strength": trend.get("trend_strength"),
+        },
+        "structural_break": {
+            "status": _summary_key(structural_break.get("status")),
+            "candidate_count": _int_payload(
+                structural_break.get("candidate_count")
+            ),
+            "strongest_candidate": dict(
+                _payload_mapping(structural_break.get("strongest_candidate"))
+            ),
+        },
+        "training_projection": dict(
+            _payload_mapping(decomposition.get("training_projection"))
+        ),
+    }
+    if readiness["status"] in {"limited", "unavailable"} and not readiness.get(
+        "reason"
+    ):
+        readiness["reason"] = _summary_key(
+            _string_list(decomposition.get("limitations"))[0]
+            if _string_list(decomposition.get("limitations"))
+            else decomposition.get("decomposition_status")
         )
     return readiness
 
@@ -4253,9 +4698,10 @@ def _add_dynamics_payload(
     profile: HistDataFingerprintProfile,
 ) -> None:
     if target.timeframe == TICK:
-        microstructure_dynamics, dependence, stationarity = (
+        microstructure_dynamics, dependence, stationarity, decomposition = (
             _tick_sequence_payloads(
                 payload,
+                target=target,
                 frame=frame,
                 text=text,
                 profile=profile,
@@ -4264,15 +4710,22 @@ def _add_dynamics_payload(
         payload["microstructure_dynamics"] = microstructure_dynamics
         payload["dependence"] = dependence
         payload["stationarity_diagnostics"] = stationarity
+        payload["decomposition"] = decomposition
 
 
 def _tick_sequence_payloads(
     payload: Mapping[str, JSONValue],
     *,
+    target: QualityTarget,
     frame: Any | None,
     text: str | None,
     profile: HistDataFingerprintProfile,
-) -> tuple[dict[str, JSONValue], dict[str, JSONValue], dict[str, JSONValue]]:
+) -> tuple[
+    dict[str, JSONValue],
+    dict[str, JSONValue],
+    dict[str, JSONValue],
+    dict[str, JSONValue],
+]:
     if frame is not None:
         rows, row_count, usable_row_count, invalid_row_count = (
             _tick_dynamics_rows_from_frame(frame, profile)
@@ -4306,6 +4759,11 @@ def _tick_sequence_payloads(
         partial_row_count=partial_row_count,
         profile=profile,
     )
+    stationarity = _tick_stationarity_payload(
+        rows,
+        base=base,
+        profile=profile,
+    )
     return (
         _tick_microstructure_dynamics_payload(
             rows,
@@ -4313,7 +4771,14 @@ def _tick_sequence_payloads(
             profile=profile,
         ),
         _tick_dependence_payload(rows, base=base, profile=profile),
-        _tick_stationarity_payload(rows, base=base, profile=profile),
+        stationarity,
+        _tick_decomposition_payload(
+            rows,
+            base=base,
+            stationarity=stationarity,
+            target=target,
+            profile=profile,
+        ),
     )
 
 
@@ -4769,6 +5234,745 @@ def _tick_stationarity_payload(
         level_values=mids,
         return_values=returns,
     )
+
+
+def _tick_decomposition_payload(
+    rows: list[_TickDynamicsRow],
+    *,
+    base: dict[str, JSONValue],
+    stationarity: Mapping[str, JSONValue],
+    target: QualityTarget,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    mids = [(row.bid + row.ask) / 2.0 for row in rows]
+    returns: list[float] = []
+    absolute_returns_by_row: list[float | None] = []
+    previous_mid: float | None = None
+    for mid in mids:
+        row_return: float | None = None
+        if previous_mid is not None and previous_mid > 0.0 and mid > 0.0:
+            row_return = math.log(mid / previous_mid)
+            returns.append(row_return)
+        absolute_returns_by_row.append(
+            abs(row_return) if row_return is not None else None
+        )
+        previous_mid = mid
+    return _decomposition_payload(
+        base,
+        profile=profile,
+        target=target,
+        metric="mid_price",
+        timestamps=[row.timestamp_utc_ms for row in rows],
+        level_values=mids,
+        return_values=returns,
+        absolute_returns_by_row=absolute_returns_by_row,
+        stationarity=stationarity,
+    )
+
+
+def _decomposition_payload(
+    base: Mapping[str, JSONValue],
+    *,
+    profile: HistDataFingerprintProfile,
+    target: QualityTarget,
+    metric: str,
+    timestamps: list[int],
+    level_values: Iterable[float],
+    return_values: Iterable[float],
+    absolute_returns_by_row: list[float | None],
+    stationarity: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    levels = _finite_values(level_values)
+    returns = _finite_values(return_values)
+    trend = _decomposition_trend_payload(levels, profile)
+    residual = _decomposition_residual_payload(levels, profile)
+    seasonality = _decomposition_seasonality_payload(
+        timestamps,
+        levels,
+        absolute_returns_by_row,
+        target=target,
+        profile=profile,
+    )
+    smoothing_windows, computed_window_count, skipped_reason_counts = (
+        _decomposition_smoothing_windows_payload(levels, returns, profile)
+    )
+    structural_break = _decomposition_structural_break_payload(levels, profile)
+    stationarity_basis = _decomposition_stationarity_basis(stationarity)
+    skipped_window_count = sum(skipped_reason_counts.values())
+    limitations = _decomposition_limitations(
+        base,
+        stationarity_basis=stationarity_basis,
+        level_count=len(levels),
+        return_count=len(returns),
+        computed_window_count=computed_window_count,
+        skipped_window_count=skipped_window_count,
+    )
+    decomposition_status = _decomposition_status(
+        base,
+        stationarity_basis=stationarity_basis,
+        level_count=len(levels),
+        return_count=len(returns),
+        limitations=limitations,
+    )
+
+    result = dict(base)
+    result.update(
+        {
+            "schema_version": (
+                TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
+            ),
+            "decomposition_status": decomposition_status,
+            "calculation_basis": "observed_sequence",
+            "metric": metric,
+            "sample_counts": {
+                "level": len(levels),
+                "return": len(returns),
+            },
+            "windows": [int(window) for window in profile.rolling_windows],
+            "rounding_digits": int(profile.rounding_digits),
+            "stationarity_basis": stationarity_basis,
+            "trend_proxy": trend,
+            "seasonality_proxy": seasonality,
+            "residual_proxy": residual,
+            "smoothing_windows": smoothing_windows,
+            "computed_window_count": computed_window_count,
+            "skipped_window_count": skipped_window_count,
+            "skipped_window_reason_counts": _counter_payload(
+                skipped_reason_counts
+            ),
+            "structural_break_proxy": structural_break,
+            "limitations": [value for value in limitations],
+        }
+    )
+    if decomposition_status in {"limited", "unavailable"}:
+        result["reason"] = _decomposition_status_reason(
+            limitations,
+            stationarity_basis=stationarity_basis,
+        )
+    result["training_projection"] = decomposition_training_projection(result)
+    return result
+
+
+def _decomposition_stationarity_basis(
+    stationarity: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    if not stationarity:
+        return {
+            "status": "unavailable",
+            "reason": "stationarity_unavailable",
+            "stationarity_status": "unavailable",
+            "calculation_basis": "unknown",
+            "computed_window_count": 0,
+            "skipped_window_count": 0,
+            "skipped_window_reason_counts": {},
+            "zero_variance_metrics": [],
+            "recommended_transforms": [],
+            "limitations": ["stationarity_unavailable"],
+        }
+    return {
+        "status": _stationarity_section_status(stationarity),
+        "reason": _optional_summary_key(stationarity.get("reason")),
+        "stationarity_status": _summary_key(
+            stationarity.get("stationarity_status")
+        ),
+        "calculation_basis": _summary_key(
+            stationarity.get("calculation_basis")
+        ),
+        "computed_window_count": _int_payload(
+            stationarity.get("computed_window_count")
+        ),
+        "skipped_window_count": _int_payload(
+            stationarity.get("skipped_window_count")
+        ),
+        "skipped_window_reason_counts": _counter_payload(
+            _counter_from_mapping(
+                _payload_mapping(
+                    stationarity.get("skipped_window_reason_counts")
+                )
+            )
+        ),
+        "zero_variance_metrics": _string_list(
+            stationarity.get("zero_variance_metrics")
+        ),
+        "recommended_transforms": _string_list(
+            stationarity.get("recommended_transforms")
+        ),
+        "limitations": _string_list(stationarity.get("limitations")),
+    }
+
+
+def _decomposition_trend_payload(
+    levels: list[float],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    components = _linear_trend_components(levels)
+    if components is None:
+        return {
+            "status": "skipped",
+            "reason": "insufficient_sample_count",
+            "sample_count": len(levels),
+            "required_sample_count": 2,
+        }
+    slope, intercept, fitted_values, _residuals, trend_strength = components
+    first_fitted = fitted_values[0]
+    last_fitted = fitted_values[-1]
+    return {
+        "status": "computed",
+        "index_basis": "observation_index",
+        "sample_count": len(levels),
+        "slope_per_observation": _rounded(slope, profile),
+        "intercept": _rounded(intercept, profile),
+        "fitted_first": _rounded(first_fitted, profile),
+        "fitted_last": _rounded(last_fitted, profile),
+        "direction": _trend_direction(slope, profile),
+        "trend_strength": _rounded(trend_strength, profile),
+        "fitted_change_first_to_last": _stationarity_change_payload(
+            first_fitted,
+            last_fitted,
+            profile,
+        ),
+    }
+
+
+def _decomposition_residual_payload(
+    levels: list[float],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    components = _linear_trend_components(levels)
+    if components is None:
+        return {
+            "status": "skipped",
+            "reason": "insufficient_sample_count",
+            "sample_count": len(levels),
+            "required_sample_count": 2,
+        }
+    _slope, _intercept, _fitted_values, residuals, _trend_strength = components
+    level_variance = _population_variance(levels)
+    residual_variance = _population_variance(residuals)
+    return {
+        "status": "computed",
+        "basis": "linear_trend_residual",
+        "sample_count": len(levels),
+        "level_variance": _rounded(level_variance, profile),
+        "residual_variance": _rounded(residual_variance, profile),
+        "residual_to_level_variance_ratio": (
+            _rounded(residual_variance / level_variance, profile)
+            if level_variance > 0.0
+            else None
+        ),
+        "residual": _numeric_summary(residuals, profile),
+        "absolute_residual": _numeric_summary(
+            [abs(value) for value in residuals],
+            profile,
+        ),
+    }
+
+
+def _linear_trend_components(
+    values: list[float],
+) -> tuple[float, float, list[float], list[float], float] | None:
+    sample_count = len(values)
+    if sample_count < 2:
+        return None
+    x_mean = (sample_count - 1) / 2.0
+    y_mean = _mean(values)
+    denominator = sum((index - x_mean) ** 2 for index in range(sample_count))
+    if denominator <= 0.0:
+        return None
+    slope = (
+        sum(
+            (index - x_mean) * (value - y_mean)
+            for index, value in enumerate(values)
+        )
+        / denominator
+    )
+    intercept = y_mean - slope * x_mean
+    fitted_values = [intercept + slope * index for index in range(sample_count)]
+    residuals = [
+        value - fitted
+        for value, fitted in zip(values, fitted_values, strict=True)
+    ]
+    total_variance = _population_variance(values)
+    residual_variance = _population_variance(residuals)
+    if total_variance > 0.0:
+        trend_strength = max(
+            0.0, min(1.0, 1.0 - residual_variance / total_variance)
+        )
+    else:
+        trend_strength = 1.0 if residual_variance <= 0.0 else 0.0
+    return slope, intercept, fitted_values, residuals, trend_strength
+
+
+def _trend_direction(
+    slope: float,
+    profile: HistDataFingerprintProfile,
+) -> str:
+    tolerance = 10 ** (-max(0, int(profile.rounding_digits)))
+    if slope > tolerance:
+        return "increasing"
+    if slope < -tolerance:
+        return "decreasing"
+    return "flat"
+
+
+def _decomposition_seasonality_payload(
+    timestamps: list[int],
+    levels: list[float],
+    absolute_returns_by_row: list[float | None],
+    *,
+    target: QualityTarget,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    by_hour: dict[str, list[float]] = {}
+    returns_by_hour: dict[str, list[float]] = {}
+    by_weekday: dict[str, list[float]] = {}
+    returns_by_weekday: dict[str, list[float]] = {}
+    by_session: dict[str, list[float]] = {}
+    returns_by_session: dict[str, list[float]] = {}
+    usable_count = min(
+        len(timestamps), len(levels), len(absolute_returns_by_row)
+    )
+
+    for index in range(usable_count):
+        classification = classify_histdata_timestamp(
+            timestamps[index],
+            calendar_profile=profile.calendar_profile,
+            asset_class=_target_asset_class(target),
+        )
+        source_datetime = classification.source_datetime
+        hour_key = f"{source_datetime.hour:02d}"
+        weekday_key = SOURCE_WEEKDAY_NAMES[source_datetime.weekday()]
+        active_sessions = tuple(classification.active_sessions) or (
+            (SESSION_MARKET_CLOSED,)
+            if classification.session_state == SESSION_STATE_WEEKEND_CLOSURE
+            else (SESSION_NO_ACTIVE_WINDOW,)
+        )
+        _record_decomposition_bucket(
+            by_hour,
+            returns_by_hour,
+            hour_key,
+            level=levels[index],
+            absolute_return=absolute_returns_by_row[index],
+        )
+        _record_decomposition_bucket(
+            by_weekday,
+            returns_by_weekday,
+            weekday_key,
+            level=levels[index],
+            absolute_return=absolute_returns_by_row[index],
+        )
+        for session in active_sessions:
+            _record_decomposition_bucket(
+                by_session,
+                returns_by_session,
+                str(session),
+                level=levels[index],
+                absolute_return=absolute_returns_by_row[index],
+            )
+
+    status = "computed" if usable_count else "skipped"
+    result: dict[str, JSONValue] = {
+        "status": status,
+        "sample_count": usable_count,
+        "grouped_by": ["source_hour", "source_weekday", "active_session"],
+        "by_source_hour": _decomposition_bucket_group_payload(
+            by_hour,
+            returns_by_hour,
+            profile,
+        ),
+        "by_source_weekday": _decomposition_bucket_group_payload(
+            by_weekday,
+            returns_by_weekday,
+            profile,
+        ),
+        "by_active_session": _decomposition_bucket_group_payload(
+            by_session,
+            returns_by_session,
+            profile,
+        ),
+    }
+    if status == "skipped":
+        result["reason"] = "insufficient_sample_count"
+    return result
+
+
+def _record_decomposition_bucket(
+    level_buckets: dict[str, list[float]],
+    return_buckets: dict[str, list[float]],
+    bucket: str,
+    *,
+    level: float,
+    absolute_return: float | None,
+) -> None:
+    level_buckets.setdefault(bucket, []).append(level)
+    if absolute_return is not None:
+        return_buckets.setdefault(bucket, []).append(absolute_return)
+
+
+def _decomposition_bucket_group_payload(
+    level_buckets: Mapping[str, list[float]],
+    return_buckets: Mapping[str, list[float]],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    limit = max(1, int(profile.histogram_bins))
+    bucket_names = sorted(level_buckets)
+    included_names = bucket_names[:limit]
+    buckets: dict[str, JSONValue] = {}
+    level_means: list[float] = []
+    return_means: list[float] = []
+    for bucket in included_names:
+        bucket_levels = _finite_values(level_buckets.get(bucket, ()))
+        bucket_returns = _finite_values(return_buckets.get(bucket, ()))
+        level_mean = _mean(bucket_levels) if bucket_levels else None
+        return_mean = _mean(bucket_returns) if bucket_returns else None
+        if level_mean is not None:
+            level_means.append(level_mean)
+        if return_mean is not None:
+            return_means.append(return_mean)
+        buckets[bucket] = {
+            "level_count": len(bucket_levels),
+            "level_mean": (
+                _rounded(level_mean, profile)
+                if level_mean is not None
+                else None
+            ),
+            "absolute_return_count": len(bucket_returns),
+            "absolute_return_mean": (
+                _rounded(return_mean, profile)
+                if return_mean is not None
+                else None
+            ),
+        }
+    dominant_bucket = None
+    if bucket_names:
+        dominant_bucket = max(
+            bucket_names,
+            key=lambda item: (len(level_buckets.get(item, ())), item),
+        )
+    return {
+        "bucket_count": len(bucket_names),
+        "included_bucket_count": len(included_names),
+        "omitted_bucket_count": max(0, len(bucket_names) - len(included_names)),
+        "truncated": len(included_names) < len(bucket_names),
+        "dominant_bucket": dominant_bucket,
+        "buckets": buckets,
+        "level_mean_dispersion": _numeric_summary(level_means, profile),
+        "absolute_return_mean_dispersion": _numeric_summary(
+            return_means,
+            profile,
+        ),
+    }
+
+
+def _decomposition_smoothing_windows_payload(
+    levels: list[float],
+    returns: list[float],
+    profile: HistDataFingerprintProfile,
+) -> tuple[dict[str, JSONValue], int, Counter[str]]:
+    windows: dict[str, JSONValue] = {}
+    skipped_reason_counts: Counter[str] = Counter()
+    computed_window_count = 0
+    for window in profile.rolling_windows:
+        window_payload = _decomposition_smoothing_window_payload(
+            levels,
+            returns,
+            window=int(window),
+            profile=profile,
+        )
+        windows[str(window)] = window_payload
+        if _summary_key(window_payload.get("status")) == "computed":
+            computed_window_count += 1
+        else:
+            reason = _optional_summary_key(window_payload.get("reason"))
+            if reason:
+                skipped_reason_counts[reason] += 1
+    return windows, computed_window_count, skipped_reason_counts
+
+
+def _decomposition_smoothing_window_payload(
+    levels: list[float],
+    returns: list[float],
+    *,
+    window: int,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    sample_counts: dict[str, JSONValue] = {
+        "level": len(levels),
+        "return": len(returns),
+    }
+    required_sample_count = max(2, window * 2)
+    if (
+        window <= 0
+        or len(levels) < required_sample_count
+        or len(returns) < required_sample_count
+    ):
+        return {
+            "status": "skipped",
+            "reason": "insufficient_sample_count",
+            "window": window,
+            "sample_counts": sample_counts,
+            "required_sample_count": required_sample_count,
+        }
+    level_means = _rolling_stat_values(levels, window, statistic="mean")
+    level_variances = _rolling_stat_values(
+        levels,
+        window,
+        statistic="variance",
+    )
+    absolute_return_means = _rolling_stat_values(
+        [abs(value) for value in returns],
+        window,
+        statistic="mean",
+    )
+    return {
+        "status": "computed",
+        "window": window,
+        "sample_counts": sample_counts,
+        "required_sample_count": required_sample_count,
+        "level_smoothed_mean": _numeric_summary(level_means, profile),
+        "level_smoothed_variance": _numeric_summary(level_variances, profile),
+        "level_smoothed_mean_drift": _stationarity_change_payload(
+            level_means[0],
+            level_means[-1],
+            profile,
+        ),
+        "absolute_return_smoothed_mean": _numeric_summary(
+            absolute_return_means,
+            profile,
+        ),
+        "absolute_return_smoothed_mean_drift": _stationarity_change_payload(
+            absolute_return_means[0],
+            absolute_return_means[-1],
+            profile,
+        ),
+    }
+
+
+def _rolling_stat_values(
+    values: list[float],
+    window: int,
+    *,
+    statistic: str,
+) -> list[float]:
+    if window <= 0 or len(values) < window:
+        return []
+    return [
+        _stationarity_statistic(values[index : index + window], statistic)
+        for index in range(0, len(values) - window + 1)
+    ]
+
+
+def _decomposition_structural_break_payload(
+    levels: list[float],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    sample_count = len(levels)
+    minimum_segment_size = 2
+    if sample_count < minimum_segment_size * 2:
+        return {
+            "status": "skipped",
+            "reason": "insufficient_sample_count",
+            "sample_count": sample_count,
+            "required_sample_count": minimum_segment_size * 2,
+            "minimum_segment_size": minimum_segment_size,
+            "candidate_count": 0,
+            "candidates": [],
+        }
+    candidates: list[dict[str, JSONValue]] = []
+    for split_index in range(
+        minimum_segment_size,
+        sample_count - minimum_segment_size + 1,
+    ):
+        before = levels[:split_index]
+        after = levels[split_index:]
+        before_mean = _mean(before)
+        after_mean = _mean(after)
+        mean_shift = after_mean - before_mean
+        pooled_variance = (
+            _population_variance(before) + _population_variance(after)
+        ) / 2.0
+        if pooled_variance > 0.0:
+            score = abs(mean_shift) / math.sqrt(pooled_variance)
+            score_basis = "absolute_mean_shift_over_pooled_std"
+        else:
+            score = abs(mean_shift) * sample_count
+            score_basis = "scaled_absolute_mean_shift_zero_variance"
+        candidates.append(
+            {
+                "split_index": split_index,
+                "before_count": len(before),
+                "after_count": len(after),
+                "before_mean": _rounded(before_mean, profile),
+                "after_mean": _rounded(after_mean, profile),
+                "mean_shift": _rounded(mean_shift, profile),
+                "absolute_mean_shift": _rounded(abs(mean_shift), profile),
+                "score": _rounded(score, profile),
+                "score_basis": score_basis,
+            }
+        )
+    ranked = sorted(
+        candidates,
+        key=lambda item: (
+            -(_optional_float_payload(item.get("score")) or 0.0),
+            _int_payload(item.get("split_index")),
+        ),
+    )
+    limit = max(1, int(profile.histogram_bins))
+    included = ranked[:limit]
+    included_candidates: list[JSONValue] = [dict(item) for item in included]
+    return {
+        "status": "computed",
+        "basis": "two_segment_mean_shift",
+        "sample_count": sample_count,
+        "minimum_segment_size": minimum_segment_size,
+        "candidate_count": len(candidates),
+        "included_candidate_count": len(included),
+        "omitted_candidate_count": max(0, len(candidates) - len(included)),
+        "truncated": len(included) < len(candidates),
+        "strongest_candidate": (
+            included_candidates[0] if included_candidates else None
+        ),
+        "candidates": included_candidates,
+    }
+
+
+def _decomposition_limitations(
+    base: Mapping[str, JSONValue],
+    *,
+    stationarity_basis: Mapping[str, JSONValue],
+    level_count: int,
+    return_count: int,
+    computed_window_count: int,
+    skipped_window_count: int,
+) -> tuple[str, ...]:
+    limitations = [
+        str(value) for value in _string_list(base.get("limitations"))
+    ]
+    if level_count < 3 or return_count < 1:
+        limitations.append("insufficient_sample_count")
+    stationarity_status = _summary_key(stationarity_basis.get("status"))
+    if stationarity_status == "unavailable":
+        limitations.append("stationarity_unavailable")
+    elif stationarity_status == "limited":
+        limitations.append("stationarity_limited")
+    if _string_list(stationarity_basis.get("zero_variance_metrics")):
+        limitations.append("zero_variance")
+    if skipped_window_count > 0 or _int_payload(
+        stationarity_basis.get("skipped_window_count")
+    ):
+        limitations.append("skipped_rolling_windows")
+    if computed_window_count <= 0:
+        limitations.append("insufficient_sample_count")
+    return _ordered_unique(limitations)
+
+
+def _decomposition_status(
+    base: Mapping[str, JSONValue],
+    *,
+    stationarity_basis: Mapping[str, JSONValue],
+    level_count: int,
+    return_count: int,
+    limitations: tuple[str, ...],
+) -> str:
+    if _summary_key(base.get("sequence_status")) == "unavailable":
+        return "unavailable"
+    if level_count < 3 or return_count < 1:
+        return "unavailable"
+    if _summary_key(stationarity_basis.get("status")) == "unavailable":
+        return "unavailable"
+    if limitations:
+        return "limited"
+    return "ok"
+
+
+def _decomposition_status_reason(
+    limitations: tuple[str, ...],
+    *,
+    stationarity_basis: Mapping[str, JSONValue],
+) -> str:
+    if limitations:
+        return _summary_key(limitations[0])
+    reason = _optional_summary_key(stationarity_basis.get("reason"))
+    if reason:
+        return reason
+    return "limited"
+
+
+def decomposition_training_projection(
+    decomposition: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    """Return flat period-grain decomposition scalars for training rows."""
+    trend = _payload_mapping(decomposition.get("trend_proxy"))
+    residual = _payload_mapping(decomposition.get("residual_proxy"))
+    structural = _payload_mapping(decomposition.get("structural_break_proxy"))
+    strongest = _payload_mapping(structural.get("strongest_candidate"))
+    stationarity = _payload_mapping(decomposition.get("stationarity_basis"))
+    status = _summary_key(decomposition.get("decomposition_status"))
+    direction = _summary_key(trend.get("direction"))
+    stationarity_status = _summary_key(stationarity.get("status"))
+    return {
+        "schema_version": (
+            TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION
+        ),
+        "grain": "period",
+        "identity_fields": ["series_id", "period", "row_id"],
+        "values": {
+            "decomposition_status_code": {
+                "unavailable": 1,
+                "limited": 2,
+                "ok": 3,
+            }.get(status, 0),
+            "decomposition_training_ready": status in {"limited", "ok"},
+            "decomposition_trend_direction_code": {
+                "decreasing": -1,
+                "flat": 0,
+                "increasing": 1,
+            }.get(direction, 0),
+            "decomposition_trend_slope": trend.get("slope_per_observation"),
+            "decomposition_trend_strength": trend.get("trend_strength"),
+            "decomposition_residual_variance_ratio": residual.get(
+                "residual_to_level_variance_ratio"
+            ),
+            "decomposition_computed_window_count": _int_payload(
+                decomposition.get("computed_window_count")
+            ),
+            "decomposition_structural_break_candidate_count": _int_payload(
+                structural.get("candidate_count")
+            ),
+            "decomposition_structural_break_split_index": (
+                _int_payload(strongest.get("split_index"))
+                if strongest
+                else None
+            ),
+            "decomposition_structural_break_score": strongest.get("score"),
+            "decomposition_stationarity_status_code": {
+                "unavailable": 1,
+                "limited": 2,
+                "valid": 3,
+            }.get(stationarity_status, 0),
+        },
+    }
+
+
+def project_decomposition_onto_training_frame(
+    frame: Any,
+    decomposition: Mapping[str, JSONValue],
+) -> Any:
+    """Project period-grain decomposition scalars onto enriched tick rows."""
+    required = {"series_id", "period", "row_id"}
+    columns = set(getattr(frame, "columns", ()))
+    missing = sorted(required - columns)
+    if missing:
+        raise ValueError(
+            "decomposition training projection requires enriched ASCII tick "
+            f"identity columns: {', '.join(missing)}"
+        )
+    import polars as pl
+
+    projection = decomposition_training_projection(decomposition)
+    values = _payload_mapping(projection.get("values"))
+    expressions = [pl.lit(value).alias(name) for name, value in values.items()]
+    return frame.with_columns(expressions)
 
 
 def _stationarity_payload(

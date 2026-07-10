@@ -1009,7 +1009,7 @@ Supported groups:
 | `domain` | symbol metadata, quote conventions, calendar/session tags, cross-instrument consistency |
 | `modeling` | advisory modeling-readiness checks for leakage risk, spread-cost assumptions, and target horizon feasibility |
 | `provenance` | optional orchestration manifest/status lineage checks for artifact paths, sizes, checksums, cache metadata, stale caches, and orphan files |
-| `fingerprint` | deterministic INFO-only time-series fingerprints for target axis, coverage, timestamp topology, tick distributions, calendar regimes, microstructure dynamics, lag dependence, stationarity/drift diagnostics, and bounded tick spread conditioning |
+| `fingerprint` | deterministic INFO-only time-series fingerprints for target axis, coverage, timestamp topology, tick distributions, calendar regimes, microstructure dynamics, lag dependence, stationarity/drift diagnostics, decomposition and structural-regime proxies, and bounded tick spread conditioning |
 
 `fingerprint.series` payloads include a `calendar_regimes` section for readable
 ASCII tick targets. It counts session states, active/clock sessions,
@@ -1035,12 +1035,31 @@ reasons, sample counts, configured windows, rounding policy, zero-variance
 markers, and deterministic transform recommendations such as `log_return`,
 `differencing`, and `session_conditioning`. These diagnostics are descriptive
 fingerprint facts only; nonstationarity does not fail a quality run.
+Readable ASCII tick fingerprints also include a tick-only `decomposition`
+section. It reuses the stationarity result, source-calendar hour/day/session
+classification, and profile-configured rolling windows to emit deterministic
+linear-trend, seasonal-bucket, residual, smoothing-window, and two-segment
+structural-break proxies. Buckets and structural candidates are bounded by the
+profile histogram limit; insufficient samples, skipped windows, zero variance,
+and stationarity limitations remain explicit advisory metadata. These are
+descriptive proxies, not fitted forecasting models, and no retired bar or M1
+schema is emitted.
+
+The decomposition section embeds a `period`-grain training projection with the
+stable identity fields `series_id`, `period`, and `row_id`. API consumers can
+call `decomposition_training_projection(...)` for its flat scalar values and
+`project_decomposition_onto_training_frame(...)` to repeat those period facts
+onto an already enriched ASCII tick frame without parsing a report or performing
+a side join. Row count and identity columns are preserved.
+
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,
 stable skip/eligibility reason codes, calendar-profile completeness, tick-spread
-conditioning eligibility, dynamics readiness, and stationarity readiness. This
-is machine-readable contract metadata for report consumers; the full fingerprint
-sections remain the source of the detailed statistics.
+conditioning eligibility, dynamics readiness, stationarity readiness, and
+decomposition readiness. This is machine-readable contract metadata for report
+consumers; the full fingerprint sections remain the source of the detailed
+statistics.
+
 Quality JSON reports and CLI summaries also include bounded regime and
 readiness summaries when fingerprint findings are present. Use
 `time_series_fingerprint_regime_summary` to scan dominant session states, active
@@ -1055,7 +1074,10 @@ status, ACF basis, configured lag coverage, computed/skipped lag counts,
 skipped-lag reason counts, and per-series sample counts. It also includes
 stationarity status, calculation basis, sample counts, configured rolling
 windows, computed/skipped window counts, skipped-window reasons, rounding
-policy, zero-variance markers, and recommended transforms. Use
+policy, zero-variance markers, and recommended transforms. The readiness surface
+also carries decomposition basis, sample/window coverage,
+stationarity dependency status, trend direction, structural-break candidate
+counts, limitations, and its training-projection contract. Use
 `time_series_fingerprint_readiness_risk` when you need a bounded, deterministic
 triage list of targets and sections most likely to block downstream fingerprint
 use. It ranks existing readiness, topology, dependence, regime, cache-source,

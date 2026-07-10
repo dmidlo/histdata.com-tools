@@ -2665,11 +2665,53 @@ def format_fingerprint_readiness_summary_lines(
             f"{_int_metadata(summary, 'stationarity_skipped_window_count')}"
         )
         lines.append(stationarity_line)
+    decomposition_counts = _format_count_metadata(
+        summary.get("decomposition_status_counts")
+    )
+    if decomposition_counts:
+        decomposition_line = f"- decomposition: {decomposition_counts}"
+        decomposition_reasons = _format_count_metadata(
+            summary.get("decomposition_reason_counts")
+        )
+        if decomposition_reasons:
+            decomposition_line += f" reasons: {decomposition_reasons}"
+        skipped_window_reasons = _format_count_metadata(
+            summary.get("decomposition_skipped_window_reason_counts")
+        )
+        if skipped_window_reasons:
+            decomposition_line += (
+                f" skipped-window reasons: {skipped_window_reasons}"
+            )
+        basis_counts = _format_count_metadata(
+            summary.get("decomposition_basis_counts")
+        )
+        if basis_counts:
+            decomposition_line += f" basis: {basis_counts}"
+        stationarity_counts = _format_count_metadata(
+            summary.get("decomposition_stationarity_status_counts")
+        )
+        if stationarity_counts:
+            decomposition_line += f" stationarity: {stationarity_counts}"
+        structural_counts = _format_count_metadata(
+            summary.get("decomposition_structural_break_status_counts")
+        )
+        if structural_counts:
+            decomposition_line += f" structural-breaks: {structural_counts}"
+        decomposition_line += (
+            " computed_windows="
+            f"{_int_metadata(summary, 'decomposition_computed_window_count')} "
+            "skipped_windows="
+            f"{_int_metadata(summary, 'decomposition_skipped_window_count')} "
+            "structural_candidates="
+            f"{_int_metadata(summary, 'decomposition_structural_break_candidate_count')}"
+        )
+        lines.append(decomposition_line)
     count_lines = (
         ("topology limitations", "topology_limitation_counts"),
         ("dynamics limitations", "dynamics_limitation_counts"),
         ("dependence limitations", "dependence_limitation_counts"),
         ("stationarity limitations", "stationarity_limitation_counts"),
+        ("decomposition limitations", "decomposition_limitation_counts"),
         ("row order", "row_order_counts"),
         ("computed from", "computed_from_counts"),
         ("cache sources", "cache_source_counts"),
@@ -2804,6 +2846,12 @@ def _format_fingerprint_readiness_target_line(
     stationarity_text = (
         f", {stationarity_details}" if stationarity_details else ""
     )
+    decomposition_details = _format_fingerprint_readiness_decomposition_details(
+        _mapping_payload(summary.get("decomposition"))
+    )
+    decomposition_text = (
+        f", {decomposition_details}" if decomposition_details else ""
+    )
     return (
         f"{_string_metadata(axis, 'data_format')} "
         f"{_string_metadata(axis, 'symbol')} "
@@ -2827,6 +2875,7 @@ def _format_fingerprint_readiness_target_line(
         f"{details_text}"
         f"{dependence_text}"
         f"{stationarity_text}"
+        f"{decomposition_text}"
     )
 
 
@@ -2937,6 +2986,44 @@ def _format_fingerprint_readiness_stationarity_details(
         f"{_int_metadata(stationarity, 'skipped_window_count')} "
         f"rounding={_int_metadata(stationarity, 'rounding_digits')} "
         f"transforms={transform_text}"
+        f"{skipped_reason_text}"
+    )
+
+
+def _format_fingerprint_readiness_decomposition_details(
+    decomposition: Mapping[str, JSONValue],
+) -> str:
+    if not decomposition:
+        return ""
+    status = _string_metadata(decomposition, "status")
+    reason = _optional_string_metadata(decomposition, "reason")
+    reason_text = f" reason={reason}" if reason else ""
+    skipped_reasons = _format_count_metadata(
+        decomposition.get("skipped_window_reason_counts")
+    )
+    skipped_reason_text = (
+        f" skipped_reasons={skipped_reasons}" if skipped_reasons else ""
+    )
+    stationarity = _mapping_payload(decomposition.get("stationarity"))
+    structural = _mapping_payload(decomposition.get("structural_break"))
+    trend = _mapping_payload(decomposition.get("trend"))
+    projection = _mapping_payload(decomposition.get("training_projection"))
+    return (
+        f"decomposition={status}{reason_text} "
+        f"basis={_string_metadata(decomposition, 'calculation_basis')} "
+        f"metric={_string_metadata(decomposition, 'metric')} "
+        f"samples={_int_metadata(decomposition, 'level_sample_count')}/"
+        f"{_int_metadata(decomposition, 'return_sample_count')} "
+        f"windows={_format_window_metadata(decomposition)} "
+        "computed_windows="
+        f"{_int_metadata(decomposition, 'computed_window_count')} "
+        "skipped_windows="
+        f"{_int_metadata(decomposition, 'skipped_window_count')} "
+        f"stationarity={_string_metadata(stationarity, 'status')} "
+        f"trend={_string_metadata(trend, 'direction')} "
+        f"structural={_string_metadata(structural, 'status')}/"
+        f"{_int_metadata(structural, 'candidate_count')} "
+        f"projection={_string_metadata(projection, 'grain')}"
         f"{skipped_reason_text}"
     )
 

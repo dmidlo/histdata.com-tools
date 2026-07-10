@@ -21,6 +21,8 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
@@ -77,6 +79,7 @@ TICK_SECTIONS = [
     "microstructure_dynamics",
     "dependence",
     "stationarity_diagnostics",
+    "decomposition",
 ]
 
 
@@ -153,6 +156,26 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
     assert stationarity["metric"] == "mid_price"
     assert _mapping(stationarity["sample_counts"]) == {"level": 3, "return": 2}
 
+    decomposition = _mapping(payload["decomposition"])
+    assert decomposition["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
+    )
+    assert decomposition["metric"] == "mid_price"
+    assert _mapping(decomposition["sample_counts"]) == {
+        "level": 3,
+        "return": 2,
+    }
+    projection = _mapping(decomposition["training_projection"])
+    assert projection["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert projection["grain"] == "period"
+    assert _list(projection["identity_fields"]) == [
+        "series_id",
+        "period",
+        "row_id",
+    ]
+
     audit = _mapping(payload["fingerprint_audit"])
     assert (
         audit["schema_version"] == TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION
@@ -166,6 +189,8 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
     assert statuses["microstructure_dynamics"] == "valid"
     assert statuses["dependence"] == "limited"
     assert statuses["stationarity_diagnostics"] == "limited"
+    assert statuses["decomposition"] == "limited"
+    assert _mapping(audit["decomposition_readiness"])["status"] == "limited"
     assert _retired_bar_schema_keys(payload) == set()
 
 
@@ -272,6 +297,149 @@ def test_fingerprint_stationarity_diagnostics_describe_stable_tick_series(
     assert level_mean_drift["first"] == 1.0
     assert level_mean_drift["last"] == 1.0
     assert level_mean_drift["absolute_change"] == 0.0
+
+
+def test_fingerprint_decomposition_handles_flat_and_trending_ticks(
+    tmp_path: Path,
+) -> None:
+    """Decomposition proxies should distinguish flat and linear tick levels."""
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2, 3), rounding_digits=6
+    )
+    flat = _mapping(
+        _payload_for_case(
+            tmp_path / "flat",
+            _tick_case_from_mid_prices("tick-flat", (1.0,) * 9),
+            profile,
+        )["decomposition"]
+    )
+    trending = _mapping(
+        _payload_for_case(
+            tmp_path / "trend",
+            _tick_case_from_mid_prices(
+                "tick-trend",
+                (1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8),
+            ),
+            profile,
+        )["decomposition"]
+    )
+
+    assert flat["decomposition_status"] == "limited"
+    assert "zero_variance" in _list(flat["limitations"])
+    assert _mapping(flat["trend_proxy"])["direction"] == "flat"
+    assert (
+        _mapping(flat["residual_proxy"])["residual_to_level_variance_ratio"]
+        is None
+    )
+    assert _mapping(flat["stationarity_basis"])["status"] == "valid"
+    assert _mapping(flat["stationarity_basis"])["zero_variance_metrics"]
+
+    trend = _mapping(trending["trend_proxy"])
+    assert trend["direction"] == "increasing"
+    assert trend["slope_per_observation"] == 0.1
+    assert trend["trend_strength"] == 1.0
+    assert trending["computed_window_count"] == 2
+    assert _mapping(trending["stationarity_basis"])["status"] == "valid"
+    assert _retired_bar_schema_keys(trending) == set()
+
+
+def test_fingerprint_decomposition_seasonality_is_calendar_based_and_bounded(
+    tmp_path: Path,
+) -> None:
+    """Seasonality buckets should reuse source-calendar sessions and limits."""
+    case = HistDataAsciiCase(
+        name="tick-decomposition-seasonality",
+        timeframe=TICK,
+        filename="DAT_ASCII_EURUSD_T_201202.csv",
+        rows=(
+            "20120102 010000000,1.000000,1.000000,0",
+            "20120102 090000000,1.100000,1.100000,0",
+            "20120103 170000000,1.200000,1.200000,0",
+            "20120104 230000000,1.300000,1.300000,0",
+        ),
+    )
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2,), histogram_bins=2, rounding_digits=6
+    )
+    decomposition = _mapping(
+        _payload_for_case(tmp_path, case, profile)["decomposition"]
+    )
+    seasonality = _mapping(decomposition["seasonality_proxy"])
+    by_hour = _mapping(seasonality["by_source_hour"])
+    by_weekday = _mapping(seasonality["by_source_weekday"])
+    by_session = _mapping(seasonality["by_active_session"])
+
+    assert seasonality["grouped_by"] == [
+        "source_hour",
+        "source_weekday",
+        "active_session",
+    ]
+    assert by_hour["bucket_count"] == 4
+    assert by_hour["included_bucket_count"] == 2
+    assert by_hour["truncated"] is True
+    assert by_weekday["bucket_count"] == 3
+    assert by_session["bucket_count"] >= 3
+    assert all(
+        len(_mapping(group)["buckets"]) <= 2
+        for group in (
+            by_hour,
+            by_weekday,
+            by_session,
+        )
+    )
+
+
+def test_fingerprint_decomposition_insufficient_series_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    """A one-row series should report deterministic unavailable proxies."""
+    decomposition = _mapping(
+        _payload_for_case(
+            tmp_path,
+            _tick_case_from_mid_prices("tick-insufficient", (1.0,)),
+            HistDataFingerprintProfile(rolling_windows=(2, 3)),
+        )["decomposition"]
+    )
+
+    assert decomposition["decomposition_status"] == "unavailable"
+    assert decomposition["reason"] == "insufficient_sequence_rows"
+    assert "insufficient_sample_count" in _list(decomposition["limitations"])
+    assert decomposition["computed_window_count"] == 0
+    assert decomposition["skipped_window_count"] == 2
+    assert _mapping(decomposition["structural_break_proxy"])["status"] == (
+        "skipped"
+    )
+    assert _mapping(decomposition["stationarity_basis"])["status"] == (
+        "unavailable"
+    )
+
+
+def test_fingerprint_decomposition_structural_break_proxy_is_deterministic(
+    tmp_path: Path,
+) -> None:
+    """Structural candidates should rank a fixed step change identically."""
+    case = _tick_case_from_mid_prices(
+        "tick-structural-break",
+        (1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0),
+    )
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2,), histogram_bins=3, rounding_digits=6
+    )
+    first = _mapping(
+        _payload_for_case(tmp_path / "first", case, profile)["decomposition"]
+    )
+    second = _mapping(
+        _payload_for_case(tmp_path / "second", case, profile)["decomposition"]
+    )
+    first_structural = _mapping(first["structural_break_proxy"])
+    second_structural = _mapping(second["structural_break_proxy"])
+
+    assert first_structural == second_structural
+    assert first_structural["status"] == "computed"
+    assert first_structural["candidate_count"] == 5
+    assert first_structural["included_candidate_count"] == 3
+    assert first_structural["truncated"] is True
+    assert _mapping(first_structural["strongest_candidate"])["split_index"] == 3
 
 
 def test_fingerprint_calendar_regimes_and_conditioning_are_tick_based(
@@ -1145,6 +1313,14 @@ def test_fingerprint_constants_are_stable() -> None:
     assert (
         TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION
         == "histdatacom.time-series-fingerprint-stationarity.v1"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-decomposition.v1"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-decomposition-training-projection.v1"
     )
     assert (
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION

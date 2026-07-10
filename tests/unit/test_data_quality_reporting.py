@@ -641,8 +641,8 @@ def test_fingerprint_readiness_risk_summary_handles_missing_sections(
     assert summary is not None
     assert summary["target_count"] == 2
     assert summary["risk_target_count"] == 2
-    assert summary["reason_counts"]["not_emitted"] == 4
-    assert summary["reason_counts"]["unsupported_target_kind"] == 3
+    assert summary["reason_counts"]["not_emitted"] == 5
+    assert summary["reason_counts"]["unsupported_target_kind"] == 4
     assert summary["target_risks"][0]["target_axis"]["kind"] == "unknown"
     assert (
         "unsupported_target_kind" in summary["target_risks"][0]["reason_codes"]
@@ -672,6 +672,11 @@ def test_fingerprint_console_summary_reports_readiness_lines(
         "acf_basis: observed_sequence=3 computed_lags=15 skipped_lags=3"
     ) in output
     assert (
+        "- decomposition: skipped=3 reasons: not_emitted=3 "
+        "stationarity: unknown=3 structural-breaks: unknown=3 "
+        "computed_windows=0 skipped_windows=0 structural_candidates=0"
+    ) in output
+    assert (
         "- topology limitations: duplicate_timestamps=1, "
         "expected_session_closures=1, invalid_timestamps_skipped=1, "
         "non_monotonic_timestamp_order=1, suspicious_gaps=1"
@@ -697,6 +702,12 @@ def test_fingerprint_console_summary_reports_readiness_lines(
         "skipped_lags=3 skipped_reasons=insufficient_sample_count=3"
     ) in output
     assert "spread_acf:samples=2/computed=1/skipped=1" in output
+    assert (
+        "decomposition=skipped reason=not_emitted basis=unknown metric=unknown "
+        "samples=0/0 windows=[] computed_windows=0 skipped_windows=0 "
+        "stationarity=unknown trend=unknown structural=unknown/0 "
+        "projection=unknown"
+    ) in output
     assert (
         "- ascii EURUSD T 201202 csv: microstructure_dynamics valid"
     ) in output
@@ -1535,6 +1546,11 @@ def test_fingerprint_readiness_summary_is_bounded_and_issue_first(
     assert summary["target_summaries"][0]["target_axis"]["symbol"] == "GBPUSD"
     assert summary["target_summaries"][0]["applicable_dynamics_status"] == (
         "limited"
+    )
+    assert summary["decomposition_status_counts"] == {"skipped": 3}
+    assert summary["decomposition_reason_counts"] == {"not_emitted": 3}
+    assert summary["target_summaries"][0]["decomposition"]["status"] == (
+        "skipped"
     )
 
 

@@ -14,6 +14,9 @@ from histdatacom.data_quality import (
     QualityStatus,
     QualityTarget,
     QualityTargetKind,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION,
+    decomposition_training_projection,
+    project_decomposition_onto_training_frame,
 )
 from histdatacom.data_quality.training_features import (
     DEFAULT_SUSPICIOUS_TICK_GAP_MS,
@@ -78,6 +81,71 @@ def test_enriched_tick_frame_contains_flat_row_aligned_training_schema() -> (
     assert masked.select(["series_id", "period", "row_id"]).to_dicts() == (
         enriched.select(["series_id", "period", "row_id"]).to_dicts()
     )
+
+
+def test_decomposition_projection_preserves_enriched_tick_identity() -> None:
+    """Period decomposition scalars should project without a side join."""
+    enriched = enrich_tick_cache_with_training_features(
+        _tick_frame(
+            [
+                (1_000, 1.0, 1.1, 0),
+                (1_300, 1.1, 1.2, 1),
+            ]
+        ),
+        symbol="EURUSD",
+        data_format="ascii",
+        timeframe="T",
+        period="201202",
+    )
+    decomposition = {
+        "decomposition_status": "ok",
+        "computed_window_count": 2,
+        "trend_proxy": {
+            "direction": "increasing",
+            "slope_per_observation": 0.1,
+            "trend_strength": 0.9,
+        },
+        "residual_proxy": {"residual_to_level_variance_ratio": 0.1},
+        "structural_break_proxy": {
+            "candidate_count": 3,
+            "strongest_candidate": {"split_index": 2, "score": 4.5},
+        },
+        "stationarity_basis": {"status": "valid"},
+    }
+
+    projection = decomposition_training_projection(decomposition)
+    projected = project_decomposition_onto_training_frame(
+        enriched,
+        decomposition,
+    )
+
+    assert projection["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert projection["grain"] == "period"
+    assert projected.height == enriched.height
+    assert projected.select(["series_id", "period", "row_id"]).equals(
+        enriched.select(["series_id", "period", "row_id"])
+    )
+    assert projected.get_column("decomposition_status_code").to_list() == [3, 3]
+    assert projected.get_column(
+        "decomposition_trend_direction_code"
+    ).to_list() == [
+        1,
+        1,
+    ]
+    assert projected.get_column(
+        "decomposition_structural_break_score"
+    ).to_list() == [
+        4.5,
+        4.5,
+    ]
+
+    with pytest.raises(ValueError, match="identity columns: row_id"):
+        project_decomposition_onto_training_frame(
+            enriched.drop("row_id"),
+            decomposition,
+        )
 
 
 def test_training_feature_issues_drive_deterministic_classification() -> None:

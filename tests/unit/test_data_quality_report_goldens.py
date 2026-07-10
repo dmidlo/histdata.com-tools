@@ -1509,6 +1509,16 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "dependence_skipped_lag_count",
         "dependence_skipped_lag_reason_counts",
         "dependence_status_counts",
+        "decomposition_basis_counts",
+        "decomposition_computed_window_count",
+        "decomposition_limitation_counts",
+        "decomposition_reason_counts",
+        "decomposition_skipped_window_count",
+        "decomposition_skipped_window_reason_counts",
+        "decomposition_stationarity_status_counts",
+        "decomposition_status_counts",
+        "decomposition_structural_break_candidate_count",
+        "decomposition_structural_break_status_counts",
         "dynamics_limitation_counts",
         "dynamics_reason_counts",
         "dynamics_status_counts",
@@ -1548,6 +1558,9 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "dependence_skipped_lag_count",
         "stationarity_computed_window_count",
         "stationarity_skipped_window_count",
+        "decomposition_computed_window_count",
+        "decomposition_skipped_window_count",
+        "decomposition_structural_break_candidate_count",
     ):
         assert isinstance(payload[key], int)
         assert payload[key] >= 0
@@ -1561,6 +1574,13 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "dependence_reason_counts",
         "dependence_skipped_lag_reason_counts",
         "dependence_status_counts",
+        "decomposition_basis_counts",
+        "decomposition_limitation_counts",
+        "decomposition_reason_counts",
+        "decomposition_skipped_window_reason_counts",
+        "decomposition_stationarity_status_counts",
+        "decomposition_status_counts",
+        "decomposition_structural_break_status_counts",
         "dynamics_limitation_counts",
         "dynamics_reason_counts",
         "dynamics_status_counts",
@@ -1732,6 +1752,7 @@ def _assert_fingerprint_readiness_target(
         "applicable_dynamics_section",
         "applicable_dynamics_status",
         "dependence",
+        "decomposition",
         "microstructure_dynamics",
         "profile_completeness",
         "section_skip_reasons",
@@ -1787,6 +1808,9 @@ def _assert_fingerprint_readiness_target(
     _assert_fingerprint_readiness_dependence(_mapping(payload["dependence"]))
     _assert_fingerprint_readiness_stationarity(
         _mapping(payload["stationarity_diagnostics"])
+    )
+    _assert_fingerprint_readiness_decomposition(
+        _mapping(payload["decomposition"])
     )
 
 
@@ -2041,6 +2065,63 @@ def _assert_fingerprint_readiness_stationarity_window(
             )
     else:
         assert isinstance(payload["required_sample_count"], int)
+
+
+def _assert_fingerprint_readiness_decomposition(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "basis",
+        "cache_source",
+        "calculation_basis",
+        "computed_from",
+        "computed_window_count",
+        "invalid_row_count",
+        "level_sample_count",
+        "limitations",
+        "metric",
+        "partial_row_count",
+        "reason",
+        "regular_grid",
+        "return_sample_count",
+        "rounding_digits",
+        "row_count",
+        "row_order",
+        "sampled_row_count",
+        "skipped_window_count",
+        "skipped_window_reason_counts",
+        "stationarity",
+        "status",
+        "structural_break",
+        "training_projection",
+        "trend",
+        "truncated",
+        "usable_row_count",
+        "windows",
+    }
+    assert payload["status"] in {"limited", "skipped", "unavailable", "valid"}
+    assert isinstance(payload["limitations"], list)
+    assert isinstance(payload["regular_grid"], bool)
+    assert isinstance(payload["truncated"], bool)
+    assert isinstance(payload["windows"], list)
+    assert isinstance(payload["skipped_window_reason_counts"], dict)
+    assert isinstance(payload["stationarity"], dict)
+    assert isinstance(payload["structural_break"], dict)
+    assert isinstance(payload["training_projection"], dict)
+    assert isinstance(payload["trend"], dict)
+    for key in (
+        "computed_window_count",
+        "invalid_row_count",
+        "level_sample_count",
+        "partial_row_count",
+        "return_sample_count",
+        "rounding_digits",
+        "row_count",
+        "sampled_row_count",
+        "skipped_window_count",
+        "usable_row_count",
+    ):
+        assert isinstance(payload[key], int)
 
 
 def _assert_fingerprint_readiness_stationarity_change(

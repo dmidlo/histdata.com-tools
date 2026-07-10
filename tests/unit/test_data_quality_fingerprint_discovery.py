@@ -33,6 +33,8 @@ from histdatacom.data_quality.fingerprints import (
     SERIES_FINGERPRINT_RULE_ID,
     HistDataFingerprintProfile,
     TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
@@ -76,6 +78,15 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         schemas["fingerprint_stationarity_diagnostics"]["schema_version"]
         == TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION
     )
+    assert schemas["fingerprint_decomposition"]["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_decomposition_training_projection"][
+            "schema_version"
+        ]
+        == TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
     assert schemas["fingerprint_readiness_summary"]["schema_version"] == (
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION
     )
@@ -103,13 +114,11 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "microstructure_dynamics",
         "dependence",
         "stationarity_diagnostics",
+        "decomposition",
         "fingerprint_audit",
     ]
     planned = payload["sections"]["planned"]["target_sections"]
-    assert [section["name"] for section in planned] == [
-        "decomposition",
-        "synthetic_constraints",
-    ]
+    assert [section["name"] for section in planned] == ["synthetic_constraints"]
     assert "observed_sequence" in payload["calculation_bases"]["basis"]
     assert "source_text_order" in payload["calculation_bases"]["row_order"]
     assert "not_emitted" in payload["vocabularies"]["skip_and_reason_codes"]
@@ -477,6 +486,7 @@ def test_format_fingerprint_schema_discovery_renders_human_summary() -> None:
     assert "- microstructure_dynamics: implemented; timeframes=[T]" in output
     assert "- dependence: implemented; timeframes=[T]" in output
     assert "- stationarity_diagnostics: implemented; timeframes=[T]" in output
+    assert "- decomposition: implemented; timeframes=[T]" in output
     assert "without reading source or running data quality checks" in output
 
 

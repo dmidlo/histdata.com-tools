@@ -34,6 +34,8 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
@@ -115,6 +117,8 @@ FINGERPRINT_SKIP_REASON_CODES = (
     "no_computable_lags",
     "skipped_lags",
     "skipped_rolling_windows",
+    "stationarity_limited",
+    "stationarity_unavailable",
     "not_emitted",
 )
 FINGERPRINT_TOPOLOGY_LIMITATIONS = (
@@ -384,6 +388,22 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_decomposition",
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.decomposition",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_decomposition_training_projection",
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.decomposition.training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_audit",
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -561,6 +581,31 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "decomposition",
+        (
+            "advisory trend, seasonality, residual, smoothing-window, and "
+            "structural-break proxies"
+        ),
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_decomposition",
+        basis_values=("observed_sequence",),
+        row_order_values=("source_text_order", "cache_order"),
+        extra={
+            "profile_controlled_by": [
+                "rolling_windows",
+                "histogram_bins",
+                "rounding_digits",
+            ],
+            "stationarity_basis": "stationarity_diagnostics",
+            "training_projection_grain": "period",
+            "training_projection_identity": [
+                "series_id",
+                "period",
+                "row_id",
+            ],
+        },
+    ),
+    FingerprintTargetSectionContract(
         "fingerprint_audit",
         "machine-readable expected/emitted/skipped section accounting and readiness",
         target_timeframes=(TICK,),
@@ -569,7 +614,6 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
 )
 
 PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
-    FingerprintPlannedSectionContract("decomposition", "#330"),
     FingerprintPlannedSectionContract("synthetic_constraints", "#333"),
 )
 PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS = (
