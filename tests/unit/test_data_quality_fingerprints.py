@@ -15,6 +15,8 @@ from histdatacom.data_quality import (
     DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
     DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
     QUALITY_PROFILE_SCHEMA_VERSION,
+    QUALITY_ENGINE_METADATA_KEY,
+    QUALITY_SKIP_EVENTS_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
@@ -911,6 +913,19 @@ def test_fingerprint_coverage_summary_reports_duplicate_archive_skip(
         "duplicate_archive_preferred_csv": 1,
     }
     assert summary["source_kind_counts"] == {"csv_text": 1}
+    engine = _mapping(report.metadata[QUALITY_ENGINE_METADATA_KEY])
+    skips = _mapping(engine["skip_events"])
+    assert skips["schema_version"] == QUALITY_SKIP_EVENTS_SCHEMA_VERSION
+    assert skips["event_count"] == summary["skipped_fingerprint_target_count"]
+    assert skips["reason_counts"] == summary["skipped_reason_counts"]
+    assert skips["rule_id_counts"] == {SERIES_FINGERPRINT_RULE_ID: 1}
+    assert _mapping(_list(skips["events"])[0])["target_axis"] == {
+        "data_format": "ascii",
+        "timeframe": "T",
+        "symbol": "EURUSD",
+        "period": "201202",
+        "kind": "zip",
+    }
 
 
 def test_series_fingerprint_distribution_summary_counts_tick_payloads(

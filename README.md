@@ -824,6 +824,18 @@ surfaces should derive from or stay consistent with those row-level columns, so
 downstream training code does not need to parse report JSON or join separate
 quality tables to assemble a training row.
 
+When the engine intentionally skips a target-rule evaluation—for example, a
+semantic scan of a ZIP whose matching extracted CSV is preferred—the report
+adds optional `metadata.quality_engine` reconciliation metadata. Its
+`histdatacom.quality-skip-events.v1` event list records a stable reason code,
+rule ID, target kind, and publish-safe format/timeframe/symbol/period axis; it
+never records local paths or row samples. Events and aggregate reason/rule
+counts are deterministically bounded with explicit omission metadata. The same
+contract is projected into bounded runtime payloads as `quality_engine`, and
+the human summary reports planned, executed, and skipped evaluation totals.
+The existing `skipped_duplicate_archive_rule_evaluation_count` remains for
+compatible consumers.
+
 Use `--repo-quality` when the same quality run should also update the local
 repo helper file with bounded per-instrument quality summaries:
 

@@ -24,7 +24,7 @@ def test_bounded_payload_contract_audit_passes_representative_payload() -> None:
     assert payload["status"] == "pass"
     assert payload["finding_count"] == 0
     assert payload["findings"] == []
-    assert payload["checked_surfaces"]["sequence_contract_count"] == 13
+    assert payload["checked_surfaces"]["sequence_contract_count"] == 14
     assert "does not read local market data" in payload["non_goals"]
 
 
@@ -96,6 +96,24 @@ def test_bounded_payload_contract_audit_detects_truncation_mismatch() -> None:
     assert audit["status"] == "fail"
     finding = _first_finding(audit, "bounded_payload_truncation_mismatch")
     assert finding["path"] == "payload_limits.target_summaries.truncated"
+
+
+def test_bounded_payload_contract_audit_checks_quality_skip_events() -> None:
+    """Engine skip count metadata should match its bounded event sequence."""
+    payload = _representative_payload_copy()
+    skip_events = payload["quality_engine"]["skip_events"]
+    assert isinstance(skip_events, dict)
+    events = skip_events["events"]
+    assert isinstance(events, list)
+    events.clear()
+
+    audit = bounded_payload_contract_audit(payload)
+
+    assert audit["status"] == "fail"
+    finding = _first_finding(audit, "bounded_payload_count_mismatch")
+    assert finding["path"] == (
+        "quality_engine.skip_events.limit_metadata.events.included_count"
+    )
 
 
 def test_format_bounded_payload_contract_audit_renders_human_summary() -> None:

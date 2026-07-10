@@ -1,0 +1,189 @@
+{
+  "metadata": {
+    "check_groups": [
+      "time"
+    ],
+    "operation": "data-quality",
+    "quality_engine": {
+      "duplicate_archive_scan_policy": "prefer_extracted_csv_for_non_inventory_rules",
+      "planned_target_rule_evaluation_count": 2,
+      "rule_count": 1,
+      "run_rule_count": 0,
+      "schema_version": "histdatacom.quality-engine.v1",
+      "skip_events": {
+        "event_count": 1,
+        "events": [
+          {
+            "reason_code": "duplicate_archive_preferred_csv",
+            "rule_id": "time.ascii.gaps",
+            "target_axis": {
+              "data_format": "ascii",
+              "kind": "zip",
+              "period": "201202",
+              "symbol": "EURUSD",
+              "timeframe": "T"
+            },
+            "target_kind": "zip"
+          }
+        ],
+        "included_event_count": 1,
+        "limit_metadata": {
+          "events": {
+            "default_limit": 128,
+            "effective_limit": 128,
+            "included_count": 1,
+            "limit": 128,
+            "maximum_limit": 128,
+            "minimum_limit": 0,
+            "omitted_count": 0,
+            "requested_limit": null,
+            "total_count": 1,
+            "truncated": false,
+            "unbounded": false
+          },
+          "reasons": {
+            "default_limit": 64,
+            "effective_limit": 64,
+            "included_count": 1,
+            "limit": 64,
+            "maximum_limit": 64,
+            "minimum_limit": 0,
+            "omitted_count": 0,
+            "requested_limit": null,
+            "total_count": 1,
+            "truncated": false,
+            "unbounded": false
+          },
+          "rules": {
+            "default_limit": 64,
+            "effective_limit": 64,
+            "included_count": 1,
+            "limit": 64,
+            "maximum_limit": 64,
+            "minimum_limit": 0,
+            "omitted_count": 0,
+            "requested_limit": null,
+            "total_count": 1,
+            "truncated": false,
+            "unbounded": false
+          },
+          "target_kinds": {
+            "default_limit": 64,
+            "effective_limit": 64,
+            "included_count": 1,
+            "limit": 64,
+            "maximum_limit": 64,
+            "minimum_limit": 0,
+            "omitted_count": 0,
+            "requested_limit": null,
+            "total_count": 1,
+            "truncated": false,
+            "unbounded": false
+          }
+        },
+        "omitted_event_count": 0,
+        "reason_counts": {
+          "duplicate_archive_preferred_csv": 1
+        },
+        "rule_id_counts": {
+          "time.ascii.gaps": 1
+        },
+        "schema_version": "histdatacom.quality-skip-events.v1",
+        "target_kind_counts": {
+          "zip": 1
+        },
+        "truncated": false
+      },
+      "skipped_duplicate_archive_rule_evaluation_count": 1,
+      "skipped_rule_evaluation_count": 1,
+      "target_count": 2,
+      "target_rule_evaluation_count": 1
+    }
+  },
+  "rule_results": [
+    {
+      "findings": [],
+      "max_severity": "info",
+      "rule_id": "time.ascii.gaps",
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {},
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "T"
+      }
+    }
+  ],
+  "schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 0,
+    "finding_count": 0,
+    "info_count": 0,
+    "max_severity": "info",
+    "rule_count": 1,
+    "status": "clean",
+    "target_count": 2,
+    "warning_count": 0
+  },
+  "target_summaries": [
+    {
+      "error_count": 0,
+      "finding_count": 0,
+      "info_count": 0,
+      "max_severity": "info",
+      "rule_count": 0,
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "zip",
+        "metadata": {},
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.zip",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "T"
+      },
+      "warning_count": 0
+    },
+    {
+      "error_count": 0,
+      "finding_count": 0,
+      "info_count": 0,
+      "max_severity": "info",
+      "rule_count": 1,
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {},
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "T"
+      },
+      "warning_count": 0
+    }
+  ],
+  "targets": [
+    {
+      "data_format": "ascii",
+      "kind": "zip",
+      "metadata": {},
+      "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.zip",
+      "period": "201202",
+      "symbol": "EURUSD",
+      "timeframe": "T"
+    },
+    {
+      "data_format": "ascii",
+      "kind": "csv",
+      "metadata": {},
+      "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
+      "period": "201202",
+      "symbol": "EURUSD",
+      "timeframe": "T"
+    }
+  ]
+}

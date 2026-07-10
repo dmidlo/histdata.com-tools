@@ -28,6 +28,33 @@ fields, finding fields, bounded runtime payload keys, or artifact metadata
 fields. A schema-version change is also required when severity or status values
 change meaning.
 
+## Intentional Rule Skips
+
+Reports with intentionally skipped target-rule evaluations include optional
+`metadata.quality_engine` metadata using
+`histdatacom.quality-engine.v1`. Its planned, executed, and skipped target-rule
+counts satisfy:
+
+```text
+planned_target_rule_evaluation_count
+  = target_rule_evaluation_count + skipped_rule_evaluation_count
+```
+
+`quality_engine.skip_events` uses
+`histdatacom.quality-skip-events.v1`. Each event contains a stable reason code,
+rule ID, target kind, and publish-safe data format, timeframe, symbol, and
+period axis. Events never contain absolute paths or row samples. The event list
+is deterministically limited to 128 entries; reason, rule, and target-kind
+count maps are limited to 64 entries and expose complete truncation accounting
+under `limit_metadata`.
+
+The legacy
+`quality_engine.skipped_duplicate_archive_rule_evaluation_count` remains
+available. Full report consumers can use the structured events from report
+metadata, and bounded runtime consumers receive the same contract at the
+top-level `quality_engine` key. Reports without intentional rule skips do not
+add `quality_engine`, preserving the prior optional-metadata behavior.
+
 ## Golden Fixtures
 
 Representative payload fixtures live under
@@ -41,6 +68,8 @@ The golden suite covers:
 - corrupt ZIP detailed report;
 - coverage-manifest failure detailed report;
 - canonical cache target detailed report;
+- duplicate ZIP/CSV quality-engine skip detailed report;
+- bounded runtime payload with structured quality-engine skips;
 - run-scoped finding detailed report;
 - bounded runtime payload with quality-report artifact metadata.
 

@@ -61,6 +61,7 @@ from tests.fixtures.histdata_ascii.quality_cases import (
     CLEAN_TICK_CASE,
     write_ascii_case,
     write_corrupt_zip,
+    write_zip_case,
 )
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
@@ -1195,6 +1196,49 @@ def test_data_quality_activity_writes_report_and_bounded_metrics(
     assert detailed_report["metadata"]["quality_profile"]["name"] == (
         "activity-profile"
     )
+
+
+def test_data_quality_activity_projects_structured_skip_events(
+    tmp_path: Path,
+) -> None:
+    """Activity metrics and detailed reports should agree on engine skips."""
+    write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    write_zip_case(
+        tmp_path,
+        CLEAN_TICK_CASE,
+        zip_filename="DAT_ASCII_EURUSD_T_201202.zip",
+    )
+    report_path = tmp_path / "reports" / "quality-skips.json"
+    request = RunRequest(
+        request_id="run-quality-skips",
+        data_directory=str(tmp_path),
+        data_quality=True,
+        quality_paths=(str(tmp_path),),
+        quality_check_groups=("time",),
+        quality_report_path=str(report_path),
+        quality_fail_on="never",
+    )
+
+    payload = data_quality_activity({"request": request.to_dict()})
+
+    quality = payload["result"]["metrics"]["quality"]
+    engine = quality["quality_engine"]
+    skips = engine["skip_events"]
+    detailed_report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert payload["result"]["status"] == WorkStatus.COMPLETED.value
+    assert engine == detailed_report["metadata"]["quality_engine"]
+    assert engine["planned_target_rule_evaluation_count"] == (
+        engine["target_rule_evaluation_count"]
+        + engine["skipped_rule_evaluation_count"]
+    )
+    assert skips["event_count"] == engine["skipped_rule_evaluation_count"]
+    assert skips["event_count"] > 0
+    assert skips["reason_counts"] == {
+        "duplicate_archive_preferred_csv": skips["event_count"]
+    }
+    assert {event["target_kind"] for event in skips["events"]} == {"zip"}
+    assert str(tmp_path) not in json.dumps(engine, sort_keys=True)
 
 
 def test_data_quality_activity_deletes_default_scratch_report_on_success(

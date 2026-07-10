@@ -19,6 +19,7 @@ from histdatacom.data_quality.contracts import (
     QualityStatus,
     QualityTargetSummary,
 )
+from histdatacom.data_quality.engine import QUALITY_ENGINE_METADATA_KEY
 from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_COVERAGE_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY,
@@ -432,6 +433,9 @@ def format_quality_console_summary(
     if summary.target_count == 0:
         lines.append("No data quality targets discovered.")
     lines.extend(
+        format_quality_engine_skip_lines(_quality_engine_summary(report))
+    )
+    lines.extend(
         format_quality_next_action_lines(quality_next_actions_summary(report))
     )
     lines.extend(
@@ -552,6 +556,7 @@ def bounded_quality_payload(
     remediation_catalog_audit = quality_remediation_catalog_audit_summary(
         report
     )
+    quality_engine = _quality_engine_summary(report)
     payload_limits: dict[str, JSONValue] = {
         "discovery_targets": _payload_limit_metadata(
             _sequence_count(discovery.get("targets")),
@@ -630,6 +635,8 @@ def bounded_quality_payload(
                 remediation_catalog_audit
             )
         )
+    if quality_engine is not None:
+        payload[QUALITY_ENGINE_METADATA_KEY] = quality_engine
     if not publish_safe:
         return payload
     return _publish_safe_mapping(payload)
@@ -1209,6 +1216,40 @@ def format_quality_remediation_coverage_lines(
     ]
     for group in groups:
         lines.append(f"- {_format_quality_remediation_coverage_group(group)}")
+    return lines
+
+
+def format_quality_engine_skip_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise reconciliation lines for skipped rule evaluations."""
+    if not summary:
+        return []
+    skipped = _int_metadata(summary, "skipped_rule_evaluation_count")
+    skip_events = _mapping_payload(summary.get("skip_events"))
+    if not skipped or not skip_events:
+        return []
+    lines = [
+        "",
+        "Quality engine skips",
+        (
+            "- evaluations: "
+            f"planned={_int_metadata(summary, 'planned_target_rule_evaluation_count')} "
+            f"executed={_int_metadata(summary, 'target_rule_evaluation_count')} "
+            f"skipped={skipped}"
+        ),
+        (
+            "- events: "
+            f"included={_int_metadata(skip_events, 'included_event_count')} "
+            f"omitted={_int_metadata(skip_events, 'omitted_event_count')}"
+        ),
+    ]
+    reason_counts = _format_count_metadata(skip_events.get("reason_counts"))
+    if reason_counts:
+        lines.append(f"- reasons: {reason_counts}")
+    rule_id_counts = _format_count_metadata(skip_events.get("rule_id_counts"))
+    if rule_id_counts:
+        lines.append(f"- rules: {rule_id_counts}")
     return lines
 
 
@@ -1885,6 +1926,15 @@ def _fingerprint_coverage_summary(
         return dict(summary)
     return _optional_mapping_payload(
         series_fingerprint_coverage_summary(report.findings)
+    )
+
+
+def _quality_engine_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return structured quality-engine metadata when evaluations were skipped."""
+    return _optional_mapping_payload(
+        report.metadata.get(QUALITY_ENGINE_METADATA_KEY)
     )
 
 

@@ -15,6 +15,10 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
     QualityTargetKind,
 )
+from histdatacom.data_quality.engine import (
+    QUALITY_ENGINE_METADATA_KEY,
+    run_quality_assessment,
+)
 from histdatacom.data_quality.fingerprints import (
     SERIES_FINGERPRINT_RULE_ID,
 )
@@ -132,6 +136,15 @@ _SEQUENCE_CONTRACTS: tuple[_BoundedSequenceContract, ...] = (
             "ranked_gaps",
             "truncated",
         ),
+    ),
+    _BoundedSequenceContract(
+        "quality_engine_skip_events",
+        ("quality_engine", "skip_events", "limit_metadata", "events"),
+        ("quality_engine", "skip_events", "events"),
+        ("quality_engine", "skip_events", "event_count"),
+        ("quality_engine", "skip_events", "included_event_count"),
+        ("quality_engine", "skip_events", "omitted_event_count"),
+        ("quality_engine", "skip_events", "truncated"),
     ),
     _BoundedSequenceContract(
         "fingerprint_distribution",
@@ -710,6 +723,15 @@ def _iter_limit_payloads(
     return tuple(results)
 
 
+class _RepresentativeQualitySkipRule:
+    rule_id = "time.ascii.gaps"
+    description = "semantic scans prefer extracted CSVs"
+
+    def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
+        del target
+        return ()
+
+
 def _representative_quality_report() -> QualityReport:
     valid_tick = _target(
         "data/EURUSD-T-valid.csv", symbol="EURUSD", timeframe="T"
@@ -734,6 +756,14 @@ def _representative_quality_report() -> QualityReport:
         kind=QualityTargetKind.DIRECTORY,
         data_format="ascii",
         timeframe="T",
+    )
+    duplicate_archive = QualityTarget(
+        path="data/EURUSD-T-valid.zip",
+        kind=QualityTargetKind.ZIP,
+        data_format=valid_tick.data_format,
+        timeframe=valid_tick.timeframe,
+        symbol=valid_tick.symbol,
+        period=valid_tick.period,
     )
 
     fingerprint_findings = (
@@ -788,6 +818,7 @@ def _representative_quality_report() -> QualityReport:
         },
     )
     targets = (
+        duplicate_archive,
         valid_tick,
         limited_tick,
         tick,
@@ -796,9 +827,15 @@ def _representative_quality_report() -> QualityReport:
         negative_spread,
         directory,
     )
+    skip_report = run_quality_assessment(
+        targets=targets,
+        rules=(_RepresentativeQualitySkipRule(),),
+    )
+    quality_engine = skip_report.metadata[QUALITY_ENGINE_METADATA_KEY]
     return QualityReport(
         targets=targets,
         rule_results=(
+            *skip_report.rule_results,
             *(
                 QualityRuleResult(
                     rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -829,11 +866,12 @@ def _representative_quality_report() -> QualityReport:
             ),
         ),
         metadata={
+            QUALITY_ENGINE_METADATA_KEY: quality_engine,
             QUALITY_REPORTING_METADATA_KEY: {
                 QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY: {
                     "enabled": True,
                 }
-            }
+            },
         },
     )
 

@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 
 from histdatacom.data_quality import (
+    QUALITY_ENGINE_METADATA_KEY,
+    QUALITY_ENGINE_SCHEMA_VERSION,
     QUALITY_NEXT_ACTIONS_METADATA_KEY,
     QUALITY_NEXT_ACTIONS_SCHEMA_VERSION,
     QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY,
@@ -13,6 +15,8 @@ from histdatacom.data_quality import (
     QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION,
     QUALITY_REPORTING_METADATA_KEY,
     QUALITY_REPORT_SCHEMA_VERSION,
+    QUALITY_SKIP_EVENTS_SCHEMA_VERSION,
+    QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
@@ -44,6 +48,7 @@ from histdatacom.data_quality import (
     quality_remediation_coverage_summary,
     quality_report_payload,
     quality_report_to_json,
+    run_quality_assessment,
     series_fingerprint_readiness_summary,
     series_fingerprint_readiness_risk_summary,
     series_fingerprint_regime_summary,
@@ -110,6 +115,33 @@ def test_quality_report_payload_can_preserve_raw_local_paths(
     payload = quality_report_payload(report, publish_safe=False)
 
     assert payload["targets"][0]["path"] == str(tmp_path / "clean.csv")
+
+
+def test_quality_report_payload_exposes_publish_safe_skip_events(
+    tmp_path: Path,
+) -> None:
+    """Full report consumers should receive structured path-free skips."""
+    report = _quality_engine_skip_report(tmp_path)
+    payload = quality_report_payload(report)
+    metadata = payload["metadata"]
+    assert isinstance(metadata, dict)
+    engine = metadata[QUALITY_ENGINE_METADATA_KEY]
+    assert isinstance(engine, dict)
+    skips = engine["skip_events"]
+    assert isinstance(skips, dict)
+
+    assert engine["schema_version"] == QUALITY_ENGINE_SCHEMA_VERSION
+    assert engine["planned_target_rule_evaluation_count"] == 2
+    assert engine["target_rule_evaluation_count"] == 1
+    assert engine["skipped_rule_evaluation_count"] == 1
+    assert skips["schema_version"] == QUALITY_SKIP_EVENTS_SCHEMA_VERSION
+    assert skips["reason_counts"] == {
+        QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV: 1
+    }
+    assert skips["rule_id_counts"] == {"time.ascii.gaps": 1}
+    encoded = json.dumps(payload, sort_keys=True)
+    assert str(tmp_path) not in encoded
+    assert "/Users/" not in encoded
 
 
 def test_publish_safe_json_value_sanitizes_nested_path_metadata() -> None:
@@ -294,6 +326,22 @@ def test_quality_console_summary_separates_target_statuses(
     assert "Clean files\n- csv:" in output
     assert "Warning files\n- csv:" in output
     assert "Failed files\n- csv:" in output
+
+
+def test_quality_console_summary_reconciles_skipped_evaluations(
+    tmp_path: Path,
+) -> None:
+    """Human output should explain intentional engine-level rule skips."""
+    output = format_quality_console_summary(
+        _quality_engine_skip_report(tmp_path),
+        check_groups=("time",),
+    )
+
+    assert "Quality engine skips" in output
+    assert "- evaluations: planned=2 executed=1 skipped=1" in output
+    assert "- events: included=1 omitted=0" in output
+    assert "- reasons: duplicate_archive_preferred_csv=1" in output
+    assert "- rules: time.ascii.gaps=1" in output
 
 
 def test_quality_report_payload_adds_fingerprint_coverage_metadata(
@@ -1241,6 +1289,38 @@ def test_bounded_quality_payload_includes_fingerprint_coverage(
     }
 
 
+def test_bounded_quality_payload_includes_structured_skip_events(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration consumers should reconcile engine skips."""
+    report = _quality_engine_skip_report(tmp_path)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("time",),
+        discovery={"roots": [str(tmp_path)], "target_count": 2},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+    engine = payload[QUALITY_ENGINE_METADATA_KEY]
+    assert isinstance(engine, dict)
+    skips = engine["skip_events"]
+    assert isinstance(skips, dict)
+
+    assert engine["planned_target_rule_evaluation_count"] == 2
+    assert engine["target_rule_evaluation_count"] == 1
+    assert engine["skipped_rule_evaluation_count"] == 1
+    assert skips["event_count"] == 1
+    assert skips["events"][0]["target_axis"] == {
+        "data_format": "ascii",
+        "timeframe": "T",
+        "symbol": "EURUSD",
+        "period": "201202",
+        "kind": "zip",
+    }
+    assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
+
+
 def test_bounded_quality_payload_includes_fingerprint_distribution(
     tmp_path: Path,
 ) -> None:
@@ -1808,6 +1888,38 @@ def test_quality_exit_policy_applies_error_warning_and_never_modes(
         .evaluate(summary)
         .exit_code
         == 0
+    )
+
+
+class _QualityEngineSkipRule:
+    rule_id = "time.ascii.gaps"
+    description = "semantic scans prefer extracted CSVs"
+
+    def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
+        del target
+        return ()
+
+
+def _quality_engine_skip_report(tmp_path: Path) -> QualityReport:
+    archive = QualityTarget(
+        path=str(tmp_path / "DAT_ASCII_EURUSD_T_201202.zip"),
+        kind=QualityTargetKind.ZIP,
+        data_format="ascii",
+        timeframe="T",
+        symbol="EURUSD",
+        period="201202",
+    )
+    csv = QualityTarget(
+        path=str(tmp_path / "DAT_ASCII_EURUSD_T_201202.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="T",
+        symbol="EURUSD",
+        period="201202",
+    )
+    return run_quality_assessment(
+        targets=(archive, csv),
+        rules=(_QualityEngineSkipRule(),),
     )
 
 

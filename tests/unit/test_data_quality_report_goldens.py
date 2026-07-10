@@ -11,11 +11,15 @@ from typing import Any
 import pytest
 
 from histdatacom.data_quality import (
+    QUALITY_ENGINE_METADATA_KEY,
+    QUALITY_ENGINE_SCHEMA_VERSION,
     QUALITY_NEXT_ACTIONS_METADATA_KEY,
     QUALITY_NEXT_ACTIONS_SCHEMA_VERSION,
     QUALITY_REMEDIATION_COVERAGE_METADATA_KEY,
     QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION,
     QUALITY_REPORT_SCHEMA_VERSION,
+    QUALITY_SKIP_EVENTS_SCHEMA_VERSION,
+    QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV,
     QualityExitPolicy,
     QualityFinding,
     QualityLocation,
@@ -47,6 +51,7 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
     bounded_quality_payload,
     quality_report_payload,
+    run_quality_assessment,
 )
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 
@@ -68,6 +73,16 @@ GOLDEN_CASES: tuple[tuple[str, str, str], ...] = (
         "_coverage_manifest_failure_report_payload",
     ),
     ("cache_target_report", "report", "_cache_target_report_payload"),
+    (
+        "quality_engine_skip_report",
+        "report",
+        "_quality_engine_skip_report_payload",
+    ),
+    (
+        "quality_engine_skip_bounded_payload",
+        "bounded",
+        "_quality_engine_skip_bounded_payload",
+    ),
     ("fingerprint_report", "report", "_fingerprint_report_payload"),
     (
         "fingerprint_bounded_payload",
@@ -355,6 +370,69 @@ def _cache_target_report_payload() -> dict[str, JSONValue]:
                 "check_groups": ["ingestion"],
             },
         )
+    )
+
+
+class _GoldenQualityEngineSkipRule:
+    rule_id = "time.ascii.gaps"
+    description = "semantic scans prefer extracted CSVs"
+
+    def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
+        del target
+        return ()
+
+
+def _quality_engine_skip_report() -> QualityReport:
+    archive = _target(
+        path="/quality-fixtures/DAT_ASCII_EURUSD_T_201202.zip",
+        kind=QualityTargetKind.ZIP,
+    )
+    csv = _target(
+        path="/quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
+        kind=QualityTargetKind.CSV,
+    )
+    return run_quality_assessment(
+        targets=(archive, csv),
+        rules=(_GoldenQualityEngineSkipRule(),),
+        metadata={
+            "operation": "data-quality",
+            "check_groups": ["time"],
+        },
+    )
+
+
+def _quality_engine_skip_report_payload() -> dict[str, JSONValue]:
+    return quality_report_payload(_quality_engine_skip_report())
+
+
+def _quality_engine_skip_bounded_payload() -> dict[str, JSONValue]:
+    report = _quality_engine_skip_report()
+    artifact = ArtifactRef(
+        kind="quality-report",
+        path=("/quality-fixtures/reports/quality-engine-skip-report.json"),
+        size_bytes=2048,
+        sha256="2" * 64,
+        metadata={
+            "schema_version": QUALITY_REPORT_SCHEMA_VERSION,
+            "status": report.status.value,
+            "max_severity": report.max_severity.value,
+            "target_count": report.summary().target_count,
+            "finding_count": report.summary().finding_count,
+            "warning_count": report.summary().warning_count,
+            "error_count": report.summary().error_count,
+        },
+    )
+    return bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("time",),
+        discovery={
+            "roots": ["/quality-fixtures"],
+            "target_count": 2,
+            "metadata": {"supported_kinds": ["zip", "csv", "cache"]},
+        },
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=artifact,
     )
 
 
@@ -778,6 +856,8 @@ def _assert_report_contract(payload: dict[str, JSONValue]) -> None:
         _assert_quality_remediation_coverage(
             _mapping(metadata[QUALITY_REMEDIATION_COVERAGE_METADATA_KEY])
         )
+    if QUALITY_ENGINE_METADATA_KEY in metadata:
+        _assert_quality_engine(_mapping(metadata[QUALITY_ENGINE_METADATA_KEY]))
     summary = _mapping(payload["summary"])
     _assert_summary(summary)
 
@@ -821,6 +901,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "fingerprint_topology",
         "fingerprint_topology_attention",
         "next_actions",
+        "quality_engine",
         "remediation_coverage",
     }
     assert expected_keys <= set(payload)
@@ -865,6 +946,8 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         _assert_quality_remediation_coverage(
             _mapping(payload["remediation_coverage"])
         )
+    if QUALITY_ENGINE_METADATA_KEY in payload:
+        _assert_quality_engine(_mapping(payload[QUALITY_ENGINE_METADATA_KEY]))
 
     for target_summary in _list(payload["target_summaries"]):
         _assert_target_summary(_mapping(target_summary))
@@ -885,6 +968,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     assert artifact["kind"] == "quality-report"
     assert artifact["path"] in {
         "quality-fixtures/reports/fingerprint-report.json",
+        "quality-fixtures/reports/quality-engine-skip-report.json",
         "quality-fixtures/reports/run-scoped-report.json",
     }
     assert len(str(artifact["sha256"])) == 64
@@ -896,6 +980,104 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     assert set(decision) == {"exit_code", "policy", "reason"}
     policy = _mapping(decision["policy"])
     assert set(policy) == {"fail_on", "max_errors", "max_warnings"}
+
+
+def _assert_quality_engine(payload: dict[str, JSONValue]) -> None:
+    assert set(payload) == {
+        "duplicate_archive_scan_policy",
+        "planned_target_rule_evaluation_count",
+        "rule_count",
+        "run_rule_count",
+        "schema_version",
+        "skip_events",
+        "skipped_duplicate_archive_rule_evaluation_count",
+        "skipped_rule_evaluation_count",
+        "target_count",
+        "target_rule_evaluation_count",
+    }
+    assert payload["schema_version"] == QUALITY_ENGINE_SCHEMA_VERSION
+    for key in (
+        "planned_target_rule_evaluation_count",
+        "rule_count",
+        "run_rule_count",
+        "skipped_duplicate_archive_rule_evaluation_count",
+        "skipped_rule_evaluation_count",
+        "target_count",
+        "target_rule_evaluation_count",
+    ):
+        assert isinstance(payload[key], int)
+        assert payload[key] >= 0
+    assert payload["planned_target_rule_evaluation_count"] == (
+        payload["target_rule_evaluation_count"]
+        + payload["skipped_rule_evaluation_count"]
+    )
+    assert payload["duplicate_archive_scan_policy"] == (
+        "prefer_extracted_csv_for_non_inventory_rules"
+    )
+
+    skips = _mapping(payload["skip_events"])
+    assert set(skips) == {
+        "event_count",
+        "events",
+        "included_event_count",
+        "limit_metadata",
+        "omitted_event_count",
+        "reason_counts",
+        "rule_id_counts",
+        "schema_version",
+        "target_kind_counts",
+        "truncated",
+    }
+    assert skips["schema_version"] == QUALITY_SKIP_EVENTS_SCHEMA_VERSION
+    for key in ("event_count", "included_event_count", "omitted_event_count"):
+        assert isinstance(skips[key], int)
+        assert skips[key] >= 0
+    assert skips["event_count"] == payload["skipped_rule_evaluation_count"]
+    assert skips["included_event_count"] + skips["omitted_event_count"] == (
+        skips["event_count"]
+    )
+    assert skips["truncated"] is (skips["omitted_event_count"] > 0)
+    _assert_limit_metadata_map(
+        skips["limit_metadata"],
+        keys=("events", "reasons", "rules", "target_kinds"),
+    )
+    for count_key in ("reason_counts", "rule_id_counts", "target_kind_counts"):
+        counts = _mapping(skips[count_key])
+        for name, count in counts.items():
+            assert name
+            assert isinstance(count, int)
+            assert count > 0
+    assert (
+        _mapping(skips["reason_counts"])[
+            QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV
+        ]
+        == payload["skipped_duplicate_archive_rule_evaluation_count"]
+    )
+
+    events = _list(skips["events"])
+    assert len(events) == skips["included_event_count"]
+    for event_value in events:
+        event = _mapping(event_value)
+        assert set(event) == {
+            "reason_code",
+            "rule_id",
+            "target_axis",
+            "target_kind",
+        }
+        assert isinstance(event["reason_code"], str)
+        assert event["reason_code"]
+        assert isinstance(event["rule_id"], str)
+        assert event["rule_id"]
+        assert event["target_kind"] in TARGET_KIND_VALUES
+        axis = _mapping(event["target_axis"])
+        assert set(axis) == {
+            "data_format",
+            "kind",
+            "period",
+            "symbol",
+            "timeframe",
+        }
+        assert axis["kind"] == event["target_kind"]
 
 
 def _assert_fingerprint_coverage(payload: dict[str, JSONValue]) -> None:

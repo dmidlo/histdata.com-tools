@@ -132,6 +132,7 @@ def _orchestration_quality_result(
     error: str = "",
     check_groups: list[str] | None = None,
     next_actions: dict[str, object] | None = None,
+    quality_engine: dict[str, object] | None = None,
     remediation_coverage: dict[str, object] | None = None,
     fingerprint_distribution: dict[str, object] | None = None,
     fingerprint_distribution_attention: dict[str, object] | None = None,
@@ -208,6 +209,8 @@ def _orchestration_quality_result(
     }
     if next_actions is not None:
         quality["next_actions"] = next_actions
+    if quality_engine is not None:
+        quality["quality_engine"] = quality_engine
     if remediation_coverage is not None:
         quality["remediation_coverage"] = remediation_coverage
     if fingerprint_distribution is not None:
@@ -873,6 +876,63 @@ def test_data_quality_cli_submits_quality_request_to_orchestration(
     }
     assert "Data quality assessment" in output
     assert f"targets: {expected_count}" in output
+
+
+def test_data_quality_cli_renders_quality_engine_skips(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Quality CLI should reconcile skips from bounded engine metadata."""
+    import histdatacom.histdata_com as histdata_com
+
+    target = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+
+    def fake_submit(request, **kwargs: object) -> JobResult:
+        return _orchestration_quality_result(
+            target_count=2,
+            check_groups=["time"],
+            quality_engine={
+                "planned_target_rule_evaluation_count": 2,
+                "target_rule_evaluation_count": 1,
+                "skipped_rule_evaluation_count": 1,
+                "skip_events": {
+                    "included_event_count": 1,
+                    "omitted_event_count": 0,
+                    "reason_counts": {
+                        "duplicate_archive_preferred_csv": 1,
+                    },
+                    "rule_id_counts": {"time.ascii.gaps": 1},
+                },
+            },
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-checks",
+            "time",
+            "--quality-target",
+            str(target),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert "Quality engine skips" in output
+    assert "- evaluations: planned=2 executed=1 skipped=1" in output
+    assert "- events: included=1 omitted=0" in output
+    assert "- reasons: duplicate_archive_preferred_csv=1" in output
+    assert "- rules: time.ascii.gaps=1" in output
 
 
 def test_data_quality_cli_renders_fingerprint_topology_summary(
