@@ -591,10 +591,10 @@ def test_quality_preflight_imports_validation_report_status(
     assert str(tmp_path) not in markdown
 
 
-def test_quality_preflight_imports_final_coverage_receipt_as_full_pytest(
+def test_quality_preflight_imports_full_plain_pytest_result(
     tmp_path: Path,
 ) -> None:
-    """The authoritative final-coverage gate should satisfy full pytest."""
+    """The release-independent closure gate should satisfy full pytest."""
     data_dir = tmp_path / "data"
     _write_tick_cache(data_dir, symbol="eurusd", row_multiplier=1)
     validation_path = _write_validation_report(
@@ -602,13 +602,13 @@ def test_quality_preflight_imports_final_coverage_receipt_as_full_pytest(
         generated_at_utc="2026-07-10T12:00:00Z",
         results=[
             {
-                "name": "final-coverage",
-                "command": "python scripts/run_final_coverage.py --ensure",
+                "name": "full-tests",
+                "command": "python -m pytest",
                 "status": "pass",
                 "returncode": 0,
                 "duration_seconds": 0.04,
-                "stdout_tail": "Final coverage reused: receipt-key",
-                "log_path": str(tmp_path / "logs" / "coverage.log"),
+                "stdout_tail": "1370 passed",
+                "log_path": str(tmp_path / "logs" / "pytest.log"),
             }
         ],
     )
@@ -628,12 +628,10 @@ def test_quality_preflight_imports_final_coverage_receipt_as_full_pytest(
     }
 
     assert rows["full-pytest"]["status"] == "pass"
-    assert rows["full-pytest"]["command"] == (
-        "python scripts/run_final_coverage.py --ensure"
-    )
+    assert rows["full-pytest"]["command"] == "python -m pytest"
     assert rows["full-pytest"]["duration_seconds"] == 0.04
-    assert rows["full-pytest"]["output_artifact_path"] == "coverage.log"
-    assert "Final coverage reused" in str(rows["full-pytest"]["summary"])
+    assert rows["full-pytest"]["output_artifact_path"] == "pytest.log"
+    assert "1370 passed" in str(rows["full-pytest"]["summary"])
     assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
 
 

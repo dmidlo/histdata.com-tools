@@ -48,8 +48,8 @@ def test_run_dev_tool_remove_is_cross_platform(tmp_path: Path) -> None:
     assert not artifact.exists()
 
 
-def test_local_pre_commit_hooks_use_dev_tool_launcher() -> None:
-    """Coverage should be one final pre-push hook after branch checks."""
+def test_local_pre_commit_hooks_do_not_run_coverage() -> None:
+    """Routine commits and pushes must not start coverage."""
     config = yaml.safe_load((REPO_ROOT / ".pre-commit-config.yaml").read_text())
     ordered_hooks = [
         hook for repo in config["repos"] for hook in repo.get("hooks", [])
@@ -65,19 +65,38 @@ def test_local_pre_commit_hooks_use_dev_tool_launcher() -> None:
         "coverage-report",
         "coverage-rm",
     }.intersection(hooks)
-    coverage = hooks["coverage-final"]
-    assert coverage["entry"] == "scripts/run_dev_tool.py python"
-    assert coverage["args"] == [
-        "scripts/run_final_coverage.py",
-        "--ensure",
-    ]
-    assert coverage["pass_filenames"] is False
-    assert coverage["always_run"] is True
-    assert coverage["stages"] == ["pre-push"]
     hook_ids = [hook["id"] for hook in ordered_hooks]
-    assert hook_ids.count("coverage-final") == 1
-    assert hook_ids.index("commitizen-branch") < hook_ids.index(
-        "coverage-final"
+    assert not any("coverage" in hook_id for hook_id in hook_ids)
+
+
+def test_coverage_runs_only_for_dev_to_main_promotion() -> None:
+    """CI should instrument tests only at the production promotion boundary."""
+    config = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    )
+    jobs = config["jobs"]
+    production = jobs["production-coverage"]
+
+    assert production["name"] == "Production coverage"
+    assert production["if"] == (
+        "github.event_name == 'pull_request' && "
+        "github.base_ref == 'main' && github.head_ref == 'dev'"
+    )
+
+    coverage_steps = []
+    for job_name, job in jobs.items():
+        for step in job.get("steps", []):
+            command = str(step.get("run", ""))
+            if "--cov=" in command or "coverage report" in command:
+                coverage_steps.append((job_name, command))
+
+    assert [job_name for job_name, _ in coverage_steps] == [
+        "production-coverage",
+        "production-coverage",
+    ]
+    assert all(
+        "--cov=" not in str(step.get("run", ""))
+        for step in jobs["test"]["steps"]
     )
 
 

@@ -1,5 +1,11 @@
 ## Unreleased
 
+### Fixed
+
+- **ci**: reserve coverage for one required `dev`-to-`main` production
+  promotion job instead of running it during routine pushes, issue closure,
+  and every Python/OS test-matrix job (#420).
+
 ## 1.3.2 (2026-07-03)
 
 ### Added

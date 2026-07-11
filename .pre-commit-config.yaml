@@ -94,14 +94,3 @@ repos:
     - id: commitizen
     - id: commitizen-branch
       stages: [pre-push]
-- repo: local
-  hooks:
-    - id: coverage-final
-      name: coverage-final
-      entry: scripts/run_dev_tool.py python
-      language: system
-      args: ["scripts/run_final_coverage.py", "--ensure"]
-      pass_filenames: false
-      always_run: true
-      verbose: true
-      stages: [pre-push]

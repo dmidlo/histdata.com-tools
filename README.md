@@ -913,8 +913,8 @@ run repository gates. For release notes or GitHub issue evidence, pass
 closure/readiness JSON report. Use
 `--quality-preflight-validation-report latest` to resolve the newest compatible
 JSON report under `.histdatacom/closure-readiness` without running gates. The
-single authoritative `final-coverage` receipt is recognized as full-pytest
-evidence; importing it never starts coverage again. Pass
+closure report's release-independent `full-tests` result is recognized as
+full-pytest evidence; importing it never starts tests or coverage. Pass
 `--quality-preflight-run-validation` to run only the bounded local validation
 bundle: focused quality-preflight tests, the README help-sync check, and
 `git diff --check`. It does not run full pytest/coverage or pre-commit.
@@ -2357,7 +2357,7 @@ The `dev`, `lint`, `test`, and `release` extras pin direct developer tools
 where reproducibility matters. Runtime dependencies keep compatibility lower
 bounds rather than lock-file pins because `histdatacom` is a published PyPI
 library. The active lint baseline is Black, Ruff, mypy, generic file checks,
-Pyroma, ShellCheck, Commitizen, and the local CLI/coverage smoke hooks. The
+Pyroma, ShellCheck, Commitizen, and the local CLI smoke hook. The
 previous flake8 plugin stack was intentionally replaced with Ruff so local
 installs and hook behavior do not drift independently.
 
@@ -2408,10 +2408,15 @@ modules. Future test work should raise `fail_under` when the baseline improves;
 do not lower it unless a PR explains the production risk and links the follow-up
 issue.
 
-CI runs pytest through `pytest-cov`, enforces the `.coveragerc` threshold, and
-uploads `coverage.xml` plus the `htmlcov/` report for every Python and OS matrix
-leg. The first-pass gate is total-only. Per-package or domain thresholds belong
-with the broader testing work tracked in issues #9 and #68.
+Routine development and the Python/OS CI matrix run the full test suite without
+coverage. Coverage runs once, in the dedicated `Production coverage` job, only
+when a pull request promotes `dev` into `main`. That required production gate
+runs pytest through `pytest-cov`, enforces the `.coveragerc` threshold, and
+uploads one `coverage.xml` plus `htmlcov/` artifact. Ordinary commits, pushes,
+issue closure, non-production pull requests, workflow dispatches, and pushes to
+`main` do not execute coverage. The first-pass gate is total-only. Per-package
+or domain thresholds belong with the broader testing work tracked in issues #9
+and #68.
 
 The live Temporal runtime smoke is not collected by default pytest because it
 requires a real Temporal executable and starts local worker processes. Bundled

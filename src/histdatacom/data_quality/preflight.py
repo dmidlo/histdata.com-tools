@@ -2153,6 +2153,7 @@ def _validation_target_name(result: Mapping[str, JSONValue]) -> str:
     normalized_name = name.removeprefix("gate-")
     aliases = {
         "pytest": "full-pytest",
+        "full-tests": "full-pytest",
         "full-pytest": "full-pytest",
         "pre-commit": "full-pre-commit",
         "pre_commit": "full-pre-commit",
@@ -2160,7 +2161,6 @@ def _validation_target_name(result: Mapping[str, JSONValue]) -> str:
         "readme-help-sync": "readme-help-sync",
         "git-diff-check": "git-diff-check",
         "focused-quality-preflight-tests": "focused-quality-preflight-tests",
-        "final-coverage": "full-pytest",
     }
     if normalized_name in aliases:
         return aliases[normalized_name]
@@ -2177,8 +2177,6 @@ def _validation_target_name(result: Mapping[str, JSONValue]) -> str:
         return "full-pre-commit"
     if "sync-readme-cli-help.py" in command_key and "--check" in command_key:
         return "readme-help-sync"
-    if "run-final-coverage.py" in command_key:
-        return "full-pytest"
     if "git diff --check" in command_key:
         return "git-diff-check"
     return ""
