@@ -119,7 +119,17 @@ def test_remediation_catalog_audit_maps_inventory_archive_batch() -> None:
     assert payload["summary"]["unmapped_warning_error_gap_count"] == 1
     assert payload["known_unmapped_codes"] == [
         {
+            "attribution_reason": "provided_rule_id",
+            "attribution_reason_counts": {"provided_rule_id": 1},
+            "attribution_status": "exact",
+            "attribution_status_counts": {"exact": 1},
             "finding_code": "HISTDATA_FORMAT_UNSUPPORTED",
+            "finding_code_prefix_counts": [
+                {
+                    "count": 1,
+                    "finding_code_prefix": "HISTDATA_FORMAT",
+                },
+            ],
             "included_source_count": 1,
             "mapped": False,
             "max_severity": "error",
@@ -132,6 +142,7 @@ def test_remediation_catalog_audit_maps_inventory_archive_batch() -> None:
             "source_family_counts": [
                 {"count": 1, "source_family": "inventory"},
             ],
+            "source_helper_counts": [],
             "sources": [
                 {
                     "count": 1,
@@ -377,12 +388,184 @@ def source_error():
         "ticks.ascii.spread"
     )
     assert findings["ASCII_TICK_BID_ASK_INVALID"].rule_id == (
-        "ticks.unresolved"
+        "ticks.ascii.spread"
+    )
+    assert (
+        findings["ASCII_TICK_BID_ASK_INVALID"].attribution_reason
+        == "finding_code_prefix"
     )
     assert findings["ASCII_TICK_CACHE_SCHEMA_UNSUPPORTED"].rule_id == (
-        "ticks.unresolved"
+        "ticks.ascii.spread"
+    )
+    assert (
+        findings["ASCII_TICK_CACHE_SCHEMA_UNSUPPORTED"].attribution_reason
+        == "unique_module_rule"
     )
     assert {item.source_family for item in findings.values()} == {"ticks"}
+
+
+def test_discovery_infers_constructor_assignments_and_helper_callers(
+    tmp_path: Path,
+) -> None:
+    """Local rule objects and single-rule helper chains should be inferable."""
+    source = tmp_path / "custom.py"
+    source.write_text(
+        """
+CUSTOM_RULE_ID = "custom.rule"
+
+
+class CustomRule:
+    rule_id: str = CUSTOM_RULE_ID
+
+    def evaluate(self, target):
+        return source_error(target)
+
+
+def source_error(target):
+    return _finding(target, code="CUSTOM_SOURCE_UNREADABLE")
+
+
+def local_rule(target):
+    rule = CustomRule()
+    return _finding(
+        target,
+        code="CUSTOM_LOCAL_RULE",
+        rule_id=rule.rule_id,
+    )
+
+
+def typed_rule(target, rule: CustomRule):
+    return _finding(
+        target,
+        code="CUSTOM_TYPED_RULE",
+        rule_id=rule.rule_id,
+    )
+
+
+def default_rule(target, rule_id: str = CUSTOM_RULE_ID):
+    return _finding(
+        target,
+        code="CUSTOM_DEFAULT_RULE",
+        rule_id=rule_id,
+    )
+""",
+        encoding="utf-8",
+    )
+
+    findings = {
+        item.finding_code: item
+        for item in discover_known_quality_findings(tmp_path)
+    }
+
+    assert findings["CUSTOM_SOURCE_UNREADABLE"].rule_id == "custom.rule"
+    assert (
+        findings["CUSTOM_SOURCE_UNREADABLE"].attribution_reason
+        == "unique_helper_rule"
+    )
+    assert findings["CUSTOM_LOCAL_RULE"].rule_id == "custom.rule"
+    assert (
+        findings["CUSTOM_LOCAL_RULE"].attribution_reason == "local_rule_object"
+    )
+    assert findings["CUSTOM_TYPED_RULE"].rule_id == "custom.rule"
+    assert (
+        findings["CUSTOM_TYPED_RULE"].attribution_reason == "local_rule_object"
+    )
+    assert findings["CUSTOM_DEFAULT_RULE"].rule_id == "custom.rule"
+    assert (
+        findings["CUSTOM_DEFAULT_RULE"].attribution_reason
+        == "unique_helper_rule"
+    )
+
+
+def test_discovery_preserves_ambiguous_family_fallback_with_reason(
+    tmp_path: Path,
+) -> None:
+    """Helpers shared by multiple rules should remain explicitly unresolved."""
+    source = tmp_path / "ticks.py"
+    source.write_text(
+        """
+FIRST_RULE_ID = "ticks.first"
+SECOND_RULE_ID = "ticks.second"
+
+
+class FirstRule:
+    rule_id: str = FIRST_RULE_ID
+
+    def evaluate(self, target):
+        return shared_error(target)
+
+
+class SecondRule:
+    rule_id: str = SECOND_RULE_ID
+
+    def evaluate(self, target):
+        return shared_error(target)
+
+
+def shared_error(target):
+    return _finding(target, code="CUSTOM_SHARED_FAILURE")
+""",
+        encoding="utf-8",
+    )
+
+    finding = discover_known_quality_findings(tmp_path)[0]
+    payload = audit_remediation_catalog(known_findings=(finding,))
+    gap = payload["ranked_gaps"][0]
+
+    assert finding.rule_id == "ticks.unresolved"
+    assert finding.attribution_status == "unresolved"
+    assert finding.attribution_reason == "ambiguous_helper_rules"
+    assert gap["attribution_status"] == "unresolved"
+    assert gap["attribution_reason"] == "ambiguous_helper_rules"
+    assert gap["source_helper_counts"] == [
+        {"count": 1, "source_helper": "shared_error"},
+    ]
+    assert payload["summary"]["unresolved_attribution_occurrence_count"] == 1
+    assert payload["known_code_counts"][
+        "unresolved_finding_code_prefix_counts"
+    ] == [{"count": 1, "finding_code_prefix": "CUSTOM_SHARED_FAILURE"}]
+    for key in (
+        "attribution_reason_counts",
+        "unresolved_source_helper_counts",
+        "unresolved_finding_code_prefix_counts",
+    ):
+        _assert_count_limit_metadata(
+            payload["payload_limits"][key],
+            limit=16,
+            total_count=1,
+            included_count=1,
+            omitted_count=0,
+            truncated=False,
+            requested_limit=16,
+            default_limit=16,
+        )
+
+
+def test_current_top_gaps_have_specific_rule_attribution() -> None:
+    """Current high-priority families should not regress to broad rule IDs."""
+    findings = discover_known_quality_findings()
+    by_code = {item.finding_code: item for item in findings}
+
+    assert by_code["ASCII_TICK_SPREAD_CACHE_SCHEMA_UNSUPPORTED"].rule_id == (
+        "ticks.ascii.spread"
+    )
+    assert by_code["DOMAIN_CALENDAR_SOURCE_UNREADABLE"].rule_id == (
+        "domain.calendar_sessions"
+    )
+    assert by_code["PROVENANCE_CACHE_METADATA_MISMATCH"].rule_id == (
+        "provenance.manifest.lineage"
+    )
+    unresolved = [
+        item for item in findings if item.attribution_status == "unresolved"
+    ]
+    assert {item.source_family for item in unresolved} <= {
+        "ingestion",
+        "time",
+    }
+    assert all(
+        item.attribution_reason == "ambiguous_helper_rules"
+        for item in unresolved
+    )
 
 
 def test_remediation_catalog_audit_uses_report_coverage_and_sanitizes_paths(

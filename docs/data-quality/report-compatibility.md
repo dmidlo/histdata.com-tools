@@ -108,6 +108,16 @@ The golden suite covers:
 The fixtures intentionally use stable `quality-fixtures/...` paths instead of
 machine-local absolute paths.
 
+Remediation catalog audit payloads may add bounded attribution evidence while
+remaining compatible with `histdatacom.quality-remediation-catalog-audit.v1`.
+Current attribution fields include `attribution_status`,
+`attribution_reason`, status/reason counts, source-helper counts, and
+finding-code-prefix counts. Consumers must treat `exact`, `inferred`, and
+`unresolved` as advisory audit states; they do not replace `rule_id`, alter
+finding severity, or change quality exit decisions. Runtime-only report gaps
+use `runtime_report` because their rule ID comes from the saved report rather
+than static source discovery.
+
 ## Update Workflow
 
 Do not update golden fixtures as a side effect of routine test runs. When a

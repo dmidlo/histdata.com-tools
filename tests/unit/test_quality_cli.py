@@ -248,6 +248,7 @@ def test_quality_remediation_catalog_cli_reports_ranked_human_output(
     assert exit_code == 1
     assert "Ranked remediation gaps" in output
     assert "#1 warning CLI_GAP family=time" in output
+    assert "attribution=inferred(unique_helper_rule)" in output
     assert "report_occurrences=3" in output
 
 
@@ -769,6 +770,8 @@ def _catalog_payload(
                 "report_occurrence_count": 3,
                 "rule_id": "time.ascii.sequence",
                 "source_family": "time",
+                "attribution_status": "inferred",
+                "attribution_reason": "unique_helper_rule",
             }
         )
     return {
@@ -788,6 +791,9 @@ def _catalog_payload(
             "unmapped_known_code_count": 1 if gap_count else 0,
             "unmapped_warning_error_code_count": gap_count,
             "unmapped_warning_error_gap_count": gap_count,
+            "exact_attribution_occurrence_count": 0,
+            "inferred_attribution_occurrence_count": 1,
+            "unresolved_attribution_occurrence_count": 0,
         },
         "known_code_counts": {},
         "known_unmapped_codes": [],

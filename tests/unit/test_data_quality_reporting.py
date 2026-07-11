@@ -1125,6 +1125,9 @@ def test_quality_console_summary_renders_remediation_catalog_audit(
     assert audit is not None
     assert "Remediation catalog audit" in output
     assert "- observed report: reports=1 findings=2" in output
+    assert "- attribution: exact=" in output
+    assert " inferred=" in output
+    assert " unresolved=" in output
     assert "- observed error custom.report:CUSTOM_REPORT_ONLY_GAP" in output
     assert lines[0] == ""
     assert "CUSTOM_REPORT_ONLY_GAP" in "\n".join(lines)

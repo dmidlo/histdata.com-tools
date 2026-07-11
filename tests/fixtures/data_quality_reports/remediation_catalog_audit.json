@@ -1,5 +1,14 @@
 {
   "known_code_counts": {
+    "attribution_reason_counts": [
+      {
+        "attribution_reason": "provided_rule_id",
+        "count": 3
+      }
+    ],
+    "attribution_status_counts": {
+      "exact": 3
+    },
     "finding_code_counts": [
       {
         "count": 1,
@@ -72,11 +81,28 @@
         "count": 1,
         "source_family": "time"
       }
-    ]
+    ],
+    "unresolved_finding_code_prefix_counts": [],
+    "unresolved_source_family_counts": [],
+    "unresolved_source_helper_counts": []
   },
   "known_unmapped_codes": [
     {
+      "attribution_reason": "provided_rule_id",
+      "attribution_reason_counts": {
+        "provided_rule_id": 1
+      },
+      "attribution_status": "exact",
+      "attribution_status_counts": {
+        "exact": 1
+      },
       "finding_code": "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH",
+      "finding_code_prefix_counts": [
+        {
+          "count": 1,
+          "finding_code_prefix": "ASCII_TIMESTAMP_SOURCE"
+        }
+      ],
       "included_source_count": 1,
       "mapped": false,
       "max_severity": "error",
@@ -94,6 +120,7 @@
           "source_family": "time"
         }
       ],
+      "source_helper_counts": [],
       "sources": [
         {
           "count": 1,
@@ -102,7 +129,21 @@
       ]
     },
     {
+      "attribution_reason": "provided_rule_id",
+      "attribution_reason_counts": {
+        "provided_rule_id": 1
+      },
+      "attribution_status": "exact",
+      "attribution_status_counts": {
+        "exact": 1
+      },
       "finding_code": "FINGERPRINT_SERIES_SUMMARY",
+      "finding_code_prefix_counts": [
+        {
+          "count": 1,
+          "finding_code_prefix": "FINGERPRINT"
+        }
+      ],
       "included_source_count": 1,
       "mapped": false,
       "max_severity": "info",
@@ -120,6 +161,7 @@
           "source_family": "fingerprint"
         }
       ],
+      "source_helper_counts": [],
       "sources": [
         {
           "count": 1,
@@ -129,6 +171,19 @@
     }
   ],
   "payload_limits": {
+    "attribution_reason_counts": {
+      "default_limit": 16,
+      "effective_limit": 4,
+      "included_count": 1,
+      "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 4,
+      "total_count": 1,
+      "truncated": false,
+      "unbounded": false
+    },
     "known_code_sources": {
       "applies_per_code": true,
       "default_limit": 8,
@@ -230,11 +285,51 @@
       },
       "target_axis_limit": 8,
       "unbounded": false
+    },
+    "unresolved_finding_code_prefix_counts": {
+      "default_limit": 16,
+      "effective_limit": 4,
+      "included_count": 0,
+      "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 4,
+      "total_count": 0,
+      "truncated": false,
+      "unbounded": false
+    },
+    "unresolved_source_helper_counts": {
+      "default_limit": 16,
+      "effective_limit": 4,
+      "included_count": 0,
+      "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 4,
+      "total_count": 0,
+      "truncated": false,
+      "unbounded": false
     }
   },
   "ranked_gaps": [
     {
+      "attribution_reason": "provided_rule_id",
+      "attribution_reason_counts": {
+        "provided_rule_id": 1
+      },
+      "attribution_status": "exact",
+      "attribution_status_counts": {
+        "exact": 1
+      },
       "finding_code": "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH",
+      "finding_code_prefix_counts": [
+        {
+          "count": 1,
+          "finding_code_prefix": "ASCII_TIMESTAMP_SOURCE"
+        }
+      ],
       "included_source_count": 1,
       "known_source_occurrence_count": 1,
       "mapped": false,
@@ -260,6 +355,7 @@
           "source_family": "time"
         }
       ],
+      "source_helper_counts": [],
       "sources": [
         {
           "count": 1,
@@ -268,7 +364,21 @@
       ]
     },
     {
+      "attribution_reason": "provided_rule_id",
+      "attribution_reason_counts": {
+        "provided_rule_id": 1
+      },
+      "attribution_status": "exact",
+      "attribution_status_counts": {
+        "exact": 1
+      },
       "finding_code": "FINGERPRINT_SERIES_SUMMARY",
+      "finding_code_prefix_counts": [
+        {
+          "count": 1,
+          "finding_code_prefix": "FINGERPRINT"
+        }
+      ],
       "included_source_count": 1,
       "known_source_occurrence_count": 1,
       "mapped": false,
@@ -294,6 +404,7 @@
           "source_family": "fingerprint"
         }
       ],
+      "source_helper_counts": [],
       "sources": [
         {
           "count": 1,
@@ -306,6 +417,8 @@
   "schema_version": "histdatacom.quality-remediation-catalog-audit.v1",
   "status": "needs-remediation-guidance",
   "summary": {
+    "exact_attribution_occurrence_count": 3,
+    "inferred_attribution_occurrence_count": 0,
     "known_code_count": 3,
     "known_finding_occurrence_count": 3,
     "known_warning_error_code_count": 2,
@@ -318,6 +431,7 @@
     "unmapped_info_only_code_count": 1,
     "unmapped_known_code_count": 2,
     "unmapped_warning_error_code_count": 1,
-    "unmapped_warning_error_gap_count": 1
+    "unmapped_warning_error_gap_count": 1,
+    "unresolved_attribution_occurrence_count": 0
   }
 }

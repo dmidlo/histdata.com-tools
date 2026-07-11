@@ -43,6 +43,32 @@ DEFAULT_REMEDIATION_CATALOG_AUDIT_TARGET_AXIS_LIMIT = (
 
 _SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
 _SEVERITY_SORT = {"error": 0, "warning": 1, "info": 2}
+_ATTRIBUTION_STATUS_SORT = {"unresolved": 0, "inferred": 1, "exact": 2}
+_FINDING_CODE_RULE_PREFIXES = (
+    ("ASCII_TICK_SPREAD_REGIME_", "ticks.ascii.spread_regimes"),
+    ("ASCII_TICK_MICROSTRUCTURE_", "ticks.ascii.microstructure"),
+    ("ASCII_TICK_ONE_SIDED_", "ticks.ascii.microstructure"),
+    ("ASCII_TICK_STALE_", "ticks.ascii.microstructure"),
+    ("ASCII_TICK_BURST_", "ticks.ascii.microstructure"),
+    ("ASCII_TICK_BID_ASK_", "ticks.ascii.spread"),
+    ("ASCII_TICK_NEGATIVE_SPREAD", "ticks.ascii.spread"),
+    ("ASCII_TICK_ZERO_SPREAD", "ticks.ascii.spread"),
+    ("ASCII_TICK_SPREAD_", "ticks.ascii.spread"),
+    ("DOMAIN_CALENDAR_", "domain.calendar_sessions"),
+    ("DOMAIN_CROSS_INSTRUMENT_", "domain.cross_instrument_consistency"),
+    ("PROVENANCE_", "provenance.manifest.lineage"),
+    ("ASCII_TIMESTAMP_CONTINUITY_", "time.ascii.continuity"),
+    ("ASCII_TIMESTAMP_EXPECTED_SESSION_CLOSURE_GAP", "time.ascii.gaps"),
+    ("ASCII_TIMESTAMP_SUSPICIOUS_GAP", "time.ascii.gaps"),
+    ("ASCII_TIMESTAMP_WEEKEND_ACTIVITY", "time.ascii.gaps"),
+    ("ASCII_TIMESTAMP_GAP_", "time.ascii.gaps"),
+    ("ASCII_TIMESTAMP_SOURCE_", "time.ascii.est_no_dst"),
+    ("ASCII_TIMESTAMP_EST_NO_DST_", "time.ascii.est_no_dst"),
+    ("ASCII_TIMESTAMP_UTC_", "time.ascii.est_no_dst"),
+    ("HISTDATA_FORMAT_", "inventory.format_support"),
+    ("COVERAGE_", "inventory.coverage.manifest"),
+    ("FINGERPRINT_", "fingerprint.series"),
+)
 _T = TypeVar("_T")
 
 
@@ -56,6 +82,17 @@ class KnownQualityFindingCode:
     source: str = ""
     severity_source: str = ""
     source_family: str = ""
+    source_helper: str = ""
+    finding_code_prefix: str = ""
+    attribution_status: str = "exact"
+    attribution_reason: str = "provided_rule_id"
+
+
+@dataclass(frozen=True, slots=True)
+class _RuleAttribution:
+    rule_id: str
+    status: str
+    reason: str
 
 
 @dataclass(slots=True)
@@ -67,6 +104,10 @@ class _CodeAggregate:
     severity_counts: Counter[str] = field(default_factory=Counter)
     source_counts: Counter[str] = field(default_factory=Counter)
     source_family_counts: Counter[str] = field(default_factory=Counter)
+    source_helper_counts: Counter[str] = field(default_factory=Counter)
+    finding_code_prefix_counts: Counter[str] = field(default_factory=Counter)
+    attribution_status_counts: Counter[str] = field(default_factory=Counter)
+    attribution_reason_counts: Counter[str] = field(default_factory=Counter)
 
     @property
     def max_severity(self) -> str:
@@ -255,6 +296,34 @@ def audit_remediation_catalog(
                 ),
                 code_limit_state,
             ),
+            "attribution_reason_counts": _payload_limit_metadata(
+                _counter_distinct_count(
+                    reason
+                    for aggregate in known_aggregates.values()
+                    for reason in aggregate.attribution_reason_counts
+                ),
+                rule_limit_state,
+            ),
+            "unresolved_source_helper_counts": _payload_limit_metadata(
+                _counter_distinct_count(
+                    helper
+                    for aggregate in known_aggregates.values()
+                    if aggregate.attribution_status_counts["unresolved"]
+                    for helper in aggregate.source_helper_counts
+                ),
+                rule_limit_state,
+            ),
+            "unresolved_finding_code_prefix_counts": (
+                _payload_limit_metadata(
+                    _counter_distinct_count(
+                        prefix
+                        for aggregate in known_aggregates.values()
+                        if aggregate.attribution_status_counts["unresolved"]
+                        for prefix in aggregate.finding_code_prefix_counts
+                    ),
+                    rule_limit_state,
+                )
+            ),
             "report_unmapped_groups": {
                 **code_limit_state.limit_payload(),
                 "target_axis_limit": target_axis_limit_state.effective_limit,
@@ -326,7 +395,28 @@ def format_remediation_catalog_audit(
             "warning/error gaps: "
             f"{_int_value(summary, 'unmapped_warning_error_gap_count')}"
         ),
+        (
+            "attribution occurrences: "
+            f"exact={_int_value(summary, 'exact_attribution_occurrence_count')} "
+            "inferred="
+            f"{_int_value(summary, 'inferred_attribution_occurrence_count')} "
+            "unresolved="
+            f"{_int_value(summary, 'unresolved_attribution_occurrence_count')}"
+        ),
     ]
+    code_counts = _mapping_payload(payload.get("known_code_counts"))
+    unresolved_families = _format_named_counts(
+        code_counts.get("unresolved_source_family_counts"),
+        name_key="source_family",
+    )
+    if unresolved_families:
+        lines.append(f"unresolved families: {unresolved_families}")
+    unresolved_helpers = _format_named_counts(
+        code_counts.get("unresolved_source_helper_counts"),
+        name_key="source_helper",
+    )
+    if unresolved_helpers:
+        lines.append(f"unresolved helpers: {unresolved_helpers}")
     report_count = _int_value(summary, "report_count")
     if report_count:
         lines.append(
@@ -403,22 +493,29 @@ def _known_findings_from_source(
         if not code or not _looks_like_finding_code(code):
             continue
         severity, severity_source = _severity_from_call(node)
-        rule_id = _rule_id_from_call(
+        attribution = _rule_attribution_from_call(
             node,
+            code,
+            tree,
             constants,
             class_rule_ids=class_rule_ids,
             parents=parents,
             source_family=source_family,
         )
+        source_helper = _nearest_function_name(node, parents)
         source = _relative_source(path, root=root, line_number=node.lineno)
         findings.append(
             KnownQualityFindingCode(
-                rule_id=rule_id,
+                rule_id=attribution.rule_id,
                 finding_code=code,
                 severity=severity,
                 source=source,
                 severity_source=severity_source,
                 source_family=source_family,
+                source_helper=source_helper,
+                finding_code_prefix=_finding_code_prefix(code),
+                attribution_status=attribution.status,
+                attribution_reason=attribution.reason,
             )
         )
     return tuple(findings)
@@ -445,6 +542,19 @@ def _known_code_aggregates(
         family = known.source_family or _source_family_from_source(known.source)
         if family:
             aggregate.source_family_counts[family] += 1
+        if known.source_helper:
+            aggregate.source_helper_counts[known.source_helper] += 1
+        prefix = known.finding_code_prefix or _finding_code_prefix(
+            known.finding_code
+        )
+        if prefix:
+            aggregate.finding_code_prefix_counts[prefix] += 1
+        aggregate.attribution_status_counts[
+            known.attribution_status or "unresolved"
+        ] += 1
+        aggregate.attribution_reason_counts[
+            known.attribution_reason or "no_rule_context"
+        ] += 1
         aggregate.mapped = aggregate.mapped or _known_code_is_mapped(known)
     return aggregates
 
@@ -584,6 +694,9 @@ def _audit_summary(
         report_summary,
         "report_unmapped_warning_error_group_count",
     )
+    attribution_status_counts: Counter[str] = Counter()
+    for aggregate in aggregates.values():
+        attribution_status_counts.update(aggregate.attribution_status_counts)
     return {
         "known_code_count": known_code_count,
         "known_finding_occurrence_count": sum(
@@ -599,6 +712,15 @@ def _audit_summary(
         "unmapped_warning_error_gap_count": (
             unmapped_warning_error_code_count + report_gap_count
         ),
+        "exact_attribution_occurrence_count": attribution_status_counts[
+            "exact"
+        ],
+        "inferred_attribution_occurrence_count": attribution_status_counts[
+            "inferred"
+        ],
+        "unresolved_attribution_occurrence_count": attribution_status_counts[
+            "unresolved"
+        ],
         **dict(report_summary),
     }
 
@@ -666,6 +788,26 @@ def _ranked_gap_payload(
         "severity_counts": severity_counts,
         "source_family": source_family,
         "source_family_counts": source_family_counts,
+        "source_helper_counts": _named_counter_payloads(
+            aggregate.source_helper_counts,
+            key_name="source_helper",
+            limit=source_limit,
+        ),
+        "finding_code_prefix_counts": _named_counter_payloads(
+            aggregate.finding_code_prefix_counts,
+            key_name="finding_code_prefix",
+            limit=source_limit,
+        ),
+        "attribution_status": _primary_attribution_status(aggregate),
+        "attribution_reason": _primary_counter_key(
+            aggregate.attribution_reason_counts
+        ),
+        "attribution_status_counts": _counter_payload(
+            aggregate.attribution_status_counts
+        ),
+        "attribution_reason_counts": _counter_payload(
+            aggregate.attribution_reason_counts
+        ),
         "known_source_occurrence_count": aggregate.occurrence_count,
         "source_count": len(aggregate.source_counts),
         "included_source_count": len(sources),
@@ -706,6 +848,12 @@ def _report_gap_payload(
         "severity_counts": _counter_payload(aggregate.severity_counts),
         "source_family": source_family,
         "source_family_counts": [],
+        "source_helper_counts": [],
+        "finding_code_prefix_counts": [],
+        "attribution_status": "runtime_report",
+        "attribution_reason": "report_rule_id",
+        "attribution_status_counts": {},
+        "attribution_reason_counts": {},
         "known_source_occurrence_count": 0,
         "source_count": 0,
         "included_source_count": 0,
@@ -787,6 +935,11 @@ def _known_code_counts(
     unmapped_rule_id_counts: Counter[str] = Counter()
     unmapped_source_family_counts: Counter[str] = Counter()
     unmapped_finding_code_counts: Counter[str] = Counter()
+    attribution_status_counts: Counter[str] = Counter()
+    attribution_reason_counts: Counter[str] = Counter()
+    unresolved_source_family_counts: Counter[str] = Counter()
+    unresolved_source_helper_counts: Counter[str] = Counter()
+    unresolved_finding_code_prefix_counts: Counter[str] = Counter()
     for aggregate in aggregates.values():
         severity_counts.update(aggregate.severity_counts)
         rule_id_counts[aggregate.rule_id] += aggregate.occurrence_count
@@ -794,6 +947,18 @@ def _known_code_counts(
         finding_code_counts[
             aggregate.finding_code
         ] += aggregate.occurrence_count
+        attribution_status_counts.update(aggregate.attribution_status_counts)
+        attribution_reason_counts.update(aggregate.attribution_reason_counts)
+        if aggregate.attribution_status_counts["unresolved"]:
+            unresolved_source_family_counts.update(
+                aggregate.source_family_counts
+            )
+            unresolved_source_helper_counts.update(
+                aggregate.source_helper_counts
+            )
+            unresolved_finding_code_prefix_counts.update(
+                aggregate.finding_code_prefix_counts
+            )
         if not aggregate.mapped:
             unmapped_rule_id_counts[
                 aggregate.rule_id
@@ -818,6 +983,29 @@ def _known_code_counts(
             finding_code_counts,
             key_name="finding_code",
             limit=code_limit,
+        ),
+        "attribution_status_counts": _counter_payload(
+            attribution_status_counts
+        ),
+        "attribution_reason_counts": _named_counter_payloads(
+            attribution_reason_counts,
+            key_name="attribution_reason",
+            limit=rule_limit,
+        ),
+        "unresolved_source_family_counts": _named_counter_payloads(
+            unresolved_source_family_counts,
+            key_name="source_family",
+            limit=rule_limit,
+        ),
+        "unresolved_source_helper_counts": _named_counter_payloads(
+            unresolved_source_helper_counts,
+            key_name="source_helper",
+            limit=rule_limit,
+        ),
+        "unresolved_finding_code_prefix_counts": _named_counter_payloads(
+            unresolved_finding_code_prefix_counts,
+            key_name="finding_code_prefix",
+            limit=rule_limit,
         ),
         "unmapped_rule_id_counts": _named_counter_payloads(
             unmapped_rule_id_counts,
@@ -861,6 +1049,26 @@ def _code_aggregate_payload(
         "severity_counts": _counter_payload(aggregate.severity_counts),
         "source_family": _primary_source_family(aggregate.source_family_counts),
         "source_family_counts": source_family_counts,
+        "source_helper_counts": _named_counter_payloads(
+            aggregate.source_helper_counts,
+            key_name="source_helper",
+            limit=source_limit,
+        ),
+        "finding_code_prefix_counts": _named_counter_payloads(
+            aggregate.finding_code_prefix_counts,
+            key_name="finding_code_prefix",
+            limit=source_limit,
+        ),
+        "attribution_status": _primary_attribution_status(aggregate),
+        "attribution_reason": _primary_counter_key(
+            aggregate.attribution_reason_counts
+        ),
+        "attribution_status_counts": _counter_payload(
+            aggregate.attribution_status_counts
+        ),
+        "attribution_reason_counts": _counter_payload(
+            aggregate.attribution_reason_counts
+        ),
         "source_count": len(aggregate.source_counts),
         "included_source_count": len(sources),
         "omitted_source_count": max(
@@ -946,33 +1154,285 @@ def _string_keyword(node: ast.Call, name: str) -> str:
     return ""
 
 
-def _rule_id_from_call(
+def _rule_attribution_from_call(
+    node: ast.Call,
+    finding_code: str,
+    tree: ast.AST,
+    constants: Mapping[str, str],
+    *,
+    class_rule_ids: Mapping[str, str],
+    parents: Mapping[ast.AST, ast.AST],
+    source_family: str,
+) -> _RuleAttribution:
+    explicit = _explicit_rule_attribution(
+        node,
+        constants,
+        class_rule_ids=class_rule_ids,
+        parents=parents,
+        source_family=source_family,
+    )
+    if explicit is not None:
+        return explicit
+
+    helper_candidates = _enclosing_function_rule_candidates(
+        node,
+        tree,
+        constants,
+        class_rule_ids=class_rule_ids,
+        parents=parents,
+        source_family=source_family,
+    )
+    if len(helper_candidates) == 1:
+        return _RuleAttribution(
+            rule_id=next(iter(helper_candidates)),
+            status="inferred",
+            reason="unique_helper_rule",
+        )
+
+    prefix_rule_id = _finding_code_rule_id(finding_code)
+    if prefix_rule_id and (
+        not helper_candidates or prefix_rule_id in helper_candidates
+    ):
+        return _RuleAttribution(
+            rule_id=prefix_rule_id,
+            status="inferred",
+            reason="finding_code_prefix",
+        )
+
+    module_rule_ids = set(class_rule_ids.values())
+    if len(module_rule_ids) == 1:
+        return _RuleAttribution(
+            rule_id=next(iter(module_rule_ids)),
+            status="inferred",
+            reason="unique_module_rule",
+        )
+
+    if len(helper_candidates) > 1:
+        reason = "ambiguous_helper_rules"
+    elif len(module_rule_ids) > 1:
+        reason = "multiple_module_rules"
+    else:
+        reason = "no_rule_context"
+    return _RuleAttribution(
+        rule_id=_unresolved_rule_id(source_family),
+        status="unresolved",
+        reason=reason,
+    )
+
+
+def _explicit_rule_attribution(
     node: ast.Call,
     constants: Mapping[str, str],
     *,
     class_rule_ids: Mapping[str, str],
     parents: Mapping[ast.AST, ast.AST],
     source_family: str,
-) -> str:
+) -> _RuleAttribution | None:
     for keyword in node.keywords:
         if keyword.arg != "rule_id":
             continue
         value = keyword.value
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            return value.value
-        if isinstance(value, ast.Name):
-            return constants.get(
-                value.id,
-                _unresolved_rule_id(source_family),
+            return _RuleAttribution(
+                rule_id=value.value,
+                status="exact",
+                reason="literal_rule_id",
             )
-        return _rule_id_from_expression(
+        if isinstance(value, ast.Name) and value.id in constants:
+            return _RuleAttribution(
+                rule_id=constants[value.id],
+                status="exact",
+                reason="module_constant",
+            )
+        rule_id = _rule_id_from_expression(
             value,
             constants,
             class_rule_ids=class_rule_ids,
             parents=parents,
             source_family=source_family,
         )
-    return _unresolved_rule_id(source_family)
+        if not rule_id.endswith(".unresolved"):
+            is_self = (
+                isinstance(value, ast.Attribute)
+                and isinstance(value.value, ast.Name)
+                and value.value.id == "self"
+            )
+            return _RuleAttribution(
+                rule_id=rule_id,
+                status="exact" if is_self else "inferred",
+                reason=("class_rule_id" if is_self else "local_rule_object"),
+            )
+    return None
+
+
+def _enclosing_function_rule_candidates(
+    node: ast.AST,
+    tree: ast.AST,
+    constants: Mapping[str, str],
+    *,
+    class_rule_ids: Mapping[str, str],
+    parents: Mapping[ast.AST, ast.AST],
+    source_family: str,
+) -> set[str]:
+    function = _nearest_function(node, parents)
+    if function is None:
+        return set()
+    return _function_rule_candidates(
+        function,
+        tree,
+        constants,
+        class_rule_ids=class_rule_ids,
+        parents=parents,
+        source_family=source_family,
+        visited=set(),
+    )
+
+
+def _function_rule_candidates(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    tree: ast.AST,
+    constants: Mapping[str, str],
+    *,
+    class_rule_ids: Mapping[str, str],
+    parents: Mapping[ast.AST, ast.AST],
+    source_family: str,
+    visited: set[int],
+) -> set[str]:
+    identity = id(function)
+    if identity in visited:
+        return set()
+    visited = {*visited, identity}
+    candidates: set[str] = set()
+
+    class_rule_id = _nearest_class_rule_id(
+        function,
+        parents=parents,
+        class_rule_ids=class_rule_ids,
+    )
+    if class_rule_id:
+        candidates.add(class_rule_id)
+    candidates.update(
+        _function_rule_id_annotations(function, class_rule_ids).values()
+    )
+    candidates.update(
+        _function_rule_id_assertions(function, class_rule_ids).values()
+    )
+    candidates.update(
+        _function_rule_id_assignments(function, class_rule_ids).values()
+    )
+    default_rule_id = _function_default_rule_id(function, constants)
+    if default_rule_id:
+        candidates.add(default_rule_id)
+
+    if class_rule_id:
+        return candidates
+
+    for call in _calls_to_function(tree, function.name):
+        argument_rule_id = _call_rule_id_argument(
+            call,
+            function,
+            constants,
+            class_rule_ids=class_rule_ids,
+            parents=parents,
+            source_family=source_family,
+        )
+        if argument_rule_id:
+            candidates.add(argument_rule_id)
+        caller_class_rule_id = _nearest_class_rule_id(
+            call,
+            parents=parents,
+            class_rule_ids=class_rule_ids,
+        )
+        if caller_class_rule_id:
+            candidates.add(caller_class_rule_id)
+            continue
+        caller = _nearest_function(call, parents)
+        if caller is None or caller is function:
+            continue
+        candidates.update(
+            _function_rule_candidates(
+                caller,
+                tree,
+                constants,
+                class_rule_ids=class_rule_ids,
+                parents=parents,
+                source_family=source_family,
+                visited=visited,
+            )
+        )
+    return candidates
+
+
+def _calls_to_function(
+    tree: ast.AST, function_name: str
+) -> tuple[ast.Call, ...]:
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and _call_function_name(node.func) == function_name
+    ]
+    return tuple(sorted(calls, key=lambda item: (item.lineno, item.col_offset)))
+
+
+def _call_function_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _call_rule_id_argument(
+    call: ast.Call,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    constants: Mapping[str, str],
+    *,
+    class_rule_ids: Mapping[str, str],
+    parents: Mapping[ast.AST, ast.AST],
+    source_family: str,
+) -> str:
+    value: ast.AST | None = None
+    for keyword in call.keywords:
+        if keyword.arg == "rule_id":
+            value = keyword.value
+            break
+    if value is None:
+        args = list(function.args.posonlyargs) + list(function.args.args)
+        rule_indexes = [
+            index for index, arg in enumerate(args) if arg.arg == "rule_id"
+        ]
+        if rule_indexes and rule_indexes[0] < len(call.args):
+            value = call.args[rule_indexes[0]]
+    if value is None:
+        return ""
+    rule_id = _rule_id_from_expression(
+        value,
+        constants,
+        class_rule_ids=class_rule_ids,
+        parents=parents,
+        source_family=source_family,
+    )
+    return "" if rule_id.endswith(".unresolved") else rule_id
+
+
+def _function_default_rule_id(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    constants: Mapping[str, str],
+) -> str:
+    positional = list(function.args.posonlyargs) + list(function.args.args)
+    defaults = list(function.args.defaults)
+    if defaults:
+        for arg, default in zip(positional[-len(defaults) :], defaults):
+            if arg.arg == "rule_id":
+                return _rule_id_literal(default, constants)
+    for arg, kw_default in zip(
+        function.args.kwonlyargs,
+        function.args.kw_defaults,
+    ):
+        if arg.arg == "rule_id":
+            return _rule_id_literal(kw_default, constants)
+    return ""
 
 
 def _rule_id_from_expression(
@@ -1056,7 +1516,10 @@ def _function_rule_id_for_name(
     if name in annotations:
         return annotations[name]
     asserted = _function_rule_id_assertions(function, class_rule_ids)
-    return asserted.get(name, "")
+    if name in asserted:
+        return asserted[name]
+    assigned = _function_rule_id_assignments(function, class_rule_ids)
+    return assigned.get(name, "")
 
 
 def _nearest_function(
@@ -1069,6 +1532,14 @@ def _nearest_function(
             return parent
         parent = parents.get(parent)
     return None
+
+
+def _nearest_function_name(
+    node: ast.AST,
+    parents: Mapping[ast.AST, ast.AST],
+) -> str:
+    function = _nearest_function(node, parents)
+    return function.name if function is not None else "<module>"
 
 
 def _function_rule_id_annotations(
@@ -1112,12 +1583,56 @@ def _function_rule_id_assertions(
     return asserted
 
 
+def _function_rule_id_assignments(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    class_rule_ids: Mapping[str, str],
+) -> dict[str, str]:
+    assigned: dict[str, str] = {}
+    for node in ast.walk(function):
+        target: ast.Name | None = None
+        value: ast.AST | None = None
+        annotation: ast.AST | None = None
+        if isinstance(node, ast.AnnAssign) and isinstance(
+            node.target, ast.Name
+        ):
+            target = node.target
+            value = node.value
+            annotation = node.annotation
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            if isinstance(node.targets[0], ast.Name):
+                target = node.targets[0]
+                value = node.value
+        if target is None:
+            continue
+        class_name = _annotation_name(annotation)
+        if not class_name and isinstance(value, ast.Call):
+            class_name = _annotation_name(value.func)
+        if class_name in class_rule_ids:
+            assigned[target.id] = class_rule_ids[class_name]
+    return assigned
+
+
 def _annotation_name(node: ast.AST | None) -> str:
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
         return node.attr
     return ""
+
+
+def _finding_code_rule_id(finding_code: str) -> str:
+    for prefix, rule_id in _FINDING_CODE_RULE_PREFIXES:
+        if finding_code.startswith(prefix):
+            return rule_id
+    return ""
+
+
+def _finding_code_prefix(finding_code: str) -> str:
+    for prefix, _rule_id in _FINDING_CODE_RULE_PREFIXES:
+        if finding_code.startswith(prefix):
+            return prefix.removesuffix("_")
+    parts = [part for part in finding_code.split("_") if part]
+    return "_".join(parts[:3])
 
 
 def _call_name_is(node: ast.AST, name: str) -> bool:
@@ -1162,6 +1677,21 @@ def _primary_source_family(counter: Counter[str]) -> str:
     if not counter:
         return ""
     return sorted(counter, key=lambda item: (-counter[item], item))[0]
+
+
+def _primary_counter_key(counter: Counter[str]) -> str:
+    if not counter:
+        return ""
+    return sorted(counter, key=lambda item: (-counter[item], item))[0]
+
+
+def _primary_attribution_status(aggregate: _CodeAggregate) -> str:
+    if not aggregate.attribution_status_counts:
+        return "unresolved"
+    return min(
+        aggregate.attribution_status_counts,
+        key=lambda item: (_ATTRIBUTION_STATUS_SORT.get(item, 9), item),
+    )
 
 
 def _max_severity(counter: Counter[str]) -> str:
@@ -1248,6 +1778,12 @@ def _format_code_group(group: Mapping[str, JSONValue]) -> str:
     omitted = _int_value(group, "omitted_source_count")
     if omitted:
         suffix += f" (+{omitted} more sources)"
+    attribution = _optional_string(group, "attribution_status")
+    attribution_reason = _optional_string(group, "attribution_reason")
+    if attribution:
+        suffix += f" attribution={attribution}"
+    if attribution_reason:
+        suffix += f"({attribution_reason})"
     return (
         f"{_optional_string(group, 'max_severity') or 'info'} "
         f"{_optional_string(group, 'finding_code')} "
@@ -1260,6 +1796,11 @@ def _format_code_group(group: Mapping[str, JSONValue]) -> str:
 def _format_ranked_gap(group: Mapping[str, JSONValue]) -> str:
     reasons = _string_list(group.get("rank_reasons"))
     reason_text = f" reasons={'; '.join(reasons)}" if reasons else ""
+    attribution = _optional_string(group, "attribution_status") or "unknown"
+    attribution_reason = _optional_string(group, "attribution_reason")
+    attribution_text = f" attribution={attribution}"
+    if attribution_reason:
+        attribution_text += f"({attribution_reason})"
     return (
         f"#{_int_value(group, 'rank')} "
         f"{_optional_string(group, 'max_severity') or 'info'} "
@@ -1268,8 +1809,18 @@ def _format_ranked_gap(group: Mapping[str, JSONValue]) -> str:
         f"rule={_optional_string(group, 'rule_id') or 'unknown'} "
         f"reports={_int_value(group, 'report_occurrence_count')} "
         f"known_sources={_int_value(group, 'known_source_occurrence_count')}"
+        f"{attribution_text}"
         f"{reason_text}"
     )
+
+
+def _format_named_counts(value: object, *, name_key: str) -> str:
+    parts = []
+    for item in _list_payload(value):
+        name = _optional_string(item, name_key)
+        if name:
+            parts.append(f"{name}={_int_value(item, 'count')}")
+    return ", ".join(parts)
 
 
 def _payload_limit_metadata(

@@ -1294,6 +1294,25 @@ payloads, and quality preflight sample evidence, opt in with:
 The embedded audit reuses the standalone remediation-catalog audit schema,
 keeps known source-code coverage separate from observed report coverage, and
 remains advisory; it does not change finding severities or quality exit policy.
+The audit also records how each static finding was attributed to a rule:
+`exact` for an explicit literal, constant, or class rule; `inferred` for a
+single-rule helper chain, local rule object, module rule, or unambiguous
+finding-code prefix; and `unresolved` when multiple rule callers remain
+possible. Unresolved entries retain the source-family fallback and include a
+stable `attribution_reason` such as `ambiguous_helper_rules`. Bounded source
+family, helper, and finding-prefix counts make the remaining ambiguity
+auditable without executing quality rules or reading market data.
+
+Inspect that attribution directly through the standalone command:
+
+```sh
+histdatacom quality remediation-catalog --json
+```
+
+The concise renderer includes exact, inferred, and unresolved occurrence
+counts plus attribution status and reason on ranked gaps. These fields improve
+catalog planning evidence only; they do not add remediation mappings or change
+gap severity and ranking policy.
 The same reporting surface can be enabled without a profile file by passing
 `--quality-remediation-catalog-audit` with `--quality`, `--repo-quality`, or
 `--quality-preflight`. When the flag is combined with `--quality-profile`, the

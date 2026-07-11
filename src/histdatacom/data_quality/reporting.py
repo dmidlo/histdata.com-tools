@@ -1338,6 +1338,15 @@ def format_quality_remediation_catalog_audit_lines(
             "unmapped warning/error groups="
             f"{report_gap_count}"
         ),
+        (
+            "- attribution: "
+            "exact="
+            f"{_int_metadata(audit_summary, 'exact_attribution_occurrence_count')} "
+            "inferred="
+            f"{_int_metadata(audit_summary, 'inferred_attribution_occurrence_count')} "
+            "unresolved="
+            f"{_int_metadata(audit_summary, 'unresolved_attribution_occurrence_count')}"
+        ),
     ]
     for group in _remediation_catalog_observed_gap_groups(summary):
         lines.append(
@@ -1882,6 +1891,16 @@ def _format_quality_remediation_coverage_group(
 def _format_quality_remediation_catalog_gap(
     gap: Mapping[str, JSONValue],
 ) -> str:
+    attribution = (
+        _optional_string_metadata(gap, "attribution_status") or "unknown"
+    )
+    attribution_reason = _optional_string_metadata(
+        gap,
+        "attribution_reason",
+    )
+    attribution_text = f"attribution={attribution}"
+    if attribution_reason:
+        attribution_text += f"({attribution_reason})"
     return (
         f"{_optional_string_metadata(gap, 'max_severity')} "
         f"rank={_int_metadata(gap, 'rank')} "
@@ -1890,7 +1909,8 @@ def _format_quality_remediation_catalog_gap(
         "known="
         f"{_int_metadata(gap, 'known_source_occurrence_count')} "
         "observed="
-        f"{_int_metadata(gap, 'report_occurrence_count')}"
+        f"{_int_metadata(gap, 'report_occurrence_count')} "
+        f"{attribution_text}"
     )
 
 
