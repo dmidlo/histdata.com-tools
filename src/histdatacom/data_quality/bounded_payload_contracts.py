@@ -142,6 +142,39 @@ _SEQUENCE_CONTRACTS: tuple[_BoundedSequenceContract, ...] = (
         ),
     ),
     _BoundedSequenceContract(
+        "remediation_plan",
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "remediation_plan",
+        ),
+        ("remediation_catalog_audit", "remediation_plan", "items"),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "remediation_plan",
+            "total_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "remediation_plan",
+            "included_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "remediation_plan",
+            "omitted_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "remediation_plan",
+            "truncated",
+        ),
+    ),
+    _BoundedSequenceContract(
         "remediation_attribution_reasons",
         (
             "remediation_catalog_audit",

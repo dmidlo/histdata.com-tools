@@ -85,6 +85,7 @@ QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_AUDIT_STATUS_POLICY = (
 )
 QUALITY_PREFLIGHT_FINGERPRINT_CONTRACT_FINDING_DISPLAY_LIMIT = 8
 QUALITY_PREFLIGHT_BOUNDED_PAYLOAD_CONTRACT_FINDING_DISPLAY_LIMIT = 8
+QUALITY_PREFLIGHT_REMEDIATION_PLAN_DISPLAY_LIMIT = 5
 DEFAULT_QUALITY_PREFLIGHT_VALIDATION_REPORT_DIR = (
     Path(".histdatacom") / "closure-readiness"
 )
@@ -227,10 +228,10 @@ def quality_preflight_validation_evidence_payload(
         "status_counts": status_counts,
         "commands": command_payloads,
     }
-    return cast(
-        dict[str, JSONValue],
-        publish_safe_json_mapping(validation_payload),
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(
+        validation_payload
     )
+    return safe_payload
 
 
 def quality_preflight_validation_evidence_to_json(
@@ -244,30 +245,28 @@ def _validation_artifact_command(
     row: Mapping[str, Any],
 ) -> dict[str, JSONValue]:
     """Normalize one validation row for the dedicated evidence artifact."""
-    return cast(
-        dict[str, JSONValue],
-        publish_safe_json_mapping(
-            {
-                "name": str(row.get("name", "")),
-                "command": str(row.get("command", "")),
-                "status": _normalized_validation_status(row.get("status")),
-                "exit_code": (
-                    _int_value(row.get("returncode"))
-                    if "returncode" in row
-                    else None
-                ),
-                "duration_seconds": (
-                    round(_float_value(row.get("duration_seconds")), 6)
-                    if "duration_seconds" in row
-                    else None
-                ),
-                "summary": _validation_summary(row),
-                "output_artifact_path": str(
-                    row.get("output_artifact_path", "") or ""
-                ),
-            }
-        ),
+    safe_payload: dict[str, JSONValue] = publish_safe_json_mapping(
+        {
+            "name": str(row.get("name", "")),
+            "command": str(row.get("command", "")),
+            "status": _normalized_validation_status(row.get("status")),
+            "exit_code": (
+                _int_value(row.get("returncode"))
+                if "returncode" in row
+                else None
+            ),
+            "duration_seconds": (
+                round(_float_value(row.get("duration_seconds")), 6)
+                if "duration_seconds" in row
+                else None
+            ),
+            "summary": _validation_summary(row),
+            "output_artifact_path": str(
+                row.get("output_artifact_path", "") or ""
+            ),
+        }
     )
+    return safe_payload
 
 
 def _validation_artifact_state(
@@ -390,6 +389,7 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
     quality_summary = _mapping(quality.get("summary"))
     remediation_audit = _mapping(quality.get("remediation_catalog_audit"))
     remediation_audit_summary = _mapping(remediation_audit.get("summary"))
+    remediation_plan = _mapping(remediation_audit.get("remediation_plan"))
     decision = _mapping(safe_payload.get("decision"))
     cache_inventory = _mapping(safe_payload.get("cache_inventory"))
     lines = [
@@ -692,11 +692,28 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
                                 )
                             ),
                         ),
+                        (
+                            "Remediation plan candidates",
+                            str(remediation_plan.get("plan_item_count", 0)),
+                        ),
                     ),
                 ),
                 "",
             ]
         )
+        plan_rows = _remediation_plan_markdown_rows(remediation_plan)
+        if plan_rows:
+            lines.extend(
+                [
+                    "#### Top Remediation Plan Items",
+                    "",
+                    *_markdown_table(
+                        ("Rank", "Gap", "Fixability", "Selector", "Action"),
+                        plan_rows,
+                    ),
+                    "",
+                ]
+            )
     lines.extend(_operational_markdown_lines(operational, runtime_cleanup))
     lines.extend(
         [
@@ -1087,6 +1104,7 @@ def format_quality_preflight_console_summary(
     quality_summary = _mapping(quality.get("summary"))
     remediation_audit = _mapping(quality.get("remediation_catalog_audit"))
     remediation_audit_summary = _mapping(remediation_audit.get("summary"))
+    remediation_plan = _mapping(remediation_audit.get("remediation_plan"))
     decision = _mapping(payload.get("decision"))
     diagnostics = _mapping(payload.get("diagnostics"))
     evidence = _mapping(payload.get("evidence"))
@@ -1150,6 +1168,20 @@ def format_quality_preflight_console_summary(
             "intentional_boundaries="
             f"{remediation_audit_summary.get('intentionally_unremediable_warning_error_code_count', 0)}"
         )
+        plan_items = _list_of_mappings(remediation_plan.get("items"))
+        if plan_items:
+            first_plan = plan_items[0]
+            first_fixability = _mapping(first_plan.get("fixability"))
+            first_action = _mapping(first_plan.get("suggested_action"))
+            lines.append(
+                "sample remediation plan: candidates="
+                f"{remediation_plan.get('plan_item_count', 0)} "
+                f"top={first_plan.get('finding_code', 'unknown')} "
+                "fixability="
+                f"{first_fixability.get('level', 'unknown')}/"
+                f"{first_fixability.get('score', 0)} "
+                f"action={first_action.get('action_kind', 'inspect')}"
+            )
     if fingerprint_contract:
         lines.append(
             "fingerprint contract audit: "
@@ -3200,6 +3232,34 @@ def _fingerprint_contract_audit_markdown_rows(
         ("Reason", str(gate.get("reason", ""))),
         ("Standalone command", str(gate.get("standalone_command", ""))),
     )
+
+
+def _remediation_plan_markdown_rows(
+    plan: Mapping[str, Any],
+) -> tuple[tuple[str, str, str, str, str], ...]:
+    rows: list[tuple[str, str, str, str, str]] = []
+    for item in _list_of_mappings(plan.get("items"))[
+        :QUALITY_PREFLIGHT_REMEDIATION_PLAN_DISPLAY_LIMIT
+    ]:
+        fixability = _mapping(item.get("fixability"))
+        selector = _mapping(item.get("suggested_selector"))
+        action = _mapping(item.get("suggested_action"))
+        rows.append(
+            (
+                str(item.get("rank", "")),
+                (
+                    f"{item.get('rule_id', 'unknown')}:"
+                    f"{item.get('finding_code', 'unknown')}"
+                ),
+                (
+                    f"{fixability.get('level', 'unknown')}/"
+                    f"{fixability.get('score', 0)}"
+                ),
+                str(selector.get("shape", "unknown")),
+                str(action.get("action_kind", "inspect")),
+            )
+        )
+    return tuple(rows)
 
 
 def _fingerprint_contract_finding_rows(

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from histdatacom.data_quality import (
+    QUALITY_REMEDIATION_PLAN_SCHEMA_VERSION,
     KnownQualityFindingCode,
     QualityFinding,
     QualityReport,
@@ -241,6 +242,83 @@ def test_remediation_catalog_audit_ranks_actionable_gaps_before_boundaries() -> 
     assert summary["intentionally_unremediable_warning_error_code_count"] == 3
 
 
+def test_remediation_catalog_audit_emits_fixability_ranked_plan() -> None:
+    """Plan items should turn exact actionable gaps into catalog-edit inputs."""
+    payload = audit_remediation_catalog(
+        known_findings=(
+            _known(
+                "custom.rule",
+                "CUSTOM_INVALID_ROW",
+                QualitySeverity.ERROR,
+            ),
+            _known(
+                "inventory.format_support",
+                "HISTDATA_FORMAT_UNSUPPORTED",
+                QualitySeverity.ERROR,
+            ),
+        )
+    )
+
+    plan = payload["remediation_plan"]
+    first = plan["items"][0]
+
+    assert plan["schema_version"] == QUALITY_REMEDIATION_PLAN_SCHEMA_VERSION
+    assert plan["plan_item_count"] == 2
+    assert plan["included_plan_item_count"] == 2
+    assert plan["truncated"] is False
+    assert first["rank"] == 1
+    assert first["catalog_gap_rank"] == 1
+    assert first["finding_code"] == "CUSTOM_INVALID_ROW"
+    assert first["suggested_selector"] == {
+        "shape": "exact_rule_and_finding",
+        "rule_id": "custom.rule",
+        "finding_code": "CUSTOM_INVALID_ROW",
+        "finding_code_prefix": "CUSTOM_INVALID_ROW",
+        "confidence": "high",
+        "basis": "exact_rule_attribution",
+    }
+    assert first["draft_hint_code"] == "repair_custom_invalid_row"
+    assert first["suggested_action"] == {
+        "action_kind": "repair",
+        "confidence": "high",
+        "basis": "finding_code_marker=invalid",
+        "concrete": True,
+    }
+    assert first["fixability"]["level"] == "high"
+    assert first["fixability"]["score"] == 96
+    assert first["missing_fields"] == ["message"]
+    assert plan["items"][1]["fixability"]["level"] == "low"
+    assert "Remediation plan" in format_remediation_catalog_audit(payload)
+
+
+def test_remediation_plan_marks_unresolved_attribution_blocked() -> None:
+    """An unresolved rule must not become an apparently exact catalog plan."""
+    payload = audit_remediation_catalog(
+        known_findings=(
+            KnownQualityFindingCode(
+                rule_id="time.unresolved",
+                finding_code="CUSTOM_INVALID_ROW",
+                severity=QualitySeverity.ERROR,
+                source="data_quality/time.py:1",
+                source_family="time",
+                attribution_status="unresolved",
+                attribution_reason="ambiguous_helper_rules",
+            ),
+        )
+    )
+    item = payload["remediation_plan"]["items"][0]
+
+    assert item["suggested_selector"]["shape"] == "finding_family"
+    assert item["fixability"]["level"] == "blocked"
+    assert item["fixability"]["score"] == 24
+    assert item["missing_fields"] == [
+        "message",
+        "exact_rule_id",
+        "action_kind_confirmation",
+        "blocking_evidence",
+    ]
+
+
 def test_remediation_catalog_audit_keeps_info_only_gaps_advisory() -> None:
     """INFO-only missing guidance should be visible without failing the audit."""
     payload = audit_remediation_catalog(
@@ -300,6 +378,21 @@ def test_remediation_catalog_audit_truncates_deterministically() -> None:
         default_limit=16,
     )
     assert len(payload["known_code_counts"]["rule_id_counts"]) == 1
+    plan = payload["remediation_plan"]
+    assert plan["plan_item_count"] == 3
+    assert plan["included_plan_item_count"] == 2
+    assert plan["omitted_plan_item_count"] == 1
+    assert plan["truncated"] is True
+    _assert_count_limit_metadata(
+        payload["payload_limits"]["remediation_plan"],
+        limit=2,
+        total_count=3,
+        included_count=2,
+        omitted_count=1,
+        truncated=True,
+        requested_limit=2,
+        default_limit=16,
+    )
 
 
 def test_remediation_catalog_audit_ranks_report_observed_gaps(
@@ -403,6 +496,19 @@ def test_remediation_catalog_audit_ranks_report_only_gaps(
         }
     ]
     assert "report_occurrences=2" in ranked[0]["rank_reasons"]
+    plan_item = payload["remediation_plan"]["items"][0]
+    assert plan_item["catalog_gap_rank"] == 1
+    assert plan_item["suggested_selector"]["shape"] == (
+        "exact_rule_and_finding"
+    )
+    assert plan_item["suggested_selector"]["basis"] == (
+        "reported_rule_and_finding"
+    )
+    assert plan_item["evidence"]["known_source_occurrence_count"] == 0
+    assert plan_item["evidence"]["report_occurrence_count"] == 2
+    assert plan_item["evidence"]["reports"] == [
+        {"count": 1, "source": "reports/quality.json"}
+    ]
 
 
 def test_discover_known_quality_findings_resolves_source_attribution(

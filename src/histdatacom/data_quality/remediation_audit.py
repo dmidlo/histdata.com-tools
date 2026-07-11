@@ -35,6 +35,9 @@ from histdatacom.runtime_contracts import JSONValue
 QUALITY_REMEDIATION_CATALOG_AUDIT_SCHEMA_VERSION = (
     "histdatacom.quality-remediation-catalog-audit.v1"
 )
+QUALITY_REMEDIATION_PLAN_SCHEMA_VERSION = (
+    "histdatacom.quality-remediation-plan.v1"
+)
 DEFAULT_REMEDIATION_CATALOG_AUDIT_CODE_LIMIT = (
     QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT
 )
@@ -57,6 +60,53 @@ _ACTIONABILITY_SORT = {
     RemediationActionability.EXPECTED_ARTIFACT_OR_CONTEXT.value: 6,
     RemediationActionability.INFORMATIONAL_ONLY.value: 7,
 }
+_ACTIONABILITY_FIXABILITY_SCORE = {
+    RemediationActionability.REMEDIABLE_DEFECT.value: 45,
+    RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT.value: 15,
+    RemediationActionability.NEEDS_RULE_ATTRIBUTION.value: 10,
+    RemediationActionability.UNSAFE_TO_AUTOMATE.value: 8,
+    RemediationActionability.POLICY_OR_PROFILE_DECISION.value: 8,
+    RemediationActionability.UNSUPPORTED_FORMAT_OR_CAPABILITY.value: 5,
+    RemediationActionability.EXPECTED_ARTIFACT_OR_CONTEXT.value: 5,
+    RemediationActionability.INFORMATIONAL_ONLY.value: 3,
+}
+_BLOCKED_PLAN_ACTIONABILITIES = frozenset(
+    {
+        RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT.value,
+        RemediationActionability.NEEDS_RULE_ATTRIBUTION.value,
+    }
+)
+_BOUNDARY_PLAN_ACTIONABILITIES = frozenset(
+    {
+        RemediationActionability.POLICY_OR_PROFILE_DECISION.value,
+        RemediationActionability.UNSUPPORTED_FORMAT_OR_CAPABILITY.value,
+        RemediationActionability.EXPECTED_ARTIFACT_OR_CONTEXT.value,
+        RemediationActionability.UNSAFE_TO_AUTOMATE.value,
+        RemediationActionability.INFORMATIONAL_ONLY.value,
+    }
+)
+_REBUILD_ACTION_MARKERS = (
+    "CACHE_SCHEMA",
+    "CORRUPT",
+    "CRC",
+    "MISSING",
+    "UNAVAILABLE",
+)
+_REPAIR_ACTION_MARKERS = (
+    "DUPLICATE",
+    "INVALID",
+    "MISMATCH",
+    "NEGATIVE",
+    "NON_MONOTONIC",
+    "PRECISION",
+    "UNREADABLE",
+)
+_VERIFY_ACTION_MARKERS = (
+    "EXPECTED",
+    "POLICY",
+    "UNSUPPORTED",
+)
+_REMEDIATION_PLAN_DISPLAY_LIMIT = 5
 _FINDING_CODE_RULE_PREFIXES = (
     ("ASCII_TICK_SPREAD_REGIME_", "ticks.ascii.spread_regimes"),
     ("ASCII_TICK_MICROSTRUCTURE_", "ticks.ascii.microstructure"),
@@ -246,6 +296,10 @@ def audit_remediation_catalog(
         report_gap_evidence=report_gap_evidence,
         source_limit=source_limit_state.effective_limit,
     )
+    remediation_plan = _remediation_plan_payload(
+        ranked_gaps,
+        limit=code_limit_state,
+    )
     included_ranked_gaps = list(code_limit_state.slice(ranked_gaps))
     included_unmapped_known = code_limit_state.slice(unmapped_known)
     report_summary = _report_coverage_summary(report_payloads)
@@ -274,9 +328,14 @@ def audit_remediation_catalog(
             for aggregate in included_unmapped_known
         ],
         "ranked_gaps": cast(JSONValue, included_ranked_gaps),
+        "remediation_plan": remediation_plan,
         "report_coverage": cast(JSONValue, report_payloads),
         "payload_limits": {
             "ranked_gaps": _payload_limit_metadata(
+                len(ranked_gaps),
+                code_limit_state,
+            ),
+            "remediation_plan": _payload_limit_metadata(
                 len(ranked_gaps),
                 code_limit_state,
             ),
@@ -450,6 +509,23 @@ def format_remediation_catalog_audit(
             "unmapped warning/error groups: "
             f"{_int_value(summary, 'report_unmapped_warning_error_group_count')}"
         )
+    remediation_plan = _mapping_payload(payload.get("remediation_plan"))
+    plan_items = _list_payload(remediation_plan.get("items"))
+    lines.extend(("", "Remediation plan"))
+    if not plan_items:
+        lines.append("- none")
+    else:
+        lines.extend(
+            f"- {_format_remediation_plan_item(item)}"
+            for item in plan_items[:_REMEDIATION_PLAN_DISPLAY_LIMIT]
+        )
+        hidden_plan_items = max(
+            0,
+            _int_value(remediation_plan, "plan_item_count")
+            - min(len(plan_items), _REMEDIATION_PLAN_DISPLAY_LIMIT),
+        )
+        if hidden_plan_items:
+            lines.append(f"- additional plan items: {hidden_plan_items}")
     ranked_groups = [
         item
         for item in _list_payload(payload.get("ranked_gaps"))
@@ -859,6 +935,291 @@ def _ranked_gap_payloads(
         key=_ranked_gap_sort_key,
     )
     return [{**gap, "rank": index} for index, gap in enumerate(ranked, start=1)]
+
+
+def _remediation_plan_payload(
+    ranked_gaps: Sequence[JSONValue],
+    *,
+    limit: BoundedReportLimit,
+) -> dict[str, JSONValue]:
+    """Turn ranked catalog gaps into bounded catalog-edit plan inputs."""
+    plan_items = sorted(
+        (
+            _remediation_plan_item(gap)
+            for gap in ranked_gaps
+            if isinstance(gap, Mapping)
+        ),
+        key=_remediation_plan_item_sort_key,
+    )
+    ranked_items = [
+        {**item, "rank": index}
+        for index, item in enumerate(plan_items, start=1)
+    ]
+    included_items = list(limit.slice(ranked_items))
+    actionability_counts = Counter(
+        _optional_string(item, "actionability") or "unknown"
+        for item in plan_items
+    )
+    fixability_counts = Counter(
+        _optional_string(_mapping_payload(item.get("fixability")), "level")
+        or "unknown"
+        for item in plan_items
+    )
+    return {
+        "schema_version": QUALITY_REMEDIATION_PLAN_SCHEMA_VERSION,
+        "plan_item_count": len(plan_items),
+        "included_plan_item_count": len(included_items),
+        "omitted_plan_item_count": max(
+            0,
+            len(plan_items) - len(included_items),
+        ),
+        "truncated": len(included_items) < len(plan_items),
+        "actionability_counts": _counter_payload(actionability_counts),
+        "fixability_counts": _counter_payload(fixability_counts),
+        "items": cast(JSONValue, included_items),
+    }
+
+
+def _remediation_plan_item(
+    gap: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    selector = _suggested_remediation_selector(gap)
+    action = _suggested_remediation_action(gap)
+    fixability = _remediation_fixability(
+        gap,
+        selector=selector,
+        action=action,
+    )
+    missing_fields = _remediation_plan_missing_fields(
+        gap,
+        selector=selector,
+        action=action,
+    )
+    finding_code = _optional_string(gap, "finding_code")
+    action_kind = _optional_string(action, "action_kind") or "inspect"
+    prefix = _optional_string(selector, "finding_code_prefix")
+    return {
+        "catalog_gap_rank": _int_value(gap, "rank"),
+        "finding_code": finding_code,
+        "rule_id": _optional_string(gap, "rule_id") or "unknown",
+        "source_family": _optional_string(gap, "source_family"),
+        "mapped": bool(gap.get("mapped")),
+        "max_severity": _optional_string(gap, "max_severity") or "info",
+        "severity_counts": _mapping_payload(gap.get("severity_counts")),
+        "actionability": _optional_string(gap, "actionability"),
+        "actionability_reason": _optional_string(
+            gap,
+            "actionability_reason",
+        ),
+        "attribution_status": _optional_string(gap, "attribution_status"),
+        "attribution_reason": _optional_string(gap, "attribution_reason"),
+        "suggested_selector": selector,
+        "suggested_hint_code_prefix": (
+            f"{action_kind}_{prefix.lower()}" if prefix else action_kind
+        ),
+        "draft_hint_code": (
+            f"{action_kind}_{finding_code.lower()}"
+            if finding_code
+            else f"{action_kind}_finding"
+        ),
+        "suggested_action": action,
+        "fixability": fixability,
+        "missing_fields": cast(JSONValue, missing_fields),
+        "evidence": {
+            "known_source_occurrence_count": _int_value(
+                gap,
+                "known_source_occurrence_count",
+            ),
+            "report_occurrence_count": _int_value(
+                gap,
+                "report_occurrence_count",
+            ),
+            "report_group_count": _int_value(gap, "report_group_count"),
+            "sources": gap.get("sources", []),
+            "reports": gap.get("reports", []),
+            "omitted_source_count": _int_value(
+                gap,
+                "omitted_source_count",
+            ),
+            "omitted_report_source_count": _int_value(
+                gap,
+                "omitted_report_source_count",
+            ),
+        },
+        "rank_reasons": gap.get("rank_reasons", []),
+    }
+
+
+def _suggested_remediation_selector(
+    gap: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    finding_code = _optional_string(gap, "finding_code")
+    rule_id = _optional_string(gap, "rule_id")
+    attribution = _optional_string(gap, "attribution_status")
+    rule_is_specific = bool(
+        rule_id and rule_id != "unknown" and not rule_id.endswith(".unresolved")
+    )
+    prefix_counts = _list_payload(gap.get("finding_code_prefix_counts"))
+    prefix = (
+        _optional_string(prefix_counts[0], "finding_code_prefix")
+        if prefix_counts
+        else _finding_code_prefix(finding_code)
+    )
+    if rule_is_specific and finding_code:
+        confidence = (
+            "high" if attribution in {"exact", "runtime_report"} else "medium"
+        )
+        basis = (
+            "reported_rule_and_finding"
+            if attribution == "runtime_report"
+            else f"{attribution or 'unknown'}_rule_attribution"
+        )
+        return {
+            "shape": "exact_rule_and_finding",
+            "rule_id": rule_id,
+            "finding_code": finding_code,
+            "finding_code_prefix": prefix,
+            "confidence": confidence,
+            "basis": basis,
+        }
+    return {
+        "shape": "finding_family",
+        "rule_id": rule_id or "unknown",
+        "finding_code": finding_code,
+        "finding_code_prefix": prefix,
+        "confidence": "low",
+        "basis": "rule_attribution_required",
+    }
+
+
+def _suggested_remediation_action(
+    gap: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    finding_code = _optional_string(gap, "finding_code").upper()
+    actionability = _optional_string(gap, "actionability")
+    marker = _first_marker(finding_code, _REBUILD_ACTION_MARKERS)
+    action_kind = "rebuild"
+    if not marker:
+        marker = _first_marker(finding_code, _REPAIR_ACTION_MARKERS)
+        action_kind = "repair"
+    if not marker:
+        marker = _first_marker(finding_code, _VERIFY_ACTION_MARKERS)
+        action_kind = "verify"
+    if not marker:
+        action_kind = "inspect"
+    confidence = "high" if marker else "low"
+    basis = (
+        f"finding_code_marker={marker.lower()}"
+        if marker
+        else "no_concrete_action_marker"
+    )
+    if actionability in _BOUNDARY_PLAN_ACTIONABILITIES:
+        confidence = "low"
+        basis = f"actionability_boundary={actionability}"
+    if actionability in _BLOCKED_PLAN_ACTIONABILITIES:
+        confidence = "low"
+        basis = f"actionability_blocker={actionability}"
+    return {
+        "action_kind": action_kind,
+        "confidence": confidence,
+        "basis": basis,
+        "concrete": confidence == "high",
+    }
+
+
+def _remediation_fixability(
+    gap: Mapping[str, JSONValue],
+    *,
+    selector: Mapping[str, JSONValue],
+    action: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    actionability = _optional_string(gap, "actionability")
+    attribution = _optional_string(gap, "attribution_status")
+    severity = _optional_string(gap, "max_severity")
+    selector_shape = _optional_string(selector, "shape")
+    concrete = bool(action.get("concrete"))
+    known_sources = _int_value(gap, "known_source_occurrence_count")
+    report_occurrences = _int_value(gap, "report_occurrence_count")
+    score = _ACTIONABILITY_FIXABILITY_SCORE.get(actionability, 0)
+    score += 20 if selector_shape == "exact_rule_and_finding" else 5
+    if attribution in {"exact", "runtime_report"}:
+        score += 10
+    elif attribution == "inferred":
+        score += 6
+    score += {"error": 10, "warning": 7, "info": 2}.get(severity, 0)
+    score += min(5, known_sources)
+    if report_occurrences:
+        score += min(20, 10 + report_occurrences * 2)
+    if concrete:
+        score += 10
+    score = min(100, score)
+    if actionability in _BLOCKED_PLAN_ACTIONABILITIES:
+        score = min(score, 24)
+        level = "blocked"
+    elif actionability in _BOUNDARY_PLAN_ACTIONABILITIES:
+        score = min(score, 49)
+        level = "low"
+    elif score >= 75:
+        level = "high"
+    elif score >= 50:
+        level = "medium"
+    elif score >= 25:
+        level = "low"
+    else:
+        level = "blocked"
+    confidence = "high" if score >= 75 else "medium" if score >= 50 else "low"
+    basis: list[JSONValue] = [
+        f"actionability={actionability or 'unknown'}",
+        f"selector={selector_shape or 'unknown'}",
+        f"attribution={attribution or 'unknown'}",
+        f"severity={severity or 'unknown'}",
+        f"concrete_action={str(concrete).lower()}",
+        f"known_sources={known_sources}",
+        f"report_occurrences={report_occurrences}",
+    ]
+    return {
+        "score": score,
+        "level": level,
+        "confidence": confidence,
+        "basis": basis,
+    }
+
+
+def _remediation_plan_missing_fields(
+    gap: Mapping[str, JSONValue],
+    *,
+    selector: Mapping[str, JSONValue],
+    action: Mapping[str, JSONValue],
+) -> list[JSONValue]:
+    missing: list[JSONValue] = ["message"]
+    if _optional_string(selector, "shape") != "exact_rule_and_finding":
+        missing.append("exact_rule_id")
+    if _optional_string(action, "confidence") != "high":
+        missing.append("action_kind_confirmation")
+    actionability = _optional_string(gap, "actionability")
+    if actionability in _BLOCKED_PLAN_ACTIONABILITIES:
+        missing.append("blocking_evidence")
+    elif actionability in _BOUNDARY_PLAN_ACTIONABILITIES:
+        missing.append("boundary_decision")
+    return missing
+
+
+def _remediation_plan_item_sort_key(
+    item: Mapping[str, JSONValue],
+) -> tuple[int, int, int, str, str]:
+    fixability = _mapping_payload(item.get("fixability"))
+    level = _optional_string(fixability, "level")
+    return (
+        1 if level == "blocked" else 0,
+        -_int_value(fixability, "score"),
+        _int_value(item, "catalog_gap_rank"),
+        _optional_string(item, "finding_code"),
+        _optional_string(item, "rule_id"),
+    )
+
+
+def _first_marker(value: str, markers: Sequence[str]) -> str:
+    return next((marker for marker in markers if marker in value), "")
 
 
 def _ranked_gap_payload(
@@ -1959,6 +2320,26 @@ def _format_ranked_gap(group: Mapping[str, JSONValue]) -> str:
         f"{attribution_text}"
         f"{actionability_text}"
         f"{reason_text}"
+    )
+
+
+def _format_remediation_plan_item(
+    item: Mapping[str, JSONValue],
+) -> str:
+    selector = _mapping_payload(item.get("suggested_selector"))
+    action = _mapping_payload(item.get("suggested_action"))
+    fixability = _mapping_payload(item.get("fixability"))
+    missing = _string_list(item.get("missing_fields"))
+    missing_text = ",".join(missing) if missing else "none"
+    return (
+        f"#{_int_value(item, 'rank')} "
+        f"{_optional_string(fixability, 'level') or 'unknown'}"
+        f"/{_int_value(fixability, 'score')} "
+        f"{_optional_string(item, 'finding_code')} "
+        f"selector={_optional_string(selector, 'shape') or 'unknown'} "
+        f"action={_optional_string(action, 'action_kind') or 'inspect'} "
+        f"confidence={_optional_string(fixability, 'confidence') or 'low'} "
+        f"missing={missing_text}"
     )
 
 

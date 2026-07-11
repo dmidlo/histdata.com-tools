@@ -1181,6 +1181,13 @@ def test_quality_report_embeds_enabled_remediation_catalog_audit(
     assert observed_groups[0]["finding_code"] == ("CUSTOM_REPORT_ONLY_GAP")
     assert observed_groups[0]["occurrence_count"] == 1
     assert observed_groups[0]["actionability"] == "remediable_defect"
+    assert audit["remediation_plan"]["schema_version"] == (
+        "histdatacom.quality-remediation-plan.v1"
+    )
+    assert any(
+        item["finding_code"] == "CUSTOM_REPORT_ONLY_GAP"
+        for item in audit["remediation_plan"]["items"]
+    )
     assert str(tmp_path) not in encoded
 
 
@@ -1201,6 +1208,8 @@ def test_quality_console_summary_renders_remediation_catalog_audit(
     assert " inferred=" in output
     assert " unresolved=" in output
     assert "- actionability: actionable=" in output
+    assert "- plan: candidates=" in output
+    assert "- plan rank=" in output
     assert "- observed error custom.report:CUSTOM_REPORT_ONLY_GAP" in output
     assert (
         "actionability=remediable_defect(unmapped_warning_or_error)" in output
@@ -2089,6 +2098,12 @@ def test_bounded_quality_payload_includes_enabled_remediation_catalog_audit(
     assert audit["report_coverage"][0]["remediation_coverage"][
         "unmapped_groups"
     ][0]["finding_code"] == ("CUSTOM_REPORT_ONLY_GAP")
+    assert audit["remediation_plan"]["plan_item_count"] > 0
+    assert audit["remediation_plan"]["items"]
+    assert (
+        audit["payload_limits"]["remediation_plan"]["included_count"]
+        == audit["remediation_plan"]["included_plan_item_count"]
+    )
     assert (
         payload["payload_limits"]["remediation_catalog_audit"][
             "target_axis_limit"

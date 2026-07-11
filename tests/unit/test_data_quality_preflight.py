@@ -510,10 +510,13 @@ def test_quality_preflight_embeds_enabled_remediation_catalog_audit(
 
     assert audit["summary"]["report_count"] == 1
     assert audit["report_coverage"][0]["source"] == "current-report"
+    assert audit["remediation_plan"]["items"]
     assert "sample remediation audit:" in console
+    assert "sample remediation plan:" in console
     assert "actionable_warning_error_gaps=" in console
     assert "intentional_boundaries=" in console
     assert "### Sample Remediation Catalog Audit" in markdown
+    assert "#### Top Remediation Plan Items" in markdown
     assert "Actionable warning/error gaps" in markdown
     assert "Intentional warning/error boundaries" in markdown
     assert str(tmp_path) not in encoded

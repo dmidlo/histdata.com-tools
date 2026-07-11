@@ -87,6 +87,7 @@ QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT = 16
 QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT = 8
 QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT = 16
 QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT = 8
+QUALITY_REMEDIATION_PLAN_DISPLAY_LIMIT = 5
 
 _FINGERPRINT_REPORT_SURFACE_EVIDENCE_ACTIVE = False
 _NEXT_ACTION_SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
@@ -1442,6 +1443,21 @@ def format_quality_remediation_catalog_audit_lines(
             f"{_int_metadata(audit_summary, 'intentionally_unremediable_warning_error_code_count')}"
         ),
     ]
+    remediation_plan = _mapping_payload(summary.get("remediation_plan"))
+    plan_items = _list_metadata(remediation_plan.get("items"))
+    if plan_items:
+        lines.append(
+            "- plan: candidates="
+            f"{_int_metadata(remediation_plan, 'plan_item_count')} "
+            "included="
+            f"{_int_metadata(remediation_plan, 'included_plan_item_count')} "
+            "truncated="
+            f"{str(bool(remediation_plan.get('truncated'))).lower()}"
+        )
+        lines.extend(
+            f"- plan {_format_quality_remediation_plan_item(item)}"
+            for item in plan_items[:QUALITY_REMEDIATION_PLAN_DISPLAY_LIMIT]
+        )
     for group in _remediation_catalog_observed_gap_groups(summary):
         lines.append(
             "- observed " + _format_quality_remediation_coverage_group(group)
@@ -2042,6 +2058,23 @@ def _format_quality_remediation_catalog_gap(
         f"{_int_metadata(gap, 'report_occurrence_count')} "
         f"{attribution_text} "
         f"{actionability_text}"
+    )
+
+
+def _format_quality_remediation_plan_item(
+    item: Mapping[str, JSONValue],
+) -> str:
+    selector = _mapping_payload(item.get("suggested_selector"))
+    action = _mapping_payload(item.get("suggested_action"))
+    fixability = _mapping_payload(item.get("fixability"))
+    return (
+        f"rank={_int_metadata(item, 'rank')} "
+        f"{_optional_string_metadata(item, 'rule_id')}:"
+        f"{_optional_string_metadata(item, 'finding_code')} "
+        f"fixability={_optional_string_metadata(fixability, 'level')}"
+        f"/{_int_metadata(fixability, 'score')} "
+        f"selector={_optional_string_metadata(selector, 'shape')} "
+        f"action={_optional_string_metadata(action, 'action_kind')}"
     )
 
 

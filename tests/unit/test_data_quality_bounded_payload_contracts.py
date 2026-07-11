@@ -24,7 +24,7 @@ def test_bounded_payload_contract_audit_passes_representative_payload() -> None:
     assert payload["status"] == "pass"
     assert payload["finding_count"] == 0
     assert payload["findings"] == []
-    assert payload["checked_surfaces"]["sequence_contract_count"] == 18
+    assert payload["checked_surfaces"]["sequence_contract_count"] == 19
     assert "does not read local market data" in payload["non_goals"]
 
 
@@ -113,6 +113,27 @@ def test_bounded_payload_contract_audit_checks_quality_skip_events() -> None:
     finding = _first_finding(audit, "bounded_payload_count_mismatch")
     assert finding["path"] == (
         "quality_engine.skip_events.limit_metadata.events.included_count"
+    )
+
+
+def test_bounded_payload_contract_audit_checks_remediation_plan_limits() -> (
+    None
+):
+    """Remediation-plan item counts should remain independently bounded."""
+    payload = _representative_payload_copy()
+    plan = payload["remediation_catalog_audit"]["remediation_plan"]
+    assert isinstance(plan, dict)
+    items = plan["items"]
+    assert isinstance(items, list)
+    items.clear()
+
+    audit = bounded_payload_contract_audit(payload)
+
+    assert audit["status"] == "fail"
+    finding = _first_finding(audit, "bounded_payload_count_mismatch")
+    assert finding["path"] == (
+        "remediation_catalog_audit.payload_limits.remediation_plan."
+        "included_count"
     )
 
 

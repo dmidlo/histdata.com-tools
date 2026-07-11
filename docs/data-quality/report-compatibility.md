@@ -132,6 +132,18 @@ rule, finding-code, severity, mapping, or attribution evidence can move a gap
 behind actionable defects. These fields do not change finding severity, quality
 status, or exit policy.
 
+Catalog audits may also add a `remediation_plan` using
+`histdatacom.quality-remediation-plan.v1`. The section is derived from
+`ranked_gaps` and has independent bounded-sequence metadata under
+`payload_limits.remediation_plan`. Consumers should use `items`,
+`plan_item_count`, `included_plan_item_count`, `omitted_plan_item_count`, and
+`truncated` together rather than assuming every candidate is embedded. Each
+item preserves its `catalog_gap_rank` while adding a fixability-oriented `rank`,
+suggested selector/action/hint-code metadata, explicit `missing_fields`, and
+bounded `evidence`. Fixability scores and proposals are deterministic advisory
+planning aids; they are not applied remediation mappings and do not mutate
+reports, catalogs, files, or repository state.
+
 ## Update Workflow
 
 Do not update golden fixtures as a side effect of routine test runs. When a

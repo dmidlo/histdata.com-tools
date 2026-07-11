@@ -270,6 +270,19 @@
       "truncated": false,
       "unbounded": false
     },
+    "remediation_plan": {
+      "default_limit": 16,
+      "effective_limit": 4,
+      "included_count": 2,
+      "limit": 4,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 4,
+      "total_count": 2,
+      "truncated": false,
+      "unbounded": false
+    },
     "report_unmapped_groups": {
       "applies_per_report": true,
       "default_limit": 16,
@@ -423,6 +436,163 @@
       ]
     }
   ],
+  "remediation_plan": {
+    "actionability_counts": {
+      "informational_only": 1,
+      "remediable_defect": 1
+    },
+    "fixability_counts": {
+      "high": 1,
+      "low": 1
+    },
+    "included_plan_item_count": 2,
+    "items": [
+      {
+        "actionability": "remediable_defect",
+        "actionability_reason": "unmapped_warning_or_error",
+        "attribution_reason": "provided_rule_id",
+        "attribution_status": "exact",
+        "catalog_gap_rank": 1,
+        "draft_hint_code": "repair_ascii_timestamp_source_period_mismatch",
+        "evidence": {
+          "known_source_occurrence_count": 1,
+          "omitted_report_source_count": 0,
+          "omitted_source_count": 0,
+          "report_group_count": 0,
+          "report_occurrence_count": 0,
+          "reports": [],
+          "sources": [
+            {
+              "count": 1,
+              "source": "data_quality/time.ascii.est_no_dst.py:1"
+            }
+          ]
+        },
+        "finding_code": "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH",
+        "fixability": {
+          "basis": [
+            "actionability=remediable_defect",
+            "selector=exact_rule_and_finding",
+            "attribution=exact",
+            "severity=error",
+            "concrete_action=true",
+            "known_sources=1",
+            "report_occurrences=0"
+          ],
+          "confidence": "high",
+          "level": "high",
+          "score": 96
+        },
+        "mapped": false,
+        "max_severity": "error",
+        "missing_fields": [
+          "message"
+        ],
+        "rank": 1,
+        "rank_reasons": [
+          "actionability=remediable_defect",
+          "severity=error",
+          "source_family=time",
+          "known_sources=1"
+        ],
+        "rule_id": "time.ascii.est_no_dst",
+        "severity_counts": {
+          "error": 1
+        },
+        "source_family": "time",
+        "suggested_action": {
+          "action_kind": "repair",
+          "basis": "finding_code_marker=mismatch",
+          "concrete": true,
+          "confidence": "high"
+        },
+        "suggested_hint_code_prefix": "repair_ascii_timestamp_source",
+        "suggested_selector": {
+          "basis": "exact_rule_attribution",
+          "confidence": "high",
+          "finding_code": "ASCII_TIMESTAMP_SOURCE_PERIOD_MISMATCH",
+          "finding_code_prefix": "ASCII_TIMESTAMP_SOURCE",
+          "rule_id": "time.ascii.est_no_dst",
+          "shape": "exact_rule_and_finding"
+        }
+      },
+      {
+        "actionability": "informational_only",
+        "actionability_reason": "informational_severity",
+        "attribution_reason": "provided_rule_id",
+        "attribution_status": "exact",
+        "catalog_gap_rank": 2,
+        "draft_hint_code": "inspect_fingerprint_series_summary",
+        "evidence": {
+          "known_source_occurrence_count": 1,
+          "omitted_report_source_count": 0,
+          "omitted_source_count": 0,
+          "report_group_count": 0,
+          "report_occurrence_count": 0,
+          "reports": [],
+          "sources": [
+            {
+              "count": 1,
+              "source": "data_quality/fingerprint.series.py:1"
+            }
+          ]
+        },
+        "finding_code": "FINGERPRINT_SERIES_SUMMARY",
+        "fixability": {
+          "basis": [
+            "actionability=informational_only",
+            "selector=exact_rule_and_finding",
+            "attribution=exact",
+            "severity=info",
+            "concrete_action=false",
+            "known_sources=1",
+            "report_occurrences=0"
+          ],
+          "confidence": "low",
+          "level": "low",
+          "score": 36
+        },
+        "mapped": false,
+        "max_severity": "info",
+        "missing_fields": [
+          "message",
+          "action_kind_confirmation",
+          "boundary_decision"
+        ],
+        "rank": 2,
+        "rank_reasons": [
+          "actionability=informational_only",
+          "severity=info",
+          "source_family=fingerprint",
+          "known_sources=1"
+        ],
+        "rule_id": "fingerprint.series",
+        "severity_counts": {
+          "info": 1
+        },
+        "source_family": "fingerprint",
+        "suggested_action": {
+          "action_kind": "inspect",
+          "basis": "actionability_boundary=informational_only",
+          "concrete": false,
+          "confidence": "low"
+        },
+        "suggested_hint_code_prefix": "inspect_fingerprint",
+        "suggested_selector": {
+          "basis": "exact_rule_attribution",
+          "confidence": "high",
+          "finding_code": "FINGERPRINT_SERIES_SUMMARY",
+          "finding_code_prefix": "FINGERPRINT",
+          "rule_id": "fingerprint.series",
+          "shape": "exact_rule_and_finding"
+        }
+      }
+    ],
+    "omitted_plan_item_count": 0,
+    "plan_item_count": 2,
+    "schema_version": "histdatacom.quality-remediation-plan.v1",
+    "truncated": false
+  },
   "report_coverage": [],
   "schema_version": "histdatacom.quality-remediation-catalog-audit.v1",
   "status": "needs-remediation-guidance",

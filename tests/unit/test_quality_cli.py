@@ -247,6 +247,8 @@ def test_quality_remediation_catalog_cli_reports_ranked_human_output(
 
     assert exit_code == 1
     assert "Ranked remediation gaps" in output
+    assert "Remediation plan" in output
+    assert "#1 high/90 CLI_GAP selector=exact_rule_and_finding" in output
     assert "#1 warning CLI_GAP family=time" in output
     assert "attribution=inferred(unique_helper_rule)" in output
     assert (
@@ -779,6 +781,42 @@ def _catalog_payload(
                 "actionability_reason": "unmapped_warning_or_error",
             }
         )
+    remediation_plan: dict[str, object] = {
+        "schema_version": "histdatacom.quality-remediation-plan.v1",
+        "plan_item_count": 0,
+        "included_plan_item_count": 0,
+        "omitted_plan_item_count": 0,
+        "truncated": False,
+        "actionability_counts": {},
+        "fixability_counts": {},
+        "items": [],
+    }
+    if ranked_gap:
+        remediation_plan.update(
+            {
+                "plan_item_count": 1,
+                "included_plan_item_count": 1,
+                "actionability_counts": {"remediable_defect": 1},
+                "fixability_counts": {"high": 1},
+                "items": [
+                    {
+                        "rank": 1,
+                        "finding_code": "CLI_GAP",
+                        "rule_id": "time.ascii.sequence",
+                        "suggested_selector": {
+                            "shape": "exact_rule_and_finding"
+                        },
+                        "suggested_action": {"action_kind": "inspect"},
+                        "fixability": {
+                            "level": "high",
+                            "score": 90,
+                            "confidence": "high",
+                        },
+                        "missing_fields": ["message"],
+                    }
+                ],
+            }
+        )
     return {
         "schema_version": "histdatacom.quality-remediation-catalog-audit.v1",
         "status": ("needs-remediation-guidance" if gap_count else "covered"),
@@ -803,6 +841,7 @@ def _catalog_payload(
         "known_code_counts": {},
         "known_unmapped_codes": [],
         "ranked_gaps": ranked_gaps,
+        "remediation_plan": remediation_plan,
         "report_coverage": [],
         "payload_limits": {},
     }

@@ -1320,6 +1320,21 @@ ordinary mapped/unmapped counts and adds boundary-aware actionable, intentional,
 attribution-blocked, and diagnostic-blocked counts. Unknown warning/error gaps
 remain actionable by default, so boundary classification cannot silently hide a
 new defect.
+
+Every audit also derives a bounded `remediation_plan` from the complete ranked
+gap set. Plan items are re-ranked by deterministic fixability rather than raw
+severity alone and include the original catalog-gap rank, actionability,
+severity counts, exact-or-family selector proposal, draft hint-code slug,
+suggested action kind, fixability score/level/confidence with a reason trail,
+fields still requiring maintainer judgment, and bounded source/report evidence.
+Observed report-only gaps use their reported rule/finding identity and remain
+first-class plan candidates. Attribution and diagnostic blockers are explicitly
+marked `blocked`; policy, support, expected-context, unsafe, and informational
+boundaries remain visible with low fixability instead of being presented as
+automatic catalog edits. The `histdatacom.quality-remediation-plan.v1` artifact
+is advisory: it never edits the remediation catalog, creates GitHub work, or
+changes finding severity and exit policy.
+
 The same reporting surface can be enabled without a profile file by passing
 `--quality-remediation-catalog-audit` with `--quality`, `--repo-quality`, or
 `--quality-preflight`. When the flag is combined with `--quality-profile`, the
