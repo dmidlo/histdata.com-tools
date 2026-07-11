@@ -1335,6 +1335,32 @@ automatic catalog edits. The `histdatacom.quality-remediation-plan.v1` artifact
 is advisory: it never edits the remediation catalog, creates GitHub work, or
 changes finding severity and exit policy.
 
+To translate findings in a saved quality report into concrete user-data repair
+steps, use the separate non-mutating repair-plan command:
+
+```sh
+histdatacom quality repair-plan \
+  --report reports/quality.json
+```
+
+Add `--json` for the bounded `histdatacom.quality-repair-plan.v1` artifact.
+`--item-limit` controls included findings and `--evidence-limit` controls the
+publish-safe diagnostic values retained per item; both surfaces include total,
+included, omitted, and truncation metadata. The initial operation vocabulary
+covers invalid archive/member renames, missing or unexpected member rebuilds,
+extra-member inspection, CRC/corrupt archive replacement, and read-access
+restoration. Exact report evidence produces an exact proposal, incomplete
+evidence produces `needs_context`, and unmapped or out-of-scope findings remain
+explicitly `unsupported`.
+
+The repair plan is advisory and manual-only. It does not expose an `--apply`
+mode and never renames files, rewrites ZIPs, removes members, changes
+permissions, downloads replacements, or changes report severity and exit
+policy. This is distinct from remediation-catalog `remediation_plan` output:
+the catalog plan helps maintainers add missing hint mappings, while
+`quality repair-plan` helps users interpret already observed findings and
+mapped hints without changing their data.
+
 The same reporting surface can be enabled without a profile file by passing
 `--quality-remediation-catalog-audit` with `--quality`, `--repo-quality`, or
 `--quality-preflight`. When the flag is combined with `--quality-profile`, the

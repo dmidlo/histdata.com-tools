@@ -63,6 +63,90 @@ def test_main_routes_quality_command(
     assert captured == ["evidence"]
 
 
+def test_quality_repair_plan_cli_emits_bounded_non_mutating_json(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The repair-plan command should translate a report without changing data."""
+    archive = tmp_path / "DAT_ASCII_EURUSD_T_201202.zip"
+    archive.write_bytes(b"not a zip")
+    target = QualityTarget(
+        path=str(archive),
+        kind=QualityTargetKind.ZIP,
+        data_format="ascii",
+        timeframe="T",
+        symbol="EURUSD",
+        period="201202",
+    )
+    finding = QualityFinding(
+        severity=QualitySeverity.ERROR,
+        code="ZIP_CORRUPT",
+        message="ZIP archive could not be opened.",
+        rule_id="inventory.zip.integrity",
+        target=target,
+        metadata={"error_type": "BadZipFile"},
+    )
+    report = QualityReport(
+        targets=(target,),
+        rule_results=(
+            QualityRuleResult(
+                rule_id="inventory.zip.integrity",
+                target=target,
+                findings=(finding,),
+            ),
+        ),
+    )
+    report_path = tmp_path / "quality.json"
+    write_quality_report(report, report_path)
+    archive_before = archive.read_bytes()
+    report_before = report_path.read_bytes()
+
+    exit_code = main(
+        [
+            "repair-plan",
+            "--report",
+            str(report_path),
+            "--item-limit",
+            "1",
+            "--evidence-limit",
+            "1",
+            "--json",
+        ]
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == "histdatacom.quality-repair-plan.v1"
+    assert payload["mode"] == "non_mutating"
+    assert payload["apply_supported"] is False
+    assert payload["items"][0]["operation"]["category"] == (
+        "redownload_archive"
+    )
+    assert str(tmp_path) not in captured.out
+    assert archive.read_bytes() == archive_before
+    assert report_path.read_bytes() == report_before
+
+
+def test_quality_repair_plan_cli_human_output_is_concise(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The repair-plan command should explain missing plans without failing."""
+    report_path = Path(
+        "tests/fixtures/data_quality_reports/corrupt_zip_report.json"
+    )
+
+    exit_code = main(["repair-plan", "--report", str(report_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Quality repair plan" in captured.out
+    assert "mode: non_mutating" in captured.out
+    assert "ZIP_CORRUPT" in captured.out
+    assert "redownload_archive" in captured.out
+    assert "error_type" not in captured.out
+
+
 def test_quality_evidence_cli_reports_human_accepted_status(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,

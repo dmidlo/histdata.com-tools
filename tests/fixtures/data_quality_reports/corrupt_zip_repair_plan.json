@@ -1,0 +1,117 @@
+{
+  "apply_supported": false,
+  "included_plan_item_count": 1,
+  "input_report": {
+    "finding_count": 1,
+    "path": "tests/fixtures/data_quality_reports/corrupt_zip_report.json",
+    "status": "failed",
+    "target_count": 1
+  },
+  "items": [
+    {
+      "action_kind": "rebuild",
+      "confidence": {
+        "basis": [
+          "exact rule and finding operation mapping",
+          "required diagnostic evidence is present",
+          "operation remains manual and non-mutating in the application"
+        ],
+        "level": "high"
+      },
+      "evidence": {
+        "default_limit": 8,
+        "effective_limit": 8,
+        "included_count": 1,
+        "items": [
+          {
+            "kind": "error_type",
+            "value": "BadZipFile"
+          }
+        ],
+        "limit": 8,
+        "maximum_limit": 32,
+        "minimum_limit": 0,
+        "omitted_count": 0,
+        "requested_limit": 8,
+        "total_count": 1,
+        "truncated": false,
+        "unbounded": false
+      },
+      "evidence_needed": [
+        "archive target identity",
+        "replacement provenance"
+      ],
+      "finding_code": "ZIP_CORRUPT",
+      "missing_evidence": [],
+      "operation": {
+        "automation_status": "manual_only",
+        "category": "redownload_archive",
+        "next_step": "Replace the corrupt archive with a trusted copy from the original source.",
+        "proposal_status": "proposed",
+        "reason": "exact_rule_finding_operation_mapping",
+        "specificity": "exact"
+      },
+      "preconditions": [
+        "Confirm the archive target identity and period.",
+        "Retain the original until the replacement passes ZIP integrity checks."
+      ],
+      "rank": 1,
+      "remediation_hint_code": "redownload_corrupt_zip_archive",
+      "rule_id": "inventory.zip.integrity",
+      "severity": "error",
+      "target": {
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.zip",
+        "target_axis": {
+          "data_format": "ascii",
+          "kind": "zip",
+          "period": "201202",
+          "symbol": "EURUSD",
+          "timeframe": "T"
+        }
+      }
+    }
+  ],
+  "mode": "non_mutating",
+  "mutating_operations_performed": false,
+  "omitted_plan_item_count": 0,
+  "operation_category_counts": {
+    "redownload_archive": 1
+  },
+  "payload_limits": {
+    "evidence_per_item": {
+      "default_limit": 8,
+      "effective_limit": 8,
+      "limit": 8,
+      "maximum_limit": 32,
+      "minimum_limit": 0,
+      "requested_limit": 8,
+      "unbounded": false
+    },
+    "items": {
+      "default_limit": 16,
+      "effective_limit": 16,
+      "included_count": 1,
+      "limit": 16,
+      "maximum_limit": 64,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 16,
+      "total_count": 1,
+      "truncated": false,
+      "unbounded": false
+    }
+  },
+  "plan_item_count": 1,
+  "proposal_status_counts": {
+    "proposed": 1
+  },
+  "safety": {
+    "advisory_only": true,
+    "automatic_execution": "unsupported",
+    "filesystem_mutation_performed": false,
+    "network_access_performed": false,
+    "requires_user_verification_before_action": true
+  },
+  "schema_version": "histdatacom.quality-repair-plan.v1",
+  "truncated": false
+}

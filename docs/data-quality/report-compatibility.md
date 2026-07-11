@@ -144,6 +144,20 @@ bounded `evidence`. Fixability scores and proposals are deterministic advisory
 planning aids; they are not applied remediation mappings and do not mutate
 reports, catalogs, files, or repository state.
 
+Standalone repair-plan output uses
+`histdatacom.quality-repair-plan.v1`. It is derived from a saved
+`histdatacom.quality-report.v1` and does not alter or replace the source report.
+Consumers should use `plan_item_count`, `included_plan_item_count`,
+`omitted_plan_item_count`, `truncated`, and `payload_limits.items` together.
+Each item preserves the finding code, rule ID, severity, mapped hint and action
+kind, publish-safe target identity, proposed operation, preconditions,
+evidence requirements, bounded evidence, missing context, and confidence
+basis. Stable proposal states are `proposed`, `needs_context`, and
+`unsupported`; operation execution remains `manual_only` or `unsupported`.
+The top-level `mode`, `apply_supported`, `mutating_operations_performed`, and
+`safety` fields are normative: version 1 is advisory and performs no file,
+archive, permission, network, report, or catalog mutation.
+
 ## Update Workflow
 
 Do not update golden fixtures as a side effect of routine test runs. When a

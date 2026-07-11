@@ -48,6 +48,13 @@ from histdatacom.data_quality.remediation_audit import (
     remediation_catalog_audit_has_warning_error_gaps,
     remediation_catalog_audit_to_json,
 )
+from histdatacom.data_quality.repair_plan import (
+    DEFAULT_QUALITY_REPAIR_PLAN_EVIDENCE_LIMIT,
+    DEFAULT_QUALITY_REPAIR_PLAN_ITEM_LIMIT,
+    format_quality_repair_plan,
+    quality_repair_plan,
+    quality_repair_plan_to_json,
+)
 from histdatacom.fx_enums import (
     Format,
     Pairs,
@@ -233,6 +240,43 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit the machine-readable audit payload",
     )
+    repair_plan = subparsers.add_parser(
+        "repair-plan",
+        aliases=("remediation-repair-plan",),
+        help="derive a non-mutating repair plan from a saved quality report",
+    )
+    repair_plan.add_argument(
+        "--report",
+        dest="report_path",
+        required=True,
+        metavar="PATH",
+        help="saved quality JSON report to translate into a repair plan",
+    )
+    repair_plan.add_argument(
+        "--item-limit",
+        type=_non_negative_int,
+        default=DEFAULT_QUALITY_REPAIR_PLAN_ITEM_LIMIT,
+        metavar="N",
+        help=(
+            "maximum repair-plan items to include; defaults to "
+            f"{DEFAULT_QUALITY_REPAIR_PLAN_ITEM_LIMIT}"
+        ),
+    )
+    repair_plan.add_argument(
+        "--evidence-limit",
+        type=_non_negative_int,
+        default=DEFAULT_QUALITY_REPAIR_PLAN_EVIDENCE_LIMIT,
+        metavar="N",
+        help=(
+            "maximum evidence values per item; defaults to "
+            f"{DEFAULT_QUALITY_REPAIR_PLAN_EVIDENCE_LIMIT}"
+        ),
+    )
+    repair_plan.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the machine-readable non-mutating repair plan",
+    )
     fingerprint_schema = subparsers.add_parser(
         "fingerprint-schema",
         aliases=("fingerprint-contract", "fingerprint-discovery"),
@@ -374,6 +418,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             if remediation_catalog_audit_has_warning_error_gaps(payload)
             else 0
         )
+
+    if args.quality_command in {
+        "repair-plan",
+        "remediation-repair-plan",
+    }:
+        try:
+            report = load_quality_report(args.report_path)
+            repair_payload = quality_repair_plan(
+                report,
+                report_path=args.report_path,
+                item_limit=args.item_limit,
+                evidence_limit=args.evidence_limit,
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            print(f"quality report error: {exc}", file=sys.stderr)  # noqa:T201
+            return 1
+        if args.json:
+            print(
+                quality_repair_plan_to_json(repair_payload), end=""
+            )  # noqa:T201
+        else:
+            print(format_quality_repair_plan(repair_payload))  # noqa:T201
+        return 0
 
     if args.quality_command in {
         "fingerprint-schema",
