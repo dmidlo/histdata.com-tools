@@ -206,6 +206,9 @@ from histdatacom.data_quality.provenance import (
 )
 from histdatacom.data_quality.remediation import (
     QualityRemediationHint,
+    RemediationActionability,
+    RemediationActionabilityDecision,
+    classify_remediation_actionability,
     remediation_hint_payloads_for_finding,
     remediation_hint_payloads_for_flags,
     remediation_hints_for_finding_code,
@@ -601,6 +604,7 @@ __all__ = [
     "quality_support_from_metadata",
     "quality_target_from_path",
     "discover_known_quality_findings",
+    "classify_remediation_actionability",
     "format_remediation_catalog_audit",
     "remediation_hint_payloads_for_finding",
     "remediation_hint_payloads_for_flags",
@@ -608,6 +612,8 @@ __all__ = [
     "remediation_hints_for_flags",
     "remediation_catalog_audit_has_warning_error_gaps",
     "remediation_catalog_audit_to_json",
+    "RemediationActionability",
+    "RemediationActionabilityDecision",
     "run_quality_assessment",
     "series_fingerprint_coverage_summary",
     "series_fingerprint_distribution_attention_summary",

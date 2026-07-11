@@ -985,6 +985,15 @@ def test_quality_report_payload_adds_remediation_coverage_metadata(
     assert coverage["unmapped_warning_error_group_count"] == 2
     assert coverage["included_unmapped_warning_error_group_count"] == 2
     assert coverage["omitted_unmapped_warning_error_group_count"] == 0
+    assert coverage["actionability_counts"] == {
+        "informational_only": 1,
+        "remediable_defect": 4,
+    }
+    assert coverage["unmapped_actionable_warning_error_finding_count"] == 3
+    assert coverage["unmapped_actionable_warning_error_group_count"] == 2
+    assert (
+        coverage["intentionally_unremediable_warning_error_finding_count"] == 0
+    )
 
     groups = coverage["unmapped_groups"]
     assert [group["max_severity"] for group in groups] == [
@@ -996,6 +1005,64 @@ def test_quality_report_payload_adds_remediation_coverage_metadata(
     assert groups[0]["finding_code"] == "FILE_MISSING"
     assert groups[0]["occurrence_count"] == 2
     assert groups[0]["target_axis_count"] == 2
+    assert groups[0]["actionability"] == "remediable_defect"
+    assert groups[0]["actionability_reason"] == "unmapped_warning_or_error"
+
+
+def test_quality_remediation_coverage_separates_actionable_boundaries(
+    tmp_path: Path,
+) -> None:
+    """Published report coverage should distinguish support boundaries."""
+    target = _target(tmp_path / "unsupported.csv")
+    report = QualityReport(
+        targets=(target,),
+        rule_results=(
+            QualityRuleResult(
+                rule_id="custom.rule",
+                target=target,
+                findings=(
+                    QualityFinding(
+                        severity=QualitySeverity.WARNING,
+                        code="CUSTOM_REPAIRABLE_FAILURE",
+                        message="repairable failure",
+                        rule_id="custom.rule",
+                        target=target,
+                    ),
+                ),
+            ),
+            QualityRuleResult(
+                rule_id="inventory.format_support",
+                target=target,
+                findings=(
+                    QualityFinding(
+                        severity=QualitySeverity.ERROR,
+                        code="HISTDATA_FORMAT_UNSUPPORTED",
+                        message="unsupported format",
+                        rule_id="inventory.format_support",
+                        target=target,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    coverage = quality_remediation_coverage_summary(report)
+    assert coverage is not None
+    groups = coverage["unmapped_groups"]
+
+    assert coverage["unmapped_warning_error_group_count"] == 2
+    assert coverage["unmapped_actionable_warning_error_group_count"] == 1
+    assert coverage["unmapped_actionable_warning_error_finding_count"] == 1
+    assert (
+        coverage["intentionally_unremediable_warning_error_finding_count"] == 1
+    )
+    assert groups[0]["finding_code"] == "CUSTOM_REPAIRABLE_FAILURE"
+    assert groups[0]["actionability"] == "remediable_defect"
+    assert groups[1]["finding_code"] == "HISTDATA_FORMAT_UNSUPPORTED"
+    assert groups[1]["actionability"] == "unsupported_format_or_capability"
+    output = "\n".join(format_quality_remediation_coverage_lines(coverage))
+    assert "actionability: actionable=1" in output
+    assert "intentional_boundary=1" in output
 
 
 def test_quality_report_payload_adds_all_mapped_remediation_coverage(
@@ -1104,11 +1171,16 @@ def test_quality_report_embeds_enabled_remediation_catalog_audit(
     assert audit["summary"]["report_count"] == 1
     assert audit["summary"]["report_finding_count"] == 2
     assert audit["summary"]["report_unmapped_warning_error_group_count"] == 1
+    assert (
+        audit["summary"]["report_unmapped_actionable_warning_error_group_count"]
+        == 1
+    )
     observed_groups = audit["report_coverage"][0]["remediation_coverage"][
         "unmapped_groups"
     ]
     assert observed_groups[0]["finding_code"] == ("CUSTOM_REPORT_ONLY_GAP")
     assert observed_groups[0]["occurrence_count"] == 1
+    assert observed_groups[0]["actionability"] == "remediable_defect"
     assert str(tmp_path) not in encoded
 
 
@@ -1128,7 +1200,11 @@ def test_quality_console_summary_renders_remediation_catalog_audit(
     assert "- attribution: exact=" in output
     assert " inferred=" in output
     assert " unresolved=" in output
+    assert "- actionability: actionable=" in output
     assert "- observed error custom.report:CUSTOM_REPORT_ONLY_GAP" in output
+    assert (
+        "actionability=remediable_defect(unmapped_warning_or_error)" in output
+    )
     assert lines[0] == ""
     assert "CUSTOM_REPORT_ONLY_GAP" in "\n".join(lines)
 

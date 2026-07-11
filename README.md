@@ -1312,7 +1312,14 @@ histdatacom quality remediation-catalog --json
 The concise renderer includes exact, inferred, and unresolved occurrence
 counts plus attribution status and reason on ranked gaps. These fields improve
 catalog planning evidence only; they do not add remediation mappings or change
-gap severity and ranking policy.
+gap severity. Ranked gaps also include `actionability` and
+`actionability_reason`. Actionable defects sort ahead of policy/profile
+decisions, unsupported formats or capabilities, expected context, attribution
+or diagnostic blockers, and unsafe-to-automate cases. The summary preserves the
+ordinary mapped/unmapped counts and adds boundary-aware actionable, intentional,
+attribution-blocked, and diagnostic-blocked counts. Unknown warning/error gaps
+remain actionable by default, so boundary classification cannot silently hide a
+new defect.
 The same reporting surface can be enabled without a profile file by passing
 `--quality-remediation-catalog-audit` with `--quality`, `--repo-quality`, or
 `--quality-preflight`. When the flag is combined with `--quality-profile`, the

@@ -227,7 +227,10 @@ def quality_preflight_validation_evidence_payload(
         "status_counts": status_counts,
         "commands": command_payloads,
     }
-    return publish_safe_json_mapping(validation_payload)
+    return cast(
+        dict[str, JSONValue],
+        publish_safe_json_mapping(validation_payload),
+    )
 
 
 def quality_preflight_validation_evidence_to_json(
@@ -241,26 +244,29 @@ def _validation_artifact_command(
     row: Mapping[str, Any],
 ) -> dict[str, JSONValue]:
     """Normalize one validation row for the dedicated evidence artifact."""
-    return publish_safe_json_mapping(
-        {
-            "name": str(row.get("name", "")),
-            "command": str(row.get("command", "")),
-            "status": _normalized_validation_status(row.get("status")),
-            "exit_code": (
-                _int_value(row.get("returncode"))
-                if "returncode" in row
-                else None
-            ),
-            "duration_seconds": (
-                round(_float_value(row.get("duration_seconds")), 6)
-                if "duration_seconds" in row
-                else None
-            ),
-            "summary": _validation_summary(row),
-            "output_artifact_path": str(
-                row.get("output_artifact_path", "") or ""
-            ),
-        }
+    return cast(
+        dict[str, JSONValue],
+        publish_safe_json_mapping(
+            {
+                "name": str(row.get("name", "")),
+                "command": str(row.get("command", "")),
+                "status": _normalized_validation_status(row.get("status")),
+                "exit_code": (
+                    _int_value(row.get("returncode"))
+                    if "returncode" in row
+                    else None
+                ),
+                "duration_seconds": (
+                    round(_float_value(row.get("duration_seconds")), 6)
+                    if "duration_seconds" in row
+                    else None
+                ),
+                "summary": _validation_summary(row),
+                "output_artifact_path": str(
+                    row.get("output_artifact_path", "") or ""
+                ),
+            }
+        ),
     )
 
 
@@ -655,6 +661,33 @@ def quality_preflight_to_markdown(payload: Mapping[str, JSONValue]) -> str:
                             str(
                                 remediation_audit_summary.get(
                                     "report_unmapped_warning_error_group_count",
+                                    0,
+                                )
+                            ),
+                        ),
+                        (
+                            "Actionable warning/error gaps",
+                            str(
+                                remediation_audit_summary.get(
+                                    "unmapped_actionable_warning_error_gap_count",
+                                    0,
+                                )
+                            ),
+                        ),
+                        (
+                            "Intentional warning/error boundaries",
+                            str(
+                                remediation_audit_summary.get(
+                                    "intentionally_unremediable_warning_error_code_count",
+                                    0,
+                                )
+                            ),
+                        ),
+                        (
+                            "Attribution-blocked warning/error gaps",
+                            str(
+                                remediation_audit_summary.get(
+                                    "blocked_by_attribution_warning_error_code_count",
                                     0,
                                 )
                             ),
@@ -1111,7 +1144,11 @@ def format_quality_preflight_console_summary(
             "known_warning_error_gaps="
             f"{remediation_audit_summary.get('unmapped_warning_error_gap_count', 0)} "
             "observed_unmapped_warning_error_groups="
-            f"{remediation_audit_summary.get('report_unmapped_warning_error_group_count', 0)}"
+            f"{remediation_audit_summary.get('report_unmapped_warning_error_group_count', 0)} "
+            "actionable_warning_error_gaps="
+            f"{remediation_audit_summary.get('unmapped_actionable_warning_error_gap_count', 0)} "
+            "intentional_boundaries="
+            f"{remediation_audit_summary.get('intentionally_unremediable_warning_error_code_count', 0)}"
         )
     if fingerprint_contract:
         lines.append(

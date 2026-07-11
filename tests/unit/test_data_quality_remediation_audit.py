@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from histdatacom.data_quality import (
@@ -119,6 +120,8 @@ def test_remediation_catalog_audit_maps_inventory_archive_batch() -> None:
     assert payload["summary"]["unmapped_warning_error_gap_count"] == 1
     assert payload["known_unmapped_codes"] == [
         {
+            "actionability": "unsupported_format_or_capability",
+            "actionability_reason": "unsupported_format_rule",
             "attribution_reason": "provided_rule_id",
             "attribution_reason_counts": {"provided_rule_id": 1},
             "attribution_status": "exact",
@@ -161,6 +164,81 @@ def test_remediation_catalog_audit_maps_inventory_archive_batch() -> None:
         str(item["finding_code"]) for item in payload["ranked_gaps"]
     }.isdisjoint(inventory_archive_codes)
     assert encoded == remediation_catalog_audit_to_json(payload)
+
+
+def test_remediation_catalog_audit_ranks_actionable_gaps_before_boundaries() -> (
+    None
+):
+    """Actionable defects should outrank more frequent support boundaries."""
+    payload = audit_remediation_catalog(
+        known_findings=(
+            _known(
+                "inventory.format_support",
+                "HISTDATA_FORMAT_UNSUPPORTED",
+                QualitySeverity.ERROR,
+                source_family="inventory",
+            ),
+            _known(
+                "inventory.format_support",
+                "HISTDATA_FORMAT_UNSUPPORTED",
+                QualitySeverity.ERROR,
+                source="data_quality/inventory.py:2",
+                source_family="inventory",
+            ),
+            _known(
+                "inventory.format_support",
+                "HISTDATA_FORMAT_UNSUPPORTED",
+                QualitySeverity.ERROR,
+                source="data_quality/inventory.py:3",
+                source_family="inventory",
+            ),
+            _known(
+                "custom.rule",
+                "CUSTOM_REPAIRABLE_FAILURE",
+                QualitySeverity.WARNING,
+            ),
+            KnownQualityFindingCode(
+                rule_id="time.unresolved",
+                finding_code="CUSTOM_SHARED_FAILURE",
+                severity=QualitySeverity.ERROR,
+                source="data_quality/time.py:1",
+                source_family="time",
+                attribution_status="unresolved",
+                attribution_reason="ambiguous_helper_rules",
+            ),
+            _known(
+                "custom.diagnostics",
+                "DIAGNOSTIC_CONTEXT_MISSING",
+                QualitySeverity.WARNING,
+            ),
+            _known(
+                "modeling.readiness",
+                "MODELING_CALENDAR_REGIME_POLICY_MISSING",
+                QualitySeverity.WARNING,
+            ),
+            _known(
+                "custom.repair",
+                "DESTRUCTIVE_REPAIR_REQUIRED",
+                QualitySeverity.ERROR,
+            ),
+        )
+    )
+
+    ranked = payload["ranked_gaps"]
+    summary = payload["summary"]
+
+    assert ranked[0]["finding_code"] == "CUSTOM_REPAIRABLE_FAILURE"
+    assert ranked[0]["actionability"] == "remediable_defect"
+    assert ranked[1]["actionability"] == "needs_diagnostic_context"
+    assert ranked[2]["actionability"] == "needs_rule_attribution"
+    assert ranked[-1]["actionability"] == ("unsupported_format_or_capability")
+    assert "actionability=remediable_defect" in ranked[0]["rank_reasons"]
+    assert summary["unmapped_actionable_warning_error_code_count"] == 1
+    assert summary["blocked_by_attribution_warning_error_code_count"] == 1
+    assert (
+        summary["blocked_by_missing_diagnostics_warning_error_code_count"] == 1
+    )
+    assert summary["intentionally_unremediable_warning_error_code_count"] == 3
 
 
 def test_remediation_catalog_audit_keeps_info_only_gaps_advisory() -> None:
@@ -634,10 +712,11 @@ def test_remediation_catalog_audit_json_matches_golden_fixture() -> None:
     fixture = Path(
         "tests/fixtures/data_quality_reports/remediation_catalog_audit.json"
     )
+    encoded = remediation_catalog_audit_to_json(payload)
+    if os.environ.get("HISTDATACOM_UPDATE_QUALITY_GOLDENS") == "1":
+        fixture.write_text(encoded, encoding="utf-8")
 
-    assert remediation_catalog_audit_to_json(payload) == fixture.read_text(
-        encoding="utf-8"
-    )
+    assert encoded == fixture.read_text(encoding="utf-8")
 
 
 def _known(

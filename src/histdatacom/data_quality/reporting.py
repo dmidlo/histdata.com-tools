@@ -59,6 +59,8 @@ from histdatacom.data_quality.limits import (
     bounded_report_limit,
 )
 from histdatacom.data_quality.remediation import (
+    RemediationActionability,
+    classify_remediation_actionability,
     remediation_hint_payloads_for_finding,
 )
 from histdatacom.data_quality.profiles import QUALITY_REPORTING_METADATA_KEY
@@ -89,6 +91,16 @@ QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT = 8
 _FINGERPRINT_REPORT_SURFACE_EVIDENCE_ACTIVE = False
 _NEXT_ACTION_SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
 _REMEDIATION_COVERAGE_SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
+_REMEDIATION_ACTIONABILITY_SORT = {
+    RemediationActionability.REMEDIABLE_DEFECT.value: 0,
+    RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT.value: 1,
+    RemediationActionability.NEEDS_RULE_ATTRIBUTION.value: 2,
+    RemediationActionability.UNSAFE_TO_AUTOMATE.value: 3,
+    RemediationActionability.POLICY_OR_PROFILE_DECISION.value: 4,
+    RemediationActionability.UNSUPPORTED_FORMAT_OR_CAPABILITY.value: 5,
+    RemediationActionability.EXPECTED_ARTIFACT_OR_CONTEXT.value: 6,
+    RemediationActionability.INFORMATIONAL_ONLY.value: 7,
+}
 _NEXT_ACTION_ATTENTION_RANK = {
     "session": 1,
     "sequence": 2,
@@ -128,6 +140,8 @@ class _RemediationCoverageAggregate:
     rule_id: str
     finding_code: str
     mapped: bool
+    actionability: str
+    actionability_reason: str
     occurrence_count: int = 0
     severity_counts: Counter[str] = field(default_factory=Counter)
     target_axis_counts: Counter[tuple[str, str, str, str, str]] = field(
@@ -1057,10 +1071,14 @@ def quality_remediation_coverage_summary(
     finding_code_counts: Counter[str] = Counter()
     mapped_finding_code_counts: Counter[str] = Counter()
     unmapped_finding_code_counts: Counter[str] = Counter()
+    actionability_counts: Counter[str] = Counter()
     mapped_finding_count = 0
     unmapped_finding_count = 0
 
     for aggregate in aggregates.values():
+        actionability_counts[
+            aggregate.actionability
+        ] += aggregate.occurrence_count
         severity_counts.update(aggregate.severity_counts)
         rule_id_counts[aggregate.rule_id] += aggregate.occurrence_count
         finding_code_counts[
@@ -1104,6 +1122,20 @@ def quality_remediation_coverage_summary(
         for aggregate in included_unmapped_groups
         if _remediation_coverage_group_is_warning_or_error(aggregate)
     )
+    unmapped_actionable_warning_error_groups = [
+        aggregate
+        for aggregate in unmapped_groups
+        if _remediation_coverage_group_is_warning_or_error(aggregate)
+        and aggregate.actionability
+        == RemediationActionability.REMEDIABLE_DEFECT.value
+    ]
+    included_unmapped_actionable_warning_error_group_count = sum(
+        1
+        for aggregate in included_unmapped_groups
+        if _remediation_coverage_group_is_warning_or_error(aggregate)
+        and aggregate.actionability
+        == RemediationActionability.REMEDIABLE_DEFECT.value
+    )
     count_limits = _remediation_coverage_count_limits(
         rule_id_counts=rule_id_counts,
         mapped_rule_id_counts=mapped_rule_id_counts,
@@ -1126,6 +1158,37 @@ def quality_remediation_coverage_summary(
             count
             for severity, count in unmapped_severity_counts.items()
             if severity in {"error", "warning"}
+        ),
+        "actionability_counts": _counter_payload(actionability_counts),
+        "unmapped_actionable_warning_error_finding_count": sum(
+            aggregate.occurrence_count
+            for aggregate in unmapped_actionable_warning_error_groups
+        ),
+        "intentionally_unremediable_warning_error_finding_count": sum(
+            aggregate.occurrence_count
+            for aggregate in unmapped_groups
+            if _remediation_coverage_group_is_warning_or_error(aggregate)
+            and aggregate.actionability
+            in {
+                RemediationActionability.POLICY_OR_PROFILE_DECISION.value,
+                RemediationActionability.UNSUPPORTED_FORMAT_OR_CAPABILITY.value,
+                RemediationActionability.EXPECTED_ARTIFACT_OR_CONTEXT.value,
+                RemediationActionability.UNSAFE_TO_AUTOMATE.value,
+            }
+        ),
+        "blocked_by_attribution_warning_error_finding_count": sum(
+            aggregate.occurrence_count
+            for aggregate in unmapped_groups
+            if _remediation_coverage_group_is_warning_or_error(aggregate)
+            and aggregate.actionability
+            == RemediationActionability.NEEDS_RULE_ATTRIBUTION.value
+        ),
+        "blocked_by_missing_diagnostics_warning_error_finding_count": sum(
+            aggregate.occurrence_count
+            for aggregate in unmapped_groups
+            if _remediation_coverage_group_is_warning_or_error(aggregate)
+            and aggregate.actionability
+            == RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT.value
         ),
         "severity_counts": _counter_payload(severity_counts),
         "mapped_severity_counts": _counter_payload(mapped_severity_counts),
@@ -1180,6 +1243,17 @@ def quality_remediation_coverage_summary(
             unmapped_warning_error_group_count
             - included_unmapped_warning_error_group_count,
         ),
+        "unmapped_actionable_warning_error_group_count": len(
+            unmapped_actionable_warning_error_groups
+        ),
+        "included_unmapped_actionable_warning_error_group_count": (
+            included_unmapped_actionable_warning_error_group_count
+        ),
+        "omitted_unmapped_actionable_warning_error_group_count": max(
+            0,
+            len(unmapped_actionable_warning_error_groups)
+            - included_unmapped_actionable_warning_error_group_count,
+        ),
         "unmapped_groups": [
             _remediation_coverage_group_payload(
                 aggregate,
@@ -1224,6 +1298,16 @@ def format_quality_remediation_coverage_lines(
             f"{_int_metadata(summary, 'included_unmapped_warning_error_group_count')} "
             "omitted: "
             f"{_int_metadata(summary, 'omitted_unmapped_warning_error_group_count')}"
+        ),
+        (
+            "- actionability: actionable="
+            f"{_int_metadata(summary, 'unmapped_actionable_warning_error_group_count')} "
+            "blocked_attribution="
+            f"{_int_metadata(summary, 'blocked_by_attribution_warning_error_finding_count')} "
+            "blocked_diagnostics="
+            f"{_int_metadata(summary, 'blocked_by_missing_diagnostics_warning_error_finding_count')} "
+            "intentional_boundary="
+            f"{_int_metadata(summary, 'intentionally_unremediable_warning_error_finding_count')}"
         ),
     ]
     for group in groups:
@@ -1346,6 +1430,16 @@ def format_quality_remediation_catalog_audit_lines(
             f"{_int_metadata(audit_summary, 'inferred_attribution_occurrence_count')} "
             "unresolved="
             f"{_int_metadata(audit_summary, 'unresolved_attribution_occurrence_count')}"
+        ),
+        (
+            "- actionability: actionable="
+            f"{_int_metadata(audit_summary, 'unmapped_actionable_warning_error_gap_count')} "
+            "blocked_attribution="
+            f"{_int_metadata(audit_summary, 'blocked_by_attribution_warning_error_code_count')} "
+            "blocked_diagnostics="
+            f"{_int_metadata(audit_summary, 'blocked_by_missing_diagnostics_warning_error_code_count')} "
+            "intentional_boundary="
+            f"{_int_metadata(audit_summary, 'intentionally_unremediable_warning_error_code_count')}"
         ),
     ]
     for group in _remediation_catalog_observed_gap_groups(summary):
@@ -1742,16 +1836,38 @@ def _remediation_coverage_aggregates(
         mapped = bool(remediation_hint_payloads_for_finding(finding))
         rule_id = finding.rule_id or "unknown"
         finding_code = finding.code or "unknown"
+        decision = classify_remediation_actionability(
+            rule_id=rule_id,
+            finding_code=finding_code,
+            severity=finding.severity.value,
+            mapped=mapped,
+            attribution_status=("exact" if finding.rule_id else "unresolved"),
+        )
         aggregate = aggregates.setdefault(
             (mapped, rule_id, finding_code),
             _RemediationCoverageAggregate(
                 rule_id=rule_id,
                 finding_code=finding_code,
                 mapped=mapped,
+                actionability=decision.actionability.value,
+                actionability_reason=decision.reason,
             ),
         )
         aggregate.occurrence_count += 1
         aggregate.severity_counts[finding.severity.value] += 1
+        max_severity = _ranked_counter_max(
+            aggregate.severity_counts,
+            _REMEDIATION_COVERAGE_SEVERITY_RANK,
+        )
+        decision = classify_remediation_actionability(
+            rule_id=rule_id,
+            finding_code=finding_code,
+            severity=max_severity or finding.severity.value,
+            mapped=mapped,
+            attribution_status=("exact" if finding.rule_id else "unresolved"),
+        )
+        aggregate.actionability = decision.actionability.value
+        aggregate.actionability_reason = decision.reason
         aggregate.target_axis_counts[
             _target_axis_key(_target_axis_from_finding(finding))
         ] += 1
@@ -1777,6 +1893,8 @@ def _remediation_coverage_group_payload(
         "rule_id": aggregate.rule_id,
         "finding_code": aggregate.finding_code,
         "mapped": aggregate.mapped,
+        "actionability": aggregate.actionability,
+        "actionability_reason": aggregate.actionability_reason,
         "max_severity": _ranked_counter_max(
             aggregate.severity_counts,
             _REMEDIATION_COVERAGE_SEVERITY_RANK,
@@ -1796,12 +1914,13 @@ def _remediation_coverage_group_payload(
 
 def _remediation_coverage_group_sort_key(
     aggregate: _RemediationCoverageAggregate,
-) -> tuple[int, int, int, str, str]:
+) -> tuple[int, int, int, int, str, str]:
     max_severity = _ranked_counter_max(
         aggregate.severity_counts,
         _REMEDIATION_COVERAGE_SEVERITY_RANK,
     )
     return (
+        _REMEDIATION_ACTIONABILITY_SORT.get(aggregate.actionability, 9),
         -_REMEDIATION_COVERAGE_SEVERITY_RANK.get(max_severity or "", 0),
         -aggregate.occurrence_count,
         -len(aggregate.target_axis_counts),
@@ -1884,7 +2003,10 @@ def _format_quality_remediation_coverage_group(
         f"{_optional_string_metadata(group, 'rule_id')}:"
         f"{_optional_string_metadata(group, 'finding_code')} "
         f"findings={_int_metadata(group, 'occurrence_count')} "
-        f"targets={_int_metadata(group, 'target_axis_count')}"
+        f"targets={_int_metadata(group, 'target_axis_count')} "
+        "actionability="
+        f"{_optional_string_metadata(group, 'actionability')}"
+        f"({_optional_string_metadata(group, 'actionability_reason')})"
     )
 
 
@@ -1901,6 +2023,14 @@ def _format_quality_remediation_catalog_gap(
     attribution_text = f"attribution={attribution}"
     if attribution_reason:
         attribution_text += f"({attribution_reason})"
+    actionability = _optional_string_metadata(gap, "actionability") or "unknown"
+    actionability_reason = _optional_string_metadata(
+        gap,
+        "actionability_reason",
+    )
+    actionability_text = f"actionability={actionability}"
+    if actionability_reason:
+        actionability_text += f"({actionability_reason})"
     return (
         f"{_optional_string_metadata(gap, 'max_severity')} "
         f"rank={_int_metadata(gap, 'rank')} "
@@ -1910,7 +2040,8 @@ def _format_quality_remediation_catalog_gap(
         f"{_int_metadata(gap, 'known_source_occurrence_count')} "
         "observed="
         f"{_int_metadata(gap, 'report_occurrence_count')} "
-        f"{attribution_text}"
+        f"{attribution_text} "
+        f"{actionability_text}"
     )
 
 

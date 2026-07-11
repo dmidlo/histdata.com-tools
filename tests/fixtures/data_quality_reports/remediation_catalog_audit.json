@@ -88,6 +88,8 @@
   },
   "known_unmapped_codes": [
     {
+      "actionability": "remediable_defect",
+      "actionability_reason": "unmapped_warning_or_error",
       "attribution_reason": "provided_rule_id",
       "attribution_reason_counts": {
         "provided_rule_id": 1
@@ -129,6 +131,8 @@
       ]
     },
     {
+      "actionability": "informational_only",
+      "actionability_reason": "informational_severity",
       "attribution_reason": "provided_rule_id",
       "attribution_reason_counts": {
         "provided_rule_id": 1
@@ -315,6 +319,8 @@
   },
   "ranked_gaps": [
     {
+      "actionability": "remediable_defect",
+      "actionability_reason": "unmapped_warning_or_error",
       "attribution_reason": "provided_rule_id",
       "attribution_reason_counts": {
         "provided_rule_id": 1
@@ -337,6 +343,7 @@
       "omitted_source_count": 0,
       "rank": 1,
       "rank_reasons": [
+        "actionability=remediable_defect",
         "severity=error",
         "source_family=time",
         "known_sources=1"
@@ -364,6 +371,8 @@
       ]
     },
     {
+      "actionability": "informational_only",
+      "actionability_reason": "informational_severity",
       "attribution_reason": "provided_rule_id",
       "attribution_reason_counts": {
         "provided_rule_id": 1
@@ -386,6 +395,7 @@
       "omitted_source_count": 0,
       "rank": 2,
       "rank_reasons": [
+        "actionability=informational_only",
         "severity=info",
         "source_family=fingerprint",
         "known_sources=1"
@@ -417,17 +427,30 @@
   "schema_version": "histdatacom.quality-remediation-catalog-audit.v1",
   "status": "needs-remediation-guidance",
   "summary": {
+    "actionability_counts": {
+      "informational_only": 1,
+      "remediable_defect": 2
+    },
+    "blocked_by_attribution_warning_error_code_count": 0,
+    "blocked_by_missing_diagnostics_warning_error_code_count": 0,
     "exact_attribution_occurrence_count": 3,
     "inferred_attribution_occurrence_count": 0,
+    "intentionally_unremediable_warning_error_code_count": 0,
     "known_code_count": 3,
     "known_finding_occurrence_count": 3,
     "known_warning_error_code_count": 2,
     "mapped_known_code_count": 1,
+    "report_blocked_by_attribution_warning_error_finding_count": 0,
+    "report_blocked_by_missing_diagnostics_warning_error_finding_count": 0,
     "report_count": 0,
     "report_finding_count": 0,
+    "report_intentionally_unremediable_warning_error_finding_count": 0,
     "report_mapped_finding_count": 0,
+    "report_unmapped_actionable_warning_error_group_count": 0,
     "report_unmapped_finding_count": 0,
     "report_unmapped_warning_error_group_count": 0,
+    "unmapped_actionable_warning_error_code_count": 1,
+    "unmapped_actionable_warning_error_gap_count": 1,
     "unmapped_info_only_code_count": 1,
     "unmapped_known_code_count": 2,
     "unmapped_warning_error_code_count": 1,

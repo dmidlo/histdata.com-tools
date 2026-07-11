@@ -2755,22 +2755,30 @@ def _assert_quality_remediation_coverage(
     payload: dict[str, JSONValue],
 ) -> None:
     assert set(payload) == {
+        "actionability_counts",
+        "blocked_by_attribution_warning_error_finding_count",
+        "blocked_by_missing_diagnostics_warning_error_finding_count",
         "count_limits",
         "finding_code_counts",
         "finding_count",
         "included_unmapped_group_count",
+        "included_unmapped_actionable_warning_error_group_count",
         "included_unmapped_warning_error_group_count",
         "limit_metadata",
         "mapped_finding_code_counts",
         "mapped_finding_count",
         "mapped_rule_id_counts",
         "mapped_severity_counts",
+        "intentionally_unremediable_warning_error_finding_count",
         "omitted_unmapped_group_count",
+        "omitted_unmapped_actionable_warning_error_group_count",
         "omitted_unmapped_warning_error_group_count",
         "rule_id_counts",
         "schema_version",
         "severity_counts",
         "unmapped_finding_code_counts",
+        "unmapped_actionable_warning_error_finding_count",
+        "unmapped_actionable_warning_error_group_count",
         "unmapped_finding_count",
         "unmapped_group_count",
         "unmapped_groups",
@@ -2788,13 +2796,20 @@ def _assert_quality_remediation_coverage(
         keys=("groups", "target_axes"),
     )
     for key in (
+        "blocked_by_attribution_warning_error_finding_count",
+        "blocked_by_missing_diagnostics_warning_error_finding_count",
         "finding_count",
+        "included_unmapped_actionable_warning_error_group_count",
         "included_unmapped_group_count",
         "included_unmapped_warning_error_group_count",
         "mapped_finding_count",
+        "intentionally_unremediable_warning_error_finding_count",
+        "omitted_unmapped_actionable_warning_error_group_count",
         "omitted_unmapped_group_count",
         "omitted_unmapped_warning_error_group_count",
         "unmapped_finding_count",
+        "unmapped_actionable_warning_error_finding_count",
+        "unmapped_actionable_warning_error_group_count",
         "unmapped_group_count",
         "unmapped_warning_error_finding_count",
         "unmapped_warning_error_group_count",
@@ -2803,6 +2818,7 @@ def _assert_quality_remediation_coverage(
         assert payload[key] >= 0
     assert isinstance(payload["unmapped_truncated"], bool)
     for key in (
+        "actionability_counts",
         "mapped_severity_counts",
         "severity_counts",
         "unmapped_severity_counts",
@@ -2840,6 +2856,8 @@ def _assert_quality_remediation_coverage_group(
     payload: dict[str, JSONValue],
 ) -> None:
     assert set(payload) == {
+        "actionability",
+        "actionability_reason",
         "finding_code",
         "included_target_axis_count",
         "limit_metadata",
@@ -2854,6 +2872,18 @@ def _assert_quality_remediation_coverage_group(
         "target_axis_truncated",
     }
     assert payload["mapped"] is False
+    assert payload["actionability"] in {
+        "remediable_defect",
+        "policy_or_profile_decision",
+        "unsupported_format_or_capability",
+        "expected_artifact_or_context",
+        "needs_rule_attribution",
+        "needs_diagnostic_context",
+        "unsafe_to_automate",
+        "informational_only",
+    }
+    assert isinstance(payload["actionability_reason"], str)
+    assert payload["actionability_reason"]
     _assert_limit_metadata_map(payload["limit_metadata"], keys=("target_axes",))
     assert payload["max_severity"] in SEVERITY_VALUES
     assert isinstance(payload["finding_code"], str)

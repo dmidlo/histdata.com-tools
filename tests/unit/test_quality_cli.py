@@ -249,6 +249,9 @@ def test_quality_remediation_catalog_cli_reports_ranked_human_output(
     assert "Ranked remediation gaps" in output
     assert "#1 warning CLI_GAP family=time" in output
     assert "attribution=inferred(unique_helper_rule)" in output
+    assert (
+        "actionability=remediable_defect(unmapped_warning_or_error)" in output
+    )
     assert "report_occurrences=3" in output
 
 
@@ -772,6 +775,8 @@ def _catalog_payload(
                 "source_family": "time",
                 "attribution_status": "inferred",
                 "attribution_reason": "unique_helper_rule",
+                "actionability": "remediable_defect",
+                "actionability_reason": "unmapped_warning_or_error",
             }
         )
     return {

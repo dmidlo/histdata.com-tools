@@ -19,6 +19,9 @@ from histdatacom.data_quality.limits import (
     bounded_report_limit,
 )
 from histdatacom.data_quality.remediation import (
+    RemediationActionability,
+    RemediationActionabilityDecision,
+    classify_remediation_actionability,
     remediation_hints_for_finding_code,
 )
 from histdatacom.data_quality.reporting import (
@@ -44,6 +47,16 @@ DEFAULT_REMEDIATION_CATALOG_AUDIT_TARGET_AXIS_LIMIT = (
 _SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
 _SEVERITY_SORT = {"error": 0, "warning": 1, "info": 2}
 _ATTRIBUTION_STATUS_SORT = {"unresolved": 0, "inferred": 1, "exact": 2}
+_ACTIONABILITY_SORT = {
+    RemediationActionability.REMEDIABLE_DEFECT.value: 0,
+    RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT.value: 1,
+    RemediationActionability.NEEDS_RULE_ATTRIBUTION.value: 2,
+    RemediationActionability.UNSAFE_TO_AUTOMATE.value: 3,
+    RemediationActionability.POLICY_OR_PROFILE_DECISION.value: 4,
+    RemediationActionability.UNSUPPORTED_FORMAT_OR_CAPABILITY.value: 5,
+    RemediationActionability.EXPECTED_ARTIFACT_OR_CONTEXT.value: 6,
+    RemediationActionability.INFORMATIONAL_ONLY.value: 7,
+}
 _FINDING_CODE_RULE_PREFIXES = (
     ("ASCII_TICK_SPREAD_REGIME_", "ticks.ascii.spread_regimes"),
     ("ASCII_TICK_MICROSTRUCTURE_", "ticks.ascii.microstructure"),
@@ -403,6 +416,17 @@ def format_remediation_catalog_audit(
             "unresolved="
             f"{_int_value(summary, 'unresolved_attribution_occurrence_count')}"
         ),
+        (
+            "actionability gaps: "
+            "actionable="
+            f"{_int_value(summary, 'unmapped_actionable_warning_error_gap_count')} "
+            "blocked_attribution="
+            f"{_int_value(summary, 'blocked_by_attribution_warning_error_code_count')} "
+            "blocked_diagnostics="
+            f"{_int_value(summary, 'blocked_by_missing_diagnostics_warning_error_code_count')} "
+            "intentional_boundary="
+            f"{_int_value(summary, 'intentionally_unremediable_warning_error_code_count')}"
+        ),
     ]
     code_counts = _mapping_payload(payload.get("known_code_counts"))
     unresolved_families = _format_named_counts(
@@ -596,6 +620,10 @@ def _report_coverage_summary(
     mapped_finding_count = 0
     unmapped_finding_count = 0
     unmapped_warning_error_group_count = 0
+    unmapped_actionable_warning_error_group_count = 0
+    intentionally_unremediable_warning_error_finding_count = 0
+    blocked_by_attribution_warning_error_finding_count = 0
+    blocked_by_missing_diagnostics_warning_error_finding_count = 0
     for payload in report_payloads:
         coverage = _mapping_payload(payload.get("remediation_coverage"))
         finding_count += _int_value(coverage, "finding_count")
@@ -608,6 +636,24 @@ def _report_coverage_summary(
             coverage,
             "unmapped_warning_error_group_count",
         )
+        unmapped_actionable_warning_error_group_count += _int_value(
+            coverage,
+            "unmapped_actionable_warning_error_group_count",
+        )
+        intentionally_unremediable_warning_error_finding_count += _int_value(
+            coverage,
+            "intentionally_unremediable_warning_error_finding_count",
+        )
+        blocked_by_attribution_warning_error_finding_count += _int_value(
+            coverage,
+            "blocked_by_attribution_warning_error_finding_count",
+        )
+        blocked_by_missing_diagnostics_warning_error_finding_count += (
+            _int_value(
+                coverage,
+                "blocked_by_missing_diagnostics_warning_error_finding_count",
+            )
+        )
     return {
         "report_count": report_count,
         "report_finding_count": finding_count,
@@ -615,6 +661,18 @@ def _report_coverage_summary(
         "report_unmapped_finding_count": unmapped_finding_count,
         "report_unmapped_warning_error_group_count": (
             unmapped_warning_error_group_count
+        ),
+        "report_unmapped_actionable_warning_error_group_count": (
+            unmapped_actionable_warning_error_group_count
+        ),
+        "report_intentionally_unremediable_warning_error_finding_count": (
+            intentionally_unremediable_warning_error_finding_count
+        ),
+        "report_blocked_by_attribution_warning_error_finding_count": (
+            blocked_by_attribution_warning_error_finding_count
+        ),
+        "report_blocked_by_missing_diagnostics_warning_error_finding_count": (
+            blocked_by_missing_diagnostics_warning_error_finding_count
         ),
     }
 
@@ -695,8 +753,38 @@ def _audit_summary(
         "report_unmapped_warning_error_group_count",
     )
     attribution_status_counts: Counter[str] = Counter()
+    actionability_counts: Counter[str] = Counter()
+    unmapped_actionable_warning_error_code_count = 0
+    intentionally_unremediable_warning_error_code_count = 0
+    blocked_by_attribution_warning_error_code_count = 0
+    blocked_by_missing_diagnostics_warning_error_code_count = 0
     for aggregate in aggregates.values():
         attribution_status_counts.update(aggregate.attribution_status_counts)
+        decision = _code_aggregate_actionability(aggregate)
+        actionability_counts[decision.actionability.value] += 1
+        if aggregate.mapped or aggregate.max_severity not in {
+            "error",
+            "warning",
+        }:
+            continue
+        if decision.actionability is RemediationActionability.REMEDIABLE_DEFECT:
+            unmapped_actionable_warning_error_code_count += 1
+        elif (
+            decision.actionability
+            is RemediationActionability.NEEDS_RULE_ATTRIBUTION
+        ):
+            blocked_by_attribution_warning_error_code_count += 1
+        elif (
+            decision.actionability
+            is RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT
+        ):
+            blocked_by_missing_diagnostics_warning_error_code_count += 1
+        else:
+            intentionally_unremediable_warning_error_code_count += 1
+    report_actionable_gap_count = _int_value(
+        report_summary,
+        "report_unmapped_actionable_warning_error_group_count",
+    )
     return {
         "known_code_count": known_code_count,
         "known_finding_occurrence_count": sum(
@@ -721,6 +809,23 @@ def _audit_summary(
         "unresolved_attribution_occurrence_count": attribution_status_counts[
             "unresolved"
         ],
+        "actionability_counts": _counter_payload(actionability_counts),
+        "unmapped_actionable_warning_error_code_count": (
+            unmapped_actionable_warning_error_code_count
+        ),
+        "unmapped_actionable_warning_error_gap_count": (
+            unmapped_actionable_warning_error_code_count
+            + report_actionable_gap_count
+        ),
+        "intentionally_unremediable_warning_error_code_count": (
+            intentionally_unremediable_warning_error_code_count
+        ),
+        "blocked_by_attribution_warning_error_code_count": (
+            blocked_by_attribution_warning_error_code_count
+        ),
+        "blocked_by_missing_diagnostics_warning_error_code_count": (
+            blocked_by_missing_diagnostics_warning_error_code_count
+        ),
         **dict(report_summary),
     }
 
@@ -780,6 +885,7 @@ def _ranked_gap_payload(
         limit=source_limit,
     )
     source_family = _primary_source_family(aggregate.source_family_counts)
+    actionability = _code_aggregate_actionability(aggregate)
     payload: dict[str, JSONValue] = {
         "finding_code": aggregate.finding_code,
         "rule_id": aggregate.rule_id,
@@ -808,6 +914,7 @@ def _ranked_gap_payload(
         "attribution_reason_counts": _counter_payload(
             aggregate.attribution_reason_counts
         ),
+        **actionability.to_payload(),
         "known_source_occurrence_count": aggregate.occurrence_count,
         "source_count": len(aggregate.source_counts),
         "included_source_count": len(sources),
@@ -824,6 +931,7 @@ def _ranked_gap_payload(
             aggregate,
             report_occurrence_count=report_occurrence_count,
             source_family=source_family,
+            actionability=actionability.actionability.value,
         ),
     }
     return payload
@@ -840,6 +948,13 @@ def _report_gap_payload(
         limit=source_limit,
     )
     source_family = _source_family_from_rule_id(aggregate.rule_id)
+    actionability = classify_remediation_actionability(
+        rule_id=aggregate.rule_id,
+        finding_code=aggregate.finding_code,
+        severity=aggregate.max_severity,
+        mapped=False,
+        attribution_status="runtime_report",
+    )
     return {
         "finding_code": aggregate.finding_code,
         "rule_id": aggregate.rule_id,
@@ -854,6 +969,7 @@ def _report_gap_payload(
         "attribution_reason": "report_rule_id",
         "attribution_status_counts": {},
         "attribution_reason_counts": {},
+        **actionability.to_payload(),
         "known_source_occurrence_count": 0,
         "source_count": 0,
         "included_source_count": 0,
@@ -871,16 +987,18 @@ def _report_gap_payload(
         "rank_reasons": _report_rank_reasons(
             aggregate,
             source_family=source_family,
+            actionability=actionability.actionability.value,
         ),
     }
 
 
 def _ranked_gap_sort_key(
     gap: Mapping[str, JSONValue],
-) -> tuple[int, int, int, int, int, int, str, str, str]:
+) -> tuple[int, int, int, int, int, int, int, str, str, str]:
     severity_counts = _mapping_payload(gap.get("severity_counts"))
     max_severity = _optional_string(gap, "max_severity")
     return (
+        _ACTIONABILITY_SORT.get(_optional_string(gap, "actionability"), 9),
         0 if max_severity in {"error", "warning"} else 1,
         _SEVERITY_SORT.get(max_severity, 9),
         -_int_value(severity_counts, "error"),
@@ -898,8 +1016,10 @@ def _rank_reasons(
     *,
     report_occurrence_count: int,
     source_family: str,
+    actionability: str,
 ) -> list[JSONValue]:
     reasons: list[JSONValue] = [
+        f"actionability={actionability}",
         f"severity={aggregate.max_severity}",
         f"source_family={source_family or 'unknown'}",
         f"known_sources={aggregate.occurrence_count}",
@@ -913,8 +1033,10 @@ def _report_rank_reasons(
     aggregate: _ReportGapAggregate,
     *,
     source_family: str,
+    actionability: str,
 ) -> list[JSONValue]:
     return [
+        f"actionability={actionability}",
         f"severity={aggregate.max_severity}",
         f"source_family={source_family or 'unknown'}",
         f"report_occurrences={aggregate.occurrence_count}",
@@ -1040,6 +1162,7 @@ def _code_aggregate_payload(
         key_name="source_family",
         limit=source_limit,
     )
+    actionability = _code_aggregate_actionability(aggregate)
     return {
         "rule_id": aggregate.rule_id,
         "finding_code": aggregate.finding_code,
@@ -1069,6 +1192,7 @@ def _code_aggregate_payload(
         "attribution_reason_counts": _counter_payload(
             aggregate.attribution_reason_counts
         ),
+        **actionability.to_payload(),
         "source_count": len(aggregate.source_counts),
         "included_source_count": len(sources),
         "omitted_source_count": max(
@@ -1077,6 +1201,18 @@ def _code_aggregate_payload(
         ),
         "sources": sources,
     }
+
+
+def _code_aggregate_actionability(
+    aggregate: _CodeAggregate,
+) -> RemediationActionabilityDecision:
+    return classify_remediation_actionability(
+        rule_id=aggregate.rule_id,
+        finding_code=aggregate.finding_code,
+        severity=aggregate.max_severity,
+        mapped=aggregate.mapped,
+        attribution_status=_primary_attribution_status(aggregate),
+    )
 
 
 def _normalized_reports(
@@ -1784,6 +1920,12 @@ def _format_code_group(group: Mapping[str, JSONValue]) -> str:
         suffix += f" attribution={attribution}"
     if attribution_reason:
         suffix += f"({attribution_reason})"
+    actionability = _optional_string(group, "actionability")
+    actionability_reason = _optional_string(group, "actionability_reason")
+    if actionability:
+        suffix += f" actionability={actionability}"
+    if actionability_reason:
+        suffix += f"({actionability_reason})"
     return (
         f"{_optional_string(group, 'max_severity') or 'info'} "
         f"{_optional_string(group, 'finding_code')} "
@@ -1801,6 +1943,11 @@ def _format_ranked_gap(group: Mapping[str, JSONValue]) -> str:
     attribution_text = f" attribution={attribution}"
     if attribution_reason:
         attribution_text += f"({attribution_reason})"
+    actionability = _optional_string(group, "actionability") or "unknown"
+    actionability_reason = _optional_string(group, "actionability_reason")
+    actionability_text = f" actionability={actionability}"
+    if actionability_reason:
+        actionability_text += f"({actionability_reason})"
     return (
         f"#{_int_value(group, 'rank')} "
         f"{_optional_string(group, 'max_severity') or 'info'} "
@@ -1810,6 +1957,7 @@ def _format_ranked_gap(group: Mapping[str, JSONValue]) -> str:
         f"reports={_int_value(group, 'report_occurrence_count')} "
         f"known_sources={_int_value(group, 'known_source_occurrence_count')}"
         f"{attribution_text}"
+        f"{actionability_text}"
         f"{reason_text}"
     )
 

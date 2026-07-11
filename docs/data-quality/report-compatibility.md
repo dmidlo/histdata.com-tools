@@ -118,6 +118,20 @@ finding severity, or change quality exit decisions. Runtime-only report gaps
 use `runtime_report` because their rule ID comes from the saved report rather
 than static source discovery.
 
+Remediation coverage and catalog-audit groups also include deterministic
+`actionability` and `actionability_reason` fields. The stable actionability
+vocabulary is `remediable_defect`, `policy_or_profile_decision`,
+`unsupported_format_or_capability`, `expected_artifact_or_context`,
+`needs_rule_attribution`, `needs_diagnostic_context`, `unsafe_to_automate`, and
+`informational_only`. Boundary-aware summary counts are advisory additions:
+ordinary mapped/unmapped and warning/error counts remain unchanged, while
+actionable, intentional-boundary, attribution-blocked, and
+diagnostic-context-blocked counts explain which gaps should be worked first.
+Unknown warning/error codes default to `remediable_defect`; only deterministic
+rule, finding-code, severity, mapping, or attribution evidence can move a gap
+behind actionable defects. These fields do not change finding severity, quality
+status, or exit policy.
+
 ## Update Workflow
 
 Do not update golden fixtures as a side effect of routine test runs. When a

@@ -4,9 +4,146 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from enum import Enum
 
 from histdatacom.data_quality.contracts import QualityFinding
 from histdatacom.runtime_contracts import JSONValue
+
+
+class RemediationActionability(str, Enum):
+    """Stable remediation actionability and boundary classifications."""
+
+    REMEDIABLE_DEFECT = "remediable_defect"
+    POLICY_OR_PROFILE_DECISION = "policy_or_profile_decision"
+    UNSUPPORTED_FORMAT_OR_CAPABILITY = "unsupported_format_or_capability"
+    EXPECTED_ARTIFACT_OR_CONTEXT = "expected_artifact_or_context"
+    NEEDS_RULE_ATTRIBUTION = "needs_rule_attribution"
+    NEEDS_DIAGNOSTIC_CONTEXT = "needs_diagnostic_context"
+    UNSAFE_TO_AUTOMATE = "unsafe_to_automate"
+    INFORMATIONAL_ONLY = "informational_only"
+
+
+@dataclass(frozen=True, slots=True)
+class RemediationActionabilityDecision:
+    """One deterministic actionability decision and its stable reason."""
+
+    actionability: RemediationActionability
+    reason: str
+
+    def to_payload(self) -> dict[str, JSONValue]:
+        """Return the public JSON-compatible decision payload."""
+        return {
+            "actionability": self.actionability.value,
+            "actionability_reason": self.reason,
+        }
+
+
+_POLICY_OR_PROFILE_FINDING_MARKERS = (
+    "_POLICY_",
+    "_POLICY_MISSING",
+    "_PROFILE_",
+    "_PROFILE_MISSING",
+    "EXPECTED_SESSION_CLOSURE",
+    "WEEKEND_ACTIVITY",
+)
+_EXPECTED_ARTIFACT_OR_CONTEXT_FINDING_MARKERS = (
+    "EXPECTED_ARTIFACT_OR_CONTEXT",
+    "EXPECTED_CONTEXT",
+    "PROVENANCE_MANIFEST_UNAVAILABLE",
+)
+_NEEDS_DIAGNOSTIC_CONTEXT_FINDING_MARKERS = (
+    "DIAGNOSTIC_CONTEXT_MISSING",
+    "DIAGNOSTICS_UNAVAILABLE",
+    "NEEDS_DIAGNOSTIC_CONTEXT",
+)
+_UNSAFE_TO_AUTOMATE_FINDING_MARKERS = (
+    "UNSAFE_TO_AUTOMATE",
+    "DESTRUCTIVE_REPAIR_REQUIRED",
+)
+
+
+def classify_remediation_actionability(
+    *,
+    rule_id: str,
+    finding_code: str,
+    severity: str,
+    mapped: bool,
+    attribution_status: str = "exact",
+) -> RemediationActionabilityDecision:
+    """Classify remediation actionability without weakening defect coverage."""
+    normalized_rule = rule_id.strip().lower()
+    normalized_code = finding_code.strip().upper()
+    normalized_severity = severity.strip().lower()
+
+    if mapped:
+        return RemediationActionabilityDecision(
+            RemediationActionability.REMEDIABLE_DEFECT,
+            "mapped_remediation_hint",
+        )
+    if normalized_severity == "info":
+        return RemediationActionabilityDecision(
+            RemediationActionability.INFORMATIONAL_ONLY,
+            "informational_severity",
+        )
+    if (
+        attribution_status == "unresolved"
+        or normalized_rule
+        in {
+            "",
+            "unknown",
+        }
+        or normalized_rule.endswith(".unresolved")
+    ):
+        return RemediationActionabilityDecision(
+            RemediationActionability.NEEDS_RULE_ATTRIBUTION,
+            "unresolved_rule_attribution",
+        )
+    if normalized_rule == "inventory.format_support":
+        return RemediationActionabilityDecision(
+            RemediationActionability.UNSUPPORTED_FORMAT_OR_CAPABILITY,
+            "unsupported_format_rule",
+        )
+    if "UNSUPPORTED" in normalized_code or "NOT_SUPPORTED" in normalized_code:
+        return RemediationActionabilityDecision(
+            RemediationActionability.UNSUPPORTED_FORMAT_OR_CAPABILITY,
+            "unsupported_capability_finding",
+        )
+    if any(
+        marker in normalized_code
+        for marker in _POLICY_OR_PROFILE_FINDING_MARKERS
+    ):
+        return RemediationActionabilityDecision(
+            RemediationActionability.POLICY_OR_PROFILE_DECISION,
+            "policy_or_profile_context_required",
+        )
+    if any(
+        marker in normalized_code
+        for marker in _EXPECTED_ARTIFACT_OR_CONTEXT_FINDING_MARKERS
+    ):
+        return RemediationActionabilityDecision(
+            RemediationActionability.EXPECTED_ARTIFACT_OR_CONTEXT,
+            "expected_artifact_or_context",
+        )
+    if any(
+        marker in normalized_code
+        for marker in _NEEDS_DIAGNOSTIC_CONTEXT_FINDING_MARKERS
+    ):
+        return RemediationActionabilityDecision(
+            RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT,
+            "missing_diagnostic_context",
+        )
+    if any(
+        marker in normalized_code
+        for marker in _UNSAFE_TO_AUTOMATE_FINDING_MARKERS
+    ):
+        return RemediationActionabilityDecision(
+            RemediationActionability.UNSAFE_TO_AUTOMATE,
+            "unsafe_automatic_repair",
+        )
+    return RemediationActionabilityDecision(
+        RemediationActionability.REMEDIABLE_DEFECT,
+        "unmapped_warning_or_error",
+    )
 
 
 @dataclass(frozen=True, slots=True)
