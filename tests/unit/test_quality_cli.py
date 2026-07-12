@@ -35,6 +35,10 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
 )
 from histdatacom.data_quality.profiles import QUALITY_PROFILE_SCHEMA_VERSION
+from histdatacom.data_quality.synthetic_constraints import (
+    SYNTHETIC_VALIDATION_SCHEMA_VERSION,
+    synthetic_constraints_from_fingerprint,
+)
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     TICK,
@@ -516,6 +520,34 @@ def test_quality_bounded_payload_contract_cli_reports_human_output(
     assert "No bounded payload contract drift detected." in output
 
 
+def test_quality_synthetic_validate_cli_compares_saved_reports(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Synthetic validation should use the saved quality-report CLI path."""
+    report_path = _write_fingerprint_quality_report(tmp_path)
+
+    exit_code = main(
+        [
+            "synthetic-validate",
+            "--reference-report",
+            str(report_path),
+            "--candidate-report",
+            str(report_path),
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == SYNTHETIC_VALIDATION_SCHEMA_VERSION
+    assert payload["status"] == "mismatch"
+    assert payload["mismatched_target_count"] == 1
+    assert "synthetic_candidate_avoid_duplicate_timestamps_present" in (
+        payload["mismatch_code_counts"]
+    )
+
+
 def test_quality_fingerprint_schema_cli_applies_yaml_defaults(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -857,6 +889,9 @@ def _write_fingerprint_quality_report(tmp_path: Path) -> Path:
             },
         },
     }
+    payload["synthetic_constraints"] = synthetic_constraints_from_fingerprint(
+        payload
+    )
     finding = QualityFinding(
         severity=QualitySeverity.INFO,
         code="FINGERPRINT_SERIES_SUMMARY",

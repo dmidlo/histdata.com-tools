@@ -19,6 +19,9 @@ from histdatacom.data_quality import (
     QUALITY_SKIP_EVENTS_SCHEMA_VERSION,
     QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV,
     SERIES_FINGERPRINT_RULE_ID,
+    SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY,
+    SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY,
+    SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
@@ -155,6 +158,27 @@ def test_fingerprint_parity_has_report_bounded_and_console_surfaces() -> None:
     assert direct["included_target_count"] == 1
     assert direct["omitted_target_count"] == 2
     assert direct["truncated"] is True
+
+
+def test_synthetic_constraints_have_report_bounded_and_console_surfaces() -> (
+    None
+):
+    """Generator constraints should be visible without nested findings."""
+    report = representative_quality_report()
+    full = quality_report_payload(report)
+    bounded = representative_bounded_quality_payload()
+    console = format_quality_console_summary(
+        report,
+        check_groups=("fingerprint",),
+    )
+    summary = full["metadata"][SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY]
+
+    assert summary["schema_version"] == (
+        SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION
+    )
+    assert summary["target_count"] == 3
+    assert bounded[SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY] == summary
+    assert "Synthetic fingerprint constraints" in console
 
 
 def test_quality_report_payload_is_publish_safe_by_default(
@@ -879,7 +903,7 @@ def test_fingerprint_readiness_risk_summary_handles_missing_sections(
     assert summary is not None
     assert summary["target_count"] == 2
     assert summary["risk_target_count"] == 2
-    assert summary["reason_counts"]["not_emitted"] == 5
+    assert summary["reason_counts"]["not_emitted"] == 7
     assert summary["reason_counts"]["unsupported_target_kind"] == 4
     assert summary["target_risks"][0]["target_axis"]["kind"] == "unknown"
     assert (

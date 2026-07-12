@@ -66,6 +66,14 @@ from histdatacom.data_quality.fingerprints import (
 from histdatacom.data_quality.time import (
     TIMESTAMP_TOPOLOGY_INSPECTION_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.synthetic_constraints import (
+    DEFAULT_SYNTHETIC_CONSTRAINT_SUMMARY_LIMIT,
+    SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY,
+    SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY,
+    SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION,
+    SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
+    SYNTHETIC_VALIDATION_SCHEMA_VERSION,
+)
 from histdatacom.histdata_ascii import TICK
 from histdatacom.runtime_contracts import JSONValue
 
@@ -105,6 +113,9 @@ FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY = "fingerprint_readiness"
 FINGERPRINT_READINESS_RISK_BOUNDED_PAYLOAD_KEY = "fingerprint_readiness_risk"
 FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY = "fingerprint_cross_series"
 FINGERPRINT_PARITY_BOUNDED_PAYLOAD_KEY = "fingerprint_parity"
+FINGERPRINT_SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY = (
+    SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY
+)
 
 FINGERPRINT_SECTION_STATUSES = ("valid", "limited", "skipped", "unavailable")
 FINGERPRINT_DYNAMICS_STATUSES = ("ok", "limited", "unavailable")
@@ -447,6 +458,27 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_synthetic_constraints",
+        SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.synthetic_constraints",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_synthetic_constraint_summary",
+        SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY,
+        bounded_payload_key=FINGERPRINT_SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_synthetic_validation",
+        SYNTHETIC_VALIDATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_readiness_summary",
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -528,6 +560,14 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         FINGERPRINT_PARITY_BOUNDED_PAYLOAD_KEY,
         "cache_source_parity",
         "Fingerprint cache/source parity",
+    ),
+    FingerprintReportSurfaceContract(
+        "synthetic_constraints",
+        "fingerprint_synthetic_constraint_summary",
+        SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY,
+        FINGERPRINT_SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY,
+        "synthetic_constraints",
+        "Synthetic fingerprint constraints",
     ),
     FingerprintReportSurfaceContract(
         "readiness_summary",
@@ -675,6 +715,20 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "synthetic_constraints",
+        "generator-facing defects, stylized facts, artifacts, and validation contract",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_synthetic_constraints",
+        basis_values=("enriched_training_frame", "fingerprint_fallback"),
+        extra={
+            "issue": "#333",
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "generation_in_scope": False,
+            "non_tick_input_constraints_supported": False,
+        },
+    ),
+    FingerprintTargetSectionContract(
         "fingerprint_audit",
         "machine-readable expected/emitted/skipped section accounting and readiness",
         target_timeframes=(TICK,),
@@ -682,9 +736,9 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
     ),
 )
 
-PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
-    FingerprintPlannedSectionContract("synthetic_constraints", "#333"),
-)
+PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS: tuple[
+    FingerprintPlannedSectionContract, ...
+] = ()
 IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS = (
     FingerprintRunSectionContract(
         "cross_series_fingerprint",
@@ -721,6 +775,9 @@ FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
         DEFAULT_FINGERPRINT_READINESS_RISK_REASON_LIMIT
     ),
     "parity_summary_target_limit": DEFAULT_FINGERPRINT_PARITY_SUMMARY_LIMIT,
+    "synthetic_constraint_summary_target_limit": (
+        DEFAULT_SYNTHETIC_CONSTRAINT_SUMMARY_LIMIT
+    ),
 }
 FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS = {
     "invalid_row_min_count": DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT,

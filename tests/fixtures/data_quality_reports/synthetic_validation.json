@@ -1,0 +1,86 @@
+{
+  "advisory": true,
+  "base_grain": {
+    "data_format": "ascii",
+    "timeframe": "T"
+  },
+  "candidate_target_count": 1,
+  "compared_target_count": 1,
+  "included_target_count": 1,
+  "limit_metadata": {
+    "mismatches": {
+      "default_limit": 32,
+      "effective_limit": 32,
+      "limit": 32,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "requested_limit": 32,
+      "unbounded": false
+    },
+    "targets": {
+      "default_limit": 32,
+      "effective_limit": 32,
+      "limit": 32,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "requested_limit": 32,
+      "unbounded": false
+    }
+  },
+  "matching_target_count": 0,
+  "mismatch_code_counts": {
+    "synthetic_candidate_avoid_duplicate_timestamps_present": 1,
+    "synthetic_candidate_gap_bucket_shape_mismatch": 1
+  },
+  "mismatch_count": 2,
+  "mismatched_target_count": 1,
+  "not_compared_target_count": 0,
+  "omitted_target_count": 0,
+  "reference_target_count": 1,
+  "schema_version": "histdatacom.synthetic-fingerprint-validation.v1",
+  "status": "mismatch",
+  "target_results": [
+    {
+      "compared_fact_count": 15,
+      "included_mismatch_code_count": 2,
+      "included_mismatch_count": 2,
+      "mismatch_code_count": 2,
+      "mismatch_code_counts": {
+        "synthetic_candidate_avoid_duplicate_timestamps_present": 1,
+        "synthetic_candidate_gap_bucket_shape_mismatch": 1
+      },
+      "mismatch_codes": [
+        "synthetic_candidate_avoid_duplicate_timestamps_present",
+        "synthetic_candidate_gap_bucket_shape_mismatch"
+      ],
+      "mismatch_count": 2,
+      "mismatch_details": [
+        {
+          "category": "defect",
+          "code": "synthetic_candidate_avoid_duplicate_timestamps_present",
+          "constraint_code": "avoid_duplicate_timestamps",
+          "observed_count": 2
+        },
+        {
+          "category": "stylized_fact",
+          "code": "synthetic_candidate_gap_bucket_shape_mismatch",
+          "comparison": "distribution_l1",
+          "constraint_code": "gap_bucket_shape",
+          "tolerance": 0.1
+        }
+      ],
+      "omitted_mismatch_code_count": 0,
+      "omitted_mismatch_count": 0,
+      "status": "mismatch",
+      "target_axis": {
+        "data_format": "ascii",
+        "kind": "cache",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "T"
+      },
+      "truncated": false
+    }
+  ],
+  "truncated": false
+}

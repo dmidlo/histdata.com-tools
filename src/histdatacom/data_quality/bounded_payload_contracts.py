@@ -28,6 +28,9 @@ from histdatacom.data_quality.fingerprints import (
 )
 from histdatacom.data_quality.limits import bounded_report_limit
 from histdatacom.data_quality.profiles import QUALITY_REPORTING_METADATA_KEY
+from histdatacom.data_quality.synthetic_constraints import (
+    synthetic_constraints_from_fingerprint,
+)
 from histdatacom.data_quality.reporting import (
     QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY,
     QualityExitPolicy,
@@ -1216,13 +1219,16 @@ def _limited_tick_fingerprint_payload() -> dict[str, JSONValue]:
         tick_spread_eligible=True,
         tick_spread_emitted=True,
     )
+    payload["synthetic_constraints"] = synthetic_constraints_from_fingerprint(
+        payload
+    )
     return payload
 
 
 def _tick_fingerprint_payload(
     *, symbol: str = "EURUSD"
 ) -> dict[str, JSONValue]:
-    return {
+    payload: dict[str, JSONValue] = {
         "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
         "coverage": {"row_count": 5, "parsed_row_count": 5},
         "temporal_topology": _topology_payload(computed_from="text_scan"),
@@ -1280,6 +1286,10 @@ def _tick_fingerprint_payload(
         ),
         "source": {"kind": "csv_text"},
     }
+    payload["synthetic_constraints"] = synthetic_constraints_from_fingerprint(
+        payload
+    )
+    return payload
 
 
 def _cache_source_parity_payload(symbol: str) -> dict[str, JSONValue]:

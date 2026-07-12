@@ -55,6 +55,9 @@ from histdatacom.data_quality.symbols import (
     HistDataCrossSeriesFingerprintRule as HistDataCrossSeriesFingerprintRule,
     symbol_metadata_for,
 )
+from histdatacom.data_quality.synthetic_constraints import (
+    synthetic_constraints_from_fingerprint,
+)
 from histdatacom.data_quality.time import (
     DEFAULT_TIMESTAMP_INSPECTION_SAMPLE_LIMIT,
     timestamp_topology_payload_for_target,
@@ -242,6 +245,7 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "stationarity_diagnostics",
     "decomposition",
     "cache_source_parity",
+    "synthetic_constraints",
 )
 FINGERPRINT_DYNAMICS_SECTIONS = ("microstructure_dynamics",)
 
@@ -3616,6 +3620,7 @@ def _series_fingerprint_payload(
             payload,
             target=target,
             profile=profile,
+            training_frame=cache.frame,
         )
 
     if target.kind is QualityTargetKind.CACHE:
@@ -3696,10 +3701,16 @@ def _series_fingerprint_payload(
             "kind": "csv_text",
             "path": publish_safe_path(target.path),
         }
+    training_frame = _training_frame_from_text(
+        text_payload.text,
+        target=target,
+        profile=profile,
+    )
     return _finalize_fingerprint_payload(
         payload,
         target=target,
         profile=profile,
+        training_frame=training_frame,
     )
 
 
@@ -3708,6 +3719,7 @@ def _finalize_fingerprint_payload(
     *,
     target: QualityTarget,
     profile: HistDataFingerprintProfile,
+    training_frame: Any | None = None,
 ) -> dict[str, JSONValue]:
     if profile.cache_source_parity.enabled:
         payload["cache_source_parity"] = _cache_source_parity_payload(
@@ -3719,8 +3731,37 @@ def _finalize_fingerprint_payload(
         target=target,
         profile=profile,
     )
+    if not _unsupported_reason(target):
+        payload["synthetic_constraints"] = (
+            synthetic_constraints_from_fingerprint(
+                payload,
+                training_frame=training_frame,
+                target=target,
+            )
+        )
+        payload["fingerprint_audit"] = _fingerprint_audit_payload(
+            payload,
+            target=target,
+            profile=profile,
+        )
     payload["fingerprint_id"] = _fingerprint_id(payload)
     return payload
+
+
+def _training_frame_from_text(
+    text: str,
+    *,
+    target: QualityTarget,
+    profile: HistDataFingerprintProfile,
+) -> Any | None:
+    try:
+        batch = parse_ascii_lines(
+            target.timeframe,
+            islice(StringIO(text), max(1, _profile_max_rows(profile))),
+        )
+        return to_polars_frame(batch)
+    except (OSError, TypeError, ValueError):
+        return None
 
 
 def _cache_source_parity_payload(
@@ -4444,6 +4485,7 @@ def _fingerprint_expected_sections(
                 "dependence",
                 "stationarity_diagnostics",
                 "decomposition",
+                "synthetic_constraints",
             )
         )
     return tuple(sections)
@@ -4493,6 +4535,7 @@ def _fingerprint_section_skip_details(
         "dependence",
         "stationarity_diagnostics",
         "decomposition",
+        "synthetic_constraints",
     }:
         return {"timeframe": target.timeframe}
     return {}
@@ -4537,6 +4580,7 @@ def _section_timeframe_mismatch(
                 "tick_distribution",
                 "conditional_distributions",
                 "microstructure_dynamics",
+                "synthetic_constraints",
             }
             and target.timeframe != TICK
         )
@@ -4600,6 +4644,15 @@ def _fingerprint_section_status(
         if parity_status == "match":
             return "valid"
         if parity_status == "mismatch":
+            return "limited"
+        return "unavailable"
+    if section == "synthetic_constraints":
+        constraint_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if constraint_status == "ready":
+            return "valid"
+        if constraint_status == "limited":
             return "limited"
         return "unavailable"
     return "valid"

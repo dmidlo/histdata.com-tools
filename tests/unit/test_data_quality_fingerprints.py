@@ -25,6 +25,7 @@ from histdatacom.data_quality import (
     QUALITY_ENGINE_METADATA_KEY,
     QUALITY_SKIP_EVENTS_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
+    SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
@@ -97,6 +98,7 @@ TICK_SECTIONS = [
     "dependence",
     "stationarity_diagnostics",
     "decomposition",
+    "synthetic_constraints",
 ]
 
 
@@ -604,6 +606,16 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
         "row_id",
     ]
 
+    constraints = _mapping(payload["synthetic_constraints"])
+    assert constraints["schema_version"] == SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION
+    assert constraints["status"] == "ready"
+    assert (
+        _mapping(constraints["training_substrate"])[
+            "source_rows_enriched_in_memory"
+        ]
+        is True
+    )
+
     audit = _mapping(payload["fingerprint_audit"])
     assert (
         audit["schema_version"] == TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION
@@ -618,6 +630,7 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
     assert statuses["dependence"] == "limited"
     assert statuses["stationarity_diagnostics"] == "limited"
     assert statuses["decomposition"] == "limited"
+    assert statuses["synthetic_constraints"] == "valid"
     assert _mapping(audit["decomposition_readiness"])["status"] == "limited"
     assert _retired_bar_schema_keys(payload) == set()
 
@@ -1081,6 +1094,11 @@ def test_fingerprint_rule_prefers_direct_cache_payload(tmp_path: Path) -> None:
     assert dynamics["row_order"] == "cache_order"
     assert dynamics["computed_from"] == "direct_cache"
     assert dynamics["cache_source"] == "direct"
+    training = _mapping(
+        _mapping(payload["synthetic_constraints"])["training_substrate"]
+    )
+    assert training["legacy_cache_enriched_on_read"] is True
+    assert training["training_schema_version"] == TRAINING_SCHEMA_VERSION
 
 
 def test_direct_cache_topology_inspection_counts_duplicate_timestamps(

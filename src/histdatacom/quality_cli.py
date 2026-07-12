@@ -60,6 +60,12 @@ from histdatacom.data_quality.repair_plan import (
     quality_repair_plan,
     quality_repair_plan_to_json,
 )
+from histdatacom.data_quality.synthetic_constraints import (
+    DEFAULT_SYNTHETIC_VALIDATION_MISMATCH_LIMIT,
+    DEFAULT_SYNTHETIC_VALIDATION_TARGET_LIMIT,
+    format_synthetic_validation,
+    validate_synthetic_constraint_reports,
+)
 from histdatacom.fx_enums import (
     Format,
     Pairs,
@@ -371,6 +377,42 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit the machine-readable readiness risk ranking payload",
     )
+    synthetic_validate = subparsers.add_parser(
+        "synthetic-validate",
+        aliases=("synthetic-fingerprint-validate",),
+        help="compare candidate and reference synthetic fingerprint constraints",
+    )
+    synthetic_validate.add_argument(
+        "--reference-report",
+        required=True,
+        metavar="PATH",
+        help="saved reference quality report containing fingerprint constraints",
+    )
+    synthetic_validate.add_argument(
+        "--candidate-report",
+        required=True,
+        metavar="PATH",
+        help="saved candidate quality report containing fingerprint constraints",
+    )
+    synthetic_validate.add_argument(
+        "--target-limit",
+        type=_integer_limit,
+        default=DEFAULT_SYNTHETIC_VALIDATION_TARGET_LIMIT,
+        metavar="N",
+        help="maximum target comparisons to include; use -1 for all",
+    )
+    synthetic_validate.add_argument(
+        "--mismatch-limit",
+        type=_integer_limit,
+        default=DEFAULT_SYNTHETIC_VALIDATION_MISMATCH_LIMIT,
+        metavar="N",
+        help="maximum mismatch details per target; use -1 for all",
+    )
+    synthetic_validate.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the machine-readable advisory validation payload",
+    )
     bounded_payload = subparsers.add_parser(
         "bounded-payload-contract",
         aliases=("bounded-payload-audit", "report-payload-contract"),
@@ -524,6 +566,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 _format_fingerprint_readiness_risk_command(risk_payload)
             )  # noqa:T201
+        return 0
+
+    if args.quality_command in {
+        "synthetic-validate",
+        "synthetic-fingerprint-validate",
+    }:
+        try:
+            reference = load_quality_report(args.reference_report)
+            candidate = load_quality_report(args.candidate_report)
+            validation = validate_synthetic_constraint_reports(
+                reference,
+                candidate,
+                target_limit=args.target_limit,
+                mismatch_limit=args.mismatch_limit,
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            print(f"quality report error: {exc}", file=sys.stderr)  # noqa:T201
+            return 1
+        if args.json:
+            print(json.dumps(validation, indent=2, sort_keys=True))  # noqa:T201
+        else:
+            print(format_synthetic_validation(validation))  # noqa:T201
         return 0
 
     if args.quality_command in {

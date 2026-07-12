@@ -299,6 +299,8 @@ _QUALITY_COMMANDS = {
     "fingerprint-discovery",
     "fingerprint-schema",
     "inspect-evidence",
+    "synthetic-fingerprint-validate",
+    "synthetic-validate",
     "remediation-audit",
     "remediation-catalog",
 }
@@ -317,6 +319,9 @@ _QUALITY_ALIASES = {
     "quality_path": "target_root",
     "quality_profile": "quality_profile_path",
     "quality_profile_path": "quality_profile_path",
+    "reference_report": "reference_report",
+    "candidate_report": "candidate_report",
+    "mismatch_limit": "mismatch_limit",
     "quality_preflight_evidence": "evidence_path",
     "quality_preflight_evidence_max_age": ("evidence_max_age_seconds"),
     "quality_preflight_evidence_max_age_seconds": ("evidence_max_age_seconds"),
@@ -332,6 +337,7 @@ _QUALITY_ALIASES = {
     "symbol_groups": "pair_groups",
     "target": "target_root",
     "target_axis_limit": "target_axis_limit",
+    "target_limit": "target_limit",
 }
 _QUALITY_TRUE_FLAG_ARGS = {
     "allow_stale_evidence": "--quality-preflight-evidence-stale-ok",
@@ -340,15 +346,19 @@ _QUALITY_TRUE_FLAG_ARGS = {
 }
 _QUALITY_SCALAR_ARGS = {
     "code_limit": "--code-limit",
+    "candidate_report": "--candidate-report",
     "evidence_max_age_seconds": (
         "--quality-preflight-evidence-max-age-seconds"
     ),
     "evidence_path": "--evidence",
     "quality_profile_path": "--quality-profile",
+    "reference_report": "--reference-report",
+    "mismatch_limit": "--mismatch-limit",
     "rule_limit": "--rule-limit",
     "source_limit": "--source-limit",
     "target_root": "--target",
     "target_axis_limit": "--target-axis-limit",
+    "target_limit": "--target-limit",
 }
 _QUALITY_LIST_ARGS = {
     "formats": "--formats",

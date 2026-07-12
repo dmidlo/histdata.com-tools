@@ -171,8 +171,8 @@ def test_next_work_uses_current_discovery_and_historical_decomposition_case() ->
         "ready": True,
         "basis": "readiness_section_status_counts",
     }
-    assert current["recommendation"]["capability"] == "synthetic_constraints"
-    assert current["recommendation"]["issue_reference"] == "#333"
+    assert current["status"] == "no_work"
+    assert current["recommendation"] is None
 
 
 def test_next_work_bounds_alternates_axes_and_breaks_ties() -> None:

@@ -54,6 +54,11 @@ from histdatacom.data_quality.profiles import (
     QUALITY_PROFILE_SCHEMA_VERSION,
     load_quality_profile_file,
 )
+from histdatacom.data_quality.synthetic_constraints import (
+    SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION,
+    SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
+    SYNTHETIC_VALIDATION_SCHEMA_VERSION,
+)
 from histdatacom.runtime_contracts import JSONValue
 
 
@@ -106,6 +111,16 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         schemas["fingerprint_cache_source_parity_summary"]["schema_version"]
         == TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION
     )
+    assert schemas["fingerprint_synthetic_constraints"]["schema_version"] == (
+        SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_synthetic_constraint_summary"]["schema_version"]
+        == SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_synthetic_validation"]["schema_version"] == (
+        SYNTHETIC_VALIDATION_SCHEMA_VERSION
+    )
     assert schemas["cross_series_fingerprint"] == {
         "schema_version": CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
         "status": "implemented",
@@ -140,10 +155,11 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "stationarity_diagnostics",
         "decomposition",
         "cache_source_parity",
+        "synthetic_constraints",
         "fingerprint_audit",
     ]
     planned = payload["sections"]["planned"]["target_sections"]
-    assert [section["name"] for section in planned] == ["synthetic_constraints"]
+    assert planned == []
     assert payload["sections"]["planned"]["run_sections"] == []
     assert payload["sections"]["implemented"]["run_sections"] == [
         {

@@ -1146,6 +1146,44 @@ summaries are bounded, and no raw rows or full duplicate payloads are emitted.
 Missing sources or caches are reported as `not_compared`; stale caches are
 compared and marked advisory rather than accepted by the normal freshness path.
 
+Every supported ASCII tick fingerprint also emits bounded
+`synthetic_constraints` for external generators. The protocol separates
+`defects_to_avoid`, `stylized_facts_to_preserve`, and
+`source_artifacts_to_parameterize`; records stable comparison modes and
+tolerances; and exposes advisory hints for session mix, spread regimes, gap
+topology, expected closures, stationarity transforms, cache provenance, and
+durable row identity. Its canonical generator input is the enriched `.data`
+frame, not nested report JSON. Legacy raw caches are enriched in memory before
+row issue columns are counted.
+
+Python consumers can call `synthetic_constraints_from_training_frame(...)`
+with an enriched Polars frame and its optional fingerprint. Generated values belong only in
+`synth_bid`, `synth_ask`, `synth_spread`, `synth_mid`,
+`synth_method_code`, `synth_confidence`, and `synth_usable`; observed `bid` and
+`ask` and the durable `series_id`/`period`/`row_id` identity remain unchanged.
+Generation, volume synthesis, raw M1/OHLC support, and derived candlestick
+output are deliberately outside this first ASCII tick protocol.
+
+Validate an exported candidate tick dataset by running the normal fingerprint
+quality path for both reference and candidate, then comparing their saved
+reports:
+
+```sh
+histdatacom quality synthetic-validate \
+  --reference-report reports/reference-quality.json \
+  --candidate-report reports/candidate-quality.json \
+  --json
+```
+
+The advisory `histdatacom.synthetic-fingerprint-validation.v1` result reports
+matched, mismatched, and missing target axes; candidate defect violations;
+bounded stylized-fact mismatches; output/identity contract drift; and stable
+mismatch codes. It does not generate data or turn statistical drift into a hard
+quality gate. Full reports expose
+`metadata.time_series_fingerprint_synthetic_constraint_summary`, bounded
+payloads expose `fingerprint_synthetic_constraints`, and the ordinary
+fingerprint CLI summary renders `Synthetic fingerprint constraints`.
+
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,
 stable skip/eligibility reason codes, calendar-profile completeness, tick-spread
