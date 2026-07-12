@@ -137,6 +137,31 @@ Durable identity remains `series_id`, `period`, and `row_id`, and consumers do
 not need a side-table join. Older consumers may ignore the optional report keys
 and the additive enriched columns.
 
+## Seasonal/Exogenous-Family Fingerprint
+
+Fingerprint findings may include the opt-in
+`time_series_fingerprint.seasonal_exogenous` section using
+`histdatacom.seasonal-exogenous.v1`. Full reports summarize it under
+`metadata.time_series_fingerprint_seasonal_exogenous_summary`; the bounded
+runtime equivalent is `fingerprint_seasonal_exogenous`, and the text heading is
+`Seasonal and exogenous models`.
+
+Configuration, regressor, fit, forecast, evaluation, training-projection, and
+summary objects use stable `histdatacom.seasonal-exogenous-*.v1` schemas.
+SARIMA, ARIMAX, and SARIMAX have explicit nonseasonal/seasonal orders and an
+explicit seasonal cycle tied to the model-input sampling frequency. The flat
+regressor contract records deterministic column order, vocabulary,
+known-in-advance availability, missingness, and calendar-profile provenance.
+Observed future market values, automatic order/regressor search, and automatic
+winner selection are absent.
+
+Configured projections add 123 nullable scalar columns under `cm_sarima_*`,
+`cm_arimax_*`, and `cm_sarimax_*` on enriched tick rows. Forecast fields become
+available at their origin; realized errors remain separately flagged
+post-observation diagnostics. Durable identity remains `series_id`, `period`,
+and `row_id`. Consumers may ignore the optional additive report keys and
+columns.
+
 ## Golden Fixtures
 
 Representative payload fixtures live under

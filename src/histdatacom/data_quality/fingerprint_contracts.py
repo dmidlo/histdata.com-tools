@@ -125,9 +125,26 @@ from histdatacom.data_quality.synthetic_constraints import (
     SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
     SYNTHETIC_VALIDATION_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.seasonal_exogenous import (
+    DEFAULT_SEASONAL_EXOGENOUS_SUMMARY_TARGET_LIMIT,
+    SEASONAL_EXOGENOUS_BOUNDED_PAYLOAD_KEY,
+    SEASONAL_EXOGENOUS_CONFIGURATION_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_EVALUATION_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_FAMILIES,
+    SEASONAL_EXOGENOUS_FIT_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_FIT_STATUS_CODES,
+    SEASONAL_EXOGENOUS_FORECAST_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_REASON_CODES,
+    SEASONAL_EXOGENOUS_REGRESSOR_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY,
+    SEASONAL_EXOGENOUS_SUMMARY_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.training_features import (
     AUTOREGRESSIVE_COLUMNS,
     EXPONENTIAL_SMOOTHING_COLUMNS,
+    SEASONAL_EXOGENOUS_COLUMNS,
     training_feature_definitions,
 )
 from histdatacom.histdata_ascii import TICK
@@ -147,6 +164,7 @@ FINGERPRINT_SERIES_CONFIG_KEYS = (
     "classical_model_input",
     "exponential_smoothing",
     "autoregressive",
+    "seasonal_exogenous",
 )
 FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
     "invalid_row_min_count",
@@ -668,6 +686,64 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous",
+        SEASONAL_EXOGENOUS_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.seasonal_exogenous",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_configuration",
+        SEASONAL_EXOGENOUS_CONFIGURATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.seasonal_exogenous.configuration",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_regressors",
+        SEASONAL_EXOGENOUS_REGRESSOR_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.seasonal_exogenous.regressors",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_fit",
+        SEASONAL_EXOGENOUS_FIT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.seasonal_exogenous.fit_summary",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_forecast",
+        SEASONAL_EXOGENOUS_FORECAST_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_evaluation",
+        SEASONAL_EXOGENOUS_EVALUATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.seasonal_exogenous.evaluation",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_training_projection",
+        SEASONAL_EXOGENOUS_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.seasonal_exogenous.training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_summary",
+        SEASONAL_EXOGENOUS_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY,
+        bounded_payload_key=SEASONAL_EXOGENOUS_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_audit",
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -832,6 +908,14 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         AUTOREGRESSIVE_BOUNDED_PAYLOAD_KEY,
         "autoregressive",
         "Autoregressive models",
+    ),
+    FingerprintReportSurfaceContract(
+        "seasonal_exogenous",
+        "fingerprint_seasonal_exogenous_summary",
+        SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY,
+        SEASONAL_EXOGENOUS_BOUNDED_PAYLOAD_KEY,
+        "seasonal_exogenous",
+        "Seasonal and exogenous models",
     ),
     FingerprintReportSurfaceContract(
         "readiness_summary",
@@ -1115,6 +1199,52 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "seasonal_exogenous",
+        "opt-in fitted explicit-order SARIMA, ARIMAX, and SARIMAX diagnostics",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_seasonal_exogenous",
+        basis_values=("regular_grid_rolling_origin",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#424",
+            "profile_controlled_by": [
+                "classical_model_input",
+                "seasonal_exogenous",
+            ],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid",
+            "optional_dependency_extra": "models",
+            "backend": "statsmodels",
+            "model_families": list(SEASONAL_EXOGENOUS_FAMILIES),
+            "fit_statuses": list(SEASONAL_EXOGENOUS_FIT_STATUS_CODES),
+            "failure_reason_codes": list(SEASONAL_EXOGENOUS_REASON_CODES),
+            "augmented_column_prefixes": [
+                "cm_sarima_",
+                "cm_arimax_",
+                "cm_sarimax_",
+            ],
+            "augmented_columns": [
+                {
+                    "name": definition.name,
+                    "dtype": definition.dtype,
+                    "nullable": definition.nullable,
+                    "grain": definition.grain,
+                    "source": definition.source,
+                }
+                for definition in training_feature_definitions()
+                if definition.name in SEASONAL_EXOGENOUS_COLUMNS
+            ],
+            "explicit_order_configuration": True,
+            "deterministic_regressor_contract": True,
+            "future_regressor_policy": "calendar_known_in_advance_only",
+            "automatic_order_selection": False,
+            "automatic_winner": False,
+            "row_mapping_policy": ("first_source_row_at_or_after_availability"),
+        },
+    ),
+    FingerprintTargetSectionContract(
         "synthetic_constraints",
         "generator-facing defects, stylized facts, artifacts, and validation contract",
         target_timeframes=(TICK,),
@@ -1189,6 +1319,9 @@ FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
     ),
     "autoregressive_summary_target_limit": (
         DEFAULT_AUTOREGRESSIVE_SUMMARY_TARGET_LIMIT
+    ),
+    "seasonal_exogenous_summary_target_limit": (
+        DEFAULT_SEASONAL_EXOGENOUS_SUMMARY_TARGET_LIMIT
     ),
 }
 FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS = {

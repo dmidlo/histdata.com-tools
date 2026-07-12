@@ -44,6 +44,11 @@ from histdatacom.data_quality.fingerprints import (
     HistDataFingerprintParityProfile,
     HistDataFingerprintProfile,
 )
+from histdatacom.data_quality.seasonal_exogenous import (
+    CalendarRegressorProfile,
+    SeasonalExogenousProfile,
+    SeasonalExogenousSpecification,
+)
 from histdatacom.data_quality.ingestion import (
     ASCII_ROW_COUNT_INGESTION_RULE_ID,
     DEFAULT_MIN_ROW_COUNT,
@@ -503,6 +508,7 @@ class QualityProfile:
                 "classical_model_input",
                 "exponential_smoothing",
                 "autoregressive",
+                "seasonal_exogenous",
             },
             SERIES_FINGERPRINT_RULE_ID,
         )
@@ -604,6 +610,14 @@ class QualityProfile:
                     path=SERIES_FINGERPRINT_RULE_ID,
                 ),
                 path=f"{SERIES_FINGERPRINT_RULE_ID}.autoregressive",
+            ),
+            seasonal_exogenous=_seasonal_exogenous_profile(
+                _mapping_field(
+                    config,
+                    "seasonal_exogenous",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.seasonal_exogenous",
             ),
         )
 
@@ -2197,6 +2211,263 @@ def _autoregressive_specification(
             concentrate_scale=_bool_field(
                 value, "concentrate_scale", False, path=path
             ),
+            fixed_parameters=fixed_parameters,
+            max_iterations=_int_field(
+                value, "max_iterations", 200, minimum=1, path=path
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _seasonal_exogenous_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> SeasonalExogenousProfile:
+    base = SeasonalExogenousProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "specifications",
+            "projection_specification_ids",
+            "projection_horizon",
+            "regressor_profile",
+            "baseline_rolling_windows",
+            "compare_exponential_smoothing",
+            "compare_autoregressive",
+            "rounding_digits",
+        },
+        path,
+    )
+    specifications = base.specifications
+    if "specifications" in value:
+        raw = value["specifications"]
+        if not isinstance(raw, list) or not raw:
+            raise QualityProfileError(
+                f"{path}.specifications must be a non-empty list"
+            )
+        specifications = tuple(
+            _seasonal_exogenous_specification(
+                _expect_mapping(item, path=f"{path}.specifications[{index}]"),
+                path=f"{path}.specifications[{index}]",
+            )
+            for index, item in enumerate(raw)
+        )
+    projection_ids = base.projection_specification_ids
+    if "projection_specification_ids" in value:
+        raw_ids = value["projection_specification_ids"]
+        if not isinstance(raw_ids, list) or not raw_ids:
+            raise QualityProfileError(
+                f"{path}.projection_specification_ids must be a non-empty list"
+            )
+        if not all(isinstance(item, str) and item for item in raw_ids):
+            raise QualityProfileError(
+                f"{path}.projection_specification_ids must contain strings"
+            )
+        projection_ids = tuple(cast(list[str], raw_ids))
+    elif "specifications" in value:
+        by_family: dict[str, str] = {}
+        for specification in specifications:
+            by_family.setdefault(
+                specification.family, specification.specification_id
+            )
+        projection_ids = tuple(by_family.values())
+    try:
+        return SeasonalExogenousProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            specifications=specifications,
+            projection_specification_ids=projection_ids,
+            projection_horizon=_int_field(
+                value,
+                "projection_horizon",
+                base.projection_horizon,
+                minimum=1,
+                path=path,
+            ),
+            regressor_profile=_calendar_regressor_profile(
+                _mapping_field(value, "regressor_profile", path=path),
+                path=f"{path}.regressor_profile",
+            ),
+            baseline_rolling_windows=_fingerprint_int_sequence(
+                value,
+                "baseline_rolling_windows",
+                base.baseline_rolling_windows,
+                path=path,
+            ),
+            compare_exponential_smoothing=_bool_field(
+                value,
+                "compare_exponential_smoothing",
+                base.compare_exponential_smoothing,
+                path=path,
+            ),
+            compare_autoregressive=_bool_field(
+                value,
+                "compare_autoregressive",
+                base.compare_autoregressive,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _calendar_regressor_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> CalendarRegressorProfile:
+    base = CalendarRegressorProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "allow_partial_calendar",
+            "require_complete_calendar_for",
+            "max_regressors",
+        },
+        path,
+    )
+    required = base.require_complete_calendar_for
+    if "require_complete_calendar_for" in value:
+        raw = value["require_complete_calendar_for"]
+        if not isinstance(raw, list) or not all(
+            isinstance(item, str) and item for item in raw
+        ):
+            raise QualityProfileError(
+                f"{path}.require_complete_calendar_for must contain strings"
+            )
+        required = tuple(cast(list[str], raw))
+    try:
+        return CalendarRegressorProfile(
+            allow_partial_calendar=_bool_field(
+                value,
+                "allow_partial_calendar",
+                base.allow_partial_calendar,
+                path=path,
+            ),
+            require_complete_calendar_for=required,
+            max_regressors=_int_field(
+                value,
+                "max_regressors",
+                base.max_regressors,
+                minimum=1,
+                maximum=64,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _seasonal_exogenous_specification(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> SeasonalExogenousSpecification:
+    _reject_unknown_keys(
+        value,
+        {
+            "specification_id",
+            "family",
+            "p",
+            "d",
+            "q",
+            "seasonal_p",
+            "seasonal_d",
+            "seasonal_q",
+            "seasonal_period",
+            "seasonal_cycle_ms",
+            "trend",
+            "initialization_method",
+            "optimizer",
+            "enforce_stationarity",
+            "enforce_invertibility",
+            "concentrate_scale",
+            "use_exact_diffuse",
+            "regressor_names",
+            "fixed_parameters",
+            "max_iterations",
+        },
+        path,
+    )
+    required_keys = {"specification_id", "family", "p"}
+    if not required_keys.issubset(value):
+        raise QualityProfileError(
+            f"{path} requires specification_id, family, and p"
+        )
+    regressors: tuple[str, ...] = ()
+    if "regressor_names" in value:
+        raw = value["regressor_names"]
+        if not isinstance(raw, list) or not all(
+            isinstance(item, str) and item for item in raw
+        ):
+            raise QualityProfileError(
+                f"{path}.regressor_names must contain strings"
+            )
+        regressors = tuple(cast(list[str], raw))
+    fixed_parameters: tuple[tuple[str, float], ...] = ()
+    if "fixed_parameters" in value:
+        raw_fixed = _expect_mapping(
+            value["fixed_parameters"], path=f"{path}.fixed_parameters"
+        )
+        parsed: list[tuple[str, float]] = []
+        for name, raw_value in sorted(raw_fixed.items()):
+            if isinstance(raw_value, bool):
+                raise QualityProfileError(
+                    f"{path}.fixed_parameters.{name} must be a number"
+                )
+            try:
+                parsed.append((name, float(cast(Any, raw_value))))
+            except (TypeError, ValueError) as exc:
+                raise QualityProfileError(
+                    f"{path}.fixed_parameters.{name} must be a number"
+                ) from exc
+        fixed_parameters = tuple(parsed)
+    try:
+        return SeasonalExogenousSpecification(
+            specification_id=_string_field(
+                value, "specification_id", "", path=path
+            ),
+            family=_string_field(value, "family", "", path=path),
+            p=_int_field(value, "p", 0, minimum=0, path=path),
+            d=_int_field(value, "d", 0, minimum=0, path=path),
+            q=_int_field(value, "q", 0, minimum=0, path=path),
+            seasonal_p=_int_field(value, "seasonal_p", 0, minimum=0, path=path),
+            seasonal_d=_int_field(value, "seasonal_d", 0, minimum=0, path=path),
+            seasonal_q=_int_field(value, "seasonal_q", 0, minimum=0, path=path),
+            seasonal_period=_int_field(
+                value, "seasonal_period", 0, minimum=0, path=path
+            ),
+            seasonal_cycle_ms=_int_field(
+                value, "seasonal_cycle_ms", 0, minimum=0, path=path
+            ),
+            trend=_string_field(value, "trend", "n", path=path),
+            initialization_method=_string_field(
+                value, "initialization_method", "default", path=path
+            ),
+            optimizer=_string_field(value, "optimizer", "lbfgs", path=path),
+            enforce_stationarity=_bool_field(
+                value, "enforce_stationarity", True, path=path
+            ),
+            enforce_invertibility=_bool_field(
+                value, "enforce_invertibility", True, path=path
+            ),
+            concentrate_scale=_bool_field(
+                value, "concentrate_scale", False, path=path
+            ),
+            use_exact_diffuse=_bool_field(
+                value, "use_exact_diffuse", False, path=path
+            ),
+            regressor_names=regressors,
             fixed_parameters=fixed_parameters,
             max_iterations=_int_field(
                 value, "max_iterations", 200, minimum=1, path=path

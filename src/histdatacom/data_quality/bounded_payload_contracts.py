@@ -31,6 +31,9 @@ from histdatacom.data_quality.engine import (
 from histdatacom.data_quality.exponential_smoothing import (
     EXPONENTIAL_SMOOTHING_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.seasonal_exogenous import (
+    SEASONAL_EXOGENOUS_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.fingerprints import (
     CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     CROSS_SERIES_FINGERPRINT_RULE_ID,
@@ -1246,6 +1249,9 @@ def _limited_tick_fingerprint_payload() -> dict[str, JSONValue]:
     payload["autoregressive"] = _autoregressive_payload(
         "GBPUSD", status="limited"
     )
+    payload["seasonal_exogenous"] = _seasonal_exogenous_payload(
+        "GBPUSD", status="limited"
+    )
     return payload
 
 
@@ -1317,6 +1323,7 @@ def _tick_fingerprint_payload(
     payload["classical_model_input"] = _classical_model_input_payload(symbol)
     payload["exponential_smoothing"] = _exponential_smoothing_payload(symbol)
     payload["autoregressive"] = _autoregressive_payload(symbol)
+    payload["seasonal_exogenous"] = _seasonal_exogenous_payload(symbol)
     return payload
 
 
@@ -1417,6 +1424,38 @@ def _autoregressive_payload(
         "evaluation": {
             "model_count": 3,
             "families": ["ar", "arma", "arima"],
+            "fold_count": 4,
+            "evaluated_fold_count": 3 if status == "limited" else 4,
+            "automatic_order_selection": False,
+            "automatic_winner": False,
+        },
+    }
+
+
+def _seasonal_exogenous_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    return {
+        "schema_version": SEASONAL_EXOGENOUS_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": "insufficient_folds" if status == "limited" else None,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "regressors": {
+            "column_order": ["source_hour_sin", "source_hour_cos"],
+            "known_in_advance": True,
+            "future_market_values_used": False,
+        },
+        "fit_summary": {
+            "fit_attempt_count": 12,
+            "failed_fit_count": 1 if status == "limited" else 0,
+            "converged_fit_count": 11 if status == "limited" else 12,
+        },
+        "evaluation": {
+            "model_count": 3,
+            "families": ["sarima", "arimax", "sarimax"],
             "fold_count": 4,
             "evaluated_fold_count": 3 if status == "limited" else 4,
             "automatic_order_selection": False,

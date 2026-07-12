@@ -1224,9 +1224,10 @@ zero-variance markers, and the `log_return`, `differencing`, and
 Recommended transforms are reported but are not silently applied, and
 nonstationarity never becomes a hard quality failure. Fitted
 exponential-smoothing and explicit-order AR/ARMA/ARIMA models use the separate
-contracts below. SARIMA, exogenous regressors, state-space, GARCH, automatic
-model selection, forecasting leaderboards, and synthetic generation remain
-deliberately deferred.
+contracts below. Explicit SARIMA/ARIMAX/SARIMAX models are also implemented as
+the third fitted family. State-space, GARCH, automatic model selection,
+forecasting leaderboards, and synthetic generation remain deliberately
+deferred.
 
 Python consumers can call
 `classical_baseline_diagnostics_from_training_frame(...)`, then
@@ -1494,6 +1495,98 @@ point-in-time explicit. Full reports use
 models`. Computational cost is proportional to configured specifications times
 rolling origins; #421 candidate, fit-attempt, observation, time, memory, and
 diagnostic limits bound that work.
+
+The third fitted family adds explicit seasonal and exogenous autoregressive
+models. It uses the same regular grid, transforms, chronological folds,
+original-scale inversion, and resource policy as the earlier families:
+
+```json
+{
+  "rules": {
+    "fingerprint.series": {
+      "classical_model_input": {
+        "enabled": true,
+        "frequency_ms": 60000,
+        "horizons": [1, 5],
+        "minimum_training_observations": 80,
+        "step_size": 20
+      },
+      "seasonal_exogenous": {
+        "enabled": true,
+        "projection_specification_ids": ["sarima-hour", "arimax-clock", "sarimax-hour-clock"],
+        "projection_horizon": 1,
+        "regressor_profile": {
+          "allow_partial_calendar": true,
+          "require_complete_calendar_for": [],
+          "max_regressors": 16
+        },
+        "specifications": [
+          {
+            "specification_id": "sarima-hour",
+            "family": "sarima",
+            "p": 1,
+            "seasonal_p": 1,
+            "seasonal_period": 60,
+            "seasonal_cycle_ms": 3600000
+          },
+          {
+            "specification_id": "arimax-clock",
+            "family": "arimax",
+            "p": 1,
+            "regressor_names": ["source_hour_sin", "source_hour_cos"]
+          },
+          {
+            "specification_id": "sarimax-hour-clock",
+            "family": "sarimax",
+            "p": 1,
+            "seasonal_p": 1,
+            "seasonal_period": 60,
+            "seasonal_cycle_ms": 3600000,
+            "regressor_names": ["source_hour_sin", "source_hour_cos"]
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+SARIMA, ARIMAX, and SARIMAX remain separate configured families even though
+they share Statsmodels' state-space SARIMAX backend. Nonseasonal and seasonal
+orders, the seasonal period and its elapsed-millisecond cycle, trend,
+initialization, optimizer, stationarity/invertibility enforcement, fixed scalar
+parameters, and iteration limits are explicit. A runtime cycle check prevents a
+configuration written for one sampling frequency from being silently reused at
+another frequency. There is no automatic order, regressor, or winner selection.
+
+Exogenous columns come only from the deterministic calendar classifier. The
+stable vocabulary covers source-hour and weekday cycles, market/session states,
+session overlaps, rollover, Sunday open, Friday close, London fix, month/quarter/
+year end, holiday/event presence, and explicitly registered `tag:*` values.
+Column order, vocabulary, forecast-time availability, missingness, calendar
+profile completeness, and provenance are recorded. Unknown regressors and
+observed or future-derived market values are rejected. Holiday/event regressors
+may be marked partial under the bundled advisory calendar, or required to have
+a complete operator-supplied calendar profile.
+
+Each model is refit independently at every #421 rolling origin. Future calendar
+values are classified from future grid timestamps without reading future quote
+values; missing bins and expected closures remain null and reset fitting to a
+trailing contiguous segment. Reports contain bounded parameters, residual
+summaries, roots, conditioning, convergence/failure rates, horizon metrics,
+regime-conditioned errors, lightweight baseline references, and optional #422/
+#423 references using descriptive shared-fold semantics only.
+
+`project_seasonal_exogenous_onto_training_frame(...)` augments the same enriched
+tick frame with 123 registered nullable scalar columns under `cm_sarima_*`,
+`cm_arimax_*`, and `cm_sarimax_*`. These include order and regressor codes,
+origin/target/fold/horizon identity, forecast availability, convergence and
+reason codes, and separately gated realized diagnostics. They preserve observed
+and `synth_*` namespaces and flow through the existing Polars cache and Influx
+projection. Full reports use
+`time_series_fingerprint_seasonal_exogenous_summary`, bounded payloads use
+`fingerprint_seasonal_exogenous`, and console output renders `Seasonal and
+exogenous models`.
 
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,

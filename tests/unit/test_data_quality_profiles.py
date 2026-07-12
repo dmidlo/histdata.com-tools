@@ -20,6 +20,7 @@ from histdatacom.data_quality import (
     QualityProfileError,
     QualityReport,
     QualityStatus,
+    SeasonalExogenousProfile,
     apply_quality_profile_overrides,
     discover_quality_targets,
     load_quality_profile_file,
@@ -240,6 +241,7 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
         "classical_model_input": ClassicalModelInputProfile().to_metadata(),
         "exponential_smoothing": ExponentialSmoothingProfile().to_metadata(),
         "autoregressive": AutoregressiveProfile().to_metadata(),
+        "seasonal_exogenous": SeasonalExogenousProfile().to_metadata(),
     }
 
 
