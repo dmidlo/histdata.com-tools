@@ -17,6 +17,10 @@ from histdatacom.data_quality.classical_baselines import (
     MAX_BASELINE_ROLLING_WINDOWS,
     ClassicalBaselineProfile,
 )
+from histdatacom.data_quality.classical_model_contracts import (
+    ClassicalModelInputProfile,
+    ClassicalModelResourcePolicy,
+)
 from histdatacom.data_quality.contracts import QualitySeverity
 from histdatacom.data_quality.fingerprints import (
     DEFAULT_FINGERPRINT_HISTOGRAM_BINS,
@@ -488,6 +492,7 @@ class QualityProfile:
                 "distribution_attention",
                 "cache_source_parity",
                 "classical_baselines",
+                "classical_model_input",
             },
             SERIES_FINGERPRINT_RULE_ID,
         )
@@ -565,6 +570,14 @@ class QualityProfile:
                     path=SERIES_FINGERPRINT_RULE_ID,
                 ),
                 path=f"{SERIES_FINGERPRINT_RULE_ID}.classical_baselines",
+            ),
+            classical_model_input=_classical_model_input_profile(
+                _mapping_field(
+                    config,
+                    "classical_model_input",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=(f"{SERIES_FINGERPRINT_RULE_ID}.classical_model_input"),
             ),
         )
 
@@ -1716,6 +1729,207 @@ def _classical_baseline_profile(
     )
 
 
+def _classical_model_input_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> ClassicalModelInputProfile:
+    base = ClassicalModelInputProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "frequency_ms",
+            "alignment_epoch_ms",
+            "closed_side",
+            "label_side",
+            "midpoint_aggregation",
+            "spread_aggregation",
+            "minimum_observations_per_bin",
+            "expected_closure_policy",
+            "unexpected_missing_policy",
+            "transform",
+            "differencing_order",
+            "seasonal_differencing_order",
+            "seasonal_period",
+            "horizons",
+            "fold_kind",
+            "minimum_training_observations",
+            "minimum_evaluation_observations",
+            "step_size",
+            "rolling_window",
+            "embargo_observations",
+            "rounding_digits",
+            "resources",
+        },
+        path,
+    )
+    resources = _classical_model_resource_policy(
+        _mapping_field(value, "resources", path=path),
+        path=f"{path}.resources",
+    )
+    try:
+        return ClassicalModelInputProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            frequency_ms=_int_field(
+                value,
+                "frequency_ms",
+                base.frequency_ms,
+                minimum=1,
+                path=path,
+            ),
+            alignment_epoch_ms=_int_field(
+                value,
+                "alignment_epoch_ms",
+                base.alignment_epoch_ms,
+                path=path,
+            ),
+            closed_side=_string_field(
+                value, "closed_side", base.closed_side, path=path
+            ),
+            label_side=_string_field(
+                value, "label_side", base.label_side, path=path
+            ),
+            midpoint_aggregation=_string_field(
+                value,
+                "midpoint_aggregation",
+                base.midpoint_aggregation,
+                path=path,
+            ),
+            spread_aggregation=_string_field(
+                value,
+                "spread_aggregation",
+                base.spread_aggregation,
+                path=path,
+            ),
+            minimum_observations_per_bin=_int_field(
+                value,
+                "minimum_observations_per_bin",
+                base.minimum_observations_per_bin,
+                minimum=1,
+                path=path,
+            ),
+            expected_closure_policy=_string_field(
+                value,
+                "expected_closure_policy",
+                base.expected_closure_policy,
+                path=path,
+            ),
+            unexpected_missing_policy=_string_field(
+                value,
+                "unexpected_missing_policy",
+                base.unexpected_missing_policy,
+                path=path,
+            ),
+            transform=_string_field(
+                value, "transform", base.transform, path=path
+            ),
+            differencing_order=_int_field(
+                value,
+                "differencing_order",
+                base.differencing_order,
+                minimum=0,
+                maximum=2,
+                path=path,
+            ),
+            seasonal_differencing_order=_int_field(
+                value,
+                "seasonal_differencing_order",
+                base.seasonal_differencing_order,
+                minimum=0,
+                maximum=1,
+                path=path,
+            ),
+            seasonal_period=_int_field(
+                value,
+                "seasonal_period",
+                base.seasonal_period,
+                minimum=0,
+                path=path,
+            ),
+            horizons=_fingerprint_int_sequence(
+                value,
+                "horizons",
+                base.horizons,
+                path=path,
+            ),
+            fold_kind=_string_field(
+                value, "fold_kind", base.fold_kind, path=path
+            ),
+            minimum_training_observations=_int_field(
+                value,
+                "minimum_training_observations",
+                base.minimum_training_observations,
+                minimum=1,
+                path=path,
+            ),
+            minimum_evaluation_observations=_int_field(
+                value,
+                "minimum_evaluation_observations",
+                base.minimum_evaluation_observations,
+                minimum=1,
+                path=path,
+            ),
+            step_size=_int_field(
+                value,
+                "step_size",
+                base.step_size,
+                minimum=1,
+                path=path,
+            ),
+            rolling_window=_int_field(
+                value,
+                "rolling_window",
+                base.rolling_window,
+                minimum=0,
+                path=path,
+            ),
+            embargo_observations=_int_field(
+                value,
+                "embargo_observations",
+                base.embargo_observations,
+                minimum=0,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+            resources=resources,
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _classical_model_resource_policy(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> ClassicalModelResourcePolicy:
+    base = ClassicalModelResourcePolicy()
+    keys = set(base.to_metadata())
+    _reject_unknown_keys(value, keys, path)
+    try:
+        return ClassicalModelResourcePolicy(
+            **{
+                key: _int_field(
+                    value,
+                    key,
+                    int(getattr(base, key)),
+                    minimum=1,
+                    path=path,
+                )
+                for key in keys
+            }
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
 def _quality_reporting_profile(
     value: Mapping[str, JSONValue],
 ) -> QualityReportingProfile:
@@ -1947,6 +2161,22 @@ def _bool_field(
         msg = f"{path}.{key} must be a boolean"
         raise QualityProfileError(msg)
     return value
+
+
+def _string_field(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: str,
+    *,
+    path: str,
+) -> str:
+    if key not in mapping:
+        return default
+    value = mapping[key]
+    if not isinstance(value, str) or not value.strip():
+        msg = f"{path}.{key} must be a non-empty string"
+        raise QualityProfileError(msg)
+    return value.strip()
 
 
 def _reject_unknown_keys(

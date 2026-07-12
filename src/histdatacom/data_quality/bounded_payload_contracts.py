@@ -18,6 +18,9 @@ from histdatacom.data_quality.contracts import (
 from histdatacom.data_quality.classical_baselines import (
     CLASSICAL_BASELINE_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.classical_model_contracts import (
+    CLASSICAL_MODEL_INPUT_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.engine import (
     QUALITY_ENGINE_METADATA_KEY,
     run_quality_assessment,
@@ -1228,6 +1231,9 @@ def _limited_tick_fingerprint_payload() -> dict[str, JSONValue]:
     payload["classical_baselines"] = _classical_baseline_payload(
         "GBPUSD", status="limited"
     )
+    payload["classical_model_input"] = _classical_model_input_payload(
+        "GBPUSD", status="limited"
+    )
     return payload
 
 
@@ -1296,6 +1302,7 @@ def _tick_fingerprint_payload(
         payload
     )
     payload["classical_baselines"] = _classical_baseline_payload(symbol)
+    payload["classical_model_input"] = _classical_model_input_payload(symbol)
     return payload
 
 
@@ -1324,6 +1331,31 @@ def _classical_baseline_payload(
                 "mae": 0.0001,
                 "rmse": 0.0002,
             },
+        },
+    }
+
+
+def _classical_model_input_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    return {
+        "schema_version": CLASSICAL_MODEL_INPUT_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": "insufficient_folds" if status == "limited" else None,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "regularization": {
+            "regularized_observation_count": 100,
+            "observed_bin_count": 96,
+            "expected_closure_count": 3,
+            "unexpected_missing_count": 1,
+        },
+        "fold_policy": {
+            "schema_version": "histdatacom.classical-model-fold.v1",
+            "fold_count": 8,
+            "valid_fold_count": 8,
         },
     }
 

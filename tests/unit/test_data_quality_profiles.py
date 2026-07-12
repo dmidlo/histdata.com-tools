@@ -12,6 +12,7 @@ from histdatacom.data_quality import (
     QUALITY_PROFILE_SCHEMA_VERSION,
     QUALITY_REPORTING_METADATA_KEY,
     SERIES_FINGERPRINT_RULE_ID,
+    ClassicalModelInputProfile,
     HistDataSeriesFingerprintRule,
     QualityFinding,
     QualityProfileError,
@@ -234,7 +235,45 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
             "session_seasonal_enabled": False,
             "rounding_digits": 6,
         },
+        "classical_model_input": ClassicalModelInputProfile().to_metadata(),
     }
+
+
+def test_classical_model_input_profile_flows_to_rule_surface() -> None:
+    """Regularization, fold, transform, and resource controls should parse."""
+    rules = quality_rules_for_groups(
+        ("fingerprint",),
+        profile={
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "classical_model_input": {
+                        "enabled": True,
+                        "frequency_ms": 1_000,
+                        "midpoint_aggregation": "median",
+                        "spread_aggregation": "mean",
+                        "transform": "log_return",
+                        "horizons": [1, 3],
+                        "fold_kind": "rolling",
+                        "minimum_training_observations": 10,
+                        "minimum_evaluation_observations": 2,
+                        "rolling_window": 12,
+                        "resources": {"max_folds": 8},
+                    }
+                }
+            }
+        },
+    )
+
+    model_input = rules[0].profile.classical_model_input
+    assert model_input.enabled is True
+    assert model_input.frequency_ms == 1_000
+    assert model_input.midpoint_aggregation == "median"
+    assert model_input.spread_aggregation == "mean"
+    assert model_input.transform == "log_return"
+    assert model_input.horizons == (1, 3)
+    assert model_input.fold_kind == "rolling"
+    assert model_input.rolling_window == 12
+    assert model_input.resources.max_folds == 8
 
 
 @pytest.mark.parametrize(
@@ -311,6 +350,28 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
             "rules": {
                 SERIES_FINGERPRINT_RULE_ID: {
                     "classical_baselines": {"minimum_training_rows": 0}
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {"classical_model_input": True}
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "classical_model_input": {"horizons": [3, 1]}
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "classical_model_input": {
+                        "fold_kind": "rolling",
+                        "rolling_window": 1,
+                    }
                 }
             }
         },

@@ -90,6 +90,46 @@ SYNTHETIC_PLACEHOLDER_COLUMNS = (
     "synth_usable",
 )
 
+CLASSICAL_MODEL_CONTRACT_COLUMNS = (
+    "cm_input_schema_version",
+    "cm_input_derivation_id",
+    "cm_input_status_code",
+    "cm_input_ready",
+    "cm_input_exclusion_reason_code",
+    "cm_input_frequency_ms",
+    "cm_input_bin_start_utc_ms",
+    "cm_input_bin_end_utc_ms",
+    "cm_input_available_at_utc_ms",
+    "cm_input_observation_count",
+    "cm_input_source_first_row_id",
+    "cm_input_source_last_row_id",
+    "cm_input_observed_value",
+    "cm_input_value",
+    "cm_input_spread",
+    "cm_input_transform_code",
+    "cm_input_calculation_basis_code",
+    "cm_input_available",
+    "cm_input_expected_closure",
+    "cm_input_unexpected_missing",
+    "cm_fold_schema_version",
+    "cm_fold_id",
+    "cm_fold_kind_code",
+    "cm_fold_origin_row_id",
+    "cm_fold_target_row_id",
+    "cm_fold_horizon",
+    "cm_fold_training_start_row_id",
+    "cm_fold_training_end_row_id",
+    "cm_fold_evaluation_start_row_id",
+    "cm_fold_evaluation_end_row_id",
+    "cm_evaluation_schema_version",
+    "cm_evaluation_status_code",
+    "cm_evaluation_target_available",
+    "cm_evaluation_forecast",
+    "cm_evaluation_actual",
+    "cm_evaluation_error",
+    "cm_evaluation_diagnostic_only",
+)
+
 TRAINING_REQUIRED_COLUMNS = (
     *IDENTITY_COLUMNS,
     "spread",
@@ -118,6 +158,7 @@ TRAINING_REQUIRED_COLUMNS = (
     "class_volatility_regime_code",
     "class_training_action_code",
     *SYNTHETIC_PLACEHOLDER_COLUMNS,
+    *CLASSICAL_MODEL_CONTRACT_COLUMNS,
 )
 
 ISSUE_CODE_BY_COLUMN = {
@@ -297,6 +338,7 @@ def training_feature_definitions() -> tuple[TrainingFeatureDefinition, ...]:
     definitions.extend(_period_metric_definition_rows())
     definitions.extend(_classification_definition_rows())
     definitions.extend(_synthetic_definition_rows())
+    definitions.extend(_classical_model_contract_definition_rows())
     return tuple(definitions)
 
 
@@ -774,6 +816,59 @@ def _synthetic_definition_rows() -> list[TrainingFeatureDefinition]:
     ]
 
 
+def _classical_model_contract_definition_rows() -> (
+    list[TrainingFeatureDefinition]
+):
+    strings = {
+        "cm_input_schema_version",
+        "cm_input_derivation_id",
+        "cm_fold_schema_version",
+        "cm_evaluation_schema_version",
+    }
+    booleans = {
+        "cm_input_ready",
+        "cm_input_available",
+        "cm_input_expected_closure",
+        "cm_input_unexpected_missing",
+        "cm_evaluation_target_available",
+        "cm_evaluation_diagnostic_only",
+    }
+    floats = {
+        "cm_input_observed_value",
+        "cm_input_value",
+        "cm_input_spread",
+        "cm_evaluation_forecast",
+        "cm_evaluation_actual",
+        "cm_evaluation_error",
+    }
+    definitions: list[TrainingFeatureDefinition] = []
+    for name in CLASSICAL_MODEL_CONTRACT_COLUMNS:
+        dtype = (
+            "Utf8"
+            if name in strings
+            else (
+                "Boolean"
+                if name in booleans
+                else "Float64" if name in floats else "Int64"
+            )
+        )
+        definitions.append(
+            TrainingFeatureDefinition(
+                name,
+                dtype,
+                None,
+                (
+                    "Point-in-time-safe classical model contract scalar: "
+                    f"{name}."
+                ),
+                "classical_model_contracts",
+                "row",
+                True,
+            )
+        )
+    return definitions
+
+
 def _training_context(
     target: Any | None,
     *,
@@ -824,7 +919,7 @@ def _normalize_timeframe(value: str) -> str:
         "tick_data_quotes": TICK,
         "t": TICK,
     }
-    return aliases.get(normalized.lower(), normalized)
+    return str(aliases.get(normalized.lower(), normalized))
 
 
 def _require_ascii_tick_context(context: Mapping[str, str]) -> None:

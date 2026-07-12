@@ -16,6 +16,20 @@ from histdatacom.data_quality.classical_baselines import (
     CLASSICAL_BASELINE_TRAINING_PROJECTION_SCHEMA_VERSION,
     DEFAULT_BASELINE_SUMMARY_TARGET_LIMIT,
 )
+from histdatacom.data_quality.classical_model_contracts import (
+    CLASSICAL_MODEL_EVALUATION_RESULT_SCHEMA_VERSION,
+    CLASSICAL_MODEL_FIT_RESULT_SCHEMA_VERSION,
+    CLASSICAL_MODEL_FOLD_SCHEMA_VERSION,
+    CLASSICAL_MODEL_INPUT_BOUNDED_PAYLOAD_KEY,
+    CLASSICAL_MODEL_INPUT_SCHEMA_VERSION,
+    CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY,
+    CLASSICAL_MODEL_INPUT_SUMMARY_SCHEMA_VERSION,
+    CLASSICAL_MODEL_TRAINING_PROJECTION_SCHEMA_VERSION,
+    DEFAULT_MODEL_INPUT_SUMMARY_TARGET_LIMIT,
+    MODEL_FAILURE_REASON_CODES,
+    MODEL_FIT_STATUSES,
+    MODEL_TRANSFORM_CODES,
+)
 from histdatacom.data_quality.fingerprints import (
     CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     CROSS_SERIES_FINGERPRINT_RULE_ID,
@@ -96,6 +110,7 @@ FINGERPRINT_SERIES_CONFIG_KEYS = (
     "distribution_attention",
     "cache_source_parity",
     "classical_baselines",
+    "classical_model_input",
 )
 FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
     "invalid_row_min_count",
@@ -175,7 +190,10 @@ FINGERPRINT_BASIS_DESCRIPTIONS = (
         "observed_sequence",
         "statistics computed over parsed row order without regular-grid imputation",
     ),
-    ("regular_grid", "reserved for future grid-regularized calculations"),
+    (
+        "regular_grid",
+        "deterministic UTC grid derived from enriched ASCII tick rows",
+    ),
     ("limited", "section emitted with advisory limitations"),
     ("unavailable", "section could not compute enough contract data"),
 )
@@ -469,6 +487,49 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_classical_model_input",
+        CLASSICAL_MODEL_INPUT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.classical_model_input",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_fold",
+        CLASSICAL_MODEL_FOLD_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.classical_model_input.fold_policy",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_fit_result",
+        CLASSICAL_MODEL_FIT_RESULT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_evaluation_result",
+        CLASSICAL_MODEL_EVALUATION_RESULT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_training_projection",
+        CLASSICAL_MODEL_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.classical_model_input.training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_input_summary",
+        CLASSICAL_MODEL_INPUT_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY,
+        bounded_payload_key=CLASSICAL_MODEL_INPUT_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_audit",
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -609,6 +670,14 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         CLASSICAL_BASELINE_BOUNDED_PAYLOAD_KEY,
         "classical_baselines",
         "Classical fingerprint baselines",
+    ),
+    FingerprintReportSurfaceContract(
+        "classical_model_input",
+        "fingerprint_classical_model_input_summary",
+        CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY,
+        CLASSICAL_MODEL_INPUT_BOUNDED_PAYLOAD_KEY,
+        "classical_model_input",
+        "Classical model input contracts",
     ),
     FingerprintReportSurfaceContract(
         "readiness_summary",
@@ -779,6 +848,37 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "classical_model_input",
+        "opt-in regularized input and evaluation contract over enriched tick rows",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_classical_model_input",
+        basis_values=("regular_grid_from_enriched_ascii_ticks",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#421",
+            "profile_controlled_by": ["classical_model_input"],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid",
+            "timestamp_required_as_identity": False,
+            "augmented_column_prefixes": [
+                "cm_input_",
+                "cm_fold_",
+                "cm_evaluation_",
+            ],
+            "model_fitting_in_scope": False,
+            "aggregations": ["first", "last", "mean", "median"],
+            "transforms": list(MODEL_TRANSFORM_CODES),
+            "fold_kinds": ["expanding", "rolling"],
+            "fit_statuses": list(MODEL_FIT_STATUSES),
+            "failure_reason_codes": list(MODEL_FAILURE_REASON_CODES),
+            "row_mapping_policy": (
+                "availability_safe_repetition_after_bin_close"
+            ),
+        },
+    ),
+    FingerprintTargetSectionContract(
         "synthetic_constraints",
         "generator-facing defects, stylized facts, artifacts, and validation contract",
         target_timeframes=(TICK,),
@@ -844,6 +944,9 @@ FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
     ),
     "classical_baseline_summary_target_limit": (
         DEFAULT_BASELINE_SUMMARY_TARGET_LIMIT
+    ),
+    "classical_model_input_summary_target_limit": (
+        DEFAULT_MODEL_INPUT_SUMMARY_TARGET_LIMIT
     ),
 }
 FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS = {

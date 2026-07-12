@@ -22,6 +22,15 @@ from histdatacom.data_quality.classical_baselines import (
     CLASSICAL_BASELINE_SUMMARY_SCHEMA_VERSION,
     CLASSICAL_BASELINE_TRAINING_PROJECTION_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.classical_model_contracts import (
+    CLASSICAL_MODEL_EVALUATION_RESULT_SCHEMA_VERSION,
+    CLASSICAL_MODEL_FIT_RESULT_SCHEMA_VERSION,
+    CLASSICAL_MODEL_FOLD_SCHEMA_VERSION,
+    CLASSICAL_MODEL_INPUT_SCHEMA_VERSION,
+    CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY,
+    CLASSICAL_MODEL_INPUT_SUMMARY_SCHEMA_VERSION,
+    CLASSICAL_MODEL_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS,
     FINGERPRINT_REPORT_SURFACE_CONTRACTS,
@@ -110,6 +119,24 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         schemas["fingerprint_classical_baseline_summary"]["schema_version"]
         == CLASSICAL_BASELINE_SUMMARY_SCHEMA_VERSION
     )
+    assert schemas["fingerprint_classical_model_input"]["schema_version"] == (
+        CLASSICAL_MODEL_INPUT_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_classical_model_fold"]["schema_version"] == (
+        CLASSICAL_MODEL_FOLD_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_classical_model_fit_result"][
+        "schema_version"
+    ] == (CLASSICAL_MODEL_FIT_RESULT_SCHEMA_VERSION)
+    assert schemas["fingerprint_classical_model_evaluation_result"][
+        "schema_version"
+    ] == (CLASSICAL_MODEL_EVALUATION_RESULT_SCHEMA_VERSION)
+    assert schemas["fingerprint_classical_model_training_projection"][
+        "schema_version"
+    ] == (CLASSICAL_MODEL_TRAINING_PROJECTION_SCHEMA_VERSION)
+    assert schemas["fingerprint_classical_model_input_summary"][
+        "schema_version"
+    ] == (CLASSICAL_MODEL_INPUT_SUMMARY_SCHEMA_VERSION)
     assert (
         schemas["fingerprint_decomposition_training_projection"][
             "schema_version"
@@ -160,6 +187,9 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         payload["metadata_keys"]["report_metadata"]["cache_source_parity"]
         == TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY
     )
+    assert payload["metadata_keys"]["report_metadata"][
+        "classical_model_input"
+    ] == (CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY)
 
     implemented = payload["sections"]["implemented"]["target_sections"]
     assert [section["name"] for section in implemented] == [
@@ -174,6 +204,7 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "decomposition",
         "cache_source_parity",
         "classical_baselines",
+        "classical_model_input",
         "synthetic_constraints",
         "fingerprint_audit",
     ]

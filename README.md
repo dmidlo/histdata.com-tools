@@ -1237,6 +1237,102 @@ through the existing same-point Influx projection. Full reports expose
 use `fingerprint_classical_baselines`, and the fingerprint CLI renders
 `Classical fingerprint baselines`.
 
+The broader fitted-model curriculum begins with a separate opt-in input and
+evaluation contract. It regularizes the enriched ASCII tick frame without
+restoring raw M1 as an independent input or fitting ETS/ARIMA/state-space/GARCH
+models prematurely:
+
+```json
+{
+  "schema_version": "histdatacom.quality-profile.v1",
+  "name": "classical-model-input",
+  "rules": {
+    "fingerprint.series": {
+      "classical_model_input": {
+        "enabled": true,
+        "frequency_ms": 60000,
+        "alignment_epoch_ms": 0,
+        "closed_side": "left",
+        "label_side": "left",
+        "midpoint_aggregation": "last",
+        "spread_aggregation": "last",
+        "minimum_observations_per_bin": 1,
+        "expected_closure_policy": "mark",
+        "unexpected_missing_policy": "mark",
+        "transform": "level",
+        "differencing_order": 0,
+        "seasonal_differencing_order": 0,
+        "seasonal_period": 0,
+        "horizons": [1],
+        "fold_kind": "expanding",
+        "minimum_training_observations": 20,
+        "minimum_evaluation_observations": 5,
+        "step_size": 5,
+        "rolling_window": 0,
+        "embargo_observations": 0,
+        "rounding_digits": 12,
+        "resources": {
+          "max_source_rows": 1000000,
+          "max_regularized_observations": 100000,
+          "max_folds": 64,
+          "max_horizons": 16,
+          "max_candidate_orders": 32,
+          "max_fit_attempts": 64,
+          "max_wall_time_seconds": 300,
+          "max_memory_bytes": 536870912,
+          "max_retained_diagnostics": 64
+        }
+      }
+    }
+  }
+}
+```
+
+`build_classical_model_input(...)` produces a bounded regular-grid derived
+view and the `histdatacom.classical-model-input.v1` contract. UTC bins are
+left-closed and left-labeled (`[start,end)`), aligned to an explicit epoch, and
+never cross a source period. Midpoint and spread support explicit
+first/last/mean/median aggregation. Derived midpoint open/high/low/close values
+are descriptive fields in the regularized view; they do not make raw bar data
+canonical again. Multiple ticks, duplicate timestamps, minimum bin support,
+source-row bounds, truncation, and rounding all remain explicit.
+
+Empty bins are never forward-filled. Calendar classification separates expected
+weekend/session closures from unexpected missing observations; both remain null
+on the canonical grid. The `omit` closure policy suppresses closure-target
+evaluation folds without compressing elapsed grid time or forecast horizons. Level, log-level,
+return, log-return, first differencing, and seasonal differencing are applied
+only when configured. The contract records invalid domains, warm-up loss,
+inverse-transform requirements, and the requirement to report forecast errors
+on the original requested scale.
+
+Expanding and rolling folds are chronological, never shuffled, and record
+training/evaluation boundaries, configured horizons, step size, embargo, and
+incomplete targets through `histdatacom.classical-model-fold.v1`. Shared
+`histdatacom.classical-model-fit-result.v1` and
+`histdatacom.classical-model-evaluation-result.v1` schemas define bounded
+fitted/converged/limited/skipped/timeout/numerical/dependency/failure metadata
+for later model families without including backend exception text, full
+forecasts, residual histories, or fitted objects.
+
+`project_classical_model_input_onto_training_frame(...)` augments the same
+enriched tick rows with registered nullable `cm_input_*`, `cm_fold_*`, and
+`cm_evaluation_*` scalar columns. Projection uses `series_id`, `period`, and
+`row_id` as durable identity and repeats a completed-bin value only on rows at
+or after its UTC close. Masked timestamps remain identifiable, duplicate
+timestamps remain distinct, observed bid/ask and `synth_*` fields are preserved,
+and post-observation evaluation values are marked diagnostic-only. The same
+columns flow through the ordinary Polars cache and same-point Influx projection;
+consumers do not need report parsing or model side-table joins.
+
+No rich numerical dependency is added to the core package by this contract.
+Future Statsmodels- and ARCH-style providers belong in an optional `models`
+extra selected by the model-family issues; the low-dependency fingerprint and
+baseline paths remain usable when those providers are absent. Full reports use
+`time_series_fingerprint_classical_model_input_summary`, bounded payloads use
+`fingerprint_classical_model_input`, and console output renders
+`Classical model input contracts`.
+
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,
 stable skip/eligibility reason codes, calendar-profile completeness, tick-spread

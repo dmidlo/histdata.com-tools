@@ -150,7 +150,7 @@ def classical_baseline_diagnostics_from_training_frame(
         missing_payload = _unavailable_payload(base, "missing_required_columns")
         missing_payload["training_substrate"] = {
             **cast(dict[str, JSONValue], missing_payload["training_substrate"]),
-            "missing_required_columns": missing,
+            "missing_required_columns": cast(JSONValue, missing),
         }
         return missing_payload
 
@@ -233,7 +233,7 @@ def classical_baseline_diagnostics_from_training_frame(
             "model_count": len(models),
             "evaluated_model_count": len(evaluated),
             "skipped_model_count": len(models) - len(evaluated),
-            "models": models,
+            "models": cast(JSONValue, models),
             "best_model": dict(best),
         },
         "limitations": limitations,
@@ -363,7 +363,9 @@ def classical_baseline_summary(
                 "best_model": model or None,
                 "best_model_code": _int(best.get("model_code")),
                 "best_mae": best.get("mae"),
-                "guard_codes": _strings(evaluation.get("guard_codes")),
+                "guard_codes": cast(
+                    JSONValue, _strings(evaluation.get("guard_codes"))
+                ),
             }
         )
     if not targets:
@@ -385,7 +387,7 @@ def classical_baseline_summary(
         "truncated": omitted > 0,
         "status_counts": dict(sorted(status_counts.items())),
         "best_model_counts": dict(sorted(best_model_counts.items())),
-        "target_summaries": included,
+        "target_summaries": cast(JSONValue, included),
         "limit_metadata": {"targets": limit.limit_payload()},
     }
 
@@ -786,10 +788,10 @@ def _prerequisite_readiness(
         status = "valid"
     return {
         "status": status,
-        "required_sections": list(required),
-        "missing_sections": missing,
-        "limited_sections": limited,
-        "unavailable_sections": unavailable,
+        "required_sections": cast(JSONValue, list(required)),
+        "missing_sections": cast(JSONValue, missing),
+        "limited_sections": cast(JSONValue, limited),
+        "unavailable_sections": cast(JSONValue, unavailable),
         "stationarity_status": stationarity_status,
         "stationarity_reason": stationarity.get("reason"),
         "rolling_drift_status": (
@@ -807,8 +809,9 @@ def _prerequisite_readiness(
             stationarity.get("computed_window_count")
         ),
         "skipped_window_count": _int(stationarity.get("skipped_window_count")),
-        "zero_variance_metrics": _strings(
-            stationarity.get("zero_variance_metrics")
+        "zero_variance_metrics": cast(
+            JSONValue,
+            _strings(stationarity.get("zero_variance_metrics")),
         ),
         "recommended_transforms": _recommended_transforms(fingerprint),
     }
@@ -844,7 +847,10 @@ def _recommended_transforms(
     fingerprint: Mapping[str, JSONValue],
 ) -> list[JSONValue]:
     stationarity = _mapping(fingerprint.get("stationarity_diagnostics"))
-    return _strings(stationarity.get("recommended_transforms"))
+    return cast(
+        list[JSONValue],
+        _strings(stationarity.get("recommended_transforms")),
+    )
 
 
 def _empty_evaluation(
@@ -907,7 +913,7 @@ def _mapping_rows(value: Any) -> list[Mapping[str, JSONValue]]:
     return [item for item in value if isinstance(item, Mapping)]
 
 
-def _strings(value: Any) -> list[JSONValue]:
+def _strings(value: Any) -> list[str]:
     if not isinstance(value, (list, tuple)):
         return []
     return [str(item) for item in value if item not in (None, "")]

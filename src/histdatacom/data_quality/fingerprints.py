@@ -41,6 +41,10 @@ from histdatacom.data_quality.classical_baselines import (
     ClassicalBaselineProfile,
     classical_baseline_diagnostics_from_training_frame,
 )
+from histdatacom.data_quality.classical_model_contracts import (
+    ClassicalModelInputProfile,
+    classical_model_input_contract_from_training_frame,
+)
 from histdatacom.data_quality.limits import (
     BoundedReportLimit,
     bounded_report_limit,
@@ -250,6 +254,7 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "decomposition",
     "cache_source_parity",
     "classical_baselines",
+    "classical_model_input",
     "synthetic_constraints",
 )
 FINGERPRINT_DYNAMICS_SECTIONS = ("microstructure_dynamics",)
@@ -340,6 +345,9 @@ class HistDataFingerprintProfile:
     classical_baselines: ClassicalBaselineProfile = field(
         default_factory=ClassicalBaselineProfile
     )
+    classical_model_input: ClassicalModelInputProfile = field(
+        default_factory=ClassicalModelInputProfile
+    )
 
     def to_metadata(self) -> dict[str, JSONValue]:
         """Return a JSON-compatible representation."""
@@ -358,6 +366,7 @@ class HistDataFingerprintProfile:
             ),
             "cache_source_parity": self.cache_source_parity.to_metadata(),
             "classical_baselines": self.classical_baselines.to_metadata(),
+            "classical_model_input": (self.classical_model_input.to_metadata()),
         }
 
 
@@ -3757,6 +3766,15 @@ def _finalize_fingerprint_payload(
                     target=target,
                 )
             )
+        if profile.classical_model_input.enabled:
+            payload["classical_model_input"] = (
+                classical_model_input_contract_from_training_frame(
+                    training_frame,
+                    payload,
+                    profile=profile.classical_model_input,
+                    target=target,
+                )
+            )
         payload["fingerprint_audit"] = _fingerprint_audit_payload(
             payload,
             target=target,
@@ -4417,6 +4435,8 @@ def _fingerprint_audit_payload(
         expected = (*expected, "cache_source_parity")
     if profile.classical_baselines.enabled:
         expected = (*expected, "classical_baselines")
+    if profile.classical_model_input.enabled:
+        expected = (*expected, "classical_model_input")
     emitted = [
         section for section in FINGERPRINT_AUDIT_SECTIONS if section in payload
     ]
@@ -4556,6 +4576,7 @@ def _fingerprint_section_skip_details(
         "stationarity_diagnostics",
         "decomposition",
         "classical_baselines",
+        "classical_model_input",
         "synthetic_constraints",
     }:
         return {"timeframe": target.timeframe}
@@ -4603,6 +4624,7 @@ def _section_timeframe_mismatch(
                 "microstructure_dynamics",
                 "synthetic_constraints",
                 "classical_baselines",
+                "classical_model_input",
             }
             and target.timeframe != TICK
         )
@@ -4684,6 +4706,15 @@ def _fingerprint_section_status(
         if baseline_status == "ready":
             return "valid"
         if baseline_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "classical_model_input":
+        input_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if input_status == "ready":
+            return "valid"
+        if input_status == "limited":
             return "limited"
         return "unavailable"
     return "valid"
