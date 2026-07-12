@@ -141,10 +141,28 @@ from histdatacom.data_quality.seasonal_exogenous import (
     SEASONAL_EXOGENOUS_SUMMARY_SCHEMA_VERSION,
     SEASONAL_EXOGENOUS_TRAINING_PROJECTION_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.state_space import (
+    DEFAULT_STATE_SPACE_SUMMARY_TARGET_LIMIT,
+    STATE_SPACE_BOUNDED_PAYLOAD_KEY,
+    STATE_SPACE_CONFIGURATION_SCHEMA_VERSION,
+    STATE_SPACE_EVALUATION_SCHEMA_VERSION,
+    STATE_SPACE_FAMILIES,
+    STATE_SPACE_FIT_SCHEMA_VERSION,
+    STATE_SPACE_FIT_STATUS_CODES,
+    STATE_SPACE_FORECAST_SCHEMA_VERSION,
+    STATE_SPACE_REASON_CODES,
+    STATE_SPACE_SCHEMA_VERSION,
+    STATE_SPACE_STATE_RESULT_SCHEMA_VERSION,
+    STATE_SPACE_SUMMARY_METADATA_KEY,
+    STATE_SPACE_SUMMARY_SCHEMA_VERSION,
+    STATE_SPACE_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.training_features import (
     AUTOREGRESSIVE_COLUMNS,
     EXPONENTIAL_SMOOTHING_COLUMNS,
     SEASONAL_EXOGENOUS_COLUMNS,
+    KALMAN_COLUMNS,
+    STATE_SPACE_COLUMNS,
     training_feature_definitions,
 )
 from histdatacom.histdata_ascii import TICK
@@ -165,6 +183,7 @@ FINGERPRINT_SERIES_CONFIG_KEYS = (
     "exponential_smoothing",
     "autoregressive",
     "seasonal_exogenous",
+    "state_space",
 )
 FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
     "invalid_row_min_count",
@@ -744,6 +763,61 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_state_space",
+        STATE_SPACE_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.state_space",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space_configuration",
+        STATE_SPACE_CONFIGURATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.state_space.configuration",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space_fit",
+        STATE_SPACE_FIT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.state_space.fit_summary",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_kalman_state_result",
+        STATE_SPACE_STATE_RESULT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space_forecast",
+        STATE_SPACE_FORECAST_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space_evaluation",
+        STATE_SPACE_EVALUATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.state_space.evaluation",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space_training_projection",
+        STATE_SPACE_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.state_space.training_projection",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space_summary",
+        STATE_SPACE_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=STATE_SPACE_SUMMARY_METADATA_KEY,
+        bounded_payload_key=STATE_SPACE_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_audit",
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -916,6 +990,14 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         SEASONAL_EXOGENOUS_BOUNDED_PAYLOAD_KEY,
         "seasonal_exogenous",
         "Seasonal and exogenous models",
+    ),
+    FingerprintReportSurfaceContract(
+        "state_space",
+        "fingerprint_state_space_summary",
+        STATE_SPACE_SUMMARY_METADATA_KEY,
+        STATE_SPACE_BOUNDED_PAYLOAD_KEY,
+        "state_space",
+        "State-space and Kalman models",
     ),
     FingerprintReportSurfaceContract(
         "readiness_summary",
@@ -1245,6 +1327,52 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "state_space",
+        "opt-in structural state-space and leakage-safe Kalman diagnostics",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_state_space",
+        basis_values=("regular_grid_rolling_origin",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#425",
+            "profile_controlled_by": [
+                "classical_model_input",
+                "state_space",
+            ],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid",
+            "optional_dependency_extra": "models",
+            "backend": "statsmodels",
+            "model_families": list(STATE_SPACE_FAMILIES),
+            "fit_statuses": list(STATE_SPACE_FIT_STATUS_CODES),
+            "failure_reason_codes": list(STATE_SPACE_REASON_CODES),
+            "augmented_column_prefixes": [
+                "cm_state_space_",
+                "cm_kalman_",
+            ],
+            "augmented_columns": [
+                {
+                    "name": definition.name,
+                    "dtype": definition.dtype,
+                    "nullable": definition.nullable,
+                    "grain": definition.grain,
+                    "source": definition.source,
+                }
+                for definition in training_feature_definitions()
+                if definition.name in (*STATE_SPACE_COLUMNS, *KALMAN_COLUMNS)
+            ],
+            "explicit_component_configuration": True,
+            "filtered_state_policy": "forecast_origin_information_only",
+            "smoothed_state_policy": "retrospective_diagnostic_only",
+            "missing_observation_policy": "prediction_only_transition",
+            "automatic_component_selection": False,
+            "automatic_winner": False,
+            "row_mapping_policy": "first_source_row_at_or_after_availability",
+        },
+    ),
+    FingerprintTargetSectionContract(
         "synthetic_constraints",
         "generator-facing defects, stylized facts, artifacts, and validation contract",
         target_timeframes=(TICK,),
@@ -1323,6 +1451,7 @@ FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
     "seasonal_exogenous_summary_target_limit": (
         DEFAULT_SEASONAL_EXOGENOUS_SUMMARY_TARGET_LIMIT
     ),
+    "state_space_summary_target_limit": DEFAULT_STATE_SPACE_SUMMARY_TARGET_LIMIT,
 }
 FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS = {
     "invalid_row_min_count": DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT,

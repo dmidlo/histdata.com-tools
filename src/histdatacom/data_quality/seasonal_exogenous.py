@@ -881,8 +881,8 @@ def _calendar_regressors(
         "regressor_count": len(requested),
         "definitions": cast(JSONValue, definitions),
         "supported_builtin_vocabulary": list(CALENDAR_REGRESSOR_NAMES),
-        "configured_tag_vocabulary": sorted(tag_vocabulary),
-        "unknown_regressors": unknown,
+        "configured_tag_vocabulary": cast(JSONValue, sorted(tag_vocabulary)),
+        "unknown_regressors": cast(JSONValue, unknown),
         "availability_counts": dict(sorted(availability_counts.items())),
         "calendar_profile": calendar_profile.to_metadata(),
         "calendar_profile_complete": calendar_profile.complete,
@@ -1751,8 +1751,10 @@ def _regime_error_summary(
         for tag in cast(list[str], row.get("target_special_tags", [])):
             tags.setdefault(tag, []).append(abs(error))
     return {
-        "by_active_session": _bounded_error_groups(sessions, digits),
-        "by_special_tag": _bounded_error_groups(tags, digits),
+        "by_active_session": cast(
+            JSONValue, _bounded_error_groups(sessions, digits)
+        ),
+        "by_special_tag": cast(JSONValue, _bounded_error_groups(tags, digits)),
         "causal_interpretation": False,
     }
 

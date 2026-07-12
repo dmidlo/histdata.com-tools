@@ -1588,6 +1588,85 @@ projection. Full reports use
 `fingerprint_seasonal_exogenous`, and console output renders `Seasonal and
 exogenous models`.
 
+The fourth fitted family adds explicit structural state-space models and
+leakage-safe Kalman state diagnostics. It consumes the same #421 regular grid,
+aggregation, transform, rolling-origin folds, horizons, and resource policy:
+
+```json
+{
+  "rules": {
+    "fingerprint.series": {
+      "classical_model_input": {
+        "enabled": true,
+        "frequency_ms": 60000,
+        "horizons": [1, 5],
+        "minimum_training_observations": 80,
+        "step_size": 20
+      },
+      "state_space": {
+        "enabled": true,
+        "projection_specification_id": "local-level",
+        "projection_horizon": 1,
+        "max_state_dimension": 64,
+        "max_component_count": 8,
+        "max_prediction_only_gap": 240,
+        "max_retained_states": 16,
+        "specifications": [
+          {
+            "specification_id": "local-level",
+            "family": "local_level"
+          },
+          {
+            "specification_id": "local-linear-trend",
+            "family": "local_linear_trend",
+            "stochastic_trend": true
+          },
+          {
+            "specification_id": "structural-hourly",
+            "family": "structural",
+            "seasonal_period": 60,
+            "seasonal_cycle_ms": 3600000
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Local level, local linear trend, and configurable structural models remain
+first-class specifications. Level/trend/irregular, seasonal, cycle, and
+autoregressive components; stochastic flags; initialization; optimizer; fixed
+parameters; and iteration limits are explicit. There is no automatic component
+search or winner. Seasonal periods carry an elapsed-millisecond cycle so a
+configuration cannot silently move to a different sampling frequency.
+
+Missing regular-grid observations are passed to the Statsmodels
+`UnobservedComponents` backend as missing observations. The Kalman system
+performs one prediction-only transition per grid step: expected closures and
+true missing observations remain distinct in the #421 input contract, neither
+is forward-filled, and long prediction-only runs are bounded and reported.
+Each model is independently refit at every forecast origin. Filtered states use
+only that origin's training segment. Smoothed states are retrospective
+diagnostics for the same bounded segment, are never used to forecast, and are
+never training-eligible.
+
+Reports include bounded likelihood/AIC/BIC, innovations, state uncertainty,
+parameters, convergence/failure rates, prediction-only transition counts,
+horizon metrics, lightweight baselines, and optional #422/#423/#424 references.
+Comparisons are descriptive shared-fold references only. Full reports use
+`time_series_fingerprint_state_space_summary`, bounded payloads use
+`fingerprint_state_space`, and console output renders `State-space and Kalman
+models`.
+
+`project_state_space_onto_training_frame(...)` augments the same enriched tick
+rows with 52 registered nullable scalar columns: 32 under `cm_state_space_*`
+and 20 under `cm_kalman_*`. Forecast, actual/error, fit/reason, fold, horizon,
+filtered-state, smoothed-state, uncertainty, availability, retrospective, and
+training-eligibility fields join only by `series_id`/`period`/`row_id`. They
+preserve observed and `synth_*` namespaces and serialize through the existing
+Polars cache and Influx projection.
+
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,
 stable skip/eligibility reason codes, calendar-profile completeness, tick-spread

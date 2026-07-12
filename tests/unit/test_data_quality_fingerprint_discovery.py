@@ -63,6 +63,17 @@ from histdatacom.data_quality.seasonal_exogenous import (
     SEASONAL_EXOGENOUS_SUMMARY_SCHEMA_VERSION,
     SEASONAL_EXOGENOUS_TRAINING_PROJECTION_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.state_space import (
+    STATE_SPACE_CONFIGURATION_SCHEMA_VERSION,
+    STATE_SPACE_EVALUATION_SCHEMA_VERSION,
+    STATE_SPACE_FIT_SCHEMA_VERSION,
+    STATE_SPACE_FORECAST_SCHEMA_VERSION,
+    STATE_SPACE_SCHEMA_VERSION,
+    STATE_SPACE_STATE_RESULT_SCHEMA_VERSION,
+    STATE_SPACE_SUMMARY_METADATA_KEY,
+    STATE_SPACE_SUMMARY_SCHEMA_VERSION,
+    STATE_SPACE_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS,
     FINGERPRINT_REPORT_SURFACE_CONTRACTS,
@@ -108,6 +119,8 @@ from histdatacom.data_quality.synthetic_constraints import (
 from histdatacom.data_quality.training_features import (
     EXPONENTIAL_SMOOTHING_COLUMNS,
     SEASONAL_EXOGENOUS_COLUMNS,
+    KALMAN_COLUMNS,
+    STATE_SPACE_COLUMNS,
     training_feature_definitions,
 )
 from histdatacom.runtime_contracts import JSONValue
@@ -257,6 +270,32 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert schemas["fingerprint_seasonal_exogenous_summary"][
         "schema_version"
     ] == (SEASONAL_EXOGENOUS_SUMMARY_SCHEMA_VERSION)
+    assert schemas["fingerprint_state_space"]["schema_version"] == (
+        STATE_SPACE_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_state_space_configuration"]["schema_version"]
+        == STATE_SPACE_CONFIGURATION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_state_space_fit"]["schema_version"] == (
+        STATE_SPACE_FIT_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_kalman_state_result"]["schema_version"] == (
+        STATE_SPACE_STATE_RESULT_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_state_space_forecast"]["schema_version"] == (
+        STATE_SPACE_FORECAST_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_state_space_evaluation"]["schema_version"] == (
+        STATE_SPACE_EVALUATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_state_space_training_projection"]["schema_version"]
+        == STATE_SPACE_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_state_space_summary"]["schema_version"] == (
+        STATE_SPACE_SUMMARY_SCHEMA_VERSION
+    )
     assert (
         schemas["fingerprint_decomposition_training_projection"][
             "schema_version"
@@ -320,6 +359,9 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert payload["metadata_keys"]["report_metadata"][
         "seasonal_exogenous"
     ] == (SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY)
+    assert payload["metadata_keys"]["report_metadata"]["state_space"] == (
+        STATE_SPACE_SUMMARY_METADATA_KEY
+    )
 
     implemented = payload["sections"]["implemented"]["target_sections"]
     assert [section["name"] for section in implemented] == [
@@ -338,6 +380,7 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "exponential_smoothing",
         "autoregressive",
         "seasonal_exogenous",
+        "state_space",
         "synthetic_constraints",
         "fingerprint_audit",
     ]
@@ -399,6 +442,28 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
             "source": definitions[name].source,
         }
         for name in SEASONAL_EXOGENOUS_COLUMNS
+    ]
+    state_space = next(
+        section for section in implemented if section["name"] == "state_space"
+    )
+    assert state_space["model_families"] == [
+        "local_level",
+        "local_linear_trend",
+        "structural",
+    ]
+    assert state_space["augmented_column_prefixes"] == [
+        "cm_state_space_",
+        "cm_kalman_",
+    ]
+    assert state_space["augmented_columns"] == [
+        {
+            "name": name,
+            "dtype": definitions[name].dtype,
+            "nullable": definitions[name].nullable,
+            "grain": definitions[name].grain,
+            "source": definitions[name].source,
+        }
+        for name in (*STATE_SPACE_COLUMNS, *KALMAN_COLUMNS)
     ]
     planned = payload["sections"]["planned"]["target_sections"]
     assert planned == []

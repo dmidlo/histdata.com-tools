@@ -249,6 +249,70 @@ SEASONAL_EXOGENOUS_COLUMNS = tuple(
     for suffix in SEASONAL_EXOGENOUS_FAMILY_COLUMN_SUFFIXES
 )
 
+STATE_SPACE_COLUMN_SUFFIXES = (
+    "schema_version",
+    "input_derivation_id",
+    "model_id",
+    "family_code",
+    "specification_code",
+    "state_dimension",
+    "component_count",
+    "initialization_code",
+    "fit_status_code",
+    "failure_reason_code",
+    "converged",
+    "effective_observation_count",
+    "missing_observation_count",
+    "prediction_only_transition_count",
+    "max_prediction_only_gap",
+    "fold_id",
+    "origin_row_id",
+    "target_row_id",
+    "horizon",
+    "forecast",
+    "forecast_standard_error",
+    "forecast_lower",
+    "forecast_upper",
+    "forecast_available",
+    "forecast_available_at_utc_ms",
+    "actual",
+    "error",
+    "diagnostic_available",
+    "diagnostic_available_at_utc_ms",
+    "diagnostic_only",
+    "original_scale",
+    "training_eligible",
+)
+STATE_SPACE_COLUMNS = tuple(
+    f"cm_state_space_{suffix}" for suffix in STATE_SPACE_COLUMN_SUFFIXES
+)
+
+KALMAN_COLUMN_SUFFIXES = (
+    "schema_version",
+    "model_id",
+    "filtered_calculation_basis_code",
+    "filtered_level",
+    "filtered_trend",
+    "filtered_level_variance",
+    "filtered_trend_variance",
+    "filtered_available",
+    "filtered_available_at_utc_ms",
+    "filtered_training_eligible",
+    "smoothed_calculation_basis_code",
+    "smoothed_level",
+    "smoothed_trend",
+    "smoothed_level_variance",
+    "smoothed_trend_variance",
+    "smoothed_available",
+    "smoothed_available_at_utc_ms",
+    "smoothed_retrospective",
+    "smoothed_diagnostic_only",
+    "smoothed_training_eligible",
+)
+KALMAN_COLUMNS = tuple(
+    f"cm_kalman_{suffix}" for suffix in KALMAN_COLUMN_SUFFIXES
+)
+
 TRAINING_REQUIRED_COLUMNS = (
     *IDENTITY_COLUMNS,
     "spread",
@@ -281,6 +345,8 @@ TRAINING_REQUIRED_COLUMNS = (
     *EXPONENTIAL_SMOOTHING_COLUMNS,
     *AUTOREGRESSIVE_COLUMNS,
     *SEASONAL_EXOGENOUS_COLUMNS,
+    *STATE_SPACE_COLUMNS,
+    *KALMAN_COLUMNS,
 )
 
 ISSUE_CODE_BY_COLUMN = {
@@ -464,6 +530,7 @@ def training_feature_definitions() -> tuple[TrainingFeatureDefinition, ...]:
     definitions.extend(_exponential_smoothing_definition_rows())
     definitions.extend(_autoregressive_definition_rows())
     definitions.extend(_seasonal_exogenous_definition_rows())
+    definitions.extend(_state_space_definition_rows())
     return tuple(definitions)
 
 
@@ -1125,6 +1192,67 @@ def _seasonal_exogenous_definition_rows() -> list[TrainingFeatureDefinition]:
                 None,
                 f"Point-in-time-safe seasonal/exogenous scalar: {name}.",
                 "seasonal_exogenous",
+                "row",
+                True,
+            )
+        )
+    return definitions
+
+
+def _state_space_definition_rows() -> list[TrainingFeatureDefinition]:
+    strings = {"schema_version", "input_derivation_id", "model_id"}
+    booleans = {
+        "converged",
+        "forecast_available",
+        "diagnostic_available",
+        "diagnostic_only",
+        "original_scale",
+        "training_eligible",
+        "filtered_available",
+        "filtered_training_eligible",
+        "smoothed_available",
+        "smoothed_retrospective",
+        "smoothed_diagnostic_only",
+        "smoothed_training_eligible",
+    }
+    floats = {
+        "forecast",
+        "forecast_standard_error",
+        "forecast_lower",
+        "forecast_upper",
+        "actual",
+        "error",
+        "filtered_level",
+        "filtered_trend",
+        "filtered_level_variance",
+        "filtered_trend_variance",
+        "smoothed_level",
+        "smoothed_trend",
+        "smoothed_level_variance",
+        "smoothed_trend_variance",
+    }
+    definitions: list[TrainingFeatureDefinition] = []
+    for name in (*STATE_SPACE_COLUMNS, *KALMAN_COLUMNS):
+        if name.startswith("cm_state_space_"):
+            suffix = name.removeprefix("cm_state_space_")
+        else:
+            suffix = name.removeprefix("cm_kalman_")
+        dtype = (
+            "Utf8"
+            if suffix in strings
+            else (
+                "Boolean"
+                if suffix in booleans
+                else "Float64" if suffix in floats else "Int64"
+            )
+        )
+        definitions.append(
+            TrainingFeatureDefinition(
+                name,
+                dtype,
+                None,
+                f"Point-in-time state-space/Kalman scalar: {name}.",
+                "state_space",
                 "row",
                 True,
             )

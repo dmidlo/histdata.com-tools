@@ -49,6 +49,10 @@ from histdatacom.data_quality.seasonal_exogenous import (
     SeasonalExogenousProfile,
     SeasonalExogenousSpecification,
 )
+from histdatacom.data_quality.state_space import (
+    StateSpaceProfile,
+    StateSpaceSpecification,
+)
 from histdatacom.data_quality.ingestion import (
     ASCII_ROW_COUNT_INGESTION_RULE_ID,
     DEFAULT_MIN_ROW_COUNT,
@@ -509,6 +513,7 @@ class QualityProfile:
                 "exponential_smoothing",
                 "autoregressive",
                 "seasonal_exogenous",
+                "state_space",
             },
             SERIES_FINGERPRINT_RULE_ID,
         )
@@ -618,6 +623,14 @@ class QualityProfile:
                     path=SERIES_FINGERPRINT_RULE_ID,
                 ),
                 path=f"{SERIES_FINGERPRINT_RULE_ID}.seasonal_exogenous",
+            ),
+            state_space=_state_space_profile(
+                _mapping_field(
+                    config,
+                    "state_space",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.state_space",
             ),
         )
 
@@ -2315,6 +2328,237 @@ def _seasonal_exogenous_profile(
                 minimum=0,
                 maximum=16,
                 path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _state_space_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> StateSpaceProfile:
+    base = StateSpaceProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "specifications",
+            "projection_specification_id",
+            "projection_horizon",
+            "max_state_dimension",
+            "max_component_count",
+            "max_prediction_only_gap",
+            "max_retained_states",
+            "baseline_rolling_windows",
+            "compare_exponential_smoothing",
+            "compare_autoregressive",
+            "compare_seasonal_exogenous",
+            "rounding_digits",
+        },
+        path,
+    )
+    specifications = base.specifications
+    if "specifications" in value:
+        raw = value["specifications"]
+        if not isinstance(raw, list) or not raw:
+            raise QualityProfileError(
+                f"{path}.specifications must be a non-empty list"
+            )
+        specifications = tuple(
+            _state_space_specification(
+                _expect_mapping(item, path=f"{path}.specifications[{index}]"),
+                path=f"{path}.specifications[{index}]",
+            )
+            for index, item in enumerate(raw)
+        )
+    projection_id = _string_field(
+        value,
+        "projection_specification_id",
+        (
+            specifications[0].specification_id
+            if "specifications" in value
+            else base.projection_specification_id
+        ),
+        path=path,
+    )
+    try:
+        return StateSpaceProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            specifications=specifications,
+            projection_specification_id=projection_id,
+            projection_horizon=_int_field(
+                value,
+                "projection_horizon",
+                base.projection_horizon,
+                minimum=1,
+                path=path,
+            ),
+            max_state_dimension=_int_field(
+                value,
+                "max_state_dimension",
+                base.max_state_dimension,
+                minimum=1,
+                maximum=256,
+                path=path,
+            ),
+            max_component_count=_int_field(
+                value,
+                "max_component_count",
+                base.max_component_count,
+                minimum=1,
+                maximum=16,
+                path=path,
+            ),
+            max_prediction_only_gap=_int_field(
+                value,
+                "max_prediction_only_gap",
+                base.max_prediction_only_gap,
+                minimum=0,
+                path=path,
+            ),
+            max_retained_states=_int_field(
+                value,
+                "max_retained_states",
+                base.max_retained_states,
+                minimum=1,
+                maximum=64,
+                path=path,
+            ),
+            baseline_rolling_windows=_fingerprint_int_sequence(
+                value,
+                "baseline_rolling_windows",
+                base.baseline_rolling_windows,
+                path=path,
+            ),
+            compare_exponential_smoothing=_bool_field(
+                value,
+                "compare_exponential_smoothing",
+                base.compare_exponential_smoothing,
+                path=path,
+            ),
+            compare_autoregressive=_bool_field(
+                value,
+                "compare_autoregressive",
+                base.compare_autoregressive,
+                path=path,
+            ),
+            compare_seasonal_exogenous=_bool_field(
+                value,
+                "compare_seasonal_exogenous",
+                base.compare_seasonal_exogenous,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _state_space_specification(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> StateSpaceSpecification:
+    _reject_unknown_keys(
+        value,
+        {
+            "specification_id",
+            "family",
+            "irregular",
+            "stochastic_level",
+            "stochastic_trend",
+            "seasonal_period",
+            "seasonal_cycle_ms",
+            "stochastic_seasonal",
+            "cycle",
+            "stochastic_cycle",
+            "damped_cycle",
+            "autoregressive_order",
+            "initialization_method",
+            "approximate_diffuse_variance",
+            "optimizer",
+            "fixed_parameters",
+            "max_iterations",
+        },
+        path,
+    )
+    if "specification_id" not in value or "family" not in value:
+        raise QualityProfileError(
+            f"{path} requires specification_id and family"
+        )
+    fixed_parameters: tuple[tuple[str, float], ...] = ()
+    if "fixed_parameters" in value:
+        raw_fixed = _expect_mapping(
+            value["fixed_parameters"], path=f"{path}.fixed_parameters"
+        )
+        parsed: list[tuple[str, float]] = []
+        for name, raw_value in sorted(raw_fixed.items()):
+            if isinstance(raw_value, bool):
+                raise QualityProfileError(
+                    f"{path}.fixed_parameters.{name} must be a number"
+                )
+            try:
+                parsed.append((name, float(cast(Any, raw_value))))
+            except (TypeError, ValueError) as exc:
+                raise QualityProfileError(
+                    f"{path}.fixed_parameters.{name} must be a number"
+                ) from exc
+        fixed_parameters = tuple(parsed)
+    family = _string_field(value, "family", "", path=path)
+    default_trend = family == "local_linear_trend"
+    try:
+        return StateSpaceSpecification(
+            specification_id=_string_field(
+                value, "specification_id", "", path=path
+            ),
+            family=family,
+            irregular=_bool_field(value, "irregular", True, path=path),
+            stochastic_level=_bool_field(
+                value, "stochastic_level", True, path=path
+            ),
+            stochastic_trend=_bool_field(
+                value, "stochastic_trend", default_trend, path=path
+            ),
+            seasonal_period=_int_field(
+                value, "seasonal_period", 0, minimum=0, path=path
+            ),
+            seasonal_cycle_ms=_int_field(
+                value, "seasonal_cycle_ms", 0, minimum=0, path=path
+            ),
+            stochastic_seasonal=_bool_field(
+                value, "stochastic_seasonal", True, path=path
+            ),
+            cycle=_bool_field(value, "cycle", False, path=path),
+            stochastic_cycle=_bool_field(
+                value, "stochastic_cycle", False, path=path
+            ),
+            damped_cycle=_bool_field(value, "damped_cycle", False, path=path),
+            autoregressive_order=_int_field(
+                value, "autoregressive_order", 0, minimum=0, path=path
+            ),
+            initialization_method=_string_field(
+                value, "initialization_method", "default", path=path
+            ),
+            approximate_diffuse_variance=_float_field(
+                value,
+                "approximate_diffuse_variance",
+                1_000_000.0,
+                minimum=0.0,
+                path=path,
+            ),
+            optimizer=_string_field(value, "optimizer", "lbfgs", path=path),
+            fixed_parameters=fixed_parameters,
+            max_iterations=_int_field(
+                value, "max_iterations", 200, minimum=1, path=path
             ),
         )
     except ValueError as exc:

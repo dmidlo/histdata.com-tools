@@ -63,6 +63,12 @@ from histdatacom.data_quality.seasonal_exogenous import (
     format_seasonal_exogenous_summary_lines,
     seasonal_exogenous_summary,
 )
+from histdatacom.data_quality.state_space import (
+    STATE_SPACE_BOUNDED_PAYLOAD_KEY,
+    STATE_SPACE_SUMMARY_METADATA_KEY,
+    format_state_space_summary_lines,
+    state_space_summary,
+)
 from histdatacom.data_quality.fingerprints import (
     CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
@@ -396,6 +402,11 @@ def quality_report_payload(
         metadata = _mapping_payload(payload.get("metadata"))
         metadata[SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY] = seasonal_exogenous
         payload["metadata"] = metadata
+    state_space = _state_space_summary(report)
+    if state_space is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[STATE_SPACE_SUMMARY_METADATA_KEY] = state_space
+        payload["metadata"] = metadata
     fingerprint_topology = _fingerprint_topology_summary(report)
     if fingerprint_topology is not None:
         metadata = _mapping_payload(payload.get("metadata"))
@@ -604,6 +615,9 @@ def format_quality_console_summary(
             )
         )
         lines.extend(
+            format_state_space_summary_lines(_state_space_summary(report))
+        )
+        lines.extend(
             format_fingerprint_topology_attention_lines(
                 _fingerprint_topology_attention_summary(report)
             )
@@ -691,6 +705,7 @@ def bounded_quality_payload(
     exponential_smoothing = _exponential_smoothing_summary(report)
     autoregressive = _autoregressive_summary(report)
     seasonal_exogenous = _seasonal_exogenous_summary(report)
+    state_space = _state_space_summary(report)
     fingerprint_topology = _fingerprint_topology_summary(report)
     fingerprint_topology_attention = _fingerprint_topology_attention_summary(
         report
@@ -777,6 +792,8 @@ def bounded_quality_payload(
         payload[AUTOREGRESSIVE_BOUNDED_PAYLOAD_KEY] = autoregressive
     if seasonal_exogenous is not None:
         payload[SEASONAL_EXOGENOUS_BOUNDED_PAYLOAD_KEY] = seasonal_exogenous
+    if state_space is not None:
+        payload[STATE_SPACE_BOUNDED_PAYLOAD_KEY] = state_space
     if fingerprint_topology is not None:
         payload[FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY] = fingerprint_topology
     if fingerprint_topology_attention is not None:
@@ -2436,6 +2453,16 @@ def _seasonal_exogenous_summary(
     return _optional_mapping_payload(
         seasonal_exogenous_summary(report.findings)
     )
+
+
+def _state_space_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return state-space/Kalman metadata from report or findings."""
+    summary = report.metadata.get(STATE_SPACE_SUMMARY_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(state_space_summary(report.findings))
 
 
 def _fingerprint_topology_summary(

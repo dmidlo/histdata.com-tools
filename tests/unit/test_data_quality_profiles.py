@@ -21,6 +21,7 @@ from histdatacom.data_quality import (
     QualityReport,
     QualityStatus,
     SeasonalExogenousProfile,
+    StateSpaceProfile,
     apply_quality_profile_overrides,
     discover_quality_targets,
     load_quality_profile_file,
@@ -242,6 +243,7 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
         "exponential_smoothing": ExponentialSmoothingProfile().to_metadata(),
         "autoregressive": AutoregressiveProfile().to_metadata(),
         "seasonal_exogenous": SeasonalExogenousProfile().to_metadata(),
+        "state_space": StateSpaceProfile().to_metadata(),
     }
 
 

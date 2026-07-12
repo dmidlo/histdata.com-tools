@@ -65,6 +65,10 @@ from histdatacom.data_quality.seasonal_exogenous import (
     SeasonalExogenousProfile,
     seasonal_exogenous_from_model_input,
 )
+from histdatacom.data_quality.state_space import (
+    StateSpaceProfile,
+    state_space_from_model_input,
+)
 from histdatacom.data_quality.remediation import (
     remediation_hint_payloads_for_flags,
 )
@@ -270,6 +274,7 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "exponential_smoothing",
     "autoregressive",
     "seasonal_exogenous",
+    "state_space",
     "synthetic_constraints",
 )
 FINGERPRINT_DYNAMICS_SECTIONS = ("microstructure_dynamics",)
@@ -372,6 +377,7 @@ class HistDataFingerprintProfile:
     seasonal_exogenous: SeasonalExogenousProfile = field(
         default_factory=SeasonalExogenousProfile
     )
+    state_space: StateSpaceProfile = field(default_factory=StateSpaceProfile)
 
     def to_metadata(self) -> dict[str, JSONValue]:
         """Return a JSON-compatible representation."""
@@ -394,6 +400,7 @@ class HistDataFingerprintProfile:
             "exponential_smoothing": self.exponential_smoothing.to_metadata(),
             "autoregressive": self.autoregressive.to_metadata(),
             "seasonal_exogenous": self.seasonal_exogenous.to_metadata(),
+            "state_space": self.state_space.to_metadata(),
         }
 
 
@@ -3799,6 +3806,7 @@ def _finalize_fingerprint_payload(
             or profile.exponential_smoothing.enabled
             or profile.autoregressive.enabled
             or profile.seasonal_exogenous.enabled
+            or profile.state_space.enabled
         ):
             model_input_result = build_classical_model_input(
                 training_frame,
@@ -3856,6 +3864,26 @@ def _finalize_fingerprint_payload(
                     ),
                     autoregressive=_payload_mapping(
                         payload.get("autoregressive")
+                    ),
+                    target=target,
+                ).diagnostics
+            )
+        if profile.state_space.enabled and model_input_result is not None:
+            payload["state_space"] = dict(
+                state_space_from_model_input(
+                    training_frame,
+                    model_input_result,
+                    payload,
+                    input_profile=profile.classical_model_input,
+                    profile=profile.state_space,
+                    exponential_smoothing=_payload_mapping(
+                        payload.get("exponential_smoothing")
+                    ),
+                    autoregressive=_payload_mapping(
+                        payload.get("autoregressive")
+                    ),
+                    seasonal_exogenous=_payload_mapping(
+                        payload.get("seasonal_exogenous")
                     ),
                     target=target,
                 ).diagnostics
@@ -4528,6 +4556,8 @@ def _fingerprint_audit_payload(
         expected = (*expected, "autoregressive")
     if profile.seasonal_exogenous.enabled:
         expected = (*expected, "seasonal_exogenous")
+    if profile.state_space.enabled:
+        expected = (*expected, "state_space")
     emitted = [
         section for section in FINGERPRINT_AUDIT_SECTIONS if section in payload
     ]
@@ -4671,6 +4701,7 @@ def _fingerprint_section_skip_details(
         "exponential_smoothing",
         "autoregressive",
         "seasonal_exogenous",
+        "state_space",
         "synthetic_constraints",
     }:
         return {"timeframe": target.timeframe}
@@ -4722,6 +4753,7 @@ def _section_timeframe_mismatch(
                 "exponential_smoothing",
                 "autoregressive",
                 "seasonal_exogenous",
+                "state_space",
             }
             and target.timeframe != TICK
         )
@@ -4833,6 +4865,15 @@ def _fingerprint_section_status(
             return "limited"
         return "unavailable"
     if section == "seasonal_exogenous":
+        model_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if model_status == "ready":
+            return "valid"
+        if model_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "state_space":
         model_status = _summary_key(
             _payload_mapping(payload[section]).get("status")
         )
