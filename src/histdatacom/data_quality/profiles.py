@@ -18,12 +18,14 @@ from histdatacom.data_quality.fingerprints import (
     DEFAULT_FINGERPRINT_HISTOGRAM_BINS,
     DEFAULT_FINGERPRINT_LAGS,
     DEFAULT_FINGERPRINT_MAX_ROWS,
+    DEFAULT_FINGERPRINT_PARITY_MISMATCH_LIMIT,
     DEFAULT_FINGERPRINT_QUANTILES,
     DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
     DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
     DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT,
     SERIES_FINGERPRINT_RULE_ID,
     HistDataFingerprintDistributionAttentionProfile,
+    HistDataFingerprintParityProfile,
     HistDataFingerprintProfile,
 )
 from histdatacom.data_quality.ingestion import (
@@ -480,6 +482,7 @@ class QualityProfile:
                 "rounding_digits",
                 "topology_inspection_sample_limit",
                 "distribution_attention",
+                "cache_source_parity",
             },
             SERIES_FINGERPRINT_RULE_ID,
         )
@@ -541,6 +544,14 @@ class QualityProfile:
                     ),
                     path=f"{SERIES_FINGERPRINT_RULE_ID}.distribution_attention",
                 )
+            ),
+            cache_source_parity=_fingerprint_parity_profile(
+                _mapping_field(
+                    config,
+                    "cache_source_parity",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.cache_source_parity",
             ),
         )
 
@@ -1597,6 +1608,24 @@ def _fingerprint_distribution_attention_profile(
             value,
             "flag_cache_float_precision",
             base.flag_cache_float_precision,
+            path=path,
+        ),
+    )
+
+
+def _fingerprint_parity_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> HistDataFingerprintParityProfile:
+    _reject_unknown_keys(value, {"enabled", "mismatch_limit"}, path)
+    return HistDataFingerprintParityProfile(
+        enabled=_bool_field(value, "enabled", False, path=path),
+        mismatch_limit=_int_field(
+            value,
+            "mismatch_limit",
+            DEFAULT_FINGERPRINT_PARITY_MISMATCH_LIMIT,
+            minimum=0,
             path=path,
         ),
     )

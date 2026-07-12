@@ -11,6 +11,8 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, localcontext
+from io import StringIO
+from itertools import islice
 from pathlib import Path
 from typing import Any, cast
 
@@ -39,7 +41,10 @@ from histdatacom.data_quality.limits import (
     BoundedReportLimit,
     bounded_report_limit,
 )
-from histdatacom.data_quality.polars_cache import read_quality_polars_cache
+from histdatacom.data_quality.polars_cache import (
+    read_fingerprint_parity_polars_cache,
+    read_quality_polars_cache,
+)
 from histdatacom.data_quality.remediation import (
     remediation_hint_payloads_for_flags,
 )
@@ -54,6 +59,12 @@ from histdatacom.data_quality.time import (
     DEFAULT_TIMESTAMP_INSPECTION_SAMPLE_LIMIT,
     timestamp_topology_payload_for_target,
 )
+from histdatacom.data_quality.training_features import (
+    TRAINING_REQUIRED_COLUMNS,
+    TRAINING_SCHEMA_VERSION,
+    ensure_tick_training_features,
+    quality_report_from_training_features,
+)
 from histdatacom.data_quality.ticks import (
     DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS,
     DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS,
@@ -62,7 +73,10 @@ from histdatacom.histdata_ascii import (
     TICK,
     columns_for_timeframe,
     delimiter_for_timeframe,
+    format_influx_line,
     normalize_ascii_row,
+    parse_ascii_lines,
+    to_polars_frame,
 )
 from histdatacom.publication_safety import publish_safe_path
 from histdatacom.runtime_contracts import JSONValue
@@ -115,6 +129,12 @@ TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION = (
 TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-readiness-risk.v1"
 )
+TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-cache-source-parity.v1"
+)
+TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-cache-source-parity-summary.v1"
+)
 TIME_SERIES_FINGERPRINT_METADATA_KEY = "time_series_fingerprint"
 TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY = (
     "time_series_fingerprint_coverage"
@@ -139,6 +159,9 @@ TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY = (
 )
 TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY = (
     "time_series_fingerprint_readiness_risk"
+)
+TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY = (
+    "time_series_fingerprint_cache_source_parity_summary"
 )
 SERIES_FINGERPRINT_RULE_ID = "fingerprint.series"
 SERIES_FINGERPRINT_SUMMARY_CODE = "FINGERPRINT_SERIES_SUMMARY"
@@ -180,6 +203,8 @@ DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_COUNT = 1
 DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_RATE = 0.0
 DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_TRUNCATED = True
 DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_CACHE_FLOAT_PRECISION = True
+DEFAULT_FINGERPRINT_PARITY_MISMATCH_LIMIT = 16
+DEFAULT_FINGERPRINT_PARITY_SUMMARY_LIMIT = 32
 _CALENDAR_POLICY_CONTEXT_TEXT_LIMIT = 128
 SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES = (TICK,)
 SUPPORTED_SERIES_FINGERPRINT_KINDS = (
@@ -216,6 +241,7 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "dependence",
     "stationarity_diagnostics",
     "decomposition",
+    "cache_source_parity",
 )
 FINGERPRINT_DYNAMICS_SECTIONS = ("microstructure_dynamics",)
 
@@ -264,6 +290,21 @@ class HistDataFingerprintDistributionAttentionProfile:
 
 
 @dataclass(frozen=True, slots=True)
+class HistDataFingerprintParityProfile:
+    """Opt-in bounded cache/source parity controls."""
+
+    enabled: bool = False
+    mismatch_limit: int = DEFAULT_FINGERPRINT_PARITY_MISMATCH_LIMIT
+
+    def to_metadata(self) -> dict[str, JSONValue]:
+        """Return a JSON-compatible representation."""
+        return {
+            "enabled": self.enabled,
+            "mismatch_limit": self.mismatch_limit,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class HistDataFingerprintProfile:
     """Operator-tunable limits for deterministic fingerprint summaries."""
 
@@ -284,6 +325,9 @@ class HistDataFingerprintProfile:
     distribution_attention: HistDataFingerprintDistributionAttentionProfile = (
         field(default_factory=HistDataFingerprintDistributionAttentionProfile)
     )
+    cache_source_parity: HistDataFingerprintParityProfile = field(
+        default_factory=HistDataFingerprintParityProfile
+    )
 
     def to_metadata(self) -> dict[str, JSONValue]:
         """Return a JSON-compatible representation."""
@@ -300,6 +344,7 @@ class HistDataFingerprintProfile:
             "distribution_attention": (
                 self.distribution_attention.to_metadata()
             ),
+            "cache_source_parity": self.cache_source_parity.to_metadata(),
         }
 
 
@@ -863,6 +908,127 @@ def series_fingerprint_regime_summary(
         ),
         "target_summaries": included,
     }
+
+
+def series_fingerprint_parity_summary(
+    findings: Iterable[QualityFinding],
+    *,
+    target_limit: int | None = DEFAULT_FINGERPRINT_PARITY_SUMMARY_LIMIT,
+) -> dict[str, JSONValue] | None:
+    """Return a bounded cache/source parity rollup from fingerprint findings."""
+    target_limit_state = bounded_report_limit(
+        target_limit,
+        default_limit=DEFAULT_FINGERPRINT_PARITY_SUMMARY_LIMIT,
+    )
+    targets: list[dict[str, JSONValue]] = []
+    status_counts: Counter[str] = Counter()
+    mismatch_code_counts: Counter[str] = Counter()
+    cache_source_counts: Counter[str] = Counter()
+    freshness_counts: Counter[str] = Counter()
+    computed_from_counts: Counter[str] = Counter()
+    for finding in findings:
+        fingerprint = _payload_mapping(
+            finding.metadata.get(TIME_SERIES_FINGERPRINT_METADATA_KEY)
+        )
+        parity = _payload_mapping(fingerprint.get("cache_source_parity"))
+        if not parity:
+            continue
+        bases = _payload_mapping(parity.get("bases"))
+        raw_cache = _payload_mapping(bases.get("raw_cache"))
+        enriched_cache = _payload_mapping(bases.get("enriched_cache"))
+        calendar = _payload_mapping(fingerprint.get("calendar_regimes"))
+        status = _summary_key(parity.get("status"))
+        status_counts[status] += 1
+        mismatch_codes = [
+            str(item) for item in _string_list(parity.get("mismatch_codes"))
+        ]
+        mismatch_code_counts.update(mismatch_codes)
+        cache_source = _optional_summary_key(raw_cache.get("cache_source"))
+        if cache_source:
+            cache_source_counts[cache_source] += 1
+        freshness = _optional_summary_key(raw_cache.get("freshness"))
+        if freshness:
+            freshness_counts[freshness] += 1
+        computed_from = _optional_summary_key(calendar.get("computed_from"))
+        if computed_from:
+            computed_from_counts[computed_from] += 1
+        target_summary: dict[str, JSONValue] = {
+            "target_axis": dict(_payload_mapping(parity.get("target_axis"))),
+            "status": status,
+            "compared_section_count": _int_payload(
+                parity.get("compared_section_count")
+            ),
+            "mismatched_section_count": _int_payload(
+                parity.get("mismatched_section_count")
+            ),
+            "mismatch_codes": cast(JSONValue, mismatch_codes),
+            "skipped_reasons": cast(
+                JSONValue,
+                [
+                    str(item)
+                    for item in _string_list(parity.get("skipped_reasons"))
+                ],
+            ),
+            "cache_source": cache_source,
+            "freshness": freshness,
+            "computed_from": computed_from,
+            "training_substrate": {
+                "status": enriched_cache.get("status"),
+                "training_schema_version": enriched_cache.get(
+                    "training_schema_version"
+                ),
+                "cache_was_enriched": enriched_cache.get("cache_was_enriched"),
+                "legacy_cache_enriched_on_read": enriched_cache.get(
+                    "legacy_cache_enriched_on_read"
+                ),
+            },
+        }
+        targets.append(target_summary)
+    if not targets:
+        return None
+    targets.sort(key=_fingerprint_parity_target_sort_key)
+    included: list[JSONValue] = [
+        dict(item) for item in target_limit_state.slice(targets)
+    ]
+    omitted_count = max(0, len(targets) - len(included))
+    return {
+        "schema_version": TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION,
+        "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "target_count": len(targets),
+        "compared_target_count": sum(
+            count
+            for status, count in status_counts.items()
+            if status in {"match", "mismatch"}
+        ),
+        "matching_target_count": status_counts.get("match", 0),
+        "mismatched_target_count": status_counts.get("mismatch", 0),
+        "not_compared_target_count": status_counts.get("not_compared", 0),
+        "included_target_count": len(included),
+        "omitted_target_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "limit_metadata": {"targets": target_limit_state.limit_payload()},
+        "status_counts": _counter_payload(status_counts),
+        "mismatch_code_counts": _counter_payload(mismatch_code_counts),
+        "computed_from_counts": _counter_payload(computed_from_counts),
+        "cache_source_counts": _counter_payload(cache_source_counts),
+        "freshness_counts": _counter_payload(freshness_counts),
+        "target_summaries": included,
+    }
+
+
+def _fingerprint_parity_target_sort_key(
+    target: Mapping[str, JSONValue],
+) -> tuple[int, str, str, str, str, str]:
+    status_rank = {"mismatch": 0, "not_compared": 1, "match": 2}
+    axis = _payload_mapping(target.get("target_axis"))
+    return (
+        status_rank.get(_summary_key(target.get("status")), 99),
+        _summary_key(axis.get("data_format")),
+        _summary_key(axis.get("timeframe")),
+        _summary_key(axis.get("symbol")),
+        _summary_key(axis.get("period")),
+        _summary_key(axis.get("kind")),
+    )
 
 
 def series_fingerprint_readiness_summary(
@@ -3543,6 +3709,11 @@ def _finalize_fingerprint_payload(
     target: QualityTarget,
     profile: HistDataFingerprintProfile,
 ) -> dict[str, JSONValue]:
+    if profile.cache_source_parity.enabled:
+        payload["cache_source_parity"] = _cache_source_parity_payload(
+            target,
+            profile=profile,
+        )
     payload["fingerprint_audit"] = _fingerprint_audit_payload(
         payload,
         target=target,
@@ -3552,6 +3723,630 @@ def _finalize_fingerprint_payload(
     return payload
 
 
+def _cache_source_parity_payload(
+    target: QualityTarget,
+    *,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    mismatch_limit = bounded_report_limit(
+        profile.cache_source_parity.mismatch_limit,
+        default_limit=DEFAULT_FINGERPRINT_PARITY_MISMATCH_LIMIT,
+    )
+    bases: dict[str, JSONValue] = {
+        "raw_source": _parity_unavailable_basis("source_unavailable"),
+        "raw_cache": _parity_unavailable_basis("cache_unavailable"),
+        "enriched_cache": _parity_unavailable_basis(
+            "cache_enrichment_unavailable"
+        ),
+        "quality_report": _parity_unavailable_basis(
+            "quality_report_projection_unavailable"
+        ),
+        "influx_projection": _parity_unavailable_basis(
+            "influx_projection_unavailable"
+        ),
+    }
+    unsupported_reason = _unsupported_reason(target)
+    if unsupported_reason:
+        return _finalize_parity_payload(
+            target,
+            bases=bases,
+            comparisons=[],
+            skipped_reasons=[unsupported_reason],
+            mismatch_limit=mismatch_limit,
+        )
+    required_columns = columns_for_timeframe(target.timeframe)
+    cache = read_fingerprint_parity_polars_cache(
+        target,
+        required_columns=required_columns,
+    )
+    if cache is not None:
+        raw_cache_columns = set(getattr(cache.frame, "columns", ()))
+        bases["raw_cache"] = {
+            "status": "available",
+            "path": publish_safe_path(str(cache.path)),
+            "cache_source": cache.source,
+            "fresh": cache.fresh,
+            "freshness": _parity_freshness_status(cache.fresh),
+            "row_count": int(getattr(cache.frame, "height", 0) or 0),
+            "column_count": len(raw_cache_columns),
+            "training_schema_present": (
+                "training_schema_version" in raw_cache_columns
+            ),
+            "training_required_columns_present": set(
+                TRAINING_REQUIRED_COLUMNS
+            ).issubset(raw_cache_columns),
+        }
+    if target.kind not in {QualityTargetKind.CSV, QualityTargetKind.ZIP}:
+        return _finalize_parity_payload(
+            target,
+            bases=bases,
+            comparisons=[],
+            skipped_reasons=["source_target_unavailable"],
+            mismatch_limit=mismatch_limit,
+        )
+    try:
+        text_payload = _read_text_payload(target)
+    except (OSError, UnicodeDecodeError, ValueError, zipfile.BadZipFile) as exc:
+        bases["raw_source"] = _parity_unavailable_basis(
+            "source_unreadable",
+            detail=type(exc).__name__,
+        )
+        return _finalize_parity_payload(
+            target,
+            bases=bases,
+            comparisons=[],
+            skipped_reasons=["source_unreadable"],
+            mismatch_limit=mismatch_limit,
+        )
+
+    source_coverage = _coverage_from_text(
+        text_payload.text,
+        timeframe=target.timeframe,
+    )
+    bases["raw_source"] = {
+        "status": "available",
+        "kind": (
+            "zip_member" if target.kind is QualityTargetKind.ZIP else "csv_text"
+        ),
+        "path": publish_safe_path(target.path),
+        "member": text_payload.source_member or None,
+        "row_count": _int_payload(source_coverage.get("row_count")),
+    }
+    if cache is None:
+        return _finalize_parity_payload(
+            target,
+            bases=bases,
+            comparisons=[],
+            skipped_reasons=["cache_unavailable"],
+            mismatch_limit=mismatch_limit,
+        )
+
+    cache_target = QualityTarget(
+        path=str(cache.path),
+        kind=QualityTargetKind.CACHE,
+        data_format=target.data_format,
+        timeframe=target.timeframe,
+        symbol=target.symbol,
+        period=target.period,
+        metadata=dict(target.metadata),
+    )
+    source_sections: dict[str, Mapping[str, JSONValue]] = {
+        "coverage": source_coverage,
+        "temporal_topology": timestamp_topology_payload_for_target(
+            target,
+            inspection_sample_limit=0,
+            prefer_cache=False,
+        ),
+        "calendar_regimes": calendar_regime_payload_for_target(
+            target,
+            calendar_profile=profile.calendar_profile,
+            prefer_cache=False,
+        ),
+        "conditional_distributions": _conditional_distributions(
+            target,
+            frame=None,
+            text=text_payload.text,
+            profile=profile,
+        ),
+    }
+    cache_sections: dict[str, Mapping[str, JSONValue]] = {
+        "coverage": _coverage_from_frame(cache.frame),
+        "temporal_topology": timestamp_topology_payload_for_target(
+            cache_target,
+            inspection_sample_limit=0,
+        ),
+        "calendar_regimes": calendar_regime_payload_for_target(
+            cache_target,
+            calendar_profile=profile.calendar_profile,
+        ),
+        "conditional_distributions": _conditional_distributions(
+            cache_target,
+            frame=cache.frame,
+            text=None,
+            profile=profile,
+        ),
+    }
+    comparisons = _fingerprint_section_parity_comparisons(
+        source_sections,
+        cache_sections,
+        mismatch_limit=mismatch_limit,
+    )
+    training_comparisons, training_bases = _training_projection_parity(
+        target,
+        cache_target=cache_target,
+        source_text=text_payload.text,
+        cache_frame=cache.frame,
+        profile=profile,
+        mismatch_limit=mismatch_limit,
+    )
+    comparisons.extend(training_comparisons)
+    bases.update(training_bases)
+    if cache.fresh is False:
+        comparisons.insert(
+            0,
+            {
+                "section": "cache_freshness",
+                "status": "mismatch",
+                "compared_field_count": 1,
+                "mismatch_field_count": 1,
+                "mismatch_fields": ["mtime_ns"],
+                "mismatch_codes": ["fingerprint_cache_source_stale_cache"],
+            },
+        )
+    return _finalize_parity_payload(
+        target,
+        bases=bases,
+        comparisons=comparisons,
+        skipped_reasons=[],
+        mismatch_limit=mismatch_limit,
+    )
+
+
+def _fingerprint_section_parity_comparisons(
+    source: Mapping[str, Mapping[str, JSONValue]],
+    cache: Mapping[str, Mapping[str, JSONValue]],
+    *,
+    mismatch_limit: BoundedReportLimit,
+) -> list[dict[str, JSONValue]]:
+    specifications = (
+        (
+            "coverage",
+            (
+                "row_count",
+                "parsed_row_count",
+                "start_timestamp_utc_ms",
+                "end_timestamp_utc_ms",
+            ),
+        ),
+        (
+            "temporal_topology",
+            (
+                "row_count",
+                "parsed_row_count",
+                "invalid_timestamp_count",
+                "non_monotonic_count",
+                "duplicate_timestamp_count",
+                "suspicious_gap_count",
+                "expected_session_closure_count",
+                "weekend_activity_count",
+                "gap_bucket_counts",
+            ),
+        ),
+        (
+            "calendar_regimes",
+            (
+                "row_count",
+                "parsed_row_count",
+                "invalid_timestamp_count",
+                "session_state_counts",
+                "active_session_counts",
+                "clock_session_counts",
+                "overlap_counts",
+                "special_tag_counts",
+                "holiday_tag_counts",
+                "event_tag_counts",
+                "hour_of_day_counts",
+                "day_of_week_counts",
+            ),
+        ),
+        (
+            "conditional_distributions",
+            (
+                "row_count",
+                "sampled_row_count",
+                "usable_row_count",
+                "invalid_row_count",
+                "by_active_session",
+                "by_special_tag",
+            ),
+        ),
+    )
+    return [
+        _parity_section_comparison(
+            section,
+            source.get(section, {}),
+            cache.get(section, {}),
+            fields=fields,
+            mismatch_limit=mismatch_limit,
+        )
+        for section, fields in specifications
+    ]
+
+
+def _parity_section_comparison(
+    section: str,
+    source: Mapping[str, JSONValue],
+    cache: Mapping[str, JSONValue],
+    *,
+    fields: tuple[str, ...],
+    mismatch_limit: BoundedReportLimit,
+) -> dict[str, JSONValue]:
+    if not source or not cache:
+        return {
+            "section": section,
+            "status": "skipped",
+            "reason": "section_unavailable",
+            "compared_field_count": 0,
+            "mismatch_field_count": 0,
+            "mismatch_fields": [],
+            "mismatch_codes": [],
+        }
+    mismatches = [
+        field for field in fields if source.get(field) != cache.get(field)
+    ]
+    codes = _parity_section_mismatch_codes(section, mismatches)
+    included = mismatch_limit.slice(mismatches)
+    return {
+        "section": section,
+        "status": "mismatch" if mismatches else "match",
+        "compared_field_count": len(fields),
+        "mismatch_field_count": len(mismatches),
+        "included_mismatch_field_count": len(included),
+        "omitted_mismatch_field_count": max(0, len(mismatches) - len(included)),
+        "truncated": len(included) < len(mismatches),
+        "mismatch_fields": cast(JSONValue, included),
+        "mismatch_codes": cast(JSONValue, codes),
+    }
+
+
+def _parity_section_mismatch_codes(
+    section: str,
+    fields: list[str],
+) -> list[str]:
+    if not fields:
+        return []
+    if section == "coverage":
+        codes = []
+        if set(fields) & {"row_count", "parsed_row_count"}:
+            codes.append("fingerprint_cache_source_row_count_mismatch")
+        if set(fields) & {"start_timestamp_utc_ms", "end_timestamp_utc_ms"}:
+            codes.append("fingerprint_cache_source_coverage_bounds_mismatch")
+        return codes
+    return [
+        {
+            "temporal_topology": "fingerprint_cache_source_topology_mismatch",
+            "calendar_regimes": "fingerprint_cache_source_calendar_mismatch",
+            "conditional_distributions": (
+                "fingerprint_cache_source_conditioned_spread_mismatch"
+            ),
+        }[section]
+    ]
+
+
+def _training_projection_parity(
+    target: QualityTarget,
+    *,
+    cache_target: QualityTarget,
+    source_text: str,
+    cache_frame: Any,
+    profile: HistDataFingerprintProfile,
+    mismatch_limit: BoundedReportLimit,
+) -> tuple[list[dict[str, JSONValue]], dict[str, JSONValue]]:
+    sample_limit = max(1, _profile_max_rows(profile))
+    try:
+        source_batch = parse_ascii_lines(
+            target.timeframe,
+            islice(StringIO(source_text), sample_limit),
+        )
+        source_frame = to_polars_frame(source_batch)
+        cache_sample = cache_frame.head(sample_limit)
+        enriched_source = ensure_tick_training_features(
+            source_frame,
+            target=target,
+        )
+        enriched_cache = ensure_tick_training_features(
+            cache_sample,
+            target=target,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        comparison: dict[str, JSONValue] = {
+            "section": "training_substrate",
+            "status": "skipped",
+            "reason": "training_enrichment_unavailable",
+            "error_type": type(exc).__name__,
+            "compared_field_count": 0,
+            "mismatch_field_count": 0,
+            "mismatch_fields": [],
+            "mismatch_codes": [],
+        }
+        return [comparison], {}
+
+    required = set(TRAINING_REQUIRED_COLUMNS)
+    source_columns = set(enriched_source.columns)
+    cache_columns = set(enriched_cache.columns)
+    missing_columns = sorted(
+        (required - source_columns) | (required - cache_columns)
+    )
+    column_comparison = _bounded_training_comparison(
+        "training_columns",
+        missing_columns,
+        code="fingerprint_cache_source_training_columns_mismatch",
+        compared_count=len(required),
+        mismatch_limit=mismatch_limit,
+    )
+    identity_mismatches = _identity_mismatch_columns(
+        enriched_source,
+        enriched_cache,
+    )
+    identity_comparison = _bounded_training_comparison(
+        "row_identity",
+        identity_mismatches,
+        code="fingerprint_cache_source_row_identity_mismatch",
+        compared_count=5,
+        mismatch_limit=mismatch_limit,
+    )
+    source_duplicates = _duplicate_timestamp_row_count(enriched_source)
+    cache_duplicates = _duplicate_timestamp_row_count(enriched_cache)
+    duplicate_fields = (
+        []
+        if source_duplicates == cache_duplicates
+        else ["duplicate_timestamp_row_count"]
+    )
+    duplicate_comparison = _bounded_training_comparison(
+        "duplicate_timestamps",
+        duplicate_fields,
+        code="fingerprint_cache_source_duplicate_timestamp_mismatch",
+        compared_count=1,
+        mismatch_limit=mismatch_limit,
+    )
+
+    report = quality_report_from_training_features(
+        enriched_cache,
+        target=cache_target,
+    )
+    report_fields = []
+    if (
+        report.metadata.get("training_schema_version")
+        != TRAINING_SCHEMA_VERSION
+    ):
+        report_fields.append("training_schema_version")
+    if _int_payload(report.metadata.get("row_count")) != enriched_cache.height:
+        report_fields.append("row_count")
+    report_comparison = _bounded_training_comparison(
+        "quality_report_projection",
+        report_fields,
+        code="fingerprint_cache_source_quality_report_projection_mismatch",
+        compared_count=2,
+        mismatch_limit=mismatch_limit,
+    )
+    influx_fields = _influx_projection_missing_fields(
+        enriched_cache,
+        target=target,
+    )
+    influx_comparison = _bounded_training_comparison(
+        "influx_projection",
+        influx_fields,
+        code="fingerprint_cache_source_influx_projection_mismatch",
+        compared_count=6,
+        mismatch_limit=mismatch_limit,
+    )
+    raw_cache_columns = set(getattr(cache_frame, "columns", ()))
+    cache_was_enriched = required.issubset(raw_cache_columns)
+    sampled_count = min(int(cache_frame.height), sample_limit)
+    bases: dict[str, JSONValue] = {
+        "enriched_cache": {
+            "status": "available",
+            "training_schema_version": TRAINING_SCHEMA_VERSION,
+            "cache_was_enriched": cache_was_enriched,
+            "legacy_cache_enriched_on_read": not cache_was_enriched,
+            "required_column_count": len(required),
+            "column_count": len(cache_columns),
+            "sampled_row_count": sampled_count,
+            "source_row_count": int(cache_frame.height),
+            "truncated": sampled_count < int(cache_frame.height),
+        },
+        "quality_report": {
+            "status": "available",
+            "projection_kind": "audit_from_enriched_rows",
+            "training_schema_version": report.metadata.get(
+                "training_schema_version"
+            ),
+            "row_count": report.metadata.get("row_count"),
+        },
+        "influx_projection": {
+            "status": "available" if not influx_fields else "limited",
+            "projection_kind": "same_point_enriched_fields",
+            "missing_required_field_count": len(influx_fields),
+        },
+    }
+    return (
+        [
+            column_comparison,
+            identity_comparison,
+            duplicate_comparison,
+            report_comparison,
+            influx_comparison,
+        ],
+        bases,
+    )
+
+
+def _bounded_training_comparison(
+    section: str,
+    mismatches: list[str],
+    *,
+    code: str,
+    compared_count: int,
+    mismatch_limit: BoundedReportLimit,
+) -> dict[str, JSONValue]:
+    included = mismatch_limit.slice(mismatches)
+    return {
+        "section": section,
+        "status": "mismatch" if mismatches else "match",
+        "compared_field_count": compared_count,
+        "mismatch_field_count": len(mismatches),
+        "included_mismatch_field_count": len(included),
+        "omitted_mismatch_field_count": max(0, len(mismatches) - len(included)),
+        "truncated": len(included) < len(mismatches),
+        "mismatch_fields": cast(JSONValue, included),
+        "mismatch_codes": cast(JSONValue, [code] if mismatches else []),
+    }
+
+
+def _identity_mismatch_columns(source: Any, cache: Any) -> list[str]:
+    identity_columns = (
+        "series_id",
+        "period",
+        "row_id",
+        "source_row_number",
+        "event_seq",
+    )
+    mismatches = []
+    for column in identity_columns:
+        if column not in source.columns or column not in cache.columns:
+            mismatches.append(column)
+            continue
+        source_values = source.get_column(column).to_list()
+        cache_values = cache.get_column(column).to_list()
+        if source_values != cache_values:
+            mismatches.append(column)
+    return mismatches
+
+
+def _duplicate_timestamp_row_count(frame: Any) -> int:
+    if "datetime" not in frame.columns or frame.is_empty():
+        return 0
+    return max(
+        0,
+        int(frame.height) - int(frame.get_column("datetime").n_unique()),
+    )
+
+
+def _influx_projection_missing_fields(
+    frame: Any,
+    *,
+    target: QualityTarget,
+) -> list[str]:
+    if frame.is_empty():
+        return ["sample_row"]
+    columns = tuple(frame.columns)
+    row = frame.row(0)
+    line = format_influx_line(
+        target.symbol,
+        target.data_format,
+        target.timeframe,
+        row,
+        columns=columns,
+    )
+    try:
+        field_text = line.split(" ", 2)[1]
+    except IndexError:
+        return ["line_protocol_fields"]
+    emitted = {
+        item.split("=", 1)[0] for item in field_text.split(",") if "=" in item
+    }
+    required = (
+        "source_row_number",
+        "event_seq",
+        "quality_status_code",
+        "quality_finding_count",
+        "training_usable",
+        "training_weight",
+    )
+    return [field for field in required if field not in emitted]
+
+
+def _finalize_parity_payload(
+    target: QualityTarget,
+    *,
+    bases: Mapping[str, JSONValue],
+    comparisons: list[dict[str, JSONValue]],
+    skipped_reasons: list[str],
+    mismatch_limit: BoundedReportLimit,
+) -> dict[str, JSONValue]:
+    mismatch_codes = sorted(
+        {
+            code
+            for comparison in comparisons
+            for code in (
+                str(item)
+                for item in _string_list(comparison.get("mismatch_codes"))
+            )
+        }
+    )
+    included_codes = mismatch_limit.slice(mismatch_codes)
+    mismatch_count = sum(
+        1 for item in comparisons if item.get("status") == "mismatch"
+    )
+    compared_count = sum(
+        1 for item in comparisons if item.get("status") in {"match", "mismatch"}
+    )
+    status = "not_compared"
+    if compared_count:
+        status = "mismatch" if mismatch_count else "match"
+    return {
+        "schema_version": TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
+        "status": status,
+        "advisory": True,
+        "target_axis": _target_axis(target),
+        "base_grain": {
+            "data_format": target.data_format,
+            "timeframe": target.timeframe,
+        },
+        "compared_section_count": compared_count,
+        "matching_section_count": sum(
+            1 for item in comparisons if item.get("status") == "match"
+        ),
+        "mismatched_section_count": mismatch_count,
+        "skipped_section_count": sum(
+            1 for item in comparisons if item.get("status") == "skipped"
+        ),
+        "mismatch_code_count": len(mismatch_codes),
+        "included_mismatch_code_count": len(included_codes),
+        "omitted_mismatch_code_count": max(
+            0, len(mismatch_codes) - len(included_codes)
+        ),
+        "truncated": len(included_codes) < len(mismatch_codes),
+        "limit_metadata": {"mismatches": mismatch_limit.limit_payload()},
+        "mismatch_codes": cast(JSONValue, included_codes),
+        "skipped_reasons": cast(JSONValue, sorted(set(skipped_reasons))),
+        "bases": dict(bases),
+        "comparisons": cast(JSONValue, comparisons),
+    }
+
+
+def _parity_unavailable_basis(
+    reason: str,
+    *,
+    detail: str = "",
+) -> dict[str, JSONValue]:
+    payload: dict[str, JSONValue] = {
+        "status": "unavailable",
+        "reason": reason,
+    }
+    if detail:
+        payload["detail"] = detail
+    return payload
+
+
+def _parity_freshness_status(fresh: bool | None) -> str:
+    if fresh is True:
+        return "fresh"
+    if fresh is False:
+        return "stale"
+    return "not_applicable"
+
+
 def _fingerprint_audit_payload(
     payload: Mapping[str, JSONValue],
     *,
@@ -3559,6 +4354,8 @@ def _fingerprint_audit_payload(
     profile: HistDataFingerprintProfile,
 ) -> dict[str, JSONValue]:
     expected = _fingerprint_expected_sections(target)
+    if profile.cache_source_parity.enabled:
+        expected = (*expected, "cache_source_parity")
     emitted = [
         section for section in FINGERPRINT_AUDIT_SECTIONS if section in payload
     ]
@@ -3796,6 +4593,15 @@ def _fingerprint_section_status(
         return _stationarity_section_status(_payload_mapping(payload[section]))
     if section == "decomposition":
         return _decomposition_section_status(_payload_mapping(payload[section]))
+    if section == "cache_source_parity":
+        parity_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if parity_status == "match":
+            return "valid"
+        if parity_status == "mismatch":
+            return "limited"
+        return "unavailable"
     return "valid"
 
 

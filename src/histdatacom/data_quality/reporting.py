@@ -25,6 +25,7 @@ from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_COVERAGE_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_DISTRIBUTION_BOUNDED_PAYLOAD_KEY,
+    FINGERPRINT_PARITY_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_READINESS_RISK_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_REGIME_BOUNDED_PAYLOAD_KEY,
@@ -37,6 +38,7 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY,
@@ -45,6 +47,7 @@ from histdatacom.data_quality.fingerprints import (
     series_fingerprint_coverage_summary,
     series_fingerprint_distribution_attention_summary,
     series_fingerprint_distribution_summary,
+    series_fingerprint_parity_summary,
     series_fingerprint_readiness_summary,
     series_fingerprint_readiness_risk_summary,
     series_fingerprint_regime_summary,
@@ -314,6 +317,13 @@ def quality_report_payload(
             fingerprint_regimes
         )
         payload["metadata"] = metadata
+    fingerprint_parity = _fingerprint_parity_summary(report)
+    if fingerprint_parity is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY] = (
+            fingerprint_parity
+        )
+        payload["metadata"] = metadata
     fingerprint_topology = _fingerprint_topology_summary(report)
     if fingerprint_topology is not None:
         metadata = _mapping_payload(payload.get("metadata"))
@@ -489,6 +499,11 @@ def format_quality_console_summary(
             )
         )
         lines.extend(
+            format_fingerprint_parity_summary_lines(
+                _fingerprint_parity_summary(report)
+            )
+        )
+        lines.extend(
             format_fingerprint_topology_attention_lines(
                 _fingerprint_topology_attention_summary(report)
             )
@@ -569,6 +584,7 @@ def bounded_quality_payload(
         _fingerprint_distribution_attention_summary(report)
     )
     fingerprint_regimes = _fingerprint_regime_summary(report)
+    fingerprint_parity = _fingerprint_parity_summary(report)
     fingerprint_topology = _fingerprint_topology_summary(report)
     fingerprint_topology_attention = _fingerprint_topology_attention_summary(
         report
@@ -635,6 +651,8 @@ def bounded_quality_payload(
         )
     if fingerprint_regimes is not None:
         payload[FINGERPRINT_REGIME_BOUNDED_PAYLOAD_KEY] = fingerprint_regimes
+    if fingerprint_parity is not None:
+        payload[FINGERPRINT_PARITY_BOUNDED_PAYLOAD_KEY] = fingerprint_parity
     if fingerprint_topology is not None:
         payload[FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY] = fingerprint_topology
     if fingerprint_topology_attention is not None:
@@ -2212,6 +2230,20 @@ def _fingerprint_regime_summary(
     )
 
 
+def _fingerprint_parity_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return cache/source parity metadata from report or findings."""
+    summary = report.metadata.get(
+        TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY
+    )
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        series_fingerprint_parity_summary(report.findings)
+    )
+
+
 def _fingerprint_topology_summary(
     report: QualityReport,
 ) -> dict[str, JSONValue] | None:
@@ -2605,6 +2637,68 @@ def format_fingerprint_regime_summary_lines(
                     f"- {_format_fingerprint_regime_target_line(item)}"
                 )
     return lines
+
+
+def format_fingerprint_parity_summary_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable cache/source parity lines."""
+    if not summary:
+        return []
+    lines = [
+        "",
+        "Fingerprint cache/source parity",
+        (
+            "- targets: "
+            f"{_int_metadata(summary, 'target_count')} "
+            f"compared: {_int_metadata(summary, 'compared_target_count')} "
+            f"matching: {_int_metadata(summary, 'matching_target_count')} "
+            f"mismatched: {_int_metadata(summary, 'mismatched_target_count')} "
+            "not-compared: "
+            f"{_int_metadata(summary, 'not_compared_target_count')}"
+        ),
+    ]
+    for label, key in (
+        ("statuses", "status_counts"),
+        ("mismatch codes", "mismatch_code_counts"),
+        ("computed from", "computed_from_counts"),
+        ("cache sources", "cache_source_counts"),
+        ("freshness", "freshness_counts"),
+    ):
+        counts = _format_count_metadata(summary.get(key))
+        if counts:
+            lines.append(f"- {label}: {counts}")
+    targets = summary.get("target_summaries")
+    if isinstance(targets, list):
+        for item in targets:
+            if not isinstance(item, Mapping):
+                continue
+            axis = _mapping_payload(item.get("target_axis"))
+            codes = ",".join(_string_list_metadata(item.get("mismatch_codes")))
+            suffix = f" codes={codes}" if codes else ""
+            lines.append(
+                "- "
+                f"{_format_target_axis(axis)}: "
+                f"{_string_metadata(item, 'status')} "
+                "sections="
+                f"{_int_metadata(item, 'compared_section_count')} "
+                "mismatched="
+                f"{_int_metadata(item, 'mismatched_section_count')}"
+                f"{suffix}"
+            )
+    return lines
+
+
+def _format_target_axis(axis: Mapping[str, JSONValue]) -> str:
+    return " ".join(
+        (
+            _string_metadata(axis, "data_format"),
+            _string_metadata(axis, "symbol"),
+            _string_metadata(axis, "timeframe"),
+            _string_metadata(axis, "period"),
+            _string_metadata(axis, "kind"),
+        )
+    )
 
 
 def _format_fingerprint_regime_target_line(

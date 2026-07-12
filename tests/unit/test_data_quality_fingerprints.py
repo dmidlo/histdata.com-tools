@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import histdatacom.data_quality.symbols as symbols_module
+import histdatacom.data_quality.fingerprints as fingerprints_module
+import pytest
 
 from histdatacom.data_quality import (
     CROSS_SERIES_FINGERPRINT_METADATA_KEY,
@@ -37,6 +39,7 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
@@ -44,10 +47,12 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
     HistDataFingerprintDistributionAttentionProfile,
+    HistDataFingerprintParityProfile,
     HistDataFingerprintProfile,
     HistDataCrossSeriesFingerprintRule,
     HistDataSeriesFingerprintRule,
     QualityFinding,
+    QualityReport,
     QualitySeverity,
     QualityTarget,
     QualityTargetKind,
@@ -1132,6 +1137,208 @@ def test_fingerprint_rule_prefers_fresh_sibling_cache(tmp_path: Path) -> None:
     assert topology["cache_source"] == "sibling"
 
 
+def test_fingerprint_parity_is_opt_in_and_matches_fresh_sibling_cache(
+    tmp_path: Path,
+) -> None:
+    """Opt-in parity should compare source, cache, and training projections."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    cache_path = csv_path.with_name(CACHE_FILENAME)
+    batch = parse_ascii_lines(TICK, CLEAN_TICK_ROWS)
+    write_polars_cache(to_polars_frame(batch), cache_path)
+    csv_mtime_ns = csv_path.stat().st_mtime_ns
+    os.utime(
+        cache_path,
+        ns=(csv_mtime_ns + 1_000_000, csv_mtime_ns + 1_000_000),
+    )
+    target = _discovered_target(csv_path)
+
+    default_payload = _fingerprint_payload(_fingerprint_finding(target))
+    parity_payload = _fingerprint_payload(
+        _fingerprint_finding(target, _parity_profile())
+    )
+    parity = _mapping(parity_payload["cache_source_parity"])
+
+    assert "cache_source_parity" not in default_payload
+    assert (
+        parity["schema_version"]
+        == TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION
+    )
+    assert parity["status"] == "match"
+    assert parity["mismatch_codes"] == []
+    assert _mapping(_mapping(parity["bases"])["raw_cache"])["freshness"] == (
+        "fresh"
+    )
+    enriched = _mapping(_mapping(parity["bases"])["enriched_cache"])
+    assert enriched["legacy_cache_enriched_on_read"] is True
+    assert enriched["training_schema_version"] == TRAINING_SCHEMA_VERSION
+    assert {item["section"] for item in _list(parity["comparisons"])} >= {
+        "coverage",
+        "temporal_topology",
+        "calendar_regimes",
+        "conditional_distributions",
+        "training_columns",
+        "row_identity",
+        "duplicate_timestamps",
+        "quality_report_projection",
+        "influx_projection",
+    }
+    audit = _mapping(parity_payload["fingerprint_audit"])
+    assert "cache_source_parity" in _list(audit["sections_expected"])
+    assert "cache_source_parity" in _list(audit["sections_emitted"])
+    assert _mapping(audit["section_statuses"])["cache_source_parity"] == (
+        "valid"
+    )
+    assert str(tmp_path) not in str(parity)
+
+
+def test_fingerprint_parity_reports_divergent_and_stale_cache(
+    tmp_path: Path,
+) -> None:
+    """Stale and divergent cache evidence should produce stable reason codes."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    cache_path = csv_path.with_name(CACHE_FILENAME)
+    divergent = parse_ascii_lines(TICK, CLEAN_TICK_ROWS[:2])
+    write_polars_cache(to_polars_frame(divergent), cache_path)
+    csv_mtime_ns = csv_path.stat().st_mtime_ns
+    os.utime(
+        cache_path,
+        ns=(csv_mtime_ns - 1_000_000, csv_mtime_ns - 1_000_000),
+    )
+
+    payload = _fingerprint_payload(
+        _fingerprint_finding(_discovered_target(csv_path), _parity_profile())
+    )
+    parity = _mapping(payload["cache_source_parity"])
+    codes = set(_list(parity["mismatch_codes"]))
+
+    assert parity["status"] == "mismatch"
+    assert "fingerprint_cache_source_stale_cache" in codes
+    assert "fingerprint_cache_source_row_count_mismatch" in codes
+    assert "fingerprint_cache_source_topology_mismatch" in codes
+    assert "fingerprint_cache_source_calendar_mismatch" in codes
+    assert "fingerprint_cache_source_conditioned_spread_mismatch" in codes
+
+
+def test_fingerprint_parity_detects_same_cardinality_regime_and_spread_drift(
+    tmp_path: Path,
+) -> None:
+    """Calendar and spread drift should not depend on row-count divergence."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    cache_path = csv_path.with_name(CACHE_FILENAME)
+    divergent_rows = (
+        CLEAN_TICK_ROWS[0]
+        .replace("000003660", "120003660")
+        .replace("1.306770", "1.307770"),
+        CLEAN_TICK_ROWS[1].replace("000003973", "120003973"),
+        CLEAN_TICK_ROWS[2].replace("000014990", "120014990"),
+    )
+    write_polars_cache(
+        to_polars_frame(parse_ascii_lines(TICK, divergent_rows)),
+        cache_path,
+    )
+    csv_mtime_ns = csv_path.stat().st_mtime_ns
+    os.utime(
+        cache_path,
+        ns=(csv_mtime_ns + 1_000_000, csv_mtime_ns + 1_000_000),
+    )
+
+    payload = _fingerprint_payload(
+        _fingerprint_finding(_discovered_target(csv_path), _parity_profile())
+    )
+    codes = set(
+        _list(_mapping(payload["cache_source_parity"])["mismatch_codes"])
+    )
+
+    assert "fingerprint_cache_source_row_count_mismatch" not in codes
+    assert "fingerprint_cache_source_calendar_mismatch" in codes
+    assert "fingerprint_cache_source_conditioned_spread_mismatch" in codes
+
+
+def test_fingerprint_parity_handles_missing_cache_source_and_zip_member(
+    tmp_path: Path,
+) -> None:
+    """Missing bases should skip safely while ZIP sibling caches compare."""
+    csv_path = write_ascii_case(tmp_path / "csv", CLEAN_TICK_CASE)
+    missing_cache = _fingerprint_payload(
+        _fingerprint_finding(_discovered_target(csv_path), _parity_profile())
+    )
+    missing = _mapping(missing_cache["cache_source_parity"])
+    assert missing["status"] == "not_compared"
+    assert missing["skipped_reasons"] == ["cache_unavailable"]
+
+    direct_target = _cache_target(tmp_path / "direct")
+    missing_source = _fingerprint_payload(
+        _fingerprint_finding(direct_target, _parity_profile())
+    )
+    direct = _mapping(missing_source["cache_source_parity"])
+    assert direct["status"] == "not_compared"
+    assert direct["skipped_reasons"] == ["source_target_unavailable"]
+    assert (
+        _mapping(_mapping(direct["bases"])["raw_cache"])["cache_source"]
+        == "direct"
+    )
+
+    archive = write_zip_case(
+        tmp_path / "zip",
+        CLEAN_TICK_CASE,
+        zip_filename="HISTDATA_COM_ASCII_EURUSD_T201202.zip",
+    )
+    zip_cache = archive.with_name(CACHE_FILENAME)
+    batch = parse_ascii_lines(TICK, CLEAN_TICK_ROWS)
+    write_polars_cache(to_polars_frame(batch), zip_cache)
+    archive_mtime_ns = archive.stat().st_mtime_ns
+    os.utime(
+        zip_cache,
+        ns=(archive_mtime_ns + 1_000_000, archive_mtime_ns + 1_000_000),
+    )
+    zip_payload = _fingerprint_payload(
+        _fingerprint_finding(_discovered_target(archive), _parity_profile())
+    )
+    zip_parity = _mapping(zip_payload["cache_source_parity"])
+    raw_source = _mapping(_mapping(zip_parity["bases"])["raw_source"])
+    assert zip_parity["status"] == "match"
+    assert raw_source["kind"] == "zip_member"
+    assert raw_source["member"] == CLEAN_TICK_CASE.filename
+
+
+def test_fingerprint_parity_detects_market_only_projection_regressions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Report and Influx bases should reject market-only projections."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    cache_path = csv_path.with_name(CACHE_FILENAME)
+    batch = parse_ascii_lines(TICK, CLEAN_TICK_ROWS)
+    write_polars_cache(to_polars_frame(batch), cache_path)
+    csv_mtime_ns = csv_path.stat().st_mtime_ns
+    os.utime(
+        cache_path,
+        ns=(csv_mtime_ns + 1_000_000, csv_mtime_ns + 1_000_000),
+    )
+    monkeypatch.setattr(
+        fingerprints_module,
+        "quality_report_from_training_features",
+        lambda *_args, **_kwargs: QualityReport(),
+    )
+    monkeypatch.setattr(
+        fingerprints_module,
+        "format_influx_line",
+        lambda *_args, **_kwargs: "EURUSD,source=histdata.com bidquote=1.0,askquote=1.1 1",
+    )
+
+    payload = _fingerprint_payload(
+        _fingerprint_finding(_discovered_target(csv_path), _parity_profile())
+    )
+    codes = set(
+        _list(_mapping(payload["cache_source_parity"])["mismatch_codes"])
+    )
+
+    assert (
+        "fingerprint_cache_source_quality_report_projection_mismatch" in codes
+    )
+    assert "fingerprint_cache_source_influx_projection_mismatch" in codes
+
+
 def test_fingerprint_cache_distribution_counts_full_rows_and_fills_sample(
     tmp_path: Path,
 ) -> None:
@@ -2200,6 +2407,18 @@ def _calendar_policy_profile(
             }
         },
     }
+
+
+def _parity_profile(
+    *,
+    mismatch_limit: int = 16,
+) -> HistDataFingerprintProfile:
+    return HistDataFingerprintProfile(
+        cache_source_parity=HistDataFingerprintParityProfile(
+            enabled=True,
+            mismatch_limit=mismatch_limit,
+        )
+    )
 
 
 def _cache_target(directory: Path) -> QualityTarget:

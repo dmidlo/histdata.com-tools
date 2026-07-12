@@ -24,6 +24,7 @@ from histdatacom.data_quality.fingerprints import (
     CROSS_SERIES_FINGERPRINT_RULE_ID,
     CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
 )
 from histdatacom.data_quality.limits import bounded_report_limit
 from histdatacom.data_quality.profiles import QUALITY_REPORTING_METADATA_KEY
@@ -1251,6 +1252,7 @@ def _tick_fingerprint_payload(
                 }
             },
         },
+        "cache_source_parity": _cache_source_parity_payload(symbol),
         "microstructure_dynamics": _microstructure_dynamics_payload(),
         "dependence": _dependence_payload(status="ok"),
         "fingerprint_audit": _audit_payload(
@@ -1277,6 +1279,82 @@ def _tick_fingerprint_payload(
             tick_spread_emitted=True,
         ),
         "source": {"kind": "csv_text"},
+    }
+
+
+def _cache_source_parity_payload(symbol: str) -> dict[str, JSONValue]:
+    return {
+        "schema_version": TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
+        "status": "match",
+        "advisory": True,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "base_grain": {"data_format": "ascii", "timeframe": "T"},
+        "compared_section_count": 9,
+        "matching_section_count": 9,
+        "mismatched_section_count": 0,
+        "skipped_section_count": 0,
+        "mismatch_code_count": 0,
+        "included_mismatch_code_count": 0,
+        "omitted_mismatch_code_count": 0,
+        "truncated": False,
+        "limit_metadata": {
+            "mismatches": {
+                "requested_limit": 16,
+                "default_limit": 16,
+                "effective_limit": 16,
+                "unbounded": False,
+            }
+        },
+        "mismatch_codes": [],
+        "skipped_reasons": [],
+        "bases": {
+            "raw_source": {
+                "status": "available",
+                "kind": "csv_text",
+                "path": f"DAT_ASCII_{symbol}_T_201202.csv",
+                "member": None,
+                "row_count": 3,
+            },
+            "raw_cache": {
+                "status": "available",
+                "path": ".data",
+                "cache_source": "sibling",
+                "fresh": True,
+                "freshness": "fresh",
+                "row_count": 3,
+            },
+            "enriched_cache": {
+                "status": "available",
+                "training_schema_version": (
+                    "histdatacom.ascii-tick-training-features.v1"
+                ),
+                "cache_was_enriched": True,
+                "legacy_cache_enriched_on_read": False,
+            },
+            "quality_report": {
+                "status": "available",
+                "projection_kind": "audit_from_enriched_rows",
+            },
+            "influx_projection": {
+                "status": "available",
+                "projection_kind": "same_point_enriched_fields",
+                "missing_required_field_count": 0,
+            },
+        },
+        "comparisons": [
+            {"section": section, "status": "match"}
+            for section in (
+                "coverage",
+                "temporal_topology",
+                "calendar_regimes",
+                "conditional_distributions",
+                "training_columns",
+                "row_identity",
+                "duplicate_timestamps",
+                "quality_report_projection",
+                "influx_projection",
+            )
+        ],
     }
 
 

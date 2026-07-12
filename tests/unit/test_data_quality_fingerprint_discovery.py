@@ -40,6 +40,9 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY,
@@ -96,6 +99,13 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert schemas["fingerprint_readiness_risk"]["schema_version"] == (
         TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION
     )
+    assert schemas["fingerprint_cache_source_parity"]["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_cache_source_parity_summary"]["schema_version"]
+        == TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION
+    )
     assert schemas["cross_series_fingerprint"] == {
         "schema_version": CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
         "status": "implemented",
@@ -113,6 +123,10 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert payload["metadata_keys"]["report_metadata"]["readiness_risk"] == (
         TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY
     )
+    assert (
+        payload["metadata_keys"]["report_metadata"]["cache_source_parity"]
+        == TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY
+    )
 
     implemented = payload["sections"]["implemented"]["target_sections"]
     assert [section["name"] for section in implemented] == [
@@ -125,6 +139,7 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "dependence",
         "stationarity_diagnostics",
         "decomposition",
+        "cache_source_parity",
         "fingerprint_audit",
     ]
     planned = payload["sections"]["planned"]["target_sections"]

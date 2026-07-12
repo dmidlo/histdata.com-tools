@@ -26,6 +26,7 @@ from histdatacom.data_quality.fingerprints import (
     DEFAULT_FINGERPRINT_READINESS_RISK_REASON_LIMIT,
     DEFAULT_FINGERPRINT_READINESS_RISK_SECTION_LIMIT,
     DEFAULT_FINGERPRINT_READINESS_RISK_TARGET_LIMIT,
+    DEFAULT_FINGERPRINT_PARITY_SUMMARY_LIMIT,
     DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT,
     DEFAULT_FINGERPRINT_REGIME_COUNT_LIMIT,
     DEFAULT_FINGERPRINT_REGIME_SUMMARY_LIMIT,
@@ -46,6 +47,9 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY,
@@ -74,6 +78,7 @@ FINGERPRINT_SERIES_CONFIG_KEYS = (
     "rounding_digits",
     "topology_inspection_sample_limit",
     "distribution_attention",
+    "cache_source_parity",
 )
 FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
     "invalid_row_min_count",
@@ -99,6 +104,7 @@ FINGERPRINT_REGIME_BOUNDED_PAYLOAD_KEY = "fingerprint_regime"
 FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY = "fingerprint_readiness"
 FINGERPRINT_READINESS_RISK_BOUNDED_PAYLOAD_KEY = "fingerprint_readiness_risk"
 FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY = "fingerprint_cross_series"
+FINGERPRINT_PARITY_BOUNDED_PAYLOAD_KEY = "fingerprint_parity"
 
 FINGERPRINT_SECTION_STATUSES = ("valid", "limited", "skipped", "unavailable")
 FINGERPRINT_DYNAMICS_STATUSES = ("ok", "limited", "unavailable")
@@ -426,6 +432,21 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_cache_source_parity",
+        TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.cache_source_parity",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_cache_source_parity_summary",
+        TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY,
+        bounded_payload_key=FINGERPRINT_PARITY_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_readiness_summary",
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -499,6 +520,14 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         FINGERPRINT_REGIME_BOUNDED_PAYLOAD_KEY,
         "regime_summary",
         "Fingerprint regimes",
+    ),
+    FingerprintReportSurfaceContract(
+        "cache_source_parity",
+        "fingerprint_cache_source_parity_summary",
+        TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY,
+        FINGERPRINT_PARITY_BOUNDED_PAYLOAD_KEY,
+        "cache_source_parity",
+        "Fingerprint cache/source parity",
     ),
     FingerprintReportSurfaceContract(
         "readiness_summary",
@@ -634,6 +663,18 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "cache_source_parity",
+        "opt-in source/cache and enriched training projection comparison",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_cache_source_parity",
+        basis_values=("text_scan", "direct_cache", "fresh_sibling_cache"),
+        extra={
+            "profile_controlled_by": ["cache_source_parity"],
+            "default_enabled": False,
+            "advisory": True,
+        },
+    ),
+    FingerprintTargetSectionContract(
         "fingerprint_audit",
         "machine-readable expected/emitted/skipped section accounting and readiness",
         target_timeframes=(TICK,),
@@ -679,6 +720,7 @@ FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
     "readiness_risk_reason_limit": (
         DEFAULT_FINGERPRINT_READINESS_RISK_REASON_LIMIT
     ),
+    "parity_summary_target_limit": DEFAULT_FINGERPRINT_PARITY_SUMMARY_LIMIT,
 }
 FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS = {
     "invalid_row_min_count": DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT,

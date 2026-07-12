@@ -1104,6 +1104,48 @@ identity. Full reports expose `metadata.cross_series_fingerprint`, bounded
 runtime payloads expose `fingerprint_cross_series`, and the CLI renders a
 concise `Cross-series fingerprint` section.
 
+Before trusting cache-backed fingerprints after a cache migration, enrichment
+change, manual cache copy, or unexpected source/cache timestamp change, run an
+opt-in cache/source parity assessment. Parity is disabled by default, so normal
+fingerprints retain their cache-first selection and cost. Enable it in a quality
+profile and run the ordinary fingerprint check against the source CSV or ZIP:
+
+```json
+{
+  "schema_version": "histdatacom.quality-profile.v1",
+  "name": "fingerprint-cache-source-parity",
+  "rules": {
+    "fingerprint.series": {
+      "cache_source_parity": {
+        "enabled": true,
+        "mismatch_limit": 16
+      }
+    }
+  }
+}
+```
+
+```sh
+histdatacom --quality \
+  --quality-target data/DAT_ASCII_EURUSD_T_201202.csv \
+  --quality-checks fingerprint \
+  --quality-profile fingerprint-cache-source-parity.json \
+  --quality-report reports/eurusd-fingerprint-parity.json
+```
+
+The advisory `cache_source_parity` target section compares bounded coverage,
+topology, calendar-regime, conditioned-spread, row-identity,
+duplicate-timestamp, quality-report, and Influx-projection evidence. It keeps
+raw source, raw legacy cache, enriched training cache, quality report, and
+Influx projection as separate bases; legacy caches are enriched in memory and
+are never rewritten. Stable mismatch codes and basis metadata roll up into
+`metadata.time_series_fingerprint_cache_source_parity_summary`, bounded payload
+key `fingerprint_parity`, and the CLI `Fingerprint cache/source parity` section.
+Source paths and ZIP members remain publication-safe, mismatch fields and target
+summaries are bounded, and no raw rows or full duplicate payloads are emitted.
+Missing sources or caches are reported as `not_compared`; stale caches are
+compared and marked advisory rather than accepted by the normal freshness path.
+
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,
 stable skip/eligibility reason codes, calendar-profile completeness, tick-spread

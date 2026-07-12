@@ -183,6 +183,10 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
                         "flag_truncated_distribution": False,
                         "flag_cache_float_precision": False,
                     },
+                    "cache_source_parity": {
+                        "enabled": True,
+                        "mismatch_limit": 7,
+                    },
                 }
             },
         },
@@ -207,6 +211,10 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
             "negative_spread_min_rate": 0.1,
             "flag_truncated_distribution": False,
             "flag_cache_float_precision": False,
+        },
+        "cache_source_parity": {
+            "enabled": True,
+            "mismatch_limit": 7,
         },
     }
 
@@ -262,6 +270,14 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
                     "distribution_attention": {
                         "flag_truncated_distribution": "yes"
                     }
+                }
+            }
+        },
+        {"rules": {SERIES_FINGERPRINT_RULE_ID: {"cache_source_parity": True}}},
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "cache_source_parity": {"mismatch_limit": -1}
                 }
             }
         },

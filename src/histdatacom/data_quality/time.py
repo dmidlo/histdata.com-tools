@@ -90,6 +90,7 @@ class _TimestampScanCacheKey:
     period: str
     size_bytes: int
     mtime_ns: int
+    prefer_cache: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -717,6 +718,7 @@ def timestamp_topology_payload_for_target(
     inspection_sample_limit: int | None = (
         DEFAULT_TIMESTAMP_INSPECTION_SAMPLE_LIMIT
     ),
+    prefer_cache: bool = True,
 ) -> dict[str, JSONValue]:
     """Return a bounded timestamp topology payload for one quality target."""
     resolved_tolerance = tolerance or HistDataGapTolerance()
@@ -727,7 +729,10 @@ def timestamp_topology_payload_for_target(
         )
 
     try:
-        scan = _timestamp_scan_for_target(target)
+        scan = _timestamp_scan_for_target(
+            target,
+            prefer_cache=prefer_cache,
+        )
     except ValueError as exc:
         return _empty_timestamp_topology_payload(
             reason="unsupported_timeframe",
@@ -866,14 +871,20 @@ def _source_error(
     )
 
 
-def _timestamp_scan_for_target(target: QualityTarget) -> _TimestampScan:
-    key = _timestamp_scan_cache_key(target)
+def _timestamp_scan_for_target(
+    target: QualityTarget,
+    *,
+    prefer_cache: bool = True,
+) -> _TimestampScan:
+    key = _timestamp_scan_cache_key(target, prefer_cache=prefer_cache)
     cached = _TIMESTAMP_SCAN_CACHE.get(key)
     if cached is not None:
         _TIMESTAMP_SCAN_CACHE.move_to_end(key)
         return cached
 
-    cache_scan = _timestamp_scan_from_polars_cache(target)
+    cache_scan = (
+        _timestamp_scan_from_polars_cache(target) if prefer_cache else None
+    )
     if cache_scan is not None:
         _cache_timestamp_scan(key, cache_scan)
         boundary = _continuity_boundary_from_scan(
@@ -1240,6 +1251,8 @@ def _scan_timestamp_sequence_polars(
 
 def _timestamp_scan_cache_key(
     target: QualityTarget,
+    *,
+    prefer_cache: bool,
 ) -> _TimestampScanCacheKey:
     path = Path(target.path)
     try:
@@ -1257,6 +1270,7 @@ def _timestamp_scan_cache_key(
         period=target.period,
         size_bytes=stat.st_size,
         mtime_ns=stat.st_mtime_ns,
+        prefer_cache=prefer_cache,
     )
 
 
@@ -2279,7 +2293,7 @@ def _timestamp_boundary_for_target(
     target: QualityTarget,
 ) -> _ContinuityBoundary | None:
     try:
-        key = _timestamp_scan_cache_key(target)
+        key = _timestamp_scan_cache_key(target, prefer_cache=True)
     except _SourceReadError:
         return None
     cached_boundary = _cached_timestamp_boundary(key)

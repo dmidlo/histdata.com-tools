@@ -22,6 +22,8 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY,
@@ -40,6 +42,7 @@ from histdatacom.data_quality import (
     QualityTargetKind,
     bounded_quality_payload,
     format_cross_series_fingerprint_lines,
+    format_fingerprint_parity_summary_lines,
     format_fingerprint_topology_attention_lines,
     format_quality_console_summary,
     format_quality_remediation_catalog_audit_lines,
@@ -54,6 +57,7 @@ from histdatacom.data_quality import (
     run_quality_assessment,
     series_fingerprint_readiness_summary,
     series_fingerprint_readiness_risk_summary,
+    series_fingerprint_parity_summary,
     series_fingerprint_regime_summary,
     write_quality_report,
 )
@@ -118,6 +122,39 @@ def test_cross_series_fingerprint_has_report_bounded_and_console_surfaces() -> (
     )
     assert "Cross-series fingerprint" in console
     assert "ascii:T:201202" in console
+
+
+def test_fingerprint_parity_has_report_bounded_and_console_surfaces() -> None:
+    """Opt-in parity should be visible without reading nested findings."""
+    report = representative_quality_report()
+    report_payload = quality_report_payload(report)
+    bounded = representative_bounded_quality_payload()
+    console = format_quality_console_summary(
+        report,
+        check_groups=("fingerprint",),
+    )
+    summary = report_payload["metadata"][
+        TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY
+    ]
+
+    assert summary["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION
+    )
+    assert summary["target_count"] == 3
+    assert summary["matching_target_count"] == 3
+    assert summary["computed_from_counts"]
+    assert summary["cache_source_counts"] == {"sibling": 3}
+    assert summary["freshness_counts"] == {"fresh": 3}
+    assert bounded["fingerprint_parity"] == summary
+    assert "Fingerprint cache/source parity" in console
+    assert format_fingerprint_parity_summary_lines(summary)[1] == (
+        "Fingerprint cache/source parity"
+    )
+    direct = series_fingerprint_parity_summary(report.findings, target_limit=1)
+    assert direct is not None
+    assert direct["included_target_count"] == 1
+    assert direct["omitted_target_count"] == 2
+    assert direct["truncated"] is True
 
 
 def test_quality_report_payload_is_publish_safe_by_default(
