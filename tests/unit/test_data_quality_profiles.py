@@ -13,6 +13,7 @@ from histdatacom.data_quality import (
     QUALITY_REPORTING_METADATA_KEY,
     SERIES_FINGERPRINT_RULE_ID,
     ClassicalModelInputProfile,
+    ExponentialSmoothingProfile,
     HistDataSeriesFingerprintRule,
     QualityFinding,
     QualityProfileError,
@@ -236,6 +237,7 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
             "rounding_digits": 6,
         },
         "classical_model_input": ClassicalModelInputProfile().to_metadata(),
+        "exponential_smoothing": ExponentialSmoothingProfile().to_metadata(),
     }
 
 
@@ -274,6 +276,53 @@ def test_classical_model_input_profile_flows_to_rule_surface() -> None:
     assert model_input.fold_kind == "rolling"
     assert model_input.rolling_window == 12
     assert model_input.resources.max_folds == 8
+
+
+def test_exponential_smoothing_profile_flows_to_rule_surface() -> None:
+    """Explicit fitted-family configurations should parse without search."""
+    rules = quality_rules_for_groups(
+        ("fingerprint",),
+        profile={
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "exponential_smoothing": {
+                        "enabled": True,
+                        "projection_specification_id": "hw",
+                        "projection_horizon": 3,
+                        "baseline_rolling_windows": [3, 9],
+                        "specifications": [
+                            {
+                                "specification_id": "hw",
+                                "family": "holt_winters",
+                                "trend": "add",
+                                "seasonal": "mul",
+                                "seasonal_periods": 12,
+                                "initialization_method": "estimated",
+                                "parameter_bounds": [
+                                    {
+                                        "parameter": "smoothing_level",
+                                        "lower": 0.01,
+                                        "upper": 0.99,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                }
+            }
+        },
+    )
+
+    profile = rules[0].profile.exponential_smoothing
+    assert profile.enabled is True
+    assert profile.projection_specification_id == "hw"
+    assert profile.projection_horizon == 3
+    assert profile.baseline_rolling_windows == (3, 9)
+    assert profile.specifications[0].family == "holt_winters"
+    assert profile.specifications[0].seasonal == "mul"
+    assert profile.specifications[0].parameter_bounds == (
+        ("smoothing_level", 0.01, 0.99),
+    )
 
 
 @pytest.mark.parametrize(
@@ -371,6 +420,27 @@ def test_classical_model_input_profile_flows_to_rule_surface() -> None:
                     "classical_model_input": {
                         "fold_kind": "rolling",
                         "rolling_window": 1,
+                    }
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "exponential_smoothing": {"specifications": []}
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "exponential_smoothing": {
+                        "specifications": [
+                            {
+                                "specification_id": "bad",
+                                "family": "holt_winters",
+                            }
+                        ]
                     }
                 }
             }

@@ -1222,7 +1222,8 @@ Stationarity status, rolling drift, distribution shift, skipped windows,
 zero-variance markers, and the `log_return`, `differencing`, and
 `session_conditioning` recommendations remain explicit evaluation guards.
 Recommended transforms are reported but are not silently applied, and
-nonstationarity never becomes a hard quality failure. ETS, ARIMA/SARIMA,
+nonstationarity never becomes a hard quality failure. Fitted
+exponential-smoothing models use the separate contract below. ARIMA/SARIMA,
 state-space, GARCH, automatic model selection, forecasting leaderboards, and
 synthetic generation remain deliberately deferred.
 
@@ -1332,6 +1333,110 @@ baseline paths remain usable when those providers are absent. Full reports use
 `time_series_fingerprint_classical_model_input_summary`, bounded payloads use
 `fingerprint_classical_model_input`, and console output renders
 `Classical model input contracts`.
+
+The first fitted family is also opt-in and requires the `models` extra:
+
+```sh
+pip install "histdatacom[models]"
+```
+
+```json
+{
+  "schema_version": "histdatacom.quality-profile.v1",
+  "name": "exponential-smoothing",
+  "rules": {
+    "fingerprint.series": {
+      "classical_model_input": {
+        "enabled": true,
+        "frequency_ms": 60000,
+        "transform": "level",
+        "horizons": [1, 5, 20],
+        "fold_kind": "expanding",
+        "minimum_training_observations": 40,
+        "minimum_evaluation_observations": 5,
+        "step_size": 20
+      },
+      "exponential_smoothing": {
+        "enabled": true,
+        "projection_specification_id": "hw-add",
+        "projection_horizon": 1,
+        "baseline_rolling_windows": [5, 20],
+        "specifications": [
+          {
+            "specification_id": "ses",
+            "family": "ses",
+            "error": "add"
+          },
+          {
+            "specification_id": "holt-damped",
+            "family": "holt",
+            "error": "add",
+            "trend": "add",
+            "damped_trend": true
+          },
+          {
+            "specification_id": "hw-add",
+            "family": "holt_winters",
+            "error": "add",
+            "trend": "add",
+            "seasonal": "add",
+            "seasonal_periods": 24,
+            "initialization_method": "estimated",
+            "optimized": true,
+            "max_iterations": 200
+          },
+          {
+            "specification_id": "ets-aaa",
+            "family": "ets",
+            "error": "add",
+            "trend": "add",
+            "seasonal": "add",
+            "seasonal_periods": 24
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+`histdatacom.exponential-smoothing.v1` consumes only the regular grid and
+rolling-origin folds produced by the model-input contract. Explicit
+specifications cover simple exponential smoothing, Holt trend, damped Holt,
+additive or multiplicative Holt-Winters, and Statsmodels ETS error/trend/
+seasonal combinations. Initialization, smoothing parameters, optimizer method,
+iteration limit, and parameter bounds are configurable; multiplicative forms
+reject non-positive transformed training segments. There is no automatic
+configuration search or automatic winner.
+
+Expected closures and unexpected missing bins stay distinct and null. A fit
+uses only the trailing contiguous observed grid segment at an origin; neither
+kind of gap is forward-filled or removed from elapsed horizon time. Configured
+level, log-level, return, log-return, ordinary differencing, and seasonal
+differencing policies come from the input contract. Forecasts and metrics are
+inverted to the original scale, while warm-up, invalid-domain, insufficient
+seasonal-cycle, skipped-target, convergence-warning, timeout, numerical, and
+dependency limitations remain bounded advisory metadata.
+
+Each explicit model is evaluated on the same configured folds and horizons as
+the naive/random-walk, rolling mean, rolling median, and session-seasonal
+references. Reports expose per-fold forecasts and errors, per-horizon aggregate
+metrics, convergence and failure counts, deterministic model IDs, backend
+version, fitted scalar parameters, and enforced fit-attempt/time/memory/
+retention limits. Fitted objects, residual vectors, backend exception text, and
+wall-clock measurements are never serialized.
+
+`project_exponential_smoothing_onto_training_frame(...)` adds registered
+nullable scalar `cm_ets_*` columns to the same enriched rows using
+`series_id`/`period`/`row_id`. Forecasts appear only when the origin bin has
+closed. Actuals and realized errors appear only at their later diagnostic
+availability row and carry explicit diagnostic-only and training-eligibility
+flags. The configured projection has bounded width, preserves observed and
+`synth_*` namespaces, survives duplicate or masked timestamps, and flows through
+the same Polars cache and Influx point. Full reports use
+`time_series_fingerprint_exponential_smoothing_summary`, bounded payloads use
+`fingerprint_exponential_smoothing`, and console output renders
+`Exponential-smoothing models`.
 
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,
@@ -2361,6 +2466,8 @@ artifacts and returns a dataframe or table.
 - *to use InfluxDB imports or notebook tooling, install the corresponding extras*
   - `pip install "histdatacom[influx]"`
   - `pip install "histdatacom[jupyter]"`
+- *to fit optional Statsmodels classical-model families*
+  - `pip install "histdatacom[models]"`
 
 - ***All datetime is returned as milliseconds since January 1, 1970 (midnight UTC/GMT)***
 
@@ -2596,6 +2703,7 @@ InfluxDB import and notebook support are optional:
 ```sh
 pip install "histdatacom[influx]"
 pip install "histdatacom[jupyter]"
+pip install "histdatacom[models]"
 pip install "histdatacom[all]"
 ```
 

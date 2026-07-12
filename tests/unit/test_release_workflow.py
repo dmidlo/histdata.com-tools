@@ -292,6 +292,16 @@ def test_package_metadata_advertises_platform_wheel_support() -> None:
     } <= classifiers
 
 
+def test_package_metadata_advertises_optional_models_provider() -> None:
+    """Rich fitted models should remain isolated in the models/all extras."""
+    optional = _pyproject_config()["project"]["optional-dependencies"]
+
+    assert optional["models"] == ["statsmodels>=0.14.6,<0.15"]
+    assert "statsmodels>=0.14.6,<0.15" in optional["all"]
+    assert "statsmodels==0.14.6" in optional["test"]
+    assert "statsmodels==0.14.6" in optional["dev"]
+
+
 def test_runtime_runbook_documents_windows_runtime_support_gap() -> None:
     """Release docs should state the current Windows runtime support boundary."""
     runbook = _project_text("docs/temporal-orchestration-runtime-runbook.md")

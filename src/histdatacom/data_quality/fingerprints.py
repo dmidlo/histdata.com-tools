@@ -43,7 +43,11 @@ from histdatacom.data_quality.classical_baselines import (
 )
 from histdatacom.data_quality.classical_model_contracts import (
     ClassicalModelInputProfile,
-    classical_model_input_contract_from_training_frame,
+    build_classical_model_input,
+)
+from histdatacom.data_quality.exponential_smoothing import (
+    ExponentialSmoothingProfile,
+    exponential_smoothing_from_model_input,
 )
 from histdatacom.data_quality.limits import (
     BoundedReportLimit,
@@ -255,6 +259,7 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "cache_source_parity",
     "classical_baselines",
     "classical_model_input",
+    "exponential_smoothing",
     "synthetic_constraints",
 )
 FINGERPRINT_DYNAMICS_SECTIONS = ("microstructure_dynamics",)
@@ -348,6 +353,9 @@ class HistDataFingerprintProfile:
     classical_model_input: ClassicalModelInputProfile = field(
         default_factory=ClassicalModelInputProfile
     )
+    exponential_smoothing: ExponentialSmoothingProfile = field(
+        default_factory=ExponentialSmoothingProfile
+    )
 
     def to_metadata(self) -> dict[str, JSONValue]:
         """Return a JSON-compatible representation."""
@@ -367,6 +375,7 @@ class HistDataFingerprintProfile:
             "cache_source_parity": self.cache_source_parity.to_metadata(),
             "classical_baselines": self.classical_baselines.to_metadata(),
             "classical_model_input": (self.classical_model_input.to_metadata()),
+            "exponential_smoothing": self.exponential_smoothing.to_metadata(),
         }
 
 
@@ -3766,14 +3775,35 @@ def _finalize_fingerprint_payload(
                     target=target,
                 )
             )
-        if profile.classical_model_input.enabled:
-            payload["classical_model_input"] = (
-                classical_model_input_contract_from_training_frame(
+        model_input_result = None
+        if (
+            profile.classical_model_input.enabled
+            or profile.exponential_smoothing.enabled
+        ):
+            model_input_result = build_classical_model_input(
+                training_frame,
+                payload,
+                profile=profile.classical_model_input,
+                target=target,
+            )
+        if (
+            profile.classical_model_input.enabled
+            and model_input_result is not None
+        ):
+            payload["classical_model_input"] = dict(model_input_result.contract)
+        if (
+            profile.exponential_smoothing.enabled
+            and model_input_result is not None
+        ):
+            payload["exponential_smoothing"] = dict(
+                exponential_smoothing_from_model_input(
                     training_frame,
+                    model_input_result,
                     payload,
-                    profile=profile.classical_model_input,
+                    input_profile=profile.classical_model_input,
+                    profile=profile.exponential_smoothing,
                     target=target,
-                )
+                ).diagnostics
             )
         payload["fingerprint_audit"] = _fingerprint_audit_payload(
             payload,
@@ -4437,6 +4467,8 @@ def _fingerprint_audit_payload(
         expected = (*expected, "classical_baselines")
     if profile.classical_model_input.enabled:
         expected = (*expected, "classical_model_input")
+    if profile.exponential_smoothing.enabled:
+        expected = (*expected, "exponential_smoothing")
     emitted = [
         section for section in FINGERPRINT_AUDIT_SECTIONS if section in payload
     ]
@@ -4577,6 +4609,7 @@ def _fingerprint_section_skip_details(
         "decomposition",
         "classical_baselines",
         "classical_model_input",
+        "exponential_smoothing",
         "synthetic_constraints",
     }:
         return {"timeframe": target.timeframe}
@@ -4625,6 +4658,7 @@ def _section_timeframe_mismatch(
                 "synthetic_constraints",
                 "classical_baselines",
                 "classical_model_input",
+                "exponential_smoothing",
             }
             and target.timeframe != TICK
         )
@@ -4715,6 +4749,15 @@ def _fingerprint_section_status(
         if input_status == "ready":
             return "valid"
         if input_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "exponential_smoothing":
+        model_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if model_status == "ready":
+            return "valid"
+        if model_status == "limited":
             return "limited"
         return "unavailable"
     return "valid"

@@ -198,6 +198,7 @@ jobs:
               "jupyter",
               "pandas",
               "pyarrow",
+              "statsmodels",
               "temporalio",
           ):
               metadata.version(distribution_name)
@@ -207,6 +208,7 @@ jobs:
               "ipywidgets",
               "pandas",
               "pyarrow",
+              "statsmodels",
               "temporalio",
           ):
               if importlib.util.find_spec(module_name) is None:

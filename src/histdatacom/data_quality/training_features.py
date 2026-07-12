@@ -130,6 +130,35 @@ CLASSICAL_MODEL_CONTRACT_COLUMNS = (
     "cm_evaluation_diagnostic_only",
 )
 
+EXPONENTIAL_SMOOTHING_COLUMNS = (
+    "cm_ets_schema_version",
+    "cm_ets_input_derivation_id",
+    "cm_ets_model_id",
+    "cm_ets_family_code",
+    "cm_ets_specification_code",
+    "cm_ets_error_code",
+    "cm_ets_trend_code",
+    "cm_ets_seasonal_code",
+    "cm_ets_damped_trend",
+    "cm_ets_initialization_code",
+    "cm_ets_fit_status_code",
+    "cm_ets_converged",
+    "cm_ets_fold_id",
+    "cm_ets_origin_row_id",
+    "cm_ets_target_row_id",
+    "cm_ets_horizon",
+    "cm_ets_forecast",
+    "cm_ets_forecast_available",
+    "cm_ets_forecast_available_at_utc_ms",
+    "cm_ets_actual",
+    "cm_ets_error",
+    "cm_ets_diagnostic_available",
+    "cm_ets_diagnostic_available_at_utc_ms",
+    "cm_ets_diagnostic_only",
+    "cm_ets_original_scale",
+    "cm_ets_training_eligible",
+)
+
 TRAINING_REQUIRED_COLUMNS = (
     *IDENTITY_COLUMNS,
     "spread",
@@ -159,6 +188,7 @@ TRAINING_REQUIRED_COLUMNS = (
     "class_training_action_code",
     *SYNTHETIC_PLACEHOLDER_COLUMNS,
     *CLASSICAL_MODEL_CONTRACT_COLUMNS,
+    *EXPONENTIAL_SMOOTHING_COLUMNS,
 )
 
 ISSUE_CODE_BY_COLUMN = {
@@ -339,6 +369,7 @@ def training_feature_definitions() -> tuple[TrainingFeatureDefinition, ...]:
     definitions.extend(_classification_definition_rows())
     definitions.extend(_synthetic_definition_rows())
     definitions.extend(_classical_model_contract_definition_rows())
+    definitions.extend(_exponential_smoothing_definition_rows())
     return tuple(definitions)
 
 
@@ -862,6 +893,47 @@ def _classical_model_contract_definition_rows() -> (
                     f"{name}."
                 ),
                 "classical_model_contracts",
+                "row",
+                True,
+            )
+        )
+    return definitions
+
+
+def _exponential_smoothing_definition_rows() -> list[TrainingFeatureDefinition]:
+    strings = {
+        "cm_ets_schema_version",
+        "cm_ets_input_derivation_id",
+        "cm_ets_model_id",
+    }
+    booleans = {
+        "cm_ets_damped_trend",
+        "cm_ets_converged",
+        "cm_ets_forecast_available",
+        "cm_ets_diagnostic_available",
+        "cm_ets_diagnostic_only",
+        "cm_ets_original_scale",
+        "cm_ets_training_eligible",
+    }
+    floats = {"cm_ets_forecast", "cm_ets_actual", "cm_ets_error"}
+    definitions: list[TrainingFeatureDefinition] = []
+    for name in EXPONENTIAL_SMOOTHING_COLUMNS:
+        dtype = (
+            "Utf8"
+            if name in strings
+            else (
+                "Boolean"
+                if name in booleans
+                else "Float64" if name in floats else "Int64"
+            )
+        )
+        definitions.append(
+            TrainingFeatureDefinition(
+                name,
+                dtype,
+                None,
+                f"Point-in-time-safe exponential-smoothing scalar: {name}.",
+                "exponential_smoothing",
                 "row",
                 True,
             )

@@ -446,8 +446,11 @@ def inspect_wheel(
                 f"console script missing from wheel metadata: {console_script}"
             )
     provides_extra = set(wheel_metadata.get_all("Provides-Extra", []))
-    if "temporal" not in provides_extra:
-        raise SystemExit("temporal optional extra missing from wheel metadata")
+    for required_extra in ("models", "temporal"):
+        if required_extra not in provides_extra:
+            raise SystemExit(
+                f"{required_extra} optional extra missing from wheel metadata"
+            )
     classifiers = set(wheel_metadata.get_all("Classifier", []))
     missing_classifiers = sorted(EXPECTED_METADATA_CLASSIFIERS - classifiers)
     if missing_classifiers:
@@ -476,6 +479,18 @@ def inspect_wheel(
         extra="all",
     ):
         raise SystemExit("temporalio dependency missing from all extra")
+    if not _requires_dist_contains(
+        requires_dist,
+        dependency="statsmodels",
+        extra="models",
+    ):
+        raise SystemExit("statsmodels dependency missing from models extra")
+    if not _requires_dist_contains(
+        requires_dist,
+        dependency="statsmodels",
+        extra="all",
+    ):
+        raise SystemExit("statsmodels dependency missing from all extra")
     if manifest["runtime"] != "temporal":
         raise SystemExit("runtime manifest does not describe Temporal")
     if manifest["distribution_strategy"] != (

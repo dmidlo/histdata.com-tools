@@ -85,6 +85,20 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.exponential_smoothing import (
+    DEFAULT_EXPONENTIAL_SMOOTHING_SUMMARY_TARGET_LIMIT,
+    EXPONENTIAL_SMOOTHING_BOUNDED_PAYLOAD_KEY,
+    EXPONENTIAL_SMOOTHING_CONFIGURATION_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_EVALUATION_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_FAMILIES,
+    EXPONENTIAL_SMOOTHING_FIT_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_FORECAST_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_REASON_CODES,
+    EXPONENTIAL_SMOOTHING_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY,
+    EXPONENTIAL_SMOOTHING_SUMMARY_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.time import (
     TIMESTAMP_TOPOLOGY_INSPECTION_SCHEMA_VERSION,
 )
@@ -95,6 +109,10 @@ from histdatacom.data_quality.synthetic_constraints import (
     SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION,
     SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
     SYNTHETIC_VALIDATION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.training_features import (
+    EXPONENTIAL_SMOOTHING_COLUMNS,
+    training_feature_definitions,
 )
 from histdatacom.histdata_ascii import TICK
 from histdatacom.runtime_contracts import JSONValue
@@ -111,6 +129,7 @@ FINGERPRINT_SERIES_CONFIG_KEYS = (
     "cache_source_parity",
     "classical_baselines",
     "classical_model_input",
+    "exponential_smoothing",
 )
 FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
     "invalid_row_min_count",
@@ -530,6 +549,57 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing",
+        EXPONENTIAL_SMOOTHING_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.exponential_smoothing",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing_configuration",
+        EXPONENTIAL_SMOOTHING_CONFIGURATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.exponential_smoothing.configuration",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing_fit",
+        EXPONENTIAL_SMOOTHING_FIT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.exponential_smoothing.fit_summary",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing_forecast",
+        EXPONENTIAL_SMOOTHING_FORECAST_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing_evaluation",
+        EXPONENTIAL_SMOOTHING_EVALUATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.exponential_smoothing.evaluation",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing_training_projection",
+        EXPONENTIAL_SMOOTHING_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.exponential_smoothing.training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing_summary",
+        EXPONENTIAL_SMOOTHING_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY,
+        bounded_payload_key=EXPONENTIAL_SMOOTHING_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_audit",
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -678,6 +748,14 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         CLASSICAL_MODEL_INPUT_BOUNDED_PAYLOAD_KEY,
         "classical_model_input",
         "Classical model input contracts",
+    ),
+    FingerprintReportSurfaceContract(
+        "exponential_smoothing",
+        "fingerprint_exponential_smoothing_summary",
+        EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY,
+        EXPONENTIAL_SMOOTHING_BOUNDED_PAYLOAD_KEY,
+        "exponential_smoothing",
+        "Exponential-smoothing models",
     ),
     FingerprintReportSurfaceContract(
         "readiness_summary",
@@ -879,6 +957,44 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "exponential_smoothing",
+        "opt-in fitted SES, Holt, Holt-Winters, and ETS diagnostics",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_exponential_smoothing",
+        basis_values=("regular_grid_rolling_origin",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#422",
+            "profile_controlled_by": [
+                "classical_model_input",
+                "exponential_smoothing",
+            ],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid",
+            "optional_dependency_extra": "models",
+            "backend": "statsmodels",
+            "model_families": list(EXPONENTIAL_SMOOTHING_FAMILIES),
+            "failure_reason_codes": list(EXPONENTIAL_SMOOTHING_REASON_CODES),
+            "augmented_column_prefixes": ["cm_ets_"],
+            "augmented_columns": [
+                {
+                    "name": definition.name,
+                    "dtype": definition.dtype,
+                    "nullable": definition.nullable,
+                    "grain": definition.grain,
+                    "source": definition.source,
+                }
+                for definition in training_feature_definitions()
+                if definition.name in EXPONENTIAL_SMOOTHING_COLUMNS
+            ],
+            "automatic_search": False,
+            "automatic_winner": False,
+            "row_mapping_policy": ("first_source_row_at_or_after_availability"),
+        },
+    ),
+    FingerprintTargetSectionContract(
         "synthetic_constraints",
         "generator-facing defects, stylized facts, artifacts, and validation contract",
         target_timeframes=(TICK,),
@@ -947,6 +1063,9 @@ FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
     ),
     "classical_model_input_summary_target_limit": (
         DEFAULT_MODEL_INPUT_SUMMARY_TARGET_LIMIT
+    ),
+    "exponential_smoothing_summary_target_limit": (
+        DEFAULT_EXPONENTIAL_SMOOTHING_SUMMARY_TARGET_LIMIT
     ),
 }
 FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS = {

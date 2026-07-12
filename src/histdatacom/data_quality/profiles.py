@@ -22,6 +22,10 @@ from histdatacom.data_quality.classical_model_contracts import (
     ClassicalModelResourcePolicy,
 )
 from histdatacom.data_quality.contracts import QualitySeverity
+from histdatacom.data_quality.exponential_smoothing import (
+    ExponentialSmoothingProfile,
+    ExponentialSmoothingSpecification,
+)
 from histdatacom.data_quality.fingerprints import (
     DEFAULT_FINGERPRINT_HISTOGRAM_BINS,
     DEFAULT_FINGERPRINT_LAGS,
@@ -493,6 +497,7 @@ class QualityProfile:
                 "cache_source_parity",
                 "classical_baselines",
                 "classical_model_input",
+                "exponential_smoothing",
             },
             SERIES_FINGERPRINT_RULE_ID,
         )
@@ -578,6 +583,14 @@ class QualityProfile:
                     path=SERIES_FINGERPRINT_RULE_ID,
                 ),
                 path=(f"{SERIES_FINGERPRINT_RULE_ID}.classical_model_input"),
+            ),
+            exponential_smoothing=_exponential_smoothing_profile(
+                _mapping_field(
+                    config,
+                    "exponential_smoothing",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.exponential_smoothing",
             ),
         )
 
@@ -1928,6 +1941,297 @@ def _classical_model_resource_policy(
         )
     except ValueError as exc:
         raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _exponential_smoothing_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> ExponentialSmoothingProfile:
+    base = ExponentialSmoothingProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "specifications",
+            "projection_specification_id",
+            "projection_horizon",
+            "baseline_rolling_windows",
+            "rounding_digits",
+        },
+        path,
+    )
+    specifications = base.specifications
+    if "specifications" in value:
+        raw = value["specifications"]
+        if not isinstance(raw, list) or not raw:
+            raise QualityProfileError(
+                f"{path}.specifications must be a non-empty list"
+            )
+        parsed: list[ExponentialSmoothingSpecification] = []
+        for index, item in enumerate(raw):
+            parsed.append(
+                _exponential_smoothing_specification(
+                    _expect_mapping(
+                        item, path=f"{path}.specifications[{index}]"
+                    ),
+                    path=f"{path}.specifications[{index}]",
+                )
+            )
+        specifications = tuple(parsed)
+    try:
+        return ExponentialSmoothingProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            specifications=specifications,
+            projection_specification_id=_string_field(
+                value,
+                "projection_specification_id",
+                (
+                    specifications[0].specification_id
+                    if "projection_specification_id" not in value
+                    else base.projection_specification_id
+                ),
+                path=path,
+            ),
+            projection_horizon=_int_field(
+                value,
+                "projection_horizon",
+                base.projection_horizon,
+                minimum=1,
+                path=path,
+            ),
+            baseline_rolling_windows=_fingerprint_int_sequence(
+                value,
+                "baseline_rolling_windows",
+                base.baseline_rolling_windows,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _exponential_smoothing_specification(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> ExponentialSmoothingSpecification:
+    base = ExponentialSmoothingSpecification()
+    _reject_unknown_keys(
+        value,
+        {
+            "specification_id",
+            "family",
+            "level",
+            "error",
+            "trend",
+            "damped_trend",
+            "seasonal",
+            "seasonal_periods",
+            "initialization_method",
+            "initial_level",
+            "initial_trend",
+            "initial_seasonal",
+            "optimized",
+            "method",
+            "use_brute",
+            "remove_bias",
+            "smoothing_level",
+            "smoothing_trend",
+            "smoothing_seasonal",
+            "damping_trend",
+            "parameter_bounds",
+            "max_iterations",
+        },
+        path,
+    )
+    try:
+        return ExponentialSmoothingSpecification(
+            specification_id=_string_field(
+                value,
+                "specification_id",
+                base.specification_id,
+                path=path,
+            ),
+            family=_string_field(value, "family", base.family, path=path),
+            level=_bool_field(value, "level", base.level, path=path),
+            error=_string_field(value, "error", base.error, path=path),
+            trend=_string_field(value, "trend", base.trend, path=path),
+            damped_trend=_bool_field(
+                value, "damped_trend", base.damped_trend, path=path
+            ),
+            seasonal=_string_field(value, "seasonal", base.seasonal, path=path),
+            seasonal_periods=_int_field(
+                value,
+                "seasonal_periods",
+                base.seasonal_periods,
+                minimum=0,
+                path=path,
+            ),
+            initialization_method=_string_field(
+                value,
+                "initialization_method",
+                base.initialization_method,
+                path=path,
+            ),
+            initial_level=_optional_float_profile_field(
+                value, "initial_level", base.initial_level, path=path
+            ),
+            initial_trend=_optional_float_profile_field(
+                value, "initial_trend", base.initial_trend, path=path
+            ),
+            initial_seasonal=_float_tuple_profile_field(
+                value,
+                "initial_seasonal",
+                base.initial_seasonal,
+                path=path,
+            ),
+            optimized=_bool_field(
+                value, "optimized", base.optimized, path=path
+            ),
+            method=_optional_string_profile_field(
+                value, "method", base.method, path=path
+            ),
+            use_brute=_bool_field(
+                value, "use_brute", base.use_brute, path=path
+            ),
+            remove_bias=_bool_field(
+                value, "remove_bias", base.remove_bias, path=path
+            ),
+            smoothing_level=_optional_float_profile_field(
+                value,
+                "smoothing_level",
+                base.smoothing_level,
+                minimum=0.0,
+                maximum=1.0,
+                path=path,
+            ),
+            smoothing_trend=_optional_float_profile_field(
+                value,
+                "smoothing_trend",
+                base.smoothing_trend,
+                minimum=0.0,
+                maximum=1.0,
+                path=path,
+            ),
+            smoothing_seasonal=_optional_float_profile_field(
+                value,
+                "smoothing_seasonal",
+                base.smoothing_seasonal,
+                minimum=0.0,
+                maximum=1.0,
+                path=path,
+            ),
+            damping_trend=_optional_float_profile_field(
+                value,
+                "damping_trend",
+                base.damping_trend,
+                minimum=0.0,
+                maximum=1.0,
+                path=path,
+            ),
+            parameter_bounds=_parameter_bounds_profile_field(
+                value, "parameter_bounds", path=path
+            ),
+            max_iterations=_int_field(
+                value,
+                "max_iterations",
+                base.max_iterations,
+                minimum=1,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _optional_float_profile_field(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: float | None,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+    path: str,
+) -> float | None:
+    if key not in mapping or mapping[key] is None:
+        return default
+    return _float_field(
+        mapping,
+        key,
+        0.0,
+        minimum=minimum,
+        maximum=maximum,
+        path=path,
+    )
+
+
+def _float_tuple_profile_field(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: tuple[float, ...],
+    *,
+    path: str,
+) -> tuple[float, ...]:
+    if key not in mapping:
+        return default
+    value = mapping[key]
+    if not isinstance(value, list):
+        raise QualityProfileError(f"{path}.{key} must be a list of numbers")
+    parsed: list[float] = []
+    for index, item in enumerate(value):
+        if isinstance(item, bool):
+            raise QualityProfileError(f"{path}.{key}[{index}] must be a number")
+        try:
+            parsed.append(float(item))  # type: ignore[arg-type]
+        except (TypeError, ValueError) as exc:
+            raise QualityProfileError(
+                f"{path}.{key}[{index}] must be a number"
+            ) from exc
+    return tuple(parsed)
+
+
+def _optional_string_profile_field(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: str,
+    *,
+    path: str,
+) -> str:
+    if key not in mapping or mapping[key] in (None, ""):
+        return default
+    return _string_field(mapping, key, default, path=path)
+
+
+def _parameter_bounds_profile_field(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    *,
+    path: str,
+) -> tuple[tuple[str, float, float], ...]:
+    if key not in mapping:
+        return ()
+    value = mapping[key]
+    if not isinstance(value, list):
+        raise QualityProfileError(f"{path}.{key} must be a list of objects")
+    parsed: list[tuple[str, float, float]] = []
+    for index, item in enumerate(value):
+        bound_path = f"{path}.{key}[{index}]"
+        bound = _expect_mapping(item, path=bound_path)
+        _reject_unknown_keys(bound, {"parameter", "lower", "upper"}, bound_path)
+        parameter = _string_field(bound, "parameter", "", path=bound_path)
+        lower = _float_field(bound, "lower", 0.0, path=bound_path)
+        upper = _float_field(bound, "upper", 0.0, path=bound_path)
+        parsed.append((parameter, lower, upper))
+    return tuple(parsed)
 
 
 def _quality_reporting_profile(

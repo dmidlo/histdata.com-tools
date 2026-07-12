@@ -32,6 +32,12 @@ from histdatacom.data_quality.classical_model_contracts import (
     format_classical_model_input_summary_lines,
 )
 from histdatacom.data_quality.engine import QUALITY_ENGINE_METADATA_KEY
+from histdatacom.data_quality.exponential_smoothing import (
+    EXPONENTIAL_SMOOTHING_BOUNDED_PAYLOAD_KEY,
+    EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY,
+    exponential_smoothing_summary,
+    format_exponential_smoothing_summary_lines,
+)
 from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_COVERAGE_BOUNDED_PAYLOAD_KEY,
@@ -361,6 +367,13 @@ def quality_report_payload(
             classical_model_input
         )
         payload["metadata"] = metadata
+    exponential_smoothing = _exponential_smoothing_summary(report)
+    if exponential_smoothing is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY] = (
+            exponential_smoothing
+        )
+        payload["metadata"] = metadata
     fingerprint_topology = _fingerprint_topology_summary(report)
     if fingerprint_topology is not None:
         metadata = _mapping_payload(payload.get("metadata"))
@@ -556,6 +569,11 @@ def format_quality_console_summary(
             )
         )
         lines.extend(
+            format_exponential_smoothing_summary_lines(
+                _exponential_smoothing_summary(report)
+            )
+        )
+        lines.extend(
             format_fingerprint_topology_attention_lines(
                 _fingerprint_topology_attention_summary(report)
             )
@@ -640,6 +658,7 @@ def bounded_quality_payload(
     synthetic_constraints = _synthetic_constraint_summary(report)
     classical_baselines = _classical_baseline_summary(report)
     classical_model_input = _classical_model_input_summary(report)
+    exponential_smoothing = _exponential_smoothing_summary(report)
     fingerprint_topology = _fingerprint_topology_summary(report)
     fingerprint_topology_attention = _fingerprint_topology_attention_summary(
         report
@@ -717,6 +736,10 @@ def bounded_quality_payload(
     if classical_model_input is not None:
         payload[CLASSICAL_MODEL_INPUT_BOUNDED_PAYLOAD_KEY] = (
             classical_model_input
+        )
+    if exponential_smoothing is not None:
+        payload[EXPONENTIAL_SMOOTHING_BOUNDED_PAYLOAD_KEY] = (
+            exponential_smoothing
         )
     if fingerprint_topology is not None:
         payload[FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY] = fingerprint_topology
@@ -2342,6 +2365,18 @@ def _classical_model_input_summary(
         return dict(summary)
     return _optional_mapping_payload(
         classical_model_input_summary(report.findings)
+    )
+
+
+def _exponential_smoothing_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return exponential-smoothing metadata from report or findings."""
+    summary = report.metadata.get(EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        exponential_smoothing_summary(report.findings)
     )
 
 

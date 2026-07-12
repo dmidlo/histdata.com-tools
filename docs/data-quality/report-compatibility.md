@@ -85,6 +85,35 @@ samples may include `series_id`, `period`, `row_id`, `source_row_number`, and
 This is a compatible optional v1 report addition. Consumers that do not use
 run-scoped fingerprints can ignore both keys.
 
+## Exponential-Smoothing Fingerprint
+
+Fingerprint findings may include the opt-in
+`time_series_fingerprint.exponential_smoothing` section using
+`histdatacom.exponential-smoothing.v1`. Full reports summarize it under
+`metadata.time_series_fingerprint_exponential_smoothing_summary`; the bounded
+runtime equivalent is `fingerprint_exponential_smoothing`, and the text summary
+heading is `Exponential-smoothing models`.
+
+Configuration, fit, forecast, evaluation, training-projection, and run-summary
+objects carry their own `histdatacom.exponential-smoothing-*.v1` schema
+versions. Model specifications and target summaries are deterministic and
+bounded. Scalar fitted parameters may be present in bounded fit samples, but
+fitted backend objects, residual vectors, exception text, and measured
+wall-clock durations are intentionally absent. Consumers must treat model
+status, convergence, errors, and baseline comparisons as advisory; no field
+selects an automatic winner or changes the data-quality exit decision.
+
+The same annotation engine projects a configured specification and horizon as
+nullable `cm_ets_*` scalar columns on enriched tick rows. Forecast values are
+point-in-time available at the origin-bin close. Realized actual/error values
+are post-observation diagnostics with separate availability and eligibility
+flags. Durable identity remains `series_id`, `period`, and `row_id`; timestamp
+is never the sole join key.
+
+This is a compatible optional v1 report and enriched-column addition. Core
+installs and profiles that do not enable the family omit these report keys and
+do not import the optional numerical backend.
+
 ## Golden Fixtures
 
 Representative payload fixtures live under

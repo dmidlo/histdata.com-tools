@@ -31,6 +31,16 @@ from histdatacom.data_quality.classical_model_contracts import (
     CLASSICAL_MODEL_INPUT_SUMMARY_SCHEMA_VERSION,
     CLASSICAL_MODEL_TRAINING_PROJECTION_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.exponential_smoothing import (
+    EXPONENTIAL_SMOOTHING_CONFIGURATION_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_EVALUATION_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_FIT_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_FORECAST_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY,
+    EXPONENTIAL_SMOOTHING_SUMMARY_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS,
     FINGERPRINT_REPORT_SURFACE_CONTRACTS,
@@ -72,6 +82,10 @@ from histdatacom.data_quality.synthetic_constraints import (
     SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION,
     SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
     SYNTHETIC_VALIDATION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.training_features import (
+    EXPONENTIAL_SMOOTHING_COLUMNS,
+    training_feature_definitions,
 )
 from histdatacom.runtime_contracts import JSONValue
 
@@ -137,6 +151,39 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert schemas["fingerprint_classical_model_input_summary"][
         "schema_version"
     ] == (CLASSICAL_MODEL_INPUT_SUMMARY_SCHEMA_VERSION)
+    assert schemas["fingerprint_exponential_smoothing"]["schema_version"] == (
+        EXPONENTIAL_SMOOTHING_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_exponential_smoothing_configuration"][
+            "schema_version"
+        ]
+        == EXPONENTIAL_SMOOTHING_CONFIGURATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_exponential_smoothing_fit"]["schema_version"]
+        == EXPONENTIAL_SMOOTHING_FIT_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_exponential_smoothing_forecast"]["schema_version"]
+        == EXPONENTIAL_SMOOTHING_FORECAST_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_exponential_smoothing_evaluation"][
+            "schema_version"
+        ]
+        == EXPONENTIAL_SMOOTHING_EVALUATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_exponential_smoothing_training_projection"][
+            "schema_version"
+        ]
+        == EXPONENTIAL_SMOOTHING_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_exponential_smoothing_summary"]["schema_version"]
+        == EXPONENTIAL_SMOOTHING_SUMMARY_SCHEMA_VERSION
+    )
     assert (
         schemas["fingerprint_decomposition_training_projection"][
             "schema_version"
@@ -190,6 +237,10 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert payload["metadata_keys"]["report_metadata"][
         "classical_model_input"
     ] == (CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY)
+    assert (
+        payload["metadata_keys"]["report_metadata"]["exponential_smoothing"]
+        == EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY
+    )
 
     implemented = payload["sections"]["implemented"]["target_sections"]
     assert [section["name"] for section in implemented] == [
@@ -205,8 +256,28 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "cache_source_parity",
         "classical_baselines",
         "classical_model_input",
+        "exponential_smoothing",
         "synthetic_constraints",
         "fingerprint_audit",
+    ]
+    exponential = next(
+        section
+        for section in implemented
+        if section["name"] == "exponential_smoothing"
+    )
+    definitions = {
+        definition.name: definition
+        for definition in training_feature_definitions()
+    }
+    assert exponential["augmented_columns"] == [
+        {
+            "name": name,
+            "dtype": definitions[name].dtype,
+            "nullable": definitions[name].nullable,
+            "grain": definitions[name].grain,
+            "source": definitions[name].source,
+        }
+        for name in EXPONENTIAL_SMOOTHING_COLUMNS
     ]
     planned = payload["sections"]["planned"]["target_sections"]
     assert planned == []

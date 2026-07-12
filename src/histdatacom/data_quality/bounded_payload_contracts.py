@@ -25,6 +25,9 @@ from histdatacom.data_quality.engine import (
     QUALITY_ENGINE_METADATA_KEY,
     run_quality_assessment,
 )
+from histdatacom.data_quality.exponential_smoothing import (
+    EXPONENTIAL_SMOOTHING_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.fingerprints import (
     CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     CROSS_SERIES_FINGERPRINT_RULE_ID,
@@ -1234,6 +1237,9 @@ def _limited_tick_fingerprint_payload() -> dict[str, JSONValue]:
     payload["classical_model_input"] = _classical_model_input_payload(
         "GBPUSD", status="limited"
     )
+    payload["exponential_smoothing"] = _exponential_smoothing_payload(
+        "GBPUSD", status="limited"
+    )
     return payload
 
 
@@ -1303,6 +1309,7 @@ def _tick_fingerprint_payload(
     )
     payload["classical_baselines"] = _classical_baseline_payload(symbol)
     payload["classical_model_input"] = _classical_model_input_payload(symbol)
+    payload["exponential_smoothing"] = _exponential_smoothing_payload(symbol)
     return payload
 
 
@@ -1356,6 +1363,30 @@ def _classical_model_input_payload(
             "schema_version": "histdatacom.classical-model-fold.v1",
             "fold_count": 8,
             "valid_fold_count": 8,
+        },
+    }
+
+
+def _exponential_smoothing_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    return {
+        "schema_version": EXPONENTIAL_SMOOTHING_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": "insufficient_data" if status == "limited" else None,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "fit_summary": {
+            "fit_attempt_count": 4,
+            "failed_fit_count": 1 if status == "limited" else 0,
+        },
+        "evaluation": {
+            "model_count": 1,
+            "fold_count": 4,
+            "evaluated_fold_count": 3 if status == "limited" else 4,
+            "automatic_winner": False,
         },
     }
 
