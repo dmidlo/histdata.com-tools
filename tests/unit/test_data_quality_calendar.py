@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from histdatacom.data_quality import (
     DOMAIN_CALENDAR_SESSION_RULE_ID,
     QUALITY_PROFILE_SCHEMA_VERSION,
@@ -55,6 +57,31 @@ def test_calendar_policy_documents_optional_static_holiday_scope() -> None:
     assert policy["month_end_policy"] == "source_calendar_date"
     assert policy["calendar_profile"]["static_advisory"] is True
     assert policy["calendar_profile"]["complete"] is False
+    assert policy["weekend_activity_policy"] == "advisory"
+    assert policy["expected_session_closure_policy"] == "expected"
+
+
+def test_calendar_profile_validates_explicit_session_policies() -> None:
+    """Operator profiles should expose explicit weekend and closure policy."""
+    profile = calendar_profile_from_mapping(
+        {
+            "weekend_activity_policy": "allowed",
+            "expected_session_closure_policy": "unexpected",
+        }
+    )
+
+    assert profile.weekend_activity_policy == "allowed"
+    assert profile.expected_session_closure_policy == "unexpected"
+    assert profile.to_metadata()["weekend_activity_policy"] == "allowed"
+
+
+def test_calendar_profile_rejects_unknown_weekend_policy() -> None:
+    """Policy values should fail before ambiguous remediation is emitted."""
+    with pytest.raises(
+        ValueError,
+        match="weekend_activity_policy must be one of",
+    ):
+        calendar_profile_from_mapping({"weekend_activity_policy": "maybe"})
 
 
 def test_domain_calendar_rule_reports_session_and_overlap_counts(

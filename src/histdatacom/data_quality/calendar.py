@@ -444,6 +444,10 @@ def calendar_policy_metadata(
         "holiday_calendar_complete": profile.complete,
         "holiday_calendar_static_advisory": profile.static_advisory,
         "holiday_calendar_limitations": "; ".join(profile.limitations),
+        "weekend_activity_policy": profile.weekend_activity_policy,
+        "expected_session_closure_policy": (
+            profile.expected_session_closure_policy
+        ),
         "static_major_holidays": [
             holiday.to_metadata() for holiday in STATIC_MAJOR_HOLIDAYS
         ],

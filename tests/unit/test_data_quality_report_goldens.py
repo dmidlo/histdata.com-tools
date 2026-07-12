@@ -1788,7 +1788,10 @@ def _assert_fingerprint_topology_target(
         "weekend_activity_count",
     }
     assert expected_keys <= set(payload)
-    assert set(payload) <= expected_keys | {"inspection_context"}
+    assert set(payload) <= expected_keys | {
+        "calendar_policy",
+        "inspection_context",
+    }
     axis = _mapping(payload["target_axis"])
     assert set(axis) == {
         "data_format",
@@ -1886,6 +1889,7 @@ def _assert_fingerprint_topology_attention_target(
         "structural",
         "sequence",
         "session",
+        "contextual",
     }
     assert isinstance(payload["attention_flags"], list)
     assert isinstance(payload["flags"], list)
@@ -1944,8 +1948,11 @@ def _assert_fingerprint_topology_inspection_context(
             section["limit_metadata"],
             keys=("samples",),
         )
-        if action_linked and section_name != "expected_session_closures":
-            assert section["actionable"] is True
+        if action_linked and (
+            section_name != "expected_session_closures"
+            or section.get("actionable") is True
+        ):
+            assert isinstance(section["actionable"], bool)
             assert set(_mapping(section["target_axis"])) == {
                 "data_format",
                 "kind",
@@ -1953,9 +1960,10 @@ def _assert_fingerprint_topology_inspection_context(
                 "symbol",
                 "timeframe",
             }
-            _assert_fingerprint_remediation_hint(
-                _mapping(section["next_action"])
+            action_key = (
+                "next_action" if section["actionable"] else "policy_note"
             )
+            _assert_fingerprint_remediation_hint(_mapping(section[action_key]))
 
 
 def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
@@ -2628,7 +2636,15 @@ def _assert_compact_numeric_summary(payload: dict[str, JSONValue]) -> None:
 def _assert_fingerprint_remediation_hint(
     payload: dict[str, JSONValue],
 ) -> None:
-    assert set(payload) == {"action_kind", "code", "flag", "message", "rule_id"}
+    assert {"action_kind", "code", "flag", "message", "rule_id"} <= set(payload)
+    assert set(payload) <= {
+        "action_kind",
+        "code",
+        "flag",
+        "message",
+        "policy_context",
+        "rule_id",
+    }
     assert isinstance(payload["action_kind"], str)
     assert payload["action_kind"] in {
         "configure",
@@ -2636,6 +2652,7 @@ def _assert_fingerprint_remediation_hint(
         "rebuild",
         "repair",
         "verify",
+        "context",
     }
     assert isinstance(payload["code"], str)
     assert payload["code"]
@@ -2645,6 +2662,12 @@ def _assert_fingerprint_remediation_hint(
     assert payload["message"]
     assert isinstance(payload["rule_id"], str)
     assert payload["rule_id"]
+    if "policy_context" in payload:
+        context = _mapping(payload["policy_context"])
+        assert context["schema_version"] == (
+            "histdatacom.calendar-policy-remediation-context.v1"
+        )
+        assert isinstance(context["actionable"], bool)
 
 
 def _assert_quality_next_actions(payload: dict[str, JSONValue]) -> None:
@@ -2673,7 +2696,7 @@ def _assert_quality_next_actions(payload: dict[str, JSONValue]) -> None:
 
 
 def _assert_quality_next_action(payload: dict[str, JSONValue]) -> None:
-    assert set(payload) == {
+    expected_keys = {
         "action_kind",
         "affected_target_count",
         "attention_level_counts",
@@ -2695,6 +2718,8 @@ def _assert_quality_next_action(payload: dict[str, JSONValue]) -> None:
         "target_axis_truncated",
         "urgency",
     }
+    assert expected_keys <= set(payload)
+    assert set(payload) <= expected_keys | {"policy_context"}
     assert payload["urgency"] in {"high", "medium", "low"}
     _assert_limit_metadata_map(payload["limit_metadata"], keys=("target_axes",))
     assert payload["action_kind"] in {
@@ -2704,6 +2729,8 @@ def _assert_quality_next_action(payload: dict[str, JSONValue]) -> None:
         "repair",
         "verify",
     }
+    if "policy_context" in payload:
+        assert isinstance(payload["policy_context"], dict)
     assert isinstance(payload["code"], str)
     assert payload["code"]
     assert isinstance(payload["message"], str)

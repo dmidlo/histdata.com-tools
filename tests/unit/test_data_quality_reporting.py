@@ -545,6 +545,73 @@ def test_topology_attention_cli_lines_render_bounded_inspection_context() -> (
     )
 
 
+def test_topology_attention_cli_renders_compact_allowed_weekend_policy() -> (
+    None
+):
+    """Allowed weekend activity should render as context, not urgent action."""
+    policy_context = {
+        "actionable": False,
+        "weekend_activity_policy": "allowed",
+        "profile_name": "weekend-market",
+    }
+    note = {
+        "code": "verify_weekend_session_policy",
+        "message": "weekend activity is allowed by the active profile",
+        "action_kind": "context",
+        "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "flag": "weekend_activity",
+        "policy_context": policy_context,
+    }
+    lines = format_fingerprint_topology_attention_lines(
+        {
+            "attention_target_count": 1,
+            "included_attention_target_count": 1,
+            "omitted_attention_target_count": 0,
+            "target_summaries": [
+                {
+                    "target_axis": {
+                        "data_format": "ascii",
+                        "timeframe": "T",
+                        "symbol": "EURUSD",
+                        "period": "201202",
+                        "kind": "csv",
+                    },
+                    "attention_level": "contextual",
+                    "attention_flags": ["weekend_activity"],
+                    "remediation_hints": [note],
+                    "calendar_policy": {
+                        "weekend_activity_policy": "allowed",
+                        "expected_session_closure_policy": "expected",
+                        "calendar_profile": {"name": "weekend-market"},
+                    },
+                    "invalid_timestamp_count": 0,
+                    "duplicate_timestamp_count": 0,
+                    "non_monotonic_count": 0,
+                    "suspicious_gap_count": 0,
+                    "weekend_activity_count": 1,
+                    "max_gap_ms": None,
+                    "computed_from": "text_scan",
+                    "inspection_context": {
+                        "weekend_activity": {
+                            "included_count": 1,
+                            "total_count": 1,
+                            "omitted_count": 0,
+                            "samples": [],
+                            "policy_note": note,
+                        }
+                    },
+                }
+            ],
+        }
+    )
+    output = "\n".join(lines)
+
+    assert "contextual" in output
+    assert "policy weekend=allowed profile=weekend-market" in output
+    assert "policy-note=verify_weekend_session_policy" in output
+    assert "action=verify_weekend_session_policy" not in output
+
+
 def test_quality_report_payload_adds_fingerprint_distribution_metadata(
     tmp_path: Path,
 ) -> None:

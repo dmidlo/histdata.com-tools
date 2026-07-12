@@ -180,6 +180,7 @@ DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_COUNT = 1
 DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_RATE = 0.0
 DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_TRUNCATED = True
 DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_CACHE_FLOAT_PRECISION = True
+_CALENDAR_POLICY_CONTEXT_TEXT_LIMIT = 128
 SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES = (TICK,)
 SUPPORTED_SERIES_FINGERPRINT_KINDS = (
     QualityTargetKind.CSV,
@@ -4306,8 +4307,17 @@ def _series_fingerprint_topology_target_summaries(
         if not topology:
             continue
         target_axis = _payload_mapping(payload.get("target_axis"))
+        calendar = _payload_mapping(payload.get("calendar_regimes"))
+        calendar_policy = _compact_calendar_policy(
+            _payload_mapping(calendar.get("calendar_policy"))
+        )
         target_summaries.append(
-            _topology_target_summary(finding, target_axis, topology)
+            _topology_target_summary(
+                finding,
+                target_axis,
+                topology,
+                calendar_policy=calendar_policy,
+            )
         )
     return target_summaries
 
@@ -4316,6 +4326,8 @@ def _topology_target_summary(
     finding: QualityFinding,
     target_axis: Mapping[str, JSONValue],
     topology: Mapping[str, JSONValue],
+    *,
+    calendar_policy: Mapping[str, JSONValue],
 ) -> dict[str, JSONValue]:
     flags = _topology_flags(topology)
     summary: dict[str, JSONValue] = {
@@ -4355,7 +4367,53 @@ def _topology_target_summary(
     inspection_context = _payload_mapping(topology.get("inspection_context"))
     if inspection_context:
         summary["inspection_context"] = dict(inspection_context)
+    if calendar_policy:
+        summary["calendar_policy"] = dict(calendar_policy)
     return summary
+
+
+def _compact_calendar_policy(
+    policy: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    """Return bounded calendar policy fields needed by remediation guidance."""
+    if not policy:
+        return {}
+    compact: dict[str, JSONValue] = {}
+    for key in (
+        "source_timezone",
+        "canonical_timezone",
+        "holiday_calendar_source",
+        "holiday_calendar_complete",
+        "holiday_calendar_static_advisory",
+        "weekend_activity_policy",
+        "expected_session_closure_policy",
+    ):
+        value = policy.get(key)
+        if value is not None:
+            compact[key] = _bounded_calendar_policy_value(value)
+    profile = _payload_mapping(policy.get("calendar_profile"))
+    compact_profile: dict[str, JSONValue] = {}
+    for key in (
+        "name",
+        "source",
+        "version",
+        "complete",
+        "static_advisory",
+        "weekend_activity_policy",
+        "expected_session_closure_policy",
+    ):
+        value = profile.get(key)
+        if value is not None:
+            compact_profile[key] = _bounded_calendar_policy_value(value)
+    if compact_profile:
+        compact["calendar_profile"] = compact_profile
+    return compact
+
+
+def _bounded_calendar_policy_value(value: JSONValue) -> JSONValue:
+    if isinstance(value, str):
+        return value[:_CALENDAR_POLICY_CONTEXT_TEXT_LIMIT]
+    return value
 
 
 def _topology_target_axis(
@@ -4468,18 +4526,29 @@ def _topology_attention_target_summary(
 ) -> dict[str, JSONValue] | None:
     flags = _topology_summary_flags(target.get("flags"))
     flag_set = set(flags)
+    calendar_policy = _payload_mapping(target.get("calendar_policy"))
     attention_flags = [
         flag for flag in ACTIONABLE_TOPOLOGY_FLAGS if flag in flag_set
     ]
+    if (
+        "expected_session_closures" in flag_set
+        and _summary_key(calendar_policy.get("expected_session_closure_policy"))
+        == "unexpected"
+    ):
+        attention_flags.append("expected_session_closures")
     if not attention_flags:
         return None
-    attention_level = _topology_attention_level(attention_flags)
+    attention_level = _topology_attention_level(
+        attention_flags,
+        calendar_policy=calendar_policy,
+    )
     summary: dict[str, JSONValue] = {
         "target_axis": _topology_attention_axis(target),
         "attention_level": attention_level,
         "attention_flags": list(attention_flags),
         "remediation_hints": remediation_hint_payloads_for_flags(
-            attention_flags
+            attention_flags,
+            calendar_policy=calendar_policy,
         ),
         "flags": list(flags),
         "status": _summary_key(target.get("status")),
@@ -4503,9 +4572,12 @@ def _topology_attention_target_summary(
         "computed_from": _summary_key(target.get("computed_from")),
         "cache_source": _optional_summary_key(target.get("cache_source")),
     }
+    if calendar_policy:
+        summary["calendar_policy"] = dict(calendar_policy)
     inspection_context = _topology_attention_inspection_context(
         target,
         attention_flags,
+        calendar_policy=calendar_policy,
     )
     if inspection_context:
         summary["inspection_context"] = inspection_context
@@ -4515,6 +4587,8 @@ def _topology_attention_target_summary(
 def _topology_attention_inspection_context(
     target: Mapping[str, JSONValue],
     attention_flags: list[str],
+    *,
+    calendar_policy: Mapping[str, JSONValue],
 ) -> dict[str, JSONValue]:
     raw = _payload_mapping(target.get("inspection_context"))
     if not raw:
@@ -4536,15 +4610,32 @@ def _topology_attention_inspection_context(
         section = _payload_mapping(raw.get(section_name))
         if flag not in attention_flag_set or not section:
             continue
-        hints = remediation_hint_payloads_for_flags((flag,))
+        hints = remediation_hint_payloads_for_flags(
+            (flag,),
+            calendar_policy=calendar_policy,
+        )
         linked = dict(section)
+        hint = hints[0] if hints and isinstance(hints[0], Mapping) else {}
+        policy_context = _payload_mapping(hint.get("policy_context"))
+        actionable = policy_context.get("actionable") is not False
+        linked["actionable"] = actionable
+        linked["target_axis"] = target_axis
+        if hints:
+            linked["next_action" if actionable else "policy_note"] = hints[0]
+        context[section_name] = linked
+    expected_closures = _payload_mapping(raw.get("expected_session_closures"))
+    if "expected_session_closures" in attention_flag_set and expected_closures:
+        linked = dict(expected_closures)
+        hints = remediation_hint_payloads_for_flags(
+            ("expected_session_closures",),
+            calendar_policy=calendar_policy,
+        )
         linked["actionable"] = True
         linked["target_axis"] = target_axis
         if hints:
             linked["next_action"] = hints[0]
-        context[section_name] = linked
-    expected_closures = _payload_mapping(raw.get("expected_session_closures"))
-    if "suspicious_gaps" in attention_flag_set and expected_closures:
+        context["expected_session_closures"] = linked
+    elif "suspicious_gaps" in attention_flag_set and expected_closures:
         contextual = dict(expected_closures)
         contextual["actionable"] = False
         contextual["contextual_for"] = "suspicious_gaps"
@@ -4579,7 +4670,11 @@ def _topology_summary_flags(value: object) -> tuple[str, ...]:
     return tuple(flags)
 
 
-def _topology_attention_level(flags: list[str]) -> str:
+def _topology_attention_level(
+    flags: list[str],
+    *,
+    calendar_policy: Mapping[str, JSONValue],
+) -> str:
     flag_set = set(flags)
     if "unavailable_topology" in flag_set:
         return "unavailable"
@@ -4587,6 +4682,12 @@ def _topology_attention_level(flags: list[str]) -> str:
         return "structural"
     if flag_set & {"duplicate_timestamps", "suspicious_gaps"}:
         return "sequence"
+    if (
+        flag_set == {"weekend_activity"}
+        and _summary_key(calendar_policy.get("weekend_activity_policy"))
+        == "allowed"
+    ):
+        return "contextual"
     return "session"
 
 
@@ -4618,6 +4719,7 @@ def _topology_attention_level_rank(level: str) -> int:
         "structural": 1,
         "sequence": 2,
         "session": 3,
+        "contextual": 4,
     }
     return ranks.get(level, 99)
 

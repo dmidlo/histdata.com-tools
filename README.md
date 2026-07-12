@@ -1031,6 +1031,30 @@ profile metadata used for classification, so incomplete/static calendar
 profiles remain advisory and visible rather than becoming hidden failures. Tick
 fingerprints also include bounded `conditional_distributions` for spread by
 active session and special tag when spread data is available.
+
+Calendar profiles can set `weekend_activity_policy` to `strict`, `advisory`, or
+`allowed`, and `expected_session_closure_policy` to `expected` or `unexpected`.
+Topology remediation keeps the stable `verify_weekend_session_policy` code but
+adds bounded policy context with the profile name/source/version, EST-no-DST to
+UTC basis, completeness, and the active treatment. Strict profiles produce an
+inspection action, advisory profiles request assumption review, and allowed
+weekend activity is rendered as a contextual note rather than a run-level next
+action. Expected session closures remain contextual unless the profile
+explicitly marks them `unexpected`.
+
+```json
+{
+  "rules": {
+    "domain.calendar_sessions": {
+      "calendar_profile": {
+        "weekend_activity_policy": "strict",
+        "expected_session_closure_policy": "expected"
+      }
+    }
+  }
+}
+```
+
 Tick fingerprints include `microstructure_dynamics` for interarrival times,
 spread changes, spread jumps, stale quote runs, bursts, and one-sided movement.
 These sections record their calculation basis and topology limitations, so

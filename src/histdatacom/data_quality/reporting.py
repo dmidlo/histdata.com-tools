@@ -103,6 +103,7 @@ _REMEDIATION_ACTIONABILITY_SORT = {
     RemediationActionability.INFORMATIONAL_ONLY.value: 7,
 }
 _NEXT_ACTION_ATTENTION_RANK = {
+    "contextual": 0,
     "session": 1,
     "sequence": 2,
     "unavailable": 3,
@@ -125,6 +126,7 @@ class _NextActionAggregate:
     message: str
     action_kind: str
     rule_id: str
+    policy_context: dict[str, JSONValue] = field(default_factory=dict)
     occurrence_count: int = 0
     severity_counts: Counter[str] = field(default_factory=Counter)
     attention_level_counts: Counter[str] = field(default_factory=Counter)
@@ -1586,6 +1588,9 @@ def _collect_fingerprint_topology_next_actions(
             continue
         for hint in hints:
             if isinstance(hint, Mapping):
+                policy_context = _mapping_payload(hint.get("policy_context"))
+                if policy_context.get("actionable") is False:
+                    continue
                 _add_next_action_hint(
                     aggregates,
                     hint,
@@ -1641,6 +1646,9 @@ def _add_next_action_hint(
             rule_id=rule_id,
         ),
     )
+    policy_context = _mapping_payload(hint.get("policy_context"))
+    if policy_context and not aggregate.policy_context:
+        aggregate.policy_context = dict(policy_context)
     aggregate.occurrence_count += 1
     aggregate.source_counts[source] += 1
     aggregate.target_axis_counts[_target_axis_key(target_axis)] += 1
@@ -1681,7 +1689,7 @@ def _next_action_payload(
         aggregate.attention_level_counts,
         _NEXT_ACTION_ATTENTION_RANK,
     )
-    return {
+    payload: dict[str, JSONValue] = {
         "code": aggregate.code,
         "message": aggregate.message,
         "action_kind": aggregate.action_kind,
@@ -1711,6 +1719,9 @@ def _next_action_payload(
         "flag_counts": _counter_payload(aggregate.flag_counts),
         "target_axis_counts": target_axis_counts,
     }
+    if aggregate.policy_context:
+        payload["policy_context"] = dict(aggregate.policy_context)
+    return payload
 
 
 def _next_action_sort_key(
@@ -1832,6 +1843,22 @@ def _format_quality_next_action_line(
         qualifiers.append(f"severity={severity}")
     if attention:
         qualifiers.append(f"attention={attention}")
+    policy = _mapping_payload(action.get("policy_context"))
+    weekend_policy = _optional_string_metadata(
+        policy,
+        "weekend_activity_policy",
+    )
+    closure_policy = _optional_string_metadata(
+        policy,
+        "expected_session_closure_policy",
+    )
+    profile_name = _optional_string_metadata(policy, "profile_name")
+    if weekend_policy:
+        qualifiers.append(f"weekend-policy={weekend_policy}")
+    if closure_policy == "unexpected":
+        qualifiers.append("closure-policy=unexpected")
+    if profile_name:
+        qualifiers.append(f"profile={profile_name}")
     qualifier_text = f", {', '.join(qualifiers)}" if qualifiers else ""
     return (
         f"{_optional_string_metadata(action, 'urgency')} "
@@ -2737,6 +2764,25 @@ def _format_fingerprint_topology_attention_target_line(
     cache_text = f", cache={cache_source}" if cache_source else ""
     hints = _remediation_hint_messages(summary.get("remediation_hints"))
     hint_text = f", next={'; '.join(hints)}" if hints else ""
+    policy = _mapping_payload(summary.get("calendar_policy"))
+    profile = _mapping_payload(policy.get("calendar_profile"))
+    weekend_policy = _optional_string_metadata(
+        policy,
+        "weekend_activity_policy",
+    )
+    closure_policy = _optional_string_metadata(
+        policy,
+        "expected_session_closure_policy",
+    )
+    profile_name = _optional_string_metadata(profile, "name")
+    policy_parts = []
+    if weekend_policy and "weekend_activity" in flags:
+        policy_parts.append(f"weekend={weekend_policy}")
+    if closure_policy and "expected_session_closures" in flags:
+        policy_parts.append(f"closures={closure_policy}")
+    if profile_name and policy_parts:
+        policy_parts.append(f"profile={profile_name}")
+    policy_text = f", policy {' '.join(policy_parts)}" if policy_parts else ""
     return (
         f"{data_format} {symbol} {timeframe} {period} {kind}: "
         f"{_string_metadata(summary, 'attention_level')}, "
@@ -2750,6 +2796,7 @@ def _format_fingerprint_topology_attention_target_line(
         f"{_format_duration_ms(summary.get('max_gap_ms'))}, "
         f"computed_from={_string_metadata(summary, 'computed_from')}"
         f"{cache_text}"
+        f"{policy_text}"
         f"{hint_text}"
     )
 
@@ -2781,8 +2828,15 @@ def _format_fingerprint_topology_inspection_context_lines(
             for sample in samples
         )
         action = _mapping_payload(section.get("next_action"))
+        policy_note = _mapping_payload(section.get("policy_note"))
         action_code = _optional_string_metadata(action, "code")
-        action_text = f" action={action_code}" if action_code else " contextual"
+        note_code = _optional_string_metadata(policy_note, "code")
+        if action_code:
+            action_text = f" action={action_code}"
+        elif note_code:
+            action_text = f" policy-note={note_code}"
+        else:
+            action_text = " contextual"
         evidence_text = f" {evidence}" if evidence else ""
         lines.append(
             "  - context "

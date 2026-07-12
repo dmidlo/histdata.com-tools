@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from histdatacom.data_quality import (
+    CALENDAR_POLICY_REMEDIATION_CONTEXT_SCHEMA_VERSION,
     QualityFinding,
     QualitySeverity,
     QualityTarget,
@@ -15,6 +18,26 @@ from histdatacom.data_quality import (
 )
 
 TARGET = QualityTarget(path="DAT_ASCII_EURUSD_T_201202.csv")
+
+
+def _calendar_policy(
+    *,
+    weekend: str = "advisory",
+    closures: str = "expected",
+) -> dict:
+    return {
+        "source_timezone": "EST-no-DST",
+        "canonical_timezone": "UTC",
+        "holiday_calendar_complete": weekend != "advisory",
+        "holiday_calendar_static_advisory": weekend == "advisory",
+        "weekend_activity_policy": weekend,
+        "expected_session_closure_policy": closures,
+        "calendar_profile": {
+            "name": "policy-profile",
+            "source": "operator-config",
+            "version": "2026.07",
+        },
+    }
 
 
 def test_remediation_actionability_classifies_supported_boundaries() -> None:
@@ -216,6 +239,97 @@ def test_remediation_catalog_preserves_input_order_and_ignores_unknowns() -> (
         "inspect_duplicate_timestamp_rows",
         "inspect_gap_boundaries",
     ]
+
+
+@pytest.mark.parametrize(
+    ("policy", "message", "action_kind", "actionable"),
+    (
+        (
+            "strict",
+            "inspect weekend activity against strict no-weekend policy",
+            "inspect",
+            True,
+        ),
+        (
+            "advisory",
+            "verify weekend-session profile assumptions",
+            "verify",
+            True,
+        ),
+        (
+            "allowed",
+            "weekend activity is allowed by the active profile",
+            "context",
+            False,
+        ),
+    ),
+)
+def test_weekend_remediation_hint_is_calendar_policy_aware(
+    policy: str,
+    message: str,
+    action_kind: str,
+    actionable: bool,
+) -> None:
+    """Weekend guidance should preserve its code while policy changes advice."""
+    payload = remediation_hint_payloads_for_flags(
+        ("weekend_activity",),
+        calendar_policy=_calendar_policy(weekend=policy),
+    )[0]
+    context = payload["policy_context"]
+
+    assert payload["code"] == "verify_weekend_session_policy"
+    assert payload["message"] == message
+    assert payload["action_kind"] == action_kind
+    assert context == {
+        "schema_version": CALENDAR_POLICY_REMEDIATION_CONTEXT_SCHEMA_VERSION,
+        "flag": "weekend_activity",
+        "actionable": actionable,
+        "profile_name": "policy-profile",
+        "profile_source": "operator-config",
+        "profile_version": "2026.07",
+        "source_timezone": "EST-no-DST",
+        "canonical_timezone": "UTC",
+        "calendar_complete": policy != "advisory",
+        "calendar_static_advisory": policy == "advisory",
+        "weekend_activity_policy": policy,
+        "expected_session_closure_policy": "expected",
+    }
+
+
+def test_expected_closure_hint_requires_explicit_unexpected_policy() -> None:
+    """Expected closures remain contextual unless the profile says otherwise."""
+    assert (
+        remediation_hint_payloads_for_flags(
+            ("expected_session_closures",),
+            calendar_policy=_calendar_policy(closures="expected"),
+        )
+        == []
+    )
+
+    payload = remediation_hint_payloads_for_flags(
+        ("expected_session_closures",),
+        calendar_policy=_calendar_policy(closures="unexpected"),
+    )[0]
+
+    assert payload["code"] == "inspect_unexpected_session_closure"
+    assert payload["action_kind"] == "inspect"
+    assert (
+        payload["policy_context"]["expected_session_closure_policy"]
+        == "unexpected"
+    )
+
+
+def test_calendar_policy_context_bounds_profile_text() -> None:
+    """Policy-aware hints should never echo unbounded profile metadata."""
+    policy = _calendar_policy(weekend="strict")
+    policy["calendar_profile"]["name"] = "x" * 500
+
+    payload = remediation_hint_payloads_for_flags(
+        ("weekend_activity",),
+        calendar_policy=policy,
+    )[0]
+
+    assert payload["policy_context"]["profile_name"] == "x" * 128
 
 
 def test_remediation_catalog_maps_representative_time_finding() -> None:

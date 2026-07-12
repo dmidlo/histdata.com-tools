@@ -54,6 +54,7 @@ from histdatacom.data_quality import (
     discover_quality_targets,
     quality_rules_for_groups,
     quality_next_actions_summary,
+    quality_report_to_json,
     quality_run_rules_for_groups,
     quality_target_from_path,
     run_quality_assessment,
@@ -1751,6 +1752,104 @@ def test_series_fingerprint_topology_attention_ignores_context_only_targets(
     assert attention["target_summaries"] == []
 
 
+def test_weekend_topology_guidance_follows_active_calendar_policy(
+    tmp_path: Path,
+) -> None:
+    """Default, strict, and allowed profiles should produce distinct advice."""
+    cases = (
+        ("default", None, "advisory", "verify", "session", True),
+        (
+            "strict",
+            _calendar_policy_profile(weekend="strict"),
+            "strict",
+            "inspect",
+            "session",
+            True,
+        ),
+        (
+            "allowed",
+            _calendar_policy_profile(weekend="allowed"),
+            "allowed",
+            "context",
+            "contextual",
+            False,
+        ),
+    )
+    for name, profile, policy, action_kind, level, actionable in cases:
+        target = _discovered_target(
+            write_ascii_case(tmp_path / name, _weekend_activity_case())
+        )
+        report = run_quality_assessment(
+            (target,),
+            quality_rules_for_groups(("fingerprint",), profile=profile),
+        )
+        attention = _mapping(
+            report.metadata[
+                TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY
+            ]
+        )
+        target_summary = _mapping(_list(attention["target_summaries"])[0])
+        hint = _mapping(_list(target_summary["remediation_hints"])[0])
+        context = _mapping(hint["policy_context"])
+        inspection = _mapping(target_summary["inspection_context"])
+        weekend = _mapping(inspection["weekend_activity"])
+
+        assert target_summary["attention_level"] == level
+        assert hint["code"] == "verify_weekend_session_policy"
+        assert hint["action_kind"] == action_kind
+        assert context["weekend_activity_policy"] == policy
+        assert context["actionable"] is actionable
+        assert weekend["actionable"] is actionable
+        if actionable:
+            actions = _mapping(quality_next_actions_summary(report))
+            action = _mapping(_list(actions["actions"])[0])
+            assert (
+                _mapping(action["policy_context"])["weekend_activity_policy"]
+                == policy
+            )
+            assert action["action_kind"] == action_kind
+            assert "next_action" in weekend
+        else:
+            assert quality_next_actions_summary(report) is None
+            assert "policy_note" in weekend
+            assert "next_action" not in weekend
+        assert quality_report_to_json(report) == quality_report_to_json(report)
+
+
+def test_expected_closure_becomes_actionable_only_when_profile_marks_unexpected(
+    tmp_path: Path,
+) -> None:
+    """An explicit unexpected-closure policy should create bounded guidance."""
+    target = _discovered_target(
+        write_ascii_case(tmp_path, _expected_weekend_closure_case())
+    )
+    report = run_quality_assessment(
+        (target,),
+        quality_rules_for_groups(
+            ("fingerprint",),
+            profile=_calendar_policy_profile(closures="unexpected"),
+        ),
+    )
+    attention = _mapping(
+        report.metadata[TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY]
+    )
+    target_summary = _mapping(_list(attention["target_summaries"])[0])
+    hint = _mapping(_list(target_summary["remediation_hints"])[0])
+    closure = _mapping(
+        _mapping(target_summary["inspection_context"])[
+            "expected_session_closures"
+        ]
+    )
+
+    assert target_summary["attention_flags"] == ["expected_session_closures"]
+    assert target_summary["attention_level"] == "session"
+    assert hint["code"] == "inspect_unexpected_session_closure"
+    assert closure["actionable"] is True
+    assert _mapping(closure["next_action"])["code"] == (
+        "inspect_unexpected_session_closure"
+    )
+
+
 def test_fingerprint_id_excludes_source_path_volatility(tmp_path: Path) -> None:
     """Identical content and target axis should hash the same across paths."""
     first = write_ascii_case(
@@ -2078,6 +2177,29 @@ def _weekend_activity_case() -> HistDataAsciiCase:
         filename="DAT_ASCII_EURUSD_T_201202_WEEKEND_ACTIVITY.csv",
         rows=("20120204 120000000,1.306600,1.306770,0",),
     )
+
+
+def _calendar_policy_profile(
+    *,
+    weekend: str = "advisory",
+    closures: str = "expected",
+) -> dict[str, Any]:
+    return {
+        "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+        "name": f"calendar-{weekend}-{closures}",
+        "rules": {
+            "domain.calendar_sessions": {
+                "calendar_profile": {
+                    "name": f"calendar-{weekend}-{closures}",
+                    "source": "operator-config",
+                    "version": "2026.07",
+                    "complete": True,
+                    "weekend_activity_policy": weekend,
+                    "expected_session_closure_policy": closures,
+                }
+            }
+        },
+    }
 
 
 def _cache_target(directory: Path) -> QualityTarget:

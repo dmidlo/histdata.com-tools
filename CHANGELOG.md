@@ -2,6 +2,9 @@
 
 ### Added
 
+- **data-quality**: make weekend and expected-session-closure remediation
+  guidance profile-aware with bounded calendar-policy context while preserving
+  stable public weekend hint codes (#344).
 - **data-quality**: preserve value-level quality-profile provenance during
   resolution across defaults, named profiles, files, YAML, API options, and CLI
   overrides, including previous source/value evidence (#367).
