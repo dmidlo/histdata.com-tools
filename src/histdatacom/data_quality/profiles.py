@@ -59,6 +59,9 @@ from histdatacom.data_quality.time import (
 from histdatacom.runtime_contracts import JSONValue
 
 QUALITY_PROFILE_SCHEMA_VERSION = "histdatacom.quality-profile.v1"
+QUALITY_PROFILE_RESOLUTION_SCHEMA_VERSION = (
+    "histdatacom.quality-profile-resolution.v1"
+)
 DEFAULT_QUALITY_PROFILE_NAME = "default"
 DEFAULT_QUALITY_PROFILE_SOURCE = "default"
 OPERATOR_QUALITY_PROFILE_SOURCE = "operator-config"
@@ -583,13 +586,224 @@ class QualityProfile:
         return payload
 
 
+@dataclass(frozen=True, slots=True)
+class QualityProfileValueSource:
+    """Value-level provenance retained while a quality profile is resolved."""
+
+    path: str
+    value: JSONValue
+    source: str
+    profile_name: str = ""
+    source_path: str = ""
+    selected_by: str = ""
+    override: bool = False
+    previous_source: str = ""
+    previous_value: JSONValue | None = None
+    previous_value_present: bool = False
+
+    def to_payload(self) -> dict[str, JSONValue]:
+        """Return deterministic JSON-compatible provenance metadata."""
+        payload: dict[str, JSONValue] = {
+            "path": self.path,
+            "value": self.value,
+            "source": self.source,
+        }
+        if self.profile_name:
+            payload["profile_name"] = self.profile_name
+        if self.source_path:
+            payload["source_path"] = self.source_path
+        if self.selected_by:
+            payload["selected_by"] = self.selected_by
+        if self.override:
+            payload["override"] = True
+            payload["previous_source"] = self.previous_source or "unknown"
+            payload["overridden_source"] = self.previous_source or "unknown"
+            if self.previous_value_present:
+                payload["previous_value"] = self.previous_value
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class QualityProfileResolution:
+    """Resolved quality profile plus deterministic value provenance."""
+
+    profile: QualityProfile
+    value_sources: tuple[QualityProfileValueSource, ...]
+    input_channels: tuple[dict[str, JSONValue], ...]
+    schema_version: str = QUALITY_PROFILE_RESOLUTION_SCHEMA_VERSION
+
+    def to_payload(self) -> dict[str, JSONValue]:
+        """Return the resolution contract as JSON-compatible metadata."""
+        return {
+            "schema_version": self.schema_version,
+            "resolved_profile": _expanded_quality_profile_payload(self.profile),
+            "input_channels": cast(JSONValue, list(self.input_channels)),
+            "effective_value_sources": cast(
+                JSONValue,
+                [item.to_payload() for item in self.value_sources],
+            ),
+        }
+
+
 def default_quality_profile() -> QualityProfile:
     """Return the deterministic default profile."""
     return QualityProfile()
 
 
+def resolve_quality_profile(
+    payload: Mapping[str, Any] | None = None,
+    *,
+    source: str = OPERATOR_QUALITY_PROFILE_SOURCE,
+    source_path: str = "",
+    config_path: str = "",
+    selected_by: str = "",
+) -> QualityProfileResolution:
+    """Resolve a profile while retaining source metadata for every value."""
+    raw_payload = dict(payload or {})
+    profile = _quality_profile_from_mapping(
+        raw_payload,
+        source=source,
+        source_path=source_path,
+    )
+    source_kind = (
+        "built_in_default"
+        if not raw_payload
+        else quality_profile_source_kind(source)
+    )
+    explicit_values = dict(_flatten_profile_mapping(raw_payload))
+    sources: list[QualityProfileValueSource] = []
+    for path, value in _flatten_profile_mapping(
+        _expanded_quality_profile_payload(profile)
+    ):
+        value_source = _resolved_profile_value_source(
+            path,
+            explicit_values=explicit_values,
+            source_kind=source_kind,
+        )
+        sources.append(
+            QualityProfileValueSource(
+                path=path,
+                value=value,
+                source=value_source,
+                profile_name=(
+                    profile.name
+                    if value_source not in {"built_in_default", "named_profile"}
+                    else ""
+                ),
+                source_path=(
+                    source_path if value_source != "built_in_default" else ""
+                ),
+                selected_by=(
+                    selected_by
+                    if value_source not in {"built_in_default", "named_profile"}
+                    else ""
+                ),
+            )
+        )
+    channels: list[dict[str, JSONValue]] = [
+        {
+            "kind": "built_in_default",
+            "description": "Built-in quality profile defaults.",
+        }
+    ]
+    if config_path:
+        _append_profile_input_channel(
+            channels,
+            {"kind": "yaml_config", "path": config_path},
+        )
+    if _is_named_quality_profile(profile, raw_payload):
+        _append_profile_input_channel(
+            channels,
+            {"kind": "named_profile", "profile_name": profile.name},
+        )
+    if raw_payload:
+        channel: dict[str, JSONValue] = {
+            "kind": source_kind,
+            "profile_name": profile.name,
+        }
+        if source_path:
+            channel["source_path"] = source_path
+        if selected_by:
+            channel["selected_by"] = selected_by
+        _append_profile_input_channel(channels, channel)
+    return QualityProfileResolution(
+        profile=profile,
+        value_sources=tuple(sorted(sources, key=lambda item: item.path)),
+        input_channels=tuple(channels),
+    )
+
+
+def apply_quality_profile_overrides(
+    resolution: QualityProfileResolution,
+    overrides: Mapping[str, JSONValue],
+    *,
+    source: str,
+    source_path: str = "",
+) -> QualityProfileResolution:
+    """Apply value overrides while retaining previous source and value facts."""
+    if not overrides:
+        return resolution
+    payload = resolution.profile.to_request_payload()
+    if resolution.profile.is_default:
+        payload["name"] = "operator"
+        payload["source"] = _quality_profile_contract_source(source)
+    override_pointers: set[str] = set()
+    for path, value in sorted(overrides.items()):
+        pointer = _profile_pointer(path)
+        override_pointers.add(pointer)
+        _set_profile_pointer(payload, pointer, value)
+    profile = _quality_profile_from_mapping(payload)
+    before = {item.path: item for item in resolution.value_sources}
+    sources: list[QualityProfileValueSource] = []
+    for path, value in _flatten_profile_mapping(
+        _expanded_quality_profile_payload(profile)
+    ):
+        previous = before.get(path)
+        changed = previous is None or previous.value != value
+        explicitly_overridden = path in override_pointers
+        if not changed and not explicitly_overridden and previous is not None:
+            sources.append(previous)
+            continue
+        sources.append(
+            QualityProfileValueSource(
+                path=path,
+                value=value,
+                source=source,
+                profile_name=profile.name,
+                source_path=source_path,
+                override=True,
+                previous_source=(previous.source if previous else "unknown"),
+                previous_value=(previous.value if previous else None),
+                previous_value_present=previous is not None,
+            )
+        )
+    channels = [dict(channel) for channel in resolution.input_channels]
+    _append_profile_input_channel(
+        channels,
+        {
+            "kind": source,
+            "paths": cast(JSONValue, sorted(override_pointers)),
+        },
+    )
+    return QualityProfileResolution(
+        profile=profile,
+        value_sources=tuple(sorted(sources, key=lambda item: item.path)),
+        input_channels=tuple(channels),
+    )
+
+
 def load_quality_profile_file(path: str | Path) -> QualityProfile:
     """Load and validate a JSON quality profile file."""
+    return load_quality_profile_file_resolution(path).profile
+
+
+def load_quality_profile_file_resolution(
+    path: str | Path,
+    *,
+    config_path: str = "",
+    selected_by: str = "",
+) -> QualityProfileResolution:
+    """Load a JSON profile while preserving file and selection provenance."""
     profile_path = Path(path).expanduser()
     try:
         payload = json.loads(profile_path.read_text(encoding="utf-8"))
@@ -602,10 +816,12 @@ def load_quality_profile_file(path: str | Path) -> QualityProfile:
     if not isinstance(payload, Mapping):
         msg = "quality profile JSON root must be an object"
         raise QualityProfileError(msg)
-    return quality_profile_from_mapping(
+    return resolve_quality_profile(
         payload,
         source="file",
         source_path=str(profile_path),
+        config_path=config_path,
+        selected_by=selected_by,
     )
 
 
@@ -616,6 +832,20 @@ def quality_profile_from_mapping(
     source_path: str = "",
 ) -> QualityProfile:
     """Validate and return a quality profile from a mapping payload."""
+    return _quality_profile_from_mapping(
+        payload,
+        source=source,
+        source_path=source_path,
+    )
+
+
+def _quality_profile_from_mapping(
+    payload: Mapping[str, Any] | None,
+    *,
+    source: str = OPERATOR_QUALITY_PROFILE_SOURCE,
+    source_path: str = "",
+) -> QualityProfile:
+    """Construct a profile without discarding resolver input metadata."""
     if not payload:
         return default_quality_profile()
     _reject_unknown_keys(payload, _TOP_LEVEL_KEYS, "quality_profile")
@@ -643,6 +873,19 @@ def quality_profile_from_mapping(
     return profile
 
 
+def quality_profile_resolution_from_value(
+    value: Mapping[str, Any] | QualityProfile | None,
+) -> QualityProfileResolution:
+    """Normalize a public profile value into the structured resolution form."""
+    if isinstance(value, QualityProfile):
+        return resolve_quality_profile(
+            value.to_request_payload(),
+            source=value.source,
+            source_path=value.source_path,
+        )
+    return resolve_quality_profile(value)
+
+
 def quality_profile_from_value(
     value: Mapping[str, Any] | QualityProfile | None,
 ) -> QualityProfile:
@@ -659,6 +902,153 @@ def quality_profile_metadata(
 ) -> dict[str, JSONValue]:
     """Return report metadata for an optional public profile value."""
     return quality_profile_from_value(value).to_metadata()
+
+
+def quality_profile_source_kind(value: str | QualityProfile) -> str:
+    """Return a stable public provenance kind for a profile source."""
+    source = value.source if isinstance(value, QualityProfile) else str(value)
+    aliases = {
+        "default": "built_in_default",
+        "file": "profile_file",
+        "api-options": "api_options",
+        "cli-options": "cli_options",
+        "operator-config": "operator_config",
+        "yaml-config": "yaml_config",
+        "cli-override": "cli_override",
+    }
+    return aliases.get(source, source.replace("-", "_") or "unknown")
+
+
+def _expanded_quality_profile_payload(
+    profile: QualityProfile,
+) -> dict[str, JSONValue]:
+    payload = profile.to_request_payload()
+    if "reporting" not in payload:
+        payload["reporting"] = profile.reporting_profile().to_metadata()
+    return payload
+
+
+def _flatten_profile_mapping(
+    value: Mapping[str, Any],
+    *,
+    prefix: str = "",
+) -> list[tuple[str, JSONValue]]:
+    flattened: list[tuple[str, JSONValue]] = []
+    for key in sorted(value, key=str):
+        path = f"{prefix}/{_profile_pointer_token(str(key))}"
+        item = value[key]
+        if isinstance(item, Mapping):
+            if item:
+                flattened.extend(_flatten_profile_mapping(item, prefix=path))
+            else:
+                flattened.append((path, {}))
+        else:
+            flattened.append((path, cast(JSONValue, item)))
+    return flattened
+
+
+def _resolved_profile_value_source(
+    path: str,
+    *,
+    explicit_values: Mapping[str, JSONValue],
+    source_kind: str,
+) -> str:
+    if path == "/name" and path in explicit_values:
+        return "named_profile"
+    if path in explicit_values:
+        return source_kind
+    if (
+        path in {"/source", "/source_path"}
+        and source_kind != "built_in_default"
+    ):
+        return source_kind
+    return "built_in_default"
+
+
+def _is_named_quality_profile(
+    profile: QualityProfile,
+    raw_payload: Mapping[str, Any],
+) -> bool:
+    return "name" in raw_payload and profile.name not in {
+        DEFAULT_QUALITY_PROFILE_NAME,
+        "operator",
+    }
+
+
+def _append_profile_input_channel(
+    channels: list[dict[str, JSONValue]],
+    channel: Mapping[str, JSONValue],
+) -> None:
+    kind = str(channel.get("kind") or "")
+    for existing in channels:
+        if existing.get("kind") != kind:
+            continue
+        for key, value in channel.items():
+            if key == "paths":
+                current = existing.get("paths")
+                current_paths = (
+                    list(current) if isinstance(current, list) else []
+                )
+                incoming = list(value) if isinstance(value, list) else []
+                existing["paths"] = cast(
+                    JSONValue,
+                    sorted({str(item) for item in (*current_paths, *incoming)}),
+                )
+            elif key != "kind":
+                existing[key] = value
+        return
+    channels.append(dict(channel))
+
+
+def _profile_pointer(path: str) -> str:
+    if path.startswith("/"):
+        return path
+    return "/" + "/".join(
+        _profile_pointer_token(part) for part in path.split(".") if part
+    )
+
+
+def _profile_pointer_token(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _profile_pointer_token_unescape(value: str) -> str:
+    return value.replace("~1", "/").replace("~0", "~")
+
+
+def _set_profile_pointer(
+    payload: dict[str, JSONValue],
+    pointer: str,
+    value: JSONValue,
+) -> None:
+    tokens = [
+        _profile_pointer_token_unescape(token)
+        for token in pointer.strip("/").split("/")
+        if token
+    ]
+    if not tokens:
+        raise QualityProfileError(
+            "quality profile override path cannot be empty"
+        )
+    current: dict[str, JSONValue] = payload
+    for token in tokens[:-1]:
+        existing = current.get(token)
+        if isinstance(existing, dict):
+            child = existing
+        else:
+            child = {}
+            current[token] = child
+        current = child
+    current[tokens[-1]] = value
+
+
+def _quality_profile_contract_source(source: str) -> str:
+    aliases = {
+        "api_options": "api-options",
+        "cli_override": "cli-options",
+        "yaml_config": "yaml-config",
+    }
+    return aliases.get(source, source.replace("_", "-"))
 
 
 def validate_quality_profile(profile: QualityProfile) -> None:

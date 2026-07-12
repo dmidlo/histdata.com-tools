@@ -1778,6 +1778,7 @@ def test_quality_profile_preview_prints_resolved_profile_without_submit(
     }
     assert [channel["kind"] for channel in explanation["input_channels"]] == [
         "built_in_default",
+        "named_profile",
         "profile_file",
         "cli_override",
     ]
@@ -1799,8 +1800,11 @@ def test_quality_profile_preview_prints_resolved_profile_without_submit(
         "path": "/reporting/remediation_catalog_audit/enabled",
         "value": True,
         "source": "cli_override",
+        "profile_name": "preview-profile",
+        "previous_source": "profile_file",
         "overridden_source": "profile_file",
         "override": True,
+        "previous_value": False,
     }
     diff = explanation["effective_diff"]
     assert diff["schema_version"] == (
@@ -2142,9 +2146,10 @@ def test_api_quality_profile_preview_returns_payload_without_submit(
     assert explanation["profile_source"]["kind"] == "api_options"
     assert [channel["kind"] for channel in explanation["input_channels"]] == [
         "built_in_default",
+        "named_profile",
         "api_options",
-        "cli_override",
     ]
+    assert payload["cli_overrides"] == {}
     value_sources = {
         item["path"]: item
         for item in explanation["effective_value_sources"]["values"]
@@ -2155,7 +2160,7 @@ def test_api_quality_profile_preview_returns_payload_without_submit(
     )
     assert (
         value_sources["/reporting/remediation_catalog_audit/enabled"]["source"]
-        == "cli_override"
+        == "api_options"
     )
     assert preview_path.read_text(encoding="utf-8").startswith(
         "Quality Profile Preview\n"
@@ -2222,6 +2227,7 @@ histdatacom:
     assert [channel["kind"] for channel in explanation["input_channels"]] == [
         "built_in_default",
         "yaml_config",
+        "named_profile",
         "profile_file",
     ]
     value_sources = {
@@ -2232,6 +2238,81 @@ histdatacom:
         value_sources["/rules/fingerprint.series/max_rows"]["source"]
         == "profile_file"
     )
+
+
+def test_config_quality_profile_override_is_attributed_to_yaml(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """YAML reporting overrides should not be mislabeled as CLI input."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "name": "yaml-override-profile",
+                "reporting": {"remediation_catalog_audit": {"enabled": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality: true
+  quality_target: {tmp_path}
+  quality_profile: {profile_path}
+  quality_profile_preview: true
+  remediation_catalog_audit: true
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    assert histdata_com.main() is None
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["cli_overrides"] == {}
+    channels = {
+        channel["kind"]: channel
+        for channel in payload["profile_explanation"]["input_channels"]
+    }
+    assert channels["yaml_config"]["path"] == str(config_path)
+    assert channels["yaml_config"]["paths"] == [
+        "/reporting/remediation_catalog_audit/enabled"
+    ]
+    sources = {
+        item["path"]: item
+        for item in payload["profile_explanation"]["effective_value_sources"][
+            "values"
+        ]
+    }
+    assert sources["/reporting/remediation_catalog_audit/enabled"] == {
+        "path": "/reporting/remediation_catalog_audit/enabled",
+        "value": True,
+        "source": "yaml_config",
+        "profile_name": "yaml-override-profile",
+        "source_path": str(config_path),
+        "override": True,
+        "previous_source": "profile_file",
+        "overridden_source": "profile_file",
+        "previous_value": False,
+    }
 
 
 def test_config_quality_profile_preview_markdown_renders_tables(

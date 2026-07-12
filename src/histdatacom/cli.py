@@ -87,10 +87,10 @@ from histdatacom.data_quality.preflight import (
     DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE,
 )
 from histdatacom.data_quality.profiles import (
-    QualityProfile,
     QualityProfileError,
-    load_quality_profile_file,
-    quality_profile_from_mapping,
+    apply_quality_profile_overrides,
+    load_quality_profile_file_resolution,
+    resolve_quality_profile,
 )
 from histdatacom.fx_enums import (
     Format,
@@ -131,21 +131,9 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
-def _enable_remediation_catalog_audit(
-    profile: QualityProfile,
-) -> QualityProfile:
-    """Return a profile with remediation-catalog audit reporting enabled."""
-    payload = profile.to_request_payload()
-    reporting_value = payload.get("reporting", {})
-    reporting = (
-        dict(reporting_value) if isinstance(reporting_value, dict) else {}
-    )
-    audit_value = reporting.get("remediation_catalog_audit", {})
-    audit = dict(audit_value) if isinstance(audit_value, dict) else {}
-    audit["enabled"] = True
-    reporting["remediation_catalog_audit"] = audit
-    payload["reporting"] = reporting
-    return quality_profile_from_mapping(payload)
+def _argv_has_option(args: Tuple[str, ...], option: str) -> bool:
+    """Return whether argv contains an option in split or equals form."""
+    return any(arg == option or arg.startswith(f"{option}=") for arg in args)
 
 
 class ArgParser(argparse.ArgumentParser):  # noqa:H601
@@ -186,6 +174,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
         self.arg_namespace = options if options is not None else Options()
         self._default_args = self.arg_namespace.to_dict()
+        self._explicit_cli_args: Tuple[str, ...] = ()
+        self._config_file_args: Tuple[str, ...] = ()
         self.set_defaults(**self._default_args)
 
     @classmethod
@@ -548,40 +538,80 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         self._load_quality_profile()
 
     def _load_quality_profile(self) -> None:
-        """Validate and embed an operator quality profile, when configured."""
+        """Resolve a profile and preserve value-level source metadata."""
+        config_path = str(self.arg_namespace.config_path or "")
         try:
             if self.arg_namespace.quality_profile_path:
-                profile = load_quality_profile_file(
-                    self.arg_namespace.quality_profile_path
+                if self.arg_namespace.from_api:
+                    selected_by = "api_options"
+                elif _argv_has_option(
+                    self._explicit_cli_args,
+                    "--quality-profile",
+                ):
+                    selected_by = "cli_override"
+                else:
+                    selected_by = "yaml_config"
+                resolution = load_quality_profile_file_resolution(
+                    self.arg_namespace.quality_profile_path,
+                    config_path=config_path,
+                    selected_by=selected_by,
                 )
             elif self.arg_namespace.quality_profile:
-                profile = quality_profile_from_mapping(
+                resolution = resolve_quality_profile(
                     self.arg_namespace.quality_profile,
-                    source="api-options",
-                )
-            elif self.arg_namespace.quality_remediation_catalog_audit:
-                profile = quality_profile_from_mapping(
-                    {
-                        "reporting": {
-                            "remediation_catalog_audit": {
-                                "enabled": True,
-                            }
-                        }
-                    },
                     source=(
                         "api-options"
                         if self.arg_namespace.from_api
-                        else "cli-options"
+                        else "operator-config"
+                    ),
+                    config_path=config_path,
+                    selected_by=(
+                        "api_options"
+                        if self.arg_namespace.from_api
+                        else "operator_config"
                     ),
                 )
             else:
-                return
+                resolution = resolve_quality_profile(
+                    config_path=config_path,
+                )
             if self.arg_namespace.quality_remediation_catalog_audit:
-                profile = _enable_remediation_catalog_audit(profile)
+                if self.arg_namespace.from_api:
+                    override_source = "api_options"
+                elif _argv_has_option(
+                    self._explicit_cli_args,
+                    "--quality-remediation-catalog-audit",
+                ):
+                    override_source = "cli_override"
+                elif _argv_has_option(
+                    self._config_file_args,
+                    "--quality-remediation-catalog-audit",
+                ):
+                    override_source = "yaml_config"
+                else:
+                    override_source = "cli_override"
+                resolution = apply_quality_profile_overrides(
+                    resolution,
+                    {
+                        "reporting.remediation_catalog_audit.enabled": True,
+                    },
+                    source=override_source,
+                    source_path=(
+                        config_path if override_source == "yaml_config" else ""
+                    ),
+                )
         except QualityProfileError as exc:
             print(f"quality profile error: {exc}")  # noqa:T201
             raise SystemExit(1) from exc
-        self.arg_namespace.quality_profile = profile.to_request_payload()
+        self.arg_namespace.quality_profile_resolution = resolution.to_payload()
+        if (
+            self.arg_namespace.quality_profile_path
+            or self.arg_namespace.quality_profile
+            or self.arg_namespace.quality_remediation_catalog_audit
+        ):
+            self.arg_namespace.quality_profile = (
+                resolution.profile.to_request_payload()
+            )
 
     def _clean_from_api_args(self) -> list:  # noqa:CCR001
         """Build the args list from api Options.
@@ -1949,11 +1979,15 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
         if self.arg_namespace.from_api:
             args = self._clean_from_api_args()
+            self._explicit_cli_args = ()
+            self._config_file_args = ()
             self.parse_args(args, namespace=self.arg_namespace)
         else:
             # Get the args from sys.argv
             cli_args = sys.argv[1:]
             config_args = self._config_args_from_cli(cli_args)
+            self._explicit_cli_args = tuple(cli_args)
+            self._config_file_args = tuple(config_args)
             self.parse_args(
                 [*config_args, *cli_args],
                 namespace=self.arg_namespace,

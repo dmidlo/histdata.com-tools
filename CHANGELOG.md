@@ -1,5 +1,11 @@
 ## Unreleased
 
+### Added
+
+- **data-quality**: preserve value-level quality-profile provenance during
+  resolution across defaults, named profiles, files, YAML, API options, and CLI
+  overrides, including previous source/value evidence (#367).
+
 ### Fixed
 
 - **ci**: reserve coverage for one required `dev`-to-`main` production

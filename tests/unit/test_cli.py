@@ -779,6 +779,16 @@ histdatacom:
     assert options.quality_profile["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
     }
+    sources = {
+        item["path"]: item
+        for item in options.quality_profile_resolution[
+            "effective_value_sources"
+        ]
+    }
+    assert (
+        sources["/reporting/remediation_catalog_audit/enabled"]["source"]
+        == "yaml_config"
+    )
     assert options.quality_fail_on == "never"
     assert options.quality_max_errors == 2
     assert options.quality_max_warnings == 5
@@ -1047,6 +1057,19 @@ def test_data_quality_cli_loads_quality_profile_file(
     assert options.quality_profile["name"] == "cli-profile"
     assert options.quality_profile["source"] == "file"
     assert options.quality_profile["source_path"] == str(profile_path)
+    resolution = options.quality_profile_resolution
+    assert [channel["kind"] for channel in resolution["input_channels"]] == [
+        "built_in_default",
+        "named_profile",
+        "profile_file",
+    ]
+    sources = {
+        item["path"]: item for item in resolution["effective_value_sources"]
+    }
+    assert (
+        sources["/rules/ingestion.ascii.row_count/min_row_count"]["source"]
+        == "profile_file"
+    )
 
 
 def test_data_quality_cli_enables_remediation_catalog_audit_profile(
@@ -1072,6 +1095,22 @@ def test_data_quality_cli_enables_remediation_catalog_audit_profile(
     assert options.quality_profile["source"] == "cli-options"
     assert options.quality_profile["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
+    }
+    sources = {
+        item["path"]: item
+        for item in options.quality_profile_resolution[
+            "effective_value_sources"
+        ]
+    }
+    assert sources["/reporting/remediation_catalog_audit/enabled"] == {
+        "path": "/reporting/remediation_catalog_audit/enabled",
+        "value": True,
+        "source": "cli_override",
+        "profile_name": "operator",
+        "override": True,
+        "previous_source": "built_in_default",
+        "overridden_source": "built_in_default",
+        "previous_value": False,
     }
 
 
@@ -1125,6 +1164,16 @@ def test_data_quality_cli_merges_remediation_catalog_audit_with_profile(
     assert options.quality_profile["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
     }
+    sources = {
+        item["path"]: item
+        for item in options.quality_profile_resolution[
+            "effective_value_sources"
+        ]
+    }
+    assert (
+        sources["/reporting/remediation_catalog_audit/enabled"]["source"]
+        == "cli_override"
+    )
 
 
 def test_quality_profile_preview_uses_normal_profile_validation(
@@ -1393,6 +1442,18 @@ def test_api_quality_options_accept_inline_profile(
     assert parsed.quality_profile["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
     }
+    assert [
+        channel["kind"]
+        for channel in parsed.quality_profile_resolution["input_channels"]
+    ] == ["built_in_default", "named_profile", "api_options"]
+    sources = {
+        item["path"]: item
+        for item in parsed.quality_profile_resolution["effective_value_sources"]
+    }
+    assert (
+        sources["/reporting/remediation_catalog_audit/enabled"]["source"]
+        == "api_options"
+    )
 
 
 def test_argparser_bare_construction_uses_fresh_option_namespace(

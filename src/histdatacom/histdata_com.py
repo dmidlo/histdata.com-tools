@@ -60,6 +60,8 @@ from histdatacom.data_quality.preflight import (
 from histdatacom.data_quality.profiles import (
     QualityProfile,
     quality_profile_from_value,
+    quality_profile_resolution_from_value,
+    quality_profile_source_kind,
 )
 from histdatacom.data_quality.reporting import (
     format_cross_series_fingerprint_lines,
@@ -166,6 +168,7 @@ class RuntimeContext:
     quality_preflight_validation_evidence_path: str
     quality_profile_path: str
     quality_profile: Mapping[str, Any]
+    quality_profile_resolution: Mapping[str, Any]
     quality_profile_preview: bool
     quality_profile_preview_format: str
     quality_profile_preview_output_path: str
@@ -627,6 +630,9 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         ),
         quality_profile_path=str(args.get("quality_profile_path") or ""),
         quality_profile=dict(args.get("quality_profile") or {}),
+        quality_profile_resolution=dict(
+            args.get("quality_profile_resolution") or {}
+        ),
         quality_profile_preview=bool(args["quality_profile_preview"]),
         quality_profile_preview_format=str(
             args.get("quality_profile_preview_format") or "json"
@@ -947,6 +953,7 @@ def _preview_channel_detail_text(channel: Mapping[str, JSONValue]) -> str:
         "profile_name",
         "profile_source",
         "source_path",
+        "selected_by",
         "paths",
     ):
         value = channel.get(key)
@@ -987,7 +994,12 @@ def _preview_value_source_text(row: Mapping[str, JSONValue]) -> str:
     source = str(row.get("source") or "unknown")
     value = _preview_display_value(row.get("value"))
     override = " override" if row.get("override") else ""
-    return f"{path} [{source}{override}]: {value}"
+    previous = ""
+    if row.get("override"):
+        previous_source = str(row.get("previous_source") or "unknown")
+        previous_value = _preview_display_value(row.get("previous_value"))
+        previous = f"; previous={previous_source}:{previous_value}"
+    return f"{path} [{source}{override}]: {value}{previous}"
 
 
 def _preview_display_value(
@@ -1033,11 +1045,12 @@ def _quality_profile_preview_payload(
 ) -> dict[str, JSONValue]:
     """Return a deterministic preview of the resolved quality profile."""
     profile = quality_profile_from_value(context.quality_profile)
-    resolved_profile = profile.to_request_payload()
-    if "reporting" not in resolved_profile:
-        resolved_profile["reporting"] = (
-            profile.reporting_profile().to_metadata()
-        )
+    resolution = dict(context.quality_profile_resolution)
+    if not resolution:
+        resolution = quality_profile_resolution_from_value(profile).to_payload()
+    resolved_profile = dict(
+        _preview_mapping(resolution.get("resolved_profile"))
+    )
 
     profile_metadata = profile.to_metadata()
     profile_metadata.setdefault("configured_reporting_keys", [])
@@ -1049,9 +1062,13 @@ def _quality_profile_preview_payload(
     audit_override_enabled = bool(
         context.args.get("quality_remediation_catalog_audit")
     )
-    cli_overrides: dict[str, JSONValue] = {}
-    if audit_override_enabled:
-        cli_overrides["reporting.remediation_catalog_audit.enabled"] = True
+    effective_sources = [
+        dict(item)
+        for item in _preview_mapping_rows(
+            resolution.get("effective_value_sources")
+        )
+    ]
+    cli_overrides = _quality_profile_cli_overrides(effective_sources)
     profile_inputs: dict[str, JSONValue] = {
         "from_api": context.from_api,
         "config_path": str(context.args.get("config_path") or ""),
@@ -1079,8 +1096,7 @@ def _quality_profile_preview_payload(
         "profile_explanation": _quality_profile_preview_explanation(
             profile,
             resolved_profile=resolved_profile,
-            profile_inputs=profile_inputs,
-            cli_overrides=cli_overrides,
+            resolution=resolution,
         ),
         "resolved_profile": resolved_profile,
     }
@@ -1090,17 +1106,17 @@ def _quality_profile_preview_explanation(
     profile: QualityProfile,
     *,
     resolved_profile: Mapping[str, JSONValue],
-    profile_inputs: Mapping[str, JSONValue],
-    cli_overrides: Mapping[str, JSONValue],
+    resolution: Mapping[str, JSONValue],
 ) -> dict[str, JSONValue]:
-    """Return deterministic provenance and default-diff metadata."""
+    """Render provenance retained by the profile resolver."""
     default_profile = _resolved_default_quality_profile_payload()
     source_kind = _quality_profile_source_kind(profile)
-    effective_sources = _quality_profile_value_sources(
-        resolved_profile,
-        profile=profile,
-        cli_overrides=cli_overrides,
-    )
+    effective_sources = [
+        dict(item)
+        for item in _preview_mapping_rows(
+            resolution.get("effective_value_sources")
+        )
+    ]
     effective_diff = _quality_profile_effective_diff(
         default_profile,
         resolved_profile,
@@ -1115,10 +1131,14 @@ def _quality_profile_preview_explanation(
             "source_path": profile.source_path,
             "is_default": profile.is_default,
         },
-        "input_channels": _quality_profile_input_channels(
-            profile,
-            profile_inputs=profile_inputs,
-            cli_overrides=cli_overrides,
+        "input_channels": cast(
+            JSONValue,
+            [
+                dict(item)
+                for item in _preview_mapping_rows(
+                    resolution.get("input_channels")
+                )
+            ],
         ),
         "effective_value_sources": _bounded_source_items(
             effective_sources,
@@ -1136,75 +1156,19 @@ def _resolved_default_quality_profile_payload() -> dict[str, JSONValue]:
     return payload
 
 
-def _quality_profile_input_channels(
-    profile: QualityProfile,
-    *,
-    profile_inputs: Mapping[str, JSONValue],
-    cli_overrides: Mapping[str, JSONValue],
-) -> list[JSONValue]:
-    """Return the input channels that shaped the resolved profile."""
-    config_path = str(profile_inputs.get("config_path") or "")
-    profile_path = str(profile_inputs.get("quality_profile_path") or "")
-    source_kind = _quality_profile_source_kind(profile)
-    channels: list[dict[str, JSONValue]] = [
-        {
-            "kind": "built_in_default",
-            "active": True,
-            "description": "Built-in quality profile defaults.",
-        },
-        {
-            "kind": "yaml_config",
-            "active": bool(config_path),
-            "path": config_path,
-        },
-        {
-            "kind": source_kind,
-            "active": not profile.is_default,
-            "profile_name": profile.name,
-            "profile_source": profile.source,
-            "source_path": profile.source_path or profile_path,
-        },
-        {
-            "kind": "api_options",
-            "active": (
-                bool(profile_inputs.get("from_api"))
-                and source_kind != "api_options"
-            ),
-        },
-        {
-            "kind": "cli_override",
-            "active": bool(cli_overrides),
-            "paths": cast(JSONValue, sorted(cli_overrides)),
-        },
-    ]
-    return [channel for channel in channels if channel["active"]]
-
-
-def _quality_profile_value_sources(
-    resolved_profile: Mapping[str, JSONValue],
-    *,
-    profile: QualityProfile,
-    cli_overrides: Mapping[str, JSONValue],
-) -> list[dict[str, JSONValue]]:
-    """Return per-value provenance for the resolved preview profile."""
-    source_by_path: dict[str, dict[str, JSONValue]] = {}
-    for path, value in _flatten_json_mapping(resolved_profile):
-        source_by_path[path] = {
-            "path": path,
-            "value": value,
-            "source": _quality_profile_path_source(path, profile=profile),
-        }
-    for dotted_path, value in sorted(cli_overrides.items()):
-        pointer = _json_pointer_from_dotted_path(dotted_path)
-        previous = source_by_path.get(pointer, {})
-        source_by_path[pointer] = {
-            "path": pointer,
-            "value": value,
-            "source": "cli_override",
-            "overridden_source": str(previous.get("source") or "unknown"),
-            "override": True,
-        }
-    return [source_by_path[path] for path in sorted(source_by_path)]
+def _quality_profile_cli_overrides(
+    effective_sources: Sequence[Mapping[str, JSONValue]],
+) -> dict[str, JSONValue]:
+    """Return compatibility CLI overrides from resolver provenance."""
+    overrides: dict[str, JSONValue] = {}
+    for item in effective_sources:
+        if item.get("source") != "cli_override" or not item.get("override"):
+            continue
+        path = str(item.get("path") or "")
+        if not path:
+            continue
+        overrides[_dotted_path_from_json_pointer(path)] = item.get("value")
+    return overrides
 
 
 def _quality_profile_effective_diff(
@@ -1264,42 +1228,9 @@ def _prune_expanded_empty_mapping_values(
             del values[path]
 
 
-def _quality_profile_path_source(
-    path: str,
-    *,
-    profile: QualityProfile,
-) -> str:
-    """Return the source label for one resolved profile value path."""
-    if profile.is_default:
-        return "built_in_default"
-    if path.startswith("/rules/") or path.startswith("/modeling_assumptions/"):
-        return _quality_profile_source_kind(profile)
-    if path.startswith("/reporting/"):
-        reporting = profile.reporting
-        if _profile_has_json_pointer(
-            reporting, path.removeprefix("/reporting")
-        ):
-            return _quality_profile_source_kind(profile)
-        return "built_in_default"
-    if path in {"/name", "/source", "/source_path", "/schema_version"}:
-        return _quality_profile_source_kind(profile)
-    return "built_in_default"
-
-
 def _quality_profile_source_kind(profile: QualityProfile) -> str:
     """Return a stable public source kind for a quality profile."""
-    source = str(getattr(profile, "source", "") or "")
-    if source == "default":
-        return "built_in_default"
-    if source == "file":
-        return "profile_file"
-    if source == "api-options":
-        return "api_options"
-    if source == "cli-options":
-        return "cli_options"
-    if source == "operator-config":
-        return "operator_config"
-    return source.replace("-", "_") or "unknown"
+    return quality_profile_source_kind(profile)
 
 
 def _bounded_source_items(
@@ -1339,25 +1270,13 @@ def _flatten_json_mapping(
     return flattened
 
 
-def _profile_has_json_pointer(
-    value: Mapping[str, JSONValue],
-    pointer: str,
-) -> bool:
-    """Return whether a profile mapping explicitly contains a pointer path."""
-    if not pointer:
-        return bool(value)
-    current: object = value
-    for raw_token in pointer.strip("/").split("/"):
-        token = _json_pointer_token_unescape(raw_token)
-        if not isinstance(current, Mapping) or token not in current:
-            return False
-        current = current[token]
-    return True
-
-
-def _json_pointer_from_dotted_path(path: str) -> str:
-    """Translate legacy dotted override paths into JSON pointers."""
-    return "/" + "/".join(_json_pointer_token(part) for part in path.split("."))
+def _dotted_path_from_json_pointer(path: str) -> str:
+    """Translate a JSON pointer into the compatibility dotted path form."""
+    return ".".join(
+        _json_pointer_token_unescape(token)
+        for token in path.strip("/").split("/")
+        if token
+    )
 
 
 def _json_pointer_token(value: str) -> str:

@@ -17,10 +17,13 @@ from histdatacom.data_quality import (
     QualityProfileError,
     QualityReport,
     QualityStatus,
+    apply_quality_profile_overrides,
     discover_quality_targets,
     load_quality_profile_file,
+    load_quality_profile_file_resolution,
     quality_profile_report_metadata,
     quality_rules_for_groups,
+    resolve_quality_profile,
     run_quality_assessment,
 )
 from histdatacom.histdata_ascii import TICK
@@ -300,6 +303,102 @@ def test_quality_profile_file_loads_json_payload(tmp_path: Path) -> None:
     assert profile.source == "file"
     assert profile.source_path == str(profile_path)
     assert profile.row_count_profile().min_row_count == 10
+
+
+def test_default_profile_resolution_attributes_every_value_to_builtin() -> None:
+    """Default resolution should expose deterministic built-in provenance."""
+    resolution = resolve_quality_profile()
+    payload = resolution.to_payload()
+
+    assert resolution.profile.is_default
+    assert [channel["kind"] for channel in payload["input_channels"]] == [
+        "built_in_default"
+    ]
+    assert {item["source"] for item in payload["effective_value_sources"]} == {
+        "built_in_default"
+    }
+
+
+def test_profile_file_resolution_preserves_nested_and_yaml_selection_sources(
+    tmp_path: Path,
+) -> None:
+    """Nested thresholds should retain file, name, and YAML selection facts."""
+    profile_path = tmp_path / "quality-profile.json"
+    config_path = tmp_path / "histdatacom.yaml"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "name": "nested-file-profile",
+                "rules": {
+                    "ingestion.ascii.row_count": {
+                        "min_row_count": 25,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resolution = load_quality_profile_file_resolution(
+        profile_path,
+        config_path=str(config_path),
+        selected_by="yaml_config",
+    )
+    payload = resolution.to_payload()
+    sources = {
+        item["path"]: item for item in payload["effective_value_sources"]
+    }
+
+    assert [channel["kind"] for channel in payload["input_channels"]] == [
+        "built_in_default",
+        "yaml_config",
+        "named_profile",
+        "profile_file",
+    ]
+    assert sources["/name"]["source"] == "named_profile"
+    assert sources["/rules/ingestion.ascii.row_count/min_row_count"] == {
+        "path": "/rules/ingestion.ascii.row_count/min_row_count",
+        "value": 25,
+        "source": "profile_file",
+        "profile_name": "nested-file-profile",
+        "source_path": str(profile_path),
+        "selected_by": "yaml_config",
+    }
+
+
+def test_profile_resolution_override_records_previous_source_and_value() -> (
+    None
+):
+    """Overrides should preserve what source and value they replaced."""
+    resolution = resolve_quality_profile(
+        {
+            "name": "override-profile",
+            "reporting": {"remediation_catalog_audit": {"enabled": False}},
+        },
+        source="file",
+        source_path="quality-profile.json",
+    )
+
+    overridden = apply_quality_profile_overrides(
+        resolution,
+        {"reporting.remediation_catalog_audit.enabled": True},
+        source="cli_override",
+    )
+    sources = {
+        item["path"]: item
+        for item in overridden.to_payload()["effective_value_sources"]
+    }
+
+    assert sources["/reporting/remediation_catalog_audit/enabled"] == {
+        "path": "/reporting/remediation_catalog_audit/enabled",
+        "value": True,
+        "source": "cli_override",
+        "profile_name": "override-profile",
+        "override": True,
+        "previous_source": "profile_file",
+        "overridden_source": "profile_file",
+        "previous_value": False,
+    }
 
 
 def _report_for_path(

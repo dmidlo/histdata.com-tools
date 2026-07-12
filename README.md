@@ -1426,10 +1426,21 @@ deterministic and includes the active profile source, source path, configured
 rule IDs, configured modeling assumptions, reporting keys, and the resolved
 `reporting.remediation_catalog_audit.enabled` value after CLI overrides. It
 also includes a `profile_explanation` section with input channels such as
-built-in defaults, YAML config, profile file, API options, and CLI overrides;
-per-value source rows; and a bounded effective diff from the built-in default
-profile. The `text` and `markdown` renderers are presentation layers over that
-same explanation data.
+built-in defaults, named profiles, YAML config, profile files, API options, and
+CLI overrides; per-value source rows; and a bounded effective diff from the
+built-in default profile. Resolution preserves those facts before the profile
+is normalized, so an override row records its previous source and value instead
+of reconstructing them from the final JSON. The `text` and `markdown` renderers
+are presentation layers over that same explanation data.
+
+Python callers that need the same first-class contract can use
+`resolve_quality_profile()`, `load_quality_profile_file_resolution()`, and
+`apply_quality_profile_overrides()` from `histdatacom.data_quality`. The
+returned `QualityProfileResolution.profile` remains the normal validated
+`QualityProfile`; `value_sources`, `input_channels`, and `to_payload()` expose
+the deterministic provenance contract. Existing `quality_profile_from_*()` and
+`load_quality_profile_file()` callers continue to receive `QualityProfile`
+directly.
 
 ```sh
 histdatacom --quality \
