@@ -1165,6 +1165,38 @@ The command reads report JSON only; it does not rescan market data. Use
 `--target-limit`, `--section-limit`, and `--reason-limit` to control the bounded
 machine JSON and matching human output.
 
+Add `--next-work` when the question is which fingerprint product gap to address
+next rather than which targets are risky:
+
+```sh
+histdatacom quality fingerprint-readiness \
+  --report reports/quality.json \
+  --next-work \
+  --alternate-limit 2 \
+  --json
+```
+
+The `histdatacom.fingerprint-next-work.v1` result combines already-saved
+readiness-risk evidence with the current implemented/planned fingerprint
+registry. It emits one recommendation, bounded alternates, publish-safe input
+report identities, representative target axes, reason codes, known
+prerequisites and downstream consumers, confidence/basis metadata, and
+issue-ready acceptance-criteria suggestions. Existing section-readiness and
+report-surface gaps rank ahead of later planned capabilities. Use the ordinary
+readiness-risk output for target-level diagnosis; use `--next-work` for the
+bounded cross-report product recommendation.
+
+The recommendation basis also records whether the saved evidence confirms the
+enriched single-row ASCII tick training substrate, legacy-cache projections,
+durable row-identity columns, duplicate timestamps, unequal cross-series ranges,
+and triangle comparisons. `ascii/T` remains the only base grain; legacy M1
+targets are counted as ignored non-base evidence and cannot become a platform
+or M1 implementation recommendation. The command never rescans market data,
+changes quality status, or creates, edits, closes, or ranks GitHub issues. Issue
+references are static capability metadata only. `--target-limit` also bounds
+representative recommendation axes, while `--alternate-limit` bounds alternate
+recommendations; both emit explicit truncation metadata.
+
 Bounded report and fingerprint summary payloads include `limit_metadata` and
 expanded `payload_limits` entries with requested, default, effective, minimum,
 maximum, and unbounded limit fields. The legacy `limit` field remains present

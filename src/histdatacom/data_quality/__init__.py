@@ -145,6 +145,13 @@ from histdatacom.data_quality.fingerprint_discovery import (
     format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
 )
+from histdatacom.data_quality.fingerprint_next_work import (
+    DEFAULT_FINGERPRINT_NEXT_WORK_ALTERNATE_LIMIT,
+    DEFAULT_FINGERPRINT_NEXT_WORK_TARGET_AXIS_LIMIT,
+    FINGERPRINT_NEXT_WORK_SCHEMA_VERSION,
+    fingerprint_next_work_recommendation,
+    format_fingerprint_next_work,
+)
 from histdatacom.data_quality.training_features import (
     DEFAULT_SUSPICIOUS_TICK_GAP_MS,
     HARD_ISSUE_COLUMNS,
@@ -558,6 +565,9 @@ __all__ = [
     "TRAINING_FEATURE_REPORT_SCHEMA_VERSION",
     "TRAINING_REQUIRED_COLUMNS",
     "TRAINING_SCHEMA_VERSION",
+    "DEFAULT_FINGERPRINT_NEXT_WORK_ALTERNATE_LIMIT",
+    "DEFAULT_FINGERPRINT_NEXT_WORK_TARGET_AXIS_LIMIT",
+    "FINGERPRINT_NEXT_WORK_SCHEMA_VERSION",
     "TrainingFeatureDefinition",
     "BoundedReportLimit",
     "BOUNDED_PAYLOAD_CONTRACT_AUDIT_SCHEMA_VERSION",
@@ -589,10 +599,12 @@ __all__ = [
     "project_decomposition_onto_training_frame",
     "fingerprint_report_surface_evidence",
     "fingerprint_schema_discovery",
+    "fingerprint_next_work_recommendation",
     "format_bounded_payload_contract_audit",
     "format_fingerprint_contract_audit",
     "format_cross_series_fingerprint_lines",
     "format_fingerprint_schema_discovery",
+    "format_fingerprint_next_work",
     "format_fingerprint_topology_attention_lines",
     "format_fingerprint_topology_summary_lines",
     "format_quality_console_summary",

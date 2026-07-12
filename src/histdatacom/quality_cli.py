@@ -24,6 +24,11 @@ from histdatacom.data_quality.fingerprint_discovery import (
     format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
 )
+from histdatacom.data_quality.fingerprint_next_work import (
+    DEFAULT_FINGERPRINT_NEXT_WORK_ALTERNATE_LIMIT,
+    fingerprint_next_work_recommendation,
+    format_fingerprint_next_work,
+)
 from histdatacom.data_quality.reporting import (
     fingerprint_readiness_risk_summary,
     format_fingerprint_readiness_risk_lines,
@@ -343,6 +348,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="maximum reason codes to include; use -1 for all",
     )
     fingerprint_readiness.add_argument(
+        "--next-work",
+        action="store_true",
+        help=(
+            "recommend the next fingerprint product work from the saved "
+            "report evidence"
+        ),
+    )
+    fingerprint_readiness.add_argument(
+        "--alternate-limit",
+        dest="alternate_limit",
+        type=_integer_limit,
+        default=DEFAULT_FINGERPRINT_NEXT_WORK_ALTERNATE_LIMIT,
+        metavar="N",
+        help=(
+            "maximum alternate next-work recommendations to include; "
+            "use -1 for all"
+        ),
+    )
+    fingerprint_readiness.add_argument(
         "--json",
         action="store_true",
         help="emit the machine-readable readiness risk ranking payload",
@@ -486,6 +510,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 target_limit=args.target_limit,
                 section_limit=args.section_limit,
                 reason_limit=args.reason_limit,
+                next_work=args.next_work,
+                alternate_limit=args.alternate_limit,
             )
         except (OSError, ValueError, TypeError) as exc:
             print(f"quality report error: {exc}", file=sys.stderr)  # noqa:T201
@@ -525,11 +551,15 @@ def _fingerprint_readiness_risk_command_payload(
     target_limit: int | None,
     section_limit: int | None,
     reason_limit: int | None,
+    next_work: bool = False,
+    alternate_limit: int | None = None,
 ) -> dict[str, JSONValue]:
     reports: list[dict[str, JSONValue]] = []
+    loaded_reports = []
     risk_report_count = 0
     for path in report_paths:
         report = load_quality_report(path)
+        loaded_reports.append((path, report))
         summary = fingerprint_readiness_risk_summary(
             report,
             target_limit=target_limit,
@@ -547,12 +577,19 @@ def _fingerprint_readiness_risk_command_payload(
                 "summary": summary or {},
             }
         )
-    return {
+    payload: dict[str, JSONValue] = {
         "schema_version": FINGERPRINT_READINESS_RISK_COMMAND_SCHEMA_VERSION,
         "report_count": len(reports),
         "risk_report_count": risk_report_count,
         "reports": cast(JSONValue, reports),
     }
+    if next_work:
+        payload["next_work"] = fingerprint_next_work_recommendation(
+            loaded_reports,
+            alternate_limit=alternate_limit,
+            target_axis_limit=target_limit,
+        )
+    return payload
 
 
 def _format_fingerprint_readiness_risk_command(
@@ -577,6 +614,10 @@ def _format_fingerprint_readiness_risk_command(
         else:
             lines.append("Fingerprint readiness risk")
             lines.append("- no fingerprint readiness data")
+    next_work = payload.get("next_work")
+    if isinstance(next_work, dict):
+        lines.append("")
+        lines.append(format_fingerprint_next_work(next_work))
     return "\n".join(lines)
 
 

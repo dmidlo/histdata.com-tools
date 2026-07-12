@@ -646,6 +646,51 @@ def test_quality_fingerprint_readiness_cli_reports_human_output(
     assert str(tmp_path) not in output
 
 
+def test_quality_fingerprint_readiness_cli_recommends_next_work(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The readiness command should optionally render bounded next work."""
+    report_path = Path(
+        "tests/fixtures/data_quality_reports/fingerprint_report.json"
+    )
+
+    exit_code = main(
+        [
+            "fingerprint-readiness",
+            "--report",
+            str(report_path),
+            "--next-work",
+            "--alternate-limit",
+            "1",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["next_work"]["schema_version"] == (
+        "histdatacom.fingerprint-next-work.v1"
+    )
+    assert payload["next_work"]["recommendation"]["rank"] == 1
+    assert len(payload["next_work"]["alternates"]) == 1
+    assert payload["next_work"]["basis"]["market_data_rescanned"] is False
+
+    exit_code = main(
+        [
+            "fingerprint-readiness",
+            "--report",
+            str(report_path),
+            "--next-work",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Next fingerprint work" in output
+    assert "suggested acceptance criteria:" in output
+    assert "does not" not in output
+
+
 def test_quality_help_advertises_fingerprint_schema_command() -> None:
     """The quality utility help should expose fingerprint schema discovery."""
     help_text = quality_cli.build_parser().format_help()
