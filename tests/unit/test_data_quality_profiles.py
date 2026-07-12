@@ -187,6 +187,15 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
                         "enabled": True,
                         "mismatch_limit": 7,
                     },
+                    "classical_baselines": {
+                        "enabled": True,
+                        "evaluation_fraction": 0.25,
+                        "minimum_training_rows": 12,
+                        "minimum_evaluation_rows": 4,
+                        "rolling_windows": [3, 9],
+                        "session_seasonal_enabled": False,
+                        "rounding_digits": 6,
+                    },
                 }
             },
         },
@@ -215,6 +224,15 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
         "cache_source_parity": {
             "enabled": True,
             "mismatch_limit": 7,
+        },
+        "classical_baselines": {
+            "enabled": True,
+            "evaluation_fraction": 0.25,
+            "minimum_training_rows": 12,
+            "minimum_evaluation_rows": 4,
+            "rolling_windows": [3, 9],
+            "session_seasonal_enabled": False,
+            "rounding_digits": 6,
         },
     }
 
@@ -278,6 +296,21 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
             "rules": {
                 SERIES_FINGERPRINT_RULE_ID: {
                     "cache_source_parity": {"mismatch_limit": -1}
+                }
+            }
+        },
+        {"rules": {SERIES_FINGERPRINT_RULE_ID: {"classical_baselines": True}}},
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "classical_baselines": {"evaluation_fraction": 1.0}
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "classical_baselines": {"minimum_training_rows": 0}
                 }
             }
         },

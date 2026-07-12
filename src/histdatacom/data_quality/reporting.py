@@ -19,6 +19,12 @@ from histdatacom.data_quality.contracts import (
     QualityStatus,
     QualityTargetSummary,
 )
+from histdatacom.data_quality.classical_baselines import (
+    CLASSICAL_BASELINE_BOUNDED_PAYLOAD_KEY,
+    CLASSICAL_BASELINE_SUMMARY_METADATA_KEY,
+    classical_baseline_summary,
+    format_classical_baseline_summary_lines,
+)
 from histdatacom.data_quality.engine import QUALITY_ENGINE_METADATA_KEY
 from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY,
@@ -337,6 +343,11 @@ def quality_report_payload(
             synthetic_constraints
         )
         payload["metadata"] = metadata
+    classical_baselines = _classical_baseline_summary(report)
+    if classical_baselines is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[CLASSICAL_BASELINE_SUMMARY_METADATA_KEY] = classical_baselines
+        payload["metadata"] = metadata
     fingerprint_topology = _fingerprint_topology_summary(report)
     if fingerprint_topology is not None:
         metadata = _mapping_payload(payload.get("metadata"))
@@ -522,6 +533,11 @@ def format_quality_console_summary(
             )
         )
         lines.extend(
+            format_classical_baseline_summary_lines(
+                _classical_baseline_summary(report)
+            )
+        )
+        lines.extend(
             format_fingerprint_topology_attention_lines(
                 _fingerprint_topology_attention_summary(report)
             )
@@ -604,6 +620,7 @@ def bounded_quality_payload(
     fingerprint_regimes = _fingerprint_regime_summary(report)
     fingerprint_parity = _fingerprint_parity_summary(report)
     synthetic_constraints = _synthetic_constraint_summary(report)
+    classical_baselines = _classical_baseline_summary(report)
     fingerprint_topology = _fingerprint_topology_summary(report)
     fingerprint_topology_attention = _fingerprint_topology_attention_summary(
         report
@@ -676,6 +693,8 @@ def bounded_quality_payload(
         payload[FINGERPRINT_SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY] = (
             synthetic_constraints
         )
+    if classical_baselines is not None:
+        payload[CLASSICAL_BASELINE_BOUNDED_PAYLOAD_KEY] = classical_baselines
     if fingerprint_topology is not None:
         payload[FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY] = fingerprint_topology
     if fingerprint_topology_attention is not None:
@@ -2276,6 +2295,18 @@ def _synthetic_constraint_summary(
         return dict(summary)
     return _optional_mapping_payload(
         synthetic_constraint_summary(report.findings)
+    )
+
+
+def _classical_baseline_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return classical baseline metadata from report or findings."""
+    summary = report.metadata.get(CLASSICAL_BASELINE_SUMMARY_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        classical_baseline_summary(report.findings)
     )
 
 

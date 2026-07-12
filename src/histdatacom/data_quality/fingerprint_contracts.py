@@ -8,6 +8,14 @@ from dataclasses import dataclass, field
 from histdatacom.data_quality.calendar import (
     TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.classical_baselines import (
+    CLASSICAL_BASELINE_BOUNDED_PAYLOAD_KEY,
+    CLASSICAL_BASELINE_SCHEMA_VERSION,
+    CLASSICAL_BASELINE_SUMMARY_METADATA_KEY,
+    CLASSICAL_BASELINE_SUMMARY_SCHEMA_VERSION,
+    CLASSICAL_BASELINE_TRAINING_PROJECTION_SCHEMA_VERSION,
+    DEFAULT_BASELINE_SUMMARY_TARGET_LIMIT,
+)
 from histdatacom.data_quality.fingerprints import (
     CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     CROSS_SERIES_FINGERPRINT_RULE_ID,
@@ -87,6 +95,7 @@ FINGERPRINT_SERIES_CONFIG_KEYS = (
     "topology_inspection_sample_limit",
     "distribution_attention",
     "cache_source_parity",
+    "classical_baselines",
 )
 FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
     "invalid_row_min_count",
@@ -436,6 +445,30 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_classical_baselines",
+        CLASSICAL_BASELINE_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.classical_baselines",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_baseline_training_projection",
+        CLASSICAL_BASELINE_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.classical_baselines.training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_baseline_summary",
+        CLASSICAL_BASELINE_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=CLASSICAL_BASELINE_SUMMARY_METADATA_KEY,
+        bounded_payload_key=CLASSICAL_BASELINE_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_audit",
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -568,6 +601,14 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         FINGERPRINT_SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY,
         "synthetic_constraints",
         "Synthetic fingerprint constraints",
+    ),
+    FingerprintReportSurfaceContract(
+        "classical_baselines",
+        "fingerprint_classical_baseline_summary",
+        CLASSICAL_BASELINE_SUMMARY_METADATA_KEY,
+        CLASSICAL_BASELINE_BOUNDED_PAYLOAD_KEY,
+        "classical_baselines",
+        "Classical fingerprint baselines",
     ),
     FingerprintReportSurfaceContract(
         "readiness_summary",
@@ -715,6 +756,29 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "classical_baselines",
+        "opt-in deterministic advisory baselines over enriched tick rows",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_classical_baselines",
+        basis_values=("observed_sequence_walk_forward",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#332",
+            "profile_controlled_by": ["classical_baselines"],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "metric": "mid",
+            "timestamp_required": False,
+            "model_families": [
+                "naive_random_walk",
+                "rolling_mean",
+                "rolling_median",
+                "session_seasonal_naive",
+            ],
+        },
+    ),
+    FingerprintTargetSectionContract(
         "synthetic_constraints",
         "generator-facing defects, stylized facts, artifacts, and validation contract",
         target_timeframes=(TICK,),
@@ -777,6 +841,9 @@ FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
     "parity_summary_target_limit": DEFAULT_FINGERPRINT_PARITY_SUMMARY_LIMIT,
     "synthetic_constraint_summary_target_limit": (
         DEFAULT_SYNTHETIC_CONSTRAINT_SUMMARY_LIMIT
+    ),
+    "classical_baseline_summary_target_limit": (
+        DEFAULT_BASELINE_SUMMARY_TARGET_LIMIT
     ),
 }
 FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS = {

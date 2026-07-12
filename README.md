@@ -1184,6 +1184,59 @@ quality gate. Full reports expose
 payloads expose `fingerprint_synthetic_constraints`, and the ordinary
 fingerprint CLI summary renders `Synthetic fingerprint constraints`.
 
+Classical baseline diagnostics are a separate, opt-in layer after the
+fingerprint substrate. They are disabled by default and do not change quality
+status. Enable the low-dependency baseline families through the ordinary
+fingerprint profile:
+
+```json
+{
+  "schema_version": "histdatacom.quality-profile.v1",
+  "name": "classical-baselines",
+  "rules": {
+    "fingerprint.series": {
+      "classical_baselines": {
+        "enabled": true,
+        "evaluation_fraction": 0.2,
+        "minimum_training_rows": 20,
+        "minimum_evaluation_rows": 5,
+        "rolling_windows": [5, 20],
+        "session_seasonal_enabled": true,
+        "rounding_digits": 12
+      }
+    }
+  }
+}
+```
+
+The `histdatacom.classical-baselines.v1` section evaluates observed midpoint
+values with a chronological holdout ordered by `series_id`, `period`, and
+`row_id`. It never shuffles, never requires timestamp as durable identity, and
+uses walk-forward forecasts where prior observed values become available only
+after their row. Initial models are naive/random-walk, rolling mean, rolling
+median, and session-conditioned seasonal-naive when the enriched session class
+and calendar fingerprint support it. Metrics are emitted only after the
+configured training and evaluation minima produce a valid split.
+
+Stationarity status, rolling drift, distribution shift, skipped windows,
+zero-variance markers, and the `log_return`, `differencing`, and
+`session_conditioning` recommendations remain explicit evaluation guards.
+Recommended transforms are reported but are not silently applied, and
+nonstationarity never becomes a hard quality failure. ETS, ARIMA/SARIMA,
+state-space, GARCH, automatic model selection, forecasting leaderboards, and
+synthetic generation remain deliberately deferred.
+
+Python consumers can call
+`classical_baseline_diagnostics_from_training_frame(...)`, then
+`project_classical_baseline_onto_training_frame(...)` to repeat the bounded
+period-level readiness, split, best-model, and error scalars onto the same
+enriched rows. The projection preserves observed bid/ask and duplicate
+timestamp rows, requires only `series_id`/`period`/`row_id` identity, and flows
+through the existing same-point Influx projection. Full reports expose
+`metadata.time_series_fingerprint_classical_baseline_summary`, bounded payloads
+use `fingerprint_classical_baselines`, and the fingerprint CLI renders
+`Classical fingerprint baselines`.
+
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,
 stable skip/eligibility reason codes, calendar-profile completeness, tick-spread

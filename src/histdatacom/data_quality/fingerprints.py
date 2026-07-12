@@ -37,6 +37,10 @@ from histdatacom.data_quality.calendar_profiles import (
     HistDataCalendarProfile,
     default_calendar_profile,
 )
+from histdatacom.data_quality.classical_baselines import (
+    ClassicalBaselineProfile,
+    classical_baseline_diagnostics_from_training_frame,
+)
 from histdatacom.data_quality.limits import (
     BoundedReportLimit,
     bounded_report_limit,
@@ -245,6 +249,7 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "stationarity_diagnostics",
     "decomposition",
     "cache_source_parity",
+    "classical_baselines",
     "synthetic_constraints",
 )
 FINGERPRINT_DYNAMICS_SECTIONS = ("microstructure_dynamics",)
@@ -332,6 +337,9 @@ class HistDataFingerprintProfile:
     cache_source_parity: HistDataFingerprintParityProfile = field(
         default_factory=HistDataFingerprintParityProfile
     )
+    classical_baselines: ClassicalBaselineProfile = field(
+        default_factory=ClassicalBaselineProfile
+    )
 
     def to_metadata(self) -> dict[str, JSONValue]:
         """Return a JSON-compatible representation."""
@@ -349,6 +357,7 @@ class HistDataFingerprintProfile:
                 self.distribution_attention.to_metadata()
             ),
             "cache_source_parity": self.cache_source_parity.to_metadata(),
+            "classical_baselines": self.classical_baselines.to_metadata(),
         }
 
 
@@ -3739,6 +3748,15 @@ def _finalize_fingerprint_payload(
                 target=target,
             )
         )
+        if profile.classical_baselines.enabled:
+            payload["classical_baselines"] = (
+                classical_baseline_diagnostics_from_training_frame(
+                    training_frame,
+                    payload,
+                    profile=profile.classical_baselines,
+                    target=target,
+                )
+            )
         payload["fingerprint_audit"] = _fingerprint_audit_payload(
             payload,
             target=target,
@@ -4397,6 +4415,8 @@ def _fingerprint_audit_payload(
     expected = _fingerprint_expected_sections(target)
     if profile.cache_source_parity.enabled:
         expected = (*expected, "cache_source_parity")
+    if profile.classical_baselines.enabled:
+        expected = (*expected, "classical_baselines")
     emitted = [
         section for section in FINGERPRINT_AUDIT_SECTIONS if section in payload
     ]
@@ -4535,6 +4555,7 @@ def _fingerprint_section_skip_details(
         "dependence",
         "stationarity_diagnostics",
         "decomposition",
+        "classical_baselines",
         "synthetic_constraints",
     }:
         return {"timeframe": target.timeframe}
@@ -4581,6 +4602,7 @@ def _section_timeframe_mismatch(
                 "conditional_distributions",
                 "microstructure_dynamics",
                 "synthetic_constraints",
+                "classical_baselines",
             }
             and target.timeframe != TICK
         )
@@ -4653,6 +4675,15 @@ def _fingerprint_section_status(
         if constraint_status == "ready":
             return "valid"
         if constraint_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "classical_baselines":
+        baseline_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if baseline_status == "ready":
+            return "valid"
+        if baseline_status == "limited":
             return "limited"
         return "unavailable"
     return "valid"

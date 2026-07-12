@@ -15,6 +15,9 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
     QualityTargetKind,
 )
+from histdatacom.data_quality.classical_baselines import (
+    CLASSICAL_BASELINE_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.engine import (
     QUALITY_ENGINE_METADATA_KEY,
     run_quality_assessment,
@@ -1222,6 +1225,9 @@ def _limited_tick_fingerprint_payload() -> dict[str, JSONValue]:
     payload["synthetic_constraints"] = synthetic_constraints_from_fingerprint(
         payload
     )
+    payload["classical_baselines"] = _classical_baseline_payload(
+        "GBPUSD", status="limited"
+    )
     return payload
 
 
@@ -1289,7 +1295,37 @@ def _tick_fingerprint_payload(
     payload["synthetic_constraints"] = synthetic_constraints_from_fingerprint(
         payload
     )
+    payload["classical_baselines"] = _classical_baseline_payload(symbol)
     return payload
+
+
+def _classical_baseline_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    return {
+        "schema_version": CLASSICAL_BASELINE_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": "stationarity_limited" if status == "limited" else None,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "split_policy": {
+            "training_row_count": 80,
+            "evaluation_row_count": 20,
+        },
+        "evaluation": {
+            "guard_codes": (
+                ["stationarity_limited"] if status == "limited" else []
+            ),
+            "best_model": {
+                "model": "naive_random_walk",
+                "model_code": 1,
+                "mae": 0.0001,
+                "rmse": 0.0002,
+            },
+        },
+    }
 
 
 def _cache_source_parity_payload(symbol: str) -> dict[str, JSONValue]:

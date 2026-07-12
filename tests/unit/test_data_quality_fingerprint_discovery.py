@@ -17,6 +17,11 @@ from histdatacom.data_quality.fingerprint_discovery import (
     format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
 )
+from histdatacom.data_quality.classical_baselines import (
+    CLASSICAL_BASELINE_SCHEMA_VERSION,
+    CLASSICAL_BASELINE_SUMMARY_SCHEMA_VERSION,
+    CLASSICAL_BASELINE_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS,
     FINGERPRINT_REPORT_SURFACE_CONTRACTS,
@@ -92,6 +97,19 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert schemas["fingerprint_decomposition"]["schema_version"] == (
         TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
     )
+    assert schemas["fingerprint_classical_baselines"]["schema_version"] == (
+        CLASSICAL_BASELINE_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_classical_baseline_training_projection"][
+            "schema_version"
+        ]
+        == CLASSICAL_BASELINE_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_classical_baseline_summary"]["schema_version"]
+        == CLASSICAL_BASELINE_SUMMARY_SCHEMA_VERSION
+    )
     assert (
         schemas["fingerprint_decomposition_training_projection"][
             "schema_version"
@@ -155,6 +173,7 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "stationarity_diagnostics",
         "decomposition",
         "cache_source_parity",
+        "classical_baselines",
         "synthetic_constraints",
         "fingerprint_audit",
     ]

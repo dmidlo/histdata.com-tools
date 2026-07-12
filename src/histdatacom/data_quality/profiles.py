@@ -13,6 +13,10 @@ from histdatacom.data_quality.calendar_profiles import (
     HistDataCalendarProfile,
     calendar_profile_from_mapping,
 )
+from histdatacom.data_quality.classical_baselines import (
+    MAX_BASELINE_ROLLING_WINDOWS,
+    ClassicalBaselineProfile,
+)
 from histdatacom.data_quality.contracts import QualitySeverity
 from histdatacom.data_quality.fingerprints import (
     DEFAULT_FINGERPRINT_HISTOGRAM_BINS,
@@ -483,6 +487,7 @@ class QualityProfile:
                 "topology_inspection_sample_limit",
                 "distribution_attention",
                 "cache_source_parity",
+                "classical_baselines",
             },
             SERIES_FINGERPRINT_RULE_ID,
         )
@@ -552,6 +557,14 @@ class QualityProfile:
                     path=SERIES_FINGERPRINT_RULE_ID,
                 ),
                 path=f"{SERIES_FINGERPRINT_RULE_ID}.cache_source_parity",
+            ),
+            classical_baselines=_classical_baseline_profile(
+                _mapping_field(
+                    config,
+                    "classical_baselines",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.classical_baselines",
             ),
         )
 
@@ -1626,6 +1639,78 @@ def _fingerprint_parity_profile(
             "mismatch_limit",
             DEFAULT_FINGERPRINT_PARITY_MISMATCH_LIMIT,
             minimum=0,
+            path=path,
+        ),
+    )
+
+
+def _classical_baseline_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> ClassicalBaselineProfile:
+    base = ClassicalBaselineProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "evaluation_fraction",
+            "minimum_training_rows",
+            "minimum_evaluation_rows",
+            "rolling_windows",
+            "session_seasonal_enabled",
+            "rounding_digits",
+        },
+        path,
+    )
+    rolling_windows = _fingerprint_int_sequence(
+        value,
+        "rolling_windows",
+        base.rolling_windows,
+        path=path,
+    )
+    if len(rolling_windows) > MAX_BASELINE_ROLLING_WINDOWS:
+        raise QualityProfileError(
+            f"{path}.rolling_windows supports at most "
+            f"{MAX_BASELINE_ROLLING_WINDOWS} values"
+        )
+    return ClassicalBaselineProfile(
+        enabled=_bool_field(value, "enabled", base.enabled, path=path),
+        evaluation_fraction=_float_field(
+            value,
+            "evaluation_fraction",
+            base.evaluation_fraction,
+            minimum=0.01,
+            maximum=0.99,
+            path=path,
+        ),
+        minimum_training_rows=_int_field(
+            value,
+            "minimum_training_rows",
+            base.minimum_training_rows,
+            minimum=1,
+            path=path,
+        ),
+        minimum_evaluation_rows=_int_field(
+            value,
+            "minimum_evaluation_rows",
+            base.minimum_evaluation_rows,
+            minimum=1,
+            path=path,
+        ),
+        rolling_windows=rolling_windows,
+        session_seasonal_enabled=_bool_field(
+            value,
+            "session_seasonal_enabled",
+            base.session_seasonal_enabled,
+            path=path,
+        ),
+        rounding_digits=_int_field(
+            value,
+            "rounding_digits",
+            base.rounding_digits,
+            minimum=0,
+            maximum=16,
             path=path,
         ),
     )
