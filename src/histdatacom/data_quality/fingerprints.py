@@ -45,6 +45,10 @@ from histdatacom.data_quality.classical_model_contracts import (
     ClassicalModelInputProfile,
     build_classical_model_input,
 )
+from histdatacom.data_quality.autoregressive import (
+    AutoregressiveProfile,
+    autoregressive_from_model_input,
+)
 from histdatacom.data_quality.exponential_smoothing import (
     ExponentialSmoothingProfile,
     exponential_smoothing_from_model_input,
@@ -260,6 +264,7 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "classical_baselines",
     "classical_model_input",
     "exponential_smoothing",
+    "autoregressive",
     "synthetic_constraints",
 )
 FINGERPRINT_DYNAMICS_SECTIONS = ("microstructure_dynamics",)
@@ -356,6 +361,9 @@ class HistDataFingerprintProfile:
     exponential_smoothing: ExponentialSmoothingProfile = field(
         default_factory=ExponentialSmoothingProfile
     )
+    autoregressive: AutoregressiveProfile = field(
+        default_factory=AutoregressiveProfile
+    )
 
     def to_metadata(self) -> dict[str, JSONValue]:
         """Return a JSON-compatible representation."""
@@ -376,6 +384,7 @@ class HistDataFingerprintProfile:
             "classical_baselines": self.classical_baselines.to_metadata(),
             "classical_model_input": (self.classical_model_input.to_metadata()),
             "exponential_smoothing": self.exponential_smoothing.to_metadata(),
+            "autoregressive": self.autoregressive.to_metadata(),
         }
 
 
@@ -3779,6 +3788,7 @@ def _finalize_fingerprint_payload(
         if (
             profile.classical_model_input.enabled
             or profile.exponential_smoothing.enabled
+            or profile.autoregressive.enabled
         ):
             model_input_result = build_classical_model_input(
                 training_frame,
@@ -3802,6 +3812,20 @@ def _finalize_fingerprint_payload(
                     payload,
                     input_profile=profile.classical_model_input,
                     profile=profile.exponential_smoothing,
+                    target=target,
+                ).diagnostics
+            )
+        if profile.autoregressive.enabled and model_input_result is not None:
+            payload["autoregressive"] = dict(
+                autoregressive_from_model_input(
+                    training_frame,
+                    model_input_result,
+                    payload,
+                    input_profile=profile.classical_model_input,
+                    profile=profile.autoregressive,
+                    exponential_smoothing=_payload_mapping(
+                        payload.get("exponential_smoothing")
+                    ),
                     target=target,
                 ).diagnostics
             )
@@ -4469,6 +4493,8 @@ def _fingerprint_audit_payload(
         expected = (*expected, "classical_model_input")
     if profile.exponential_smoothing.enabled:
         expected = (*expected, "exponential_smoothing")
+    if profile.autoregressive.enabled:
+        expected = (*expected, "autoregressive")
     emitted = [
         section for section in FINGERPRINT_AUDIT_SECTIONS if section in payload
     ]
@@ -4610,6 +4636,7 @@ def _fingerprint_section_skip_details(
         "classical_baselines",
         "classical_model_input",
         "exponential_smoothing",
+        "autoregressive",
         "synthetic_constraints",
     }:
         return {"timeframe": target.timeframe}
@@ -4659,6 +4686,7 @@ def _section_timeframe_mismatch(
                 "classical_baselines",
                 "classical_model_input",
                 "exponential_smoothing",
+                "autoregressive",
             }
             and target.timeframe != TICK
         )
@@ -4752,6 +4780,15 @@ def _fingerprint_section_status(
             return "limited"
         return "unavailable"
     if section == "exponential_smoothing":
+        model_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if model_status == "ready":
+            return "valid"
+        if model_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "autoregressive":
         model_status = _summary_key(
             _payload_mapping(payload[section]).get("status")
         )

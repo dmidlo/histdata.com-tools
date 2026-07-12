@@ -6,6 +6,17 @@ from copy import deepcopy
 import json
 from pathlib import Path
 
+from histdatacom.data_quality.autoregressive import (
+    AUTOREGRESSIVE_COLUMNS,
+    AUTOREGRESSIVE_CONFIGURATION_SCHEMA_VERSION,
+    AUTOREGRESSIVE_EVALUATION_SCHEMA_VERSION,
+    AUTOREGRESSIVE_FIT_SCHEMA_VERSION,
+    AUTOREGRESSIVE_FORECAST_SCHEMA_VERSION,
+    AUTOREGRESSIVE_SCHEMA_VERSION,
+    AUTOREGRESSIVE_SUMMARY_METADATA_KEY,
+    AUTOREGRESSIVE_SUMMARY_SCHEMA_VERSION,
+    AUTOREGRESSIVE_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.fingerprint_discovery import (
     TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_REPORT_SURFACE_EVIDENCE_SCHEMA_VERSION,
@@ -184,6 +195,32 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         schemas["fingerprint_exponential_smoothing_summary"]["schema_version"]
         == EXPONENTIAL_SMOOTHING_SUMMARY_SCHEMA_VERSION
     )
+    assert schemas["fingerprint_autoregressive"]["schema_version"] == (
+        AUTOREGRESSIVE_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_autoregressive_configuration"]["schema_version"]
+        == AUTOREGRESSIVE_CONFIGURATION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_autoregressive_fit"]["schema_version"] == (
+        AUTOREGRESSIVE_FIT_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_autoregressive_forecast"]["schema_version"] == (
+        AUTOREGRESSIVE_FORECAST_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_autoregressive_evaluation"]["schema_version"]
+        == AUTOREGRESSIVE_EVALUATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_autoregressive_training_projection"][
+            "schema_version"
+        ]
+        == AUTOREGRESSIVE_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_autoregressive_summary"]["schema_version"] == (
+        AUTOREGRESSIVE_SUMMARY_SCHEMA_VERSION
+    )
     assert (
         schemas["fingerprint_decomposition_training_projection"][
             "schema_version"
@@ -241,6 +278,9 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         payload["metadata_keys"]["report_metadata"]["exponential_smoothing"]
         == EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY
     )
+    assert payload["metadata_keys"]["report_metadata"]["autoregressive"] == (
+        AUTOREGRESSIVE_SUMMARY_METADATA_KEY
+    )
 
     implemented = payload["sections"]["implemented"]["target_sections"]
     assert [section["name"] for section in implemented] == [
@@ -257,6 +297,7 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "classical_baselines",
         "classical_model_input",
         "exponential_smoothing",
+        "autoregressive",
         "synthetic_constraints",
         "fingerprint_audit",
     ]
@@ -278,6 +319,21 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
             "source": definitions[name].source,
         }
         for name in EXPONENTIAL_SMOOTHING_COLUMNS
+    ]
+    autoregressive = next(
+        section
+        for section in implemented
+        if section["name"] == "autoregressive"
+    )
+    assert autoregressive["augmented_columns"] == [
+        {
+            "name": name,
+            "dtype": definitions[name].dtype,
+            "nullable": definitions[name].nullable,
+            "grain": definitions[name].grain,
+            "source": definitions[name].source,
+        }
+        for name in AUTOREGRESSIVE_COLUMNS
     ]
     planned = payload["sections"]["planned"]["target_sections"]
     assert planned == []

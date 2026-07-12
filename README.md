@@ -1223,9 +1223,10 @@ zero-variance markers, and the `log_return`, `differencing`, and
 `session_conditioning` recommendations remain explicit evaluation guards.
 Recommended transforms are reported but are not silently applied, and
 nonstationarity never becomes a hard quality failure. Fitted
-exponential-smoothing models use the separate contract below. ARIMA/SARIMA,
-state-space, GARCH, automatic model selection, forecasting leaderboards, and
-synthetic generation remain deliberately deferred.
+exponential-smoothing and explicit-order AR/ARMA/ARIMA models use the separate
+contracts below. SARIMA, exogenous regressors, state-space, GARCH, automatic
+model selection, forecasting leaderboards, and synthetic generation remain
+deliberately deferred.
 
 Python consumers can call
 `classical_baseline_diagnostics_from_training_frame(...)`, then
@@ -1437,6 +1438,62 @@ the same Polars cache and Influx point. Full reports use
 `time_series_fingerprint_exponential_smoothing_summary`, bounded payloads use
 `fingerprint_exponential_smoothing`, and console output renders
 `Exponential-smoothing models`.
+
+The second fitted family adds explicit-order AR, ARMA, and ARIMA models:
+
+```json
+{
+  "rules": {
+    "fingerprint.series": {
+      "classical_model_input": {
+        "enabled": true,
+        "frequency_ms": 60000,
+        "transform": "level",
+        "horizons": [1, 5],
+        "minimum_training_observations": 40,
+        "step_size": 20
+      },
+      "autoregressive": {
+        "enabled": true,
+        "projection_specification_ids": ["ar-2", "arma-1-1", "arima-1-1-1"],
+        "projection_horizon": 1,
+        "compare_exponential_smoothing": true,
+        "specifications": [
+          {"specification_id": "ar-2", "family": "ar", "p": 2, "trend": "c"},
+          {"specification_id": "arma-1-1", "family": "arma", "p": 1, "q": 1, "trend": "c"},
+          {"specification_id": "arima-1-1-1", "family": "arima", "p": 1, "d": 1, "q": 1}
+        ]
+      }
+    }
+  }
+}
+```
+
+AR and ARMA are first-class configured families even though Statsmodels uses a
+shared ARIMA backend. Orders, trend policy, initialization, estimation method,
+stationarity/invertibility enforcement, fixed scalar parameters, and iteration
+limits are explicit. Integrated model differencing (`d`) is distinct from the
+input contract's configured transform/differencing; fingerprint stationarity
+recommendations are advisory and are never applied automatically. Missing bins
+reset fitting to the trailing contiguous observed segment and are never filled.
+
+Every model is refit independently at each rolling origin, preventing residual,
+state, fitted-value, or future-value leakage. Forecasts and errors are returned
+on the original requested scale. Per-horizon MAE/RMSE/bias, forecast coverage,
+convergence/failure rates, fitted-parameter stability, roots, conditioning, and
+comparisons with lightweight and available exponential-smoothing references are
+bounded report diagnostics. There is no automatic order search or winner.
+
+`project_autoregressive_onto_training_frame(...)` adds fixed-width nullable
+scalar columns under `cm_ar_*`, `cm_arma_*`, and `cm_arima_*`, joined only by
+`series_id`/`period`/`row_id`. Forecast availability, realized diagnostic
+availability, fit/reason codes, orders, roots, and training eligibility remain
+point-in-time explicit. Full reports use
+`time_series_fingerprint_autoregressive_summary`, bounded payloads use
+`fingerprint_autoregressive`, and console output renders `Autoregressive
+models`. Computational cost is proportional to configured specifications times
+rolling origins; #421 candidate, fit-attempt, observation, time, memory, and
+diagnostic limits bound that work.
 
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,

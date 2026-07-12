@@ -12,6 +12,7 @@ from histdatacom.data_quality import (
     QUALITY_PROFILE_SCHEMA_VERSION,
     QUALITY_REPORTING_METADATA_KEY,
     SERIES_FINGERPRINT_RULE_ID,
+    AutoregressiveProfile,
     ClassicalModelInputProfile,
     ExponentialSmoothingProfile,
     HistDataSeriesFingerprintRule,
@@ -238,6 +239,7 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
         },
         "classical_model_input": ClassicalModelInputProfile().to_metadata(),
         "exponential_smoothing": ExponentialSmoothingProfile().to_metadata(),
+        "autoregressive": AutoregressiveProfile().to_metadata(),
     }
 
 

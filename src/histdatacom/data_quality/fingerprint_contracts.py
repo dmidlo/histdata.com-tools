@@ -5,6 +5,21 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from histdatacom.data_quality.autoregressive import (
+    AUTOREGRESSIVE_BOUNDED_PAYLOAD_KEY,
+    AUTOREGRESSIVE_CONFIGURATION_SCHEMA_VERSION,
+    AUTOREGRESSIVE_EVALUATION_SCHEMA_VERSION,
+    AUTOREGRESSIVE_FAMILIES,
+    AUTOREGRESSIVE_FIT_SCHEMA_VERSION,
+    AUTOREGRESSIVE_FIT_STATUS_CODES,
+    AUTOREGRESSIVE_FORECAST_SCHEMA_VERSION,
+    AUTOREGRESSIVE_REASON_CODES,
+    AUTOREGRESSIVE_SCHEMA_VERSION,
+    AUTOREGRESSIVE_SUMMARY_METADATA_KEY,
+    AUTOREGRESSIVE_SUMMARY_SCHEMA_VERSION,
+    AUTOREGRESSIVE_TRAINING_PROJECTION_SCHEMA_VERSION,
+    DEFAULT_AUTOREGRESSIVE_SUMMARY_TARGET_LIMIT,
+)
 from histdatacom.data_quality.calendar import (
     TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
 )
@@ -111,6 +126,7 @@ from histdatacom.data_quality.synthetic_constraints import (
     SYNTHETIC_VALIDATION_SCHEMA_VERSION,
 )
 from histdatacom.data_quality.training_features import (
+    AUTOREGRESSIVE_COLUMNS,
     EXPONENTIAL_SMOOTHING_COLUMNS,
     training_feature_definitions,
 )
@@ -130,6 +146,7 @@ FINGERPRINT_SERIES_CONFIG_KEYS = (
     "classical_baselines",
     "classical_model_input",
     "exponential_smoothing",
+    "autoregressive",
 )
 FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
     "invalid_row_min_count",
@@ -600,6 +617,57 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_autoregressive",
+        AUTOREGRESSIVE_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.autoregressive",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive_configuration",
+        AUTOREGRESSIVE_CONFIGURATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.autoregressive.configuration",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive_fit",
+        AUTOREGRESSIVE_FIT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.autoregressive.fit_summary",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive_forecast",
+        AUTOREGRESSIVE_FORECAST_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive_evaluation",
+        AUTOREGRESSIVE_EVALUATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.autoregressive.evaluation",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive_training_projection",
+        AUTOREGRESSIVE_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.autoregressive.training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive_summary",
+        AUTOREGRESSIVE_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=AUTOREGRESSIVE_SUMMARY_METADATA_KEY,
+        bounded_payload_key=AUTOREGRESSIVE_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_audit",
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -756,6 +824,14 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         EXPONENTIAL_SMOOTHING_BOUNDED_PAYLOAD_KEY,
         "exponential_smoothing",
         "Exponential-smoothing models",
+    ),
+    FingerprintReportSurfaceContract(
+        "autoregressive",
+        "fingerprint_autoregressive_summary",
+        AUTOREGRESSIVE_SUMMARY_METADATA_KEY,
+        AUTOREGRESSIVE_BOUNDED_PAYLOAD_KEY,
+        "autoregressive",
+        "Autoregressive models",
     ),
     FingerprintReportSurfaceContract(
         "readiness_summary",
@@ -995,6 +1071,50 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "autoregressive",
+        "opt-in fitted explicit-order AR, ARMA, and ARIMA diagnostics",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_autoregressive",
+        basis_values=("regular_grid_rolling_origin",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#423",
+            "profile_controlled_by": [
+                "classical_model_input",
+                "autoregressive",
+            ],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid",
+            "optional_dependency_extra": "models",
+            "backend": "statsmodels",
+            "model_families": list(AUTOREGRESSIVE_FAMILIES),
+            "fit_statuses": list(AUTOREGRESSIVE_FIT_STATUS_CODES),
+            "failure_reason_codes": list(AUTOREGRESSIVE_REASON_CODES),
+            "augmented_column_prefixes": [
+                "cm_ar_",
+                "cm_arma_",
+                "cm_arima_",
+            ],
+            "augmented_columns": [
+                {
+                    "name": definition.name,
+                    "dtype": definition.dtype,
+                    "nullable": definition.nullable,
+                    "grain": definition.grain,
+                    "source": definition.source,
+                }
+                for definition in training_feature_definitions()
+                if definition.name in AUTOREGRESSIVE_COLUMNS
+            ],
+            "explicit_order_configuration": True,
+            "automatic_order_selection": False,
+            "automatic_winner": False,
+            "row_mapping_policy": ("first_source_row_at_or_after_availability"),
+        },
+    ),
+    FingerprintTargetSectionContract(
         "synthetic_constraints",
         "generator-facing defects, stylized facts, artifacts, and validation contract",
         target_timeframes=(TICK,),
@@ -1066,6 +1186,9 @@ FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
     ),
     "exponential_smoothing_summary_target_limit": (
         DEFAULT_EXPONENTIAL_SMOOTHING_SUMMARY_TARGET_LIMIT
+    ),
+    "autoregressive_summary_target_limit": (
+        DEFAULT_AUTOREGRESSIVE_SUMMARY_TARGET_LIMIT
     ),
 }
 FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS = {

@@ -695,16 +695,16 @@
     },
     "report_surface_evidence": {
       "bounded_payload_state_counts": {
-        "present": 14
+        "present": 15
       },
       "cli_summary_state_counts": {
-        "present": 14
+        "present": 15
       },
       "report_metadata_state_counts": {
-        "present": 14
+        "present": 15
       },
       "schema_version": "histdatacom.time-series-fingerprint-report-surface-evidence.v1",
-      "surface_count": 14
+      "surface_count": 15
     },
     "risk_level_counts": {
       "high": 1

@@ -114,6 +114,29 @@ This is a compatible optional v1 report and enriched-column addition. Core
 installs and profiles that do not enable the family omit these report keys and
 do not import the optional numerical backend.
 
+## Autoregressive-Family Fingerprint
+
+Fingerprint findings may also include the opt-in
+`time_series_fingerprint.autoregressive` section using
+`histdatacom.autoregressive.v1`. Full reports summarize it under
+`metadata.time_series_fingerprint_autoregressive_summary`; the bounded runtime
+equivalent is `fingerprint_autoregressive`, and the text heading is
+`Autoregressive models`.
+
+Configuration, fit, forecast, evaluation, training-projection, and summary
+objects use stable `histdatacom.autoregressive-*.v1` schemas. AR, ARMA, and
+ARIMA remain explicit families with explicit orders. Automatic order search and
+winner selection are absent. Backend failures, convergence, roots,
+conditioning, parameters, fold errors, baseline references, resource limits,
+and Statsmodels version are bounded advisory metadata.
+
+Configured projections add nullable scalars under `cm_ar_*`, `cm_arma_*`, and
+`cm_arima_*` on enriched tick rows. Forecast fields become available at their
+origin; realized errors are separately marked post-observation diagnostics.
+Durable identity remains `series_id`, `period`, and `row_id`, and consumers do
+not need a side-table join. Older consumers may ignore the optional report keys
+and the additive enriched columns.
+
 ## Golden Fixtures
 
 Representative payload fixtures live under

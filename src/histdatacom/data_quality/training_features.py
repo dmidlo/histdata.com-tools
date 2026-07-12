@@ -159,6 +159,47 @@ EXPONENTIAL_SMOOTHING_COLUMNS = (
     "cm_ets_training_eligible",
 )
 
+AUTOREGRESSIVE_FAMILY_COLUMN_SUFFIXES = (
+    "schema_version",
+    "input_derivation_id",
+    "model_id",
+    "family_code",
+    "specification_code",
+    "p",
+    "d",
+    "q",
+    "trend_code",
+    "calculation_basis_code",
+    "fit_status_code",
+    "failure_reason_code",
+    "converged",
+    "stationary",
+    "invertible",
+    "ar_root_min_modulus",
+    "ma_root_min_modulus",
+    "covariance_condition_number",
+    "effective_observation_count",
+    "fold_id",
+    "origin_row_id",
+    "target_row_id",
+    "horizon",
+    "forecast",
+    "forecast_available",
+    "forecast_available_at_utc_ms",
+    "actual",
+    "error",
+    "diagnostic_available",
+    "diagnostic_available_at_utc_ms",
+    "diagnostic_only",
+    "original_scale",
+    "training_eligible",
+)
+AUTOREGRESSIVE_COLUMNS = tuple(
+    f"cm_{family}_{suffix}"
+    for family in ("ar", "arma", "arima")
+    for suffix in AUTOREGRESSIVE_FAMILY_COLUMN_SUFFIXES
+)
+
 TRAINING_REQUIRED_COLUMNS = (
     *IDENTITY_COLUMNS,
     "spread",
@@ -189,6 +230,7 @@ TRAINING_REQUIRED_COLUMNS = (
     *SYNTHETIC_PLACEHOLDER_COLUMNS,
     *CLASSICAL_MODEL_CONTRACT_COLUMNS,
     *EXPONENTIAL_SMOOTHING_COLUMNS,
+    *AUTOREGRESSIVE_COLUMNS,
 )
 
 ISSUE_CODE_BY_COLUMN = {
@@ -370,6 +412,7 @@ def training_feature_definitions() -> tuple[TrainingFeatureDefinition, ...]:
     definitions.extend(_synthetic_definition_rows())
     definitions.extend(_classical_model_contract_definition_rows())
     definitions.extend(_exponential_smoothing_definition_rows())
+    definitions.extend(_autoregressive_definition_rows())
     return tuple(definitions)
 
 
@@ -934,6 +977,56 @@ def _exponential_smoothing_definition_rows() -> list[TrainingFeatureDefinition]:
                 None,
                 f"Point-in-time-safe exponential-smoothing scalar: {name}.",
                 "exponential_smoothing",
+                "row",
+                True,
+            )
+        )
+    return definitions
+
+
+def _autoregressive_definition_rows() -> list[TrainingFeatureDefinition]:
+    strings = {
+        "schema_version",
+        "input_derivation_id",
+        "model_id",
+    }
+    booleans = {
+        "converged",
+        "stationary",
+        "invertible",
+        "forecast_available",
+        "diagnostic_available",
+        "diagnostic_only",
+        "original_scale",
+        "training_eligible",
+    }
+    floats = {
+        "forecast",
+        "actual",
+        "error",
+        "ar_root_min_modulus",
+        "ma_root_min_modulus",
+        "covariance_condition_number",
+    }
+    definitions: list[TrainingFeatureDefinition] = []
+    for name in AUTOREGRESSIVE_COLUMNS:
+        suffix = name.split("_", maxsplit=2)[-1]
+        dtype = (
+            "Utf8"
+            if suffix in strings
+            else (
+                "Boolean"
+                if suffix in booleans
+                else "Float64" if suffix in floats else "Int64"
+            )
+        )
+        definitions.append(
+            TrainingFeatureDefinition(
+                name,
+                dtype,
+                None,
+                f"Point-in-time-safe autoregressive scalar: {name}.",
+                "autoregressive",
                 "row",
                 True,
             )

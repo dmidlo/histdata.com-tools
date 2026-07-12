@@ -13,6 +13,10 @@ from histdatacom.data_quality.calendar_profiles import (
     HistDataCalendarProfile,
     calendar_profile_from_mapping,
 )
+from histdatacom.data_quality.autoregressive import (
+    AutoregressiveProfile,
+    AutoregressiveSpecification,
+)
 from histdatacom.data_quality.classical_baselines import (
     MAX_BASELINE_ROLLING_WINDOWS,
     ClassicalBaselineProfile,
@@ -498,6 +502,7 @@ class QualityProfile:
                 "classical_baselines",
                 "classical_model_input",
                 "exponential_smoothing",
+                "autoregressive",
             },
             SERIES_FINGERPRINT_RULE_ID,
         )
@@ -591,6 +596,14 @@ class QualityProfile:
                     path=SERIES_FINGERPRINT_RULE_ID,
                 ),
                 path=f"{SERIES_FINGERPRINT_RULE_ID}.exponential_smoothing",
+            ),
+            autoregressive=_autoregressive_profile(
+                _mapping_field(
+                    config,
+                    "autoregressive",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.autoregressive",
             ),
         )
 
@@ -2013,6 +2026,180 @@ def _exponential_smoothing_profile(
                 minimum=0,
                 maximum=16,
                 path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _autoregressive_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> AutoregressiveProfile:
+    base = AutoregressiveProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "specifications",
+            "projection_specification_ids",
+            "projection_horizon",
+            "baseline_rolling_windows",
+            "compare_exponential_smoothing",
+            "rounding_digits",
+        },
+        path,
+    )
+    specifications = base.specifications
+    if "specifications" in value:
+        raw = value["specifications"]
+        if not isinstance(raw, list) or not raw:
+            raise QualityProfileError(
+                f"{path}.specifications must be a non-empty list"
+            )
+        specifications = tuple(
+            _autoregressive_specification(
+                _expect_mapping(item, path=f"{path}.specifications[{index}]"),
+                path=f"{path}.specifications[{index}]",
+            )
+            for index, item in enumerate(raw)
+        )
+    projection_ids = base.projection_specification_ids
+    if "projection_specification_ids" in value:
+        raw_ids = value["projection_specification_ids"]
+        if not isinstance(raw_ids, list) or not raw_ids:
+            raise QualityProfileError(
+                f"{path}.projection_specification_ids must be a non-empty list"
+            )
+        if not all(isinstance(item, str) and item for item in raw_ids):
+            raise QualityProfileError(
+                f"{path}.projection_specification_ids must contain strings"
+            )
+        projection_ids = tuple(cast(list[str], raw_ids))
+    elif "specifications" in value:
+        by_family: dict[str, str] = {}
+        for specification in specifications:
+            by_family.setdefault(
+                specification.family, specification.specification_id
+            )
+        projection_ids = tuple(by_family.values())
+    try:
+        return AutoregressiveProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            specifications=specifications,
+            projection_specification_ids=projection_ids,
+            projection_horizon=_int_field(
+                value,
+                "projection_horizon",
+                base.projection_horizon,
+                minimum=1,
+                path=path,
+            ),
+            baseline_rolling_windows=_fingerprint_int_sequence(
+                value,
+                "baseline_rolling_windows",
+                base.baseline_rolling_windows,
+                path=path,
+            ),
+            compare_exponential_smoothing=_bool_field(
+                value,
+                "compare_exponential_smoothing",
+                base.compare_exponential_smoothing,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _autoregressive_specification(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> AutoregressiveSpecification:
+    _reject_unknown_keys(
+        value,
+        {
+            "specification_id",
+            "family",
+            "p",
+            "d",
+            "q",
+            "trend",
+            "initialization_method",
+            "estimation_method",
+            "enforce_stationarity",
+            "enforce_invertibility",
+            "concentrate_scale",
+            "fixed_parameters",
+            "max_iterations",
+        },
+        path,
+    )
+    if (
+        "specification_id" not in value
+        or "family" not in value
+        or "p" not in value
+    ):
+        raise QualityProfileError(
+            f"{path} requires specification_id, family, and p"
+        )
+    family = _string_field(value, "family", "", path=path)
+    fixed_parameters: tuple[tuple[str, float], ...] = ()
+    if "fixed_parameters" in value:
+        raw_fixed = _expect_mapping(
+            value["fixed_parameters"], path=f"{path}.fixed_parameters"
+        )
+        parsed_fixed: list[tuple[str, float]] = []
+        for name, raw_value in sorted(raw_fixed.items()):
+            if isinstance(raw_value, bool):
+                raise QualityProfileError(
+                    f"{path}.fixed_parameters.{name} must be a number"
+                )
+            try:
+                parsed_fixed.append((name, float(cast(Any, raw_value))))
+            except (TypeError, ValueError) as exc:
+                raise QualityProfileError(
+                    f"{path}.fixed_parameters.{name} must be a number"
+                ) from exc
+        fixed_parameters = tuple(parsed_fixed)
+    try:
+        return AutoregressiveSpecification(
+            specification_id=_string_field(
+                value, "specification_id", "", path=path
+            ),
+            family=family,
+            p=_int_field(value, "p", 0, minimum=0, path=path),
+            d=_int_field(value, "d", 0, minimum=0, path=path),
+            q=_int_field(value, "q", 0, minimum=0, path=path),
+            trend=_string_field(value, "trend", "n", path=path),
+            initialization_method=_string_field(
+                value, "initialization_method", "default", path=path
+            ),
+            estimation_method=_string_field(
+                value, "estimation_method", "statespace", path=path
+            ),
+            enforce_stationarity=_bool_field(
+                value, "enforce_stationarity", True, path=path
+            ),
+            enforce_invertibility=_bool_field(
+                value, "enforce_invertibility", True, path=path
+            ),
+            concentrate_scale=_bool_field(
+                value, "concentrate_scale", False, path=path
+            ),
+            fixed_parameters=fixed_parameters,
+            max_iterations=_int_field(
+                value, "max_iterations", 200, minimum=1, path=path
             ),
         )
     except ValueError as exc:
