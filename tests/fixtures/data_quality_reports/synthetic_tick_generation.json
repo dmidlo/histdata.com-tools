@@ -1,0 +1,330 @@
+{
+  "advisory": true,
+  "base_grain": {
+    "data_format": "ascii",
+    "timeframe": "T"
+  },
+  "configuration": {
+    "anchor_mode": "first_valid_mid",
+    "block_size": 4,
+    "diagnostic_sample_limit": 4,
+    "max_abs_log_return": 0.25,
+    "max_generated_rows": 1000,
+    "max_reference_rows": 1000,
+    "method": "empirical_block_bootstrap",
+    "method_code": 1,
+    "minimum_reference_rows": 8,
+    "overwrite_existing": false,
+    "rounding_digits": 8,
+    "schema_version": "histdatacom.synthetic-tick-generation-configuration.v1",
+    "seed": 17
+  },
+  "constraint_application": {
+    "defects_to_avoid": {
+      "application": "filter_flagged_reference_rows_and_enforce_quote_invariants",
+      "codes": [
+        "avoid_negative_spread",
+        "avoid_duplicate_timestamps",
+        "avoid_non_monotonic_timestamps",
+        "avoid_suspicious_non_session_gaps",
+        "avoid_invalid_rows",
+        "avoid_partial_rows",
+        "avoid_topology_unavailable",
+        "avoid_fingerprint_unready",
+        "avoid_unsupported_schema",
+        "avoid_structurally_invalid_timestamps"
+      ],
+      "count": 10
+    },
+    "source_artifacts_to_parameterize": {
+      "application": "preserve_reference_row_topology_and_expose_configuration",
+      "codes": [
+        "parameterize_source_provenance",
+        "parameterize_source_coverage",
+        "parameterize_gap_topology",
+        "parameterize_calendar_policy",
+        "parameterize_dynamics_limitations",
+        "parameterize_stationarity_limitations",
+        "parameterize_training_substrate",
+        "defer_raw_m1_ohlc_constraints"
+      ],
+      "count": 8
+    },
+    "stylized_facts_to_preserve": {
+      "application": "paired_empirical_blocks_then_fingerprint_validation",
+      "codes": [
+        "session_activity_mix",
+        "active_session_mix",
+        "calendar_special_tag_mix",
+        "gap_bucket_shape",
+        "interval_topology",
+        "spread_distribution",
+        "precision_regime",
+        "spread_jump_behavior",
+        "stale_quote_runs",
+        "burst_behavior",
+        "one_sided_movement",
+        "volatility_clustering_proxy",
+        "return_tail_shape",
+        "rolling_drift",
+        "stationarity_transform_policy",
+        "structural_regime_proxy"
+      ],
+      "count": 16
+    }
+  },
+  "generation": {
+    "block_size": 4,
+    "calculation_basis": "paired_mid_log_return_and_spread_blocks",
+    "confidence": 1.0,
+    "generated_row_count": 80,
+    "input_row_count": 80,
+    "method": "empirical_block_bootstrap",
+    "method_code": 1,
+    "observed_columns_overwritten": false,
+    "omitted_row_count": 0,
+    "price_bounds": {
+      "maximum": 1000000000000.0,
+      "minimum": 1e-08
+    },
+    "price_clamp_count": 0,
+    "return_clip_count": 0,
+    "same_row_grain": true,
+    "sample_count": 4,
+    "samples": [
+      {
+        "output_row_offset": 0,
+        "reference_source_row_id": 29,
+        "reference_transition_index": 27
+      },
+      {
+        "output_row_offset": 1,
+        "reference_source_row_id": 30,
+        "reference_transition_index": 28
+      },
+      {
+        "output_row_offset": 2,
+        "reference_source_row_id": 31,
+        "reference_transition_index": 29
+      },
+      {
+        "output_row_offset": 3,
+        "reference_source_row_id": 32,
+        "reference_transition_index": 30
+      }
+    ],
+    "samples_truncated": true,
+    "seed": 17,
+    "synthetic_columns_only": true,
+    "timestamp_generation": false
+  },
+  "generation_id": "synthetic-generation:sha256:8b28a63d7391c88986b2c2cfea3a3cb19be845648bc5ad9d1a4808d1f5e5d066",
+  "input_row_count": 80,
+  "output_contract": {
+    "columns": [
+      "synth_bid",
+      "synth_ask",
+      "synth_spread",
+      "synth_mid",
+      "synth_method_code",
+      "synth_confidence",
+      "synth_usable"
+    ],
+    "durable_identity": [
+      "series_id",
+      "period",
+      "row_id"
+    ],
+    "observed_bid_ask_preserved": true,
+    "raw_m1_generation": false,
+    "same_frame_projection": true,
+    "timestamp_is_sole_identity": false,
+    "volume_generation": false
+  },
+  "quality_gate": false,
+  "reason": null,
+  "reason_code": 0,
+  "reference_constraint_id": "sha256:c27e09c72afacd22c755c666ee281b9f94fbafc71d9e186def5a3e7e8698134a",
+  "reference_constraint_status": "ready",
+  "reference_evidence": {
+    "defective_rows_used": false,
+    "filtered_reference_row_count": 0,
+    "hard_issue_columns": [
+      "dq_issue_non_monotonic_timestamp",
+      "dq_issue_negative_spread",
+      "dq_issue_invalid_row",
+      "dq_issue_source_unavailable",
+      "dq_issue_topology_unavailable"
+    ],
+    "inspected_row_count": 80,
+    "reference_rows_truncated": false,
+    "transition_count": 79,
+    "valid_reference_row_count": 80
+  },
+  "reference_fingerprint_count": 1,
+  "reference_fingerprint_id": "sha256:3975187060b6b1f376a039cc2d0c788040fdada0752e816176a66de6b04ce7a9",
+  "reference_fingerprint_ids": [
+    "sha256:3975187060b6b1f376a039cc2d0c788040fdada0752e816176a66de6b04ce7a9"
+  ],
+  "reference_fingerprint_required": true,
+  "resource_policy": {
+    "bounded": true,
+    "max_generated_rows": 1000,
+    "max_reference_rows": 1000
+  },
+  "schema_version": "histdatacom.synthetic-tick-generation.v1",
+  "status": "ready",
+  "status_code": 3,
+  "target_axis": {
+    "data_format": "ascii",
+    "kind": "cache",
+    "period": "201202",
+    "symbol": "EURUSD",
+    "timeframe": "T"
+  },
+  "validation": {
+    "candidate_fingerprint_id": "sha256:9fbb7310d9af4d08ca9afb5735e454faf3bb044e192cff45b44d20bbfc8a5549",
+    "candidate_fingerprint_schema_version": "histdatacom.time-series-fingerprint.v1",
+    "constraint_validation": {
+      "advisory": true,
+      "base_grain": {
+        "data_format": "ascii",
+        "timeframe": "T"
+      },
+      "candidate_target_count": 1,
+      "compared_target_count": 1,
+      "included_target_count": 1,
+      "limit_metadata": {
+        "mismatches": {
+          "default_limit": 32,
+          "effective_limit": 32,
+          "limit": 32,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 32,
+          "unbounded": false
+        },
+        "targets": {
+          "default_limit": 32,
+          "effective_limit": 32,
+          "limit": 32,
+          "maximum_limit": null,
+          "minimum_limit": 0,
+          "requested_limit": 32,
+          "unbounded": false
+        }
+      },
+      "matching_target_count": 0,
+      "mismatch_code_counts": {
+        "synthetic_candidate_one_sided_movement_mismatch": 1,
+        "synthetic_candidate_precision_regime_mismatch": 1,
+        "synthetic_candidate_return_tail_shape_mismatch": 1,
+        "synthetic_candidate_spread_distribution_mismatch": 1,
+        "synthetic_candidate_structural_regime_proxy_mismatch": 1,
+        "synthetic_candidate_volatility_clustering_proxy_mismatch": 1
+      },
+      "mismatch_count": 6,
+      "mismatched_target_count": 1,
+      "not_compared_target_count": 0,
+      "omitted_target_count": 0,
+      "reference_target_count": 1,
+      "schema_version": "histdatacom.synthetic-fingerprint-validation.v1",
+      "status": "mismatch",
+      "target_results": [
+        {
+          "compared_fact_count": 16,
+          "included_mismatch_code_count": 6,
+          "included_mismatch_count": 6,
+          "mismatch_code_count": 6,
+          "mismatch_code_counts": {
+            "synthetic_candidate_one_sided_movement_mismatch": 1,
+            "synthetic_candidate_precision_regime_mismatch": 1,
+            "synthetic_candidate_return_tail_shape_mismatch": 1,
+            "synthetic_candidate_spread_distribution_mismatch": 1,
+            "synthetic_candidate_structural_regime_proxy_mismatch": 1,
+            "synthetic_candidate_volatility_clustering_proxy_mismatch": 1
+          },
+          "mismatch_codes": [
+            "synthetic_candidate_one_sided_movement_mismatch",
+            "synthetic_candidate_precision_regime_mismatch",
+            "synthetic_candidate_return_tail_shape_mismatch",
+            "synthetic_candidate_spread_distribution_mismatch",
+            "synthetic_candidate_structural_regime_proxy_mismatch",
+            "synthetic_candidate_volatility_clustering_proxy_mismatch"
+          ],
+          "mismatch_count": 6,
+          "mismatch_details": [
+            {
+              "category": "stylized_fact",
+              "code": "synthetic_candidate_one_sided_movement_mismatch",
+              "comparison": "numeric_relative_tolerance",
+              "constraint_code": "one_sided_movement",
+              "tolerance": 0.1
+            },
+            {
+              "category": "stylized_fact",
+              "code": "synthetic_candidate_precision_regime_mismatch",
+              "comparison": "distribution_l1",
+              "constraint_code": "precision_regime",
+              "tolerance": 0.0
+            },
+            {
+              "category": "stylized_fact",
+              "code": "synthetic_candidate_return_tail_shape_mismatch",
+              "comparison": "numeric_relative_tolerance",
+              "constraint_code": "return_tail_shape",
+              "tolerance": 0.1
+            },
+            {
+              "category": "stylized_fact",
+              "code": "synthetic_candidate_spread_distribution_mismatch",
+              "comparison": "numeric_relative_tolerance",
+              "constraint_code": "spread_distribution",
+              "tolerance": 0.1
+            },
+            {
+              "category": "stylized_fact",
+              "code": "synthetic_candidate_structural_regime_proxy_mismatch",
+              "comparison": "numeric_relative_tolerance",
+              "constraint_code": "structural_regime_proxy",
+              "tolerance": 0.1
+            },
+            {
+              "category": "stylized_fact",
+              "code": "synthetic_candidate_volatility_clustering_proxy_mismatch",
+              "comparison": "numeric_absolute_tolerance",
+              "constraint_code": "volatility_clustering_proxy",
+              "tolerance": 0.2
+            }
+          ],
+          "omitted_mismatch_code_count": 0,
+          "omitted_mismatch_count": 0,
+          "status": "mismatch",
+          "target_axis": {
+            "data_format": "ascii",
+            "kind": "cache",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "T"
+          },
+          "truncated": false
+        }
+      ],
+      "truncated": false
+    },
+    "hard_quality_gate": false,
+    "same_fingerprint_path_used": true,
+    "same_point_influx_projection": {
+      "line_count": 1,
+      "observed_fields_present": true,
+      "raw_line_included": false,
+      "reason": null,
+      "same_measurement": true,
+      "status": "valid",
+      "synthetic_fields_present": true,
+      "training_fields_present": true
+    },
+    "schema_version": "histdatacom.synthetic-tick-generation-validation.v1",
+    "status": "mismatch"
+  }
+}

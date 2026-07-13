@@ -133,6 +133,11 @@ from histdatacom.data_quality.synthetic_constraints import (
     SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
     SYNTHETIC_VALIDATION_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.synthetic_generation import (
+    SYNTHETIC_TICK_GENERATION_CONFIGURATION_SCHEMA_VERSION,
+    SYNTHETIC_TICK_GENERATION_SCHEMA_VERSION,
+    SYNTHETIC_TICK_GENERATION_VALIDATION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.training_features import (
     EXPONENTIAL_SMOOTHING_COLUMNS,
     SEASONAL_EXOGENOUS_COLUMNS,
@@ -382,6 +387,17 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert schemas["fingerprint_synthetic_validation"]["schema_version"] == (
         SYNTHETIC_VALIDATION_SCHEMA_VERSION
     )
+    assert schemas["synthetic_tick_generation"]["schema_version"] == (
+        SYNTHETIC_TICK_GENERATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["synthetic_tick_generation_configuration"]["schema_version"]
+        == SYNTHETIC_TICK_GENERATION_CONFIGURATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["synthetic_tick_generation_validation"]["schema_version"]
+        == SYNTHETIC_TICK_GENERATION_VALIDATION_SCHEMA_VERSION
+    )
     assert schemas["cross_series_fingerprint"] == {
         "schema_version": CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
         "status": "implemented",
@@ -461,6 +477,14 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         definition.name: definition
         for definition in training_feature_definitions()
     }
+    synthetic = next(
+        section
+        for section in implemented
+        if section["name"] == "synthetic_constraints"
+    )
+    assert synthetic["generation_in_scope"] is True
+    assert synthetic["generation_method"] == "empirical_block_bootstrap"
+    assert synthetic["issue"] == "#81"
     assert exponential["augmented_columns"] == [
         {
             "name": name,

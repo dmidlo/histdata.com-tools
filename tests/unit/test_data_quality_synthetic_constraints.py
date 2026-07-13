@@ -75,6 +75,9 @@ def test_constraints_derive_categories_from_enriched_tick_rows() -> None:
     ]
     assert output["timestamp_is_sole_identity"] is False
     assert output["non_tick_input_constraints_supported"] is False
+    assert output["generation_in_scope"] is True
+    assert output["generation_issue"] == "#81"
+    assert output["generation_method"] == "empirical_block_bootstrap"
     assert {
         item["code"] for item in _mapping_rows(first["defects_to_avoid"])
     } >= {

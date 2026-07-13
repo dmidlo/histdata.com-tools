@@ -1147,7 +1147,7 @@ Missing sources or caches are reported as `not_compared`; stale caches are
 compared and marked advisory rather than accepted by the normal freshness path.
 
 Every supported ASCII tick fingerprint also emits bounded
-`synthetic_constraints` for external generators. The protocol separates
+`synthetic_constraints` for the deterministic reference-set generator. The protocol separates
 `defects_to_avoid`, `stylized_facts_to_preserve`, and
 `source_artifacts_to_parameterize`; records stable comparison modes and
 tolerances; and exposes advisory hints for session mix, spread regimes, gap
@@ -1157,12 +1157,41 @@ frame, not nested report JSON. Legacy raw caches are enriched in memory before
 row issue columns are counted.
 
 Python consumers can call `synthetic_constraints_from_training_frame(...)`
-with an enriched Polars frame and its optional fingerprint. Generated values belong only in
-`synth_bid`, `synth_ask`, `synth_spread`, `synth_mid`,
-`synth_method_code`, `synth_confidence`, and `synth_usable`; observed `bid` and
-`ask` and the durable `series_id`/`period`/`row_id` identity remain unchanged.
-Generation, volume synthesis, raw M1/OHLC support, and derived candlestick
-output are deliberately outside this first ASCII tick protocol.
+with an enriched Polars frame and its fingerprint, then call
+`generate_synthetic_ticks_from_reference(...)`. The generator applies a seeded,
+contiguous empirical block bootstrap to paired midpoint log returns and spreads,
+filters rows marked by `dq_issue_*`, and enforces explicit inspection and output
+row limits for very large periods. It refuses a missing fingerprint or
+pre-populated synthetic columns unless replacement is explicitly requested.
+
+Generated values augment the same rows only in `synth_bid`, `synth_ask`,
+`synth_spread`, `synth_mid`, `synth_method_code`, `synth_confidence`, and
+`synth_usable`. Observed `bid`/`ask`, timestamp features, duplicate-timestamp
+rows, and durable `series_id`/`period`/`row_id` identity remain unchanged. Every
+successful generation is automatically projected into a market-only candidate
+cache, run through the ordinary `fingerprint.series` rule, and compared with
+the reference through the synthetic constraint validator. Statistical mismatch
+remains advisory rather than a hard data-quality gate.
+
+Generate an enriched synthetic cache and optionally retain its ordinary
+candidate fingerprint report:
+
+```sh
+histdatacom quality synthetic-generate \
+  --reference-cache data/ASCII/T/EURUSD/2012/01/.data \
+  --reference-report reports/reference-quality.json \
+  --output-cache generated/ASCII/T/EURUSD/2012/01/.data \
+  --candidate-report reports/generated-quality.json \
+  --seed 17 \
+  --json
+```
+
+The command will not overwrite observed columns or an existing output cache by
+default. `--max-reference-rows` and `--max-generated-rows` bound work; rows
+beyond the generation limit remain present with null synthetic values and
+`synth_usable=false`. Volume synthesis, raw M1/OHLC generation, and derived
+candlestick output remain outside this ASCII tick feature and follow later
+issues #80 and #18.
 
 Validate an exported candidate tick dataset by running the normal fingerprint
 quality path for both reference and candidate, then comparing their saved
@@ -1178,8 +1207,8 @@ histdatacom quality synthetic-validate \
 The advisory `histdatacom.synthetic-fingerprint-validation.v1` result reports
 matched, mismatched, and missing target axes; candidate defect violations;
 bounded stylized-fact mismatches; output/identity contract drift; and stable
-mismatch codes. It does not generate data or turn statistical drift into a hard
-quality gate. Full reports expose
+mismatch codes. The validator itself does not mutate data or turn statistical
+drift into a hard quality gate. Full reports expose
 `metadata.time_series_fingerprint_synthetic_constraint_summary`, bounded
 payloads expose `fingerprint_synthetic_constraints`, and the ordinary
 fingerprint CLI summary renders `Synthetic fingerprint constraints`.
@@ -1222,12 +1251,11 @@ Stationarity status, rolling drift, distribution shift, skipped windows,
 zero-variance markers, and the `log_return`, `differencing`, and
 `session_conditioning` recommendations remain explicit evaluation guards.
 Recommended transforms are reported but are not silently applied, and
-nonstationarity never becomes a hard quality failure. Fitted
-exponential-smoothing and explicit-order AR/ARMA/ARIMA models use the separate
-contracts below. Explicit SARIMA/ARIMAX/SARIMAX models are also implemented as
-the third fitted family. State-space, GARCH, automatic model selection,
-forecasting leaderboards, and synthetic generation remain deliberately
-deferred.
+nonstationarity never becomes a hard quality failure. The fitted curriculum now
+includes exponential smoothing, explicit-order AR/ARMA/ARIMA,
+SARIMA/ARIMAX/SARIMAX, structural state-space and Kalman diagnostics, symmetric
+ARCH/GARCH, and family-neutral comparison. Automatic model selection and
+forecasting leaderboards remain deliberately deferred.
 
 Python consumers can call
 `classical_baseline_diagnostics_from_training_frame(...)`, then

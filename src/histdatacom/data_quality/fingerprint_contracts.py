@@ -139,6 +139,11 @@ from histdatacom.data_quality.synthetic_constraints import (
     SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
     SYNTHETIC_VALIDATION_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.synthetic_generation import (
+    SYNTHETIC_TICK_GENERATION_CONFIGURATION_SCHEMA_VERSION,
+    SYNTHETIC_TICK_GENERATION_SCHEMA_VERSION,
+    SYNTHETIC_TICK_GENERATION_VALIDATION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.seasonal_exogenous import (
     DEFAULT_SEASONAL_EXOGENOUS_SUMMARY_TARGET_LIMIT,
     SEASONAL_EXOGENOUS_BOUNDED_PAYLOAD_KEY,
@@ -1003,6 +1008,24 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "synthetic_tick_generation",
+        SYNTHETIC_TICK_GENERATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "synthetic_tick_generation_configuration",
+        SYNTHETIC_TICK_GENERATION_CONFIGURATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "synthetic_tick_generation_validation",
+        SYNTHETIC_TICK_GENERATION_VALIDATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_readiness_summary",
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -1625,10 +1648,13 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         schema_key="fingerprint_synthetic_constraints",
         basis_values=("enriched_training_frame", "fingerprint_fallback"),
         extra={
-            "issue": "#333",
+            "issue": "#81",
+            "constraint_issue": "#333",
             "advisory": True,
             "base_grain": "ascii/T",
-            "generation_in_scope": False,
+            "generation_in_scope": True,
+            "generation_method": "empirical_block_bootstrap",
+            "generator_schema_key": "synthetic_tick_generation",
             "non_tick_input_constraints_supported": False,
         },
     ),

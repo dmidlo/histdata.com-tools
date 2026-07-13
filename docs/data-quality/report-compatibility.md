@@ -218,6 +218,30 @@ target-time gated, explicitly not training-eligible, and joined only by durable
 `series_id`, `period`, and `row_id`. No winner, best-model field, production
 recommendation, or normative automatic selection is part of this schema.
 
+## Synthetic Tick Generation
+
+`histdatacom.synthetic-tick-generation.v1` is a bounded diagnostic artifact,
+not a new quality-report top level. Its configuration and automatic candidate
+validation use `histdatacom.synthetic-tick-generation-configuration.v1` and
+`histdatacom.synthetic-tick-generation-validation.v1`. The generated candidate
+report remains an ordinary `histdatacom.quality-report.v1` containing the same
+`fingerprint.series` payload and `histdatacom.synthetic-fingerprint-validation.v1`
+comparison semantics used for external candidates.
+
+The row schema is additive: the seven existing nullable `synth_*` columns are
+populated on the enriched ASCII tick row, while observed bid/ask, duplicate
+timestamps, and `series_id`/`period`/`row_id` identity are preserved. Consumers
+that do not use synthetic values may continue to ignore those columns. The
+generator never adds a separate table, changes timestamp identity, or restores
+M1 as an independent base grain.
+
+Generation diagnostics are deterministic for the same reference fingerprint,
+configuration, and reference rows. Bounded evidence includes only counts,
+stable IDs, configuration, and a limited transition-index sample; it excludes
+raw quote rows, fitted objects, absolute report paths, and exception text.
+Statistical fingerprint mismatch remains advisory and cannot change the
+candidate quality status.
+
 ## Golden Fixtures
 
 Representative payload fixtures live under
@@ -231,6 +255,7 @@ The golden suite covers:
 - corrupt ZIP detailed report;
 - coverage-manifest failure detailed report;
 - canonical cache target detailed report;
+- deterministic synthetic tick generation diagnostics and candidate-validation evidence;
 - duplicate ZIP/CSV quality-engine skip detailed report;
 - bounded runtime payload with structured quality-engine skips;
 - fingerprint detailed and bounded reports with action-linked topology

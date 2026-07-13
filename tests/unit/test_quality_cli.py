@@ -28,21 +28,27 @@ from histdatacom.data_quality.fingerprint_discovery import (
     TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION,
 )
 from histdatacom.data_quality.fingerprints import (
+    HistDataSeriesFingerprintRule,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.discovery import quality_target_from_path
 from histdatacom.data_quality.profiles import QUALITY_PROFILE_SCHEMA_VERSION
 from histdatacom.data_quality.synthetic_constraints import (
     SYNTHETIC_VALIDATION_SCHEMA_VERSION,
     synthetic_constraints_from_fingerprint,
 )
+from histdatacom.data_quality.synthetic_generation import (
+    SYNTHETIC_TICK_GENERATION_SCHEMA_VERSION,
+)
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     TICK,
     parse_ascii_lines,
+    read_polars_cache,
     to_polars_frame,
     write_polars_cache,
 )
@@ -546,6 +552,107 @@ def test_quality_synthetic_validate_cli_compares_saved_reports(
     assert "synthetic_candidate_avoid_duplicate_timestamps_present" in (
         payload["mismatch_code_counts"]
     )
+
+
+def test_quality_synthetic_generate_cli_writes_enriched_validated_cache(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Generation should preserve observations and save validator evidence."""
+    reference_path = _write_tick_cache(
+        tmp_path / "reference",
+        symbol="EURUSD",
+        row_multiplier=8,
+    )
+    target = quality_target_from_path(reference_path)
+    assert target is not None
+    [finding] = HistDataSeriesFingerprintRule().evaluate(target)
+    reference_report = QualityReport(
+        targets=(target,),
+        rule_results=(
+            QualityRuleResult(
+                rule_id=finding.rule_id,
+                target=target,
+                findings=(finding,),
+            ),
+        ),
+    )
+    reference_report_path = tmp_path / "reference-quality.json"
+    write_quality_report(reference_report, reference_report_path)
+    output_path = tmp_path / "generated" / ".data"
+    candidate_report_path = tmp_path / "generated-quality.json"
+
+    exit_code = main(
+        [
+            "synthetic-generate",
+            "--reference-cache",
+            str(reference_path),
+            "--reference-report",
+            str(reference_report_path),
+            "--output-cache",
+            str(output_path),
+            "--candidate-report",
+            str(candidate_report_path),
+            "--minimum-reference-rows",
+            "8",
+            "--block-size",
+            "4",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == SYNTHETIC_TICK_GENERATION_SCHEMA_VERSION
+    assert payload["status"] == "ready"
+    assert payload["validation"]["same_fingerprint_path_used"] is True
+    assert output_path.is_file()
+    assert candidate_report_path.is_file()
+    reference = read_polars_cache(reference_path)
+    generated = read_polars_cache(output_path)
+    assert generated.select("datetime", "bid", "ask").to_dicts() == (
+        reference.select("datetime", "bid", "ask").to_dicts()
+    )
+    assert generated.get_column("synth_usable").all()
+    assert generated.get_column("synth_bid").null_count() == 0
+
+    configured_output = tmp_path / "configured-generated" / ".data"
+    config_path = tmp_path / "synthetic-generation.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality:
+    command: synthetic_generate
+    reference_cache: {reference_path}
+    reference_report: {reference_report_path}
+    output_cache: {configured_output}
+    minimum_reference_rows: 8
+    block_size: 4
+    seed: 23
+    json: true
+""",
+        encoding="utf-8",
+    )
+    assert main(["--config", str(config_path)]) == 0
+    configured_payload = json.loads(capsys.readouterr().out)
+    assert configured_payload["configuration"]["seed"] == 23
+    assert configured_output.is_file()
+
+    assert (
+        main(
+            [
+                "synthetic-generate",
+                "--reference-cache",
+                str(reference_path),
+                "--reference-report",
+                str(reference_report_path),
+                "--output-cache",
+                str(output_path),
+            ]
+        )
+        == 1
+    )
+    assert "output cache already exists" in capsys.readouterr().err
 
 
 def test_quality_fingerprint_schema_cli_applies_yaml_defaults(
