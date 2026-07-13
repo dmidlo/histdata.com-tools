@@ -205,6 +205,9 @@ must be written to artifact storage.
 - #436 implements the streaming reverse-degradation benchmark and scorecards
   over that operator interface; see
   [`reverse-degradation-benchmark-contracts.md`](reverse-degradation-benchmark-contracts.md).
+- #437 implements bounded point-in-time market-context query sidecars over
+  these windows; see
+  [`market-context-contracts.md`](market-context-contracts.md).
 - #439 generates variable-cardinality candidate events using these windows,
   seeds, budgets, and carry contracts.
 - #440 owns hard historical carving and detailed rejection decisions.

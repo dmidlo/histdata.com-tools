@@ -166,7 +166,10 @@ the manifest with its real availability and use times. In particular:
 
 - #434 must declare feed-epoch summaries and their observation intervals;
 - #435 must declare fitted observation-operator inputs and train split;
-- #437 must retain macro/news vintages and release/revision times;
+- #437's implemented market-context timeline retains macro/news vintages,
+  target-event times, knowledge/availability times, and revision chains; its
+  bounded query sidecars bind exact vintages into this information graph. See
+  [`market-context-contracts.md`](market-context-contracts.md).
 - #438 must distinguish point-in-time motif availability from an ex-post
   reference library;
 - #439 and #440 must require a passing report before generation or carving;

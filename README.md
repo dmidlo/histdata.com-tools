@@ -41,6 +41,7 @@ Works on macOS, Linux, and Windows.
     - [Clean and Failing Examples](#clean-and-failing-examples)
     - [Warning, Error, and Exit Policy](#warning-error-and-exit-policy)
   - [Data Analytics](#data-analytics)
+    - [Point-in-Time Market Context](#point-in-time-market-context)
     - [Feed-Regime Detection](#feed-regime-detection)
     - [Historical Feed-Observation Operators](#historical-feed-observation-operators)
     - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
@@ -2389,6 +2390,29 @@ Data analytics operations describe market-data behavior for downstream feature
 engineering, dashboards, and modeling decisions. They are separate from
 `histdatacom --quality`: analytics reports do not produce clean/warning/failed
 statuses and do not downgrade repository quality metadata.
+
+#### Point-in-Time Market Context
+
+The `histdatacom.market_context` domain stores approved macro, central-bank,
+news, and shock evidence as immutable versioned timelines rather than repeated
+tick columns. Every event vintage retains source/version and retrieval
+metadata, content hashes, licensing and redistribution constraints, affected
+currencies/symbols, confidence, limitations, normalized source time, explicit
+pre/post windows, and revision lineage.
+
+Ex-ante queries require an as-of time and cannot expose schedules, actuals, or
+revisions before the exact vintage was available. Ex-post queries retain all
+vintages. Bounded window joins return compact context/calendar sidecars over
+`ReconstructionWindowV1`; they never persist the full analytical enrichment
+frame. Missing, incomplete, and out-of-coverage context remain explicit rather
+than becoming invented event labels.
+
+Calendar sidecars reuse the existing session, holiday, rollover, fix, and
+month/quarter/year-end classifier. The shared source-adapter seam retains
+provenance and licensing but does not authorize or scrape a paid news corpus.
+See [`docs/market-context-contracts.md`](docs/market-context-contracts.md) for
+the schemas, timezone and revision rules, information-audit integration,
+streaming limits, and trust gates.
 
 #### Feed-Regime Detection
 
