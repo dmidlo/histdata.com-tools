@@ -188,7 +188,8 @@ Windowing, retries, or storage tuning do not.
 - #433 governs ex-post versus ex-ante information access.
 - #435 consumes only stability-passing definitions and implements historical
   feed-observation operators.
-- #436 owns reverse-degradation scorecards over the #435 interface.
+- #436 implements reverse-degradation scorecards over the #435 interface; see
+  [`reverse-degradation-benchmark-contracts.md`](reverse-degradation-benchmark-contracts.md).
 - #439 consumes only stable epoch artifacts while generating candidates.
 - #443 owns live broker delivery capture; #444–#445 own broker fingerprints and
   style transfer rather than historical technological epochs.

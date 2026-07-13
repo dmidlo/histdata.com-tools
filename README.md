@@ -42,6 +42,8 @@ Works on macOS, Linux, and Windows.
     - [Warning, Error, and Exit Policy](#warning-error-and-exit-policy)
   - [Data Analytics](#data-analytics)
     - [Feed-Regime Detection](#feed-regime-detection)
+    - [Historical Feed-Observation Operators](#historical-feed-observation-operators)
+    - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -2453,6 +2455,31 @@ output observations remain bounded intermediates rather than augmented
 permanent cache columns. See
 [`docs/observation-operator-contracts.md`](docs/observation-operator-contracts.md)
 for the contracts, trust gates, fallback semantics, and streaming boundary.
+
+#### Reverse-Degradation Benchmark
+
+`ReverseDegradationBenchmarkV1` is the generator-neutral validation harness for
+reconstruction work. It streams dense modern reference events through a
+versioned historical observation operator, evaluates transparent no-fill,
+interpolation, resampling, and existing empirical-overlay controls alongside
+candidate generators, and retains only bounded online aggregates.
+
+The immutable benchmark manifest subdivides the existing withheld validation
+boundary into ordered validation and final-holdout periods without changing the
+upstream information-mode v1 schema. A valid experiment covers multiple feed
+epochs and degradation severities, reports symbol/epoch/session/event/sparsity
+slices, records uncertainty and ensemble support, and carries cross-series,
+strategy, convergence, failure, memory, scratch, and output-cost hooks.
+
+Hard historical-constraint or protected-anchor violations always block
+promotion regardless of soft statistical fit. Scorecards compare every method
+with no fill but explicitly set `automatic_winner` to false and never emit a
+winner candidate. Dense, degraded, reconstructed, and rejected intermediates
+remain process-local; only the compact manifest and scorecard are intended to
+persist. See
+[`docs/reverse-degradation-benchmark-contracts.md`](docs/reverse-degradation-benchmark-contracts.md)
+for the complete interfaces, metric semantics, resource bounds, and trust
+gates.
 
 ---
 

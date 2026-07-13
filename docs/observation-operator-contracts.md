@@ -96,9 +96,11 @@ input/output parameters. Every parameter still carries its own:
 - exact evidence IDs; and
 - bounded feature/source provenance.
 
-The full reverse-degradation experiment, splits, controls, and scorecards are
-owned by #436. This module supplies the deterministic operator interface and
-controlled fixtures that benchmark will exercise.
+The implemented
+[`reverse-degradation-benchmark-contracts.md`](reverse-degradation-benchmark-contracts.md)
+layer owns the full experiment, splits, controls, and scorecards. This module
+supplies the deterministic operator interface and controlled fixtures exercised
+by that benchmark.
 
 ## Explicit conditioning and fallback
 
@@ -221,8 +223,8 @@ operator sidecar are the intended durable products.
 - #434 supplies stability-passing technological epochs and canonical evidence.
 - #435 owns the contracts and deterministic fit/apply/degrade implementation
   documented here.
-- #436 owns reverse-degradation splits, controls, metrics, and promotion
-  scorecards.
+- #436 implements reverse-degradation splits, controls, metrics, and promotion
+  scorecards over this operator.
 - #439 owns variable-cardinality market-event proposal, not delivery filtering.
 - #443–#445 own live broker capture, broker fingerprints, and broker-style
   transfer.

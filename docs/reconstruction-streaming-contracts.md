@@ -202,8 +202,9 @@ must be written to artifact storage.
 - #435's implemented observation operator consumes those assignments and uses
   these windows, alignment rules, limits, and carry seams for deterministic
   forward observation and controlled degradation.
-- #436 owns the streaming reverse-degradation benchmark and scorecards over
-  that operator interface.
+- #436 implements the streaming reverse-degradation benchmark and scorecards
+  over that operator interface; see
+  [`reverse-degradation-benchmark-contracts.md`](reverse-degradation-benchmark-contracts.md).
 - #439 generates variable-cardinality candidate events using these windows,
   seeds, budgets, and carry contracts.
 - #440 owns hard historical carving and detailed rejection decisions.
