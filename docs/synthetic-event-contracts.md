@@ -107,3 +107,7 @@ period in Temporal workflow history. #432 must move event batches through
 artifact references and bounded checkpoints. `SyntheticEventStreamV1` is
 suitable for a bounded window/partition or test artifact; final period-scale
 storage must use the Arrow schema incrementally.
+
+The implemented window, batch, carry, checkpoint, resource, and two-phase
+publication protocol is documented in
+[`reconstruction-streaming-contracts.md`](reconstruction-streaming-contracts.md).
