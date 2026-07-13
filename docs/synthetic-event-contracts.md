@@ -111,3 +111,6 @@ storage must use the Arrow schema incrementally.
 The implemented window, batch, carry, checkpoint, resource, and two-phase
 publication protocol is documented in
 [`reconstruction-streaming-contracts.md`](reconstruction-streaming-contracts.md).
+Run-bound ex-post/ex-ante modes, artifact availability, chronological splits,
+window-plan look-ahead, and the fail-closed leakage gate are documented in
+[`reconstruction-information-modes.md`](reconstruction-information-modes.md).

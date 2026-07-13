@@ -73,6 +73,12 @@ overlaps, member drift, run drift, or symbol-group drift. This gives later
 generators an explicit edge contract while keeping the scientific need for
 future anchors visible.
 
+Right look-ahead is also an information-access channel. The implemented
+[`reconstruction-information-modes.md`](reconstruction-information-modes.md)
+contract binds the exact window-plan identity into the information manifest.
+Its pre-generation audit requires zero right look-ahead for ex-ante simulation
+and checks ex-post windows against their declared policy limit.
+
 Every event batch repeats its half-open ownership bounds and rejects a first or
 last event time outside them. A halo observation can therefore inform a batch
 but cannot be mislabeled as output owned by that batch.
@@ -175,7 +181,8 @@ must be written to artifact storage.
 
 ## Issue boundaries
 
-- #433 adds ex-post/ex-ante information modes and leakage auditing.
+- #433's implemented information-mode contracts and leakage audit govern what
+  these windows may read and what downstream claims are valid.
 - #439 generates variable-cardinality candidate events using these windows,
   seeds, budgets, and carry contracts.
 - #440 owns hard historical carving and detailed rejection decisions.
