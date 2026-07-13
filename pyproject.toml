@@ -87,6 +87,7 @@ all = [
 test = [
     "arch==8.0.0",
     "coverage==7.15.0",
+    "hypothesis==6.152.7",
     "ipykernel",
     "influxdb-client>=1.50.0",
     "nbclient",
@@ -124,6 +125,7 @@ dev = [
     "black==26.5.1",
     "commitizen==4.16.4",
     "coverage==7.15.0",
+    "hypothesis==6.152.7",
     "ipykernel",
     "influxdb-client>=1.50.0",
     "ipywidgets",

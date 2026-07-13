@@ -1,0 +1,41 @@
+"""Versioned contracts for synthetic market-event products."""
+
+from histdatacom.synthetic.contracts import (
+    SYNTHETIC_ENSEMBLE_MANIFEST_SCHEMA_VERSION,
+    SYNTHETIC_EVENT_SCHEMA_VERSION,
+    SYNTHETIC_EVENT_STREAM_SCHEMA_VERSION,
+    SyntheticEnsembleManifestV1,
+    SyntheticEnsembleMemberV1,
+    SyntheticEventOrigin,
+    SyntheticEventStreamV1,
+    SyntheticEventV1,
+    canonical_contract_json,
+    derive_anchor_interval_id,
+    read_synthetic_event_stream_parquet,
+    synthetic_event_arrow_schema,
+    synthetic_event_stream_from_arrow,
+    synthetic_event_stream_from_parquet_bytes,
+    synthetic_event_stream_to_arrow,
+    synthetic_event_stream_to_parquet_bytes,
+    write_synthetic_event_stream_parquet,
+)
+
+__all__ = [
+    "SYNTHETIC_ENSEMBLE_MANIFEST_SCHEMA_VERSION",
+    "SYNTHETIC_EVENT_SCHEMA_VERSION",
+    "SYNTHETIC_EVENT_STREAM_SCHEMA_VERSION",
+    "SyntheticEnsembleManifestV1",
+    "SyntheticEnsembleMemberV1",
+    "SyntheticEventOrigin",
+    "SyntheticEventStreamV1",
+    "SyntheticEventV1",
+    "canonical_contract_json",
+    "derive_anchor_interval_id",
+    "read_synthetic_event_stream_parquet",
+    "synthetic_event_arrow_schema",
+    "synthetic_event_stream_from_arrow",
+    "synthetic_event_stream_from_parquet_bytes",
+    "synthetic_event_stream_to_arrow",
+    "synthetic_event_stream_to_parquet_bytes",
+    "write_synthetic_event_stream_parquet",
+]
