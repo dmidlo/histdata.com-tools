@@ -234,11 +234,21 @@ _ANALYTICS_TRUE_FLAG_ARGS = {
     "json": "--json",
 }
 _ANALYTICS_SCALAR_ARGS = {
+    "boundary_match_tolerance_periods": "--boundary-match-tolerance-periods",
     "bucket": "--bucket",
+    "epoch_artifact": "--epoch-artifact",
+    "max_evidence": "--max-evidence",
+    "max_sensitivity_runs": "--max-sensitivity-runs",
+    "min_boundary_support": "--min-boundary-support",
+    "min_change_score": "--min-change-score",
+    "min_evidence_periods": "--min-evidence-periods",
+    "min_feature_coverage": "--min-feature-coverage",
+    "min_segment_periods": "--min-segment-periods",
     "quiet_gap_ms": "--quiet-gap-ms",
     "report": "--report",
 }
 _ANALYTICS_LIST_ARGS = {
+    "features": "--features",
     "paths": "--target",
 }
 _ANALYTICS_ALLOWED_KEYS = (

@@ -10,6 +10,12 @@ values only.
 This is a contract layer. It does not generate events, implement production
 Temporal workflows, or publish the final Parquet product.
 
+The implemented [feed-epoch contracts](feed-epoch-contracts.md) are one of its
+bounded semantic inputs. A reconstruction run binds the compact epoch
+definition ID, and streamed windows or final events carry only their epoch or
+uncertain-transition assignment. Fingerprint payloads, fitting panels, and
+sensitivity intermediates never become permanent per-row columns.
+
 ## Contract boundary
 
 | Contract | Responsibility |
@@ -183,6 +189,8 @@ must be written to artifact storage.
 
 - #433's implemented information-mode contracts and leakage audit govern what
   these windows may read and what downstream claims are valid.
+- #434's implemented feed-epoch contract supplies only stability-passing,
+  uncertainty-aware observation-regime assignments and complete lineage.
 - #439 generates variable-cardinality candidate events using these windows,
   seeds, budgets, and carry contracts.
 - #440 owns hard historical carving and detailed rejection decisions.

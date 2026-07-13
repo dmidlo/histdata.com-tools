@@ -548,6 +548,10 @@ histdatacom:
     target: data/ASCII/T/eurusd
     bucket: month
     report: reports/eurusd-feed-regimes.json
+    epoch_artifact: reports/eurusd-feed-epochs.v1.json
+    min_evidence_periods: 12
+    min_segment_periods: 3
+    min_boundary_support: 0.75
     json: true
   jobs:
     command: submit
@@ -2386,17 +2390,18 @@ statuses and do not downgrade repository quality metadata.
 
 #### Feed-Regime Detection
 
-`histdatacom analytics feed-regimes` profiles local ASCII tick artifacts by
-month or year, then segments long histories into feed-behavior eras such as
-sparse, transitional, and dense periods. The report includes tick density,
-inter-arrival intervals, quote update cadence, zero-change runs, spread
-statistics, quiet-gap counts, regime boundaries, and summary metadata.
+`histdatacom analytics feed-regimes` projects canonical ASCII tick fingerprints
+into a versioned feed-epoch definition. Epochs represent evidence-backed
+changes in the technological observation process, not calendar eras or market
+regimes. Boundaries include uncertainty intervals and deterministic stability
+evidence under sampling, missing-period, and feature-removal perturbations.
 
 ```sh
 histdatacom analytics feed-regimes \
   --target data/ASCII/T/eurusd \
   --bucket month \
-  --report reports/eurusd-feed-regimes.json
+  --report reports/eurusd-feed-regimes.json \
+  --epoch-artifact reports/eurusd-feed-epochs.v1.json
 ```
 
 Use `--json` to print the full machine-readable payload to stdout:
@@ -2405,10 +2410,18 @@ Use `--json` to print the full machine-readable payload to stdout:
 histdatacom analytics feed-regimes --target data/ --json
 ```
 
-Use these outputs to choose modeling windows, session filters, feature
-normalization strategies, or dashboard annotations. Treat surprising regimes as
-research signals; run `histdatacom --quality` separately when you need
-readability, timestamp consistency, ZIP integrity, or pass/fail validation.
+Only stability-passing definitions are valid downstream observation-model
+inputs. Periods inside a boundary uncertainty interval are assigned to an
+explicit transition instead of being forced into either neighboring epoch. The
+artifact records every fingerprint, source, feature-provenance, conditioning,
+quality, and config hash needed for replay.
+
+Feed-epoch fitting is a bounded control-plane operation. Streaming
+reconstruction references the definition ID and carries only compact epoch or
+transition assignments; it does not persist fingerprint panels or the wide
+analytical frame per tick. See
+[`docs/feed-epoch-contracts.md`](docs/feed-epoch-contracts.md) for the schema,
+trust gate, resource limits, and streaming integration.
 
 ---
 
