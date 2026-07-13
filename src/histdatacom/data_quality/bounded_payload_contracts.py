@@ -24,6 +24,12 @@ from histdatacom.data_quality.classical_baselines import (
 from histdatacom.data_quality.classical_model_contracts import (
     CLASSICAL_MODEL_INPUT_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.classical_model_comparison import (
+    CLASSICAL_MODEL_COMPARISON_ELIGIBILITY_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_TRAINING_PROJECTION_SCHEMA_VERSION,
+    CLASSICAL_MODEL_FIT_ACCOUNTING_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.engine import (
     QUALITY_ENGINE_METADATA_KEY,
     run_quality_assessment,
@@ -1256,6 +1262,9 @@ def _limited_tick_fingerprint_payload() -> dict[str, JSONValue]:
     )
     payload["state_space"] = _state_space_payload("GBPUSD", status="limited")
     payload["volatility"] = _volatility_payload("GBPUSD", status="limited")
+    payload["classical_model_comparison"] = _classical_model_comparison_payload(
+        "GBPUSD", status="limited"
+    )
     return payload
 
 
@@ -1330,6 +1339,9 @@ def _tick_fingerprint_payload(
     payload["seasonal_exogenous"] = _seasonal_exogenous_payload(symbol)
     payload["state_space"] = _state_space_payload(symbol)
     payload["volatility"] = _volatility_payload(symbol)
+    payload["classical_model_comparison"] = _classical_model_comparison_payload(
+        symbol
+    )
     return payload
 
 
@@ -1531,6 +1543,69 @@ def _volatility_payload(
             "evaluated_fold_count": 3 if status == "limited" else 4,
             "automatic_order_selection": False,
             "automatic_winner": False,
+        },
+    }
+
+
+def _classical_model_comparison_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    eligible = 2 if status == "ready" else 0
+    return {
+        "schema_version": CLASSICAL_MODEL_COMPARISON_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": (
+            "reference_baseline_unavailable" if status == "limited" else None
+        ),
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "comparison_id": f"classical-model-comparison:{symbol.lower()}",
+        "comparison_count": 2,
+        "eligible_comparison_count": eligible,
+        "ineligible_comparison_count": 2 - eligible,
+        "model_count": 2,
+        "horizons": [1, 2],
+        "comparison_records": [
+            {
+                "schema_version": (
+                    CLASSICAL_MODEL_COMPARISON_ELIGIBILITY_SCHEMA_VERSION
+                ),
+                "comparison_id": "comparison:representative",
+                "family": "ar",
+                "model_id": "representative-ar",
+                "specification_id": "ar-1",
+                "target_metric": "mid_level",
+                "scale": "original_mid",
+                "horizon": 1,
+                "metric": "mae",
+                "metric_value": 0.0001,
+                "reference_baseline": "naive_random_walk",
+                "reference_metric_value": 0.0002,
+                "eligible": status == "ready",
+                "descriptive_only": True,
+            }
+        ],
+        "fit_accounting": {
+            "schema_version": CLASSICAL_MODEL_FIT_ACCOUNTING_SCHEMA_VERSION,
+            "totals": {"attempted": 8, "converged": 7, "failed": 1},
+            "failed_models_preserved_in_denominator": True,
+            "resource_terminations_separate": True,
+        },
+        "selection_policy": "none",
+        "descriptive_only": True,
+        "training_projection": {
+            "schema_version": (
+                CLASSICAL_MODEL_COMPARISON_TRAINING_PROJECTION_SCHEMA_VERSION
+            ),
+            "column_prefixes": [
+                "cm_comparison_",
+                "cm_skill_",
+                "cm_stability_",
+            ],
+            "annotation_count": 1,
+            "training_eligible": False,
         },
     }
 

@@ -42,6 +42,13 @@ from histdatacom.data_quality.classical_model_contracts import (
     CLASSICAL_MODEL_INPUT_SUMMARY_SCHEMA_VERSION,
     CLASSICAL_MODEL_TRAINING_PROJECTION_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.classical_model_comparison import (
+    CLASSICAL_MODEL_COMPARISON_COLUMNS,
+    CLASSICAL_MODEL_COMPARISON_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY,
+    CLASSICAL_MODEL_COMPARISON_SUMMARY_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.exponential_smoothing import (
     EXPONENTIAL_SMOOTHING_CONFIGURATION_SCHEMA_VERSION,
     EXPONENTIAL_SMOOTHING_EVALUATION_SCHEMA_VERSION,
@@ -331,6 +338,22 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         VOLATILITY_SUMMARY_SCHEMA_VERSION
     )
     assert (
+        schemas["fingerprint_classical_model_comparison"]["schema_version"]
+        == CLASSICAL_MODEL_COMPARISON_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_classical_model_comparison_training_projection"][
+            "schema_version"
+        ]
+        == CLASSICAL_MODEL_COMPARISON_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_classical_model_comparison_summary"][
+            "schema_version"
+        ]
+        == CLASSICAL_MODEL_COMPARISON_SUMMARY_SCHEMA_VERSION
+    )
+    assert (
         schemas["fingerprint_decomposition_training_projection"][
             "schema_version"
         ]
@@ -399,6 +422,12 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert payload["metadata_keys"]["report_metadata"]["volatility"] == (
         VOLATILITY_SUMMARY_METADATA_KEY
     )
+    assert (
+        payload["metadata_keys"]["report_metadata"][
+            "classical_model_comparison"
+        ]
+        == CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY
+    )
 
     implemented = payload["sections"]["implemented"]["target_sections"]
     assert [section["name"] for section in implemented] == [
@@ -419,6 +448,7 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "seasonal_exogenous",
         "state_space",
         "volatility",
+        "classical_model_comparison",
         "synthetic_constraints",
         "fingerprint_audit",
     ]
@@ -520,6 +550,26 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
             "source": definitions[name].source,
         }
         for name in VOLATILITY_COLUMNS
+    ]
+    comparison = next(
+        section
+        for section in implemented
+        if section["name"] == "classical_model_comparison"
+    )
+    assert comparison["augmented_column_prefixes"] == [
+        "cm_comparison_",
+        "cm_skill_",
+        "cm_stability_",
+    ]
+    assert comparison["augmented_columns"] == [
+        {
+            "name": name,
+            "dtype": definitions[name].dtype,
+            "nullable": definitions[name].nullable,
+            "grain": definitions[name].grain,
+            "source": definitions[name].source,
+        }
+        for name in CLASSICAL_MODEL_COMPARISON_COLUMNS
     ]
     planned = payload["sections"]["planned"]["target_sections"]
     assert planned == []

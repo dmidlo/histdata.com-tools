@@ -186,6 +186,38 @@ origin; realized-return and variance diagnostics remain separately flagged
 post-observation fields. Durable identity remains `series_id`, `period`, and
 `row_id`. Consumers may ignore these optional additive report keys and columns.
 
+## Classical-Model Comparison
+
+Fingerprint findings may include the opt-in
+`time_series_fingerprint.classical_model_comparison` section using
+`histdatacom.classical-model-comparison.v1`. It is generated only from saved
+bounded evaluation artifacts and cannot trigger fits. Full reports summarize it
+under `metadata.time_series_fingerprint_classical_model_comparison_summary`;
+the bounded runtime key is `fingerprint_classical_model_comparison`, and the
+text heading is `Classical model comparison`.
+
+Compatibility is explicit across dataset/fingerprint, regularization contract,
+fold set, target metric, scale, transform, frequency, missingness, horizon, and
+period. Incompatible or incomplete evidence stays visible but ineligible. Skill
+uses the configured mean or variance reference without silently substituting a
+baseline; negative skill, missing references, near-zero reference errors, and
+incomplete folds have stable reason codes. Conditional-mean,
+conditional-variance, and volatility metrics are never pooled.
+
+Fit accounting preserves attempted, fitted, converged, limited, skipped,
+timed-out, numerically invalid, dependency-unavailable, failed, and
+resource-limited counts. Stability is advisory and distinguishes insufficient
+folds, stable behavior, structural parameter shifts, isolated failures, and
+persistent error degradation. Fingerprint regime/stationarity/decomposition
+signals are context only, not causal claims. Diagnostics are bounded and omit
+fitted objects, raw rows, residual vectors, paths, and backend exception text.
+
+The augmented row contract adds 43 nullable scalar columns under
+`cm_comparison_*`, `cm_skill_*`, and `cm_stability_*`. They are retrospective,
+target-time gated, explicitly not training-eligible, and joined only by durable
+`series_id`, `period`, and `row_id`. No winner, best-model field, production
+recommendation, or normative automatic selection is part of this schema.
+
 ## Golden Fixtures
 
 Representative payload fixtures live under

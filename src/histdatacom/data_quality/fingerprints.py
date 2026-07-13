@@ -45,6 +45,10 @@ from histdatacom.data_quality.classical_model_contracts import (
     ClassicalModelInputProfile,
     build_classical_model_input,
 )
+from histdatacom.data_quality.classical_model_comparison import (
+    ClassicalModelComparisonProfile,
+    classical_model_comparison_from_saved_results,
+)
 from histdatacom.data_quality.autoregressive import (
     AutoregressiveProfile,
     autoregressive_from_model_input,
@@ -280,6 +284,7 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "seasonal_exogenous",
     "state_space",
     "volatility",
+    "classical_model_comparison",
     "synthetic_constraints",
 )
 FINGERPRINT_DYNAMICS_SECTIONS = ("microstructure_dynamics",)
@@ -384,6 +389,9 @@ class HistDataFingerprintProfile:
     )
     state_space: StateSpaceProfile = field(default_factory=StateSpaceProfile)
     volatility: VolatilityProfile = field(default_factory=VolatilityProfile)
+    classical_model_comparison: ClassicalModelComparisonProfile = field(
+        default_factory=ClassicalModelComparisonProfile
+    )
 
     def to_metadata(self) -> dict[str, JSONValue]:
         """Return a JSON-compatible representation."""
@@ -408,6 +416,9 @@ class HistDataFingerprintProfile:
             "seasonal_exogenous": self.seasonal_exogenous.to_metadata(),
             "state_space": self.state_space.to_metadata(),
             "volatility": self.volatility.to_metadata(),
+            "classical_model_comparison": (
+                self.classical_model_comparison.to_metadata()
+            ),
         }
 
 
@@ -3815,6 +3826,7 @@ def _finalize_fingerprint_payload(
             or profile.seasonal_exogenous.enabled
             or profile.state_space.enabled
             or profile.volatility.enabled
+            or profile.classical_model_comparison.enabled
         ):
             model_input_result = build_classical_model_input(
                 training_frame,
@@ -3914,6 +3926,36 @@ def _finalize_fingerprint_payload(
                         payload.get("seasonal_exogenous")
                     ),
                     state_space=_payload_mapping(payload.get("state_space")),
+                    target=target,
+                ).diagnostics
+            )
+        if profile.classical_model_comparison.enabled:
+            payload["classical_model_comparison"] = dict(
+                classical_model_comparison_from_saved_results(
+                    training_frame,
+                    payload,
+                    model_input=(
+                        model_input_result.contract
+                        if model_input_result is not None
+                        else _payload_mapping(
+                            payload.get("classical_model_input")
+                        )
+                    ),
+                    classical_baselines=_payload_mapping(
+                        payload.get("classical_baselines")
+                    ),
+                    exponential_smoothing=_payload_mapping(
+                        payload.get("exponential_smoothing")
+                    ),
+                    autoregressive=_payload_mapping(
+                        payload.get("autoregressive")
+                    ),
+                    seasonal_exogenous=_payload_mapping(
+                        payload.get("seasonal_exogenous")
+                    ),
+                    state_space=_payload_mapping(payload.get("state_space")),
+                    volatility=_payload_mapping(payload.get("volatility")),
+                    profile=profile.classical_model_comparison,
                     target=target,
                 ).diagnostics
             )
@@ -4589,6 +4631,8 @@ def _fingerprint_audit_payload(
         expected = (*expected, "state_space")
     if profile.volatility.enabled:
         expected = (*expected, "volatility")
+    if profile.classical_model_comparison.enabled:
+        expected = (*expected, "classical_model_comparison")
     emitted = [
         section for section in FINGERPRINT_AUDIT_SECTIONS if section in payload
     ]
@@ -4734,6 +4778,7 @@ def _fingerprint_section_skip_details(
         "seasonal_exogenous",
         "state_space",
         "volatility",
+        "classical_model_comparison",
         "synthetic_constraints",
     }:
         return {"timeframe": target.timeframe}
@@ -4787,6 +4832,7 @@ def _section_timeframe_mismatch(
                 "seasonal_exogenous",
                 "state_space",
                 "volatility",
+                "classical_model_comparison",
             }
             and target.timeframe != TICK
         )
@@ -4916,6 +4962,15 @@ def _fingerprint_section_status(
             return "limited"
         return "unavailable"
     if section == "volatility":
+        model_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if model_status == "ready":
+            return "valid"
+        if model_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "classical_model_comparison":
         model_status = _summary_key(
             _payload_mapping(payload[section]).get("status")
         )

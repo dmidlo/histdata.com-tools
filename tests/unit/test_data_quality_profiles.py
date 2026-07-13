@@ -13,6 +13,7 @@ from histdatacom.data_quality import (
     QUALITY_REPORTING_METADATA_KEY,
     SERIES_FINGERPRINT_RULE_ID,
     AutoregressiveProfile,
+    ClassicalModelComparisonProfile,
     ClassicalModelInputProfile,
     ExponentialSmoothingProfile,
     HistDataSeriesFingerprintRule,
@@ -246,6 +247,9 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
         "seasonal_exogenous": SeasonalExogenousProfile().to_metadata(),
         "state_space": StateSpaceProfile().to_metadata(),
         "volatility": VolatilityProfile().to_metadata(),
+        "classical_model_comparison": (
+            ClassicalModelComparisonProfile().to_metadata()
+        ),
     }
 
 

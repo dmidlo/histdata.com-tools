@@ -1,0 +1,48 @@
+{
+  "advisory": true,
+  "eligible_comparison_count": 6,
+  "included_target_count": 1,
+  "limit_metadata": {
+    "default_limit": 25,
+    "effective_limit": 1,
+    "included_count": 1,
+    "limit": 1,
+    "maximum_limit": null,
+    "minimum_limit": 0,
+    "omitted_count": 0,
+    "requested_limit": 1,
+    "total_count": 1,
+    "truncated": false,
+    "unbounded": false
+  },
+  "omitted_target_count": 0,
+  "schema_version": "histdatacom.classical-model-comparison-summary.v1",
+  "selection_policy": "none",
+  "status_counts": {
+    "ready": 1
+  },
+  "target_count": 1,
+  "target_summaries": [
+    {
+      "comparison_count": 6,
+      "comparison_id": "classical-model-comparison:sha256:cef1d1048f0d41d98f52aca22ecbcce45e3048f2113e9e8b0f2a947ee46aff5e",
+      "eligible_comparison_count": 6,
+      "horizons": [
+        1
+      ],
+      "ineligible_comparison_count": 0,
+      "model_count": 2,
+      "reason": null,
+      "selection_policy": "none",
+      "status": "ready",
+      "target_axis": {
+        "data_format": "ascii",
+        "kind": "cache",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "T"
+      }
+    }
+  ],
+  "truncated": false
+}

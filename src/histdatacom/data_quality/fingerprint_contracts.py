@@ -46,6 +46,19 @@ from histdatacom.data_quality.classical_model_contracts import (
     MODEL_FIT_STATUSES,
     MODEL_TRANSFORM_CODES,
 )
+from histdatacom.data_quality.classical_model_comparison import (
+    CLASSICAL_MODEL_COMPARISON_BOUNDED_PAYLOAD_KEY,
+    CLASSICAL_MODEL_COMPARISON_ELIGIBILITY_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY,
+    CLASSICAL_MODEL_COMPARISON_SUMMARY_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_TRAINING_PROJECTION_SCHEMA_VERSION,
+    CLASSICAL_MODEL_FIT_ACCOUNTING_SCHEMA_VERSION,
+    CLASSICAL_MODEL_SKILL_SCHEMA_VERSION,
+    CLASSICAL_MODEL_STABILITY_SCHEMA_VERSION,
+    COMPARISON_REASON_CODES,
+    DEFAULT_CLASSICAL_MODEL_COMPARISON_SUMMARY_TARGET_LIMIT,
+)
 from histdatacom.data_quality.fingerprints import (
     CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     CROSS_SERIES_FINGERPRINT_RULE_ID,
@@ -184,6 +197,7 @@ from histdatacom.data_quality.training_features import (
     KALMAN_COLUMNS,
     STATE_SPACE_COLUMNS,
     VOLATILITY_COLUMNS,
+    CLASSICAL_MODEL_COMPARISON_COLUMNS,
     training_feature_definitions,
 )
 from histdatacom.histdata_ascii import TICK
@@ -206,6 +220,7 @@ FINGERPRINT_SERIES_CONFIG_KEYS = (
     "seasonal_exogenous",
     "state_space",
     "volatility",
+    "classical_model_comparison",
 )
 FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
     "invalid_row_min_count",
@@ -889,6 +904,62 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_classical_model_comparison",
+        CLASSICAL_MODEL_COMPARISON_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.classical_model_comparison",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_comparison_eligibility",
+        CLASSICAL_MODEL_COMPARISON_ELIGIBILITY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.classical_model_comparison."
+            "comparison_records"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_skill",
+        CLASSICAL_MODEL_SKILL_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_stability",
+        CLASSICAL_MODEL_STABILITY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_fit_accounting",
+        CLASSICAL_MODEL_FIT_ACCOUNTING_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.classical_model_comparison.fit_accounting"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_comparison_training_projection",
+        CLASSICAL_MODEL_COMPARISON_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.classical_model_comparison."
+            "training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_comparison_summary",
+        CLASSICAL_MODEL_COMPARISON_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY,
+        bounded_payload_key=CLASSICAL_MODEL_COMPARISON_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_audit",
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -1077,6 +1148,14 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         VOLATILITY_BOUNDED_PAYLOAD_KEY,
         "volatility",
         "ARCH and GARCH volatility models",
+    ),
+    FingerprintReportSurfaceContract(
+        "classical_model_comparison",
+        "fingerprint_classical_model_comparison_summary",
+        CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY,
+        CLASSICAL_MODEL_COMPARISON_BOUNDED_PAYLOAD_KEY,
+        "classical_model_comparison",
+        "Classical model comparison",
     ),
     FingerprintReportSurfaceContract(
         "readiness_summary",
@@ -1501,6 +1580,45 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "classical_model_comparison",
+        "family-neutral skill, stability, failure, and eligibility reporting",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_classical_model_comparison",
+        basis_values=("saved_bounded_model_evaluation_artifacts",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#427",
+            "profile_controlled_by": ["classical_model_comparison"],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid_rolling_origin",
+            "model_fitting_in_scope": False,
+            "mean_and_variance_metrics_separate": True,
+            "explicit_reference_baselines": True,
+            "multiple_horizons": True,
+            "selection_policy": "none",
+            "failure_reason_codes": list(COMPARISON_REASON_CODES),
+            "augmented_column_prefixes": [
+                "cm_comparison_",
+                "cm_skill_",
+                "cm_stability_",
+            ],
+            "augmented_columns": [
+                {
+                    "name": definition.name,
+                    "dtype": definition.dtype,
+                    "nullable": definition.nullable,
+                    "grain": definition.grain,
+                    "source": definition.source,
+                }
+                for definition in training_feature_definitions()
+                if definition.name in CLASSICAL_MODEL_COMPARISON_COLUMNS
+            ],
+            "row_mapping_policy": "first_source_row_at_or_after_availability",
+        },
+    ),
+    FingerprintTargetSectionContract(
         "synthetic_constraints",
         "generator-facing defects, stylized facts, artifacts, and validation contract",
         target_timeframes=(TICK,),
@@ -1581,6 +1699,9 @@ FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
     ),
     "state_space_summary_target_limit": DEFAULT_STATE_SPACE_SUMMARY_TARGET_LIMIT,
     "volatility_summary_target_limit": DEFAULT_VOLATILITY_SUMMARY_TARGET_LIMIT,
+    "classical_model_comparison_summary_target_limit": (
+        DEFAULT_CLASSICAL_MODEL_COMPARISON_SUMMARY_TARGET_LIMIT
+    ),
 }
 FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS = {
     "invalid_row_min_count": DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT,

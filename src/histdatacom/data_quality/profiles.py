@@ -25,6 +25,9 @@ from histdatacom.data_quality.classical_model_contracts import (
     ClassicalModelInputProfile,
     ClassicalModelResourcePolicy,
 )
+from histdatacom.data_quality.classical_model_comparison import (
+    ClassicalModelComparisonProfile,
+)
 from histdatacom.data_quality.contracts import QualitySeverity
 from histdatacom.data_quality.exponential_smoothing import (
     ExponentialSmoothingProfile,
@@ -519,6 +522,7 @@ class QualityProfile:
                 "seasonal_exogenous",
                 "state_space",
                 "volatility",
+                "classical_model_comparison",
             },
             SERIES_FINGERPRINT_RULE_ID,
         )
@@ -644,6 +648,16 @@ class QualityProfile:
                     path=SERIES_FINGERPRINT_RULE_ID,
                 ),
                 path=f"{SERIES_FINGERPRINT_RULE_ID}.volatility",
+            ),
+            classical_model_comparison=_classical_model_comparison_profile(
+                _mapping_field(
+                    config,
+                    "classical_model_comparison",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=(
+                    f"{SERIES_FINGERPRINT_RULE_ID}.classical_model_comparison"
+                ),
             ),
         )
 
@@ -2712,6 +2726,108 @@ def _volatility_profile(
                 value,
                 "compare_state_space",
                 base.compare_state_space,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _classical_model_comparison_profile(
+    value: Mapping[str, JSONValue], *, path: str
+) -> ClassicalModelComparisonProfile:
+    base = ClassicalModelComparisonProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "mean_reference_baseline",
+            "variance_reference_baseline",
+            "near_zero_tolerance",
+            "minimum_stability_folds",
+            "drift_tolerance",
+            "max_models",
+            "max_horizons",
+            "max_comparisons",
+            "max_reason_codes",
+            "max_samples",
+            "rounding_digits",
+        },
+        path,
+    )
+    try:
+        return ClassicalModelComparisonProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            mean_reference_baseline=_string_field(
+                value,
+                "mean_reference_baseline",
+                base.mean_reference_baseline,
+                path=path,
+            ),
+            variance_reference_baseline=_string_field(
+                value,
+                "variance_reference_baseline",
+                base.variance_reference_baseline,
+                path=path,
+            ),
+            near_zero_tolerance=_float_field(
+                value,
+                "near_zero_tolerance",
+                base.near_zero_tolerance,
+                minimum=0.0,
+                path=path,
+            ),
+            minimum_stability_folds=_int_field(
+                value,
+                "minimum_stability_folds",
+                base.minimum_stability_folds,
+                minimum=2,
+                path=path,
+            ),
+            drift_tolerance=_float_field(
+                value,
+                "drift_tolerance",
+                base.drift_tolerance,
+                minimum=0.0,
+                path=path,
+            ),
+            max_models=_int_field(
+                value, "max_models", base.max_models, minimum=1, path=path
+            ),
+            max_horizons=_int_field(
+                value,
+                "max_horizons",
+                base.max_horizons,
+                minimum=1,
+                path=path,
+            ),
+            max_comparisons=_int_field(
+                value,
+                "max_comparisons",
+                base.max_comparisons,
+                minimum=1,
+                path=path,
+            ),
+            max_reason_codes=_int_field(
+                value,
+                "max_reason_codes",
+                base.max_reason_codes,
+                minimum=1,
+                path=path,
+            ),
+            max_samples=_int_field(
+                value,
+                "max_samples",
+                base.max_samples,
+                minimum=1,
                 path=path,
             ),
             rounding_digits=_int_field(

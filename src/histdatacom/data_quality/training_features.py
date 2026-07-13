@@ -360,6 +360,52 @@ VOLATILITY_COLUMNS = tuple(
     for suffix in VOLATILITY_FAMILY_COLUMN_SUFFIXES
 )
 
+CLASSICAL_MODEL_COMPARISON_COLUMNS = (
+    "cm_comparison_schema_version",
+    "cm_comparison_id",
+    "cm_comparison_dataset_id",
+    "cm_comparison_regularization_contract_id",
+    "cm_comparison_fold_set_id",
+    "cm_comparison_family_code",
+    "cm_comparison_model_id",
+    "cm_comparison_specification_code",
+    "cm_comparison_target_metric_code",
+    "cm_comparison_scale_code",
+    "cm_comparison_metric_code",
+    "cm_comparison_horizon",
+    "cm_comparison_fold_id",
+    "cm_comparison_origin_row_id",
+    "cm_comparison_target_row_id",
+    "cm_comparison_eligible",
+    "cm_comparison_eligibility_code",
+    "cm_comparison_reason_code",
+    "cm_comparison_metric_value",
+    "cm_comparison_reference_metric_value",
+    "cm_comparison_diagnostic_available",
+    "cm_comparison_diagnostic_available_at_utc_ms",
+    "cm_comparison_diagnostic_only",
+    "cm_comparison_training_eligible",
+    "cm_skill_schema_version",
+    "cm_skill_reference_baseline_code",
+    "cm_skill_status_code",
+    "cm_skill_value",
+    "cm_skill_negative",
+    "cm_skill_support_count",
+    "cm_skill_available",
+    "cm_skill_diagnostic_only",
+    "cm_stability_schema_version",
+    "cm_stability_status_code",
+    "cm_stability_fold_count",
+    "cm_stability_error_drift",
+    "cm_stability_skill_drift",
+    "cm_stability_parameter_drift",
+    "cm_stability_fit_duration_drift",
+    "cm_stability_convergence_rate",
+    "cm_stability_failure_rate",
+    "cm_stability_available",
+    "cm_stability_diagnostic_only",
+)
+
 TRAINING_REQUIRED_COLUMNS = (
     *IDENTITY_COLUMNS,
     "spread",
@@ -395,6 +441,7 @@ TRAINING_REQUIRED_COLUMNS = (
     *STATE_SPACE_COLUMNS,
     *KALMAN_COLUMNS,
     *VOLATILITY_COLUMNS,
+    *CLASSICAL_MODEL_COMPARISON_COLUMNS,
 )
 
 ISSUE_CODE_BY_COLUMN = {
@@ -580,6 +627,7 @@ def training_feature_definitions() -> tuple[TrainingFeatureDefinition, ...]:
     definitions.extend(_seasonal_exogenous_definition_rows())
     definitions.extend(_state_space_definition_rows())
     definitions.extend(_volatility_definition_rows())
+    definitions.extend(_classical_model_comparison_definition_rows())
     return tuple(definitions)
 
 
@@ -1354,6 +1402,66 @@ def _volatility_definition_rows() -> list[TrainingFeatureDefinition]:
                 None,
                 f"Point-in-time ARCH/GARCH scalar: {name}.",
                 "volatility",
+                "row",
+                True,
+            )
+        )
+    return definitions
+
+
+def _classical_model_comparison_definition_rows() -> (
+    list[TrainingFeatureDefinition]
+):
+    strings = {
+        "schema_version",
+        "id",
+        "dataset_id",
+        "regularization_contract_id",
+        "fold_set_id",
+        "model_id",
+    }
+    booleans = {
+        "eligible",
+        "diagnostic_available",
+        "diagnostic_only",
+        "training_eligible",
+        "negative",
+        "available",
+    }
+    floats = {
+        "metric_value",
+        "reference_metric_value",
+        "value",
+        "error_drift",
+        "skill_drift",
+        "parameter_drift",
+        "fit_duration_drift",
+        "convergence_rate",
+        "failure_rate",
+    }
+    definitions: list[TrainingFeatureDefinition] = []
+    for name in CLASSICAL_MODEL_COMPARISON_COLUMNS:
+        suffix = name
+        for prefix in ("cm_comparison_", "cm_skill_", "cm_stability_"):
+            if name.startswith(prefix):
+                suffix = name.removeprefix(prefix)
+                break
+        dtype = (
+            "Utf8"
+            if suffix in strings
+            else (
+                "Boolean"
+                if suffix in booleans
+                else "Float64" if suffix in floats else "Int64"
+            )
+        )
+        definitions.append(
+            TrainingFeatureDefinition(
+                name,
+                dtype,
+                None,
+                ("Retrospective family-neutral comparison scalar: " f"{name}."),
+                "classical_model_comparison",
                 "row",
                 True,
             )

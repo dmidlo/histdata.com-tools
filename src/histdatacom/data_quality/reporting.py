@@ -31,6 +31,12 @@ from histdatacom.data_quality.classical_model_contracts import (
     classical_model_input_summary,
     format_classical_model_input_summary_lines,
 )
+from histdatacom.data_quality.classical_model_comparison import (
+    CLASSICAL_MODEL_COMPARISON_BOUNDED_PAYLOAD_KEY,
+    CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY,
+    classical_model_comparison_summary,
+    format_classical_model_comparison_summary_lines,
+)
 from histdatacom.data_quality.autoregressive import (
     AUTOREGRESSIVE_BOUNDED_PAYLOAD_KEY,
     AUTOREGRESSIVE_SUMMARY_METADATA_KEY,
@@ -418,6 +424,13 @@ def quality_report_payload(
         metadata = _mapping_payload(payload.get("metadata"))
         metadata[VOLATILITY_SUMMARY_METADATA_KEY] = volatility
         payload["metadata"] = metadata
+    classical_model_comparison = _classical_model_comparison_summary(report)
+    if classical_model_comparison is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY] = (
+            classical_model_comparison
+        )
+        payload["metadata"] = metadata
     fingerprint_topology = _fingerprint_topology_summary(report)
     if fingerprint_topology is not None:
         metadata = _mapping_payload(payload.get("metadata"))
@@ -632,6 +645,11 @@ def format_quality_console_summary(
             format_volatility_summary_lines(_volatility_summary(report))
         )
         lines.extend(
+            format_classical_model_comparison_summary_lines(
+                _classical_model_comparison_summary(report)
+            )
+        )
+        lines.extend(
             format_fingerprint_topology_attention_lines(
                 _fingerprint_topology_attention_summary(report)
             )
@@ -721,6 +739,7 @@ def bounded_quality_payload(
     seasonal_exogenous = _seasonal_exogenous_summary(report)
     state_space = _state_space_summary(report)
     volatility = _volatility_summary(report)
+    classical_model_comparison = _classical_model_comparison_summary(report)
     fingerprint_topology = _fingerprint_topology_summary(report)
     fingerprint_topology_attention = _fingerprint_topology_attention_summary(
         report
@@ -811,6 +830,10 @@ def bounded_quality_payload(
         payload[STATE_SPACE_BOUNDED_PAYLOAD_KEY] = state_space
     if volatility is not None:
         payload[VOLATILITY_BOUNDED_PAYLOAD_KEY] = volatility
+    if classical_model_comparison is not None:
+        payload[CLASSICAL_MODEL_COMPARISON_BOUNDED_PAYLOAD_KEY] = (
+            classical_model_comparison
+        )
     if fingerprint_topology is not None:
         payload[FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY] = fingerprint_topology
     if fingerprint_topology_attention is not None:
@@ -2490,6 +2513,20 @@ def _volatility_summary(
     if isinstance(summary, Mapping):
         return dict(summary)
     return _optional_mapping_payload(volatility_summary(report.findings))
+
+
+def _classical_model_comparison_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return family-neutral comparison metadata from report or findings."""
+    summary = report.metadata.get(
+        CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY
+    )
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        classical_model_comparison_summary(report.findings)
+    )
 
 
 def _fingerprint_topology_summary(

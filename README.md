@@ -1741,6 +1741,34 @@ use `time_series_fingerprint_volatility_summary`, bounded payloads use
 `fingerprint_volatility`, and console output renders `ARCH and GARCH volatility
 models`.
 
+The opt-in family-neutral comparison layer consumes those saved bounded
+evaluation artifacts; it does not refit models. Enable it with
+`fingerprint.series.classical_model_comparison.enabled: true` after enabling the
+model-input contract and the families to compare. Each record carries the
+dataset/fingerprint, regularization contract, fold set, target metric, scale,
+horizon, period, specification, and explicit reference baseline. A comparison
+is ineligible when any compatible-identity requirement differs or when bounded
+fold evidence is incomplete. Mean/level, return-mean, conditional-variance, and
+absolute-return-volatility metrics remain separate.
+
+Skill is descriptive and reference-relative: ratio reduction for MAE/RMSE/bias
+and baseline-minus-model for QLIKE. Negative skill is preserved. Missing or
+near-zero references produce stable reason codes instead of silently changing
+the baseline. Rolling error and parameter drift, convergence and failure rates,
+regime context, resource-limit terminations, and representative reason counts
+are bounded. Failed fits remain in accounting denominators. No `winner`,
+`best_model`, production recommendation, automatic order search, or
+hyperparameter search is emitted.
+
+`project_classical_model_comparison_onto_training_frame(...)` adds 43 nullable
+diagnostic scalars under `cm_comparison_*`, `cm_skill_*`, and `cm_stability_*`.
+They join by `series_id`/`period`/`row_id`, remain null before target-time
+availability, preserve duplicate timestamps and observed/`synth_*` columns, and
+are explicitly retrospective and not training-eligible. Full reports use
+`time_series_fingerprint_classical_model_comparison_summary`, bounded payloads
+use `fingerprint_classical_model_comparison`, and console output renders
+`Classical model comparison`.
+
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,
 stable skip/eligibility reason codes, calendar-profile completeness, tick-spread
