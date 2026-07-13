@@ -46,6 +46,7 @@ Works on macOS, Linux, and Windows.
     - [Historical Feed-Observation Operators](#historical-feed-observation-operators)
     - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
+    - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -2528,6 +2529,29 @@ inputs. Index persistence is atomic and content-addressed through an
 `ArtifactRef`; augmented panels remain intermediates. See
 [`docs/reference-motif-index-contracts.md`](docs/reference-motif-index-contracts.md)
 for split, leakage, compact-layout, retrieval, resource, and trust semantics.
+
+#### Empirical Motif Candidate Generation
+
+`generate_empirical_motif_candidates()` proposes zero, one, or many narrow
+`SyntheticEventV1` rows between immutable historical anchors. Cardinality and
+cadence come from the conditioned delivery regime; selected empirical paths
+are transformed only inside their declared time/price support and detrended
+onto an anchor-to-anchor bridge so fragment seams cannot accumulate jumps.
+
+Seeds and event identity depend on semantic run, member, anchor, motif, and
+configuration inputs—not retries, workers, windows, or storage estimates.
+Each event maps to a recoverable transform containing its source motif,
+support/backoff, scale, seed, condition query, and source artifact lineage.
+Sparse evidence, closed sessions, zero-width intervals, unsafe quotes, and
+resource overruns produce explicit empty/refused decisions.
+
+Candidate rows remain bounded, process-local streaming intermediates. Batch
+metadata states that hard carving, broker conditioning, and final persistence
+have not run. The included benchmark adapter lets the existing
+reverse-degradation harness compare this generator with all controls without
+selecting an automatic winner. See
+[`docs/empirical-motif-generation-contracts.md`](docs/empirical-motif-generation-contracts.md)
+for determinism, seam, lineage, resource, and stage-boundary details.
 
 ---
 

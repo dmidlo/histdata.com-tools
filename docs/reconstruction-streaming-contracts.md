@@ -208,8 +208,9 @@ must be written to artifact storage.
 - #437 implements bounded point-in-time market-context query sidecars over
   these windows; see
   [`market-context-contracts.md`](market-context-contracts.md).
-- #439 generates variable-cardinality candidate events using these windows,
-  seeds, budgets, and carry contracts.
+- #439 implements variable-cardinality empirical-motif candidate generation
+  using these windows, seeds, budgets, and carry contracts; see
+  [`empirical-motif-generation-contracts.md`](empirical-motif-generation-contracts.md).
 - #440 owns hard historical carving and detailed rejection decisions.
 - #441 owns cross-currency generation and reconciliation semantics.
 - #446 implements final atomic Parquet and manifest publication.

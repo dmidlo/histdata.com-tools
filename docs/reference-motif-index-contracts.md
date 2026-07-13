@@ -102,6 +102,11 @@ information graph with:
 This lets the existing reconstruction information audit enforce the same
 point-in-time rules before #439 generation begins.
 
+The implemented candidate consumer is documented in
+[`empirical-motif-generation-contracts.md`](empirical-motif-generation-contracts.md).
+It retains the query result and compact source lineage while keeping candidate
+rows process-local and separate from later carving.
+
 ## Trust gates
 
 - Withheld or ineligible windows never enter the index.

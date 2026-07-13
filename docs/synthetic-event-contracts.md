@@ -14,8 +14,10 @@ uses the fields below.
   content hashes without embedding event rows.
 - `histdatacom.data_quality.synthetic_generation` remains the same-cardinality
   Stage-0 control. It does not emit these variable-cardinality events.
-- Window planning/checkpoints belong to #432, candidate generation to #439,
-  and atomic final publication/partition layout to #446.
+- Window planning/checkpoints belong to #432. The implemented empirical-motif
+  candidate generator is documented in
+  [`empirical-motif-generation-contracts.md`](empirical-motif-generation-contracts.md),
+  while atomic final publication/partition layout remains #446.
 
 ## Event ordering and identity
 
