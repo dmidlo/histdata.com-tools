@@ -45,6 +45,7 @@ Works on macOS, Linux, and Windows.
     - [Feed-Regime Detection](#feed-regime-detection)
     - [Historical Feed-Observation Operators](#historical-feed-observation-operators)
     - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
+    - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -2504,6 +2505,29 @@ persist. See
 [`docs/reverse-degradation-benchmark-contracts.md`](docs/reverse-degradation-benchmark-contracts.md)
 for the complete interfaces, metric semantics, resource bounds, and trust
 gates.
+
+#### Empirical Reference-Motif Index
+
+`ReferenceMotifIndexV1` projects bounded windows from the augmented ASCII tick
+surface into compact event-time offsets, bid/ask deltas, quote-transition
+marks, conditioning coordinates, transformation limits, and complete source
+lineage. It consumes the enriched evidence without copying the full 521-column
+row into every motif event.
+
+Only eligible training windows may enter the artifact. Chronological
+calibration, validation, and final-holdout windows are excluded, while
+cross-split source overlap and normalized near-duplicate shapes fail closed.
+Index selection is stable under input reordering, retrieval follows an explicit
+exact-to-global support hierarchy, and matches expose distance, cell support,
+fallback level, and deterministic fragment-ID tie-breaking.
+
+Ex-ante queries require an as-of timestamp and hide motifs whose observations
+or artifacts were not yet available. Selected motifs bind directly into the
+existing reconstruction information audit as training-split empirical-motif
+inputs. Index persistence is atomic and content-addressed through an
+`ArtifactRef`; augmented panels remain intermediates. See
+[`docs/reference-motif-index-contracts.md`](docs/reference-motif-index-contracts.md)
+for split, leakage, compact-layout, retrieval, resource, and trust semantics.
 
 ---
 
