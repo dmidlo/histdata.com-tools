@@ -2423,6 +2423,37 @@ analytical frame per tick. See
 [`docs/feed-epoch-contracts.md`](docs/feed-epoch-contracts.md) for the schema,
 trust gate, resource limits, and streaming integration.
 
+#### Historical Feed-Observation Operators
+
+`ObservationOperatorV1` turns a bounded market-event surface into a sparse,
+quantized delivery-observation surface using stability-passing feed epochs.
+The operator supports conditioned thinning, unchanged-quote filtering,
+timestamp and price quantization, batching, duplicates, burst/rate caps,
+outages, and reconnect behavior through versioned parameters with explicit
+support and uncertainty.
+
+The fitting boundary consumes canonical `FeedEpochEvidenceV1` projections or
+paired controlled-calibration evidence. Canonical sparse history does not
+identify a true dense-event denominator, so unsupported thinning parameters
+remain visibly unsupported and use a neutral identity behavior rather than
+being presented as direct observations. Sparse conditioned strata follow a
+fixed state/session/event-to-global fallback hierarchy or fail closed.
+
+Observation rendering does not mutate `SyntheticEventV1`. Inputs retain their
+market-event IDs and produce separate operator-lineaged delivery observations.
+Forward application preserves protected historical anchors exactly; the
+separate `degrade()` interface lets #436 degrade modern holdouts while
+protecting only explicitly selected controls.
+
+Application uses `ReconstructionWindowV1`, aligned timestamp/batch quanta,
+declared halo metadata, required bounded carry state after the source window,
+deterministic hash decisions, and input/output amplification limits. The
+compact operator JSON is durable and hash-replayable; fit panels and window
+output observations remain bounded intermediates rather than augmented
+permanent cache columns. See
+[`docs/observation-operator-contracts.md`](docs/observation-operator-contracts.md)
+for the contracts, trust gates, fallback semantics, and streaming boundary.
+
 ---
 
 ### Orchestration Runtime

@@ -183,10 +183,15 @@ Windowing, retries, or storage tuning do not.
 
 ## Issue boundaries
 
-- #432 owns canonical fingerprint persistence and is the evidence source.
+- #321–#333 own canonical fingerprints, their persistence/constraints, and the
+  evidence source consumed by epoch fitting.
 - #433 governs ex-post versus ex-ante information access.
+- #435 consumes only stability-passing definitions and implements historical
+  feed-observation operators.
+- #436 owns reverse-degradation scorecards over the #435 interface.
 - #439 consumes only stable epoch artifacts while generating candidates.
-- #443 owns wider reconstruction diagnostics and calibration reporting.
+- #443 owns live broker delivery capture; #444–#445 own broker fingerprints and
+  style transfer rather than historical technological epochs.
 - #446 publishes final Parquet and manifest artifacts atomically.
 - #447 carries compact artifact references through production streaming
   workflows.

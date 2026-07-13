@@ -16,6 +16,14 @@ definition ID, and streamed windows or final events carry only their epoch or
 uncertain-transition assignment. Fingerprint payloads, fitting panels, and
 sensitivity intermediates never become permanent per-row columns.
 
+The implemented
+[historical feed-observation operator](observation-operator-contracts.md) is a
+second bounded semantic input. Runs bind its operator ID in
+`configuration_ids`; window workers use the existing ownership/halo rules and
+persist only larger output/carry batches behind `ArtifactRef` values. Fitted
+panels and `ObservationApplicationResultV1` objects never enter workflow
+history.
+
 ## Contract boundary
 
 | Contract | Responsibility |
@@ -191,6 +199,11 @@ must be written to artifact storage.
   these windows may read and what downstream claims are valid.
 - #434's implemented feed-epoch contract supplies only stability-passing,
   uncertainty-aware observation-regime assignments and complete lineage.
+- #435's implemented observation operator consumes those assignments and uses
+  these windows, alignment rules, limits, and carry seams for deterministic
+  forward observation and controlled degradation.
+- #436 owns the streaming reverse-degradation benchmark and scorecards over
+  that operator interface.
 - #439 generates variable-cardinality candidate events using these windows,
   seeds, budgets, and carry contracts.
 - #440 owns hard historical carving and detailed rejection decisions.
