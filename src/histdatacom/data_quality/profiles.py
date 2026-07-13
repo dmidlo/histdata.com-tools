@@ -53,6 +53,10 @@ from histdatacom.data_quality.state_space import (
     StateSpaceProfile,
     StateSpaceSpecification,
 )
+from histdatacom.data_quality.volatility import (
+    VolatilityProfile,
+    VolatilitySpecification,
+)
 from histdatacom.data_quality.ingestion import (
     ASCII_ROW_COUNT_INGESTION_RULE_ID,
     DEFAULT_MIN_ROW_COUNT,
@@ -514,6 +518,7 @@ class QualityProfile:
                 "autoregressive",
                 "seasonal_exogenous",
                 "state_space",
+                "volatility",
             },
             SERIES_FINGERPRINT_RULE_ID,
         )
@@ -631,6 +636,14 @@ class QualityProfile:
                     path=SERIES_FINGERPRINT_RULE_ID,
                 ),
                 path=f"{SERIES_FINGERPRINT_RULE_ID}.state_space",
+            ),
+            volatility=_volatility_profile(
+                _mapping_field(
+                    config,
+                    "volatility",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.volatility",
             ),
         )
 
@@ -2557,6 +2570,246 @@ def _state_space_specification(
             ),
             optimizer=_string_field(value, "optimizer", "lbfgs", path=path),
             fixed_parameters=fixed_parameters,
+            max_iterations=_int_field(
+                value, "max_iterations", 200, minimum=1, path=path
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _volatility_profile(
+    value: Mapping[str, JSONValue], *, path: str
+) -> VolatilityProfile:
+    base = VolatilityProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "specifications",
+            "projection_specification_ids",
+            "projection_horizon",
+            "realized_variance_proxy",
+            "annualization_periods",
+            "baseline_rolling_windows",
+            "ewma_decay",
+            "maximum_persistence",
+            "maximum_covariance_condition_number",
+            "boundary_tolerance",
+            "compare_exponential_smoothing",
+            "compare_autoregressive",
+            "compare_seasonal_exogenous",
+            "compare_state_space",
+            "rounding_digits",
+        },
+        path,
+    )
+    specifications = base.specifications
+    if "specifications" in value:
+        raw = value["specifications"]
+        if not isinstance(raw, list) or not raw:
+            raise QualityProfileError(
+                f"{path}.specifications must be a non-empty list"
+            )
+        specifications = tuple(
+            _volatility_specification(
+                _expect_mapping(item, path=f"{path}.specifications[{index}]"),
+                path=f"{path}.specifications[{index}]",
+            )
+            for index, item in enumerate(raw)
+        )
+    projection_ids = base.projection_specification_ids
+    if "projection_specification_ids" in value:
+        raw_ids = value["projection_specification_ids"]
+        if (
+            not isinstance(raw_ids, list)
+            or not raw_ids
+            or not all(isinstance(item, str) and item for item in raw_ids)
+        ):
+            raise QualityProfileError(
+                f"{path}.projection_specification_ids must contain strings"
+            )
+        projection_ids = tuple(cast(list[str], raw_ids))
+    elif "specifications" in value:
+        by_family: dict[str, str] = {}
+        for specification in specifications:
+            by_family.setdefault(
+                specification.family, specification.specification_id
+            )
+        projection_ids = tuple(by_family.values())
+    try:
+        return VolatilityProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            specifications=specifications,
+            projection_specification_ids=projection_ids,
+            projection_horizon=_int_field(
+                value,
+                "projection_horizon",
+                base.projection_horizon,
+                minimum=1,
+                path=path,
+            ),
+            realized_variance_proxy=_string_field(
+                value,
+                "realized_variance_proxy",
+                base.realized_variance_proxy,
+                path=path,
+            ),
+            annualization_periods=_int_field(
+                value,
+                "annualization_periods",
+                base.annualization_periods,
+                minimum=0,
+                path=path,
+            ),
+            baseline_rolling_windows=_fingerprint_int_sequence(
+                value,
+                "baseline_rolling_windows",
+                base.baseline_rolling_windows,
+                path=path,
+            ),
+            ewma_decay=_float_field(
+                value, "ewma_decay", base.ewma_decay, path=path
+            ),
+            maximum_persistence=_float_field(
+                value,
+                "maximum_persistence",
+                base.maximum_persistence,
+                path=path,
+            ),
+            maximum_covariance_condition_number=_float_field(
+                value,
+                "maximum_covariance_condition_number",
+                base.maximum_covariance_condition_number,
+                minimum=1.0,
+                path=path,
+            ),
+            boundary_tolerance=_float_field(
+                value,
+                "boundary_tolerance",
+                base.boundary_tolerance,
+                path=path,
+            ),
+            compare_exponential_smoothing=_bool_field(
+                value,
+                "compare_exponential_smoothing",
+                base.compare_exponential_smoothing,
+                path=path,
+            ),
+            compare_autoregressive=_bool_field(
+                value,
+                "compare_autoregressive",
+                base.compare_autoregressive,
+                path=path,
+            ),
+            compare_seasonal_exogenous=_bool_field(
+                value,
+                "compare_seasonal_exogenous",
+                base.compare_seasonal_exogenous,
+                path=path,
+            ),
+            compare_state_space=_bool_field(
+                value,
+                "compare_state_space",
+                base.compare_state_space,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _volatility_specification(
+    value: Mapping[str, JSONValue], *, path: str
+) -> VolatilitySpecification:
+    _reject_unknown_keys(
+        value,
+        {
+            "specification_id",
+            "family",
+            "input_definition",
+            "mean_model",
+            "mean_model_reference_id",
+            "distribution",
+            "innovation_order",
+            "variance_order",
+            "scale_factor",
+            "variance_initialization",
+            "initial_variance",
+            "covariance_type",
+            "optimizer_tolerance",
+            "parameter_bounds",
+            "max_iterations",
+        },
+        path,
+    )
+    if "specification_id" not in value or "family" not in value:
+        raise QualityProfileError(
+            f"{path} requires specification_id and family"
+        )
+    family = _string_field(value, "family", "", path=path)
+    try:
+        return VolatilitySpecification(
+            specification_id=_string_field(
+                value, "specification_id", "", path=path
+            ),
+            family=family,
+            input_definition=_string_field(
+                value, "input_definition", "raw_return", path=path
+            ),
+            mean_model=_string_field(value, "mean_model", "zero", path=path),
+            mean_model_reference_id=_optional_string_profile_field(
+                value, "mean_model_reference_id", "", path=path
+            ),
+            distribution=_string_field(
+                value, "distribution", "normal", path=path
+            ),
+            innovation_order=_int_field(
+                value, "innovation_order", 1, minimum=1, path=path
+            ),
+            variance_order=_int_field(
+                value,
+                "variance_order",
+                0 if family == "arch" else 1,
+                minimum=0,
+                path=path,
+            ),
+            scale_factor=_float_field(
+                value, "scale_factor", 100.0, minimum=0.0, path=path
+            ),
+            variance_initialization=_string_field(
+                value,
+                "variance_initialization",
+                "backend_default",
+                path=path,
+            ),
+            initial_variance=_optional_float_profile_field(
+                value, "initial_variance", None, minimum=0.0, path=path
+            ),
+            covariance_type=_string_field(
+                value, "covariance_type", "robust", path=path
+            ),
+            optimizer_tolerance=_optional_float_profile_field(
+                value,
+                "optimizer_tolerance",
+                None,
+                minimum=0.0,
+                path=path,
+            ),
+            parameter_bounds=cast(
+                tuple[tuple[str, float | None, float | None], ...],
+                _parameter_bounds_profile_field(
+                    value, "parameter_bounds", path=path
+                ),
+            ),
             max_iterations=_int_field(
                 value, "max_iterations", 200, minimum=1, path=path
             ),

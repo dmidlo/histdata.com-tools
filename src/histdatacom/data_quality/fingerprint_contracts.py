@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import cast
 
 from histdatacom.data_quality.autoregressive import (
     AUTOREGRESSIVE_BOUNDED_PAYLOAD_KEY,
@@ -157,12 +158,32 @@ from histdatacom.data_quality.state_space import (
     STATE_SPACE_SUMMARY_SCHEMA_VERSION,
     STATE_SPACE_TRAINING_PROJECTION_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.volatility import (
+    ASYMMETRIC_VOLATILITY_EXTENSION_REGISTRY,
+    DEFAULT_VOLATILITY_SUMMARY_TARGET_LIMIT,
+    VOLATILITY_BOUNDED_PAYLOAD_KEY,
+    VOLATILITY_CONFIGURATION_SCHEMA_VERSION,
+    VOLATILITY_DISTRIBUTIONS,
+    VOLATILITY_EVALUATION_SCHEMA_VERSION,
+    VOLATILITY_FAMILIES,
+    VOLATILITY_FIT_SCHEMA_VERSION,
+    VOLATILITY_FIT_STATUS_CODES,
+    VOLATILITY_FORECAST_SCHEMA_VERSION,
+    VOLATILITY_INPUT_DEFINITIONS,
+    VOLATILITY_MEAN_MODELS,
+    VOLATILITY_REASON_CODES,
+    VOLATILITY_SCHEMA_VERSION,
+    VOLATILITY_SUMMARY_METADATA_KEY,
+    VOLATILITY_SUMMARY_SCHEMA_VERSION,
+    VOLATILITY_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.training_features import (
     AUTOREGRESSIVE_COLUMNS,
     EXPONENTIAL_SMOOTHING_COLUMNS,
     SEASONAL_EXOGENOUS_COLUMNS,
     KALMAN_COLUMNS,
     STATE_SPACE_COLUMNS,
+    VOLATILITY_COLUMNS,
     training_feature_definitions,
 )
 from histdatacom.histdata_ascii import TICK
@@ -184,6 +205,7 @@ FINGERPRINT_SERIES_CONFIG_KEYS = (
     "autoregressive",
     "seasonal_exogenous",
     "state_space",
+    "volatility",
 )
 FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
     "invalid_row_min_count",
@@ -818,6 +840,55 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_volatility",
+        VOLATILITY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.volatility",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility_configuration",
+        VOLATILITY_CONFIGURATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.volatility.configuration",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility_fit",
+        VOLATILITY_FIT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.volatility.fit_summary",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility_forecast",
+        VOLATILITY_FORECAST_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility_evaluation",
+        VOLATILITY_EVALUATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.volatility.evaluation",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility_training_projection",
+        VOLATILITY_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=("time_series_fingerprint.volatility.training_projection"),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility_summary",
+        VOLATILITY_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=VOLATILITY_SUMMARY_METADATA_KEY,
+        bounded_payload_key=VOLATILITY_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_audit",
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -998,6 +1069,14 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         STATE_SPACE_BOUNDED_PAYLOAD_KEY,
         "state_space",
         "State-space and Kalman models",
+    ),
+    FingerprintReportSurfaceContract(
+        "volatility",
+        "fingerprint_volatility_summary",
+        VOLATILITY_SUMMARY_METADATA_KEY,
+        VOLATILITY_BOUNDED_PAYLOAD_KEY,
+        "volatility",
+        "ARCH and GARCH volatility models",
     ),
     FingerprintReportSurfaceContract(
         "readiness_summary",
@@ -1373,6 +1452,55 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "volatility",
+        "opt-in symmetric ARCH/GARCH conditional-variance diagnostics",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_volatility",
+        basis_values=("regular_grid_rolling_origin",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#426",
+            "profile_controlled_by": [
+                "classical_model_input",
+                "volatility",
+            ],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid",
+            "optional_dependency_extra": "models",
+            "backend": "arch",
+            "model_families": list(VOLATILITY_FAMILIES),
+            "input_definitions": list(VOLATILITY_INPUT_DEFINITIONS),
+            "mean_models": list(VOLATILITY_MEAN_MODELS),
+            "distributions": list(VOLATILITY_DISTRIBUTIONS),
+            "fit_statuses": list(VOLATILITY_FIT_STATUS_CODES),
+            "failure_reason_codes": list(VOLATILITY_REASON_CODES),
+            "augmented_column_prefixes": ["cm_arch_", "cm_garch_"],
+            "augmented_columns": [
+                {
+                    "name": definition.name,
+                    "dtype": definition.dtype,
+                    "nullable": definition.nullable,
+                    "grain": definition.grain,
+                    "source": definition.source,
+                }
+                for definition in training_feature_definitions()
+                if definition.name in VOLATILITY_COLUMNS
+            ],
+            "explicit_order_configuration": True,
+            "mean_and_variance_metrics_separate": True,
+            "realized_variance_proxy_explicit": True,
+            "asymmetric_extension_registry": cast(
+                JSONValue, list(ASYMMETRIC_VOLATILITY_EXTENSION_REGISTRY)
+            ),
+            "asymmetric_fitting_enabled": False,
+            "automatic_order_selection": False,
+            "automatic_winner": False,
+            "row_mapping_policy": "first_source_row_at_or_after_availability",
+        },
+    ),
+    FingerprintTargetSectionContract(
         "synthetic_constraints",
         "generator-facing defects, stylized facts, artifacts, and validation contract",
         target_timeframes=(TICK,),
@@ -1452,6 +1580,7 @@ FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
         DEFAULT_SEASONAL_EXOGENOUS_SUMMARY_TARGET_LIMIT
     ),
     "state_space_summary_target_limit": DEFAULT_STATE_SPACE_SUMMARY_TARGET_LIMIT,
+    "volatility_summary_target_limit": DEFAULT_VOLATILITY_SUMMARY_TARGET_LIMIT,
 }
 FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS = {
     "invalid_row_min_count": DEFAULT_FINGERPRINT_DISTRIBUTION_INVALID_ROW_MIN_COUNT,

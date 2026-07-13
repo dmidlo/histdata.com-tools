@@ -296,9 +296,15 @@ def test_package_metadata_advertises_optional_models_provider() -> None:
     """Rich fitted models should remain isolated in the models/all extras."""
     optional = _pyproject_config()["project"]["optional-dependencies"]
 
-    assert optional["models"] == ["statsmodels>=0.14.6,<0.15"]
+    assert optional["models"] == [
+        "arch>=8.0.0,<9",
+        "statsmodels>=0.14.6,<0.15",
+    ]
+    assert "arch>=8.0.0,<9" in optional["all"]
     assert "statsmodels>=0.14.6,<0.15" in optional["all"]
+    assert "arch==8.0.0" in optional["test"]
     assert "statsmodels==0.14.6" in optional["test"]
+    assert "arch==8.0.0" in optional["dev"]
     assert "statsmodels==0.14.6" in optional["dev"]
 
 

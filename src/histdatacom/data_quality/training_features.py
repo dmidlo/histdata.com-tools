@@ -313,6 +313,53 @@ KALMAN_COLUMNS = tuple(
     f"cm_kalman_{suffix}" for suffix in KALMAN_COLUMN_SUFFIXES
 )
 
+VOLATILITY_FAMILY_COLUMN_SUFFIXES = (
+    "schema_version",
+    "input_derivation_id",
+    "model_id",
+    "specification_code",
+    "input_definition_code",
+    "mean_model_code",
+    "distribution_code",
+    "innovation_order",
+    "variance_order",
+    "scale_factor",
+    "fit_status_code",
+    "failure_reason_code",
+    "converged",
+    "effective_observation_count",
+    "missing_reset_count",
+    "fold_id",
+    "origin_row_id",
+    "target_row_id",
+    "horizon",
+    "mean_forecast",
+    "variance_forecast",
+    "volatility_forecast",
+    "annualized_variance_forecast",
+    "annualized_volatility_forecast",
+    "forecast_available",
+    "forecast_available_at_utc_ms",
+    "actual_return",
+    "realized_variance_proxy",
+    "mean_error",
+    "variance_error",
+    "volatility_error",
+    "qlike_loss",
+    "diagnostic_available",
+    "diagnostic_available_at_utc_ms",
+    "diagnostic_only",
+    "persistence",
+    "unconditional_variance",
+    "boundary_parameter",
+    "training_eligible",
+)
+VOLATILITY_COLUMNS = tuple(
+    f"cm_{family}_{suffix}"
+    for family in ("arch", "garch")
+    for suffix in VOLATILITY_FAMILY_COLUMN_SUFFIXES
+)
+
 TRAINING_REQUIRED_COLUMNS = (
     *IDENTITY_COLUMNS,
     "spread",
@@ -347,6 +394,7 @@ TRAINING_REQUIRED_COLUMNS = (
     *SEASONAL_EXOGENOUS_COLUMNS,
     *STATE_SPACE_COLUMNS,
     *KALMAN_COLUMNS,
+    *VOLATILITY_COLUMNS,
 )
 
 ISSUE_CODE_BY_COLUMN = {
@@ -531,6 +579,7 @@ def training_feature_definitions() -> tuple[TrainingFeatureDefinition, ...]:
     definitions.extend(_autoregressive_definition_rows())
     definitions.extend(_seasonal_exogenous_definition_rows())
     definitions.extend(_state_space_definition_rows())
+    definitions.extend(_volatility_definition_rows())
     return tuple(definitions)
 
 
@@ -1253,6 +1302,58 @@ def _state_space_definition_rows() -> list[TrainingFeatureDefinition]:
                 None,
                 f"Point-in-time state-space/Kalman scalar: {name}.",
                 "state_space",
+                "row",
+                True,
+            )
+        )
+    return definitions
+
+
+def _volatility_definition_rows() -> list[TrainingFeatureDefinition]:
+    strings = {"schema_version", "input_derivation_id", "model_id"}
+    booleans = {
+        "converged",
+        "forecast_available",
+        "diagnostic_available",
+        "diagnostic_only",
+        "boundary_parameter",
+        "training_eligible",
+    }
+    floats = {
+        "scale_factor",
+        "mean_forecast",
+        "variance_forecast",
+        "volatility_forecast",
+        "annualized_variance_forecast",
+        "annualized_volatility_forecast",
+        "actual_return",
+        "realized_variance_proxy",
+        "mean_error",
+        "variance_error",
+        "volatility_error",
+        "qlike_loss",
+        "persistence",
+        "unconditional_variance",
+    }
+    definitions: list[TrainingFeatureDefinition] = []
+    for name in VOLATILITY_COLUMNS:
+        suffix = name.removeprefix("cm_arch_").removeprefix("cm_garch_")
+        dtype = (
+            "Utf8"
+            if suffix in strings
+            else (
+                "Boolean"
+                if suffix in booleans
+                else "Float64" if suffix in floats else "Int64"
+            )
+        )
+        definitions.append(
+            TrainingFeatureDefinition(
+                name,
+                dtype,
+                None,
+                f"Point-in-time ARCH/GARCH scalar: {name}.",
+                "volatility",
                 "row",
                 True,
             )

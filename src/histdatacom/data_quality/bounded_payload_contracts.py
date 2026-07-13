@@ -35,6 +35,7 @@ from histdatacom.data_quality.seasonal_exogenous import (
     SEASONAL_EXOGENOUS_SCHEMA_VERSION,
 )
 from histdatacom.data_quality.state_space import STATE_SPACE_SCHEMA_VERSION
+from histdatacom.data_quality.volatility import VOLATILITY_SCHEMA_VERSION
 from histdatacom.data_quality.fingerprints import (
     CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     CROSS_SERIES_FINGERPRINT_RULE_ID,
@@ -1254,6 +1255,7 @@ def _limited_tick_fingerprint_payload() -> dict[str, JSONValue]:
         "GBPUSD", status="limited"
     )
     payload["state_space"] = _state_space_payload("GBPUSD", status="limited")
+    payload["volatility"] = _volatility_payload("GBPUSD", status="limited")
     return payload
 
 
@@ -1327,6 +1329,7 @@ def _tick_fingerprint_payload(
     payload["autoregressive"] = _autoregressive_payload(symbol)
     payload["seasonal_exogenous"] = _seasonal_exogenous_payload(symbol)
     payload["state_space"] = _state_space_payload(symbol)
+    payload["volatility"] = _volatility_payload(symbol)
     return payload
 
 
@@ -1496,6 +1499,37 @@ def _state_space_payload(
             "filtered_state_policy": "forecast_origin_information_only",
             "smoothed_state_policy": "retrospective_diagnostic_only",
             "automatic_component_selection": False,
+            "automatic_winner": False,
+        },
+    }
+
+
+def _volatility_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    return {
+        "schema_version": VOLATILITY_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": "insufficient_folds" if status == "limited" else None,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "variance_contract": {
+            "conditional_variance": True,
+            "realized_proxy": "squared_return",
+            "mean_metrics_separate": True,
+        },
+        "fit_summary": {
+            "fit_attempt_count": 8,
+            "failed_fit_count": 1 if status == "limited" else 0,
+        },
+        "evaluation": {
+            "model_count": 2,
+            "families": ["arch", "garch"],
+            "fold_count": 4,
+            "evaluated_fold_count": 3 if status == "limited" else 4,
+            "automatic_order_selection": False,
             "automatic_winner": False,
         },
     }

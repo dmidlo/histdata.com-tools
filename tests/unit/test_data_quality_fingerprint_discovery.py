@@ -74,6 +74,16 @@ from histdatacom.data_quality.state_space import (
     STATE_SPACE_SUMMARY_SCHEMA_VERSION,
     STATE_SPACE_TRAINING_PROJECTION_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.volatility import (
+    VOLATILITY_CONFIGURATION_SCHEMA_VERSION,
+    VOLATILITY_EVALUATION_SCHEMA_VERSION,
+    VOLATILITY_FIT_SCHEMA_VERSION,
+    VOLATILITY_FORECAST_SCHEMA_VERSION,
+    VOLATILITY_SCHEMA_VERSION,
+    VOLATILITY_SUMMARY_METADATA_KEY,
+    VOLATILITY_SUMMARY_SCHEMA_VERSION,
+    VOLATILITY_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS,
     FINGERPRINT_REPORT_SURFACE_CONTRACTS,
@@ -121,6 +131,7 @@ from histdatacom.data_quality.training_features import (
     SEASONAL_EXOGENOUS_COLUMNS,
     KALMAN_COLUMNS,
     STATE_SPACE_COLUMNS,
+    VOLATILITY_COLUMNS,
     training_feature_definitions,
 )
 from histdatacom.runtime_contracts import JSONValue
@@ -296,6 +307,29 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert schemas["fingerprint_state_space_summary"]["schema_version"] == (
         STATE_SPACE_SUMMARY_SCHEMA_VERSION
     )
+    assert schemas["fingerprint_volatility"]["schema_version"] == (
+        VOLATILITY_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_volatility_configuration"]["schema_version"]
+        == VOLATILITY_CONFIGURATION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_volatility_fit"]["schema_version"] == (
+        VOLATILITY_FIT_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_volatility_forecast"]["schema_version"] == (
+        VOLATILITY_FORECAST_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_volatility_evaluation"]["schema_version"] == (
+        VOLATILITY_EVALUATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_volatility_training_projection"]["schema_version"]
+        == VOLATILITY_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_volatility_summary"]["schema_version"] == (
+        VOLATILITY_SUMMARY_SCHEMA_VERSION
+    )
     assert (
         schemas["fingerprint_decomposition_training_projection"][
             "schema_version"
@@ -362,6 +396,9 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
     assert payload["metadata_keys"]["report_metadata"]["state_space"] == (
         STATE_SPACE_SUMMARY_METADATA_KEY
     )
+    assert payload["metadata_keys"]["report_metadata"]["volatility"] == (
+        VOLATILITY_SUMMARY_METADATA_KEY
+    )
 
     implemented = payload["sections"]["implemented"]["target_sections"]
     assert [section["name"] for section in implemented] == [
@@ -381,6 +418,7 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "autoregressive",
         "seasonal_exogenous",
         "state_space",
+        "volatility",
         "synthetic_constraints",
         "fingerprint_audit",
     ]
@@ -464,6 +502,24 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
             "source": definitions[name].source,
         }
         for name in (*STATE_SPACE_COLUMNS, *KALMAN_COLUMNS)
+    ]
+    volatility = next(
+        section for section in implemented if section["name"] == "volatility"
+    )
+    assert volatility["model_families"] == ["arch", "garch"]
+    assert volatility["augmented_column_prefixes"] == [
+        "cm_arch_",
+        "cm_garch_",
+    ]
+    assert volatility["augmented_columns"] == [
+        {
+            "name": name,
+            "dtype": definitions[name].dtype,
+            "nullable": definitions[name].nullable,
+            "grain": definitions[name].grain,
+            "source": definitions[name].source,
+        }
+        for name in VOLATILITY_COLUMNS
     ]
     planned = payload["sections"]["planned"]["target_sections"]
     assert planned == []

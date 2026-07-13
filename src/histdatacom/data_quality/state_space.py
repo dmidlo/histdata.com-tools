@@ -249,7 +249,7 @@ class StateSpaceSpecification:
             latent_components.append("cycle")
         if self.autoregressive_order:
             latent_components.append("autoregressive")
-        return {
+        metadata: dict[str, JSONValue] = {
             "schema_version": STATE_SPACE_CONFIGURATION_SCHEMA_VERSION,
             "specification_id": self.specification_id,
             "family": self.family,
@@ -262,7 +262,7 @@ class StateSpaceSpecification:
                 "time_basis": "regular_grid",
             },
             "latent_state_contract": {
-                "components": latent_components,
+                "components": cast(JSONValue, latent_components),
                 "bounded_by_profile_state_dimension": True,
             },
             "observation_equation": "y_t = Z_t alpha_t + epsilon_t",
@@ -308,6 +308,7 @@ class StateSpaceSpecification:
             "max_iterations": self.max_iterations,
             "automatic_component_selection": False,
         }
+        return metadata
 
 
 def _default_specifications() -> tuple[StateSpaceSpecification, ...]:
@@ -2102,7 +2103,8 @@ def _sequence_value(
     values: Sequence[float], horizon: int, digits: int
 ) -> float | None:
     if 0 < horizon <= len(values):
-        return cast(float | None, _rounded(values[horizon - 1], digits))
+        value = _rounded(values[horizon - 1], digits)
+        return float(value) if value is not None else None
     return None
 
 
@@ -2116,4 +2118,5 @@ def _state_index(names: Sequence[str], requested: str) -> int | None:
 def _vector_value(values: Sequence[Any], index: int | None) -> float | None:
     if index is None or index < 0 or index >= len(values):
         return None
-    return cast(float | None, _optional_float(values[index]))
+    value = _optional_float(values[index])
+    return float(value) if value is not None else None

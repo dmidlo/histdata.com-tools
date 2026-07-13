@@ -162,6 +162,30 @@ post-observation diagnostics. Durable identity remains `series_id`, `period`,
 and `row_id`. Consumers may ignore the optional additive report keys and
 columns.
 
+## Volatility-Family Fingerprint
+
+Fingerprint findings may include the opt-in
+`time_series_fingerprint.volatility` section using
+`histdatacom.volatility.v1`. Full reports summarize it under
+`metadata.time_series_fingerprint_volatility_summary`; the bounded runtime
+equivalent is `fingerprint_volatility`, and the text heading is
+`ARCH and GARCH volatility models`.
+
+Configuration, fit, forecast, evaluation, training-projection, and summary
+objects use stable `histdatacom.volatility-*.v1` schemas. Symmetric ARCH and
+GARCH orders, return input, mean model or preceding residual reference,
+innovation distribution, scale, variance initialization, covariance type,
+parameter bounds, and resource limits are explicit. Conditional-mean,
+conditional-variance, and volatility metrics are separate; the realized
+variance proxy is named, and comparison remains descriptive with no automatic
+winner. Asymmetric models are registry-only in this contract.
+
+Configured projections add 78 nullable scalar columns under `cm_arch_*` and
+`cm_garch_*` on enriched tick rows. Forecast fields become available at their
+origin; realized-return and variance diagnostics remain separately flagged
+post-observation fields. Durable identity remains `series_id`, `period`, and
+`row_id`. Consumers may ignore these optional additive report keys and columns.
+
 ## Golden Fixtures
 
 Representative payload fixtures live under

@@ -199,6 +199,7 @@ jobs:
               "pandas",
               "pyarrow",
               "statsmodels",
+              "arch",
               "temporalio",
           ):
               metadata.version(distribution_name)
@@ -209,6 +210,7 @@ jobs:
               "pandas",
               "pyarrow",
               "statsmodels",
+              "arch",
               "temporalio",
           ):
               if importlib.util.find_spec(module_name) is None:

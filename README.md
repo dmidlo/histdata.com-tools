@@ -1329,9 +1329,9 @@ columns flow through the ordinary Polars cache and same-point Influx projection;
 consumers do not need report parsing or model side-table joins.
 
 No rich numerical dependency is added to the core package by this contract.
-Future Statsmodels- and ARCH-style providers belong in an optional `models`
-extra selected by the model-family issues; the low-dependency fingerprint and
-baseline paths remain usable when those providers are absent. Full reports use
+Statsmodels and ARCH providers belong in the optional `models` extra; the
+low-dependency fingerprint and baseline paths remain usable when those
+providers are absent. Full reports use
 `time_series_fingerprint_classical_model_input_summary`, bounded payloads use
 `fingerprint_classical_model_input`, and console output renders
 `Classical model input contracts`.
@@ -1666,6 +1666,80 @@ filtered-state, smoothed-state, uncertainty, availability, retrospective, and
 training-eligibility fields join only by `series_id`/`period`/`row_id`. They
 preserve observed and `synth_*` namespaces and serialize through the existing
 Polars cache and Influx projection.
+
+The fifth fitted family provides explicit symmetric ARCH(q) and GARCH(p,q)
+conditional-variance models through the optional `arch` backend. It requires a
+return-bearing #421 input contract (`transform: return` or `log_return`) and
+keeps input definition, mean model, innovation and variance orders,
+distribution, scaling, variance initialization, covariance type, parameter
+bounds, and iteration limits explicit:
+
+```json
+{
+  "rules": {
+    "fingerprint.series": {
+      "classical_model_input": {
+        "enabled": true,
+        "transform": "return",
+        "horizons": [1, 5],
+        "minimum_training_observations": 80
+      },
+      "volatility": {
+        "enabled": true,
+        "projection_specification_ids": ["arch-5", "garch-1-1"],
+        "projection_horizon": 1,
+        "realized_variance_proxy": "squared_return",
+        "annualization_periods": 252,
+        "specifications": [
+          {
+            "specification_id": "arch-5",
+            "family": "arch",
+            "input_definition": "raw_return",
+            "mean_model": "zero",
+            "distribution": "normal",
+            "innovation_order": 5
+          },
+          {
+            "specification_id": "garch-1-1",
+            "family": "garch",
+            "input_definition": "raw_return",
+            "mean_model": "constant",
+            "distribution": "students_t",
+            "innovation_order": 1,
+            "variance_order": 1
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Raw returns, log returns, per-origin demeaned returns, and explicitly referenced
+preceding mean-model residuals are separate contracts. Missing grid bins are
+never filled: fitting uses only the trailing contiguous segment and records the
+reset count. Fits guard finite inputs, minimum history, scaling, positive
+variance, parameter bounds, persistence, unconditional variance, optimizer
+status, and numerical failures with stable reason codes and without backend
+exception text.
+
+Forecast evaluation keeps return-mean, conditional-variance, and volatility
+errors separate. Realized variance currently uses the explicit deterministic
+`squared_return` proxy; rolling-variance and EWMA references use the same folds.
+Multiple horizons, rolling stability, convergence/failure rates, bounded
+standardized-residual diagnostics, and preceding-model references are reported,
+but there is no automatic winner. GJR-GARCH and EGARCH have registry entries for
+future extension and are not silently fitted by this family.
+
+`project_volatility_onto_training_frame(...)` augments the same enriched tick
+rows with 78 registered nullable scalar columns under `cm_arch_*` and
+`cm_garch_*`. Forecasts are attached at origin availability; actual returns and
+realized diagnostics are attached only after target availability. Durable
+`series_id`/`period`/`row_id` joins preserve observed and `synth_*` fields and
+round-trip through the existing Polars cache and Influx projection. Full reports
+use `time_series_fingerprint_volatility_summary`, bounded payloads use
+`fingerprint_volatility`, and console output renders `ARCH and GARCH volatility
+models`.
 
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,

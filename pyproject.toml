@@ -71,9 +71,11 @@ temporal = [
     "temporalio>=1.10,<1.31",
 ]
 models = [
+    "arch>=8.0.0,<9",
     "statsmodels>=0.14.6,<0.15",
 ]
 all = [
+    "arch>=8.0.0,<9",
     "influxdb-client>=1.50.0",
     "ipywidgets",
     "jupyter",
@@ -83,6 +85,7 @@ all = [
     "temporalio>=1.10,<1.31",
 ]
 test = [
+    "arch==8.0.0",
     "coverage==7.15.0",
     "ipykernel",
     "influxdb-client>=1.50.0",
@@ -116,6 +119,7 @@ release = [
     "wheel==0.47.0",
 ]
 dev = [
+    "arch==8.0.0",
     "build==1.5.0",
     "black==26.5.1",
     "commitizen==4.16.4",
