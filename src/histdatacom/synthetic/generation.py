@@ -69,7 +69,10 @@ MOTIF_CANDIDATE_BATCH_SCHEMA_VERSION = (
 )
 
 EMPIRICAL_MOTIF_GENERATOR_ID = "histdatacom.empirical-motif-resampling"
-EMPIRICAL_MOTIF_GENERATOR_VERSION = "1.0.0"
+EMPIRICAL_MOTIF_GENERATOR_VERSION = "1.1.0"
+MOTIF_TRANSFORMATION_CONFIDENCE_QUANTITY = (
+    "uncalibrated-motif-match-similarity-v1"
+)
 CANDIDATE_ONLY_CONSTRAINT_SET_ID = (
     "histdatacom.constraint-set.candidate-pre-carving.v1"
 )
@@ -658,7 +661,7 @@ class EmpiricalMotifCandidateBatchV1:
                 or lineage.global_event_ordinal != event.event_sequence
                 or event.reference_id != self.query_result.result_id
                 or event.motif_id != transform.source_fragment_id
-                or event.confidence != transform.confidence
+                or event.confidence is not None
                 or not (
                     transform.output_start_ordinal
                     <= lineage.global_event_ordinal
@@ -1497,7 +1500,10 @@ def _events_for_transform(
             motif_id=fragment.fragment_id,
             feed_epoch_id=query_result.query.condition.feed_epoch_id,
             constraint_set_id=config.constraint_set_id,
-            confidence=plan.record.confidence,
+            # Motif similarity is retrieval evidence, not calibrated pointwise
+            # probability.  It remains on the transformation while generated
+            # events reserve confidence for explicitly calibrated quantities.
+            confidence=None,
         )
         events.append(event)
         lineages.append(

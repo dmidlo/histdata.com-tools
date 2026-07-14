@@ -215,6 +215,10 @@ must be written to artifact storage.
 - #441 implements exact-event-time cross-currency generation and reconciliation
   over these all-symbol windows and manifests; see
   [`cross-currency-reconciliation-contracts.md`](cross-currency-reconciliation-contracts.md).
+- #442 implements deterministic ensemble plans, all-member resource estimates,
+  retained-member policy, calibrated summaries, and hash-bound regeneration;
+  see
+  [`reconstruction-ensemble-calibration-contracts.md`](reconstruction-ensemble-calibration-contracts.md).
 - #446 implements final atomic Parquet and manifest publication.
 - #447 maps the contracts onto production Temporal workflows and activities.
 

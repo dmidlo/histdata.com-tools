@@ -81,7 +81,16 @@ volatility scaling is clamped to the fragment's declared price-scale range.
 Each `EmpiricalMotifTransformationV1` records the source index, query/result,
 fragment, window, series, period, source artifact SHA-256, backoff level,
 support, distance, source-event count, output ordinal range, time and price
-scales, clamp decision, spread-shape decision, seed, and confidence.
+scales, clamp decision, spread-shape decision, seed, and raw motif-match
+similarity. That last value has the explicit meaning
+`uncalibrated-motif-match-similarity-v1`; it is retrieval evidence, not a
+pointwise correctness probability.
+
+Generator version 1.1.0 therefore leaves each candidate
+`SyntheticEventV1.confidence` null. Calibrated reconstruction uncertainty is
+reported only as exact-stratum metric/horizon interval coverage by the
+ensemble layer; see
+[`reconstruction-ensemble-calibration-contracts.md`](reconstruction-ensemble-calibration-contracts.md).
 
 Each `EmpiricalMotifEventLineageV1` maps an emitted event ID to its transform,
 global and segment ordinals, source/anchor progress, and requested timestamp.
@@ -161,6 +170,9 @@ winner or bypass hard historical constraints.
 - #441's implemented synchronized cross-currency reconciliation consumes these
   candidate streams after historical carving; see
   [`cross-currency-reconciliation-contracts.md`](cross-currency-reconciliation-contracts.md).
+- #442's implemented ensemble layer calibrates substantive member diversity,
+  coverage, representative retention, and hash-bound regeneration; see
+  [`reconstruction-ensemble-calibration-contracts.md`](reconstruction-ensemble-calibration-contracts.md).
 - later broker-transfer work owns broker-style conditioning.
 - #446 owns final incremental Parquet layout and atomic publication.
 - #447 owns production Temporal activities, backpressure, cancellation, and

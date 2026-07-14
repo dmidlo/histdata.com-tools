@@ -61,9 +61,13 @@ Synthetic events require:
 
 Reference, motif, feed-epoch, and broker-profile IDs are nullable because not
 every generator stage has used them yet. If used, they are row-aligned scalar
-lineage. Confidence is also nullable until a stage has a defined calibration
-meaning; supplied values must be finite and in `[0, 1]`. Synthetic events
-reject observed source-row identity.
+lineage. Confidence is nullable until a stage has a defined, versioned
+calibration quantity and scope; supplied values must be finite and in
+`[0, 1]`. Raw motif-match similarity is not such a quantity and is retained
+only on empirical-motif transformation evidence. The #442 ensemble confidence
+quantity is exact-stratum metric/horizon interval coverage and does not
+populate per-event confidence. Synthetic events reject observed source-row
+identity.
 
 ## Flat Arrow and Parquet schema
 

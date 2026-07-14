@@ -222,7 +222,7 @@ class SyntheticEventV1:
         generator_version: str,
         generator_config_id: str,
         constraint_set_id: str,
-        confidence: float,
+        confidence: float | None = None,
         anchor_interval_id: str | None = None,
         reference_id: str | None = None,
         motif_id: str | None = None,

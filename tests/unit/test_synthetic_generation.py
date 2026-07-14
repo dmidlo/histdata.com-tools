@@ -21,6 +21,7 @@ from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic import (
     CANDIDATE_ONLY_CONSTRAINT_SET_ID,
     EMPIRICAL_MOTIF_GENERATOR_ID,
+    MOTIF_TRANSFORMATION_CONFIDENCE_QUANTITY,
     BenchmarkCandidateKind,
     BenchmarkCandidateV1,
     BenchmarkControlKind,
@@ -416,6 +417,11 @@ def test_cardinality_tracks_conditioned_tick_intensity(
     assert all(
         event.constraint_set_id == CANDIDATE_ONLY_CONSTRAINT_SET_ID
         for event in batch.events
+    )
+    assert all(event.confidence is None for event in batch.events)
+    assert all(0.0 <= item.confidence <= 1.0 for item in batch.transformations)
+    assert MOTIF_TRANSFORMATION_CONFIDENCE_QUANTITY == (
+        "uncalibrated-motif-match-similarity-v1"
     )
 
 

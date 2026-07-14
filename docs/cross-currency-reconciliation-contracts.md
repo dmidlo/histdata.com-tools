@@ -157,7 +157,9 @@ content and does not inline event or lineage rows into workflow history.
 Window workers may write larger streams behind artifact references, then pass
 only the bounded validation and group metadata forward.
 
-- #442 consumes passing synchronized groups for ensemble calibration.
+- #442's implemented calibration layer consumes passing synchronized groups,
+  retains bounded representative members, and hash-gates regeneration; see
+  [`reconstruction-ensemble-calibration-contracts.md`](reconstruction-ensemble-calibration-contracts.md).
 - #445 applies broker delivery conditioning and must rerun `post_broker`
   validation.
 - #446 writes final Parquet and may commit only through the atomic manifest

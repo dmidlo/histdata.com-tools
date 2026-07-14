@@ -2601,6 +2601,30 @@ roundtrip. See
 [`docs/cross-currency-reconciliation-contracts.md`](docs/cross-currency-reconciliation-contracts.md)
 for projection, refusal, validation, compatibility, and atomic-commit details.
 
+#### Calibrated Reconstruction Ensembles
+
+`plan_reconstruction_ensemble()` derives stable member IDs and semantic seeds
+from exact source/configuration hashes, not workers, retries, row order, or
+retention rank. Reverse-degradation windows then measure member intervals by
+feed epoch, session, event state, symbol, horizon, and sparsity. Validation
+cells fit bounded adjustments; final-holdout cells alone report achieved
+coverage, failures, refusals, and substantive diversity.
+
+Logical-content hashes exclude member/seed/lineage identity, so identical
+market paths are diagnosed as collapsed and ID-only or metric-free differences
+cannot count as useful diversity. The primary member is explicitly a compact
+validation-medoid representative, not historical truth, an automatic winner,
+or a default generator.
+
+Storage estimates cover all-member computation and scratch while durable
+output is limited to a configured retained subset. Omitted members can be
+regenerated only from the frozen plan after every source and configuration
+SHA-256 matches. Reports contain bounded summaries rather than event rows.
+Motif-match similarity remains uncalibrated transformation evidence; generated
+tick confidence stays null. See
+[`docs/reconstruction-ensemble-calibration-contracts.md`](docs/reconstruction-ensemble-calibration-contracts.md)
+for calibration, confidence, diversity, retention, and replay semantics.
+
 ---
 
 ### Orchestration Runtime

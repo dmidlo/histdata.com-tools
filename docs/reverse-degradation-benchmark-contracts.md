@@ -195,6 +195,10 @@ the benchmark consumes each deduplicated logical window once.
   `BenchmarkGeneratorV1`.
 - #440 supplies detailed carving violations.
 - #441 supplies synchronized cross-series metrics.
+- #442 consumes validation and final-holdout member windows to calibrate
+  metric/horizon intervals, diagnose collapsed diversity, and report bounded
+  failure/refusal evidence; see
+  [`reconstruction-ensemble-calibration-contracts.md`](reconstruction-ensemble-calibration-contracts.md).
 - #448 supplies downstream strategy-sensitivity metrics.
 
 Changing split meaning, control semantics, metric meaning, promotion gating,
