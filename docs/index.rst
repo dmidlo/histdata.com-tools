@@ -62,6 +62,7 @@ Temporal runtime and operations
 .. toctree::
    :maxdepth: 2
 
+   container
    temporal-binary-provisioning
    temporal-orchestration-operations
    temporal-orchestration-runtime-runbook

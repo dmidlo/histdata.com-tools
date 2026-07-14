@@ -73,6 +73,7 @@ Works on macOS, Linux, and Windows.
     - [Full Script Example](#full-script-example)
 - [Setup](#setup)
   - [TLDR for all platforms](#tldr-for-all-platforms)
+  - [Container Image](#container-image)
   - [Developer Setup](#developer-setup)
   - [Vanilla Python Setup](#vanilla-python-setup)
     - [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
@@ -3604,6 +3605,24 @@ to install latest development version
 ```sh
 pip install git+https://github.com/dmidlo/histdata.com-tools.git
 ```
+
+### Container Image
+
+Version tags publish a non-root Linux AMD64/ARM64 image to GHCR. Keep data,
+runtime state, and the verified Temporal cache in one named workspace volume:
+
+```sh
+docker volume create histdatacom-workspace
+docker run --rm \
+  --mount type=volume,source=histdatacom-workspace,target=/workspace \
+  ghcr.io/dmidlo/histdata.com-tools:2.1.0 \
+  --version
+```
+
+The image is a one-shot CLI, not a persistent service. See the maintained
+[container guide](docs/container.md) for builds, data operations, fixed
+UID/GID ownership, first-run Temporal provisioning, lifecycle constraints,
+verification, publication policy, and cleanup.
 
 ### Developer Setup
 

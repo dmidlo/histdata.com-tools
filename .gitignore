@@ -3,6 +3,7 @@ venv/
 *.csv
 *.txt
 !whitelist.txt
+!container/constraints.txt
 *.zip
 !tests/fixtures/**/*.csv
 .info
