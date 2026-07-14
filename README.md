@@ -56,6 +56,7 @@ Works on macOS, Linux, and Windows.
     - [Atomic Reconstruction Persistence](#atomic-reconstruction-persistence)
     - [Reconstruction Activity Semantics](#reconstruction-activity-semantics)
     - [Derived Reconstruction Candlesticks](#derived-reconstruction-candlesticks)
+    - [Reconstructed-History Strategy Sensitivity](#reconstructed-history-strategy-sensitivity)
     - [Temporal Reconstruction Orchestration](#temporal-reconstruction-orchestration)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
@@ -2820,6 +2821,43 @@ scans. Raw M1 download/import remains rejected.
 See [`docs/derived-bar-contracts.md`](docs/derived-bar-contracts.md) for the
 complete interval, OHLC, activity, lineage, partial/empty-bin, storage,
 verification, and downstream reconciliation contract.
+
+#### Reconstructed-History Strategy Sensitivity
+
+`evaluate_strategy_sensitivity()` applies one content-addressed strategy,
+execution, cost, latency, horizon, and resource policy to multiple exact
+time-aligned source cases. Supported cases include untouched observed history,
+degraded modern holdouts, reconstructed ensemble members,
+broker-conditioned/unconditioned streams, and verified derived bars. Case
+identity includes the source artifact, symbol, half-open window, information
+audit, ensemble member, broker profile, and—when applicable—bar scope and
+interval.
+
+The evaluator is streaming and bounded. It retains only strategy state,
+pending signals, and online aggregates; quotes, individual outcomes, the
+521-column analytical frame, and strategy columns are not persisted. Results
+are stratified by feed epoch, session, event state, sparsity, broker profile,
+ensemble member, and horizon. Reports include failure, no-trade,
+missing-support, and refusal rates, member/window dispersion, and explicit
+reverse-degradation evidence showing whether reconstructed execution response
+moves toward the dense reference relative to the degraded input.
+
+`ReferenceMomentumStrategyV1` is a transparent lagged-midpoint fixture for
+alignment and accounting tests. It is not a recommended strategy. Version one
+uses normalized exposure, crosses bid/ask, and makes latency, quote-wait,
+slippage, and per-side fixed costs explicit. Reports are compact derived
+metadata and always set profit claims, investment recommendations, event-schema
+augmentation, and automatic winner selection to false.
+
+Ex-post cases require an explicit `invalid-for-backtest` reason. Mixed ex-ante
+and ex-post plans require a plan-level reason as well; the label permits only a
+descriptive historical counterfactual and never converts it into point-in-time
+strategy evidence.
+
+See
+[`docs/strategy-sensitivity-contracts.md`](docs/strategy-sensitivity-contracts.md)
+for input identities, information-mode gates, source adapters, accounting,
+stratification, restoration, terminal states, and resource bounds.
 
 #### Temporal Reconstruction Orchestration
 

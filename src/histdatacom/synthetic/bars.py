@@ -790,7 +790,8 @@ class DerivedBarV1:
 
     def to_json(self) -> str:
         """Serialize one bar deterministically."""
-        return cast(str, canonical_contract_json(self.to_dict()))
+        serialized: str = canonical_contract_json(self.to_dict())
+        return serialized
 
     @classmethod
     def from_json(cls, text: str) -> "DerivedBarV1":
@@ -1126,7 +1127,8 @@ class DerivedBarProductManifestV1:
 
     def to_json(self) -> str:
         """Serialize the manifest deterministically."""
-        return cast(str, canonical_contract_json(self.to_dict()))
+        serialized: str = canonical_contract_json(self.to_dict())
+        return serialized
 
     @classmethod
     def from_dict(
