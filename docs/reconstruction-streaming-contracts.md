@@ -161,11 +161,11 @@ The phase meanings are strict:
 5. Repeating the same final commit is a no-op; attempting to replace the
    committed manifest fails.
 
-The state machine specifies the required behavior but does not perform the
-filesystem operation. #446 owns temporary paths, Parquet validation, checksums,
-atomic rename/promotion, final layout, discovery, and cleanup. A #446 writer
-must not record the `committed` checkpoint until its atomic promotion has
-succeeded.
+The state machine specifies the control behavior; the implemented
+`histdatacom.synthetic.persistence` layer performs the filesystem operation.
+It owns temporary paths, Parquet validation, checksums, atomic
+rename/promotion, final layout, discovery, and cleanup. A writer must not record
+the `committed` checkpoint until its atomic promotion has succeeded.
 
 ## Cross-symbol synchronization
 
@@ -221,7 +221,8 @@ must be written to artifact storage.
   [`reconstruction-ensemble-calibration-contracts.md`](reconstruction-ensemble-calibration-contracts.md).
 - #443 implements append-only broker capture and live/replay consumer parity;
   see [`broker-capture-contracts.md`](broker-capture-contracts.md).
-- #446 implements final atomic Parquet and manifest publication.
+- #446 implements final atomic Parquet and manifest publication; see
+  [`reconstruction-persistence-contracts.md`](reconstruction-persistence-contracts.md).
 - #447 maps the contracts onto production Temporal workflows and activities.
 
 Changing a required field, identity rule, ownership interval, phase meaning,

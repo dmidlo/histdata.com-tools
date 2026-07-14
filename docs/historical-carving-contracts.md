@@ -156,7 +156,7 @@ local event-validator ID. `merged_stream()` delegates to
 
 Only accepted rows and accepted lineage remain process-local. `metadata()`
 uses content hashes instead of embedding them. Rejected rows are discarded;
-final Parquet publication remains a later stage. This preserves the streaming
+final Parquet publication is implemented as the later #446 stage. This preserves the streaming
 design: candidate generation, carving, and later reconciliation can operate one
 bounded window at a time without materializing a permanent augmented-history
 intermediate.
@@ -167,7 +167,7 @@ intermediate.
   accepted streams; see
   [`cross-currency-reconciliation-contracts.md`](cross-currency-reconciliation-contracts.md).
 - later broker-transfer work owns broker-style conditioning.
-- #446 owns final incremental Parquet layout and atomic publication.
+- #446 implements final incremental Parquet layout and atomic publication.
 - #447 owns production Temporal activities, backpressure, cancellation, and
   resume behavior.
 

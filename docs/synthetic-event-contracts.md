@@ -17,7 +17,8 @@ uses the fields below.
 - Window planning/checkpoints belong to #432. The implemented empirical-motif
   candidate generator is documented in
   [`empirical-motif-generation-contracts.md`](empirical-motif-generation-contracts.md),
-  while atomic final publication/partition layout remains #446.
+  while #446 implements atomic final publication/partition layout in
+  `histdatacom.synthetic.persistence`.
 
 ## Event ordering and identity
 
@@ -90,8 +91,8 @@ Arrow remains optional. Importing `histdatacom.synthetic` does not import
 PyArrow; Arrow/Parquet helpers require the `histdatacom[arrow]` extra only when
 called. Parquet helpers use a fixed Zstandard/version/data-page configuration
 for stable output under the same pinned runtime. The file helper is
-intentionally non-atomic: #446 owns temporary paths, validation, checksums, and
-atomic publication.
+intentionally non-atomic: callers that need the final product use #446's
+temporary-path validation, checksums, and atomic publication layer.
 
 ## Schema evolution
 

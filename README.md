@@ -53,6 +53,7 @@ Works on macOS, Linux, and Windows.
     - [Live Broker Delivery Capture](#live-broker-delivery-capture)
     - [Broker Delivery Fingerprints](#broker-delivery-fingerprints)
     - [Broker-Conditioned Reconstruction](#broker-conditioned-reconstruction)
+    - [Atomic Reconstruction Persistence](#atomic-reconstruction-persistence)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -2699,6 +2700,36 @@ See
 for proposal, renderer, refusal, validation, benchmark, and streaming/persistence
 semantics.
 
+#### Atomic Reconstruction Persistence
+
+`publish_reconstruction_group()` turns one fully validated broker-rendered
+symbol group into the final narrow archive. It requires an independent exact
+set of immutable observed anchors plus a primary/retained-member storage
+preflight. Only the 26-column `SyntheticEventV1` schema is written; the
+521-column analytical frame and rejected candidates remain scratch data.
+
+Zstandard Parquet files are partitioned by schema, run, broker fingerprint,
+ensemble member, symbol group, symbol, and UTC event date. Files and compact
+source/constraint/quality/replay/retention manifests are validated below a
+hidden transaction directory, then the complete synchronized unit is promoted
+with one atomic same-filesystem rename. Discovery sees only committed
+directories. Repeating an identical publication is idempotent, while anchor
+drift, truncation, checksum/schema/count mismatches, or different physical
+writer settings fail closed.
+
+Arrow batches and lazy Polars scans support symbol/time file pruning, column
+projection, and event-time predicate pushdown. The optional `query` extra adds
+DuckDB for direct Parquet inspection:
+
+```sh
+pip install "histdatacom[arrow,query]"
+```
+
+See
+[`docs/reconstruction-persistence-contracts.md`](docs/reconstruction-persistence-contracts.md)
+for layout, atomic commit, replay, preflight, query, cleanup, and #447 Temporal
+handoff semantics.
+
 ---
 
 ### Orchestration Runtime
@@ -3352,6 +3383,7 @@ InfluxDB import and notebook support are optional:
 pip install "histdatacom[influx]"
 pip install "histdatacom[jupyter]"
 pip install "histdatacom[models]"
+pip install "histdatacom[query]"
 pip install "histdatacom[all]"
 ```
 
@@ -3397,9 +3429,9 @@ hooks; do not rely on user-local Python packages to satisfy `histdatacom`,
 
 The dependency surfaces are split by purpose:
 
-- `.[test]` installs pytest, coverage, pandas, pyarrow, InfluxDB support,
-  notebook execution support, and test-only support around the base Temporal SDK
-  dependency.
+- `.[test]` installs pytest, coverage, pandas, pyarrow, DuckDB, InfluxDB
+  support, notebook execution support, and test-only support around the base
+  Temporal SDK dependency.
 - `.[lint]` installs pre-commit and direct lint/type/doc hygiene tools.
 - `.[release]` installs build and publish tooling.
 - `.[dev]` is the aggregate local contributor environment with test, lint,

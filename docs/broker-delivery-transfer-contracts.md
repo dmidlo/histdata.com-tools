@@ -122,6 +122,7 @@ historical anchors
 ```
 
 Only the final validated synthetic tick partitions and compact lineage/manifests
-need durable storage. Proposal queries, candidate surfaces, reconciled groups,
-and rendered groups can remain bounded in-flight artifacts unless a diagnostic
-retention policy explicitly preserves them.
+need durable storage. The implemented #446 persistence layer consumes this
+handoff. Proposal queries, candidate surfaces, reconciled groups, and rendered
+groups remain bounded in-flight artifacts unless a diagnostic retention policy
+explicitly preserves them.

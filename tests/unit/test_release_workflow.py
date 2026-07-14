@@ -308,6 +308,16 @@ def test_package_metadata_advertises_optional_models_provider() -> None:
     assert "statsmodels==0.14.6" in optional["dev"]
 
 
+def test_package_metadata_advertises_optional_duckdb_query_provider() -> None:
+    """DuckDB stays optional at runtime and pinned in verification extras."""
+    optional = _pyproject_config()["project"]["optional-dependencies"]
+
+    assert optional["query"] == ["duckdb>=1.5.4,<2"]
+    assert "duckdb>=1.5.4,<2" in optional["all"]
+    assert "duckdb==1.5.4" in optional["test"]
+    assert "duckdb==1.5.4" in optional["dev"]
+
+
 def test_runtime_runbook_documents_windows_runtime_support_gap() -> None:
     """Release docs should state the current Windows runtime support boundary."""
     runbook = _project_text("docs/temporal-orchestration-runtime-runbook.md")

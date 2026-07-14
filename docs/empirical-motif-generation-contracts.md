@@ -174,7 +174,7 @@ winner or bypass hard historical constraints.
   coverage, representative retention, and hash-bound regeneration; see
   [`reconstruction-ensemble-calibration-contracts.md`](reconstruction-ensemble-calibration-contracts.md).
 - later broker-transfer work owns broker-style conditioning.
-- #446 owns final incremental Parquet layout and atomic publication.
+- #446 implements final incremental Parquet layout and atomic publication.
 - #447 owns production Temporal activities, backpressure, cancellation, and
   resume behavior.
 

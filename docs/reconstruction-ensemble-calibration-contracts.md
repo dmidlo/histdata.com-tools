@@ -154,7 +154,7 @@ not persist the wide augmented analytical cache or all candidate paths.
 
 - #445 may apply broker delivery conditioning only after an ensemble has
   trustworthy evidence and must preserve member lineage.
-- #446 owns retained-member/final Parquet layout and atomic publication.
+- #446 implements retained-member/final Parquet layout and atomic publication.
 - #447 owns production Temporal activities, retries, cancellation,
   backpressure, and regeneration execution.
 

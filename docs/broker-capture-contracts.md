@@ -122,8 +122,8 @@ manifests in the first place.
 ## Append-only storage and crash behavior
 
 Capture data uses dependency-free canonical UTF-8 JSON Lines. This preserves
-raw delivery evidence without coupling the base package to Arrow; #446 owns the
-separate final reconstructed Parquet product.
+raw delivery evidence without coupling the base package to Arrow; #446
+implements the separate final reconstructed Parquet product.
 
 One session directory has this shape:
 
@@ -208,7 +208,7 @@ are specified in
 - #444 supplies immutable broker-delivery fingerprints and stratified drift
   detection from qualified captures.
 - #445 applies a selected fingerprint during proposal and delivery rendering.
-- #446 publishes the final reconstructed Parquet product.
+- #446 implements the final reconstructed Parquet product publisher.
 
 Changing timestamp meaning, message identity, quote-lexeme semantics,
 credential boundary, storage publication order, replay integrity, or consumer

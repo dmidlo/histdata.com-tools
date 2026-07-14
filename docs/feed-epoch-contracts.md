@@ -195,7 +195,7 @@ Windowing, retries, or storage tuning do not.
   [live broker delivery capture](broker-capture-contracts.md) supplies qualified
   wall/monotonic delivery evidence; #444–#445 own broker fingerprints and style
   transfer rather than historical technological epochs.
-- #446 publishes final Parquet and manifest artifacts atomically.
+- #446 implements atomic final Parquet and manifest publication.
 - #447 carries compact artifact references through production streaming
   workflows.
 

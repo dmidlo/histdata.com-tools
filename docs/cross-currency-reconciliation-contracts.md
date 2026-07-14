@@ -136,7 +136,7 @@ IDs.
 
 The existing `PartitionManifestV1` remains the smallest publication unit. A
 single leg or stale validation report cannot authorize a commit. Physical
-Parquet staging and atomic promotion remain owned by #446.
+Parquet staging and atomic promotion are implemented downstream by #446.
 
 ## Existing diagnostic compatibility
 
@@ -162,8 +162,7 @@ only the bounded validation and group metadata forward.
   [`reconstruction-ensemble-calibration-contracts.md`](reconstruction-ensemble-calibration-contracts.md).
 - #445 applies broker delivery conditioning and must rerun `post_broker`
   validation.
-- #446 writes final Parquet and may commit only through the atomic manifest
-  gate.
+- #446 writes final Parquet and commits only through the atomic manifest gate.
 - #447 maps these functions onto retryable Temporal activities.
 
 Changing relationship meaning, projection priority semantics, event-time join

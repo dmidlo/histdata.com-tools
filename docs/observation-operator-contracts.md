@@ -228,7 +228,7 @@ operator sidecar are the intended durable products.
 - #439 owns variable-cardinality market-event proposal, not delivery filtering.
 - #443–#445 own live broker capture, broker fingerprints, and broker-style
   transfer.
-- #446 owns final atomic Parquet/manifests; #447 owns production Temporal
+- #446 implements final atomic Parquet/manifests; #447 owns production Temporal
   orchestration.
 
 Changing a required field, parameter meaning, fallback level, anchor policy,

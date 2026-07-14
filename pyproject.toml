@@ -57,6 +57,9 @@ dependencies = [
 arrow = [
     "pyarrow>=24.0.0",
 ]
+query = [
+    "duckdb>=1.5.4,<2",
+]
 influx = [
     "influxdb-client>=1.50.0",
 ]
@@ -76,6 +79,7 @@ models = [
 ]
 all = [
     "arch>=8.0.0,<9",
+    "duckdb>=1.5.4,<2",
     "influxdb-client>=1.50.0",
     "ipywidgets",
     "jupyter",
@@ -87,6 +91,7 @@ all = [
 test = [
     "arch==8.0.0",
     "coverage==7.15.0",
+    "duckdb==1.5.4",
     "hypothesis==6.152.7",
     "ipykernel",
     "influxdb-client>=1.50.0",
@@ -125,6 +130,7 @@ dev = [
     "black==26.5.1",
     "commitizen==4.16.4",
     "coverage==7.15.0",
+    "duckdb==1.5.4",
     "hypothesis==6.152.7",
     "ipykernel",
     "influxdb-client>=1.50.0",
