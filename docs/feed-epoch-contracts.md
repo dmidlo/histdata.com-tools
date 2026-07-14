@@ -191,8 +191,10 @@ Windowing, retries, or storage tuning do not.
 - #436 implements reverse-degradation scorecards over the #435 interface; see
   [`reverse-degradation-benchmark-contracts.md`](reverse-degradation-benchmark-contracts.md).
 - #439 consumes only stable epoch artifacts while generating candidates.
-- #443 owns live broker delivery capture; #444–#445 own broker fingerprints and
-  style transfer rather than historical technological epochs.
+- #443's implemented
+  [live broker delivery capture](broker-capture-contracts.md) supplies qualified
+  wall/monotonic delivery evidence; #444–#445 own broker fingerprints and style
+  transfer rather than historical technological epochs.
 - #446 publishes final Parquet and manifest artifacts atomically.
 - #447 carries compact artifact references through production streaming
   workflows.

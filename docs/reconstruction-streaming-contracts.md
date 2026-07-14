@@ -219,6 +219,8 @@ must be written to artifact storage.
   retained-member policy, calibrated summaries, and hash-bound regeneration;
   see
   [`reconstruction-ensemble-calibration-contracts.md`](reconstruction-ensemble-calibration-contracts.md).
+- #443 implements append-only broker capture and live/replay consumer parity;
+  see [`broker-capture-contracts.md`](broker-capture-contracts.md).
 - #446 implements final atomic Parquet and manifest publication.
 - #447 maps the contracts onto production Temporal workflows and activities.
 

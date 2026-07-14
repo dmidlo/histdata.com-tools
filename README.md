@@ -49,6 +49,8 @@ Works on macOS, Linux, and Windows.
     - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
     - [Historical Candidate Carving](#historical-candidate-carving)
     - [Cross-Currency Reconciliation](#cross-currency-reconciliation)
+    - [Calibrated Reconstruction Ensembles](#calibrated-reconstruction-ensembles)
+    - [Live Broker Delivery Capture](#live-broker-delivery-capture)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -2624,6 +2626,29 @@ Motif-match similarity remains uncalibrated transformation evidence; generated
 tick confidence stays null. See
 [`docs/reconstruction-ensemble-calibration-contracts.md`](docs/reconstruction-ensemble-calibration-contracts.md)
 for calibration, confidence, diversity, retention, and replay semantics.
+
+#### Live Broker Delivery Capture
+
+`histdatacom.broker_capture` records a broker feed as versioned measurement
+evidence rather than guessing modern delivery style from historical vendor
+data. Adapter messages retain optional broker/exchange timestamps with explicit
+precision, exact price lexemes, batch/message identity, honest size/activity
+semantics, quote and lifecycle events, and raw-message hashes where permitted.
+The collector adds adjacent UTC wall and monotonic receive clocks plus explicit
+clock-correction events.
+
+Canonical JSONL partitions are appended, fsynced, rotated, hashed, and exposed
+only after atomic compact-manifest publication. Quota, immutable retention, and
+high-watermark backpressure refuse predictably. Partial/orphan artifacts remain
+detectable but undiscoverable as completed data, while verified replay checks
+sidecars, bytes, hashes, rows, counts, and sequence before sending events
+through the same consumer interface used during live collection.
+
+The core adapter protocol never inspects private broker configuration and the
+public contracts reject credential-shaped metadata. A real adapter still
+requires an explicit broker/protocol/licensing decision; no redesign is needed.
+See [`docs/broker-capture-contracts.md`](docs/broker-capture-contracts.md) for
+clock, security, storage, replay, fixture, and #444 eligibility gates.
 
 ---
 
