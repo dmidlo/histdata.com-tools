@@ -51,6 +51,7 @@ Works on macOS, Linux, and Windows.
     - [Cross-Currency Reconciliation](#cross-currency-reconciliation)
     - [Calibrated Reconstruction Ensembles](#calibrated-reconstruction-ensembles)
     - [Live Broker Delivery Capture](#live-broker-delivery-capture)
+    - [Broker Delivery Fingerprints](#broker-delivery-fingerprints)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -2648,7 +2649,31 @@ The core adapter protocol never inspects private broker configuration and the
 public contracts reject credential-shaped metadata. A real adapter still
 requires an explicit broker/protocol/licensing decision; no redesign is needed.
 See [`docs/broker-capture-contracts.md`](docs/broker-capture-contracts.md) for
-clock, security, storage, replay, fixture, and #444 eligibility gates.
+clock, security, storage, replay, fixture, and fingerprint eligibility gates.
+
+#### Broker Delivery Fingerprints
+
+Qualified broker captures are converted into compact immutable delivery
+profiles with `fit_broker_delivery_fingerprint()`. Fitting verifies capture
+health and hashes in a first streaming pass, then performs bounded deterministic
+aggregation in a second pass and rechecks the logical content hash. It does not
+persist augmented capture rows or materialize tick-sized intermediates.
+
+Profiles describe cadence, quote intensity, spread and spread changes,
+duplicate/stale/burst behavior, source timestamp and price precision, batching,
+outage/reconnect/clock behavior, and conditional behavior by symbol, session,
+overlap, special window, holiday, market event, and lifecycle state. Every cell
+records observed support plus an explicit supported, ordered-backoff, or
+unsupported decision. Every metric has support, bounded samples, uncertainty,
+extrema, quantiles, units, and limitations.
+
+`compare_broker_delivery_fingerprints()` produces bounded, stratified drift
+evidence without a global similarity score or automatic winner. Successors are
+new effective-dated artifacts that reference—but never mutate—the old profile,
+so prior synthetic lineage remains reproducible. See
+[`docs/broker-delivery-fingerprint-contracts.md`](docs/broker-delivery-fingerprint-contracts.md)
+for eligibility, streaming, condition, drift, persistence, and #445 handoff
+semantics.
 
 ---
 

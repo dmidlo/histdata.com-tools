@@ -95,8 +95,8 @@ Lifecycle and health are data, not log-only side effects. Version one includes:
 - collector clock correction;
 - quote.
 
-This lets #444 distinguish a quiet market, a known broker outage, a collector
-failure, a reconnect discontinuity, and a clock problem. A session manifest is
+This lets the fingerprint fitter distinguish a quiet market, a known broker
+outage, a collector failure, a reconnect discontinuity, and a clock problem. A session manifest is
 `open`, `completed`, or `failed`; a failed session retains bounded reason codes
 without copying exception messages or private adapter state.
 
@@ -167,7 +167,7 @@ without bound. A future production control plane may pause/reconnect an adapter,
 but it must honor these limits and cannot silently drop or overwrite captured
 events.
 
-## Live/replay parity and the #444 interface
+## Live/replay parity and the fingerprint interface
 
 Both `LiveBrokerCaptureSourceV1` and `BrokerCaptureReplaySourceV1` implement
 `BrokerCaptureEventSourceV1`. `consume_broker_capture_source()` sends either
@@ -181,7 +181,7 @@ lifecycle, heartbeat, source batching, exact price lexemes, and wall-clock
 drift. The same consumer sees byte-replayed events equal to those observed
 during live fixture collection.
 
-Before #444 fits a broker delivery fingerprint, it must require:
+Before the fitter creates a broker delivery fingerprint, it requires:
 
 - a supported schema and adapter/collector version;
 - a completed session manifest;
@@ -194,14 +194,19 @@ Before #444 fits a broker delivery fingerprint, it must require:
 An open or failed capture may be replayed for diagnosis, but it is not silently
 eligible for fingerprint fitting.
 
+The implemented two-pass fitter, condition cells, support/backoff policy,
+compact statistics, drift evidence, supersession, and immutable artifact rules
+are specified in
+[`broker-delivery-fingerprint-contracts.md`](broker-delivery-fingerprint-contracts.md).
+
 ## Issue boundaries
 
 - #431 supplies the separate reconstructed-event contract.
 - #433 governs information safety for reconstruction; broker capture remains
   timestamped external evidence with explicit availability.
 - #443 implements capture and verified replay only.
-- #444 fits immutable broker-delivery fingerprints and drift detection from
-  qualified captures.
+- #444 supplies immutable broker-delivery fingerprints and stratified drift
+  detection from qualified captures.
 - #445 applies a selected fingerprint during proposal and delivery rendering.
 - #446 publishes the final reconstructed Parquet product.
 
