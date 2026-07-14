@@ -129,15 +129,19 @@ returns an `ArtifactRef` with byte size and SHA-256. Rewriting identical bytes i
 idempotent. Different content at the same path is refused. Loading reconstructs
 all contracts and rechecks every derived identity.
 
-## #445 handoff
+## Broker-transfer handoff
 
-#445 may select only a profile whose effective interval, capture lineage,
-eligibility, support state, and broker identity satisfy its reconstruction run.
-For a supported cell it uses that cell; for `backed_off` it follows the recorded
-`effective_condition_id`; for `unsupported` it refuses that conditioned claim.
+`histdatacom.synthetic.broker_transfer` selects only a profile whose effective
+interval, capture lineage, eligibility, support state, and broker identity
+satisfy its reconstruction run. For a supported cell it uses that cell; for
+`backed_off` it follows the recorded `effective_condition_id`; for `unsupported`
+it refuses that conditioned claim.
 
 The selected fingerprint ID must remain on generated-event lineage and the
-reconstruction manifest. #445 may sample or render from the profile, but it may
-not reinterpret capture clock semantics, invent support for sparse cells, mutate
-the profile, overwrite prior manifests, or treat this delivery fingerprint as a
-historical price-path generator.
+reconstruction manifest. Proposal conditioning and final delivery rendering may
+read the profile, but they may not reinterpret capture clock semantics, invent
+support for sparse cells, mutate the profile, overwrite prior manifests, or
+treat this delivery fingerprint as a historical price-path generator. See
+[`broker-delivery-transfer-contracts.md`](broker-delivery-transfer-contracts.md)
+for the implemented selection, rendering, validation, benchmark, and streaming
+boundaries.

@@ -52,6 +52,7 @@ Works on macOS, Linux, and Windows.
     - [Calibrated Reconstruction Ensembles](#calibrated-reconstruction-ensembles)
     - [Live Broker Delivery Capture](#live-broker-delivery-capture)
     - [Broker Delivery Fingerprints](#broker-delivery-fingerprints)
+    - [Broker-Conditioned Reconstruction](#broker-conditioned-reconstruction)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -2673,6 +2674,29 @@ new effective-dated artifacts that reference—but never mutate—the old profil
 so prior synthetic lineage remains reproducible. See
 [`docs/broker-delivery-fingerprint-contracts.md`](docs/broker-delivery-fingerprint-contracts.md)
 for eligibility, streaming, condition, drift, persistence, and #445 handoff
+semantics.
+
+#### Broker-Conditioned Reconstruction
+
+`condition_broker_proposal()` applies a versioned, bounded broker-delivery
+strength to cadence, burst/quiet/outage, spread, and precision coordinates before
+motif retrieval. Exact profile cells and recorded backoff are honored; missing,
+unsupported, ineffective, or mismatched-drift selections refuse without issuing
+a conditioned query.
+
+After historical carving and cross-currency reconciliation,
+`render_broker_delivery()` applies deterministic precision, rounding, batching,
+stale-quote, exact-duplicate, timestamp, and spread presentation to synthetic
+rows only. Observed anchors remain unchanged. The entire group is withheld until
+local constraints, post-broker cross-currency validation, and the #331
+cross-instrument quality path pass. Compact manifests retain content hashes,
+event lineage, profile/effective-period/drift evidence, action counts, config,
+and optional paired benchmark comparison IDs; augmented tick intermediates are
+not made durable.
+
+See
+[`docs/broker-delivery-transfer-contracts.md`](docs/broker-delivery-transfer-contracts.md)
+for proposal, renderer, refusal, validation, benchmark, and streaming/persistence
 semantics.
 
 ---

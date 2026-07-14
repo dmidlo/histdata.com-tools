@@ -10,6 +10,7 @@ import pytest
 
 from histdatacom.synthetic import (
     BENCHMARK_EVENT_SCHEMA_VERSION,
+    BrokerBenchmarkComparisonV1,
     BenchmarkCandidateKind,
     BenchmarkCandidateV1,
     BenchmarkCandidateWindowV1,
@@ -26,6 +27,7 @@ from histdatacom.synthetic import (
     benchmark_events_from_empirical_overlay,
     build_benchmark_control_events,
     build_benchmark_control_windows,
+    compare_broker_benchmark_results,
     degrade_benchmark_window,
     generate_benchmark_candidate_window,
     validate_benchmark_information_boundary,
@@ -364,6 +366,38 @@ def _run_scorecard(
             ),
         )
     return manifest, engine.finalize()
+
+
+def test_broker_conditioned_and_unconditioned_results_are_paired_without_winner() -> (
+    None
+):
+    """The same reverse-degradation scenarios compare both transfer modes."""
+    manifest, scorecard = _run_scorecard()
+    conditioned = next(
+        item
+        for item in manifest.candidates
+        if item.kind is BenchmarkCandidateKind.CANDIDATE
+    )
+    unconditioned = next(
+        item
+        for item in manifest.candidates
+        if item.control_kind is BenchmarkControlKind.NO_FILL
+    )
+
+    comparison = compare_broker_benchmark_results(
+        scorecard,
+        conditioned_candidate_id=conditioned.candidate_id,
+        unconditioned_candidate_id=unconditioned.candidate_id,
+    )
+
+    assert comparison.scenario_ids
+    assert comparison.to_dict()["automatic_winner"] is False
+    assert comparison.to_dict()["winner_candidate_id"] is None
+    assert all(comparison.aggregate_metric_deltas.values())
+    assert (
+        BrokerBenchmarkComparisonV1.from_json(comparison.to_json())
+        == comparison
+    )
 
 
 def test_manifest_is_immutable_versioned_and_information_bound() -> None:

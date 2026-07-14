@@ -43,7 +43,18 @@ from histdatacom.market_context import (
     MarketContextSourceV1,
     MarketContextTimelineV1,
 )
-from histdatacom.synthetic import SyntheticEventStreamV1, SyntheticEventV1
+from histdatacom.synthetic import (
+    BrokerConditionedProposalV1,
+    BrokerTransferConfigV1,
+    BrokerTransferStatus,
+    InformationMode,
+    ReferenceMotifConditionV1,
+    ReferenceMotifQueryV1,
+    SyntheticEventStreamV1,
+    SyntheticEventV1,
+    condition_broker_proposal,
+    select_broker_profile,
+)
 
 SECOND_NS = 1_000_000_000
 BASE_WALL_NS = int(
@@ -278,6 +289,15 @@ def test_drift_is_stratified_support_aware_and_has_no_winner_score(
     }.issubset(material_names)
     assert comparison.material_drift_count > 0
     assert comparison.to_dict()["global_similarity_score"] is None
+    selection = select_broker_profile(
+        drift,
+        requested_condition={},
+        selected_at_utc_ns=drift.effective_start_utc_ns,
+        drift_comparison=comparison,
+    )
+    assert selection.status is BrokerTransferStatus.APPLIED
+    assert selection.drift_comparison_id == comparison.comparison_id
+    assert selection.material_drift_count == comparison.material_drift_count
     assert (
         BrokerDeliveryFingerprintComparisonV1.from_json(comparison.to_json())
         == comparison
@@ -291,6 +311,17 @@ def test_drift_is_stratified_support_aware_and_has_no_winner_score(
     assert len(bounded.comparisons) == 3
     assert bounded.truncated
     assert bounded.comparison_candidate_count > 3
+
+    mismatched = select_broker_profile(
+        stable,
+        requested_condition={},
+        selected_at_utc_ns=stable.effective_start_utc_ns,
+        drift_comparison=comparison,
+    )
+    assert mismatched.status is BrokerTransferStatus.REFUSED
+    assert (
+        "drift_comparison_does_not_include_profile" in mismatched.reason_codes
+    )
 
 
 def test_successor_is_versioned_without_mutating_prior_synthetic_lineage(
@@ -377,6 +408,198 @@ def test_capture_identity_mixing_is_refused(tmp_path: Path) -> None:
     )
     with pytest.raises(BrokerDeliveryFingerprintIdentityError):
         fit_broker_delivery_fingerprint(tmp_path, (first, second))
+
+
+def test_proposal_conditioning_uses_cadence_burst_quiet_and_outage(
+    tmp_path: Path,
+) -> None:
+    """Delivery topology changes cadence before motif retrieval/generation."""
+    manifest = _capture(tmp_path, seed=16, wall_start_ns=BASE_WALL_NS)
+    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    query = _motif_query(
+        tick_intensity=2.0,
+        interarrival_ns=500_000_000.0,
+        timestamp_precision_ns=1.0,
+    )
+
+    proposal = condition_broker_proposal(
+        query,
+        fingerprint,
+        requested_condition={"symbol": "EURUSD"},
+        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+        config=BrokerTransferConfigV1(strength=0.5),
+    )
+
+    assert proposal.status is BrokerTransferStatus.APPLIED
+    assert proposal.conditioned_query is not None
+    assert proposal.metrics_after["interarrival_ns"] != 500_000_000.0
+    assert proposal.metrics_after["tick_intensity"] != 2.0
+    assert {
+        "burst_interval_rate",
+        "quiet_interval_rate",
+        "outage_or_gap_duration_ns",
+    }.issubset(proposal.selection.metrics)
+    assert proposal.conditioned_query.query_id != query.query_id
+    assert BrokerConditionedProposalV1.from_json(proposal.to_json()) == proposal
+
+
+def test_proposal_conditioning_transfers_timestamp_and_price_precision(
+    tmp_path: Path,
+) -> None:
+    """Timestamp and source-lexeme precision have separate query evidence."""
+    manifest = _capture(
+        tmp_path,
+        seed=17,
+        wall_start_ns=BASE_WALL_NS,
+        precision_ns=10_000_000,
+        decimal_places=3,
+    )
+    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    proposal = condition_broker_proposal(
+        _motif_query(timestamp_precision_ns=1.0),
+        fingerprint,
+        requested_condition={"symbol": "EURUSD"},
+        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+        config=BrokerTransferConfigV1(strength=1.0),
+    )
+
+    assert proposal.metrics_after["timestamp_precision_ns"] == 10_000_000.0
+    assert proposal.metrics_after["price_precision_digits"] == 3.0
+
+
+def test_zero_strength_proposal_preserves_the_original_query(
+    tmp_path: Path,
+) -> None:
+    """The lower endpoint of the versioned blend is a true no-op."""
+    manifest = _capture(tmp_path, seed=171, wall_start_ns=BASE_WALL_NS)
+    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    query = _motif_query()
+
+    proposal = condition_broker_proposal(
+        query,
+        fingerprint,
+        requested_condition={"symbol": "EURUSD"},
+        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+        config=BrokerTransferConfigV1(strength=0.0),
+    )
+
+    assert proposal.status is BrokerTransferStatus.APPLIED
+    assert proposal.conditioned_query == query
+    assert proposal.metrics_after == proposal.metrics_before
+    assert BrokerConditionedProposalV1.from_json(proposal.to_json()) == proposal
+
+
+def test_proposal_selection_retains_stale_evidence(
+    tmp_path: Path,
+) -> None:
+    """Stale-quote behavior remains available to the rendering stage."""
+    manifest = _capture(tmp_path, seed=18, wall_start_ns=BASE_WALL_NS)
+    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    selection = select_broker_profile(
+        fingerprint,
+        requested_condition={"symbol": "EURUSD"},
+        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+    )
+
+    assert selection.metrics["stale_quote_rate"] > 0.0
+
+
+def test_proposal_selection_retains_batching_evidence(tmp_path: Path) -> None:
+    """Source-message batching remains distinct from stale-quote evidence."""
+    manifest = _capture(tmp_path, seed=181, wall_start_ns=BASE_WALL_NS)
+    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    selection = select_broker_profile(
+        fingerprint,
+        requested_condition={"symbol": "EURUSD"},
+        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+    )
+
+    assert selection.metrics["source_batch_quote_count"] > 1.0
+    assert selection.metric_condition_ids["source_batch_quote_count"] == (
+        _cell(fingerprint, "global").condition.condition_id
+    )
+
+
+def test_reconnect_cell_uses_only_recorded_backoff(tmp_path: Path) -> None:
+    """Sparse reconnect evidence backs off explicitly; absent cells refuse."""
+    manifest = _capture(tmp_path, seed=19, wall_start_ns=BASE_WALL_NS)
+    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    reconnect = select_broker_profile(
+        fingerprint,
+        requested_condition={
+            "symbol": "EURUSD",
+            "lifecycle": "post_reconnect",
+        },
+        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+    )
+    absent = select_broker_profile(
+        fingerprint,
+        requested_condition={"symbol": "GBPUSD"},
+        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+    )
+
+    assert reconnect.status is BrokerTransferStatus.BACKED_OFF
+    assert reconnect.requested_condition_id != reconnect.effective_condition_id
+    assert "requested_condition_backed_off" in reconnect.reason_codes
+    assert absent.status is BrokerTransferStatus.REFUSED
+    assert absent.effective_condition_id is None
+    assert "requested_condition_absent" in absent.reason_codes
+
+
+def test_proposal_refuses_when_requested_condition_has_no_profile_cell(
+    tmp_path: Path,
+) -> None:
+    """Unsupported proposal cells produce no query for retrieval or generation."""
+    manifest = _capture(tmp_path, seed=191, wall_start_ns=BASE_WALL_NS)
+    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+
+    proposal = condition_broker_proposal(
+        _motif_query(),
+        fingerprint,
+        requested_condition={"symbol": "GBPUSD"},
+        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+    )
+
+    assert proposal.status is BrokerTransferStatus.REFUSED
+    assert proposal.conditioned_query is None
+    assert proposal.metrics_after == proposal.metrics_before
+
+
+def test_profile_effective_period_is_enforced(tmp_path: Path) -> None:
+    """A profile cannot be selected before or after its effective period."""
+    manifest = _capture(tmp_path, seed=20, wall_start_ns=BASE_WALL_NS)
+    fingerprint = fit_broker_delivery_fingerprint(
+        tmp_path,
+        (manifest,),
+        effective_end_utc_ns=BASE_WALL_NS + 100 * SECOND_NS,
+    )
+    selection = select_broker_profile(
+        fingerprint,
+        requested_condition={},
+        selected_at_utc_ns=BASE_WALL_NS + 101 * SECOND_NS,
+    )
+
+    assert selection.status is BrokerTransferStatus.REFUSED
+    assert "profile_not_effective_at_selection_time" in selection.reason_codes
+
+
+def _motif_query(**metrics: float) -> ReferenceMotifQueryV1:
+    values = {
+        "tick_intensity": 2.0,
+        "interarrival_ns": 500_000_000.0,
+        "timestamp_precision_ns": 1.0,
+        **metrics,
+    }
+    return ReferenceMotifQueryV1(
+        condition=ReferenceMotifConditionV1(
+            symbol="EURUSD",
+            feed_epoch_id="epoch:fixture",
+            session_state="open",
+            metrics=values,
+        ),
+        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        used_at_ns=BASE_WALL_NS,
+    )
 
 
 def _capture(
