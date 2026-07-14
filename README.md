@@ -55,6 +55,7 @@ Works on macOS, Linux, and Windows.
     - [Broker-Conditioned Reconstruction](#broker-conditioned-reconstruction)
     - [Atomic Reconstruction Persistence](#atomic-reconstruction-persistence)
     - [Reconstruction Activity Semantics](#reconstruction-activity-semantics)
+    - [Derived Reconstruction Candlesticks](#derived-reconstruction-candlesticks)
     - [Temporal Reconstruction Orchestration](#temporal-reconstruction-orchestration)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
@@ -2765,6 +2766,60 @@ See
 [`docs/reconstruction-activity-semantics.md`](docs/reconstruction-activity-semantics.md)
 for metric definitions, information and volume policy, provenance, streaming,
 benchmark, and derived-bar contracts.
+
+#### Derived Reconstruction Candlesticks
+
+`publish_derived_bars()` creates an optional export product from a verified
+committed reconstruction manifest. It never reads raw HistData M1 rows or the
+521-column analytical frame. The immutable 26-column event product remains the
+source of truth, while derived bars use a separate versioned 64-column schema
+and compact manifest. Each row carries the derivation policy ID and rounding
+precision; the manifest records any requested time-window bounds.
+
+Version one supports UTC Unix-epoch-aligned `1m`, `5m`, `15m`, `30m`, `1h`,
+`4h`, and `1d` half-open bins. Bid, ask, midpoint, and spread OHLC values follow
+canonical `(event_time_ns, event_sequence, event_id)` order. Observed-only,
+synthetic-only diagnostic, and merged-product scopes are explicit. Empty bins
+and market closures emit no rows, query-cut edge bins are flagged partial, and
+no price, liquidity, or volume is forward-filled.
+
+The streaming accumulator carries the previous quote into the next non-empty
+bar for price-change/stale transition accounting, then projects #80 counts,
+duration, intensity, stale rate, mean spread, and confidence support. Volume is
+always null with state `unavailable`. Each row retains event bounds, origin
+support, bounded generator/broker/constraint lineage, and an event-content
+hash.
+
+```python
+from histdatacom.synthetic import (
+    ActivitySliceScope,
+    DerivedBarPolicyV1,
+    publish_derived_bars,
+    scan_derived_bars_polars,
+)
+
+published = publish_derived_bars(
+    "data/exports",
+    "data/reconstruction-products/.../commits/.../manifest.json",
+    policy=DerivedBarPolicyV1(
+        intervals=("1m", "5m", "1h"),
+        scopes=(ActivitySliceScope.MERGED,),
+    ),
+)
+bars = scan_derived_bars_polars(
+    published.manifest_path,
+    columns=("symbol", "bar_start_ns", "mid_close", "event_count"),
+)
+```
+
+Monthly Parquet partitions are written below hidden scratch, replay-verified,
+and promoted with one same-filesystem rename. Column/time/symbol/scope/interval
+projection and pruning are available through Arrow batches and lazy Polars
+scans. Raw M1 download/import remains rejected.
+
+See [`docs/derived-bar-contracts.md`](docs/derived-bar-contracts.md) for the
+complete interval, OHLC, activity, lineage, partial/empty-bin, storage,
+verification, and downstream reconciliation contract.
 
 #### Temporal Reconstruction Orchestration
 
