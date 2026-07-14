@@ -32,6 +32,7 @@ from histdatacom.synthetic.benchmark import (
     BenchmarkSplitKind,
 )
 from histdatacom.synthetic.contracts import (
+    SyntheticEventV1,
     SyntheticEventStreamV1,
     canonical_contract_json,
 )
@@ -1219,16 +1220,16 @@ def benchmark_ensemble_calibration_sample(
     selected_candidate = _required_text(candidate_id)
     selected_window = _required_text(window_id)
     by_member: dict[str, BenchmarkCandidateWindowV1] = {}
-    for candidate_window in member_windows:
-        if candidate_window.ensemble_member_id in by_member:
+    for member_window in member_windows:
+        if member_window.ensemble_member_id in by_member:
             raise ValueError("duplicate ensemble member window")
         if (
-            candidate_window.scenario_id != scenario.scenario_id
-            or candidate_window.candidate_id != selected_candidate
-            or candidate_window.window_id != selected_window
+            member_window.scenario_id != scenario.scenario_id
+            or member_window.candidate_id != selected_candidate
+            or member_window.window_id != selected_window
         ):
             raise ValueError("candidate window differs from calibration scope")
-        by_member[candidate_window.ensemble_member_id] = candidate_window
+        by_member[member_window.ensemble_member_id] = member_window
     member_results: list[EnsembleMemberCalibrationV1] = []
     for member in plan.members:
         candidate_window = by_member.get(member.member_id)
@@ -1332,30 +1333,31 @@ def benchmark_logical_content_sha256(
     events: Iterable[BenchmarkEventV1],
 ) -> str:
     """Hash market content independently of row order, IDs, seeds, and member."""
-    rows = sorted(
-        (
-            {
-                "symbol": item.symbol,
-                "event_time_ns": item.event_time_ns,
-                "event_sequence": item.event_sequence,
-                "bid": item.bid,
-                "ask": item.ask,
-                "epoch_id": item.epoch_id,
-                "session": item.session,
-                "event_state": item.event_state,
-                "sparsity": item.sparsity,
-                "anchor_present": item.anchor_id is not None,
-            }
-            for item in events
-        ),
+    ordered_events = sorted(
+        events,
         key=lambda row: (
-            str(row["symbol"]),
-            int(row["event_time_ns"]),
-            int(row["event_sequence"]),
-            float(row["bid"]),
-            float(row["ask"]),
+            row.symbol,
+            row.event_time_ns,
+            row.event_sequence,
+            row.bid,
+            row.ask,
         ),
     )
+    rows: list[dict[str, JSONValue]] = [
+        {
+            "symbol": item.symbol,
+            "event_time_ns": item.event_time_ns,
+            "event_sequence": item.event_sequence,
+            "bid": item.bid,
+            "ask": item.ask,
+            "epoch_id": item.epoch_id,
+            "session": item.session,
+            "event_state": item.event_state,
+            "sparsity": item.sparsity,
+            "anchor_present": item.anchor_id is not None,
+        }
+        for item in ordered_events
+    ]
     return _content_sha256(rows)
 
 
@@ -1363,31 +1365,32 @@ def ensemble_logical_content_sha256(
     streams: Iterable[SyntheticEventStreamV1],
 ) -> str:
     """Hash synchronized market rows without member, run, or lineage identity."""
-    rows: list[dict[str, JSONValue]] = []
+    events: list[SyntheticEventV1] = []
     for stream in streams:
         if not isinstance(stream, SyntheticEventStreamV1):
             raise ValueError("ensemble logical hash requires event streams")
-        rows.extend(
-            {
-                "origin": event.origin.value,
-                "symbol": event.symbol,
-                "event_time_ns": event.event_time_ns,
-                "event_sequence": event.event_sequence,
-                "bid": event.bid,
-                "ask": event.ask,
-            }
-            for event in stream.events
-        )
-    rows.sort(
-        key=lambda row: (
-            str(row["symbol"]),
-            int(row["event_time_ns"]),
-            int(row["event_sequence"]),
-            str(row["origin"]),
-            float(row["bid"]),
-            float(row["ask"]),
+        events.extend(stream.events)
+    events.sort(
+        key=lambda event: (
+            event.symbol,
+            event.event_time_ns,
+            event.event_sequence,
+            event.origin.value,
+            event.bid,
+            event.ask,
         )
     )
+    rows: list[dict[str, JSONValue]] = [
+        {
+            "origin": event.origin.value,
+            "symbol": event.symbol,
+            "event_time_ns": event.event_time_ns,
+            "event_sequence": event.event_sequence,
+            "bid": event.bid,
+            "ask": event.ask,
+        }
+        for event in events
+    ]
     return _content_sha256(rows)
 
 
