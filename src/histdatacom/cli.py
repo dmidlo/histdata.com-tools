@@ -101,6 +101,11 @@ from histdatacom.fx_enums import (
     pair_group_names,
     get_valid_format_timeframes,
 )
+from histdatacom.random_windows import (
+    RandomWindowError,
+    parse_random_window_expression,
+    random_window_requires_seed,
+)
 from histdatacom.verbosity import normalize_verbosity
 from histdatacom.utils import (
     get_current_datemonth_gmt_minus5,
@@ -838,6 +843,10 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args.extend(["-s", self.arg_namespace.start_yearmonth])
         if self.arg_namespace.end_yearmonth:
             args.extend(["-e", self.arg_namespace.end_yearmonth])
+        if self.arg_namespace.random_window:
+            args.extend(["--random-window", self.arg_namespace.random_window])
+        if self.arg_namespace.random_seed is not None:
+            args.extend(["--random-seed", str(self.arg_namespace.random_seed)])
         if self.arg_namespace.output_timezone:
             args.extend(["--timezone", self.arg_namespace.output_timezone])
         if self.arg_namespace.available_remote_data:
@@ -1041,6 +1050,57 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         self._check_end_yearmonth_in_range()
         self._check_start_lessthan_end()
         self._validate_prerequisites()
+
+    def _check_random_window_input(self) -> None:
+        """Validate deterministic tick-window selection inputs."""
+        expression = str(self.arg_namespace.random_window or "")
+        seed = self.arg_namespace.random_seed
+        if not expression:
+            if seed is not None:
+                print(
+                    "ERROR: --random-seed requires --random-window"
+                )  # noqa:T201
+                raise SystemExit(1)
+            return
+        if (
+            self.arg_namespace.available_remote_data
+            or self.arg_namespace.update_remote_data
+        ):
+            print(  # noqa:T201
+                "ERROR: --random-window cannot be combined with repository "
+                "inventory modes -A or -U"
+            )
+            raise SystemExit(1)
+        if (
+            self.arg_namespace.data_quality
+            or self.arg_namespace.repo_quality_refresh
+            or self.arg_namespace.quality_preflight
+        ):
+            print(  # noqa:T201
+                "ERROR: --random-window is a tick projection option and "
+                "cannot be combined with data-quality modes"
+            )
+            raise SystemExit(1)
+        try:
+            parse_random_window_expression(expression)
+            if seed is not None and seed > 2**63 - 1:
+                raise RandomWindowError(
+                    "random-window seed exceeds signed int64 range"
+                )
+            if (
+                random_window_requires_seed(
+                    expression,
+                    start_yearmonth=self.arg_namespace.start_yearmonth,
+                    end_yearmonth=self.arg_namespace.end_yearmonth,
+                )
+                and seed is None
+            ):
+                raise RandomWindowError(
+                    "random selection requires --random-seed"
+                )
+        except RandomWindowError as exc:
+            print(f"ERROR: invalid --random-window: {exc}")  # noqa:T201
+            raise SystemExit(1) from exc
 
     def _validate_prerequisites(self) -> None:
         """Set prereqs for behavior flags -V -D -X -I."""
@@ -1275,6 +1335,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             ValueError: -s and -e cannot be the same.
             SystemExit: Exit on error
         """
+        if getattr(self.arg_namespace, "random_window", ""):
+            return
         try:
             start_yearmonth = self.arg_namespace.start_yearmonth
             start_year = get_year_from_datemonth(start_yearmonth)
@@ -1578,6 +1640,25 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 "set an end year and month for data."  # noqa:BLK100
                 " e.g. -e 2020-00 or -e 2022-04"
             ),
+        )
+        config_args.add_argument(
+            "-r",
+            "--random-window",
+            dest="random_window",
+            type=str,
+            metavar="EXPRESSION",
+            help=(
+                "select deterministic duration/session tick windows; random "
+                "selection requires --random-seed, while session expressions "
+                "with both -s and -e return all matching occurrences"
+            ),
+        )
+        config_args.add_argument(
+            "--random-seed",
+            dest="random_seed",
+            type=_non_negative_int,
+            metavar="INTEGER",
+            help="seed required for reproducible random-window selection",
         )
         config_args.add_argument(
             "-z",
@@ -2011,6 +2092,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         self._adjust_for_repo_data_request()
         self._check_quality_mode()
         self._check_datetime_input()
+        self._check_random_window_input()
         self._check_for_ascii_if_influx()
         self._check_for_ascii_if_api()
         self._check_for_supported_format_timeframe_combination()

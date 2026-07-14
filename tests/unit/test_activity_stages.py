@@ -44,12 +44,19 @@ from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     LEGACY_CACHE_ERROR,
     convert_polars_datetime_to_utc_ms,
+    read_polars_cache,
     read_ascii_file_to_polars,
     write_polars_cache,
 )
 from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkItem, WorkStatus, derive_work_id
+from histdatacom.random_windows import (
+    RANDOM_WINDOW_SELECTION_METADATA_KEY,
+    RandomWindowEmptySelectionError,
+    RandomWindowSelectionV1,
+    random_window_planning_yearmonths,
+)
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
 ASCII_TICK_URL = (
@@ -1407,6 +1414,85 @@ def test_merge_cache_work_items_can_skip_materialization(
     assert "data" not in payload
 
 
+def test_merge_cache_items_filters_projection_without_mutating_cache(
+    tmp_path: Path,
+) -> None:
+    """API projection should honor [start,end) and leave monthly evidence intact."""
+    import polars as pl
+
+    start = 1_704_096_000_000
+    end = start + 90 * 60_000
+    frame = pl.DataFrame(
+        {
+            "datetime": (start - 1, start, end - 1, end),
+            "bid": (1.1, 1.2, 1.3, 1.4),
+            "ask": (1.2, 1.3, 1.4, 1.5),
+            "volume": (0.0, 0.0, 0.0, 0.0),
+        }
+    )
+    cache_path = tmp_path / CACHE_FILENAME
+    write_polars_cache(frame, cache_path)
+    selection = RandomWindowSelectionV1(
+        expression="90m",
+        mode="random",
+        support_start_utc_ms=start - 1,
+        support_end_utc_ms=end + 1,
+        seed=12,
+        selected_start_utc_ms=start,
+        selected_end_utc_ms=end,
+    )
+    item = WorkItem.from_record(
+        Record(
+            data_dir=f"{tmp_path}{os.sep}",
+            cache_filename=CACHE_FILENAME,
+            data_format="ascii",
+            data_timeframe="T",
+            data_fxpair="eurusd",
+        )
+    )
+
+    merged = merge_cache_items(
+        [item],
+        return_type="polars",
+        random_selection=selection,
+    )
+
+    assert merged["datetime"].to_list() == [start, end - 1]
+    assert read_polars_cache(cache_path).height == 4
+
+
+def test_merge_cache_items_fails_on_empty_selected_projection(
+    tmp_path: Path,
+) -> None:
+    """A resolved interval without ticks should fail instead of substituting data."""
+    write_polars_cache(_tick_frame(), tmp_path / CACHE_FILENAME)
+    selection = RandomWindowSelectionV1(
+        expression="1m",
+        mode="random",
+        support_start_utc_ms=1_704_096_000_000,
+        support_end_utc_ms=1_704_096_120_000,
+        seed=9,
+        selected_start_utc_ms=1_704_096_000_000,
+        selected_end_utc_ms=1_704_096_060_000,
+    )
+    item = WorkItem.from_record(
+        Record(
+            data_dir=f"{tmp_path}{os.sep}",
+            cache_filename=CACHE_FILENAME,
+            data_format="ascii",
+            data_timeframe="T",
+            data_fxpair="eurusd",
+        )
+    )
+
+    with pytest.raises(RandomWindowEmptySelectionError, match="no cache rows"):
+        merge_cache_items(
+            [item],
+            return_type="polars",
+            random_selection=selection,
+        )
+
+
 def test_merge_cache_work_items_noops_unsupported_raw_dimensions(
     tmp_path: Path,
 ) -> None:
@@ -1480,6 +1566,65 @@ def test_import_to_influx_work_item_emits_batches_without_writer(
     assert "quality_status_code=0i" in first_line
     assert "training_usable=true" in first_line
     assert first_line.endswith(" 1328072403660")
+
+
+def test_influx_projection_filters_before_augmentation_and_preserves_metadata(
+    tmp_path: Path,
+) -> None:
+    """Influx should emit only selected ticks and carry selection through status."""
+    import polars as pl
+
+    start = 1_704_096_000_000
+    end = start + 60_000
+    frame = pl.DataFrame(
+        {
+            "datetime": (start - 1, start, end),
+            "bid": (1.1, 1.2, 1.3),
+            "ask": (1.2, 1.3, 1.4),
+            "volume": (0.0, 0.0, 0.0),
+        }
+    )
+    write_polars_cache(frame, tmp_path / CACHE_FILENAME)
+    selection = RandomWindowSelectionV1(
+        expression="1m",
+        mode="random",
+        support_start_utc_ms=start - 1,
+        support_end_utc_ms=end + 1,
+        seed=2,
+        selected_start_utc_ms=start,
+        selected_end_utc_ms=end,
+    )
+    item = WorkItem.from_record(
+        Record(
+            data_dir=f"{tmp_path}{os.sep}",
+            cache_filename=CACHE_FILENAME,
+            data_format="ascii",
+            data_timeframe="T",
+            data_fxpair="eurusd",
+            status=WorkStatus.CACHE_READY.value,
+        )
+    )
+    item = WorkItem.from_dict(
+        {
+            **item.to_dict(),
+            "metadata": {
+                RANDOM_WINDOW_SELECTION_METADATA_KEY: selection.to_dict()
+            },
+        }
+    )
+    emitted: list[list[str]] = []
+
+    output = import_to_influx_work_item(
+        item,
+        args=_args(tmp_path),
+        emit_lines=emitted.append,
+    )
+
+    assert output.result.metrics["line_count"] == 1
+    assert len(emitted) == 1
+    assert emitted[0][0].endswith(f" {start}")
+    assert output.work_item.metadata == item.metadata
+    assert read_polars_cache(tmp_path / CACHE_FILENAME).height == 3
 
 
 def test_import_to_influx_work_item_noops_unsupported_raw_dimensions(
@@ -1649,6 +1794,70 @@ def test_dataset_plan_stage_uses_repository_ranges_for_full_scope() -> None:
         "eurusd": ["200005", "200006"],
         "gbpusd": ["200005", "200006"],
     }
+
+
+def test_dataset_plan_stage_plans_only_seeded_window_months_with_metadata() -> (
+    None
+):
+    """Random selection should use common support and only intersecting months."""
+    output = dataset_plan_stage(
+        start_yearmonth="",
+        end_yearmonth="",
+        formats=("ascii",),
+        pairs=("eurusd", "gbpusd"),
+        timeframes=("T",),
+        current_yearmonth="202606",
+        repository_ranges={
+            "eurusd": {"start": "201001", "end": "202412"},
+            "gbpusd": {"start": "201501", "end": "202311"},
+        },
+        random_window="40d",
+        random_seed=8675309,
+    )
+    selection = RandomWindowSelectionV1.from_dict(
+        output.result.metrics["random_window_selection"]  # type: ignore[arg-type]
+    )
+    start, end = random_window_planning_yearmonths(selection)
+
+    assert selection.support_start_utc_ms == 1_420_070_400_000
+    assert selection.support_end_utc_ms == 1_701_388_800_000
+    planned_periods = sorted(
+        {item.data_datemonth for item in output.work_items}
+    )
+    assert planned_periods[0] == start
+    assert planned_periods[-1] == end
+    assert len(output.work_items) == len(planned_periods) * 2
+    assert {item.data_fxpair for item in output.work_items} == {
+        "eurusd",
+        "gbpusd",
+    }
+    assert all(
+        item.metadata[RANDOM_WINDOW_SELECTION_METADATA_KEY]
+        == selection.to_dict()
+        for item in output.work_items
+    )
+
+
+def test_dataset_plan_stage_bounded_sessions_plan_all_occurrences() -> None:
+    """A doubly bounded session expression should plan its whole support month."""
+    output = dataset_plan_stage(
+        start_yearmonth="202401",
+        end_yearmonth="202401",
+        formats=("ascii",),
+        pairs=("eurusd",),
+        timeframes=("T",),
+        current_yearmonth="202606",
+        repository_ranges={"eurusd": {"start": "201001", "end": "202412"}},
+        random_window="ldn",
+        random_seed=None,
+    )
+    selection = RandomWindowSelectionV1.from_dict(
+        output.work_items[0].metadata[RANDOM_WINDOW_SELECTION_METADATA_KEY]  # type: ignore[arg-type]
+    )
+
+    assert [item.data_datemonth for item in output.work_items] == ["202401"]
+    assert selection.mode == "all_sessions"
+    assert selection.occurrence_count == 23
 
 
 def test_dataset_plan_stage_explicit_range_overrides_repository_ranges() -> (

@@ -36,6 +36,10 @@ from histdatacom.helper_args import helper_runtime_args
 from histdatacom.legacy_boundary import warn_legacy_side_effect
 from histdatacom.observability import ProgressState, progress_increment
 from histdatacom.runtime_contracts import WorkItem, WorkStatus
+from histdatacom.random_windows import (
+    RandomWindowError,
+    RandomWindowSelectionV1,
+)
 from histdatacom.scraper.scraper import Scraper
 from histdatacom.utils import (
     normalize_api_return_type,
@@ -248,6 +252,9 @@ class Api:  # noqa:H601
         *,
         return_type: str | None = None,
         output_timezone: str | None = None,
+        random_selection: (
+            RandomWindowSelectionV1 | Mapping[str, Any] | None
+        ) = None,
     ) -> list | PolarsDataFrame | DataFrame | Table:
         """Merge caches for start_yearmonth and end_yearmonth range.
 
@@ -260,6 +267,7 @@ class Api:  # noqa:H601
             records_to_merge or [],
             return_type=return_type,
             output_timezone=output_timezone,
+            random_selection=random_selection,
         )
 
     def merge_records(
@@ -268,10 +276,17 @@ class Api:  # noqa:H601
         *,
         return_type: str | None = None,
         output_timezone: str | None = None,
+        random_selection: (
+            RandomWindowSelectionV1 | Mapping[str, Any] | None
+        ) = None,
     ) -> list | PolarsDataFrame | DataFrame | Table:
         """Merge explicit cache records into the configured API return type."""
         if not records_to_merge:
             return []
+        if self.args.get("random_window") and random_selection is None:
+            raise RandomWindowError(
+                "random-window API merge requires a resolved selection"
+            )
         resolved_return_type = _resolve_api_return_type(
             return_type or self.return_type
         )
@@ -284,6 +299,7 @@ class Api:  # noqa:H601
             return_type=resolved_return_type,
             materialize=True,
             output_timezone=resolved_output_timezone,
+            random_selection=random_selection,
         )
         if merge_output.result.status is WorkStatus.SKIPPED:
             return []

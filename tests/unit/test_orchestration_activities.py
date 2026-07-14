@@ -44,6 +44,10 @@ from histdatacom.data_quality import (
     QualityTargetKind,
 )
 from histdatacom.runtime_contracts import RunRequest, WorkItem, WorkStatus
+from histdatacom.random_windows import (
+    RANDOM_WINDOW_SELECTION_METADATA_KEY,
+    RandomWindowSelectionV1,
+)
 from histdatacom.orchestration.control import OrchestrationJobSnapshot
 from histdatacom.orchestration.activities import (
     build_cache_activity,
@@ -415,6 +419,38 @@ def test_dataset_plan_activity_uses_repo_ranges_for_full_scope(
     assert result["result"]["metrics"]["repository_range_count"] == 3
 
 
+def test_dataset_plan_activity_random_window_intersects_repo_and_user_bounds(
+    tmp_path: Path,
+) -> None:
+    """Random planning should load inventory even when user bounds are present."""
+    write_repository_data_file(
+        {"eurusd": {"start": "202001", "end": "202012"}},
+        tmp_path / ".repo",
+    )
+    request = RunRequest(
+        request_id="run-plan-random-common-support",
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        start_yearmonth="201001",
+        end_yearmonth="202512",
+        random_window="1M",
+        random_seed=81,
+        data_directory=str(tmp_path),
+    )
+
+    result = dataset_plan_activity({"request": request.to_dict()})
+    selection = RandomWindowSelectionV1.from_dict(
+        result["result"]["metrics"]["random_window_selection"]
+    )
+
+    assert result["result"]["metrics"]["repository_range_count"] == 1
+    assert selection.support_start_utc_ms == 1_577_836_800_000
+    assert selection.support_end_utc_ms == 1_609_459_200_000
+    assert len(result["work_items"]) == 1
+    assert result["work_items"][0]["data_datemonth"].startswith("2020")
+
+
 def test_dataset_plan_activity_spills_large_plan_to_manifest(
     tmp_path: Path,
 ) -> None:
@@ -448,6 +484,76 @@ def test_dataset_plan_activity_spills_large_plan_to_manifest(
         "202202",
         "202203",
     ]
+
+
+def test_random_window_metadata_survives_plan_spill_and_reload(
+    tmp_path: Path,
+) -> None:
+    """SQLite plan batching should retain the exact compact selection contract."""
+    write_repository_data_file(
+        {"eurusd": {"start": "202001", "end": "202412"}},
+        tmp_path / ".repo",
+    )
+    request = RunRequest(
+        request_id="run-plan-random-spill",
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        random_window="40d",
+        random_seed=42,
+        data_directory=str(tmp_path),
+        metadata={
+            "temporal_plan_spill": {"inline_work_item_limit": 1},
+            "temporal_batching": {"max_work_items_per_batch": 1},
+        },
+    )
+
+    result = dataset_plan_activity({"request": request.to_dict()})
+    store = ManifestStatusStore(str(tmp_path))
+    loaded = store.get_dataset_plan_work_items(
+        str(result[DATASET_PLAN_REF_KEY]["plan_id"])
+    )
+    selection_payload = result["result"]["metrics"]["random_window_selection"]
+
+    assert "work_items" not in result
+    assert len(loaded) > 1
+    assert all(
+        item.metadata[RANDOM_WINDOW_SELECTION_METADATA_KEY] == selection_payload
+        for item in loaded
+    )
+    assert RandomWindowSelectionV1.from_dict(selection_payload).selection_id
+
+
+def test_random_window_consumer_activity_fails_if_metadata_was_dropped(
+    tmp_path: Path,
+) -> None:
+    """A declared selection may not degrade into unfiltered merge behavior."""
+    request = RunRequest(
+        request_id="run-random-metadata-loss",
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        random_window="1d",
+        random_seed=42,
+        data_directory=str(tmp_path),
+        api_return_type="polars",
+    )
+    item = WorkItem(
+        work_id="work-random-metadata-loss",
+        data_format="ascii",
+        data_timeframe="T",
+        data_fxpair="eurusd",
+        data_dir=str(tmp_path),
+        cache_filename=CACHE_FILENAME,
+    )
+
+    with pytest.raises(ValueError, match="missing its resolved"):
+        merge_cache_activity(
+            {
+                "request": request.to_dict(),
+                "work_items": [item.to_dict()],
+            }
+        )
 
 
 def test_validate_urls_activity_loads_work_items_from_plan_ref(
@@ -506,6 +612,8 @@ def test_dataset_plan_activity_payload_survives_temporal_converter(
         timeframes=("T",),
         start_yearmonth="202201",
         end_yearmonth="202201",
+        random_window="1d",
+        random_seed=17,
         data_directory=str(tmp_path),
         metadata={
             "requests_timeout": "30",
@@ -525,6 +633,10 @@ def test_dataset_plan_activity_payload_survives_temporal_converter(
     assert result["result"]["metrics"]["work_item_count"] == 1
     assert len(result["work_items"]) == 1
     assert result["work_items"][0]["data_fxpair"] == "eurusd"
+    assert (
+        RANDOM_WINDOW_SELECTION_METADATA_KEY
+        in result["work_items"][0]["metadata"]
+    )
 
 
 def test_validate_urls_activity_returns_form_metadata(

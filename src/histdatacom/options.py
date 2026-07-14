@@ -61,6 +61,8 @@ class Options:
         "quality_report_path",
         "repo_quality_columns",
         "repo_quality_refresh",
+        "random_seed",
+        "random_window",
         "request_bundle_out",
         "request_json_out",
         "schedule_key",
@@ -96,6 +98,8 @@ class Options:
         self.timeframes: set = Timeframe.list_keys()
         self.start_yearmonth: str | None = ""
         self.end_yearmonth: str | None = ""
+        self.random_window: str = ""
+        self.random_seed: int | None = None
         self.data_directory: str = "data"
         self.from_api: bool = False
         self.api_return_type: str | None = None

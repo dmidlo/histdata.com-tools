@@ -77,6 +77,7 @@ from histdatacom.runtime_contracts import (
     WorkStatus,
     derive_work_id,
 )
+from histdatacom.random_windows import random_window_selection_from_metadata
 from histdatacom.source_cleanup import source_artifact_cleanliness_payload
 from histdatacom.verbosity import safe_log_extra
 from histdatacom.utils import set_working_data_dir
@@ -206,10 +207,10 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
     repository_ranges = (
         read_repository_data_file(repo_path)
         if (
-            not request.start_yearmonth
-            and not request.end_yearmonth
-            and repo_path.exists()
+            (not request.start_yearmonth and not request.end_yearmonth)
+            or bool(request.random_window)
         )
+        and repo_path.exists()
         else {}
     )
     repository_range_count = len(repository_pair_data(repository_ranges))
@@ -224,6 +225,8 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
         zip_persist=request.zip_persist,
         cache_only=request.build_cache,
         repository_ranges=repository_ranges,
+        random_window=request.random_window,
+        random_seed=request.random_seed,
     )
     plan_id = derive_work_id(
         request.request_id,
@@ -238,6 +241,8 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
         metadata={
             "start_yearmonth": request.start_yearmonth,
             "end_yearmonth": request.end_yearmonth,
+            "random_window": request.random_window,
+            "random_seed": request.random_seed,
             "formats": list(request.formats),
             "pairs": list(request.pairs),
             "timeframes": list(request.timeframes),
@@ -593,7 +598,7 @@ async def reconstruction_window_activity(
             store.save(cancelled, expected_state_id=stored_state.state_id)
         cleanup_reconstruction_window_scratch(task.scratch_directory)
         raise
-    return state.to_dict()
+    return cast(dict[str, Any], state.to_dict())
 
 
 @activity_defn(name="reconstruction_report")
@@ -800,6 +805,7 @@ def merge_cache_activity(
             dict[str, Any],
             result.to_dict(),
         )
+    _require_resolved_random_window(request, work_items)
 
     if _activity_cancelled():
         result = _observe_and_persist_stage_result(
@@ -858,6 +864,7 @@ def import_to_influx_activity(
             dict[str, Any],
             result.to_dict(),
         )
+    _require_resolved_random_window(request, work_items)
 
     total = len(work_items)
     args = _influx_args(request)
@@ -1128,6 +1135,32 @@ def _influx_args(request: RunRequest) -> dict[str, Any]:
             }
         )
     return args
+
+
+def _require_resolved_random_window(
+    request: RunRequest,
+    work_items: tuple[WorkItem, ...],
+) -> None:
+    """Fail closed when a declared random window lost its resolved metadata."""
+    if not request.random_window:
+        return
+    selections = tuple(
+        random_window_selection_from_metadata(item.metadata)
+        for item in work_items
+    )
+    selection_ids = {
+        selection.selection_id
+        for selection in selections
+        if selection is not None
+    }
+    if (
+        all(selection is not None for selection in selections)
+        and len(selection_ids) == 1
+    ):
+        return
+    raise ValueError(
+        "random-window request is missing its resolved work-item selection"
+    )
 
 
 def _influx_batch_writer(args: Mapping[str, Any]) -> Any:

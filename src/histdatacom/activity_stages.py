@@ -48,6 +48,15 @@ from histdatacom.histdata_ascii import (
     write_polars_cache,
 )
 from histdatacom.records import Record
+from histdatacom.random_windows import (
+    RANDOM_WINDOW_SELECTION_METADATA_KEY,
+    RandomWindowEmptySelectionError,
+    RandomWindowSelectionV1,
+    filter_polars_frame_to_random_window,
+    random_window_planning_yearmonths,
+    random_window_selection_from_metadata,
+    resolve_random_window_selection,
+)
 from histdatacom.repository_quality import REPOSITORY_QUALITY_KEY
 from histdatacom.runtime_contracts import (
     ArtifactRef,
@@ -1363,9 +1372,14 @@ def merge_cache_work_items(
     return_type: str = "polars",
     materialize: bool = True,
     output_timezone: str = "",
+    random_selection: RandomWindowSelectionV1 | Mapping[str, Any] | None = None,
 ) -> MergeStageOutput:
     """Merge cache artifacts from explicit work items."""
     mergeable = _mergeable_cache_items(work_items)
+    selection = _resolve_random_window_selection(
+        mergeable,
+        explicit=random_selection,
+    )
     unsupported_count = sum(
         1
         for item in work_items
@@ -1393,6 +1407,7 @@ def merge_cache_work_items(
                 return_type=return_type,
                 already_ordered=True,
                 output_timezone=output_timezone,
+                random_selection=selection,
             )
 
     if not materialize:
@@ -1429,6 +1444,9 @@ def merge_cache_work_items(
                     "record_count": len(mergeable),
                     "set_count": len(sets_to_merge),
                     "materialized": materialize,
+                    "random_window_selection_id": (
+                        selection.selection_id if selection is not None else ""
+                    ),
                 },
             ),
         ),
@@ -1438,6 +1456,9 @@ def merge_cache_work_items(
             "set_count": len(sets_to_merge),
             "materialized": materialize,
             "sets": merge_set_metrics,
+            "random_window_selection": (
+                selection.to_dict() if selection is not None else {}
+            ),
         },
     )
     return MergeStageOutput(
@@ -1453,6 +1474,7 @@ def merge_cache_items(
     return_type: str,
     already_ordered: bool = False,
     output_timezone: str = "",
+    random_selection: RandomWindowSelectionV1 | Mapping[str, Any] | None = None,
 ) -> Any:
     """Merge one pair/timeframe cache set into the requested API type."""
     import polars as pl
@@ -1471,11 +1493,22 @@ def merge_cache_items(
     ordered_items = (
         tuple(work_items) if already_ordered else order_cache_items(work_items)
     )
+    selection = _resolve_random_window_selection(
+        ordered_items,
+        explicit=random_selection,
+    )
     frames = [
-        read_polars_cache(Path(item.data_dir, item.cache_filename))
+        filter_polars_frame_to_random_window(
+            read_polars_cache(Path(item.data_dir, item.cache_filename)),
+            selection,
+        )
         for item in ordered_items
     ]
     merged = pl.concat(frames) if frames else pl.DataFrame()
+    if selection is not None and merged.height < 1:
+        raise RandomWindowEmptySelectionError(
+            "resolved random window contains no cache rows"
+        )
     merged = _append_output_timezone_projection(merged, output_timezone)
     return _convert_cache_frame(merged, return_type)
 
@@ -1485,12 +1518,14 @@ def merge_cache_records(
     *,
     return_type: str,
     output_timezone: str = "",
+    random_selection: RandomWindowSelectionV1 | Mapping[str, Any] | None = None,
 ) -> Any:
     """Merge one legacy record set through the queue-free implementation."""
     return merge_cache_items(
         [WorkItem.from_record(record) for record in records],
         return_type=return_type,
         output_timezone=output_timezone,
+        random_selection=random_selection,
     )
 
 
@@ -1623,6 +1658,12 @@ def emit_influx_cache_batches(
 
     cache_filename = work_item.cache_filename or CACHE_FILENAME
     cache = read_polars_cache(Path(work_item.data_dir, cache_filename))
+    selection = random_window_selection_from_metadata(work_item.metadata)
+    cache = filter_polars_frame_to_random_window(cache, selection)
+    if selection is not None and cache.height < 1:
+        raise RandomWindowEmptySelectionError(
+            "resolved random window contains no rows in the planned cache"
+        )
     cache = ensure_tick_training_features(cache, target=work_item)
     batch_size = coerce_batch_size(args["batch_size"])
     batch_count = 0
@@ -1659,6 +1700,8 @@ def dataset_plan_stage(
     zip_persist: bool = False,
     cache_only: bool = False,
     repository_ranges: Mapping[str, Any] | None = None,
+    random_window: str = "",
+    random_seed: int | None = None,
 ) -> DatasetPlanOutput:
     """Plan explicit dataset work items without queues or side effects."""
     formats_input = tuple(formats or ())
@@ -1676,6 +1719,8 @@ def dataset_plan_stage(
         zip_persist=zip_persist,
         cache_only=cache_only,
         repository_ranges=repository_ranges,
+        random_window=random_window,
+        random_seed=random_seed,
     )
     dimensions = valid_dataset_dimensions(
         formats_input,
@@ -1686,6 +1731,10 @@ def dataset_plan_stage(
     normalized_timeframes = tuple(sorted({item[1] for item in dimensions}))
     normalized_pairs = normalize_dataset_pairs(pairs_input)
     resolved_current = current_yearmonth or get_current_datemonth_gmt_minus5()
+    selection = _random_window_selection_from_work_items(work_items)
+    selection_payload: JSONValue = (
+        selection.to_dict() if selection is not None else {}
+    )
     result = StageResult(
         work_id=derive_work_id(
             "dataset_plan",
@@ -1694,6 +1743,7 @@ def dataset_plan_stage(
             *normalized_formats,
             *normalized_timeframes,
             *normalized_pairs,
+            selection.selection_id if selection is not None else "",
         ),
         stage="dataset_plan",
         status=WorkStatus.COMPLETED,
@@ -1702,7 +1752,10 @@ def dataset_plan_stage(
                 status=WorkStatus.COMPLETED,
                 stage="dataset_plan",
                 message="Dataset work items planned.",
-                metadata={"work_item_count": len(work_items)},
+                metadata={
+                    "work_item_count": len(work_items),
+                    "random_window_selection": selection_payload,
+                },
             ),
         ),
         metrics={
@@ -1714,6 +1767,7 @@ def dataset_plan_stage(
             "end_yearmonth": _coerce_yearmonth(end_yearmonth) or "",
             "current_yearmonth": resolved_current,
             "cache_only": cache_only,
+            "random_window_selection": selection_payload,
         },
     )
     return DatasetPlanOutput(work_items=work_items, result=result)
@@ -1732,6 +1786,8 @@ def plan_dataset_work_items(
     zip_persist: bool = False,
     cache_only: bool = False,
     repository_ranges: Mapping[str, Any] | None = None,
+    random_window: str = "",
+    random_seed: int | None = None,
 ) -> tuple[WorkItem, ...]:
     """Return deterministic URL work items for a HistData request."""
     formats_input = tuple(formats or ())
@@ -1740,13 +1796,25 @@ def plan_dataset_work_items(
     resolved_current = current_yearmonth or get_current_datemonth_gmt_minus5()
     start = _coerce_yearmonth(start_yearmonth)
     end = _coerce_yearmonth(end_yearmonth)
+    normalized_pairs = normalize_dataset_pairs(pairs_input)
+    selection: RandomWindowSelectionV1 | None = None
+    if random_window:
+        selection = resolve_random_window_selection(
+            random_window,
+            seed=random_seed,
+            pairs=normalized_pairs,
+            repository_ranges=repository_pair_data(repository_ranges or {}),
+            start_yearmonth=start,
+            end_yearmonth=end,
+            current_yearmonth=resolved_current,
+        )
+        start, end = random_window_planning_yearmonths(selection)
     full_scope = not start and not end
     if not start and not end:
         start = "200001"
         end = resolved_current
 
     planned: list[WorkItem] = []
-    normalized_pairs = normalize_dataset_pairs(pairs_input)
     pair_ranges = _dataset_pair_ranges(
         normalized_pairs,
         repository_ranges=repository_ranges if full_scope else None,
@@ -1777,7 +1845,22 @@ def plan_dataset_work_items(
                         zip_persist=zip_persist,
                     )
                 )
-    return tuple(planned)
+    if selection is None:
+        return tuple(planned)
+    selection_payload = selection.to_dict()
+    planned_count = len(planned)
+    return tuple(
+        replace(
+            item,
+            work_id=derive_work_id(item.work_id, selection.selection_id),
+            metadata={
+                **item.metadata,
+                RANDOM_WINDOW_SELECTION_METADATA_KEY: selection_payload,
+                "random_window_planned_work_item_count": planned_count,
+            },
+        )
+        for item in planned
+    )
 
 
 def _dataset_pair_ranges(
@@ -2395,7 +2478,48 @@ def _record_from_work_item(work_item: WorkItem) -> Record:
 
 
 def _work_item_from_record(record: Record, original: WorkItem) -> WorkItem:
-    return WorkItem.from_record(record, work_id=original.work_id)
+    return replace(
+        WorkItem.from_record(record, work_id=original.work_id),
+        metadata=dict(original.metadata),
+    )
+
+
+def _random_window_selection_from_work_items(
+    work_items: Sequence[WorkItem],
+) -> RandomWindowSelectionV1 | None:
+    selections = {
+        selection.selection_id: selection
+        for item in work_items
+        if (selection := random_window_selection_from_metadata(item.metadata))
+        is not None
+    }
+    if len(selections) > 1:
+        raise ValueError("cache work items contain conflicting random windows")
+    return next(iter(selections.values()), None)
+
+
+def _resolve_random_window_selection(
+    work_items: Sequence[WorkItem],
+    *,
+    explicit: RandomWindowSelectionV1 | Mapping[str, Any] | None,
+) -> RandomWindowSelectionV1 | None:
+    persisted = _random_window_selection_from_work_items(work_items)
+    supplied = (
+        explicit
+        if isinstance(explicit, RandomWindowSelectionV1)
+        else (
+            RandomWindowSelectionV1.from_dict(explicit)
+            if explicit is not None
+            else None
+        )
+    )
+    if (
+        persisted is not None
+        and supplied is not None
+        and persisted.selection_id != supplied.selection_id
+    ):
+        raise ValueError("explicit and persisted random windows do not match")
+    return supplied or persisted
 
 
 def _activity_output(

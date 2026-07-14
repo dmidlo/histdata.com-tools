@@ -18,6 +18,10 @@ from histdatacom.fx_enums import (
 )
 from histdatacom.options import Options
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
+from histdatacom.random_windows import (
+    RANDOM_WINDOW_SELECTION_METADATA_KEY,
+    RandomWindowSelectionV1,
+)
 from histdatacom.orchestration.client import (
     JobHandle,
     JobResult,
@@ -2940,6 +2944,81 @@ def test_api_orchestration_dataframe_return_is_materialized_from_cache_artifacts
         "start_if_needed": True,
         "wait_for_result": True,
     }
+
+
+def test_api_orchestration_materialization_applies_exact_random_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Client materialization should recover selection metadata from the run."""
+    import polars as pl
+
+    import histdatacom.histdata_com as histdata_com
+    from histdatacom.histdata_ascii import CACHE_FILENAME, write_polars_cache
+
+    start = 1_704_096_000_000
+    end = start + 60_000
+    cache_path = tmp_path / CACHE_FILENAME
+    source = pl.DataFrame(
+        {
+            "datetime": (start - 1, start, end),
+            "bid": (1.1, 1.2, 1.3),
+            "ask": (1.2, 1.3, 1.4),
+            "volume": (0.0, 0.0, 0.0),
+        }
+    )
+    job_result = _orchestration_cache_result(tmp_path)
+    write_polars_cache(source, cache_path)
+    selection = RandomWindowSelectionV1(
+        expression="1m",
+        mode="random",
+        support_start_utc_ms=start - 1,
+        support_end_utc_ms=end + 1,
+        seed=7,
+        selected_start_utc_ms=start,
+        selected_end_utc_ms=end,
+    )
+    stage_result = job_result.result["stage_results"][0]
+    stage_result["work_item"] = {
+        "metadata": {RANDOM_WINDOW_SELECTION_METADATA_KEY: selection.to_dict()}
+    }
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda request, **kwargs: job_result,
+    )
+    options = _orchestration_options()
+    options.random_window = "1m"
+    options.random_seed = 7
+
+    result = histdata_com.main(options)
+
+    assert isinstance(result, pl.DataFrame)
+    assert result["datetime"].to_list() == [start]
+    assert histdata_com.RunRequest.from_options(options).random_seed == 7
+    assert pl.read_ipc(cache_path).height == 3
+
+
+def test_api_orchestration_random_window_fails_if_selection_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Completed cache artifacts cannot bypass a lost selection contract."""
+    import histdatacom.histdata_com as histdata_com
+    from histdatacom.random_windows import RandomWindowError
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda request, **kwargs: _orchestration_cache_result(tmp_path),
+    )
+    options = _orchestration_options()
+    options.random_window = "1m"
+    options.random_seed = 7
+
+    with pytest.raises(RandomWindowError, match="missing its resolved"):
+        histdata_com.main(options)
 
 
 def test_api_orchestration_materialization_applies_output_timezone(

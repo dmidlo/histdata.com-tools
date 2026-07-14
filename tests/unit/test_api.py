@@ -319,6 +319,30 @@ def test_merge_records_accepts_explicit_records_without_queue(
     )
 
 
+def test_merge_records_declared_random_window_requires_resolved_selection(
+    tmp_path: Path,
+) -> None:
+    """The API helper must not fall back to a complete cache after metadata loss."""
+    from histdatacom.api import Api
+    from histdatacom.random_windows import RandomWindowError
+
+    source = Api._import_file_to_polars(
+        SimpleNamespace(data_timeframe="T"),
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
+    )
+    record = _write_cache_record(
+        tmp_path,
+        "missing-random-selection",
+        source,
+        pair="eurusd",
+        timeframe="T",
+        start=EXPECTED_TICK_DATETIMES[0],
+    )
+
+    with pytest.raises(RandomWindowError, match="resolved selection"):
+        Api(args={"random_window": "1m"}).merge_records([record])
+
+
 def test_merge_records_uses_explicit_return_type_without_parser_globals(
     tmp_path: Path,
 ) -> None:

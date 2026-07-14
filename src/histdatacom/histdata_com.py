@@ -84,6 +84,11 @@ from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.publication_safety import publish_safe_path
 from histdatacom.publication_safety import publish_safe_json_mapping
 from histdatacom.records import Record
+from histdatacom.random_windows import (
+    RANDOM_WINDOW_SELECTION_METADATA_KEY,
+    RandomWindowSelectionV1,
+    RandomWindowError,
+)
 from histdatacom.runtime_contracts import (
     FailureInfo,
     JSONValue,
@@ -442,7 +447,18 @@ class _HistDataCom:  # noqa:R701
         if self._should_materialize_orchestration_api_return(payload):
             records = _cache_records_from_orchestration_payload(payload)
             if records:
-                return self._materialize_orchestration_api_return(records)
+                selection = _random_window_selection_from_orchestration_payload(
+                    payload
+                )
+                if self.context.request.random_window and selection is None:
+                    raise RandomWindowError(
+                        "completed random-window run is missing its resolved "
+                        "selection"
+                    )
+                return self._materialize_orchestration_api_return(
+                    records,
+                    random_selection=selection,
+                )
         if not self.context.from_api:
             print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
         return payload
@@ -529,6 +545,8 @@ class _HistDataCom:  # noqa:R701
     def _materialize_orchestration_api_return(
         self,
         records: list[Record],
+        *,
+        random_selection: RandomWindowSelectionV1 | None = None,
     ) -> list | PolarsDataFrame | DataFrame | Table:
         """Rebuild the legacy API dataframe return from cache artifacts."""
         from histdatacom.api import Api
@@ -537,6 +555,7 @@ class _HistDataCom:  # noqa:R701
             records,
             return_type=str(self.context.api_return_type or ""),
             output_timezone=self.context.output_timezone,
+            random_selection=random_selection,
         )
 
 
@@ -1529,6 +1548,24 @@ def _cache_records_from_orchestration_payload(payload: dict) -> list[Record]:
         seen_paths.add(resolved_path)
         records.append(_record_from_cache_artifact(path, artifact))
     return records
+
+
+def _random_window_selection_from_orchestration_payload(
+    payload: Mapping[str, Any],
+) -> RandomWindowSelectionV1 | None:
+    """Recover and verify one compact selection from a completed run."""
+    selections: dict[str, RandomWindowSelectionV1] = {}
+    for item in _iter_mapping_payloads(payload):
+        candidate = item.get(RANDOM_WINDOW_SELECTION_METADATA_KEY)
+        if not isinstance(candidate, Mapping):
+            continue
+        selection = RandomWindowSelectionV1.from_dict(candidate)
+        selections[selection.selection_id] = selection
+    if len(selections) > 1:
+        raise ValueError(
+            "orchestration payload contains conflicting random windows"
+        )
+    return next(iter(selections.values()), None)
 
 
 def _repository_available_data_from_orchestration_payload(

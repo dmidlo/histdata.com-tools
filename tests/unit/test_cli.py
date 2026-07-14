@@ -231,6 +231,17 @@ def test_help_advertises_request_json_export() -> None:
     assert "without submitting work" in help_text
 
 
+def test_help_advertises_deterministic_random_windows() -> None:
+    """The public help should expose expression, seed, and bounded-session modes."""
+    parser = ArgParser(Options())
+    parser._set_args()
+    help_text = parser.format_help()
+
+    assert "-r, --random-window EXPRESSION" in help_text
+    assert "--random-seed INTEGER" in help_text
+    assert "all matching occurrences" in " ".join(help_text.split())
+
+
 def test_help_advertises_pair_groups() -> None:
     """Named instrument groups should be visible from the main help."""
     parser = ArgParser(Options())
@@ -620,6 +631,25 @@ def test_api_options_preserve_output_timezone(
     assert parsed.output_timezone == "Asia/Tokyo"
 
 
+def test_api_options_preserve_random_window_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Programmatic expression/seed inputs should survive argparse compatibility."""
+    monkeypatch.setattr(sys, "argv", ["histdatacom"])
+    options = Options()
+    options.from_api = True
+    options.pairs = {"eurusd"}
+    options.formats = {"ascii"}
+    options.timeframes = {"T"}
+    options.random_window = "90m"
+    options.random_seed = 20260714
+
+    parsed = ArgParser(options)()
+
+    assert parsed.random_window == "90m"
+    assert parsed.random_seed == 20260714
+
+
 def test_config_file_keeps_explicit_cli_overrides(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -700,6 +730,105 @@ histdatacom:
         "usdjpy",
     }
     assert options.pair_groups == ["majors"]
+
+
+def test_config_file_applies_random_window_and_seed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Recurrent YAML requests should round-trip deterministic window inputs."""
+    config_path = tmp_path / "random-window.yaml"
+    config_path.write_text(
+        """
+histdatacom:
+  validate_urls: true
+  pairs: [eurusd]
+  formats: [ascii]
+  timeframes: [tick-data-quotes]
+  random_window: 2d
+  random_seed: 1729
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.random_window == "2d"
+    assert options.random_seed == 1729
+
+
+def test_bounded_session_window_accepts_same_month_without_seed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both bounds mean all session occurrences, including within one month."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2024-01",
+            "-e",
+            "2024-01",
+            "-r",
+            "ldn",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.start_yearmonth == "202401"
+    assert options.end_yearmonth == "202401"
+    assert options.random_window == "ldn"
+    assert options.random_seed is None
+
+
+@pytest.mark.parametrize(
+    "tail",
+    (
+        ("--random-window", "2d"),
+        ("--random-seed", "4"),
+        ("--random-window", "ldn--ny", "--random-seed", "4"),
+        ("-A", "--random-window", "2d", "--random-seed", "4"),
+    ),
+)
+def test_random_window_cli_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tail: tuple[str, ...],
+) -> None:
+    """Missing seeds, orphan seeds, malformed forms, and repo mode must fail."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            *tail,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        ArgParser(Options())()
+
+    assert err.value.code == 1
 
 
 def test_config_file_applies_major_triangle_pair_group(

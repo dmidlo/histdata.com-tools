@@ -118,7 +118,8 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--config PATH] [-p PAIR [PAIR ...]]
                    [--pair-groups GROUP [GROUP ...]] [-f FORMAT [FORMAT ...]]
                    [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH]
-                   [-e END_YEARMONTH] [-z IANA_ZONE] [-I] [-d] [-b BATCH_SIZE]
+                   [-e END_YEARMONTH] [-r EXPRESSION] [--random-seed INTEGER]
+                   [-z IANA_ZONE] [-I] [-d] [-b BATCH_SIZE]
                    [-c CPU_UTILIZATION] [--data-directory DATA_DIRECTORY] [-v]
                    [--orchestration-start] [--no-orchestration-start]
                    [--submit-only] [--no-overlap]
@@ -182,6 +183,13 @@ Config:
   -e, --end_yearmonth END_YEARMONTH
                         set an end year and month for data. e.g. -e 2020-00 or
                         -e 2022-04
+  -r, --random-window EXPRESSION
+                        select deterministic duration/session tick windows;
+                        random selection requires --random-seed, while session
+                        expressions with both -s and -e return all matching
+                        occurrences
+  --random-seed INTEGER
+                        seed required for reproducible random-window selection
   -z, --timezone, --output-timezone IANA_ZONE
                         append datetime_local to API results in an IANA
                         timezone; canonical cache and Influx timestamps remain
@@ -531,6 +539,9 @@ histdatacom:
     - tick-data-quotes
   start_yearmonth: 2022-01
   end_yearmonth: 2022-03
+  # Optional deterministic tick projection:
+  # random_window: 2d
+  # random_seed: 1729
   data_directory: /data/histdata
   request_bundle_out: requests/eurusd-cache-bundle.json
   request_json_out: requests/eurusd-cache.json
@@ -643,6 +654,64 @@ date ranges are for year and month and can be specified in the following ways:
 |"2202 04"|
 |2202.04|
 |2202_04|
+
+##### Deterministic random and session windows
+
+Use `-r/--random-window EXPRESSION` to project a bounded subset of ASCII tick
+data. Random selection always requires an explicit non-negative
+`--random-seed`; the expression, seed, requested symbols, repository inventory,
+and optional `-s`/`-e` bounds reproduce the same half-open `[start, end)`
+selection regardless of input order or worker parallelism.
+
+```sh
+# One reproducible 90-minute interval inside common EURUSD/GBPUSD support.
+histdatacom -C -I -p eurusd gbpusd -f ascii -t tick-data-quotes \
+  -r 90m --random-seed 1729
+
+# Every London sampling window in January 2024; no seed is needed when a
+# session expression has both bounds. Equal start/end months are valid here.
+histdatacom -I -p eurusd -f ascii -t tick-data-quotes \
+  -s 2024-01 -e 2024-01 -r ldn
+```
+
+Duration units are case-sensitive: `y` is a calendar year, `q` a calendar
+quarter, `M` a calendar month, `w` a week, `d` a day, `h` an hour, and `m` a
+minute. Year, quarter, and month selections are calendar-aligned; fixed
+durations are UTC-minute-aligned. Supported forms include `1y`, `1q`, `1M`,
+`2w`, `2d`, `6h`, `90m`, `ldn`, `ldn-ny`, `syd-syd`, `hk-3d`, `hk-3d-hk`,
+`45m-auk`, `1h-auk-1h`, and `30m-ldn-1w-syd-1h`. Unsupported mixtures fail
+closed.
+
+Session codes use explicit 08:00–17:00 local-clock profiles and IANA timezone
+rules:
+
+| Code | Sampling location | IANA timezone |
+|---|---|---|
+| `fra` | Frankfurt/Paris | `Europe/Paris` |
+| `ldn` | London | `Europe/London` |
+| `ny` | New York | `America/New_York` |
+| `chi` | Chicago | `America/Chicago` |
+| `la` | San Francisco/Los Angeles | `America/Los_Angeles` |
+| `auk` | Auckland/Wellington | `Pacific/Auckland` |
+| `syd` | Sydney | `Australia/Sydney` |
+| `tyo` | Tokyo | `Asia/Tokyo` |
+| `hk` | Hong Kong/Singapore | `Asia/Hong_Kong` |
+
+These profiles are reproducible sampling windows, not claims about centralized
+FX exchange hours. DST follows each IANA zone. A single session selects its
+open through close; ordered session pairs span from the first open through the
+second close, wrapping to the next local day when needed. Equal session anchors
+such as `syd-syd` end at the following session close. Hour/minute tokens outside
+anchors add padding; day/week/month/quarter/year tokens between anchors add the
+bridge duration.
+
+HistData archives and canonical `.data` caches remain complete monthly evidence.
+The planner resolves one compact, versioned selection against the common
+repository coverage of all requested symbols and schedules only intersecting
+months. It never truncates or rewrites ZIP, CSV, or cache artifacts. Exact
+filtering happens only while materializing API results or streaming rows to
+InfluxDB; empty or off-support selections fail instead of silently substituting
+another interval.
 
 ##### to fetch a single year's data, leave out the month
 

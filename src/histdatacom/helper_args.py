@@ -21,6 +21,8 @@ DEFAULT_HELPER_ARGS: dict[str, Any] = {
     "timeframes": set(),
     "start_yearmonth": "",
     "end_yearmonth": "",
+    "random_window": "",
+    "random_seed": None,
     "default_download_dir": f"data{os.sep}",
     "from_api": False,
     "api_return_type": "polars",
