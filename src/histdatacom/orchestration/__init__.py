@@ -107,6 +107,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.orchestration.client",
         "DEFAULT_RUN_WORKFLOW_NAME",
     ),
+    "DEFAULT_RECONSTRUCTION_WORKFLOW_NAME": (
+        "histdatacom.orchestration.client",
+        "DEFAULT_RECONSTRUCTION_WORKFLOW_NAME",
+    ),
     "DEFAULT_TASK_QUEUE_PREFIX": (
         "histdatacom.orchestration.queues",
         "DEFAULT_TASK_QUEUE_PREFIX",
@@ -118,6 +122,62 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "DEFAULT_WORKFLOWS": (
         "histdatacom.orchestration.workflows",
         "DEFAULT_WORKFLOWS",
+    ),
+    "ReconstructionCheckpointStore": (
+        "histdatacom.orchestration.reconstruction",
+        "ReconstructionCheckpointStore",
+    ),
+    "ReconstructionRunReportV1": (
+        "histdatacom.orchestration.reconstruction",
+        "ReconstructionRunReportV1",
+    ),
+    "ReconstructionRunWorkflow": (
+        "histdatacom.orchestration.workflows",
+        "ReconstructionRunWorkflow",
+    ),
+    "ReconstructionStage": (
+        "histdatacom.orchestration.reconstruction",
+        "ReconstructionStage",
+    ),
+    "ReconstructionStageCommandV1": (
+        "histdatacom.orchestration.reconstruction",
+        "ReconstructionStageCommandV1",
+    ),
+    "ReconstructionStageInvocationV1": (
+        "histdatacom.orchestration.reconstruction",
+        "ReconstructionStageInvocationV1",
+    ),
+    "ReconstructionStageOutcomeV1": (
+        "histdatacom.orchestration.reconstruction",
+        "ReconstructionStageOutcomeV1",
+    ),
+    "ReconstructionStageStatus": (
+        "histdatacom.orchestration.reconstruction",
+        "ReconstructionStageStatus",
+    ),
+    "ReconstructionWindowStateV1": (
+        "histdatacom.orchestration.reconstruction",
+        "ReconstructionWindowStateV1",
+    ),
+    "ReconstructionWindowTaskV1": (
+        "histdatacom.orchestration.reconstruction",
+        "ReconstructionWindowTaskV1",
+    ),
+    "ReconstructionWindowWorkflow": (
+        "histdatacom.orchestration.workflows",
+        "ReconstructionWindowWorkflow",
+    ),
+    "ReconstructionWorkflowRequestV1": (
+        "histdatacom.orchestration.reconstruction",
+        "ReconstructionWorkflowRequestV1",
+    ),
+    "register_reconstruction_stage_handler": (
+        "histdatacom.orchestration.reconstruction",
+        "register_reconstruction_stage_handler",
+    ),
+    "submit_reconstruction_request": (
+        "histdatacom.orchestration.client",
+        "submit_reconstruction_request",
     ),
     "FANOUT_METADATA_KEY": (
         "histdatacom.orchestration.workflows",

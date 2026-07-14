@@ -54,6 +54,8 @@ from histdatacom.orchestration.activities import (
     extract_csv_activity,
     import_to_influx_activity,
     merge_cache_activity,
+    reconstruction_report_activity,
+    reconstruction_window_activity,
     repository_refresh_activity,
     validate_urls_activity,
 )
@@ -1678,4 +1680,6 @@ def test_default_activities_register_operation_activities() -> None:
         build_cache_activity,
         merge_cache_activity,
         import_to_influx_activity,
+        reconstruction_window_activity,
+        reconstruction_report_activity,
     )

@@ -196,7 +196,9 @@ Windowing, retries, or storage tuning do not.
   wall/monotonic delivery evidence; #444–#445 own broker fingerprints and style
   transfer rather than historical technological epochs.
 - #446 implements atomic final Parquet and manifest publication.
-- #447 carries compact artifact references through production streaming
+- #447's implemented Temporal control plane carries compact artifact
+  references through production streaming; see
+  [`reconstruction-temporal-orchestration.md`](reconstruction-temporal-orchestration.md).
   workflows.
 
 Changing a required field, identity derivation, stability family, transition

@@ -125,9 +125,10 @@ artifacts, or unrelated operator files.
 
 Staged and committed manifests expose strong `ArtifactRef` values. Their bytes
 are identical across promotion, so they plug directly into the #432
-`running -> staged -> validated -> committed` checkpoint transitions. #447 owns
-the Temporal activities/workflows that call these operations and must record a
-committed checkpoint only after the atomic directory promotion succeeds.
+`running -> staged -> validated -> committed` checkpoint transitions. The
+implemented #447 control plane records a committed checkpoint only after the
+atomic directory promotion succeeds; see
+[`reconstruction-temporal-orchestration.md`](reconstruction-temporal-orchestration.md).
 
 ## Query dependency
 

@@ -118,8 +118,10 @@ The policy also declares maximum events per batch, checkpoint and heartbeat
 cadence, checkpoint payload bytes, removal of uncommitted scratch on
 cancellation, and the committed-only publication rule.
 
-Production backpressure belongs to #447, but it must enforce these frozen
-limits rather than inventing an unrelated queue policy.
+The implemented Temporal reconstruction control plane enforces these limits
+with deterministic memory-weighted window waves and sequential stage
+consumption. See
+[`reconstruction-temporal-orchestration.md`](reconstruction-temporal-orchestration.md).
 
 ## Checkpoints, retries, and duplicate delivery
 
@@ -223,7 +225,9 @@ must be written to artifact storage.
   see [`broker-capture-contracts.md`](broker-capture-contracts.md).
 - #446 implements final atomic Parquet and manifest publication; see
   [`reconstruction-persistence-contracts.md`](reconstruction-persistence-contracts.md).
-- #447 maps the contracts onto production Temporal workflows and activities.
+- #447 maps the contracts onto production Temporal workflows and activities;
+  see
+  [`reconstruction-temporal-orchestration.md`](reconstruction-temporal-orchestration.md).
 
 Changing a required field, identity rule, ownership interval, phase meaning,
 or retry guarantee requires a new schema version and contract class.

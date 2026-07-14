@@ -730,6 +730,97 @@ class ManifestStatusStore:
             return None
         return dict(json.loads(str(row["payload_json"])))
 
+    def compare_and_swap_job_snapshot(
+        self,
+        snapshot: Any,
+        *,
+        expected_snapshot_id: str | None,
+    ) -> bool:
+        """Atomically replace a bounded job snapshot when its ID is current.
+
+        This is the manifest-store primitive used by resumable workflows whose
+        checkpoint chain must reject stale workers.  Repeating the exact same
+        write succeeds idempotently; a different current snapshot fails closed.
+        """
+        payload = _mapping_payload(snapshot)
+        job_id = str(
+            payload.get("job_id", "") or payload.get("workflow_id", "")
+        )
+        snapshot_id = str(payload.get("snapshot_id", "") or "").strip()
+        if not job_id:
+            raise ValueError("Job snapshot requires job_id or workflow_id.")
+        if not snapshot_id:
+            raise ValueError("CAS job snapshot requires snapshot_id.")
+        normalized_expected = (
+            str(expected_snapshot_id).strip()
+            if expected_snapshot_id is not None
+            else None
+        )
+        now = _utc_now()
+        payload["updated_at_utc"] = str(
+            payload.get("updated_at_utc", "") or now
+        )
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT payload_json FROM jobs WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                if normalized_expected is not None:
+                    conn.rollback()
+                    return False
+            else:
+                current = json.loads(str(row["payload_json"]))
+                current_id = str(current.get("snapshot_id", "") or "")
+                if current_id == snapshot_id:
+                    conn.rollback()
+                    return True
+                if current_id != (normalized_expected or ""):
+                    conn.rollback()
+                    return False
+            conn.execute(
+                """
+                INSERT INTO jobs (
+                    job_id,
+                    request_id,
+                    workflow_id,
+                    run_id,
+                    lifecycle,
+                    status,
+                    task_queue,
+                    payload_json,
+                    updated_at_utc,
+                    schema_version
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    request_id=excluded.request_id,
+                    workflow_id=excluded.workflow_id,
+                    run_id=excluded.run_id,
+                    lifecycle=excluded.lifecycle,
+                    status=excluded.status,
+                    task_queue=excluded.task_queue,
+                    payload_json=excluded.payload_json,
+                    updated_at_utc=excluded.updated_at_utc,
+                    schema_version=excluded.schema_version
+                """,
+                (
+                    job_id,
+                    str(payload.get("request_id", "") or ""),
+                    str(payload.get("workflow_id", "") or job_id),
+                    str(payload.get("run_id", "") or ""),
+                    str(payload.get("lifecycle", "") or ""),
+                    str(payload.get("status", "") or ""),
+                    str(payload.get("task_queue", "") or ""),
+                    _json_dumps(payload),
+                    now,
+                    int(payload.get("schema_version", 1) or 1),
+                ),
+            )
+            conn.commit()
+        return True
+
     def list_job_snapshots(
         self,
         *,

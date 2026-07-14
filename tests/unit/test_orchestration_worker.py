@@ -204,6 +204,8 @@ def test_run_temporal_worker_accepts_fake_temporal_classes(
         "build_cache_activity",
         "merge_cache_activity",
         "import_to_influx_activity",
+        "reconstruction_window_activity",
+        "reconstruction_report_activity",
     }
 
 
@@ -354,6 +356,8 @@ def test_default_workflows_include_topology_classes() -> None:
         "BuildCacheWorkflow",
         "MergeCacheWorkflow",
         "ImportWorkflow",
+        "ReconstructionRunWorkflow",
+        "ReconstructionWindowWorkflow",
     ]
 
 
@@ -384,6 +388,8 @@ def test_default_activities_include_repository_refresh() -> None:
         "build_cache_activity",
         "merge_cache_activity",
         "import_to_influx_activity",
+        "reconstruction_window_activity",
+        "reconstruction_report_activity",
     ]
 
 

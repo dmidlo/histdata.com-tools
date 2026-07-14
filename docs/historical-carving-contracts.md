@@ -168,7 +168,9 @@ intermediate.
   [`cross-currency-reconciliation-contracts.md`](cross-currency-reconciliation-contracts.md).
 - later broker-transfer work owns broker-style conditioning.
 - #446 implements final incremental Parquet layout and atomic publication.
-- #447 owns production Temporal activities, backpressure, cancellation, and
+- #447's implemented control plane owns production Temporal activities,
+  backpressure, cancellation, and recovery; see
+  [`reconstruction-temporal-orchestration.md`](reconstruction-temporal-orchestration.md).
   resume behavior.
 
 Changing rule meaning or order, constraint identity, decision meaning,

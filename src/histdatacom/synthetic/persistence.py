@@ -2239,12 +2239,12 @@ def _source_manifest(
     return ReconstructionSourceManifestV1(
         source_version_ids=tuple(event.source_version_id for event in rows),
         source_series_ids=tuple(
-            cast(str, event.source_series_id)
+            event.source_series_id
             for event in observed
             if event.source_series_id is not None
         ),
         source_periods=tuple(
-            cast(str, event.source_period)
+            event.source_period
             for event in observed
             if event.source_period is not None
         ),
@@ -2267,27 +2267,27 @@ def _constraint_manifest(
     return ReconstructionConstraintManifestV1(
         synthetic_event_count=len(synthetic),
         constraint_set_ids=tuple(
-            cast(str, event.constraint_set_id)
+            event.constraint_set_id
             for event in synthetic
             if event.constraint_set_id is not None
         ),
         generator_ids=tuple(
-            cast(str, event.generator_id)
+            event.generator_id
             for event in synthetic
             if event.generator_id is not None
         ),
         generator_versions=tuple(
-            cast(str, event.generator_version)
+            event.generator_version
             for event in synthetic
             if event.generator_version is not None
         ),
         generator_config_ids=tuple(
-            cast(str, event.generator_config_id)
+            event.generator_config_id
             for event in synthetic
             if event.generator_config_id is not None
         ),
         feed_epoch_ids=tuple(
-            cast(str, event.feed_epoch_id)
+            event.feed_epoch_id
             for event in synthetic
             if event.feed_epoch_id is not None
         ),

@@ -8,8 +8,10 @@ downloaded rows, dataframes, or queue payloads.
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
+import hashlib
 from importlib import import_module
 import logging
 from typing import Any, Callable, Mapping, Protocol, TypeVar, cast
@@ -93,6 +95,18 @@ def _load_workflow_api() -> Any:
 
 
 workflow = _load_workflow_api()
+_passed_through_imports = (
+    workflow.unsafe.imports_passed_through
+    if hasattr(workflow, "unsafe")
+    else nullcontext
+)
+with _passed_through_imports():
+    from histdatacom.orchestration.reconstruction import (
+        ReconstructionWorkflowRequestV1,
+        ReconstructionWindowStateV1,
+        plan_reconstruction_waves,
+    )
+
 _Decorated = TypeVar("_Decorated")
 _Callable = TypeVar("_Callable", bound=Callable[..., Any])
 _WORKFLOW_LOGGER = logging.getLogger(__name__)
@@ -516,6 +530,17 @@ WORKFLOW_TOPOLOGY = (
         lane=TaskQueueLane.INFLUX,
         operation_family="Influx import",
     ),
+    WorkflowSpec(
+        name="ReconstructionRunWorkflow",
+        lane=TaskQueueLane.ORCHESTRATION,
+        operation_family="synthetic reconstruction run",
+        children=("ReconstructionWindowWorkflow",),
+    ),
+    WorkflowSpec(
+        name="ReconstructionWindowWorkflow",
+        lane=TaskQueueLane.ORCHESTRATION,
+        operation_family="synchronized reconstruction window",
+    ),
 )
 WORKFLOW_SPECS_BY_NAME = {spec.name: spec for spec in WORKFLOW_TOPOLOGY}
 OPERATION_ACTIVITIES = {
@@ -582,6 +607,18 @@ ACTIVITY_EXECUTION_POLICIES = {
         activity_name="import_to_influx",
         start_to_close_timeout_seconds=3600,
         heartbeat_timeout_seconds=30,
+        retry_policy=IDEMPOTENT_WRITE_RETRY_POLICY,
+    ),
+    "reconstruction_window": ActivityExecutionPolicy(
+        activity_name="reconstruction_window",
+        start_to_close_timeout_seconds=604800,
+        heartbeat_timeout_seconds=60,
+        retry_policy=IDEMPOTENT_WRITE_RETRY_POLICY,
+    ),
+    "reconstruction_report": ActivityExecutionPolicy(
+        activity_name="reconstruction_report",
+        start_to_close_timeout_seconds=129600,
+        heartbeat_timeout_seconds=3600,
         retry_policy=IDEMPOTENT_WRITE_RETRY_POLICY,
     ),
 }
@@ -1189,6 +1226,170 @@ class ImportWorkflow(_ActivityWorkflowBase):
     status = workflow_query(_ActivityWorkflowBase.status)
 
 
+@workflow_defn
+class ReconstructionWindowWorkflow:
+    """Durable child workflow for one synchronized synthetic-data window."""
+
+    def __init__(self) -> None:
+        self._status: dict[str, JSONValue] = {
+            "status": WorkStatus.PLANNED.value,
+            "current_stage": "planned",
+            "completed_stages": 0,
+            "total_stages": 7,
+        }
+
+    @workflow_run
+    async def run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Execute the retry-safe window activity on the CPU/file lane."""
+        request = ReconstructionWorkflowRequestV1.from_dict(
+            _coerce_mapping(payload.get("request"))
+        )
+        if len(request.tasks) != 1:
+            raise ValueError("reconstruction window workflow requires one task")
+        task = request.tasks[0]
+        self._status = {
+            "status": WorkStatus.PLANNED.value,
+            "current_stage": "reconstruction_window",
+            "completed_stages": 0,
+            "total_stages": 7,
+            "window_id": task.window.window_id,
+        }
+        policy = activity_execution_policy("reconstruction_window")
+        options: dict[str, Any] = {
+            "start_to_close_timeout": timedelta(
+                seconds=policy.start_to_close_timeout_seconds
+            ),
+            "heartbeat_timeout": timedelta(
+                seconds=policy.heartbeat_timeout_seconds
+            ),
+            "retry_policy": _temporal_retry_policy(policy.retry_policy),
+        }
+        queue = request.task_queues.get("cpu_file", "")
+        if queue:
+            options["task_queue"] = queue
+        raw = await workflow.execute_activity(
+            "reconstruction_window",
+            {"request": request.to_dict()},
+            **options,
+        )
+        state = ReconstructionWindowStateV1.from_dict(_coerce_mapping(raw))
+        self._status = {
+            "status": _reconstruction_work_status(state).value,
+            "current_stage": state.checkpoint.phase.value,
+            "completed_stages": len(state.outcomes),
+            "total_stages": 7,
+            "window_id": task.window.window_id,
+            "checkpoint_id": state.checkpoint.checkpoint_id,
+        }
+        return state.to_dict()
+
+    @workflow_query
+    def status(self) -> dict[str, JSONValue]:
+        """Return compact queryable window progress."""
+        return dict(self._status)
+
+
+@workflow_defn
+class ReconstructionRunWorkflow:
+    """Parent planner with deterministic wave-level reconstruction backpressure."""
+
+    def __init__(self) -> None:
+        self._status: dict[str, JSONValue] = {
+            "status": WorkStatus.PLANNED.value,
+            "current_stage": "planned",
+            "completed_windows": 0,
+            "total_windows": 0,
+        }
+
+    @workflow_run
+    async def run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run bounded child windows, then reconcile committed storage."""
+        request = ReconstructionWorkflowRequestV1.from_dict(
+            _coerce_mapping(payload.get("request", payload))
+        )
+        self._status = {
+            "status": WorkStatus.PLANNED.value,
+            "current_stage": "window_planning",
+            "completed_windows": 0,
+            "total_windows": len(request.tasks),
+            "request_id": request.request_id,
+        }
+        waves = plan_reconstruction_waves(
+            request.tasks,
+            max_parallel_windows=request.max_parallel_windows,
+            max_inflight_memory_bytes=cast(
+                int, request.max_inflight_memory_bytes
+            ),
+        )
+        states: list[ReconstructionWindowStateV1] = []
+        for wave_index, wave in enumerate(waves):
+            self._status["current_stage"] = f"window_wave_{wave_index}"
+            children = []
+            for task in wave:
+                child_request = request.for_task(task)
+                child_id = _reconstruction_child_workflow_id(
+                    request.request_id, task.window.window_id
+                )
+                child_options: dict[str, Any] = {"id": child_id}
+                queue = request.task_queues.get("orchestration", "")
+                if queue:
+                    child_options["task_queue"] = queue
+                children.append(
+                    workflow.execute_child_workflow(
+                        "ReconstructionWindowWorkflow",
+                        {"request": child_request.to_dict()},
+                        **child_options,
+                    )
+                )
+            raw_states = await asyncio.gather(*children)
+            states.extend(
+                ReconstructionWindowStateV1.from_dict(
+                    _coerce_mapping(raw_state)
+                )
+                for raw_state in raw_states
+            )
+            self._status["completed_windows"] = len(states)
+        self._status["current_stage"] = "report_reconciliation"
+        policy = activity_execution_policy("reconstruction_report")
+        report_options: dict[str, Any] = {
+            "start_to_close_timeout": timedelta(
+                seconds=policy.start_to_close_timeout_seconds
+            ),
+            "heartbeat_timeout": timedelta(
+                seconds=policy.heartbeat_timeout_seconds
+            ),
+            "retry_policy": _temporal_retry_policy(policy.retry_policy),
+        }
+        report_queue = request.task_queues.get("cpu_file", "")
+        if report_queue:
+            report_options["task_queue"] = report_queue
+        report = await workflow.execute_activity(
+            "reconstruction_report",
+            {"request": request.to_dict()},
+            **report_options,
+        )
+        report_payload = _coerce_mapping(report)
+        report_body = _coerce_mapping(report_payload.get("report"))
+        self._status = {
+            "status": (
+                WorkStatus.COMPLETED.value
+                if report_body.get("status") == "committed"
+                else WorkStatus.FAILED.value
+            ),
+            "current_stage": "complete",
+            "completed_windows": len(states),
+            "total_windows": len(request.tasks),
+            "request_id": request.request_id,
+            "report_id": str(report_body.get("report_id", "")),
+        }
+        return dict(report_payload)
+
+    @workflow_query
+    def status(self) -> dict[str, JSONValue]:
+        """Return compact queryable parent progress."""
+        return dict(self._status)
+
+
 DEFAULT_WORKFLOWS = (
     HistDataRunWorkflow,
     RepositoryRefreshWorkflow,
@@ -1201,7 +1402,28 @@ DEFAULT_WORKFLOWS = (
     BuildCacheWorkflow,
     MergeCacheWorkflow,
     ImportWorkflow,
+    ReconstructionRunWorkflow,
+    ReconstructionWindowWorkflow,
 )
+
+
+def _reconstruction_child_workflow_id(request_id: str, window_id: str) -> str:
+    """Return a bounded deterministic child workflow ID."""
+    digest = hashlib.sha256(window_id.encode("utf-8")).hexdigest()[:24]
+    return f"{request_id}-reconstruction-window-{digest}"
+
+
+def _reconstruction_work_status(
+    state: ReconstructionWindowStateV1,
+) -> WorkStatus:
+    """Map checkpoint phase to public orchestration status."""
+    if state.checkpoint.phase.value == "committed":
+        return WorkStatus.COMPLETED
+    if state.checkpoint.phase.value == "cancelled":
+        return WorkStatus.CANCELLED
+    if state.checkpoint.phase.value == "failed":
+        return WorkStatus.FAILED
+    return WorkStatus.PLANNED
 
 
 def _execute_status(results: tuple[StageResult, ...]) -> WorkStatus:
@@ -1240,8 +1462,7 @@ async def _execute_child_plan(
     )
     _workflow_log(
         logging.INFO,
-        "Workflow child plan started request_id=%s workflow_name=%s "
-        "child_count=%d",
+        "Workflow child plan started request_id=%s workflow_name=%s child_count=%d",
         request.request_id,
         workflow_name,
         len(invocations),
@@ -1546,8 +1767,7 @@ async def _execute_parallel_symbol_invocations(
             break
     _workflow_log(
         logging.DEBUG,
-        "Workflow parallel symbol fanout finished request_id=%s "
-        "completed=%d",
+        "Workflow parallel symbol fanout finished request_id=%s completed=%d",
         request.request_id,
         len(results),
         request_id=request.request_id,

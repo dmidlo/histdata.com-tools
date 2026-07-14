@@ -1072,6 +1072,8 @@ def test_workflow_topology_documents_expected_hierarchy() -> None:
         "BuildCacheWorkflow",
         "MergeCacheWorkflow",
         "ImportWorkflow",
+        "ReconstructionRunWorkflow",
+        "ReconstructionWindowWorkflow",
     }
     assert specs["HistDataRunWorkflow"]["children"] == [
         "RepositoryRefreshWorkflow",
@@ -1087,10 +1089,15 @@ def test_workflow_topology_documents_expected_hierarchy() -> None:
         "MergeCacheWorkflow",
         "ImportWorkflow",
     ]
+    assert specs["ReconstructionRunWorkflow"]["children"] == [
+        "ReconstructionWindowWorkflow"
+    ]
     assert "rows" in str(document["history_policy"])
-    assert set(activity_policies) == set(
-        workflows.OPERATION_ACTIVITIES.values()
-    )
+    assert set(activity_policies) == {
+        *workflows.OPERATION_ACTIVITIES.values(),
+        "reconstruction_window",
+        "reconstruction_report",
+    }
     assert (
         activity_policies["validate_urls"]["retry_policy"]["name"]
         == RetryPolicyName.NETWORK.value
@@ -2195,7 +2202,7 @@ def test_leaf_workflow_defaults_to_temporal_activity_executor(
     summary = asyncio.run(workflow.run(invocation.payload))
 
     pending_metric = "activity" + "_pending"
-    assert not hasattr(workflows, "Pending" "ActivityExecutor")
+    assert not hasattr(workflows, "PendingActivityExecutor")
     assert captured["activity_name"] == "validate_urls"
     assert captured["options"]["task_queue"] == "queue-network"
     assert summary["status"] == WorkStatus.COMPLETED.value

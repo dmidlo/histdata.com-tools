@@ -155,7 +155,9 @@ not persist the wide augmented analytical cache or all candidate paths.
 - #445 may apply broker delivery conditioning only after an ensemble has
   trustworthy evidence and must preserve member lineage.
 - #446 implements retained-member/final Parquet layout and atomic publication.
-- #447 owns production Temporal activities, retries, cancellation,
+- #447's implemented control plane owns production Temporal activities,
+  retries, cancellation, and backpressure; see
+  [`reconstruction-temporal-orchestration.md`](reconstruction-temporal-orchestration.md).
   backpressure, and regeneration execution.
 
 Changing member identity, calibration split use, metric meaning, diversity

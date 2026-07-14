@@ -163,7 +163,8 @@ only the bounded validation and group metadata forward.
 - #445 applies broker delivery conditioning and must rerun `post_broker`
   validation.
 - #446 writes final Parquet and commits only through the atomic manifest gate.
-- #447 maps these functions onto retryable Temporal activities.
+- #447 maps these artifact boundaries onto retryable Temporal activities; see
+  [`reconstruction-temporal-orchestration.md`](reconstruction-temporal-orchestration.md).
 
 Changing relationship meaning, projection priority semantics, event-time join
 policy, hard-limit interpretation, validation stages, or atomic gate behavior

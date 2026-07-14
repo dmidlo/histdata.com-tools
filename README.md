@@ -54,6 +54,7 @@ Works on macOS, Linux, and Windows.
     - [Broker Delivery Fingerprints](#broker-delivery-fingerprints)
     - [Broker-Conditioned Reconstruction](#broker-conditioned-reconstruction)
     - [Atomic Reconstruction Persistence](#atomic-reconstruction-persistence)
+    - [Temporal Reconstruction Orchestration](#temporal-reconstruction-orchestration)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -2729,6 +2730,26 @@ See
 [`docs/reconstruction-persistence-contracts.md`](docs/reconstruction-persistence-contracts.md)
 for layout, atomic commit, replay, preflight, query, cleanup, and #447 Temporal
 handoff semantics.
+
+#### Temporal Reconstruction Orchestration
+
+`ReconstructionRunWorkflow` plans deterministic memory-weighted waves of
+all-symbol `ReconstructionWindowWorkflow` children. Each window executes the
+source/enrichment, proposal, carving, cross-series, broker-transfer,
+validation, and atomic-commit boundaries sequentially through activity-side
+stage handlers. Workflow history carries only bounded commands, counters,
+checkpoints, and strong artifact references.
+
+Stage receipts and manifest-store compare-and-swap snapshots make worker loss,
+activity retry, duplicate completion, and process restart resumable without
+duplicating committed rows. Cancellation removes only disposable window
+scratch. The final report independently verifies every committed publication
+and reconciles storage counts and scope with workflow checkpoints.
+
+See
+[`docs/reconstruction-temporal-orchestration.md`](docs/reconstruction-temporal-orchestration.md)
+for adapter registration, queue/resource policy, backpressure, recovery,
+cancellation, report reconciliation, and fault-injection guarantees.
 
 ---
 
