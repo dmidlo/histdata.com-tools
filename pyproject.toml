@@ -77,6 +77,11 @@ models = [
     "arch>=8.0.0,<9",
     "statsmodels>=0.14.6,<0.15",
 ]
+docs = [
+    "myst-parser==4.0.1",
+    "sphinx==8.1.3",
+    "sphinx-rtd-theme==3.1.0",
+]
 all = [
     "arch>=8.0.0,<9",
     "duckdb>=1.5.4,<2",
@@ -137,6 +142,7 @@ dev = [
     "ipywidgets",
     "jupyter",
     "keyring==25.7.0",
+    "myst-parser==4.0.1",
     "mypy==2.1.0",
     "nbclient",
     "nbformat",
@@ -152,6 +158,8 @@ dev = [
     "setuptools==83.0.0",
     "sh==2.3.0",
     "shellcheck-py==0.11.0.1",
+    "sphinx==8.1.3",
+    "sphinx-rtd-theme==3.1.0",
     "statsmodels==0.14.6",
     "temporalio>=1.10,<1.31",
     "twine==6.2.0",

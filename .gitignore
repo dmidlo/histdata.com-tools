@@ -24,6 +24,7 @@ output.pstats
 result.json
 out.gv
 htmlcov/
+docs/_build/
 coverage.xml
 pip-audit.json
 .coverage

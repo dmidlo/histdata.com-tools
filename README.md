@@ -3637,6 +3637,8 @@ hooks; do not rely on user-local Python packages to satisfy `histdatacom`,
 
 The dependency surfaces are split by purpose:
 
+- `.[docs]` installs the pinned Sphinx, MyST, and Read the Docs theme
+  toolchain.
 - `.[test]` installs pytest, coverage, pandas, pyarrow, DuckDB, InfluxDB
   support, notebook execution support, and test-only support around the base
   Temporal SDK dependency.
@@ -3645,10 +3647,20 @@ The dependency surfaces are split by purpose:
 - `.[dev]` is the aggregate local contributor environment with test, lint,
   release, and optional integration dependencies.
 
-The `dev`, `lint`, `test`, and `release` extras pin direct developer tools
-where reproducibility matters. Runtime dependencies keep compatibility lower
-bounds rather than lock-file pins because `histdatacom` is a published PyPI
-library. The active lint baseline is Black, Ruff, mypy, generic file checks,
+Build the same warning-as-error documentation tree used by CI and Read the
+Docs with:
+
+```sh
+python -m pip install -e ".[docs]"
+python -m sphinx -W --keep-going -b html docs docs/_build/html
+```
+
+Open `docs/_build/html/index.html` to inspect the generated site locally.
+
+The `dev`, `docs`, `lint`, `test`, and `release` extras pin direct developer
+tools where reproducibility matters. Runtime dependencies keep compatibility
+lower bounds rather than lock-file pins because `histdatacom` is a published
+PyPI library. The active lint baseline is Black, Ruff, mypy, generic file checks,
 Pyroma, ShellCheck, Commitizen, and the local CLI smoke hook. The
 previous flake8 plugin stack was intentionally replaced with Ruff so local
 installs and hook behavior do not drift independently.
