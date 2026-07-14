@@ -47,6 +47,7 @@ Works on macOS, Linux, and Windows.
     - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
     - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
+    - [Historical Candidate Carving](#historical-candidate-carving)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -2552,6 +2553,27 @@ reverse-degradation harness compare this generator with all controls without
 selecting an automatic winner. See
 [`docs/empirical-motif-generation-contracts.md`](docs/empirical-motif-generation-contracts.md)
 for determinism, seam, lineage, resource, and stage-boundary details.
+
+#### Historical Candidate Carving
+
+`carve_empirical_motif_candidates()` is the first stage allowed to accept
+candidate-only motif rows. A versioned constraint set applies immutable-anchor,
+resource, fingerprint-validation, context-support, quarantine, and session
+closure rules before conditioned motif eligibility, intensity thinning, or
+spread projection. Missing support refuses rather than inventing liquidity.
+
+News, rollover, crisis, and other explicit state tags can change acceptance
+rates, eligible motifs, and spread envelopes. Incompatible motifs may use a
+same-position candidate from an explicitly supplied substitution batch;
+otherwise they are rejected. Deterministic scores exclude retry, worker, and
+window identity, so adjacent window outputs union to the single-window result.
+
+Accepted rows carry the final constraint-set ID and compact lineage back to the
+candidate event, batch, and motif transform. Projected lineage retains original
+quotes and candidate/output content hashes. Rejected rows are discarded; only
+reconciling reason counts and bounded examples remain. See
+[`docs/historical-carving-contracts.md`](docs/historical-carving-contracts.md)
+for precedence, evidence binding, refusal, identity, and streaming semantics.
 
 ---
 

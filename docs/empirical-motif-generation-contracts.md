@@ -154,9 +154,10 @@ controls across the same feed-epoch, severity, session, event, and sparsity
 slices. The scorecard remains report-only: it does not automatically select a
 winner or bypass hard historical constraints.
 
-## Deferred stages
+## Downstream stages
 
-- #440 owns historical carving and accepted/rejected constraint decisions.
+- [Historical carving](historical-carving-contracts.md) consumes these
+  candidate-only batches and owns accepted/rejected constraint decisions.
 - #441 owns synchronized cross-currency generation and reconciliation.
 - later broker-transfer work owns broker-style conditioning.
 - #446 owns final incremental Parquet layout and atomic publication.

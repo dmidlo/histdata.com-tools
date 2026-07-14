@@ -7,6 +7,16 @@ import hashlib
 
 import pytest
 
+from histdatacom.data_quality.synthetic_constraints import (
+    SYNTHETIC_VALIDATION_SCHEMA_VERSION,
+)
+from histdatacom.market_context import (
+    MarketContextCalendarStateV1,
+    MarketContextMissingReason,
+    MarketContextQueryStatus,
+    MarketContextQueryV1,
+    MarketContextView,
+)
 from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic import (
     CANDIDATE_ONLY_CONSTRAINT_SET_ID,
@@ -20,8 +30,15 @@ from histdatacom.synthetic import (
     BenchmarkScenarioV1,
     BenchmarkSplitKind,
     BenchmarkSplitV1,
+    CarvingBatchStatus,
+    CarvingFingerprintEvidenceV1,
+    CarvingReason,
     EmpiricalMotifBenchmarkGeneratorV1,
     EmpiricalMotifGeneratorConfigV1,
+    HistoricalCarvedCandidateBatchV1,
+    HistoricalCarvingConditionPolicyV1,
+    HistoricalCarvingConstraintSetV1,
+    HistoricalCarvingQuarantineV1,
     InformationMode,
     MotifGenerationDecision,
     MotifGenerationStatus,
@@ -42,6 +59,7 @@ from histdatacom.synthetic import (
     SyntheticEventV1,
     build_benchmark_control_windows,
     build_reference_motif_index,
+    carve_empirical_motif_candidates,
     generate_benchmark_candidate_window,
     generate_empirical_motif_candidates,
     query_reference_motifs,
@@ -214,11 +232,12 @@ def _run(
     *,
     members: tuple[str, ...] = (MEMBER_ID,),
     storage_policy: ReconstructionStoragePolicyV1 | None = None,
+    additional_configuration_ids: tuple[str, ...] = (),
 ) -> ReconstructionRunV1:
     return ReconstructionRunV1(
         symbols=("EURUSD",),
         source_version_ids=(SOURCE_VERSION_ID,),
-        configuration_ids=(config.config_id,),
+        configuration_ids=(config.config_id, *additional_configuration_ids),
         ensemble_member_ids=members,
         base_seed=7,
         storage_policy=storage_policy or ReconstructionStoragePolicyV1(),
@@ -268,6 +287,95 @@ def _window(
         left_halo_ns=left_halo_ns,
         right_lookahead_ns=right_lookahead_ns,
     )
+
+
+def _market_context(
+    window: ReconstructionWindowV1,
+    *,
+    session_state: str = "active",
+    special_tags: tuple[str, ...] = ("ordinary",),
+    event_tags: tuple[str, ...] = (),
+    profile_complete: bool = True,
+    missing_reason: MarketContextMissingReason = (
+        MarketContextMissingReason.NO_MATCHING_EVENT
+    ),
+) -> MarketContextQueryV1:
+    calendar = MarketContextCalendarStateV1(
+        timestamp_utc_ns=window.core_start_ns,
+        session_state=session_state,
+        clock_sessions=("london",),
+        active_sessions=("london",) if session_state == "active" else (),
+        overlaps=(),
+        special_tags=special_tags,
+        holiday_tags=(),
+        event_tags=event_tags,
+        calendar_tags=(*special_tags, *event_tags),
+        profile_source="calendar-profile:fixture",
+        profile_version="1.0.0",
+        profile_complete=profile_complete,
+        limitations=("deterministic unit-test fixture",),
+    )
+    return MarketContextQueryV1(
+        timeline_id="market-context-timeline:fixture-v1",
+        view=MarketContextView.EX_POST,
+        start_ns=window.core_start_ns,
+        end_ns=window.core_end_ns,
+        as_of_ns=None,
+        events=(),
+        status=MarketContextQueryStatus.MISSING,
+        missing_reason=missing_reason,
+        calendar_state=calendar,
+        requested_symbols=("EURUSD",),
+        window_id=window.window_id,
+        limitations=("deterministic unit-test fixture",),
+    )
+
+
+def _fingerprint_evidence(
+    *batches,
+    status: str = "match",
+) -> CarvingFingerprintEvidenceV1:
+    return CarvingFingerprintEvidenceV1(
+        validation_payload={
+            "schema_version": SYNTHETIC_VALIDATION_SCHEMA_VERSION,
+            "status": status,
+            "advisory": True,
+            "compared_target_count": 1,
+            "matching_target_count": 1 if status == "match" else 0,
+            "mismatched_target_count": 0 if status == "match" else 1,
+        },
+        candidate_batch_ids=tuple(item.batch_id for item in batches),
+        reference_report_id="quality-report:reference-fixture",
+        candidate_report_id="quality-report:candidate-fixture",
+    )
+
+
+def _carving_inputs(
+    constraints: HistoricalCarvingConstraintSetV1,
+    *,
+    condition: ReferenceMotifConditionV1 | None = None,
+    source_name: str = "ordinary",
+):
+    selected_condition = condition or _condition()
+    index = _index(selected_condition, name=source_name)
+    config = EmpiricalMotifGeneratorConfigV1()
+    run = _run(
+        config,
+        additional_configuration_ids=(constraints.constraint_set_id,),
+    )
+    left = _anchor(run, BASE_NS, sequence=0, row_id=1)
+    right = _anchor(run, BASE_NS + SECOND, sequence=99, row_id=2)
+    window = _window(run, BASE_NS, BASE_NS + SECOND + 1)
+    result = _result(index, selected_condition)
+    batch = generate_empirical_motif_candidates(
+        run=run,
+        window=window,
+        left_anchor=left,
+        right_anchor=right,
+        query_result=result,
+        config=config,
+    )
+    return config, run, left, right, window, result, batch
 
 
 @pytest.mark.parametrize(
@@ -1102,3 +1210,412 @@ def test_reverse_degradation_scorecard_compares_motif_generator_to_controls() ->
     assert all(
         item.execution_summary["converged_count"] == 1 for item in motif_scores
     )
+
+
+def test_historical_carving_projects_with_bound_lineage_and_roundtrips() -> (
+    None
+):
+    condition = _condition(
+        special_tags=("daily_rollover", "crisis"),
+        event_tags=("news_window",),
+    )
+    policies = (
+        HistoricalCarvingConditionPolicyV1(
+            name="news intensity and spread",
+            match_tags=("news_window",),
+            spread_multiplier=1.5,
+            priority=30,
+        ),
+        HistoricalCarvingConditionPolicyV1(
+            name="rollover liquidity",
+            match_tags=("daily_rollover",),
+            spread_multiplier=2.0,
+            priority=20,
+        ),
+        HistoricalCarvingConditionPolicyV1(
+            name="crisis state",
+            match_tags=("crisis",),
+            priority=10,
+        ),
+    )
+    constraints = HistoricalCarvingConstraintSetV1(
+        fingerprint_constraint_id="fingerprint-constraints:fixture-v1",
+        condition_policies=policies,
+    )
+    _, run, left, right, window, _, batch = _carving_inputs(
+        constraints,
+        condition=condition,
+    )
+    context = _market_context(
+        window,
+        special_tags=("daily_rollover", "crisis"),
+        event_tags=("news_window",),
+    )
+    evidence = _fingerprint_evidence(batch)
+
+    carved = carve_empirical_motif_candidates(
+        run=run,
+        window=window,
+        candidate_batch=batch,
+        observed_events=(left, right),
+        market_context=context,
+        constraints=constraints,
+        fingerprint_evidence=evidence,
+    )
+
+    assert carved.status is CarvingBatchStatus.ACCEPTED
+    assert carved.projected_event_count == len(batch.events)
+    assert carved.rejection_summary.rejected_count == 0
+    assert all(
+        item.constraint_set_id == constraints.constraint_set_id
+        for item in carved.accepted_events
+    )
+    assert all(
+        item.candidate_event_id != item.output_event_id
+        and item.original_bid is not None
+        and item.original_ask is not None
+        and item.spread_multiplier == pytest.approx(3.0)
+        and set(item.policy_ids) == {policy.policy_id for policy in policies}
+        for item in carved.accepted_lineage
+    )
+    merged = carved.merged_stream((left, right))
+    assert merged.observed_event_count == 2
+    assert {left.event_id, right.event_id}.issubset(
+        {item.event_id for item in merged.events}
+    )
+    assert carved.metadata()["rejected_rows_retained"] is False
+    assert "accepted_events" not in carved.metadata()
+    assert (
+        HistoricalCarvingConstraintSetV1.from_json(constraints.to_json())
+        == constraints
+    )
+    assert (
+        HistoricalCarvedCandidateBatchV1.from_json(carved.to_json()) == carved
+    )
+
+
+def test_hard_closure_and_quarantine_precede_conditioned_projection() -> None:
+    projection = HistoricalCarvingConditionPolicyV1(
+        name="ordinary projection",
+        match_tags=("ordinary",),
+        spread_multiplier=2.0,
+    )
+    closed_constraints = HistoricalCarvingConstraintSetV1(
+        fingerprint_constraint_id="fingerprint-constraints:fixture-v1",
+        condition_policies=(projection,),
+    )
+    _, run, left, right, window, _, batch = _carving_inputs(closed_constraints)
+    closed = carve_empirical_motif_candidates(
+        run=run,
+        window=window,
+        candidate_batch=batch,
+        observed_events=(left, right),
+        market_context=_market_context(
+            window,
+            session_state="weekend_closed",
+        ),
+        constraints=closed_constraints,
+        fingerprint_evidence=_fingerprint_evidence(batch),
+    )
+    assert closed.status is CarvingBatchStatus.REFUSED
+    assert closed.refusal_reason is CarvingReason.CLOSED_SESSION
+    assert not closed.accepted_events
+    assert closed.projected_event_count == 0
+    assert closed.rejection_summary.reason_counts == {
+        CarvingReason.CLOSED_SESSION.value: len(batch.events)
+    }
+
+    quarantine_constraints = HistoricalCarvingConstraintSetV1(
+        fingerprint_constraint_id="fingerprint-constraints:fixture-v1",
+        quarantines=(
+            HistoricalCarvingQuarantineV1(
+                symbol="EURUSD",
+                start_ns=BASE_NS,
+                end_ns=BASE_NS + SECOND,
+                reason="source quality quarantine",
+                source_id="quality-report:fixture",
+            ),
+        ),
+        max_rejection_examples=2,
+    )
+    _, run, left, right, window, _, batch = _carving_inputs(
+        quarantine_constraints
+    )
+    quarantined = carve_empirical_motif_candidates(
+        run=run,
+        window=window,
+        candidate_batch=batch,
+        observed_events=(left, right),
+        market_context=_market_context(window),
+        constraints=quarantine_constraints,
+        fingerprint_evidence=_fingerprint_evidence(batch),
+    )
+    assert quarantined.status is CarvingBatchStatus.REFUSED
+    assert quarantined.refusal_reason is CarvingReason.QUARANTINED_INTERVAL
+    assert len(quarantined.rejection_examples) == 2
+    assert quarantined.rejection_summary.reason_counts == {
+        CarvingReason.QUARANTINED_INTERVAL.value: len(batch.events)
+    }
+
+
+def test_conditioned_thinning_is_retry_stable_and_evidence_is_bounded() -> None:
+    constraints = HistoricalCarvingConstraintSetV1(
+        fingerprint_constraint_id="fingerprint-constraints:fixture-v1",
+        condition_policies=(
+            HistoricalCarvingConditionPolicyV1(
+                name="zero intensity envelope",
+                match_tags=("ordinary",),
+                acceptance_rate=0.0,
+            ),
+        ),
+        max_rejection_examples=1,
+    )
+    _, run, left, right, window, _, batch = _carving_inputs(constraints)
+    arguments = {
+        "run": run,
+        "window": window,
+        "candidate_batch": batch,
+        "observed_events": (left, right),
+        "market_context": _market_context(window),
+        "constraints": constraints,
+        "fingerprint_evidence": _fingerprint_evidence(batch),
+    }
+    first = carve_empirical_motif_candidates(**arguments)
+    retry = carve_empirical_motif_candidates(**arguments)
+
+    assert first == retry
+    assert first.status is CarvingBatchStatus.REFUSED
+    assert first.refusal_reason is CarvingReason.INTENSITY_THINNED
+    assert len(first.rejection_examples) == 1
+    assert (
+        first.rejection_summary.accepted_count
+        + first.rejection_summary.rejected_count
+        == first.rejection_summary.candidate_count
+        == len(batch.events)
+    )
+    assert first.rejection_summary.reason_counts == {
+        CarvingReason.INTENSITY_THINNED.value: len(batch.events)
+    }
+
+    failed_validation = carve_empirical_motif_candidates(
+        **{
+            **arguments,
+            "fingerprint_evidence": _fingerprint_evidence(
+                batch, status="mismatch"
+            ),
+        }
+    )
+    assert failed_validation.refusal_reason is (
+        CarvingReason.FINGERPRINT_VALIDATION_FAILED
+    )
+    assert not failed_validation.accepted_events
+
+
+def test_motif_incompatibility_uses_same_position_substitution() -> None:
+    condition = _condition()
+    primary_index = _index(condition, name="primary")
+    alternate_index = _index(condition, name="alternate")
+    eligible_motif_id = alternate_index.fragments[0].fragment_id
+    constraints = HistoricalCarvingConstraintSetV1(
+        fingerprint_constraint_id="fingerprint-constraints:fixture-v1",
+        condition_policies=(
+            HistoricalCarvingConditionPolicyV1(
+                name="eligible crisis motif",
+                match_tags=("ordinary",),
+                eligible_motif_ids=(eligible_motif_id,),
+            ),
+        ),
+    )
+    config = EmpiricalMotifGeneratorConfigV1()
+    run = _run(
+        config,
+        additional_configuration_ids=(constraints.constraint_set_id,),
+    )
+    left = _anchor(run, BASE_NS, sequence=0, row_id=1)
+    right = _anchor(run, BASE_NS + SECOND, sequence=99, row_id=2)
+    window = _window(run, BASE_NS, BASE_NS + SECOND + 1)
+    primary = generate_empirical_motif_candidates(
+        run=run,
+        window=window,
+        left_anchor=left,
+        right_anchor=right,
+        query_result=_result(primary_index, condition),
+        config=config,
+    )
+    alternate = generate_empirical_motif_candidates(
+        run=run,
+        window=window,
+        left_anchor=left,
+        right_anchor=right,
+        query_result=_result(alternate_index, condition),
+        config=config,
+    )
+
+    without_substitution = carve_empirical_motif_candidates(
+        run=run,
+        window=window,
+        candidate_batch=primary,
+        observed_events=(left, right),
+        market_context=_market_context(window),
+        constraints=constraints,
+        fingerprint_evidence=_fingerprint_evidence(primary),
+    )
+    substituted = carve_empirical_motif_candidates(
+        run=run,
+        window=window,
+        candidate_batch=primary,
+        substitution_batches=(alternate,),
+        observed_events=(left, right),
+        market_context=_market_context(window),
+        constraints=constraints,
+        fingerprint_evidence=_fingerprint_evidence(primary, alternate),
+    )
+
+    assert (
+        without_substitution.refusal_reason is CarvingReason.MOTIF_INCOMPATIBLE
+    )
+    assert substituted.status is CarvingBatchStatus.ACCEPTED
+    assert substituted.substituted_event_count == len(primary.events)
+    assert all(
+        item.candidate_batch_id == alternate.batch_id
+        and item.action.value == "substituted"
+        for item in substituted.accepted_lineage
+    )
+
+
+@pytest.mark.parametrize(
+    ("constraint_kwargs", "expected_reason"),
+    (
+        (
+            {"max_input_candidate_events": 1},
+            CarvingReason.RESOURCE_LIMIT,
+        ),
+        (
+            {"max_anchor_gap_ns": SECOND // 2},
+            CarvingReason.ANCHOR_GAP_LIMIT,
+        ),
+    ),
+)
+def test_carving_refuses_resource_and_pathological_gap_limits(
+    constraint_kwargs: dict[str, int],
+    expected_reason: CarvingReason,
+) -> None:
+    constraints = HistoricalCarvingConstraintSetV1(
+        fingerprint_constraint_id="fingerprint-constraints:fixture-v1",
+        **constraint_kwargs,
+    )
+    _, run, left, right, window, _, batch = _carving_inputs(constraints)
+    carved = carve_empirical_motif_candidates(
+        run=run,
+        window=window,
+        candidate_batch=batch,
+        observed_events=(left, right),
+        market_context=_market_context(window),
+        constraints=constraints,
+        fingerprint_evidence=_fingerprint_evidence(batch),
+    )
+    assert carved.status is CarvingBatchStatus.REFUSED
+    assert carved.refusal_reason is expected_reason
+    assert not carved.accepted_events
+
+
+def test_carving_preserves_an_upstream_empty_window_as_explicit_empty() -> None:
+    constraints = HistoricalCarvingConstraintSetV1(
+        fingerprint_constraint_id="fingerprint-constraints:fixture-v1"
+    )
+    _, run, left, right, window, _, batch = _carving_inputs(
+        constraints,
+        condition=_condition(intensity=0.0),
+    )
+    assert batch.status is MotifGenerationStatus.EMPTY
+
+    carved = carve_empirical_motif_candidates(
+        run=run,
+        window=window,
+        candidate_batch=batch,
+        observed_events=(left, right),
+        market_context=_market_context(window),
+        constraints=constraints,
+        fingerprint_evidence=None,
+    )
+
+    assert carved.status is CarvingBatchStatus.EMPTY
+    assert carved.refusal_reason is CarvingReason.UPSTREAM_EMPTY
+    assert carved.rejection_summary.candidate_count == 0
+    assert carved.rejection_summary.reason_counts == {}
+    assert not carved.accepted_events and not carved.rejection_examples
+
+
+def test_carving_output_is_window_partition_invariant() -> None:
+    condition = _condition()
+    constraints = HistoricalCarvingConstraintSetV1(
+        fingerprint_constraint_id="fingerprint-constraints:fixture-v1"
+    )
+    config = EmpiricalMotifGeneratorConfigV1()
+    run = _run(
+        config,
+        additional_configuration_ids=(constraints.constraint_set_id,),
+    )
+    left = _anchor(run, BASE_NS, sequence=0, row_id=1)
+    right = _anchor(run, BASE_NS + SECOND, sequence=99, row_id=2)
+    result = _result(_index(condition), condition)
+    midpoint = BASE_NS + SECOND // 2
+    whole_window = _window(run, BASE_NS, BASE_NS + SECOND + 1)
+    left_window = _window(
+        run,
+        BASE_NS,
+        midpoint,
+        right_lookahead_ns=BASE_NS + SECOND + 1 - midpoint,
+    )
+    right_window = _window(
+        run,
+        midpoint,
+        BASE_NS + SECOND + 1,
+        left_halo_ns=midpoint - BASE_NS,
+    )
+
+    def generated(window: ReconstructionWindowV1):
+        return generate_empirical_motif_candidates(
+            run=run,
+            window=window,
+            left_anchor=left,
+            right_anchor=right,
+            query_result=result,
+            config=config,
+        )
+
+    whole_batch = generated(whole_window)
+    left_batch = generated(left_window)
+    right_batch = generated(right_window)
+
+    def carved(window: ReconstructionWindowV1, batch):
+        return carve_empirical_motif_candidates(
+            run=run,
+            window=window,
+            candidate_batch=batch,
+            observed_events=(left, right),
+            market_context=_market_context(window),
+            constraints=constraints,
+            fingerprint_evidence=_fingerprint_evidence(batch),
+        )
+
+    whole = carved(whole_window, whole_batch)
+    left_part = carved(left_window, left_batch)
+    right_part = carved(right_window, right_batch)
+    partitioned = (*left_part.accepted_events, *right_part.accepted_events)
+
+    assert whole == carved(whole_window, whole_batch)
+    assert [item.event_id for item in whole.accepted_events] == [
+        item.event_id
+        for item in sorted(
+            partitioned,
+            key=lambda item: (item.event_time_ns, item.event_sequence),
+        )
+    ]
+    assert [item.to_dict() for item in whole.accepted_events] == [
+        item.to_dict()
+        for item in sorted(
+            partitioned,
+            key=lambda item: (item.event_time_ns, item.event_sequence),
+        )
+    ]
