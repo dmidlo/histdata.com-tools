@@ -54,6 +54,7 @@ Works on macOS, Linux, and Windows.
     - [Broker Delivery Fingerprints](#broker-delivery-fingerprints)
     - [Broker-Conditioned Reconstruction](#broker-conditioned-reconstruction)
     - [Atomic Reconstruction Persistence](#atomic-reconstruction-persistence)
+    - [Reconstruction Activity Semantics](#reconstruction-activity-semantics)
     - [Temporal Reconstruction Orchestration](#temporal-reconstruction-orchestration)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
@@ -2730,6 +2731,40 @@ See
 [`docs/reconstruction-persistence-contracts.md`](docs/reconstruction-persistence-contracts.md)
 for layout, atomic commit, replay, preflight, query, cleanup, and #447 Temporal
 handoff semantics.
+
+#### Reconstruction Activity Semantics
+
+Final reconstructed rows are quote deliveries, not centralized FX trades.
+`summarize_reconstruction_activity_streams()` and
+`summarize_committed_reconstruction_activity()` derive deterministic activity
+metadata without widening the immutable 26-column `SyntheticEventV1` schema or
+persisting the 521-column analytical frame. The committed reader projects only
+the 19 event, price, origin, confidence, and lineage columns needed by the
+online accumulator and processes configurable bounded Arrow batches.
+
+Every symbol can emit separate observed-only, synthetic-only, and merged
+slices. Each slice records quote-event/update counts, exposure duration, tick
+intensity, interarrival cadence, price-change and stale-quote transitions,
+spread-based liquidity proxies, optional event-confidence support, exact units,
+aggregation rules, bounded provenance, and a content hash. Volume handling is
+explicitly `unavailable`, `omitted`, source/broker supplied, or a synthetic
+activity proxy; the contracts always set `centralized_traded_volume_claim` to
+false and refuse source-size states when the final event schema has no such
+fields.
+
+Activity evidence is bound to an information manifest and either ex-post or
+ex-ante mode. Ex-ante summaries require an as-of timestamp, while ex-post
+summaries reject one. Validation reuses the existing reverse-degradation
+scorecard's event-count, intensity, interarrival, burst/quiet, and spread
+metrics plus calibration support; it never selects an automatic winner.
+Explicit sum, boundary-carry, recomputation, and support-weighted-mean rules
+form the derived-bar handoff for #18, with volume remaining unavailable unless
+separately sourced.
+
+See
+[`docs/reconstruction-activity-semantics.md`](docs/reconstruction-activity-semantics.md)
+for metric definitions, information and volume policy, provenance, streaming,
+benchmark, and derived-bar contracts.
 
 #### Temporal Reconstruction Orchestration
 
