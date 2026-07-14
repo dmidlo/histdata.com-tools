@@ -110,6 +110,7 @@ _KEY_ALIASES = {
     "symbol_group": "pair_groups",
     "symbol_groups": "pair_groups",
     "keep_runtime": "orchestration_keep_runtime",
+    "timezone": "output_timezone",
     "repo_quality": "repo_quality_refresh",
     "schedule": "schedule_key",
     "verbose": "verbosity",
@@ -201,6 +202,7 @@ _SCALAR_ARGS = {
     "request_bundle_out": "--request-bundle-out",
     "request_json_out": "--request-json-out",
     "schedule_key": "--schedule-key",
+    "output_timezone": "--timezone",
 }
 _LIST_ARGS = {
     "pair_groups": "--pair-groups",

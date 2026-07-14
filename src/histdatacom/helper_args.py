@@ -24,6 +24,7 @@ DEFAULT_HELPER_ARGS: dict[str, Any] = {
     "default_download_dir": f"data{os.sep}",
     "from_api": False,
     "api_return_type": "polars",
+    "output_timezone": "",
     "batch_size": "5000",
     "delete_after_influx": False,
     "zip_persist": False,

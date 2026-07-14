@@ -15,6 +15,7 @@ from histdatacom.utils import (
     get_now_utc_timestamp,
     load_influx_yaml,
     normalize_api_return_type,
+    normalize_output_timezone,
     set_working_data_dir,
 )
 
@@ -62,6 +63,32 @@ def test_api_return_type_contract_is_explicit() -> None:
         "pandas",
         "polars",
     }
+
+
+@pytest.mark.parametrize(
+    ("timezone_name", "expected"),
+    (
+        ("UTC", "UTC"),
+        ("America/New_York", "America/New_York"),
+        (" Europe/London ", "Europe/London"),
+        (None, ""),
+        ("", ""),
+    ),
+)
+def test_normalize_output_timezone(
+    timezone_name: str | None,
+    expected: str,
+) -> None:
+    """IANA output zones should be normalized without choosing a local default."""
+    assert normalize_output_timezone(timezone_name) == expected
+
+
+def test_normalize_output_timezone_rejects_unknown_zone() -> None:
+    """Unknown zones should fail with actionable IANA guidance."""
+    with pytest.raises(ValueError, match="unsupported output timezone") as err:
+        normalize_output_timezone("Mars/Olympus_Mons")
+
+    assert "America/New_York" in str(err.value)
 
 
 def test_get_now_utc_timestamp_uses_aware_utc_without_warnings() -> None:

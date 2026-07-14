@@ -39,6 +39,7 @@ from histdatacom.cli_config import (
     routed_command_from_cli_args,
 )
 from histdatacom.exceptions import (
+    ConfigurationError,
     format_exception_for_cli,
     format_failure_info_for_cli,
     InfluxConfigurationError,
@@ -106,6 +107,7 @@ from histdatacom.operational_health import (
 )
 from histdatacom.utils import (
     load_influx_yaml,
+    normalize_output_timezone,
     set_working_data_dir,
     normalize_api_return_type,
 )
@@ -146,6 +148,7 @@ class RuntimeContext:
     orchestration_keep_runtime: bool
     orchestration_wait_result: bool
     api_return_type: str | None
+    output_timezone: str
     data_quality: bool
     quality_paths: tuple[str, ...]
     quality_check_groups: tuple[str, ...]
@@ -533,6 +536,7 @@ class _HistDataCom:  # noqa:R701
         return Api().merge_records(
             records,
             return_type=str(self.context.api_return_type or ""),
+            output_timezone=self.context.output_timezone,
         )
 
 
@@ -550,6 +554,17 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
     args["default_download_dir"] = set_working_data_dir(args["data_directory"])
     args["api_return_type"] = normalize_api_return_type(args["api_return_type"])
     options.api_return_type = args["api_return_type"]
+    configured_output_timezone = str(args.get("output_timezone", "") or "")
+    try:
+        args["output_timezone"] = normalize_output_timezone(
+            configured_output_timezone
+        )
+    except ValueError as err:
+        raise ConfigurationError(
+            str(err),
+            detail={"output_timezone": configured_output_timezone.strip()},
+        ) from err
+    options.output_timezone = args["output_timezone"]
     _attach_influx_config_metadata(options, args)
     try:
         should_submit_to_orchestration(args)
@@ -568,6 +583,7 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         orchestration_keep_runtime=bool(args["orchestration_keep_runtime"]),
         orchestration_wait_result=bool(args["orchestration_wait_result"]),
         api_return_type=args["api_return_type"],
+        output_timezone=args["output_timezone"],
         data_quality=bool(args["data_quality"]),
         quality_paths=tuple(
             str(path) for path in (args.get("quality_paths") or ())
@@ -1230,7 +1246,7 @@ def _prune_expanded_empty_mapping_values(
 
 def _quality_profile_source_kind(profile: QualityProfile) -> str:
     """Return a stable public source kind for a quality profile."""
-    return quality_profile_source_kind(profile)
+    return str(quality_profile_source_kind(profile))
 
 
 def _bounded_source_items(
@@ -1421,7 +1437,17 @@ def main(
 
     if not options:
         options = Options()
-        _HistDataCom(options).run()
+        try:
+            _HistDataCom(options).run()
+        except ConfigurationError as err:
+            print(  # noqa:T201
+                format_exception_for_cli(
+                    err,
+                    title="HistData configuration invalid",
+                ),
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from err
         return None
     options.from_api = True
     return _HistDataCom(options).run()

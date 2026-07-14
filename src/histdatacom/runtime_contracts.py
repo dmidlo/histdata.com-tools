@@ -453,6 +453,11 @@ class RunRequest:
         schedule_key = str(getattr(options, "schedule_key", "") or "").strip()
         if schedule_key:
             metadata["schedule_key"] = schedule_key
+        output_timezone = str(
+            getattr(options, "output_timezone", "") or ""
+        ).strip()
+        if output_timezone:
+            metadata["output_timezone"] = output_timezone
         verbosity = max(0, int(getattr(options, "verbosity", 0) or 0))
         return cls(
             request_id=request_id or new_request_id(),

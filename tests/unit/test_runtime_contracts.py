@@ -153,11 +153,13 @@ def test_run_request_round_trips_options_payload() -> None:
     options.repo_quality_columns = True
     options.no_overlap = True
     options.schedule_key = "eurusd-cache"
+    options.output_timezone = "America/New_York"
 
     request = RunRequest.from_options(options, request_id="run-test")
     restored = RunRequest.from_dict(json.loads(json.dumps(request.to_dict())))
 
     assert restored == request
+    assert restored.metadata["output_timezone"] == "America/New_York"
     assert restored.request_id == "run-test"
     assert restored.pairs == ("eurusd", "gbpusd")
     assert restored.timeframes == ("T",)

@@ -838,6 +838,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args.extend(["-s", self.arg_namespace.start_yearmonth])
         if self.arg_namespace.end_yearmonth:
             args.extend(["-e", self.arg_namespace.end_yearmonth])
+        if self.arg_namespace.output_timezone:
+            args.extend(["--timezone", self.arg_namespace.output_timezone])
         if self.arg_namespace.available_remote_data:
             args.append("-A")
         if self.arg_namespace.update_remote_data:
@@ -1575,6 +1577,18 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             help=(
                 "set an end year and month for data."  # noqa:BLK100
                 " e.g. -e 2020-00 or -e 2022-04"
+            ),
+        )
+        config_args.add_argument(
+            "-z",
+            "--timezone",
+            "--output-timezone",
+            dest="output_timezone",
+            type=str,
+            metavar="IANA_ZONE",
+            help=(
+                "append datetime_local to API results in an IANA timezone; "
+                "canonical cache and Influx timestamps remain UTC"
             ),
         )
         influx_args.add_argument(

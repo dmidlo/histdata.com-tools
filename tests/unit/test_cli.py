@@ -539,6 +539,7 @@ histdatacom:
   data_directory: {data_dir}
   cpu_utilization: low
   batch_size: 123
+  timezone: America/New_York
   keep_runtime: true
   no_overlap: true
   orchestration_start: false
@@ -572,6 +573,7 @@ histdatacom:
     assert options.data_directory == str(data_dir)
     assert options.cpu_utilization == "low"
     assert options.batch_size == 123
+    assert options.output_timezone == "America/New_York"
     assert options.validate_urls
     assert options.download_data_archives
     assert not options.extract_csvs
@@ -583,6 +585,39 @@ histdatacom:
     assert options.request_bundle_out == str(bundle_path)
     assert options.request_json_out == str(request_path)
     assert options.verbosity == 2
+
+
+def test_cli_timezone_flag_uses_output_projection_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The short and long public flag should populate output_timezone."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "-z", "Europe/London", "--request-json-out", "-"],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.output_timezone == "Europe/London"
+
+
+def test_api_options_preserve_output_timezone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Programmatic API options should survive the argparse compatibility seam."""
+    monkeypatch.setattr(sys, "argv", ["histdatacom"])
+    options = Options()
+    options.from_api = True
+    options.pairs = {"eurusd"}
+    options.formats = {"ascii"}
+    options.timeframes = {"T"}
+    options.start_yearmonth = "2022-12"
+    options.output_timezone = "Asia/Tokyo"
+
+    parsed = ArgParser(options)()
+
+    assert parsed.output_timezone == "Asia/Tokyo"
 
 
 def test_config_file_keeps_explicit_cli_overrides(

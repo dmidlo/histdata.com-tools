@@ -117,7 +117,7 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--config PATH] [-p PAIR [PAIR ...]]
                    [--pair-groups GROUP [GROUP ...]] [-f FORMAT [FORMAT ...]]
                    [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH]
-                   [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE]
+                   [-e END_YEARMONTH] [-z IANA_ZONE] [-I] [-d] [-b BATCH_SIZE]
                    [-c CPU_UTILIZATION] [--data-directory DATA_DIRECTORY] [-v]
                    [--orchestration-start] [--no-orchestration-start]
                    [--submit-only] [--no-overlap]
@@ -181,6 +181,10 @@ Config:
   -e, --end_yearmonth END_YEARMONTH
                         set an end year and month for data. e.g. -e 2020-00 or
                         -e 2022-04
+  -z, --timezone, --output-timezone IANA_ZONE
+                        append datetime_local to API results in an IANA
+                        timezone; canonical cache and Influx timestamps remain
+                        UTC
 
 Influxdb:
   -I, --import_to_influxdb
@@ -771,8 +775,11 @@ pip install "histdatacom[influx]"
 
 - ascii is the only format accepted for influxdb import.
 - all histdata.com datetime data is in EST (Eastern Standard Time) with no adjustments for daylight savings.
-- Influxdb does not adjust for timezone and all datetime data is recorded as UTC epoch timestamps (nano-seconds since midnight 00:00, January, 1st, 1970)
+- InfluxDB does not attach a display timezone; all datetime data is written as UTC
+  epoch timestamps with millisecond precision.
 - this tool converts histdata.com ESTnoDST to UTC Epoch milli-second timestamps as part of the import-to-influx process
+- `-z/--timezone` never changes Influx timestamps. Select a display timezone in
+  the Influx query or UI instead.
 - enriched ASCII tick `.data` columns are projected onto the same tick point:
   observed quote fields, quality issue flags, quality/classification codes,
   training controls, and populated synthetic fields when present. Duplicate
@@ -3109,6 +3116,10 @@ available.
 - Waited orchestration `-A` / `-U` repository requests keep the output contract: API calls return the available-data dictionary, and CLI calls render the repository table.
 - `--build-cache` / `options.build_cache` builds canonical `.data` cache files for cache-capable ASCII datasets, removes transient ZIP/CSV sources after each cache is ready, and does not merge caches into memory.
 - API calls with `options.api_return_type` return the requested `polars`, `pandas`, or `arrow` object after a completed orchestration job by materializing cache artifacts on disk.
+- API calls with `options.output_timezone` append a timezone-aware
+  `datetime_local` view after cache materialization. Canonical `datetime` and
+  `timestamp_utc_ms` values remain UTC epoch milliseconds, and no localized
+  value is persisted.
 - If orchestration is unavailable, CLI calls exit nonzero with a clear error and API calls raise `OrchestrationUnavailableError`.
 - `-v` emits high-level orchestration lifecycle logs; `-vv` adds worker,
   workflow, and activity detail; `-vvv` enables trace-level package logging and
@@ -3123,7 +3134,15 @@ defaults:
 ```python
 options.orchestration_wait_result = True
 options.api_return_type = "polars"
+options.output_timezone = "America/New_York"  # optional IANA output view
 ```
+
+The equivalent command/config option is `-z/--timezone IANA_ZONE`; YAML accepts
+either `timezone` or `output_timezone`. Unknown timezone names fail before the
+orchestration job is submitted. The returned `datetime_local` datatype carries
+the selected timezone in Polars, pandas, and Arrow. Daylight-saving transitions
+follow that output zone, but HistData source timestamps remain interpreted as
+fixed EST without daylight-saving adjustments.
 
 Set `options.orchestration_wait_result = False` to submit a job and receive
 job metadata instead of a materialized API return object. Set
@@ -3355,6 +3374,7 @@ options = Options()
 
 ```python
 options.api_return_type = "polars"  # "polars", "pandas", or "arrow"
+options.output_timezone = "America/New_York"  # optional datetime_local column
 options.formats = {"ascii"}  # Must be {"ascii"}
 options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or tick-data-quotes
 options.pairs = {"eurusd"}

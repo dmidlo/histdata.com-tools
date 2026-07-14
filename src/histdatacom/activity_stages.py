@@ -61,6 +61,7 @@ from histdatacom.runtime_contracts import (
     status_has_csv_artifact,
 )
 from histdatacom.utils import (
+    OUTPUT_DATETIME_COLUMN,
     check_installed_module,
     create_full_path,
     force_datemonth_if_only_year,
@@ -69,6 +70,7 @@ from histdatacom.utils import (
     get_now_utc_timestamp,
     get_year_from_datemonth,
     hash_dict,
+    normalize_output_timezone,
 )
 
 DEFAULT_REPOSITORY_URL = (
@@ -1360,6 +1362,7 @@ def merge_cache_work_items(
     *,
     return_type: str = "polars",
     materialize: bool = True,
+    output_timezone: str = "",
 ) -> MergeStageOutput:
     """Merge cache artifacts from explicit work items."""
     mergeable = _mergeable_cache_items(work_items)
@@ -1389,6 +1392,7 @@ def merge_cache_work_items(
                 ordered_items,
                 return_type=return_type,
                 already_ordered=True,
+                output_timezone=output_timezone,
             )
 
     if not materialize:
@@ -1448,6 +1452,7 @@ def merge_cache_items(
     *,
     return_type: str,
     already_ordered: bool = False,
+    output_timezone: str = "",
 ) -> Any:
     """Merge one pair/timeframe cache set into the requested API type."""
     import polars as pl
@@ -1471,6 +1476,7 @@ def merge_cache_items(
         for item in ordered_items
     ]
     merged = pl.concat(frames) if frames else pl.DataFrame()
+    merged = _append_output_timezone_projection(merged, output_timezone)
     return _convert_cache_frame(merged, return_type)
 
 
@@ -1478,11 +1484,13 @@ def merge_cache_records(
     records: Sequence[Any],
     *,
     return_type: str,
+    output_timezone: str = "",
 ) -> Any:
     """Merge one legacy record set through the queue-free implementation."""
     return merge_cache_items(
         [WorkItem.from_record(record) for record in records],
         return_type=return_type,
+        output_timezone=output_timezone,
     )
 
 
@@ -3189,6 +3197,24 @@ def _convert_cache_frame(frame: Any, return_type: str) -> Any:
             return frame
         case _:
             raise ValueError(f"unsupported API return type: {return_type}")
+
+
+def _append_output_timezone_projection(frame: Any, timezone_name: str) -> Any:
+    """Append a localized API timestamp while preserving canonical UTC millis."""
+    normalized = normalize_output_timezone(timezone_name)
+    if not normalized:
+        return frame
+    if "datetime" not in frame.columns:
+        raise ValueError("timezone projection requires a datetime column")
+
+    import polars as pl
+
+    return frame.with_columns(
+        pl.col("datetime")
+        .cast(pl.Datetime("ms", "UTC"))
+        .dt.convert_time_zone(normalized)
+        .alias(OUTPUT_DATETIME_COLUMN)
+    )
 
 
 def _collate_cache_sets(

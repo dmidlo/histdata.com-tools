@@ -2942,6 +2942,105 @@ def test_api_orchestration_dataframe_return_is_materialized_from_cache_artifacts
     }
 
 
+def test_api_orchestration_materialization_applies_output_timezone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The client-side view should use the timezone carried by public Options."""
+    import polars as pl
+
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> JobResult:
+        captured["request"] = request
+        return _orchestration_cache_result(tmp_path)
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    options = _orchestration_options()
+    options.output_timezone = "Europe/London"
+
+    result = histdata_com.main(options)
+
+    assert isinstance(result, pl.DataFrame)
+    assert result.schema["datetime_local"] == pl.Datetime("ms", "Europe/London")
+    request = captured["request"]
+    assert isinstance(request, RunRequest)
+    assert request.metadata["output_timezone"] == "Europe/London"
+
+
+def test_api_rejects_unknown_output_timezone_before_submission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invalid IANA zones must fail before starting or submitting orchestration."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("invalid timezone should not submit")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    options = _orchestration_options()
+    options.output_timezone = "Mars/Olympus_Mons"
+
+    with pytest.raises(ValueError, match="unsupported output timezone"):
+        histdata_com.main(options)
+
+
+def test_cli_reports_unknown_output_timezone_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI configuration failures should use the bounded report boundary."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("invalid timezone should not submit")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--timezone",
+            "Mars/Olympus_Mons",
+            "--request-json-out",
+            "-",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    captured = capsys.readouterr()
+    assert err.value.code == 1
+    assert "HistData configuration invalid" in captured.err
+    assert "CONFIGURATION_ERROR" in captured.err
+    assert "Mars/Olympus_Mons" in captured.err
+    assert "Traceback" not in captured.err
+
+
 @pytest.mark.parametrize(
     ("status", "expected"),
     (

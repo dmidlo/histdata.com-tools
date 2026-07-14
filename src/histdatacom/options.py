@@ -30,6 +30,7 @@ class Options:
         "orchestration_start",
         "orchestration_keep_runtime",
         "orchestration_wait_result",
+        "output_timezone",
         "pair_groups",
         "pairs",
         "quality_check_groups",
@@ -138,6 +139,7 @@ class Options:
         self.orchestration_start: bool = True
         self.orchestration_keep_runtime: bool = False
         self.orchestration_wait_result: bool = True
+        self.output_timezone: str = ""
         self.no_overlap: bool = False
         self.schedule_key: str = ""
         self.verbosity: int = 0
