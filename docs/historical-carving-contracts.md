@@ -161,9 +161,11 @@ design: candidate generation, carving, and later reconciliation can operate one
 bounded window at a time without materializing a permanent augmented-history
 intermediate.
 
-## Deferred stages
+## Downstream stages
 
-- #441 owns synchronized cross-currency generation and reconciliation.
+- #441's implemented synchronized cross-currency reconciliation consumes these
+  accepted streams; see
+  [`cross-currency-reconciliation-contracts.md`](cross-currency-reconciliation-contracts.md).
 - later broker-transfer work owns broker-style conditioning.
 - #446 owns final incremental Parquet layout and atomic publication.
 - #447 owns production Temporal activities, backpressure, cancellation, and

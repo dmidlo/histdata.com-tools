@@ -212,7 +212,9 @@ must be written to artifact storage.
   using these windows, seeds, budgets, and carry contracts; see
   [`empirical-motif-generation-contracts.md`](empirical-motif-generation-contracts.md).
 - #440 owns hard historical carving and detailed rejection decisions.
-- #441 owns cross-currency generation and reconciliation semantics.
+- #441 implements exact-event-time cross-currency generation and reconciliation
+  over these all-symbol windows and manifests; see
+  [`cross-currency-reconciliation-contracts.md`](cross-currency-reconciliation-contracts.md).
 - #446 implements final atomic Parquet and manifest publication.
 - #447 maps the contracts onto production Temporal workflows and activities.
 

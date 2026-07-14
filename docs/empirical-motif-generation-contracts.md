@@ -158,7 +158,9 @@ winner or bypass hard historical constraints.
 
 - [Historical carving](historical-carving-contracts.md) consumes these
   candidate-only batches and owns accepted/rejected constraint decisions.
-- #441 owns synchronized cross-currency generation and reconciliation.
+- #441's implemented synchronized cross-currency reconciliation consumes these
+  candidate streams after historical carving; see
+  [`cross-currency-reconciliation-contracts.md`](cross-currency-reconciliation-contracts.md).
 - later broker-transfer work owns broker-style conditioning.
 - #446 owns final incremental Parquet layout and atomic publication.
 - #447 owns production Temporal activities, backpressure, cancellation, and

@@ -48,6 +48,7 @@ Works on macOS, Linux, and Windows.
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
     - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
     - [Historical Candidate Carving](#historical-candidate-carving)
+    - [Cross-Currency Reconciliation](#cross-currency-reconciliation)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -2574,6 +2575,31 @@ quotes and candidate/output content hashes. Rejected rows are discarded; only
 reconciling reason counts and bounded examples remain. See
 [`docs/historical-carving-contracts.md`](docs/historical-carving-contracts.md)
 for precedence, evidence binding, refusal, identity, and streaming semantics.
+
+#### Cross-Currency Reconciliation
+
+`plan_cross_currency_windows()` intersects explicit per-symbol coverage and
+plans only complete synchronized windows. Missing legs, unequal leading or
+trailing periods, and spans without common support remain recorded exclusions;
+they are never filled or silently shortened.
+
+`reconcile_cross_currency_window()` applies versioned triangle and inverse
+relationships at exact nanosecond event times. It never forward-fills another
+instrument. Duplicate timestamps pair by deterministic event ordinal, while
+asynchronous support and stale-join risk remain measured. Only synthetic
+quotes may be projected; immutable observations are content-hashed and must
+remain unchanged. The first certified relationship is `EURUSD / GBPUSD ~=
+EURGBP`.
+
+Residuals, support, projections, and infeasibility are stratified by session,
+event, and feed epoch. Every passing generation group still requires the same
+content-bound validation after broker conditioning. A partition manifest can
+commit only when that final validation covers the complete all-symbol
+synchronization unit and exact output content. The existing #331 diagnostic
+also consumes reconciled streams directly without a permanent cache
+roundtrip. See
+[`docs/cross-currency-reconciliation-contracts.md`](docs/cross-currency-reconciliation-contracts.md)
+for projection, refusal, validation, compatibility, and atomic-commit details.
 
 ---
 

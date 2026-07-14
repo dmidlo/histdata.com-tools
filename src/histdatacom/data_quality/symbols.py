@@ -242,6 +242,78 @@ DEFAULT_CROSS_INSTRUMENT_TOLERANCE = HistDataCrossInstrumentTolerance()
 
 
 @dataclass(frozen=True, slots=True)
+class CrossInstrumentPointInput:
+    """One public event-time midpoint consumed by cross-series diagnostics."""
+
+    timestamp_utc_ms: int
+    price: float
+    row_id: int
+    source_row_number: int
+    event_seq: int
+
+    def __post_init__(self) -> None:
+        if isinstance(self.timestamp_utc_ms, bool) or not isinstance(
+            self.timestamp_utc_ms, int
+        ):
+            raise ValueError("timestamp_utc_ms must be an integer")
+        price = float(self.price)
+        if not math.isfinite(price) or price <= 0.0:
+            raise ValueError("cross-instrument input price must be positive")
+        object.__setattr__(self, "price", price)
+        for name in ("row_id", "source_row_number", "event_seq"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+            ):
+                raise ValueError(f"{name} must be a non-negative integer")
+
+
+@dataclass(frozen=True, slots=True)
+class CrossInstrumentSeriesInput:
+    """One reconstructed series supplied directly to the #331 rule surface."""
+
+    symbol: str
+    timeframe: str
+    period: str
+    series_id: str
+    points: tuple[CrossInstrumentPointInput, ...]
+    path: str = ""
+    computed_from: str = "reconstructed_event_stream"
+
+    def __post_init__(self) -> None:
+        symbol = normalize_histdata_symbol(self.symbol)
+        if not symbol:
+            raise ValueError("cross-instrument input requires a symbol")
+        object.__setattr__(self, "symbol", symbol)
+        for name in ("timeframe", "period", "series_id", "computed_from"):
+            value = str(getattr(self, name) or "").strip()
+            if not value:
+                raise ValueError(f"cross-instrument input requires {name}")
+            object.__setattr__(self, name, value)
+        points = tuple(
+            sorted(
+                tuple(self.points),
+                key=lambda item: (
+                    item.timestamp_utc_ms,
+                    item.event_seq,
+                    item.row_id,
+                ),
+            )
+        )
+        if not points:
+            raise ValueError("cross-instrument input requires points")
+        object.__setattr__(self, "points", points)
+        path = str(self.path or "").strip()
+        object.__setattr__(
+            self,
+            "path",
+            path or f"reconstructed://{self.series_id}",
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class _CrossInstrumentPoint:
     timestamp_utc_ms: int
     price: float
@@ -784,6 +856,50 @@ class HistDataCrossInstrumentConsistencyRule:
             metadata={CROSS_INSTRUMENT_METADATA_KEY: payload},
         )
 
+    def evaluate_series(
+        self,
+        series: Iterable[CrossInstrumentSeriesInput],
+        *,
+        metadata: Mapping[str, JSONValue] | None = None,
+    ) -> QualityReport:
+        """Validate reconstructed event streams without a filesystem roundtrip."""
+        inputs = tuple(series)
+        scan = _scan_cross_instrument_series_inputs(
+            inputs,
+            tolerance=self.tolerance,
+            warning_severity=self.warning_severity,
+            error_severity=self.error_severity,
+        )
+        payload = _cross_instrument_payload(scan, tolerance=self.tolerance)
+        if not _has_cross_instrument_surface(scan):
+            return QualityReport(
+                metadata={CROSS_INSTRUMENT_METADATA_KEY: payload},
+            )
+        targets = tuple(
+            _quality_target_for_series_input(item) for item in inputs
+        )
+        run_target = _cross_instrument_target(
+            targets,
+            metadata=metadata,
+            payload=payload,
+        )
+        findings = _cross_instrument_findings(
+            run_target,
+            scan=scan,
+            tolerance=self.tolerance,
+            rule_id=self.rule_id,
+        )
+        return QualityReport(
+            rule_results=(
+                QualityRuleResult(
+                    rule_id=self.rule_id,
+                    target=run_target,
+                    findings=findings,
+                ),
+            ),
+            metadata={CROSS_INSTRUMENT_METADATA_KEY: payload},
+        )
+
 
 @dataclass(slots=True)
 class HistDataCrossSeriesFingerprintRule:
@@ -1070,6 +1186,100 @@ def _scan_cross_instrument_consistency(
             continue
         scan.fx_series.append(series)
 
+    return _complete_cross_instrument_scan(
+        scan,
+        tolerance=tolerance,
+        warning_severity=warning_severity,
+        error_severity=error_severity,
+    )
+
+
+def _scan_cross_instrument_series_inputs(
+    inputs: tuple[CrossInstrumentSeriesInput, ...],
+    *,
+    tolerance: HistDataCrossInstrumentTolerance,
+    warning_severity: QualitySeverity,
+    error_severity: QualitySeverity,
+) -> _CrossInstrumentScan:
+    scan = _CrossInstrumentScan(
+        target_count=len(inputs),
+        ascii_target_count=len(inputs),
+    )
+    for item in inputs:
+        target = _quality_target_for_series_input(item)
+        metadata = symbol_metadata_for(item.symbol)
+        if metadata.asset_class != ASSET_CLASS_FX:
+            _append_unavailable(
+                scan,
+                _CrossInstrumentUnavailable(
+                    reason="non_fx_series",
+                    symbols=(item.symbol,),
+                    timeframe=item.timeframe,
+                    period=item.period,
+                ),
+            )
+            continue
+        timestamp_counts = Counter(
+            point.timestamp_utc_ms for point in item.points
+        )
+        points: dict[int, _CrossInstrumentPoint] = {}
+        for row_number, point in enumerate(item.points, start=1):
+            points.setdefault(
+                point.timestamp_utc_ms,
+                _CrossInstrumentPoint(
+                    timestamp_utc_ms=point.timestamp_utc_ms,
+                    price=point.price,
+                    row_number=row_number,
+                    row_id=point.row_id,
+                    source_row_number=point.source_row_number,
+                    event_seq=point.event_seq,
+                ),
+            )
+        scan.fx_series.append(
+            _CrossInstrumentSeries(
+                target=target,
+                metadata=metadata,
+                timeframe=item.timeframe,
+                period=item.period,
+                price_kind="mid_bid_ask",
+                points=points,
+                row_count=len(item.points),
+                duplicate_timestamp_count=_duplicate_timestamp_row_count(
+                    timestamp_counts
+                ),
+                computed_from=item.computed_from,
+                series_id=item.series_id,
+            )
+        )
+    return _complete_cross_instrument_scan(
+        scan,
+        tolerance=tolerance,
+        warning_severity=warning_severity,
+        error_severity=error_severity,
+    )
+
+
+def _quality_target_for_series_input(
+    item: CrossInstrumentSeriesInput,
+) -> QualityTarget:
+    return QualityTarget(
+        path=item.path,
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe=item.timeframe,
+        symbol=item.symbol,
+        period=item.period,
+        metadata={"computed_from": item.computed_from},
+    )
+
+
+def _complete_cross_instrument_scan(
+    scan: _CrossInstrumentScan,
+    *,
+    tolerance: HistDataCrossInstrumentTolerance,
+    warning_severity: QualitySeverity,
+    error_severity: QualitySeverity,
+) -> _CrossInstrumentScan:
     if not scan.fx_series:
         _append_unavailable(
             scan,
