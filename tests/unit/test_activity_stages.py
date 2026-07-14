@@ -107,6 +107,18 @@ def _zip_bytes(filename: str = "DAT_ASCII_EURUSD_T_202201.csv") -> bytes:
     return stream.getvalue()
 
 
+def _live_zip_bytes() -> bytes:
+    """Return the CSV plus same-stem status report used by live HistData."""
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("DAT_ASCII_EURUSD_T_202201.csv", "rows")
+        archive.writestr(
+            "DAT_ASCII_EURUSD_T_202201.txt",
+            "HistData.com status report",
+        )
+    return stream.getvalue()
+
+
 def _form_html(
     *,
     token: str = "token",
@@ -838,6 +850,71 @@ def test_extract_csv_work_item_extracts_data_member(tmp_path: Path) -> None:
         output.result.artifacts[0].sha256 == hashlib.sha256(b"rows").hexdigest()
     )
     assert record.status is WorkStatus.CSV_ZIP
+
+
+def test_download_archive_allows_live_status_report_member(
+    tmp_path: Path,
+) -> None:
+    """The vendor's same-stem TXT report is metadata, not a retired axis."""
+    data_dir = tmp_path / "ASCII" / "T" / "eurusd" / "2022" / "1"
+    record = Record(
+        url=ASCII_TICK_URL,
+        status=WorkStatus.URL_VALID.value,
+        data_dir=f"{data_dir}{os.sep}",
+        data_tk="token",
+        data_date="2022",
+        data_datemonth="202201",
+        data_format="ASCII",
+        data_timeframe="T",
+        data_fxpair="eurusd",
+    )
+
+    output = download_archive_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        post_archive=lambda *args, **kwargs: _FakeResponse(
+            headers={
+                "Content-Disposition": (
+                    "attachment; "
+                    "filename=HISTDATA_COM_ASCII_EURUSD_T202201.zip"
+                ),
+            },
+            content=_live_zip_bytes(),
+        ),
+    )
+
+    assert output.forward
+    assert output.work_item.status is WorkStatus.CSV_ZIP
+    archive_path = data_dir / output.work_item.zip_filename
+    assert archive_path.exists()
+    with zipfile.ZipFile(archive_path) as archive:
+        assert sorted(archive.namelist()) == [
+            "DAT_ASCII_EURUSD_T_202201.csv",
+            "DAT_ASCII_EURUSD_T_202201.txt",
+        ]
+
+
+def test_extract_csv_ignores_live_status_report_member(tmp_path: Path) -> None:
+    """Extraction selects the CSV while leaving vendor metadata in the ZIP."""
+    archive_path = tmp_path / "live.zip"
+    archive_path.write_bytes(_live_zip_bytes())
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        zip_filename=archive_path.name,
+        status=WorkStatus.CSV_ZIP.value,
+        data_format="ascii",
+        data_timeframe="T",
+    )
+
+    output = extract_csv_work_item(
+        WorkItem.from_record(record),
+        args={**_args(tmp_path), "zip_persist": True},
+    )
+
+    assert output.forward
+    assert output.work_item.csv_filename == "DAT_ASCII_EURUSD_T_202201.csv"
+    assert (tmp_path / output.work_item.csv_filename).read_bytes() == b"rows"
+    assert archive_path.exists()
 
 
 def test_extract_csv_work_item_preserves_zip_when_configured(

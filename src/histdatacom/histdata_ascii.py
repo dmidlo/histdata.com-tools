@@ -311,7 +311,10 @@ def filename_has_unsupported_raw_dimensions(filename: str | Path) -> bool:
     """Return whether a HistData filename declares a retired raw axis."""
     name = Path(str(filename)).name.upper()
     stem = name
-    for suffix in (".ZIP", ".CSV"):
+    # Live HistData ASCII archives include a same-stem ``.txt`` status report
+    # beside the CSV data member.  It declares the same supported raw axes and
+    # must not be mistaken for a retired platform or timeframe.
+    for suffix in (".ZIP", ".CSV", ".TXT"):
         if stem.endswith(suffix):
             stem = stem[: -len(suffix)]
     parts = stem.split("_")

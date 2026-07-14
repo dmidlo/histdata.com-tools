@@ -57,6 +57,7 @@ Works on macOS, Linux, and Windows.
     - [Reconstruction Activity Semantics](#reconstruction-activity-semantics)
     - [Derived Reconstruction Candlesticks](#derived-reconstruction-candlesticks)
     - [Reconstructed-History Strategy Sensitivity](#reconstructed-history-strategy-sensitivity)
+    - [EURUSD Triangle Reconstruction Certification](#eurusd-triangle-reconstruction-certification)
     - [Temporal Reconstruction Orchestration](#temporal-reconstruction-orchestration)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
@@ -2858,6 +2859,44 @@ See
 [`docs/strategy-sensitivity-contracts.md`](docs/strategy-sensitivity-contracts.md)
 for input identities, information-mode gates, source adapters, accounting,
 stratification, restoration, terminal states, and resource bounds.
+
+#### EURUSD Triangle Reconstruction Certification
+
+`eurusd_triangle_certification_policy()` predeclares the complete v2.1.0
+scientific, operational, reporting, repository, and release contract for the
+EURGBP/EURUSD/GBPUSD product over their common support beginning at `200203`.
+The selected broker fingerprint, common end month, reverse-degradation and
+conditioned evidence, and peak-memory/scratch/runtime/storage budgets all
+participate in the deterministic policy identity.
+
+Certification consumes compact, verified report artifacts bound to that exact
+policy identity, so evidence cannot be reused after scope or threshold drift.
+Each scalar observation names the exact artifact identities that support it,
+and every requirement declares the artifact kinds it needs. Missing artifacts
+remain `missing`; measured threshold violations are `failed`; neither can
+become a pass through a summary boolean. A broker fingerprint with an identity
+different from the one frozen in policy fails the post-render cross-currency
+gate.
+
+`evaluate_reconstruction_certification()` covers all fifteen #449 gates and
+returns one bounded `ReconstructionCertificationDossierV1`. The dossier can be
+`incomplete`, `failed`, `ready-for-promotion`, or `certified`.
+`ready-for-promotion` is narrowly reserved for the state where every check has
+passed except the single coverage observation. Coverage is still run exactly
+once, only during the explicit `dev`-to-`main` promotion. The TestPyPI local
+simple-registry preflight and all non-coverage evidence must already pass.
+
+`write_reconstruction_certification_dossier()` atomically publishes canonical
+machine JSON and deterministic human-readable Markdown, then verifies JSON
+readback. Both outputs carry strong content references. The dossier contains no
+tick rows or analytical-frame columns and never claims historical truth,
+selects an automatic winner, makes an investment recommendation, or authorizes
+release before every gate passes.
+
+See
+[`docs/reconstruction-certification-contracts.md`](docs/reconstruction-certification-contracts.md)
+for the gate mapping, artifact binding, state machine, publication semantics,
+and required real-data execution sequence.
 
 #### Temporal Reconstruction Orchestration
 

@@ -17,6 +17,7 @@ from histdatacom.histdata_ascii import (
     convert_polars_datetime_to_utc_ms,
     convert_batch_for_api,
     delimiter_for_timeframe,
+    filename_has_unsupported_raw_dimensions,
     format_influx_line,
     merge_batches,
     normalize_ascii_row,
@@ -265,6 +266,16 @@ def test_ascii_import_rejects_retired_platform_filename(
         read_ascii_file_to_polars(retired, "T")
     with pytest.raises(ValueError, match="ASCII tick"):
         read_ascii_file(retired, "T")
+
+
+def test_ascii_status_report_filename_keeps_supported_dimensions() -> None:
+    """Live same-stem TXT reports retain the supported ASCII tick axes."""
+    assert not filename_has_unsupported_raw_dimensions(
+        "DAT_ASCII_EURUSD_T_202201.txt"
+    )
+    assert filename_has_unsupported_raw_dimensions(
+        "DAT_NT_EURUSD_T_LAST_202201.txt"
+    )
 
 
 def test_ascii_zip_import_rejects_retired_platform_member(
