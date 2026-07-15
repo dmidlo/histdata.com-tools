@@ -100,6 +100,10 @@ def _write_common_assets(
 ) -> None:
     """Write common runtime assets to a fake wheel."""
     wheel.writestr(
+        "histdatacom/market_context/assets/operator_shocks_v1.json",
+        '{"schema_version":"fixture"}',
+    )
+    wheel.writestr(
         "histdatacom/orchestration/assets/README.md",
         "runtime assets",
     )

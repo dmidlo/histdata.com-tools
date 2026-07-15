@@ -90,9 +90,9 @@ def test_publish_exact_narrow_schema_reconciles_anchors_and_replays(
     assert "events" not in json.dumps(payload)
 
     for partition in manifest.partitions:
-        table = pq.read_table(
+        table = pq.ParquetFile(
             published.manifest_path.parent / partition.relative_path
-        )
+        ).read()
         assert table.schema.names == list(SYNTHETIC_EVENT_ARROW_COLUMNS)
         assert table.num_columns == 26
         assert table.num_columns < 521

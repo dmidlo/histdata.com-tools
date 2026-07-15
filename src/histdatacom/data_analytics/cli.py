@@ -27,6 +27,13 @@ from histdatacom.data_analytics.feed_epochs_v2 import (
     read_active_time_feed_epoch_definition,
     write_active_time_feed_epoch_campaign,
 )
+from histdatacom.market_context import (
+    DEFAULT_MARKET_CONTEXT_SOURCES,
+    DEFAULT_ONS_QUERIES,
+    MarketContextFetchProfileV1,
+    build_live_market_context_corpus,
+    write_market_context_corpus,
+)
 from histdatacom.synthetic.observation_calibration import (
     ObservationCalibrationProfileV2,
     calibrate_historical_observation_operators,
@@ -249,6 +256,53 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit compact calibration and artifact metadata",
     )
+    context = subparsers.add_parser(
+        "market-context-corpus",
+        help="build an immutable official-source point-in-time event corpus",
+    )
+    context.add_argument(
+        "--artifact-dir",
+        required=True,
+        metavar="PATH",
+        help="write content-addressed source, timeline, and corpus artifacts",
+    )
+    context.add_argument("--start-date", required=True, metavar="YYYY-MM-DD")
+    context.add_argument("--end-date", required=True, metavar="YYYY-MM-DD")
+    context.add_argument(
+        "--sources",
+        nargs="+",
+        choices=DEFAULT_MARKET_CONTEXT_SOURCES,
+        default=DEFAULT_MARKET_CONTEXT_SOURCES,
+        metavar="NAME",
+        help="approved source families to acquire",
+    )
+    context.add_argument(
+        "--ons-query",
+        dest="ons_queries",
+        nargs="+",
+        default=DEFAULT_ONS_QUERIES,
+        metavar="TEXT",
+        help="bounded ONS release-search queries",
+    )
+    context.add_argument(
+        "--operator-catalog",
+        default="",
+        metavar="PATH",
+        help="optional operator-maintained catalog (default: packaged catalog)",
+    )
+    context.add_argument("--timeout-seconds", type=float, default=30.0)
+    context.add_argument("--max-response-bytes", type=int, default=16 * 1024**2)
+    context.add_argument(
+        "--max-total-source-bytes", type=int, default=64 * 1024**2
+    )
+    context.add_argument("--max-ons-pages-per-query", type=int, default=8)
+    context.add_argument("--max-events", type=int, default=4096)
+    context.add_argument("--max-runtime-seconds", type=float, default=300.0)
+    context.add_argument(
+        "--json",
+        action="store_true",
+        help="emit compact corpus and artifact metadata",
+    )
     return parser
 
 
@@ -262,6 +316,61 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
         return 1
     configure_logging(args.verbosity)
+    if args.analytics_command == "market-context-corpus":
+        try:
+            build = build_live_market_context_corpus(
+                MarketContextFetchProfileV1(
+                    start_date=args.start_date,
+                    end_date=args.end_date,
+                    sources=tuple(args.sources),
+                    ons_queries=tuple(args.ons_queries),
+                    timeout_seconds=args.timeout_seconds,
+                    max_response_bytes=args.max_response_bytes,
+                    max_total_source_bytes=args.max_total_source_bytes,
+                    max_ons_pages_per_query=args.max_ons_pages_per_query,
+                    max_events=args.max_events,
+                    max_runtime_seconds=args.max_runtime_seconds,
+                ),
+                operator_catalog_path=args.operator_catalog or None,
+            )
+            artifacts = write_market_context_corpus(build, args.artifact_dir)
+        except (OSError, ValueError) as exc:
+            print(
+                f"market-context corpus error: {exc}", file=sys.stderr
+            )  # noqa:T201
+            return 1
+        corpus = build.corpus
+        context_payload = {
+            "schema_version": corpus.schema_version,
+            "corpus_id": corpus.corpus_id,
+            "timeline_id": corpus.timeline.timeline_id,
+            "event_count": len(corpus.timeline.events),
+            "source_count": len(corpus.sources),
+            "source_bytes": sum(item.size_bytes for item in corpus.sources),
+            "duplicate_event_count": corpus.duplicate_event_count,
+            "runtime_seconds": corpus.runtime_seconds,
+            "peak_memory_bytes": corpus.peak_memory_bytes,
+            "coverage": [item.to_dict() for item in corpus.coverage],
+            "artifacts": {
+                name: artifact.to_dict()
+                for name, artifact in sorted(artifacts.items())
+            },
+        }
+        if args.json:
+            print(  # noqa:T201
+                json.dumps(context_payload, indent=2, sort_keys=True)
+            )
+        else:
+            print(  # noqa:T201
+                "Point-in-time market-context corpus\n"
+                f"sources: {len(corpus.sources)}\n"
+                f"source bytes: {context_payload['source_bytes']}\n"
+                f"events: {len(corpus.timeline.events)}\n"
+                f"duplicates removed: {corpus.duplicate_event_count}\n"
+                f"timeline: {artifacts['timeline'].path}\n"
+                f"corpus: {artifacts['corpus'].path}"
+            )
+        return 0
     if args.analytics_command == "observation-calibrate-v2":
         definition = read_active_time_feed_epoch_definition(args.definition)
         evidence = read_feed_epoch_evidence_v2(args.evidence)
@@ -273,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
         configured_splits = {
             key: value for key, value in split_periods.items() if value
         }
-        campaign = calibrate_historical_observation_operators(
+        calibration_campaign = calibrate_historical_observation_operators(
             evidence,
             epoch_definition=definition,
             profile=ObservationCalibrationProfileV2(
@@ -287,54 +396,58 @@ def main(argv: list[str] | None = None) -> int:
             ),
         )
         artifacts = write_observation_calibration_campaign(
-            campaign, args.artifact_dir
+            calibration_campaign, args.artifact_dir
         )
-        payload = {
-            "schema_version": campaign.schema_version,
-            "campaign_id": campaign.campaign_id,
-            "operator_id": campaign.operator.operator_id,
-            "readiness_status": campaign.readiness_status,
-            "readiness_reasons": list(campaign.readiness_reasons),
-            "window_count": len(campaign.windows),
-            "runtime_seconds": campaign.runtime_seconds,
-            "peak_memory_bytes": campaign.peak_memory_bytes,
+        calibration_payload = {
+            "schema_version": calibration_campaign.schema_version,
+            "campaign_id": calibration_campaign.campaign_id,
+            "operator_id": calibration_campaign.operator.operator_id,
+            "readiness_status": calibration_campaign.readiness_status,
+            "readiness_reasons": list(calibration_campaign.readiness_reasons),
+            "window_count": len(calibration_campaign.windows),
+            "runtime_seconds": calibration_campaign.runtime_seconds,
+            "peak_memory_bytes": calibration_campaign.peak_memory_bytes,
             "artifacts": {
                 name: artifact.to_dict()
                 for name, artifact in sorted(artifacts.items())
             },
         }
         if args.json:
-            print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+            print(  # noqa:T201
+                json.dumps(calibration_payload, indent=2, sort_keys=True)
+            )
         else:
             print(  # noqa:T201
                 "Observation calibration v2\n"
-                f"operator: {campaign.operator.operator_id}\n"
-                f"targets: {len(campaign.targets)}\n"
-                f"windows: {len(campaign.windows)}\n"
-                f"readiness: {campaign.readiness_status}\n"
+                f"operator: {calibration_campaign.operator.operator_id}\n"
+                f"targets: {len(calibration_campaign.targets)}\n"
+                f"windows: {len(calibration_campaign.windows)}\n"
+                f"readiness: {calibration_campaign.readiness_status}\n"
                 f"campaign: {artifacts['campaign'].path}"
             )
-        return 0 if campaign.valid_for_application else 2
+        return 0 if calibration_campaign.valid_for_application else 2
     if args.analytics_command == "feed-epochs-v2":
-        campaign = analyze_active_time_feed_epochs(
+        epoch_campaign = analyze_active_time_feed_epochs(
             args.paths,
             config=_fit_v2_config_from_args(args),
         )
         artifacts = write_active_time_feed_epoch_campaign(
-            campaign, args.artifact_dir
+            epoch_campaign, args.artifact_dir
         )
-        payload = campaign.to_dict(include_evidence=False)
-        payload["artifacts"] = {
+        epoch_payload = epoch_campaign.to_dict(include_evidence=False)
+        epoch_payload["artifacts"] = {
             name: artifact.to_dict()
             for name, artifact in sorted(artifacts.items())
         }
         if args.json:
-            print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+            print(
+                json.dumps(epoch_payload, indent=2, sort_keys=True)
+            )  # noqa:T201
         else:
-            definition = campaign.definition
+            definition = epoch_campaign.definition
             print(  # noqa:T201
                 "Active-time feed epoch fit\n"
-                f"sources: {campaign.source_count}\n"
+                f"sources: {epoch_campaign.source_count}\n"
                 f"common periods: {definition.period_count}\n"
                 f"symbols: {', '.join(definition.symbols)}\n"
                 f"boundaries: {len(definition.boundaries)}\n"
@@ -364,12 +477,12 @@ def main(argv: list[str] | None = None) -> int:
         else None
     )
     if args.json:
-        payload = report.to_dict()
+        report_payload = report.to_dict()
         if artifact is not None:
-            payload["report_artifact"] = artifact.to_dict()
+            report_payload["report_artifact"] = artifact.to_dict()
         if epoch_artifact is not None:
-            payload["epoch_artifact"] = epoch_artifact.to_dict()
-        print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+            report_payload["epoch_artifact"] = epoch_artifact.to_dict()
+        print(json.dumps(report_payload, indent=2, sort_keys=True))  # noqa:T201
     else:
         summary = format_feed_regime_console_summary(report, artifact=artifact)
         if epoch_artifact is not None:

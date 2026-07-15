@@ -906,10 +906,15 @@ def calibrate_historical_observation_operators(
         "feed_epoch_definition_id": epoch_definition.definition_id,
         "profile_id": selected.profile_id,
         "calibration_end_period": calibration_period,
-        "evidence_ids": [item.evidence_id for item in source_rows],
-        "source_hashes": sorted(
-            {item.source_artifact_sha256 for item in source_rows}
-        ),
+        "evidence_ids": [
+            cast(JSONValue, item.evidence_id) for item in source_rows
+        ],
+        "source_hashes": [
+            cast(JSONValue, item)
+            for item in sorted(
+                {row.source_artifact_sha256 for row in source_rows}
+            )
+        ],
         "claim": "relative_dense_reference_observation_calibration",
     }
     corpus_hash = (
@@ -1451,7 +1456,10 @@ def _build_fit_evidence(
             reference_target.target_statistics["session_mix"]
         )
         desired = _conditioned_retention_grid(
-            float(target.target_statistics["relative_retention"]),
+            _finite_float(
+                target.target_statistics["relative_retention"],
+                "relative_retention",
+            ),
             target_update=target_update,
             reference_update=reference_update,
             target_session=target_session,
@@ -1510,7 +1518,10 @@ def _build_fit_evidence(
                     max(
                         1,
                         int(
-                            float(target.target_statistics["target_row_count"])
+                            _finite_float(
+                                target.target_statistics["target_row_count"],
+                                "target_row_count",
+                            )
                             * target_update[state]
                             * target_session[session]
                         ),

@@ -12,6 +12,7 @@ from typing import Any
 from zipfile import ZipFile
 
 EXPECTED_BASE_RUNTIME_ASSETS = {
+    "histdatacom/market_context/assets/operator_shocks_v1.json",
     "histdatacom/orchestration/assets/README.md",
     "histdatacom/orchestration/assets/manifest.json",
     "histdatacom/orchestration/assets/runtime-defaults.json",

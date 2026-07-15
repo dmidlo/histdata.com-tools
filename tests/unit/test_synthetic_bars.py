@@ -366,9 +366,9 @@ def test_atomic_publication_round_trip_and_idempotent_commit(
     assert manifest.to_dict()["analytical_frame_columns_inline"] is False
     assert discover_derived_bar_manifests(root) == (committed.manifest_path,)
     for partition in manifest.partitions:
-        table = pq.read_table(
+        table = pq.ParquetFile(
             committed.manifest_path.parent / partition.relative_path
-        )
+        ).read()
         assert table.schema.names == list(DERIVED_BAR_ARROW_COLUMNS)
         assert table.num_columns == 64
         assert table.num_columns < 521

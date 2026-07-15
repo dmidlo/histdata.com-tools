@@ -188,6 +188,9 @@ where = ["src"]
     "assets/bin/*/*",
     "assets/third-party/*/*",
 ]
+"histdatacom.market_context" = [
+    "assets/*.json",
+]
 
 [tool.setuptools.dynamic]
 version = { attr = "histdatacom.__version__" }

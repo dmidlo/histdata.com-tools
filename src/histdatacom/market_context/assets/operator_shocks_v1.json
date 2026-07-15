@@ -1,0 +1,221 @@
+{
+  "catalog_version": "2026-07-15.1",
+  "events": [
+    {
+      "affected_currencies": [
+        "EUR",
+        "GBP",
+        "USD"
+      ],
+      "affected_symbols": [
+        "EURGBP",
+        "EURUSD",
+        "GBPUSD"
+      ],
+      "ambiguity_reason": "The retained record conditions the UTC calendar day; it does not claim one exact market-impact instant.",
+      "available_at": "2001-09-12T00:00:00+00:00",
+      "canonical_key": "operator.shock.september-11-attacks.2001-09-11",
+      "confidence": 1.0,
+      "first_known_at": "2001-09-12T00:00:00+00:00",
+      "kind": "unscheduled_shock",
+      "limitations": [
+        "The full-day window is conservative and does not infer the first tradable reaction timestamp; ex-ante availability is delayed until the following UTC day.",
+        "Public record: National Commission on Terrorist Attacks Upon the United States, https://www.9-11commission.gov/report/911Report.pdf"
+      ],
+      "post_event_ns": 86400000000000,
+      "pre_event_ns": 0,
+      "precision": "window_only",
+      "revision_sequence": 0,
+      "source_event_time": "2001-09-11T00:00:00+00:00",
+      "source_timezone": "UTC",
+      "tags": [
+        "geopolitical",
+        "public_record",
+        "terrorism"
+      ],
+      "title": "September 11 attacks",
+      "vintage_id": "operator-public-record-2001-09-11-v1"
+    },
+    {
+      "affected_currencies": [
+        "EUR",
+        "GBP",
+        "USD"
+      ],
+      "affected_symbols": [
+        "EURGBP",
+        "EURUSD",
+        "GBPUSD"
+      ],
+      "ambiguity_reason": "The retained record conditions the filing day and does not claim one exact market-impact instant.",
+      "available_at": "2008-09-16T00:00:00+00:00",
+      "canonical_key": "operator.shock.lehman-bankruptcy.2008-09-15",
+      "confidence": 1.0,
+      "first_known_at": "2008-09-16T00:00:00+00:00",
+      "kind": "unscheduled_shock",
+      "limitations": [
+        "The filing-day window is not a claim that all market effects began at midnight UTC; ex-ante availability is delayed until the following UTC day.",
+        "Public record: Lehman Brothers Holdings Inc. Form 8-K, https://www.sec.gov/Archives/edgar/data/806085/000119312508198257/d8k.htm"
+      ],
+      "post_event_ns": 86400000000000,
+      "pre_event_ns": 0,
+      "precision": "window_only",
+      "revision_sequence": 0,
+      "source_event_time": "2008-09-15T00:00:00+00:00",
+      "source_timezone": "UTC",
+      "tags": [
+        "bankruptcy",
+        "financial_crisis",
+        "public_record"
+      ],
+      "title": "Lehman Brothers bankruptcy filing",
+      "vintage_id": "operator-public-record-2008-09-15-v1"
+    },
+    {
+      "affected_currencies": [
+        "EUR",
+        "GBP",
+        "USD"
+      ],
+      "affected_symbols": [
+        "EURGBP",
+        "EURUSD",
+        "GBPUSD"
+      ],
+      "ambiguity_reason": "The official announcement time is retained as a narrow source window rather than an exact universal market-impact boundary.",
+      "available_at": "2015-01-15T10:30:00+01:00",
+      "canonical_key": "operator.shock.snb-minimum-exchange-rate.2015-01-15",
+      "confidence": 1.0,
+      "first_known_at": "2015-01-15T10:30:00+01:00",
+      "kind": "unscheduled_shock",
+      "limitations": [
+        "This record conditions the announcement window and makes no causal claim for each FX instrument.",
+        "Public record: Swiss National Bank press release, https://www.snb.ch/en/publications/communication/press-releases-restricted/pre_20150115"
+      ],
+      "post_event_ns": 7200000000000,
+      "pre_event_ns": 1800000000000,
+      "precision": "approximate",
+      "revision_sequence": 0,
+      "source_event_time": "2015-01-15T10:30:00+01:00",
+      "source_timezone": "Europe/Zurich",
+      "tags": [
+        "central_bank",
+        "public_record",
+        "snb"
+      ],
+      "title": "SNB discontinues minimum exchange rate",
+      "vintage_id": "operator-public-record-2015-01-15-v1"
+    },
+    {
+      "affected_currencies": [
+        "EUR",
+        "GBP",
+        "USD"
+      ],
+      "affected_symbols": [
+        "EURGBP",
+        "EURUSD",
+        "GBPUSD"
+      ],
+      "ambiguity_reason": "The retained record conditions the referendum-result day and does not invent an exact completion timestamp for the nationwide count.",
+      "available_at": "2016-06-25T00:00:00+00:00",
+      "canonical_key": "operator.shock.eu-referendum-result.2016-06-24",
+      "confidence": 1.0,
+      "first_known_at": "2016-06-25T00:00:00+00:00",
+      "kind": "unscheduled_shock",
+      "limitations": [
+        "The full-day result window does not expose the result before its retained knowledge boundary; ex-ante availability is delayed until the following UTC day.",
+        "Public record: UK Electoral Commission referendum results, https://www.electoralcommission.org.uk/who-we-are-and-what-we-do/elections-and-referendums/past-elections-and-referendums/eu-referendum/results-and-turnout-eu-referendum"
+      ],
+      "post_event_ns": 86400000000000,
+      "pre_event_ns": 0,
+      "precision": "window_only",
+      "revision_sequence": 0,
+      "source_event_time": "2016-06-24T00:00:00+00:00",
+      "source_timezone": "UTC",
+      "tags": [
+        "brexit",
+        "public_record",
+        "referendum"
+      ],
+      "title": "United Kingdom votes to leave the European Union",
+      "vintage_id": "operator-public-record-2016-06-24-v1"
+    },
+    {
+      "affected_currencies": [
+        "EUR",
+        "GBP",
+        "USD"
+      ],
+      "affected_symbols": [
+        "EURGBP",
+        "EURUSD",
+        "GBPUSD"
+      ],
+      "ambiguity_reason": "The retained record conditions the WHO declaration day and does not claim a single market-impact instant.",
+      "available_at": "2020-03-12T00:00:00+00:00",
+      "canonical_key": "operator.shock.who-pandemic-characterization.2020-03-11",
+      "confidence": 1.0,
+      "first_known_at": "2020-03-12T00:00:00+00:00",
+      "kind": "unscheduled_shock",
+      "limitations": [
+        "The declaration-day window is distinct from the broader pandemic market regime; ex-ante availability is delayed until the following UTC day.",
+        "Public record: World Health Organization opening remarks, https://www.who.int/director-general/speeches/detail/who-director-general-s-opening-remarks-at-the-media-briefing-on-covid-19---11-march-2020"
+      ],
+      "post_event_ns": 86400000000000,
+      "pre_event_ns": 0,
+      "precision": "window_only",
+      "revision_sequence": 0,
+      "source_event_time": "2020-03-11T00:00:00+00:00",
+      "source_timezone": "UTC",
+      "tags": [
+        "covid-19",
+        "pandemic",
+        "public_record"
+      ],
+      "title": "WHO characterizes COVID-19 as a pandemic",
+      "vintage_id": "operator-public-record-2020-03-11-v1"
+    },
+    {
+      "affected_currencies": [
+        "EUR",
+        "GBP",
+        "USD"
+      ],
+      "affected_symbols": [
+        "EURGBP",
+        "EURUSD",
+        "GBPUSD"
+      ],
+      "ambiguity_reason": "The retained record conditions the invasion day and does not claim one exact market-impact instant.",
+      "available_at": "2022-02-25T00:00:00+00:00",
+      "canonical_key": "operator.shock.russia-invasion-ukraine.2022-02-24",
+      "confidence": 1.0,
+      "first_known_at": "2022-02-25T00:00:00+00:00",
+      "kind": "unscheduled_shock",
+      "limitations": [
+        "The full-day window does not infer the timing or causality of every market response; ex-ante availability is delayed until the following UTC day.",
+        "Public record: United Nations General Assembly ES-11 record, https://www.un.org/en/ga/emergency-special-session-ukraine/"
+      ],
+      "post_event_ns": 86400000000000,
+      "pre_event_ns": 0,
+      "precision": "window_only",
+      "revision_sequence": 0,
+      "source_event_time": "2022-02-24T00:00:00+00:00",
+      "source_timezone": "UTC",
+      "tags": [
+        "geopolitical",
+        "public_record",
+        "war"
+      ],
+      "title": "Russian Federation invasion of Ukraine",
+      "vintage_id": "operator-public-record-2022-02-24-v1"
+    }
+  ],
+  "limitations": [
+    "This catalog is deliberately selective; an absent date is not a no-shock label.",
+    "Events are public-record conditioning windows, not causal market labels or exact historical tick reconstructions.",
+    "Upstream citations establish factual provenance; upstream reuse terms remain authoritative."
+  ],
+  "schema_version": "histdatacom.operator-market-context-catalog.v1"
+}

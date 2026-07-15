@@ -232,6 +232,7 @@ _ALLOWED_KEYS = (
 _ANALYTICS_COMMANDS = {
     "feed-epochs-v2",
     "feed-regimes",
+    "market-context-corpus",
     "observation-calibrate-v2",
 }
 _ANALYTICS_ALIASES = {
@@ -255,10 +256,15 @@ _ANALYTICS_SCALAR_ARGS = {
     "evidence": "--evidence",
     "epoch_artifact": "--epoch-artifact",
     "max_evidence": "--max-evidence",
+    "end_date": "--end-date",
     "max_events_per_window": "--max-events-per-window",
+    "max_events": "--max-events",
+    "max_ons_pages_per_query": "--max-ons-pages-per-query",
     "max_peak_memory_bytes": "--max-peak-memory-bytes",
     "max_runtime_seconds": "--max-runtime-seconds",
     "max_source_bytes": "--max-source-bytes",
+    "max_response_bytes": "--max-response-bytes",
+    "max_total_source_bytes": "--max-total-source-bytes",
     "max_sensitivity_runs": "--max-sensitivity-runs",
     "min_boundary_support": "--min-boundary-support",
     "min_change_score": "--min-change-score",
@@ -273,11 +279,16 @@ _ANALYTICS_SCALAR_ARGS = {
     "robust_clip": "--robust-clip",
     "final_holdout_period": "--final-holdout-period",
     "validation_period": "--validation-period",
+    "operator_catalog": "--operator-catalog",
+    "start_date": "--start-date",
+    "timeout_seconds": "--timeout-seconds",
 }
 _ANALYTICS_LIST_ARGS = {
     "features": "--features",
+    "ons_queries": "--ons-query",
     "paths": "--target",
     "sessions": "--sessions",
+    "sources": "--sources",
 }
 _ANALYTICS_ALLOWED_KEYS = (
     {"command", "verbosity"}

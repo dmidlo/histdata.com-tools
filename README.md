@@ -2501,9 +2501,28 @@ than becoming invented event labels.
 Calendar sidecars reuse the existing session, holiday, rollover, fix, and
 month/quarter/year-end classifier. The shared source-adapter seam retains
 provenance and licensing but does not authorize or scrape a paid news corpus.
+The production corpus uses documented official ONS, ECB, Bank of England, and
+Federal Reserve sources plus a small cited operator shock catalog:
+
+```bash
+histdatacom analytics market-context-corpus \
+  --artifact-dir .histdatacom/market-context \
+  --start-date 2002-03-01 \
+  --end-date 2026-06-30
+```
+
+The command writes immutable content-addressed raw snapshots, a directly
+loadable timeline, and a self-contained corpus with source hashes, licenses,
+coverage/missingness, duplicate counts, runtime, and peak memory. Installed
+helpers replay the raw snapshots, refuse unsupported reconstruction context,
+return the carving query contract, and project bounded benchmark event state.
+
 See [`docs/market-context-contracts.md`](docs/market-context-contracts.md) for
-the schemas, timezone and revision rules, information-audit integration,
-streaming limits, and trust gates.
+the source selection, licenses, artifacts, replay, coverage/preflight,
+timezone and revision rules, information-audit integration, streaming limits,
+and trust gates. CFTC Commitments of Traders remains a separate persistent
+positioning sidecar tracked by issue #468; it is not repeated as permanent
+columns on every tick.
 
 #### Feed-Regime Detection
 

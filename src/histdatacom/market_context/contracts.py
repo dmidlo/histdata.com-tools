@@ -17,7 +17,14 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Protocol, TypeVar, cast, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Protocol,
+    TypeVar,
+    cast,
+    runtime_checkable,
+)
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from histdatacom.data_quality.calendar import (
@@ -26,16 +33,14 @@ from histdatacom.data_quality.calendar import (
 )
 from histdatacom.data_quality.calendar_profiles import HistDataCalendarProfile
 from histdatacom.runtime_contracts import JSONValue
-from histdatacom.synthetic.contracts import canonical_contract_json
-from histdatacom.synthetic.information import (
-    InformationInputKind,
-    InformationMode,
-    InformationScope,
-    InformationSplitKind,
-    InformationStage,
-    ReconstructionInformationInputV1,
-)
-from histdatacom.synthetic.streaming import ReconstructionWindowV1
+
+if TYPE_CHECKING:
+    from histdatacom.synthetic.information import (
+        InformationMode,
+        InformationSplitKind,
+        ReconstructionInformationInputV1,
+    )
+    from histdatacom.synthetic.streaming import ReconstructionWindowV1
 
 MARKET_CONTEXT_SOURCE_SCHEMA_VERSION = "histdatacom.market-context-source.v1"
 MARKET_CONTEXT_EVENT_SCHEMA_VERSION = "histdatacom.market-context-event.v1"
@@ -64,11 +69,30 @@ _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 _EnumT = TypeVar("_EnumT", bound=Enum)
 
 
+def canonical_contract_json(value: Any) -> str:
+    """Encode contracts without importing the synthetic package facade.
+
+    Importing ``histdatacom.synthetic.contracts`` executes the synthetic
+    package ``__init__`` first.  That facade imports broker fingerprint code,
+    which imports this module and creates a market-context-first circular
+    import.  Keeping the shared byte-for-byte canonical encoding local makes
+    this domain independently importable while preserving every existing ID.
+    """
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+
+
 class MarketContextKind(str, Enum):
     """Stable semantic kinds for external market-context records."""
 
     MACRO_RELEASE = "macro_release"
     CENTRAL_BANK_DECISION = "central_bank_decision"
+    POLICY_RATE_CHANGE = "policy_rate_change"
     CENTRAL_BANK_STATEMENT = "central_bank_statement"
     SCHEDULED_COMMUNICATION = "scheduled_communication"
     UNSCHEDULED_SHOCK = "unscheduled_shock"
@@ -879,6 +903,10 @@ class MarketContextQueryV1:
     @property
     def information_mode(self) -> InformationMode:
         """Return the reconstruction information mode implied by this view."""
+        from histdatacom.synthetic.information import (  # pylint: disable=import-outside-toplevel
+            InformationMode,
+        )
+
         if self.view is MarketContextView.EX_ANTE:
             return InformationMode.EX_ANTE_SIMULATION
         return InformationMode.EX_POST_RECONSTRUCTION
@@ -1288,6 +1316,10 @@ def query_market_context_window(
     max_events: int = MAX_MARKET_CONTEXT_QUERY_EVENTS,
 ) -> MarketContextQueryV1:
     """Join context to one streaming window without materializing row columns."""
+    from histdatacom.synthetic.streaming import (  # pylint: disable=import-outside-toplevel
+        ReconstructionWindowV1,
+    )
+
     if not isinstance(window, ReconstructionWindowV1):
         raise ValueError("window must use the v1 reconstruction contract")
     selected_view = MarketContextView.from_value(view)
@@ -1319,6 +1351,13 @@ def market_context_information_inputs(
     split_kind: InformationSplitKind | None = None,
 ) -> tuple[ReconstructionInformationInputV1, ...]:
     """Bind queried event vintages into the existing leakage-audit graph."""
+    from histdatacom.synthetic.information import (  # pylint: disable=import-outside-toplevel
+        InformationInputKind,
+        InformationScope,
+        InformationStage,
+        ReconstructionInformationInputV1,
+    )
+
     if not isinstance(query, MarketContextQueryV1):
         raise ValueError("query must use the v1 market-context contract")
     run = _required_text(run_id)
