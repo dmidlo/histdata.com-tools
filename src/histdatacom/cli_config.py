@@ -229,7 +229,11 @@ _ALLOWED_KEYS = (
     | _CONTROL_BOOL_KEYS
     | {"verbosity"}
 )
-_ANALYTICS_COMMANDS = {"feed-epochs-v2", "feed-regimes"}
+_ANALYTICS_COMMANDS = {
+    "feed-epochs-v2",
+    "feed-regimes",
+    "observation-calibrate-v2",
+}
 _ANALYTICS_ALIASES = {
     **_COMMAND_KEY_ALIASES,
     "path": "paths",
@@ -246,8 +250,15 @@ _ANALYTICS_SCALAR_ARGS = {
     "boundary_match_tolerance_periods": "--boundary-match-tolerance-periods",
     "bucket": "--bucket",
     "burst_interval_ms": "--burst-interval-ms",
+    "calibration_period": "--calibration-period",
+    "definition": "--definition",
+    "evidence": "--evidence",
     "epoch_artifact": "--epoch-artifact",
     "max_evidence": "--max-evidence",
+    "max_events_per_window": "--max-events-per-window",
+    "max_peak_memory_bytes": "--max-peak-memory-bytes",
+    "max_runtime_seconds": "--max-runtime-seconds",
+    "max_source_bytes": "--max-source-bytes",
     "max_sensitivity_runs": "--max-sensitivity-runs",
     "min_boundary_support": "--min-boundary-support",
     "min_change_score": "--min-change-score",
@@ -255,14 +266,18 @@ _ANALYTICS_SCALAR_ARGS = {
     "min_feature_coverage": "--min-feature-coverage",
     "min_symbol_count": "--min-symbol-count",
     "min_segment_periods": "--min-segment-periods",
+    "minimum_events_per_window": "--minimum-events-per-window",
     "quiet_gap_ms": "--quiet-gap-ms",
     "penalty_multiplier": "--penalty-multiplier",
     "report": "--report",
     "robust_clip": "--robust-clip",
+    "final_holdout_period": "--final-holdout-period",
+    "validation_period": "--validation-period",
 }
 _ANALYTICS_LIST_ARGS = {
     "features": "--features",
     "paths": "--target",
+    "sessions": "--sessions",
 }
 _ANALYTICS_ALLOWED_KEYS = (
     {"command", "verbosity"}

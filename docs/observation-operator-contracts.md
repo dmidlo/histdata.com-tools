@@ -5,10 +5,10 @@ surface becomes the sparse, quantized, filtered feed preserved by a
 technological epoch. They model delivery technology, not market-price
 dynamics, candidate generation, or broker-specific style.
 
-The operator layer consumes only stability-passing
-[`FeedEpochDefinitionV1`](feed-epoch-contracts.md) artifacts and bounded,
-provenance-bearing fit evidence. It never rediscovers raw paths or persists the
-521-column analytical frame.
+The operator layer consumes stability-passing v1 or active-time v2
+[`feed-epoch definitions`](feed-epoch-contracts.md) and bounded,
+provenance-bearing fit evidence. It never persists the 521-column analytical
+frame.
 
 ## Identity boundary
 
@@ -101,6 +101,58 @@ The implemented
 layer owns the full experiment, splits, controls, and scorecards. This module
 supplies the deterministic operator interface and controlled fixtures exercised
 by that benchmark.
+
+## Real-evidence calibration v2
+
+`ObservationCalibrationCampaignV2` makes a stricter claim than a bare v1
+operator. It uses the last stable technology epoch as the dense reference,
+estimates earlier symbol/epoch targets relative to its active-time denominator,
+and evaluates the fitted operator on chronologically blocked calibration,
+validation, and final-holdout windows. Split periods must be distinct and span
+three years. Dense and degraded rows stay process-local; only bounded aggregate
+window evidence is persisted.
+
+The calibration surface conditions retention by update type and session. It
+records timestamp precision and quote-step support directly, while spread,
+activity, and volatility conditioning remain explicitly unsupported until
+conditional epoch denominators exist. Batching versus timestamp quantization,
+and rate cap versus retention, are recorded as bounded confounded mechanisms.
+Archive gaps, outage duration, and reconnect identity remain unsupported rather
+than being inferred from silence.
+
+Every target includes all twelve parameter names with a value, interval,
+support status, estimation/refusal reason, source evidence IDs, hashes, and
+distinct mechanism diagnostics. The nested `ObservationOperatorV1` contains
+only supported parameters; its conservative neutral behavior does not promote
+an unsupported mechanism into a calibration claim.
+
+Application readiness is enforced by
+`ObservationCalibrationCampaignV2.require_application_ready()`. The default
+required mechanisms include retention, unchanged filtering, timestamp and
+price precision, duplicates, and burst cadence. A caller requesting a bounded
+or unsupported mechanism is rejected. A retention estimate whose only basis is
+`identity_without_dense_denominator` is always rejected, even if an older bare
+v1 operator can still replay it.
+
+Use the artifacts emitted by `feed-epochs-v2` directly:
+
+```sh
+histdatacom analytics observation-calibrate-v2 \
+  --definition data/.histdatacom/feed-epochs-v2/feed-epochs-v2-definition.json \
+  --evidence data/.histdatacom/feed-epochs-v2/feed-epochs-v2-evidence.json \
+  --artifact-dir data/.histdatacom/observation-calibration-v2
+```
+
+The command verifies every selected dense cache's byte size and SHA-256 against
+the epoch evidence, then writes separate campaign, operator, and fit-evidence
+JSON files. Per-window event count and per-source byte limits are explicit in
+the profile and campaign resource evidence. Campaign wall-clock and peak-memory
+ceilings are also hard readiness gates; the measured runtime and process peak
+are persisted beside those limits.
+It exits with status 2 when a final holdout or readiness gate fails, while
+retaining the failed evidence for audit. Existing v1 operator artifacts remain
+readable; v2 feed-definition identities are accepted without rewriting their
+schema or IDs.
 
 ## Explicit conditioning and fallback
 

@@ -2563,12 +2563,35 @@ timestamp and price quantization, batching, duplicates, burst/rate caps,
 outages, and reconnect behavior through versioned parameters with explicit
 support and uncertainty.
 
-The fitting boundary consumes canonical `FeedEpochEvidenceV1` projections or
-paired controlled-calibration evidence. Canonical sparse history does not
-identify a true dense-event denominator, so unsupported thinning parameters
-remain visibly unsupported and use a neutral identity behavior rather than
-being presented as direct observations. Sparse conditioned strata follow a
-fixed state/session/event-to-global fallback hierarchy or fail closed.
+The bare fitting boundary consumes canonical feed-epoch projections or paired
+controlled-calibration evidence. Canonical sparse history does not identify a
+true dense-event denominator, so unsupported thinning parameters remain
+visibly unsupported and use a neutral identity behavior rather than being
+presented as direct observations. Sparse conditioned strata follow a fixed
+state/session/event-to-global fallback hierarchy or fail closed.
+
+`ObservationCalibrationCampaignV2` adds the real-evidence trust boundary. It
+fits relative active-time retention and supported delivery mechanisms by
+symbol, technology epoch, update type, and session, then applies the operator
+to dense reference caches in chronological calibration, validation, and final
+holdout blocks. Every parameter carries support, uncertainty, source hashes,
+and an identifiability or refusal reason. Calendar closure, archive gaps,
+unchanged filtering, batching, quantization, duplicates, outages, and reconnect
+behavior remain distinct diagnostics.
+
+```sh
+histdatacom analytics observation-calibrate-v2 \
+  --definition data/.histdatacom/feed-epochs-v2/feed-epochs-v2-definition.json \
+  --evidence data/.histdatacom/feed-epochs-v2/feed-epochs-v2-evidence.json \
+  --artifact-dir data/.histdatacom/observation-calibration-v2
+```
+
+The campaign cannot become application-ready when retention is merely identity
+because the dense denominator is unknown, when a default required mechanism is
+unsupported, or when a final holdout fails. Requesting an optional unsupported
+mechanism also fails closed. Dense and degraded window rows stay process-local;
+the persisted campaign contains aggregate evidence and the compact replayable
+operator only.
 
 Observation rendering does not mutate `SyntheticEventV1`. Inputs retain their
 market-event IDs and produce separate operator-lineaged delivery observations.

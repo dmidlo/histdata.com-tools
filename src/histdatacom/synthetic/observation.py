@@ -529,25 +529,30 @@ class ObservationFitEvidenceV1:
         parameter_values = {
             "retention_probability": 1.0,
             "unchanged_retention_probability": stale_rate,
-            "timestamp_quantum_ns": float(round(min_interval_ms * 1_000_000)),
+            "timestamp_quantum_ns": float(
+                int(round(min_interval_ms * 1_000_000))
+            ),
             "price_precision_digits": float(precision),
             "quote_transition_threshold": 10.0 ** (-precision),
-            "batch_window_ns": float(round(min_interval_ms * 1_000_000)),
+            "batch_window_ns": float(int(round(min_interval_ms * 1_000_000))),
             "duplicate_probability": duplicate_rate,
             "rate_cap_per_second": max(
                 tick_rate,
                 1_000.0 / min_interval_ms,
             ),
-            "burst_window_ns": float(round(median_interval_ms * 1_000_000)),
+            "burst_window_ns": float(
+                int(round(median_interval_ms * 1_000_000))
+            ),
             "quiet_gap_probability": gap_rate,
-            "outage_window_ns": float(round(p95_interval_ms * 1_000_000)),
+            "outage_window_ns": float(int(round(p95_interval_ms * 1_000_000))),
             "reconnect_duplicate_probability": duplicate_rate,
         }
         parameter_values["timestamp_quantum_ns"] = max(
             1.0, parameter_values["timestamp_quantum_ns"]
         )
         bounds = _canonical_proxy_bounds(parameter_values)
-        support_counts = {name: row_count for name in parameter_values}
+        support = min(row_count, MAX_OBSERVATION_INPUT_EVENTS)
+        support_counts = {name: support for name in parameter_values}
         support_counts["retention_probability"] = 0
         bases = {
             name: "canonical_descriptive_proxy" for name in parameter_values
@@ -1144,10 +1149,8 @@ class ObservationOperatorV1:
     def __post_init__(self) -> None:
         if self.schema_version != OBSERVATION_OPERATOR_SCHEMA_VERSION:
             raise ValueError("unsupported observation operator schema")
-        definition_id = _required_sha256_id(
-            self.feed_epoch_definition_id,
-            "feed_epoch_definition_id",
-            prefix="feed-epoch-definition",
+        definition_id = _required_feed_epoch_definition_id(
+            self.feed_epoch_definition_id
         )
         labels = _bounded_text_tuple(
             self.feed_epoch_labels,
@@ -2815,6 +2818,11 @@ def _canonical_proxy_bounds(
             result[name] = (max(0.0, value - 1.0), min(16.0, value + 1.0))
         elif value == 0.0:
             result[name] = (0.0, 0.0)
+        elif name in _INTEGER_PARAMETERS:
+            result[name] = (
+                float(max(0, math.floor(value * 0.5))),
+                float(math.ceil(value * 2.0)),
+            )
         else:
             result[name] = (max(0.0, value * 0.5), value * 2.0)
     return result
@@ -3008,6 +3016,18 @@ def _required_sha256_id(
     if not _SHA256_RE.fullmatch(digest):
         raise ValueError(f"{name} must be a sha256 identifier")
     return "sha256:" + digest
+
+
+def _required_feed_epoch_definition_id(value: Any) -> str:
+    """Accept both readable v1 and active-time v2 definition identities."""
+    text = _required_text(value)
+    for prefix in ("feed-epoch-definition", "feed-epoch-definition-v2"):
+        expected = f"{prefix}:sha256:"
+        if text.startswith(expected):
+            digest = text.removeprefix(expected)
+            if _SHA256_RE.fullmatch(digest):
+                return expected + digest
+    raise ValueError("feed_epoch_definition_id must be a sha256 identifier")
 
 
 def _required_text(value: Any) -> str:

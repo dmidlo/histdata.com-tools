@@ -24,7 +24,14 @@ from histdatacom.data_analytics.feed_epochs import (
 from histdatacom.data_analytics.feed_epochs_v2 import (
     FeedEpochFitConfigV2,
     analyze_active_time_feed_epochs,
+    read_active_time_feed_epoch_definition,
     write_active_time_feed_epoch_campaign,
+)
+from histdatacom.synthetic.observation_calibration import (
+    ObservationCalibrationProfileV2,
+    calibrate_historical_observation_operators,
+    read_feed_epoch_evidence_v2,
+    write_observation_calibration_campaign,
 )
 from histdatacom.verbosity import configure_logging
 
@@ -194,6 +201,54 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit compact campaign and artifact metadata",
     )
+    calibration = subparsers.add_parser(
+        "observation-calibrate-v2",
+        help="fit and hold out historical observation operators",
+    )
+    calibration.add_argument(
+        "--definition",
+        required=True,
+        metavar="PATH",
+        help="stable feed-epochs-v2 definition artifact",
+    )
+    calibration.add_argument(
+        "--evidence",
+        required=True,
+        metavar="PATH",
+        help="feed-epochs-v2 evidence artifact with local cache paths",
+    )
+    calibration.add_argument(
+        "--artifact-dir",
+        required=True,
+        metavar="PATH",
+        help="write operator, fit evidence, and campaign artifacts",
+    )
+    calibration.add_argument(
+        "--sessions",
+        nargs="+",
+        default=("asia", "london", "new_york"),
+        metavar="NAME",
+        help="bounded UTC session windows used for real evaluation",
+    )
+    calibration.add_argument("--calibration-period", default="")
+    calibration.add_argument("--validation-period", default="")
+    calibration.add_argument("--final-holdout-period", default="")
+    calibration.add_argument("--max-events-per-window", type=int, default=4096)
+    calibration.add_argument(
+        "--minimum-events-per-window", type=int, default=512
+    )
+    calibration.add_argument(
+        "--max-source-bytes", type=int, default=2 * 1024**3
+    )
+    calibration.add_argument("--max-runtime-seconds", type=float, default=600.0)
+    calibration.add_argument(
+        "--max-peak-memory-bytes", type=int, default=2 * 1024**3
+    )
+    calibration.add_argument(
+        "--json",
+        action="store_true",
+        help="emit compact calibration and artifact metadata",
+    )
     return parser
 
 
@@ -207,6 +262,59 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
         return 1
     configure_logging(args.verbosity)
+    if args.analytics_command == "observation-calibrate-v2":
+        definition = read_active_time_feed_epoch_definition(args.definition)
+        evidence = read_feed_epoch_evidence_v2(args.evidence)
+        split_periods = {
+            "calibration": args.calibration_period,
+            "validation": args.validation_period,
+            "final_holdout": args.final_holdout_period,
+        }
+        configured_splits = {
+            key: value for key, value in split_periods.items() if value
+        }
+        campaign = calibrate_historical_observation_operators(
+            evidence,
+            epoch_definition=definition,
+            profile=ObservationCalibrationProfileV2(
+                split_periods=configured_splits,
+                sessions=tuple(args.sessions),
+                max_events_per_window=args.max_events_per_window,
+                minimum_events_per_window=args.minimum_events_per_window,
+                max_source_bytes=args.max_source_bytes,
+                max_runtime_seconds=args.max_runtime_seconds,
+                max_peak_memory_bytes=args.max_peak_memory_bytes,
+            ),
+        )
+        artifacts = write_observation_calibration_campaign(
+            campaign, args.artifact_dir
+        )
+        payload = {
+            "schema_version": campaign.schema_version,
+            "campaign_id": campaign.campaign_id,
+            "operator_id": campaign.operator.operator_id,
+            "readiness_status": campaign.readiness_status,
+            "readiness_reasons": list(campaign.readiness_reasons),
+            "window_count": len(campaign.windows),
+            "runtime_seconds": campaign.runtime_seconds,
+            "peak_memory_bytes": campaign.peak_memory_bytes,
+            "artifacts": {
+                name: artifact.to_dict()
+                for name, artifact in sorted(artifacts.items())
+            },
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+        else:
+            print(  # noqa:T201
+                "Observation calibration v2\n"
+                f"operator: {campaign.operator.operator_id}\n"
+                f"targets: {len(campaign.targets)}\n"
+                f"windows: {len(campaign.windows)}\n"
+                f"readiness: {campaign.readiness_status}\n"
+                f"campaign: {artifacts['campaign'].path}"
+            )
+        return 0 if campaign.valid_for_application else 2
     if args.analytics_command == "feed-epochs-v2":
         campaign = analyze_active_time_feed_epochs(
             args.paths,
