@@ -2520,9 +2520,35 @@ return the carving query contract, and project bounded benchmark event state.
 See [`docs/market-context-contracts.md`](docs/market-context-contracts.md) for
 the source selection, licenses, artifacts, replay, coverage/preflight,
 timezone and revision rules, information-audit integration, streaming limits,
-and trust gates. CFTC Commitments of Traders remains a separate persistent
-positioning sidecar tracked by issue #468; it is not repeated as permanent
-columns on every tick.
+and trust gates.
+
+#### CFTC positioning state
+
+CFTC Commitments of Traders is a separate persistent weekly positioning
+sidecar, not a `MarketContextEventV1` window and not a repeated tick column.
+The installed campaign retains Legacy and TFF, futures-only and combined,
+EUR/GBP/EURGBP contract identities, official release/correction evidence,
+compressed-history consistency, immutable refresh diffs, and fail-closed
+ex-ante semantics:
+
+```bash
+histdatacom analytics cftc-positioning-corpus \
+  --artifact-dir data/.histdatacom/analytics/cftc-positioning \
+  --start-date 2002-03-01 \
+  --end-date 2026-06-30
+```
+
+Window queries expose bounded latest-known snapshots, age, mapping status, and
+point-in-time-safe net/open-interest/change/rolling features. Current PRE rows
+cannot masquerade as original vintages; nominal publication estimates fail
+strict ex-ante use. Companion receipts bind the query into the information
+audit, benchmark, motif selection, planning, and carving without changing
+their immutable v1 schemas.
+
+See [`docs/cftc-positioning-contracts.md`](docs/cftc-positioning-contracts.md)
+for source selection and acknowledgement, field/family/scope mappings, quote
+direction, publication/restatement rules, artifact replay/diff behavior,
+coverage, resource limits, consumer seams, and explicit nonclaims.
 
 #### Feed-Regime Detection
 

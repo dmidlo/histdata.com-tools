@@ -6,6 +6,8 @@ import argparse
 import json
 import sys
 
+from requests import RequestException
+
 from histdatacom.cli_config import (
     CliConfigError,
     add_config_argument,
@@ -31,8 +33,12 @@ from histdatacom.market_context import (
     DEFAULT_MARKET_CONTEXT_SOURCES,
     DEFAULT_ONS_QUERIES,
     MarketContextFetchProfileV1,
+    CftcPositioningFetchProfileV1,
     build_live_market_context_corpus,
+    build_live_cftc_positioning_corpus,
+    read_cftc_positioning_corpus,
     write_market_context_corpus,
+    write_cftc_positioning_corpus,
 )
 from histdatacom.synthetic.observation_calibration import (
     ObservationCalibrationProfileV2,
@@ -303,6 +309,46 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit compact corpus and artifact metadata",
     )
+    positioning = subparsers.add_parser(
+        "cftc-positioning-corpus",
+        help="build replayable CFTC weekly positioning state",
+    )
+    positioning.add_argument(
+        "--artifact-dir",
+        required=True,
+        metavar="PATH",
+        help="write content-addressed source, corpus, and audit artifacts",
+    )
+    positioning.add_argument(
+        "--start-date", required=True, metavar="YYYY-MM-DD"
+    )
+    positioning.add_argument("--end-date", required=True, metavar="YYYY-MM-DD")
+    positioning.add_argument("--page-size", type=int, default=1000)
+    positioning.add_argument("--max-pages-per-dataset", type=int, default=128)
+    positioning.add_argument("--timeout-seconds", type=float, default=45.0)
+    positioning.add_argument(
+        "--max-response-bytes", type=int, default=32 * 1024**2
+    )
+    positioning.add_argument(
+        "--max-total-source-bytes", type=int, default=256 * 1024**2
+    )
+    positioning.add_argument("--max-rows", type=int, default=100_000)
+    positioning.add_argument("--max-runtime-seconds", type=float, default=600.0)
+    positioning.add_argument(
+        "--max-peak-memory-bytes", type=int, default=2 * 1024**3
+    )
+    positioning.add_argument("--max-staleness-days", type=int, default=14)
+    positioning.add_argument(
+        "--previous-corpus",
+        default="",
+        metavar="PATH",
+        help="write a logical-row refresh/restatement diff against PATH",
+    )
+    positioning.add_argument(
+        "--json",
+        action="store_true",
+        help="emit compact corpus and artifact metadata",
+    )
     return parser
 
 
@@ -316,6 +362,73 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
         return 1
     configure_logging(args.verbosity)
+    if args.analytics_command == "cftc-positioning-corpus":
+        try:
+            positioning_build = build_live_cftc_positioning_corpus(
+                CftcPositioningFetchProfileV1(
+                    start_date=args.start_date,
+                    end_date=args.end_date,
+                    page_size=args.page_size,
+                    max_pages_per_dataset=args.max_pages_per_dataset,
+                    timeout_seconds=args.timeout_seconds,
+                    max_response_bytes=args.max_response_bytes,
+                    max_total_source_bytes=args.max_total_source_bytes,
+                    max_rows=args.max_rows,
+                    max_runtime_seconds=args.max_runtime_seconds,
+                    max_peak_memory_bytes=args.max_peak_memory_bytes,
+                    max_staleness_days=args.max_staleness_days,
+                )
+            )
+            previous = (
+                read_cftc_positioning_corpus(args.previous_corpus)
+                if args.previous_corpus
+                else None
+            )
+            positioning_artifacts = write_cftc_positioning_corpus(
+                positioning_build,
+                args.artifact_dir,
+                previous_corpus=previous,
+            )
+        except (OSError, RequestException, ValueError) as exc:
+            print(
+                f"CFTC positioning corpus error: {exc}", file=sys.stderr
+            )  # noqa:T201
+            return 1
+        positioning_corpus = positioning_build.corpus
+        positioning_payload = {
+            "schema_version": positioning_corpus.schema_version,
+            "corpus_id": positioning_corpus.corpus_id,
+            "snapshot_count": len(positioning_corpus.snapshots),
+            "source_count": len(positioning_corpus.sources),
+            "source_bytes": sum(
+                int(item["size_bytes"]) for item in positioning_corpus.sources
+            ),
+            "duplicate_key_count": positioning_corpus.duplicate_key_count,
+            "runtime_seconds": positioning_corpus.runtime_seconds,
+            "peak_memory_bytes": positioning_corpus.peak_memory_bytes,
+            "coverage_slice_count": len(positioning_corpus.coverage),
+            "archive_consistency": [
+                item.to_dict()
+                for item in positioning_corpus.archive_consistency
+            ],
+            "artifacts": {
+                name: artifact.to_dict()
+                for name, artifact in sorted(positioning_artifacts.items())
+            },
+        }
+        if args.json:
+            print(
+                json.dumps(positioning_payload, indent=2, sort_keys=True)
+            )  # noqa:T201
+        else:
+            print(  # noqa:T201
+                "CFTC positioning corpus\n"
+                f"sources: {len(positioning_corpus.sources)}\n"
+                f"source bytes: {positioning_payload['source_bytes']}\n"
+                f"snapshots: {len(positioning_corpus.snapshots)}\n"
+                f"corpus: {positioning_artifacts['corpus'].path}"
+            )
+        return 0
     if args.analytics_command == "market-context-corpus":
         try:
             build = build_live_market_context_corpus(

@@ -18,6 +18,7 @@ Data and reconstruction foundations
    feed-epoch-contracts
    observation-operator-contracts
    market-context-contracts
+   cftc-positioning-contracts
 
 Empirical reconstruction pipeline
 ---------------------------------

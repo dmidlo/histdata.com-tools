@@ -259,11 +259,12 @@ Commitments of Traders is intentionally not coerced into this event corpus.
 COT is a weekly persistent positioning state measured on one date, published
 later, and valid until superseded. It needs latest-known-state queries,
 high-dimensional position vectors, publication-confidence evidence, and
-restatement handling rather than pre/post event overlap. That sibling domain is
-tracked by [#468](https://github.com/dmidlo/histdata.com-tools/issues/468).
+restatement handling rather than pre/post event overlap. The sibling domain is
+documented in
+[`cftc-positioning-contracts.md`](cftc-positioning-contracts.md).
 
-COT will reuse source-license, content-addressed artifact, replay, coverage, and
-preflight infrastructure from this corpus. It will not become permanent
+COT reuses source-policy, content-addressed artifact, replay, coverage, and
+preflight patterns from this corpus. It does not become permanent
 augmented columns on every tick; reconstruction will consume one bounded
 positioning sidecar per window.
 

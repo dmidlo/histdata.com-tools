@@ -230,6 +230,7 @@ _ALLOWED_KEYS = (
     | {"verbosity"}
 )
 _ANALYTICS_COMMANDS = {
+    "cftc-positioning-corpus",
     "feed-epochs-v2",
     "feed-regimes",
     "market-context-corpus",
@@ -260,8 +261,10 @@ _ANALYTICS_SCALAR_ARGS = {
     "max_events_per_window": "--max-events-per-window",
     "max_events": "--max-events",
     "max_ons_pages_per_query": "--max-ons-pages-per-query",
+    "max_pages_per_dataset": "--max-pages-per-dataset",
     "max_peak_memory_bytes": "--max-peak-memory-bytes",
     "max_runtime_seconds": "--max-runtime-seconds",
+    "max_rows": "--max-rows",
     "max_source_bytes": "--max-source-bytes",
     "max_response_bytes": "--max-response-bytes",
     "max_total_source_bytes": "--max-total-source-bytes",
@@ -280,7 +283,10 @@ _ANALYTICS_SCALAR_ARGS = {
     "final_holdout_period": "--final-holdout-period",
     "validation_period": "--validation-period",
     "operator_catalog": "--operator-catalog",
+    "page_size": "--page-size",
+    "previous_corpus": "--previous-corpus",
     "start_date": "--start-date",
+    "max_staleness_days": "--max-staleness-days",
     "timeout_seconds": "--timeout-seconds",
 }
 _ANALYTICS_LIST_ARGS = {
