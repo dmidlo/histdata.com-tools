@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from typing import cast
 
 from requests import RequestException
 
@@ -401,7 +402,8 @@ def main(argv: list[str] | None = None) -> int:
             "snapshot_count": len(positioning_corpus.snapshots),
             "source_count": len(positioning_corpus.sources),
             "source_bytes": sum(
-                int(item["size_bytes"]) for item in positioning_corpus.sources
+                cast(int, item["size_bytes"])
+                for item in positioning_corpus.sources
             ),
             "duplicate_key_count": positioning_corpus.duplicate_key_count,
             "runtime_seconds": positioning_corpus.runtime_seconds,

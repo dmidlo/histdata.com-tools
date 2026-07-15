@@ -1378,7 +1378,7 @@ class CftcPositioningCorpusV1:
         return {
             "schema_version": self.schema_version,
             "profile": self.profile.to_dict(),
-            "sources": list(self.sources),
+            "sources": [dict(item) for item in self.sources],
             "symbol_mappings": [
                 item.to_dict() for item in self.symbol_mappings
             ],
