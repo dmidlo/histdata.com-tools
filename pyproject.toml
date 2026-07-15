@@ -191,6 +191,9 @@ where = ["src"]
 "histdatacom.market_context" = [
     "assets/*.json",
 ]
+"histdatacom.synthetic" = [
+    "assets/*.json",
+]
 
 [tool.setuptools.dynamic]
 version = { attr = "histdatacom.__version__" }

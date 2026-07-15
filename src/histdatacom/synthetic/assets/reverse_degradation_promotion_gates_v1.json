@@ -1,0 +1,240 @@
+{
+  "schema_version": "histdatacom.benchmark-promotion-gate-policy.v1",
+  "policy_name": "eurusd-triangle-reverse-degradation",
+  "policy_version": "v1",
+  "issue_number": 463,
+  "frozen_before_candidate_results": true,
+  "requirements": [
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "campaign-artifact-budget",
+      "scope": "campaign",
+      "severity": "hard",
+      "metric_name": "artifact_bytes",
+      "comparator": "less-or-equal",
+      "threshold": 67108864,
+      "description": "Compact persisted benchmark evidence must remain at or below 64 MiB."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "campaign-bounded-hook-count",
+      "scope": "campaign",
+      "severity": "hard",
+      "metric_name": "max_hook_metric_count",
+      "comparator": "less-or-equal",
+      "threshold": 64,
+      "description": "Every candidate window must retain no more than 64 bounded hook metrics."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "campaign-dense-identity-control",
+      "scope": "campaign",
+      "severity": "hard",
+      "metric_name": "dense_identity_failure_count",
+      "comparator": "zero",
+      "threshold": 0,
+      "description": "Untouched dense reference controls must pass every applicable integrity gate."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "campaign-ensemble-support",
+      "scope": "campaign",
+      "severity": "advisory",
+      "metric_name": "minimum_ensemble_member_count",
+      "comparator": "greater-or-equal",
+      "threshold": 2,
+      "description": "Candidate uncertainty should include at least two deterministic ensemble members."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "campaign-information-audit",
+      "scope": "campaign",
+      "severity": "hard",
+      "metric_name": "information_audit_violation_count",
+      "comparator": "zero",
+      "threshold": 0,
+      "description": "Blocked splits and every information input must pass the existing leakage audit."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "campaign-negative-control",
+      "scope": "campaign",
+      "severity": "hard",
+      "metric_name": "negative_control_unexpected_pass_count",
+      "comparator": "zero",
+      "threshold": 0,
+      "description": "Every declared negative control must fail at least one hard promotion gate."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "campaign-neighbor-leakage",
+      "scope": "campaign",
+      "severity": "hard",
+      "metric_name": "holdout_neighbor_leakage_count",
+      "comparator": "zero",
+      "threshold": 0,
+      "description": "No calibration source or near-neighbor window may overlap validation or final holdout."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "campaign-peak-memory-budget",
+      "scope": "campaign",
+      "severity": "hard",
+      "metric_name": "peak_memory_bytes",
+      "comparator": "less-or-equal",
+      "threshold": 2147483648,
+      "description": "Peak benchmark memory must remain at or below the predeclared 2 GiB budget."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "campaign-required-strata",
+      "scope": "campaign",
+      "severity": "hard",
+      "metric_name": "required_stratum_missing_count",
+      "comparator": "zero",
+      "threshold": 0,
+      "description": "Every predeclared symbol, split, session, epoch, context, and severity stratum must have support."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "campaign-runtime-budget",
+      "scope": "campaign",
+      "severity": "hard",
+      "metric_name": "runtime_seconds",
+      "comparator": "less-or-equal",
+      "threshold": 900.0,
+      "description": "The bounded real benchmark campaign must complete within 15 minutes."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "campaign-source-hashes",
+      "scope": "campaign",
+      "severity": "hard",
+      "metric_name": "source_hash_mismatch_count",
+      "comparator": "zero",
+      "threshold": 0,
+      "description": "Every selected source partition must match its recorded content hash."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "campaign-window-support",
+      "scope": "campaign",
+      "severity": "advisory",
+      "metric_name": "measured_window_count",
+      "comparator": "greater-or-equal",
+      "threshold": 18,
+      "description": "The campaign should measure at least eighteen real synchronized windows."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "candidate-anchor-integrity",
+      "scope": "candidate",
+      "severity": "hard",
+      "metric_name": "immutable_anchor_violation_count",
+      "comparator": "zero",
+      "threshold": 0,
+      "description": "A candidate cannot alter or omit a protected observed anchor."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "candidate-event-count",
+      "scope": "candidate",
+      "severity": "hard",
+      "metric_name": "max_event_count_relative_error",
+      "comparator": "less-or-equal",
+      "threshold": 0.5,
+      "description": "Worst supported holdout event-count relative error must not exceed 0.50."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "candidate-execution-failures",
+      "scope": "candidate",
+      "severity": "hard",
+      "metric_name": "candidate_failure_count",
+      "comparator": "zero",
+      "threshold": 0,
+      "description": "A promotable candidate cannot have a failed or non-converged measured window."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "candidate-interarrival-shape",
+      "scope": "candidate",
+      "severity": "hard",
+      "metric_name": "max_interarrival_hist_l1",
+      "comparator": "less-or-equal",
+      "threshold": 0.45,
+      "description": "Worst supported holdout inter-arrival histogram L1 distance must not exceed 0.45."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "candidate-path-variation",
+      "scope": "candidate",
+      "severity": "hard",
+      "metric_name": "max_path_realized_variation_relative_error",
+      "comparator": "less-or-equal",
+      "threshold": 0.75,
+      "description": "Worst supported holdout realized-variation relative error must not exceed 0.75."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "candidate-refusal-reporting",
+      "scope": "candidate",
+      "severity": "advisory",
+      "metric_name": "refusal_rate_reported",
+      "comparator": "true",
+      "threshold": true,
+      "description": "Every candidate report should expose measured refusal and unsupported-context rates."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "candidate-spread-tail",
+      "scope": "candidate",
+      "severity": "hard",
+      "metric_name": "max_spread_tail_relative_error",
+      "comparator": "less-or-equal",
+      "threshold": 0.75,
+      "description": "Worst supported holdout spread-tail relative error must not exceed 0.75."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "candidate-triangle-residual",
+      "scope": "candidate",
+      "severity": "advisory",
+      "metric_name": "triangle_residual_p99_pips",
+      "comparator": "less-or-equal",
+      "threshold": 5.0,
+      "description": "The synchronized triangle p99 residual should remain at or below five pips."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "candidate-uncertainty-support",
+      "scope": "candidate",
+      "severity": "advisory",
+      "metric_name": "uncertainty_interval_count",
+      "comparator": "greater-or-equal",
+      "threshold": 6,
+      "description": "Candidate results should report uncertainty over at least six supported holdout slices."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "candidate-unsupported-emission",
+      "scope": "candidate",
+      "severity": "hard",
+      "metric_name": "unsupported_context_emission_count",
+      "comparator": "zero",
+      "threshold": 0,
+      "description": "Unsupported contexts must refuse instead of emitting plausible-looking events."
+    },
+    {
+      "schema_version": "histdatacom.benchmark-gate-requirement.v1",
+      "requirement_id": "candidate-update-transition",
+      "scope": "candidate",
+      "severity": "hard",
+      "metric_name": "max_update_transition_l1",
+      "comparator": "less-or-equal",
+      "threshold": 0.55,
+      "description": "Worst supported holdout update-transition matrix L1 distance must not exceed 0.55."
+    }
+  ],
+  "policy_id": ""
+}

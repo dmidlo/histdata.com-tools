@@ -2678,6 +2678,14 @@ persist. See
 for the complete interfaces, metric semantics, resource bounds, and trust
 gates.
 
+The real-data promotion policy is separately frozen and packaged before any
+promotable candidate campaign. It distinguishes hard campaign/candidate gates
+from visible advisory evidence, fails closed when hard observations are
+missing, and never selects an automatic winner. See
+[`docs/reverse-degradation-benchmark-corpus.md`](docs/reverse-degradation-benchmark-corpus.md)
+for the predeclared thresholds, evidence ordering, provisional motif boundary,
+and scientific nonclaims.
+
 #### Empirical Reference-Motif Index
 
 `ReferenceMotifIndexV1` projects bounded windows from the augmented ASCII tick

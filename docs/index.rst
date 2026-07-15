@@ -46,6 +46,7 @@ Persistence, projections, and validation
    derived-bar-contracts
    strategy-sensitivity-contracts
    reverse-degradation-benchmark-contracts
+   reverse-degradation-benchmark-corpus
    reconstruction-certification-contracts
    reconstruction-temporal-orchestration
 
