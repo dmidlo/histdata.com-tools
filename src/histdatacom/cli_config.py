@@ -229,7 +229,7 @@ _ALLOWED_KEYS = (
     | _CONTROL_BOOL_KEYS
     | {"verbosity"}
 )
-_ANALYTICS_COMMANDS = {"feed-regimes"}
+_ANALYTICS_COMMANDS = {"feed-epochs-v2", "feed-regimes"}
 _ANALYTICS_ALIASES = {
     **_COMMAND_KEY_ALIASES,
     "path": "paths",
@@ -240,8 +240,12 @@ _ANALYTICS_TRUE_FLAG_ARGS = {
     "json": "--json",
 }
 _ANALYTICS_SCALAR_ARGS = {
+    "active_gap_cap_ms": "--active-gap-cap-ms",
+    "activity_bin_ms": "--activity-bin-ms",
+    "artifact_dir": "--artifact-dir",
     "boundary_match_tolerance_periods": "--boundary-match-tolerance-periods",
     "bucket": "--bucket",
+    "burst_interval_ms": "--burst-interval-ms",
     "epoch_artifact": "--epoch-artifact",
     "max_evidence": "--max-evidence",
     "max_sensitivity_runs": "--max-sensitivity-runs",
@@ -249,9 +253,12 @@ _ANALYTICS_SCALAR_ARGS = {
     "min_change_score": "--min-change-score",
     "min_evidence_periods": "--min-evidence-periods",
     "min_feature_coverage": "--min-feature-coverage",
+    "min_symbol_count": "--min-symbol-count",
     "min_segment_periods": "--min-segment-periods",
     "quiet_gap_ms": "--quiet-gap-ms",
+    "penalty_multiplier": "--penalty-multiplier",
     "report": "--report",
+    "robust_clip": "--robust-clip",
 }
 _ANALYTICS_LIST_ARGS = {
     "features": "--features",

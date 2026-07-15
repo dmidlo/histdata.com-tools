@@ -2540,6 +2540,20 @@ analytical frame per tick. See
 [`docs/feed-epoch-contracts.md`](docs/feed-epoch-contracts.md) for the schema,
 trust gate, resource limits, and streaming integration.
 
+For the real three-symbol technology-epoch fit, v2 scans monthly Arrow caches
+column-wise, uses explicit calendar/open/active-time denominators, and applies
+robust multivariate PELT plus family-specific holdouts:
+
+```sh
+histdatacom analytics feed-epochs-v2 \
+  --target data/ASCII/T/eurusd data/ASCII/T/gbpusd data/ASCII/T/eurgbp \
+  --artifact-dir data/.histdatacom/feed-epochs-v2
+```
+
+The command writes separate compact definition, bounded evidence, and runtime
+artifacts. It does not create an augmented cache or claim that a detected
+boundary is a market regime, recovered quote, vendor cause, or broker profile.
+
 #### Historical Feed-Observation Operators
 
 `ObservationOperatorV1` turns a bounded market-event surface into a sparse,

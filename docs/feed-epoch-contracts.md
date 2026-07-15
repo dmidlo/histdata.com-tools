@@ -12,6 +12,64 @@ labels derived from an independent raw-tick scan. The command name
 its discovery and evidence now flow through the data-quality target and
 fingerprint engine.
 
+## Active-time multivariate v2 fit
+
+`histdatacom analytics feed-epochs-v2` is the production research path for
+issue #460. It does not reinterpret the v1 schema. It reads the real monthly
+ASCII tick Arrow caches directly and writes three bounded artifacts: source
+evidence, the compact epoch definition, and campaign/runtime metadata.
+
+Each monthly observation states three different denominators:
+
+- full UTC calendar-month duration;
+- duration in the shared fixed-EST FX market-open policy, including the
+  labelled Friday-close and Sunday-open windows but excluding weekend closure;
+- observed active time, defined as the sum of positive market-open
+  inter-arrivals at or below the configured active-gap cap.
+
+Rates never silently substitute one denominator or numerator for another. The
+calendar rate uses all rows, the market-open rate uses only market-open rows,
+and the active-window rate uses qualifying intervals divided by their summed
+duration. Both filtered numerators are retained as evidence counts. The v2
+evidence also records bid-only, ask-only, joint, and unchanged transitions;
+hourly-count Fano dispersion; inter-arrival dispersion and lag; timestamp
+quantization plus bounded last-digit counts; price precision; duplicate, burst,
+and stale rates; exact stale-run p95 and maximum lengths; spread tails and
+jumps; normalized activity over the shared overlapping session windows and
+source-calendar weekdays; and cross-symbol hourly activity correlation and
+overlap. Hourly synchronization is explicitly a bounded activity proxy, not a
+claim that quote identities or missing ticks are shared.
+
+The shared detector robustly scales features within each symbol, takes the
+cross-symbol median for each common month, and applies multivariate PELT with a
+versioned winsorized squared-error cost, penalty, and minimum segment length.
+Separate per-symbol fits are retained as deviations rather than folded into the
+global epochs. Boundary support and uncertainty come from penalty variants,
+leave-one-symbol and leave-one-feature runs, alternate denominator-feature
+exclusions, and duplicate-feature exclusion.
+
+PELT candidates do not automatically become epochs. A candidate must meet the
+support threshold overall and within every available sensitivity family.
+Candidates that fail a family are retained in `rejected_candidates` with their
+family support table, but they are excluded from the intervals exposed to
+downstream code.
+
+The definition is admitted to observation-operator fitting only when the
+configured symbol, common-period, feature-coverage, and boundary-sensitivity
+requirements pass. Failed or unsupported definitions remain inspectable but
+are not valid reconstruction inputs.
+
+```sh
+histdatacom analytics feed-epochs-v2 \
+  --target data/ASCII/T/eurusd data/ASCII/T/gbpusd data/ASCII/T/eurgbp \
+  --artifact-dir data/.histdatacom/feed-epochs-v2 \
+  --json
+```
+
+This analysis describes changes in the *observation technology represented by
+these source caches*. It does not identify market regimes, recover unobserved
+historical quotes, prove a causal vendor change, or supply broker adaptation.
+
 ## Contract boundary
 
 | Contract | Responsibility |
@@ -50,7 +108,7 @@ feature-provenance map states the exact fingerprint path used for every value.
 Calendar/event coverage and quality limitations are retained even when they are
 not themselves fitted as numeric features.
 
-The epoch fitter does not discover paths or scan raw ticks. Public CLI and API
+The v1 epoch fitter does not discover paths or scan raw ticks. Public v1 CLI and API
 compatibility functions delegate discovery to `discover_quality_targets()`, run
 the canonical fingerprint rules, then pass the resulting evidence into the
 standalone fitter. This keeps one interpretation of source freshness, sibling

@@ -21,6 +21,11 @@ from histdatacom.data_analytics.feed_epochs import (
     FeedEpochFitConfigV1,
     write_feed_epoch_definition,
 )
+from histdatacom.data_analytics.feed_epochs_v2 import (
+    FeedEpochFitConfigV2,
+    analyze_active_time_feed_epochs,
+    write_active_time_feed_epoch_campaign,
+)
 from histdatacom.verbosity import configure_logging
 
 
@@ -143,6 +148,52 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit the full machine-readable analytics payload",
     )
+    active = subparsers.add_parser(
+        "feed-epochs-v2",
+        help="fit active-time multivariate epochs from ASCII tick caches",
+    )
+    active.add_argument(
+        "--target",
+        "--path",
+        dest="paths",
+        nargs="+",
+        required=True,
+        metavar="PATH",
+        help="local file or directory containing monthly ASCII tick caches",
+    )
+    active.add_argument(
+        "--artifact-dir",
+        required=True,
+        metavar="PATH",
+        help="write definition, evidence, and campaign JSON artifacts",
+    )
+    active.add_argument(
+        "--features",
+        nargs="+",
+        default=None,
+        metavar="NAME",
+        help="active-time features included in the multivariate objective",
+    )
+    active.add_argument("--min-evidence-periods", type=int, default=None)
+    active.add_argument("--min-segment-periods", type=int, default=None)
+    active.add_argument("--min-feature-coverage", type=float, default=None)
+    active.add_argument("--min-symbol-count", type=int, default=None)
+    active.add_argument("--penalty-multiplier", type=float, default=None)
+    active.add_argument("--robust-clip", type=float, default=None)
+    active.add_argument("--min-boundary-support", type=float, default=None)
+    active.add_argument(
+        "--boundary-match-tolerance-periods", type=int, default=None
+    )
+    active.add_argument("--active-gap-cap-ms", type=int, default=None)
+    active.add_argument("--burst-interval-ms", type=int, default=None)
+    active.add_argument("--activity-bin-ms", type=int, default=None)
+    active.add_argument("--max-evidence", type=int, default=None)
+    active.add_argument("--max-sensitivity-runs", type=int, default=None)
+    active.add_argument(
+        "--json",
+        action="store_true",
+        help="emit compact campaign and artifact metadata",
+    )
     return parser
 
 
@@ -156,6 +207,33 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
         return 1
     configure_logging(args.verbosity)
+    if args.analytics_command == "feed-epochs-v2":
+        campaign = analyze_active_time_feed_epochs(
+            args.paths,
+            config=_fit_v2_config_from_args(args),
+        )
+        artifacts = write_active_time_feed_epoch_campaign(
+            campaign, args.artifact_dir
+        )
+        payload = campaign.to_dict(include_evidence=False)
+        payload["artifacts"] = {
+            name: artifact.to_dict()
+            for name, artifact in sorted(artifacts.items())
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
+        else:
+            definition = campaign.definition
+            print(  # noqa:T201
+                "Active-time feed epoch fit\n"
+                f"sources: {campaign.source_count}\n"
+                f"common periods: {definition.period_count}\n"
+                f"symbols: {', '.join(definition.symbols)}\n"
+                f"boundaries: {len(definition.boundaries)}\n"
+                f"stability: {definition.stability.status}\n"
+                f"definition: {artifacts['definition'].path}"
+            )
+        return 0
     if args.analytics_command != "feed-regimes":
         parser.error(f"unsupported analytics command: {args.analytics_command}")
 
@@ -213,3 +291,31 @@ def _fit_config_from_args(
         name: value for name, value in values.items() if value is not None
     }
     return FeedEpochFitConfigV1(**configured) if configured else None
+
+
+def _fit_v2_config_from_args(
+    args: argparse.Namespace,
+) -> FeedEpochFitConfigV2 | None:
+    """Return an explicit v2 policy only when the operator configured one."""
+    values = {
+        "feature_names": tuple(args.features) if args.features else None,
+        "min_evidence_periods": args.min_evidence_periods,
+        "min_segment_periods": args.min_segment_periods,
+        "min_feature_coverage": args.min_feature_coverage,
+        "min_symbol_count": args.min_symbol_count,
+        "penalty_multiplier": args.penalty_multiplier,
+        "robust_clip": args.robust_clip,
+        "min_boundary_support": args.min_boundary_support,
+        "boundary_match_tolerance_periods": (
+            args.boundary_match_tolerance_periods
+        ),
+        "active_gap_cap_ms": args.active_gap_cap_ms,
+        "burst_interval_ms": args.burst_interval_ms,
+        "activity_bin_ms": args.activity_bin_ms,
+        "max_evidence": args.max_evidence,
+        "max_sensitivity_runs": args.max_sensitivity_runs,
+    }
+    configured = {
+        name: value for name, value in values.items() if value is not None
+    }
+    return FeedEpochFitConfigV2(**configured) if configured else None

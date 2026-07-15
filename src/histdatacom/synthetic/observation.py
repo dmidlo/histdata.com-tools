@@ -37,6 +37,10 @@ if TYPE_CHECKING:
         FeedEpochDefinitionV1,
         FeedEpochEvidenceV1,
     )
+    from histdatacom.data_analytics.feed_epochs_v2 import (
+        FeedEpochDefinitionV2,
+        FeedEpochEvidenceV2,
+    )
 
 OBSERVATION_CONTEXT_SCHEMA_VERSION = "histdatacom.observation-context.v1"
 OBSERVATION_FIT_EVIDENCE_SCHEMA_VERSION = (
@@ -148,11 +152,13 @@ _NEUTRAL_PARAMETER_VALUES: dict[str, float] = {
     "reconnect_duplicate_probability": 0.0,
 }
 _EVIDENCE_KINDS = {
+    "active_time_feed_epoch",
     "canonical_fingerprint",
     "paired_calibration",
     "controlled_fixture",
 }
 _SOURCE_HASH_BASES = {
+    "cache_content_sha256",
     "canonical_fingerprint_id",
     "canonical_fingerprint_aggregate_id",
     "persisted_fingerprint_artifact_sha256",
@@ -470,8 +476,8 @@ class ObservationFitEvidenceV1:
     @classmethod
     def from_feed_epoch_evidence(
         cls,
-        evidence: FeedEpochEvidenceV1,
-        epoch_definition: FeedEpochDefinitionV1,
+        evidence: FeedEpochEvidenceV1 | FeedEpochEvidenceV2,
+        epoch_definition: FeedEpochDefinitionV1 | FeedEpochDefinitionV2,
     ) -> "ObservationFitEvidenceV1":
         """Project canonical epoch evidence without claiming dense recovery."""
         if not epoch_definition.valid_for_observation_models:
@@ -504,7 +510,11 @@ class ObservationFitEvidenceV1:
         )
         precision = int(round(features.get("price_precision_digits", 8.0)))
         precision = min(16, max(0, precision))
-        stale_rate = _probability(features.get("stale_repeat_rate", 0.0))
+        stale_rate = _probability(
+            features.get(
+                "stale_repeat_rate", features.get("stale_quote_rate", 0.0)
+            )
+        )
         duplicate_rate = _probability(
             features.get("duplicate_timestamp_rate", 0.0)
         )
@@ -559,7 +569,12 @@ class ObservationFitEvidenceV1:
             source_evidence_id=evidence.evidence_id,
             source_artifact_sha256=evidence.source_artifact_sha256,
             source_hash_basis=evidence.source_hash_basis,
-            evidence_kind="canonical_fingerprint",
+            evidence_kind=(
+                "active_time_feed_epoch"
+                if evidence.schema_version
+                == "histdatacom.feed-epoch-evidence.v2"
+                else "canonical_fingerprint"
+            ),
             parameter_values=parameter_values,
             parameter_lower_bounds={
                 name: pair[0] for name, pair in bounds.items()
@@ -2024,7 +2039,7 @@ class ObservationApplicationResultV1:
 def fit_observation_operator(
     evidence: Sequence[ObservationFitEvidenceV1],
     *,
-    epoch_definition: FeedEpochDefinitionV1,
+    epoch_definition: FeedEpochDefinitionV1 | FeedEpochDefinitionV2,
     config: ObservationOperatorFitConfigV1 | None = None,
 ) -> ObservationOperatorV1:
     """Fit a deterministic operator through an explicit hierarchy."""
