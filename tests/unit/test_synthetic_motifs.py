@@ -44,6 +44,7 @@ from histdatacom.synthetic import (
     extract_reference_motif_fragment,
     query_reference_motifs,
     read_reference_motif_index,
+    reference_motif_condition_from_quotes,
     reconstruction_information_window_plan_id,
     reference_motif_information_inputs,
     reference_motif_source_window_from_training_frame,
@@ -280,6 +281,40 @@ def test_augmented_training_frame_projects_to_compact_fragment() -> None:
             condition=_condition(),
             first_known_at_ns=1_700_000_000_030_000_000,
             available_at_ns=1_700_000_000_030_000_000,
+        )
+
+
+def test_quote_feature_schema_is_fixed_and_encodes_weekday() -> None:
+    condition = reference_motif_condition_from_quotes(
+        symbol="EURUSD",
+        feed_epoch_id="technology_epoch_04",
+        session_state="london",
+        event_times_ns=(
+            1_704_067_200_000_000_000,
+            1_704_067_200_100_000_000,
+            1_704_067_200_400_000_000,
+        ),
+        bids=(1.10000, 1.10002, 1.10008),
+        asks=(1.10010, 1.10012, 1.10018),
+        event_tags=("market_context:scheduled_macro",),
+    )
+
+    assert condition.special_tags == ("weekday:monday",)
+    assert condition.event_tags == ("market_context:scheduled_macro",)
+    assert condition.return_regime == "up_large"
+    assert condition.volatility_regime in {"medium", "high"}
+    assert condition.activity_regime == "high"
+    assert condition.timestamp_precision == "millisecond"
+    assert condition.metrics["timestamp_precision_ns"] == 100_000_000.0
+
+    with pytest.raises(ValueError, match="aligned quote rows"):
+        reference_motif_condition_from_quotes(
+            symbol="EURUSD",
+            feed_epoch_id="technology_epoch_04",
+            session_state="london",
+            event_times_ns=(1, 2),
+            bids=(1.0,),
+            asks=(1.1, 1.2),
         )
 
 

@@ -27,6 +27,7 @@ Empirical reconstruction pipeline
    :maxdepth: 2
 
    reference-motif-index-contracts
+   modern-reference-motif-library
    empirical-motif-generation-contracts
    historical-carving-contracts
    cross-currency-reconciliation-contracts

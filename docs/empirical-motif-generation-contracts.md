@@ -75,7 +75,11 @@ For each segment, the generator derives a seed from:
 Worker, retry, window, scratch path, and batch placement are absent. The seed
 rotates through the deterministically ranked motif matches. A fragment may be
 interpolated to more or fewer output events, but the resulting segment duration
-must remain inside that fragment's declared time-scale range. Requested
+must remain inside that fragment's declared time-scale range. When a compact
+fragment supplies fewer gaps than the target cardinality, its positive
+empirical gap weights repeat deterministically and are normalized inside the
+segment boundary. Output timing therefore retains observed burst/quiet shape
+instead of reverting to a uniform clock. Requested
 volatility scaling is clamped to the fragment's declared price-scale range.
 
 Each `EmpiricalMotifTransformationV1` records the source index, query/result,
@@ -86,7 +90,7 @@ similarity. That last value has the explicit meaning
 `uncalibrated-motif-match-similarity-v1`; it is retrieval evidence, not a
 pointwise correctness probability.
 
-Generator version 1.1.0 therefore leaves each candidate
+Generator version 1.2.0 therefore leaves each candidate
 `SyntheticEventV1.confidence` null. Calibrated reconstruction uncertainty is
 reported only as exact-stratum metric/horizon interval coverage by the
 ensemble layer; see
@@ -106,8 +110,11 @@ the immutable anchor mids and spreads. The virtual transform therefore equals
 the historical anchors at progress zero and one, and adjacent fragments meet
 on the same anchor bridge instead of accumulating translation jumps.
 
-Target price precision is applied after transformation. Every candidate is
-then checked for finite, positive bid/ask values and non-negative spread. One
+Target price precision is applied after transformation. Rounded internal
+events preserve the selected fragment's bid-only, ask-only, both-mark, or
+unchanged transition when the quote domain permits it; the last event of a
+transform remains on the common linear seam. Every candidate is then checked
+for finite, positive bid/ask values and non-negative spread. One
 invalid transformed quote refuses the complete anchor interval; version one
 does not silently clip, swap, or partially retain an unsafe path.
 
@@ -157,6 +164,11 @@ immutable anchors, queries the motif index under the configured information
 mode, emits the anchors plus owned proposals, and passes that stream to
 `generate_benchmark_candidate_window()`.
 
+After observed anchors and proposals merge, the adapter recomputes bid-only,
+ask-only, joint, and unchanged state from the actual adjacent quote values.
+Benchmark transition scores therefore cannot be improved by a stale activity
+label that disagrees with the emitted stream.
+
 The existing reverse-degradation engine can therefore compare this generator
 with no-fill, linear interpolation, resample-last, and empirical-overlay
 controls across the same feed-epoch, severity, session, event, and sparsity
@@ -178,7 +190,6 @@ winner or bypass hard historical constraints.
 - #447's implemented control plane owns production Temporal activities,
   backpressure, cancellation, and recovery; see
   [`reconstruction-temporal-orchestration.md`](reconstruction-temporal-orchestration.md).
-  resume behavior.
 
 Changing event-generation semantics, identity fields, decision meanings, or
 lineage interpretation requires a new schema/generator version.

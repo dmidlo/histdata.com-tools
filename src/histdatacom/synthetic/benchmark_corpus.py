@@ -29,18 +29,6 @@ from typing import Any, cast
 from histdatacom.data_analytics.feed_epochs_v2 import (
     read_active_time_feed_epoch_definition,
 )
-from histdatacom.market_context import (
-    CftcReportFamily,
-    CftcReportScope,
-    CftcPositioningQueryStatus,
-    MarketContextView,
-    cftc_positioning_state_label,
-    market_context_benchmark_event_state,
-    query_cftc_positioning_corpus,
-    query_market_context_corpus,
-    read_cftc_positioning_corpus,
-    read_market_context_corpus,
-)
 from histdatacom.runtime_contracts import ArtifactRef, JSONScalar, JSONValue
 from histdatacom.synthetic.benchmark import (
     BenchmarkCandidateKind,
@@ -77,6 +65,7 @@ from histdatacom.synthetic.motifs import (
     ReferenceMotifSplitKind,
     ReferenceMotifSplitV1,
     build_reference_motif_index,
+    reference_motif_condition_from_quotes,
 )
 from histdatacom.synthetic.observation import ObservationOperatorV1
 from histdatacom.synthetic.observation_calibration import (
@@ -1088,6 +1077,19 @@ def build_reverse_degradation_benchmark_corpus(
     The caller supplies prior immutable artifacts instead of allowing the
     benchmark to discover or refresh scientific inputs during execution.
     """
+    from histdatacom.market_context import (  # pylint: disable=import-outside-toplevel
+        CftcPositioningQueryStatus,
+        CftcReportFamily,
+        CftcReportScope,
+        MarketContextView,
+        cftc_positioning_state_label,
+        market_context_benchmark_event_state,
+        query_cftc_positioning_corpus,
+        query_market_context_corpus,
+        read_cftc_positioning_corpus,
+        read_market_context_corpus,
+    )
+
     selected = profile or ReverseDegradationCorpusProfileV1()
     started = time.monotonic()
     root = Path(source_root).expanduser().resolve()
@@ -1672,8 +1674,11 @@ def _split_hashes(
 def run_reverse_degradation_benchmark_campaign(
     corpus: ReverseDegradationBenchmarkCorpusV1,
     source_root: str | Path,
+    *,
+    motif_index: ReferenceMotifIndexV1 | None = None,
+    motif_candidate_provisional: bool = True,
 ) -> tuple[ReverseDegradationBenchmarkCampaignV1, ReferenceMotifIndexV1]:
-    """Run baselines, the provisional motif candidate, and negative control."""
+    """Run baselines, one bound motif candidate, and a negative control."""
     if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
         raise ValueError("benchmark campaign requires a v1 corpus")
     started_wall = datetime.now(timezone.utc)
@@ -1700,11 +1705,16 @@ def run_reverse_degradation_benchmark_campaign(
         )
         for item in corpus.windows
     }
-    motif_index = _build_real_reference_motif_index(
-        corpus,
-        events_by_window,
-        source_by_id=source_by_id,
-    )
+    if motif_index is None:
+        motif_index = _build_real_reference_motif_index(
+            corpus,
+            events_by_window,
+            source_by_id=source_by_id,
+        )
+    elif not isinstance(motif_index, ReferenceMotifIndexV1):
+        raise ValueError("external motif index must use the v1 contract")
+    if not isinstance(motif_candidate_provisional, bool):
+        raise ValueError("motif_candidate_provisional must be boolean")
     generator_config = EmpiricalMotifGeneratorConfigV1(
         max_events_per_interval=512,
         max_transformations_per_interval=64,
@@ -1733,8 +1743,15 @@ def run_reverse_degradation_benchmark_campaign(
     motif_candidate = BenchmarkCandidateV1(
         kind=BenchmarkCandidateKind.CANDIDATE,
         method_id=EMPIRICAL_MOTIF_GENERATOR_ID,
-        implementation_version="1.0.0-provisional-issue-463",
-        parameters={"motif_generator_config_id": generator_config.config_id},
+        implementation_version=(
+            "1.2.0-provisional-issue-463"
+            if motif_candidate_provisional
+            else "1.2.0-qualified-modern-reference"
+        ),
+        parameters={
+            "motif_generator_config_id": generator_config.config_id,
+            "motif_index_id": motif_index.index_id,
+        },
         ensemble_member_ids=corpus.profile.ensemble_member_ids,
     )
     linear_candidate = BenchmarkCandidateV1(
@@ -1955,7 +1972,9 @@ def run_reverse_degradation_benchmark_campaign(
                 else 1
             ),
             evaluated_window_count=len(evaluated),
-            provisional=name == "empirical_motif",
+            provisional=(
+                name == "empirical_motif" and motif_candidate_provisional
+            ),
         )
         for name, accumulator in accumulators.items()
     )
@@ -2399,37 +2418,14 @@ def _motif_condition(
     symbol: str,
     events: Sequence[BenchmarkEventV1],
 ) -> ReferenceMotifConditionV1:
-    intervals = [
-        current.event_time_ns - previous.event_time_ns
-        for previous, current in zip(events, events[1:])
-        if current.event_time_ns > previous.event_time_ns
-    ]
-    duration = max(
-        1,
-        (
-            (events[-1].event_time_ns - events[0].event_time_ns)
-            if len(events) > 1
-            else NANOSECONDS_PER_SECOND
-        ),
-    )
-    return ReferenceMotifConditionV1(
+    return reference_motif_condition_from_quotes(
         symbol=symbol,
         feed_epoch_id=partition.epoch_label,
         session_state=partition.session,
-        active_sessions=(partition.session,),
         event_tags=(partition.context_state, partition.positioning_state),
-        activity_regime="observed",
-        timestamp_precision="millisecond",
-        source_quality_state="eligible",
-        metrics={
-            "tick_intensity": len(events) * NANOSECONDS_PER_SECOND / duration,
-            "interarrival_ns": (
-                statistics.median(intervals)
-                if intervals
-                else float(NANOSECONDS_PER_SECOND)
-            ),
-            "timestamp_precision_ns": float(NANOSECONDS_PER_MILLISECOND),
-        },
+        event_times_ns=tuple(item.event_time_ns for item in events),
+        bids=tuple(item.bid for item in events),
+        asks=tuple(item.ask for item in events),
     )
 
 

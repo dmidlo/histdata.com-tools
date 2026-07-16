@@ -234,6 +234,7 @@ _ANALYTICS_COMMANDS = {
     "feed-epochs-v2",
     "feed-regimes",
     "market-context-corpus",
+    "modern-reference-motif-library",
     "observation-calibrate-v2",
     "reverse-degradation-benchmark-corpus",
 }
@@ -250,6 +251,7 @@ _ANALYTICS_SCALAR_ARGS = {
     "active_gap_cap_ms": "--active-gap-cap-ms",
     "activity_bin_ms": "--activity-bin-ms",
     "artifact_dir": "--artifact-dir",
+    "benchmark_manifest": "--benchmark-manifest",
     "boundary_match_tolerance_periods": "--boundary-match-tolerance-periods",
     "bucket": "--bucket",
     "burst_interval_ms": "--burst-interval-ms",
@@ -259,6 +261,8 @@ _ANALYTICS_SCALAR_ARGS = {
     "evidence": "--evidence",
     "epoch_artifact": "--epoch-artifact",
     "max_evidence": "--max-evidence",
+    "max_fragments": "--max-fragments",
+    "max_matches": "--max-matches",
     "end_date": "--end-date",
     "max_events_per_window": "--max-events-per-window",
     "max_events_per_symbol": "--max-events-per-symbol",
@@ -300,6 +304,7 @@ _ANALYTICS_SCALAR_ARGS = {
     "timeout_seconds": "--timeout-seconds",
     "window_duration_seconds": "--window-duration-seconds",
     "windows_per_split": "--windows-per-split",
+    "windows_per_period": "--windows-per-period",
 }
 _ANALYTICS_LIST_ARGS = {
     "features": "--features",
@@ -307,6 +312,7 @@ _ANALYTICS_LIST_ARGS = {
     "paths": "--target",
     "sessions": "--sessions",
     "sources": "--sources",
+    "train_periods": "--train-periods",
 }
 _ANALYTICS_ALLOWED_KEYS = (
     {"command", "verbosity"}

@@ -461,6 +461,73 @@ def test_cardinality_falls_back_to_conditioned_interarrival_cadence() -> None:
     ]
 
 
+def test_empirical_clock_and_quote_transition_marks_are_materialized() -> None:
+    condition = _condition(intensity=8.0)
+    index = _index(
+        condition,
+        event_offsets_ns=(0, 50_000_000, 250_000_000),
+        quotes=(
+            (1.10000, 1.10020),
+            (1.10010, 1.10020),
+            (1.10010, 1.10030),
+        ),
+    )
+    config = EmpiricalMotifGeneratorConfigV1()
+    run = _run(config)
+    left = _anchor(run, BASE_NS, sequence=0, row_id=1)
+    right = _anchor(
+        run,
+        BASE_NS + SECOND,
+        sequence=99,
+        row_id=2,
+        bid=1.1004,
+        ask=1.1006,
+    )
+
+    first = generate_empirical_motif_candidates(
+        run=run,
+        window=_window(run, BASE_NS, BASE_NS + SECOND + 1),
+        left_anchor=left,
+        right_anchor=right,
+        query_result=_result(index, condition),
+        config=config,
+    )
+    replay = generate_empirical_motif_candidates(
+        run=run,
+        window=_window(run, BASE_NS, BASE_NS + SECOND + 1),
+        left_anchor=left,
+        right_anchor=right,
+        query_result=_result(index, condition),
+        config=config,
+    )
+
+    assert first.events == replay.events
+    gaps = [
+        right_time - left_time
+        for left_time, right_time in zip(
+            (
+                left.event_time_ns,
+                *(item.event_time_ns for item in first.events),
+            ),
+            (
+                *(item.event_time_ns for item in first.events),
+                right.event_time_ns,
+            ),
+        )
+    ]
+    assert len(set(gaps)) > 1
+    stream = (left, *first.events, right)
+    transitions = {
+        (
+            current.bid != previous.bid,
+            current.ask != previous.ask,
+        )
+        for previous, current in zip(stream, stream[1:])
+    }
+    assert (True, False) in transitions
+    assert (False, True) in transitions
+
+
 def test_lineage_anchor_seams_and_merged_observations_are_preserved() -> None:
     condition = _condition()
     index = _index(condition)

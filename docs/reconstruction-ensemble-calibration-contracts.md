@@ -138,7 +138,7 @@ streaming, carving, synchronization, broker, validation, or publication gates.
 
 The empirical motif generator retains `1 / (1 + match_distance)` only as
 `uncalibrated-motif-match-similarity-v1` on its transformation evidence. As of
-generator version 1.1.0, candidate `SyntheticEventV1.confidence` is null. Raw
+generator version 1.2.0, candidate `SyntheticEventV1.confidence` is null. Raw
 retrieval similarity is not copied into a row field that could be mistaken for
 calibrated confidence.
 

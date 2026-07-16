@@ -54,6 +54,12 @@ from histdatacom.synthetic.benchmark_corpus import (
     run_reverse_degradation_benchmark_campaign,
     write_reverse_degradation_benchmark_artifacts,
 )
+from histdatacom.synthetic.motif_library import (
+    DEFAULT_MODERN_MOTIF_SPLIT_PERIODS,
+    ModernReferenceMotifProfileV1,
+    build_modern_reference_motif_library,
+    write_modern_reference_motif_artifacts,
+)
 from histdatacom.verbosity import configure_logging
 
 
@@ -357,6 +363,93 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit compact corpus and artifact metadata",
     )
+    motif_library = subparsers.add_parser(
+        "modern-reference-motif-library",
+        help="build and qualify the real modern empirical motif library",
+    )
+    motif_library.add_argument(
+        "--source-root",
+        required=True,
+        metavar="PATH",
+        help="root containing symbol/year/month/.data Arrow tick caches",
+    )
+    motif_library.add_argument(
+        "--definition",
+        required=True,
+        metavar="PATH",
+        help="stable feed-epochs-v2 definition artifact",
+    )
+    motif_library.add_argument(
+        "--market-context-corpus",
+        required=True,
+        metavar="PATH",
+        help="content-addressed market-context corpus artifact",
+    )
+    motif_library.add_argument(
+        "--cftc-positioning-corpus",
+        required=True,
+        metavar="PATH",
+        help="content-addressed CFTC positioning corpus artifact",
+    )
+    motif_library.add_argument(
+        "--benchmark-manifest",
+        required=True,
+        metavar="PATH",
+        help="frozen #463 benchmark manifest for real qualification",
+    )
+    motif_library.add_argument(
+        "--artifact-dir",
+        required=True,
+        metavar="PATH",
+        help="write content-addressed library and qualification artifacts",
+    )
+    motif_library.add_argument(
+        "--train-periods",
+        nargs="+",
+        default=DEFAULT_MODERN_MOTIF_SPLIT_PERIODS["train"],
+    )
+    motif_library.add_argument(
+        "--calibration-period",
+        default=DEFAULT_MODERN_MOTIF_SPLIT_PERIODS["calibration"][0],
+    )
+    motif_library.add_argument(
+        "--validation-period",
+        default=DEFAULT_MODERN_MOTIF_SPLIT_PERIODS["validation"][0],
+    )
+    motif_library.add_argument(
+        "--final-holdout-period",
+        default=DEFAULT_MODERN_MOTIF_SPLIT_PERIODS["final_holdout"][0],
+    )
+    motif_library.add_argument("--windows-per-period", type=int, default=6)
+    motif_library.add_argument(
+        "--window-duration-seconds", type=int, default=600
+    )
+    motif_library.add_argument(
+        "--minimum-events-per-symbol", type=int, default=32
+    )
+    motif_library.add_argument("--max-events-per-symbol", type=int, default=96)
+    motif_library.add_argument("--max-fragments", type=int, default=256)
+    motif_library.add_argument("--max-matches", type=int, default=64)
+    motif_library.add_argument(
+        "--neighbor-guard-seconds", type=int, default=1800
+    )
+    motif_library.add_argument(
+        "--max-source-bytes", type=int, default=2 * 1024**3
+    )
+    motif_library.add_argument(
+        "--max-runtime-seconds", type=float, default=900.0
+    )
+    motif_library.add_argument(
+        "--max-peak-memory-bytes", type=int, default=2 * 1024**3
+    )
+    motif_library.add_argument(
+        "--max-artifact-bytes", type=int, default=64 * 1024**2
+    )
+    motif_library.add_argument(
+        "--json",
+        action="store_true",
+        help="emit compact library, gate, and artifact metadata",
+    )
     benchmark = subparsers.add_parser(
         "reverse-degradation-benchmark-corpus",
         help="build and run the immutable real tick reconstruction benchmark",
@@ -434,6 +527,75 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
         return 1
     configure_logging(args.verbosity)
+    if args.analytics_command == "modern-reference-motif-library":
+        try:
+            motif_build = build_modern_reference_motif_library(
+                args.source_root,
+                feed_epoch_definition_path=args.definition,
+                market_context_corpus_path=args.market_context_corpus,
+                cftc_positioning_corpus_path=args.cftc_positioning_corpus,
+                benchmark_manifest_path=args.benchmark_manifest,
+                profile=ModernReferenceMotifProfileV1(
+                    split_periods={
+                        "train": tuple(args.train_periods),
+                        "calibration": (args.calibration_period,),
+                        "validation": (args.validation_period,),
+                        "final_holdout": (args.final_holdout_period,),
+                    },
+                    synchronized_windows_per_period=args.windows_per_period,
+                    window_duration_seconds=args.window_duration_seconds,
+                    minimum_events_per_symbol=args.minimum_events_per_symbol,
+                    max_events_per_symbol=args.max_events_per_symbol,
+                    max_fragments=args.max_fragments,
+                    max_matches=args.max_matches,
+                    neighbor_guard_seconds=args.neighbor_guard_seconds,
+                    max_source_bytes=args.max_source_bytes,
+                    max_runtime_seconds=args.max_runtime_seconds,
+                    max_peak_memory_bytes=args.max_peak_memory_bytes,
+                    max_artifact_bytes=args.max_artifact_bytes,
+                ),
+            )
+            motif_artifacts = write_modern_reference_motif_artifacts(
+                motif_build, args.artifact_dir
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(
+                f"modern motif library error: {exc}", file=sys.stderr
+            )  # noqa:T201
+            return 1
+        eligible = bool(
+            motif_build.qualification["candidate_promotion_eligible"]
+            and all(motif_build.qualification["real_window_contracts"].values())
+        )
+        motif_payload = {
+            "schema_version": motif_build.manifest["schema_version"],
+            "library_id": motif_build.library_id,
+            "index_id": motif_build.index.index_id,
+            "fragment_count": len(motif_build.index.fragments),
+            "candidate_promotion_eligible": motif_build.qualification[
+                "candidate_promotion_eligible"
+            ],
+            "real_window_contracts": motif_build.qualification[
+                "real_window_contracts"
+            ],
+            "artifacts": {
+                name: artifact.to_dict()
+                for name, artifact in sorted(motif_artifacts.items())
+            },
+        }
+        if args.json:
+            print(
+                json.dumps(motif_payload, indent=2, sort_keys=True)
+            )  # noqa:T201
+        else:
+            print(  # noqa:T201
+                "Modern reference-motif library\n"
+                f"fragments: {len(motif_build.index.fragments)}\n"
+                f"candidate gate: {'pass' if eligible else 'fail'}\n"
+                f"manifest: {motif_artifacts['manifest'].path}\n"
+                f"qualification: {motif_artifacts['qualification'].path}"
+            )
+        return 0 if eligible else 2
     if args.analytics_command == "reverse-degradation-benchmark-corpus":
         try:
             benchmark_corpus = build_reverse_degradation_benchmark_corpus(

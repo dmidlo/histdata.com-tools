@@ -14,7 +14,7 @@ event identities never include a worker, retry, or window identifier.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 import hashlib
 import json
@@ -69,7 +69,7 @@ MOTIF_CANDIDATE_BATCH_SCHEMA_VERSION = (
 )
 
 EMPIRICAL_MOTIF_GENERATOR_ID = "histdatacom.empirical-motif-resampling"
-EMPIRICAL_MOTIF_GENERATOR_VERSION = "1.1.0"
+EMPIRICAL_MOTIF_GENERATOR_VERSION = "1.2.0"
 MOTIF_TRANSFORMATION_CONFIDENCE_QUANTITY = (
     "uncalibrated-motif-match-similarity-v1"
 )
@@ -1189,16 +1189,40 @@ class EmpiricalMotifBenchmarkGeneratorV1(BenchmarkGeneratorV1):
             )
             for item in proposals
         ]
-        return tuple(
-            sorted(
-                (*benchmark_anchors, *benchmark_proposals),
-                key=lambda item: (
-                    item.event_time_ns,
-                    item.event_sequence,
-                    item.benchmark_event_id,
-                ),
-            )
+        return _benchmark_update_states(
+            tuple((*benchmark_anchors, *benchmark_proposals))
         )
+
+
+def _benchmark_update_states(
+    events: Sequence[BenchmarkEventV1],
+) -> tuple[BenchmarkEventV1, ...]:
+    """Recompute bid/ask transition marks after anchors and proposals merge."""
+    ordered = tuple(
+        sorted(
+            events,
+            key=lambda item: (
+                item.event_time_ns,
+                item.event_sequence,
+                item.benchmark_event_id,
+            ),
+        )
+    )
+    previous: dict[str, BenchmarkEventV1] = {}
+    result: list[BenchmarkEventV1] = []
+    for item in ordered:
+        prior = previous.get(item.symbol)
+        if prior is None or (prior.bid != item.bid and prior.ask != item.ask):
+            state = "update_joint"
+        elif prior.bid == item.bid and prior.ask == item.ask:
+            state = "unchanged"
+        elif prior.bid != item.bid:
+            state = "update_bid_only"
+        else:
+            state = "update_ask_only"
+        result.append(replace(item, event_state=state, benchmark_event_id=""))
+        previous[item.symbol] = item
+    return tuple(result)
 
 
 def _validate_generation_scope(
@@ -1287,6 +1311,54 @@ def _candidate_times(
     return tuple(values)
 
 
+def _motif_warped_event_times(
+    *,
+    uniform_event_times: tuple[int, ...],
+    left_time_ns: int,
+    right_time_ns: int,
+    plan: _PlannedTransform,
+    timestamp_precision_ns: int,
+) -> tuple[int, ...]:
+    """Warp one planned segment with the selected motif's event clock."""
+    start = (
+        left_time_ns
+        if plan.start_index == 0
+        else uniform_event_times[plan.start_index - 1]
+    )
+    end_index = plan.start_index + plan.event_count
+    end = (
+        right_time_ns
+        if end_index == len(uniform_event_times)
+        else uniform_event_times[end_index]
+    )
+    fragment = plan.match.fragment
+    source_gaps = tuple(
+        max(1, right - left)
+        for left, right in zip(
+            fragment.event_offsets_ns, fragment.event_offsets_ns[1:]
+        )
+    )
+    rotation = plan.record.seed % len(source_gaps)
+    gap_weights = tuple(
+        source_gaps[(rotation + index) % len(source_gaps)]
+        for index in range(plan.event_count + 1)
+    )
+    total_weight = sum(gap_weights)
+    precision = max(1, timestamp_precision_ns)
+    values: list[int] = []
+    previous = start
+    cumulative_weight = 0
+    for local_index in range(plan.event_count):
+        cumulative_weight += gap_weights[local_index]
+        raw = start + round((end - start) * cumulative_weight / total_weight)
+        quantized = ((raw + precision // 2) // precision) * precision
+        selected = max(start + 1, min(end - 1, quantized))
+        selected = max(previous, selected)
+        values.append(selected)
+        previous = selected
+    return tuple(values)
+
+
 def _plan_transforms(
     *,
     run: ReconstructionRunV1,
@@ -1324,8 +1396,25 @@ def _plan_transforms(
                     event_times[cursor + event_count - 1] - previous_time
                 )
                 duration = max(observed_duration, cadence_ns * event_count)
-                time_scale = duration / match.fragment.duration_ns
+                source_gap_count = max(
+                    1, len(match.fragment.event_offsets_ns) - 1
+                )
+                repeated_source_duration = match.fragment.duration_ns * (
+                    (event_count + 1) / source_gap_count
+                )
+                time_scale = duration / repeated_source_duration
                 policy = match.fragment.transform_policy
+                terminal_scale = (
+                    duration + cadence_ns
+                ) / repeated_source_duration
+                if (
+                    event_count == capacity
+                    and time_scale < policy.min_time_scale
+                    and policy.min_time_scale
+                    <= terminal_scale
+                    <= policy.max_time_scale
+                ):
+                    time_scale = terminal_scale
                 if policy.min_time_scale <= time_scale <= policy.max_time_scale:
                     chosen = (match, event_count, time_scale)
                     break
@@ -1425,6 +1514,20 @@ def _events_for_transform(
     precision_digits = _price_precision_digits(
         query_result.query.condition, config
     )
+    warped_event_times = _motif_warped_event_times(
+        uniform_event_times=event_times,
+        left_time_ns=left_anchor.event_time_ns,
+        right_time_ns=right_anchor.event_time_ns,
+        plan=plan,
+        timestamp_precision_ns=max(
+            1,
+            round(
+                query_result.query.condition.metrics.get(
+                    "timestamp_precision_ns", 1.0
+                )
+            ),
+        ),
+    )
     midpoint_deltas = tuple(
         (bid_delta + ask_delta) / 2.0
         for bid_delta, ask_delta in zip(
@@ -1439,10 +1542,12 @@ def _events_for_transform(
     )
     events: list[SyntheticEventV1] = []
     lineages: list[EmpiricalMotifEventLineageV1] = []
+    previous_bid = left_anchor.bid
+    previous_ask = left_anchor.ask
     for local_index in range(plan.event_count):
         global_index = plan.start_index + local_index
         global_ordinal = global_index + 1
-        event_time_ns = event_times[global_index]
+        event_time_ns = warped_event_times[local_index]
         anchor_progress = (event_time_ns - left_anchor.event_time_ns) / gap_ns
         source_progress = (local_index + 1) / plan.event_count
         source_mid = _interpolate_fragment(
@@ -1466,6 +1571,49 @@ def _events_for_transform(
             )
         bid = round(mid - spread / 2.0, precision_digits)
         ask = round(mid + spread / 2.0, precision_digits)
+        transition_index = max(
+            1,
+            min(
+                len(fragment.transitions) - 1,
+                round(source_progress * (len(fragment.transitions) - 1)),
+            ),
+        )
+        transition = fragment.transitions[transition_index].value
+        if local_index == plan.event_count - 1:
+            transition = "seam"
+        if transition == "unchanged":
+            bid, ask = previous_bid, previous_ask
+        elif transition == "bid":
+            ask = previous_ask
+            bid = min(bid, ask)
+            bid = _force_changed_mark(
+                bid,
+                previous_bid,
+                upper_bound=ask,
+                precision_digits=precision_digits,
+            )
+        elif transition == "ask":
+            bid = previous_bid
+            ask = max(ask, bid)
+            ask = _force_changed_mark(
+                ask,
+                previous_ask,
+                lower_bound=bid,
+                precision_digits=precision_digits,
+            )
+        elif transition == "both":
+            bid = _force_changed_mark(
+                bid,
+                previous_bid,
+                upper_bound=ask,
+                precision_digits=precision_digits,
+            )
+            ask = _force_changed_mark(
+                ask,
+                previous_ask,
+                lower_bound=bid,
+                precision_digits=precision_digits,
+            )
         if not (
             math.isfinite(bid)
             and math.isfinite(ask)
@@ -1481,6 +1629,7 @@ def _events_for_transform(
                     f"at output ordinal {global_ordinal}"
                 ),
             )
+        previous_bid, previous_ask = bid, ask
         event = SyntheticEventV1.generated(
             symbol=left_anchor.symbol,
             event_time_ns=event_time_ns,
@@ -1518,6 +1667,31 @@ def _events_for_transform(
             )
         )
     return tuple(events), tuple(lineages), None
+
+
+def _force_changed_mark(
+    value: float,
+    previous: float,
+    *,
+    precision_digits: int,
+    lower_bound: float | None = None,
+    upper_bound: float | None = None,
+) -> float:
+    """Preserve an empirical transition after quote rounding."""
+    if value != previous:
+        return value
+    tick = 10.0 ** (-precision_digits)
+    candidates = (previous + tick, previous - tick)
+    for candidate in candidates:
+        rounded = round(candidate, precision_digits)
+        if (
+            rounded > 0.0
+            and rounded != previous
+            and (lower_bound is None or rounded >= lower_bound)
+            and (upper_bound is None or rounded <= upper_bound)
+        ):
+            return rounded
+    return value
 
 
 def _interpolate_fragment(

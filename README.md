@@ -46,6 +46,7 @@ Works on macOS, Linux, and Windows.
     - [Historical Feed-Observation Operators](#historical-feed-observation-operators)
     - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
+    - [Real Modern Reference-Motif Library](#real-modern-reference-motif-library)
     - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
     - [Historical Candidate Carving](#historical-candidate-carving)
     - [Cross-Currency Reconciliation](#cross-currency-reconciliation)
@@ -2716,6 +2717,25 @@ inputs. Index persistence is atomic and content-addressed through an
 `ArtifactRef`; augmented panels remain intermediates. See
 [`docs/reference-motif-index-contracts.md`](docs/reference-motif-index-contracts.md)
 for split, leakage, compact-layout, retrieval, resource, and trust semantics.
+
+#### Real Modern Reference-Motif Library
+
+The installed `histdatacom analytics modern-reference-motif-library` command
+builds the first production index from 24 hash-verified monthly EURUSD,
+GBPUSD, and EURGBP Arrow caches in stable `technology_epoch_04`. Its fixed
+chronological profile keeps 201901--202301 for training and blocks 202307,
+202401, and 202510 as calibration, validation, and final holdout.
+
+The builder prefilters normalized cross-split near duplicates, reruns the
+fail-closed leakage audit, retains a deterministic compact 256-fragment train
+index, aggregates support/backoff coverage, exercises explicit unsupported
+refusal, and runs the unchanged #463 real benchmark twice. The installed
+readers verify the content-addressed index, manifest, leakage, coverage,
+qualification, and resource artifacts. Dense source and holdout rows never
+enter those files. See
+[`docs/modern-reference-motif-library.md`](docs/modern-reference-motif-library.md)
+for the source profile, feature schema, corrected event-clock/transition
+semantics, qualification gates, CLI, and nonclaims.
 
 #### Empirical Motif Candidate Generation
 

@@ -183,13 +183,14 @@ is recorded as not applicable when a candidate exposes no conditional
 intensity instead of fabricating a diagnostic. Six frequentist 95% uncertainty
 intervals summarize window/member variation for every candidate report.
 
-## Candidate boundary before #464
+## Candidate boundary supplied to #464
 
-Issue #464 owns the qualified production reference-motif library. The #463
-campaign may exercise the existing `EmpiricalMotifBenchmarkGeneratorV1` only
-with a provisional calibration-only motif input whose source windows cannot
-touch validation or final holdout. Such a result is labeled provisional and
-cannot claim that #464 is complete.
+The #463 campaign exercised `EmpiricalMotifBenchmarkGeneratorV1` with a
+provisional calibration-only motif input whose source windows could not touch
+validation or final holdout. That failed result remains immutable baseline
+evidence. The qualified production library, independent split manifest, and
+non-provisional rerun are now owned by #464 and documented in
+[`modern-reference-motif-library.md`](modern-reference-motif-library.md).
 
 ## Issue #463 reference campaign
 

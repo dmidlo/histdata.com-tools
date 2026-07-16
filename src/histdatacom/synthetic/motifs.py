@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 import hashlib
 import json
@@ -20,6 +21,7 @@ import math
 import os
 from pathlib import Path
 import re
+import statistics
 from typing import Any, cast
 
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
@@ -61,6 +63,9 @@ REFERENCE_MOTIF_QUERY_RESULT_SCHEMA_VERSION = (
     "histdatacom.reference-motif-query-result.v1"
 )
 REFERENCE_MOTIF_ARTIFACT_KIND = "reference-motif-index"
+REFERENCE_MOTIF_FEATURE_SCHEMA_VERSION = (
+    "histdatacom.reference-motif-features.v1"
+)
 
 INT64_MIN = -(2**63)
 INT64_MAX = 2**63 - 1
@@ -401,6 +406,130 @@ class ReferenceMotifConditionV1:
             },
             schema_version=str(data.get("schema_version", "")),
         )
+
+
+def reference_motif_condition_from_quotes(
+    *,
+    symbol: str,
+    feed_epoch_id: str,
+    session_state: str,
+    event_times_ns: Sequence[int],
+    bids: Sequence[float],
+    asks: Sequence[float],
+    event_tags: Sequence[str] = (),
+    active_sessions: Sequence[str] = (),
+    overlap_tags: Sequence[str] = (),
+    special_tags: Sequence[str] = (),
+    holiday_tags: Sequence[str] = (),
+    source_quality_score: float = 1.0,
+) -> ReferenceMotifConditionV1:
+    """Derive the versioned retrieval coordinates from one quote window.
+
+    The feature thresholds are fixed rather than fitted on a holdout.  This
+    keeps production-library and benchmark-query classification identical and
+    makes weekday, event, activity, volatility, spread, return, precision, and
+    quality conditioning replayable from the recorded quote rows.
+    """
+    times = tuple(
+        _bounded_int64(value, "event_time_ns") for value in event_times_ns
+    )
+    bid_values = tuple(_positive_float(value, "bid") for value in bids)
+    ask_values = tuple(_positive_float(value, "ask") for value in asks)
+    if (
+        len({len(times), len(bid_values), len(ask_values)}) != 1
+        or len(times) < 2
+    ):
+        raise ValueError("motif feature extraction requires aligned quote rows")
+    if list(times) != sorted(times) or times[-1] <= times[0]:
+        raise ValueError(
+            "motif feature timestamps must be ordered with duration"
+        )
+    if any(ask < bid for bid, ask in zip(bid_values, ask_values)):
+        raise ValueError("motif feature extraction rejects negative spreads")
+
+    mids = tuple((bid + ask) / 2.0 for bid, ask in zip(bid_values, ask_values))
+    log_returns = tuple(
+        math.log(right / left)
+        for left, right in zip(mids, mids[1:])
+        if left > 0.0 and right > 0.0
+    )
+    positive_intervals = tuple(
+        right - left for left, right in zip(times, times[1:]) if right > left
+    )
+    duration_ns = max(1, times[-1] - times[0])
+    return_value = math.log(mids[-1] / mids[0])
+    range_value = (max(mids) - min(mids)) / max(1e-15, statistics.median(mids))
+    volatility = math.sqrt(
+        sum(value * value for value in log_returns) / max(1, len(log_returns))
+    )
+    spread = statistics.median(
+        ask - bid for bid, ask in zip(bid_values, ask_values)
+    )
+    relative_spread = spread / max(1e-15, statistics.median(mids))
+    tick_intensity = len(times) * 1_000_000_000 / duration_ns
+    interarrival_ns = (
+        float(statistics.median(positive_intervals))
+        if positive_intervals
+        else float(duration_ns)
+    )
+    timestamp_precision_ns = _integer_gcd(positive_intervals) or 1
+    price_precision_digits = max(
+        _decimal_precision(value) for value in (*bid_values, *ask_values)
+    )
+    quality_score = _finite_float(source_quality_score, "source_quality_score")
+    if not 0.0 <= quality_score <= 1.0:
+        raise ValueError("source_quality_score must be inside [0,1]")
+
+    weekday = (
+        datetime.fromtimestamp(times[0] / 1_000_000_000, tz=timezone.utc)
+        .strftime("%A")
+        .lower()
+    )
+    tags = tuple(event_tags) or ("event:none",)
+    return ReferenceMotifConditionV1(
+        symbol=symbol,
+        feed_epoch_id=feed_epoch_id,
+        session_state=session_state,
+        active_sessions=tuple(active_sessions) or (session_state,),
+        overlap_tags=tuple(overlap_tags),
+        special_tags=tuple((*special_tags, f"weekday:{weekday}")),
+        holiday_tags=tuple(holiday_tags),
+        event_tags=tags,
+        return_regime=_signed_regime(return_value, 1e-5, 5e-5),
+        range_regime=_three_level_regime(range_value, 2e-5, 1e-4),
+        volatility_regime=_three_level_regime(volatility, 5e-6, 2.5e-5),
+        spread_regime=_three_level_regime(relative_spread, 5e-5, 2e-4),
+        activity_regime=_three_level_regime(tick_intensity, 1.0, 5.0),
+        interarrival_regime=(
+            "fast"
+            if interarrival_ns < 200_000_000
+            else "normal" if interarrival_ns < 2_000_000_000 else "slow"
+        ),
+        timestamp_precision=(
+            "second"
+            if timestamp_precision_ns >= 1_000_000_000
+            else (
+                "millisecond"
+                if timestamp_precision_ns >= 1_000_000
+                else "sub_millisecond"
+            )
+        ),
+        price_precision=f"digits:{price_precision_digits}",
+        source_quality_state=(
+            "eligible" if quality_score >= 1.0 else "degraded"
+        ),
+        metrics={
+            "return_value": return_value,
+            "range_value": range_value,
+            "volatility": volatility,
+            "spread": spread,
+            "tick_intensity": tick_intensity,
+            "interarrival_ns": interarrival_ns,
+            "timestamp_precision_ns": float(timestamp_precision_ns),
+            "price_precision_digits": float(price_precision_digits),
+            "source_quality_score": quality_score,
+        },
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2582,6 +2711,34 @@ def _metric_mapping(value: Mapping[str, float]) -> dict[str, float]:
     return result
 
 
+def _signed_regime(value: float, small: float, large: float) -> str:
+    magnitude = abs(value)
+    if magnitude < small:
+        return "flat"
+    direction = "up" if value > 0.0 else "down"
+    return f"{direction}_{'small' if magnitude < large else 'large'}"
+
+
+def _three_level_regime(value: float, low: float, high: float) -> str:
+    if value < low:
+        return "low"
+    return "medium" if value < high else "high"
+
+
+def _integer_gcd(values: Sequence[int]) -> int:
+    result = 0
+    for value in values:
+        result = math.gcd(result, int(value))
+        if result == 1:
+            break
+    return result
+
+
+def _decimal_precision(value: float) -> int:
+    rendered = f"{value:.12f}".rstrip("0").rstrip(".")
+    return len(rendered.rsplit(".", 1)[1]) if "." in rendered else 0
+
+
 def _named_positive_mapping(
     value: Mapping[str, float], name: str
 ) -> dict[str, float]:
@@ -2888,6 +3045,7 @@ __all__ = [
     "REFERENCE_MOTIF_BACKOFF_LEVELS",
     "REFERENCE_MOTIF_CONDITION_SCHEMA_VERSION",
     "REFERENCE_MOTIF_FRAGMENT_SCHEMA_VERSION",
+    "REFERENCE_MOTIF_FEATURE_SCHEMA_VERSION",
     "REFERENCE_MOTIF_INDEX_CONFIG_SCHEMA_VERSION",
     "REFERENCE_MOTIF_INDEX_SCHEMA_VERSION",
     "REFERENCE_MOTIF_MATCH_SCHEMA_VERSION",
@@ -2920,6 +3078,7 @@ __all__ = [
     "query_reference_motifs",
     "read_reference_motif_index",
     "reference_motif_information_inputs",
+    "reference_motif_condition_from_quotes",
     "reference_motif_source_window_from_training_frame",
     "write_reference_motif_index",
 ]
