@@ -47,6 +47,13 @@ from histdatacom.synthetic.observation_calibration import (
     read_feed_epoch_evidence_v2,
     write_observation_calibration_campaign,
 )
+from histdatacom.synthetic.benchmark_corpus import (
+    PREDECLARED_GATE_COMMIT,
+    ReverseDegradationCorpusProfileV1,
+    build_reverse_degradation_benchmark_corpus,
+    run_reverse_degradation_benchmark_campaign,
+    write_reverse_degradation_benchmark_artifacts,
+)
 from histdatacom.verbosity import configure_logging
 
 
@@ -350,6 +357,70 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit compact corpus and artifact metadata",
     )
+    benchmark = subparsers.add_parser(
+        "reverse-degradation-benchmark-corpus",
+        help="build and run the immutable real tick reconstruction benchmark",
+    )
+    benchmark.add_argument(
+        "--source-root",
+        required=True,
+        metavar="PATH",
+        help="root containing symbol/year/month/.data Arrow tick caches",
+    )
+    benchmark.add_argument(
+        "--definition",
+        required=True,
+        metavar="PATH",
+        help="feed-epochs-v2 definition artifact",
+    )
+    benchmark.add_argument(
+        "--observation-campaign",
+        required=True,
+        metavar="PATH",
+        help="fitted observation-calibration-v2 campaign artifact",
+    )
+    benchmark.add_argument(
+        "--market-context-corpus",
+        required=True,
+        metavar="PATH",
+        help="content-addressed market-context corpus artifact",
+    )
+    benchmark.add_argument(
+        "--cftc-positioning-corpus",
+        required=True,
+        metavar="PATH",
+        help="content-addressed CFTC positioning corpus artifact",
+    )
+    benchmark.add_argument(
+        "--artifact-dir",
+        required=True,
+        metavar="PATH",
+        help="write content-addressed benchmark evidence artifacts",
+    )
+    benchmark.add_argument("--calibration-period", default="201001")
+    benchmark.add_argument("--validation-period", default="202401")
+    benchmark.add_argument("--final-holdout-period", default="202510")
+    benchmark.add_argument("--windows-per-split", type=int, default=6)
+    benchmark.add_argument("--window-duration-seconds", type=int, default=600)
+    benchmark.add_argument("--minimum-events-per-symbol", type=int, default=64)
+    benchmark.add_argument("--max-events-per-symbol", type=int, default=256)
+    benchmark.add_argument("--neighbor-guard-seconds", type=int, default=1800)
+    benchmark.add_argument("--max-source-bytes", type=int, default=2 * 1024**3)
+    benchmark.add_argument("--max-runtime-seconds", type=float, default=900.0)
+    benchmark.add_argument(
+        "--max-peak-memory-bytes", type=int, default=2 * 1024**3
+    )
+    benchmark.add_argument(
+        "--max-artifact-bytes", type=int, default=64 * 1024**2
+    )
+    benchmark.add_argument(
+        "--gate-policy-commit", default=PREDECLARED_GATE_COMMIT
+    )
+    benchmark.add_argument(
+        "--json",
+        action="store_true",
+        help="emit compact corpus, campaign, decision, and artifact metadata",
+    )
     return parser
 
 
@@ -363,6 +434,93 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
         return 1
     configure_logging(args.verbosity)
+    if args.analytics_command == "reverse-degradation-benchmark-corpus":
+        try:
+            benchmark_corpus = build_reverse_degradation_benchmark_corpus(
+                args.source_root,
+                feed_epoch_definition_path=args.definition,
+                observation_campaign_path=args.observation_campaign,
+                market_context_corpus_path=args.market_context_corpus,
+                cftc_positioning_corpus_path=args.cftc_positioning_corpus,
+                profile=ReverseDegradationCorpusProfileV1(
+                    split_periods={
+                        "calibration": args.calibration_period,
+                        "validation": args.validation_period,
+                        "final_holdout": args.final_holdout_period,
+                    },
+                    synchronized_windows_per_split=args.windows_per_split,
+                    window_duration_seconds=args.window_duration_seconds,
+                    minimum_events_per_symbol=args.minimum_events_per_symbol,
+                    max_events_per_symbol=args.max_events_per_symbol,
+                    neighbor_guard_seconds=args.neighbor_guard_seconds,
+                    max_source_bytes=args.max_source_bytes,
+                    max_runtime_seconds=args.max_runtime_seconds,
+                    max_peak_memory_bytes=args.max_peak_memory_bytes,
+                    max_artifact_bytes=args.max_artifact_bytes,
+                ),
+                gate_policy_commit=args.gate_policy_commit,
+            )
+            benchmark_campaign, motif_index = (
+                run_reverse_degradation_benchmark_campaign(
+                    benchmark_corpus, args.source_root
+                )
+            )
+            benchmark_artifacts = write_reverse_degradation_benchmark_artifacts(
+                benchmark_corpus,
+                benchmark_campaign,
+                motif_index,
+                args.artifact_dir,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(
+                f"reverse-degradation benchmark error: {exc}",
+                file=sys.stderr,
+            )  # noqa:T201
+            return 1
+        benchmark_payload = {
+            "schema_version": benchmark_campaign.schema_version,
+            "corpus_id": benchmark_corpus.corpus_id,
+            "campaign_id": benchmark_campaign.campaign_id,
+            "motif_index_id": motif_index.index_id,
+            "source_count": len(benchmark_corpus.sources),
+            "window_count": len(benchmark_corpus.windows),
+            "runtime_seconds": benchmark_campaign.runtime_seconds,
+            "peak_memory_bytes": benchmark_campaign.peak_memory_bytes,
+            "campaign_promotion_eligible": (
+                benchmark_campaign.campaign_gate_decision.promotion_eligible
+            ),
+            "candidate_decisions": {
+                item.method_name: {
+                    "promotion_eligible": item.gate_decision.promotion_eligible,
+                    "provisional": item.provisional,
+                    "decision_id": item.gate_decision.decision_id,
+                }
+                for item in benchmark_campaign.candidate_reports
+            },
+            "artifacts": {
+                name: artifact.to_dict()
+                for name, artifact in sorted(benchmark_artifacts.items())
+            },
+        }
+        if args.json:
+            print(
+                json.dumps(benchmark_payload, indent=2, sort_keys=True)
+            )  # noqa:T201
+        else:
+            print(  # noqa:T201
+                "Real reverse-degradation benchmark\n"
+                f"sources: {len(benchmark_corpus.sources)}\n"
+                f"synchronized windows: {len(benchmark_corpus.windows)}\n"
+                f"campaign gate: "
+                f"{'pass' if benchmark_campaign.campaign_gate_decision.promotion_eligible else 'fail'}\n"
+                f"manifest: {benchmark_artifacts['manifest'].path}\n"
+                f"scorecard: {benchmark_artifacts['scorecard'].path}"
+            )
+        return (
+            0
+            if benchmark_campaign.campaign_gate_decision.promotion_eligible
+            else 2
+        )
     if args.analytics_command == "cftc-positioning-corpus":
         try:
             positioning_build = build_live_cftc_positioning_corpus(
@@ -472,9 +630,9 @@ def main(argv: list[str] | None = None) -> int:
             },
         }
         if args.json:
-            print(  # noqa:T201
+            print(
                 json.dumps(context_payload, indent=2, sort_keys=True)
-            )
+            )  # noqa:T201
         else:
             print(  # noqa:T201
                 "Point-in-time market-context corpus\n"

@@ -2686,6 +2686,14 @@ missing, and never selects an automatic winner. See
 for the predeclared thresholds, evidence ordering, provisional motif boundary,
 and scientific nonclaims.
 
+The installed `histdatacom analytics reverse-degradation-benchmark-corpus`
+command now builds the real EURUSD/GBPUSD/EURGBP Arrow partitions, replays
+source and selected-window hashes, executes all declared degradation families,
+runs dense/no-fill/interpolation/motif/negative controls, and writes a compact
+content-addressed manifest, motif index, leakage audit, resource audit, and
+scorecard. Required fitted-operator or replay failures abort the campaign;
+dense and holdout event rows remain process-local.
+
 #### Empirical Reference-Motif Index
 
 `ReferenceMotifIndexV1` projects bounded windows from the augmented ASCII tick
