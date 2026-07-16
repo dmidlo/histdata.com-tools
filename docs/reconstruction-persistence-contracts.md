@@ -1,9 +1,11 @@
 # Reconstruction persistence contracts
 
 `histdatacom.synthetic.persistence` is the final durable boundary for the
-v2.1 reconstruction product. It accepts one fully applied
-`BrokerRenderedGroupV1`, exact immutable observed anchors, and a successful
-storage/retention preflight. It writes only the 26 fields in
+v2.1 reconstruction product. The legacy v1 boundary accepts a fully applied
+`BrokerRenderedGroupV1`; the v2 boundary accepts an explicit
+`ReconstructionDeliveredGroupV1` and does not require or impersonate a broker
+fingerprint. Both require exact immutable observed anchors and a successful
+storage/retention preflight. They write only the 26 fields in
 `SyntheticEventV1`. The 521-column analytical frame, candidate surfaces,
 individual rejected rows, and broker-render workspaces remain ephemeral.
 
@@ -32,6 +34,12 @@ All path components are percent-encoded. The manifest stores paths relative to
 its transaction directory and rejects absolute paths, traversal, alternate
 separators, or paths that do not match the symbol/date partition evidence.
 
+Generic delivery uses the parallel v2 axis
+`schema=histdatacom.reconstruction-product.v2/run=.../delivery=<profile>/member=.../group=...`.
+The modern-reference profile is an identity projection with a content-bound
+identity-lineage hash; broker-conditioned delivery remains an optional,
+separate adapter.
+
 `stage_reconstruction_publication()` writes each Parquet file through a partial
 name, fsyncs it, validates it, atomically publishes the compact manifest inside
 the hidden transaction directory, and validates a clean replay. The final
@@ -43,6 +51,13 @@ The logical publication ID does not depend on scratch paths, worker attempts,
 or partition bytes. Repeating the same input under the same retention plan is
 idempotent. A retry with different content or physical writer settings cannot
 replace the committed publication.
+
+The first-party v2 handler stages below the window's disposable scratch tree,
+but only after verifying that scratch and the output axis share a filesystem.
+Validation retains a byte-identical manifest mirror plus a compact transaction
+descriptor outside the directory being renamed. A retry after rename can
+therefore verify the committed output and finish the receipt/checkpoint chain
+without dereferencing the vanished staging path.
 
 ## Exact rows and immutable anchors
 
@@ -68,9 +83,10 @@ The top-level manifest embeds bounded summaries, never event rows:
   counts/content/ID hashes;
 - constraint evidence: generator, configuration, constraint, and feed-epoch
   IDs plus compact hashes of per-event motif/reference assignments;
-- quality evidence: broker-transfer/fingerprint IDs, final validation and #331
-  quality hashes/status, observed/synthetic/lineage counts, broker lineage hash,
-  action counts, and optional benchmark comparisons;
+- quality evidence: either broker-transfer/fingerprint evidence for v1 or
+  generic delivery profile/mode, final validation, benchmark and leakage
+  artifact IDs, observed/synthetic/identity counts, identity-lineage hash, and
+  delivery action counts for v2;
 - replay evidence: partition-independent logical hash, physical byte aggregate,
   hash algorithms, writer/runtime version, compression, row-group size, and any
   canonicalized metadata exclusions; and
@@ -78,8 +94,8 @@ The top-level manifest embeds bounded summaries, never event rows:
   counts, compressed-byte estimates, manifest overhead, and the exact #432
   storage policy ID.
 
-Counts reconcile across partitions, source, constraints, broker transfer, and
-the top-level manifest. Manifest IDs cover the compact physical evidence;
+Counts reconcile across partitions, source, constraints, the selected delivery
+contract, and the top-level manifest. Manifest IDs cover the compact physical evidence;
 publication IDs cover the logical product identity.
 
 ## Preflight and retention

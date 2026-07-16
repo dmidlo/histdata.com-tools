@@ -3097,7 +3097,7 @@ and required real-data execution sequence.
 
 `ReconstructionRunWorkflow` plans deterministic memory-weighted waves of
 all-symbol `ReconstructionWindowWorkflow` children. Each window executes the
-source/enrichment, proposal, carving, cross-series, broker-transfer,
+source/enrichment, proposal, carving, cross-series, delivery-projection,
 validation, and atomic-commit boundaries sequentially through activity-side
 stage handlers. Workflow history carries only bounded commands, counters,
 checkpoints, and strong artifact references.
@@ -3107,6 +3107,13 @@ activity retry, duplicate completion, and process restart resumable without
 duplicating committed rows. Cancellation removes only disposable window
 scratch. The final report independently verifies every committed publication
 and reconciles storage counts and scope with workflow checkpoints.
+
+Default workers install the seven versioned first-party handlers. The reference
+path uses explicit modern-reference identity delivery and generic v2
+persistence, so no application registration or fake broker fingerprint is
+needed. Validation keeps a byte-identical staged-manifest mirror and a separate
+transaction descriptor, allowing a retry after the atomic rename but before
+the commit receipt to recover the already committed publication safely.
 
 See
 [`docs/reconstruction-temporal-orchestration.md`](docs/reconstruction-temporal-orchestration.md)

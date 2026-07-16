@@ -1290,6 +1290,13 @@ def unregister_reconstruction_stage_handler(name: str) -> None:
     _STAGE_HANDLERS.pop(str(name).strip(), None)
 
 
+def registered_reconstruction_stage_handlers() -> (
+    Mapping[str, ReconstructionStageHandler]
+):
+    """Return an isolated snapshot of installed activity-side adapters."""
+    return dict(_STAGE_HANDLERS)
+
+
 async def execute_reconstruction_stage(
     invocation: ReconstructionStageInvocationV1,
     *,

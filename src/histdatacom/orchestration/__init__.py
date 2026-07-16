@@ -175,6 +175,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "histdatacom.orchestration.reconstruction",
         "register_reconstruction_stage_handler",
     ),
+    "registered_reconstruction_stage_handlers": (
+        "histdatacom.orchestration.reconstruction",
+        "registered_reconstruction_stage_handlers",
+    ),
     "submit_reconstruction_request": (
         "histdatacom.orchestration.client",
         "submit_reconstruction_request",

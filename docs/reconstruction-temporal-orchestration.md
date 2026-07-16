@@ -13,7 +13,7 @@ source/enrichment
   -> proposal
   -> carving
   -> cross-series reconciliation
-  -> broker transfer
+  -> delivery projection
   -> validation/staging
   -> atomic partition commit
 ```
@@ -41,9 +41,24 @@ ceiling. Artifact references must include byte size and lowercase SHA-256.
 Inline keys such as `rows`, `events`, `records`, `table`, or `dataframe` are
 rejected even when hidden inside artifact metadata.
 
-## Data-plane adapters
+## First-party data-plane adapters
 
-Scientific code runs only in activity workers. Register an adapter there:
+Scientific code runs only in activity workers. Default worker construction
+idempotently registers the versioned handlers emitted by the first-party plan:
+
+| Stage | First-party action |
+| --- | --- |
+| source/enrichment | Hash-verifies ASCII/T Arrow partitions, maps the zero-based Arrow ordinal to the positive event-contract row ID, rejects invalid quotes, and materializes input/core Parquet plus feed-epoch, calendar, and CFTC sidecars. |
+| proposal | Queries the qualified modern motif index and writes candidate rows to Parquet with bounded batch lineage. |
+| carving | Applies the declared hard/advisory constraints, records bounded rejection evidence, and materializes accepted core streams. |
+| cross-series reconciliation | Reconciles the complete EURUSD/GBPUSD/EURGBP group using exact event-time support. |
+| delivery projection | Applies explicit modern-reference identity delivery; it never invents a broker fingerprint. |
+| validation | Rechecks cross-instrument output, benchmark qualification, motif leakage, information safety, immutable anchors, retention, and storage before staging. |
+| atomic commit | Promotes or recovers the complete v2 Parquet transaction. |
+
+Applications do not register these handlers themselves. A deliberately custom
+worker may still register a different, separately versioned adapter before
+constructing a worker with an explicit activity list:
 
 ```python
 from histdatacom.orchestration import register_reconstruction_stage_handler
@@ -66,11 +81,9 @@ def proposal_handler(invocation):
 register_reconstruction_stage_handler("proposal-v1", proposal_handler)
 ```
 
-Handler registration is process-local by design: call it while configuring the
-activity worker, not from workflow code. `handler_name` is deterministic
-command metadata; the callable is outside workflow history. A custom worker
-may register different adapter versions side by side, while configuration
-artifact hashes and the command ID bind the selected behavior.
+Handler registration remains process-local by design. `handler_name` is
+deterministic command metadata; the callable is outside workflow history.
+Configuration artifact hashes and the command ID bind the selected behavior.
 
 Long-running handlers call `invocation.heartbeat(...)` at bounded batch
 intervals and check `invocation.cancellation_requested` before producing more
@@ -96,6 +109,23 @@ stage output written
   -> outcome is reused
   -> checkpoint advances once
 ```
+
+Atomic publication also closes the later loss interval:
+
+```text
+validated manifest mirror and transaction descriptor written
+  -> staging directory atomically renamed into commits
+  -> worker dies before the commit receipt
+  -> retry verifies the byte-identical manifest mirror
+  -> descriptor locates the expected committed identity
+  -> committed Parquet and manifest are fully reverified
+  -> the commit receipt and checkpoint advance once
+```
+
+The transaction descriptor is not the staged phase artifact. The staged phase
+reference is a durable byte-identical mirror of the product manifest, so its
+SHA-256 must equal the committed manifest even after the rename removes the
+original staging path.
 
 If the checkpoint was already advanced, the strict outcome prefix resolves a
 duplicate completion to the newer state. A different receipt, input
@@ -180,6 +210,9 @@ submission in the manifest store. Default workers register:
 - `reconstruction_window`; and
 - `reconstruction_report`.
 
+They also install all seven first-party stage handlers before accepting
+activities; no application-level registry setup is required.
+
 Both workflows validate in Temporal's sandbox. The activity-side module is
 passed through the sandbox import boundary and is never called from workflow
 decision code.
@@ -199,5 +232,9 @@ The orchestration tests inject and verify:
 - manifest-store re-open after a process/server-style restart; and
 - final workflow/storage scope and count reconciliation.
 
-These tests certify the control-plane guarantees. They intentionally do not
-select a scientific model or weaken any stage-specific validation contract.
+The real-artifact integration gate additionally runs a qualified synchronized
+triangle through the first-party handlers, compares logical and physical
+hashes across concurrency settings, injects termination after the atomic
+rename, injects cancellation, and proves a failing qualification prevents
+commit. Set `HISTDATACOM_REAL_RECONSTRUCTION_PLAN` to a #465 plan artifact to
+run that gate; no scientific handler is mocked.

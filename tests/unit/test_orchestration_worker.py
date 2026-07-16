@@ -11,12 +11,18 @@ from importlib import import_module
 from pathlib import Path
 
 from histdatacom.orchestration import worker
+from histdatacom.orchestration.reconstruction import (
+    registered_reconstruction_stage_handlers,
+)
 from histdatacom.orchestration.queues import (
     TaskQueueLane,
     build_orchestration_worker_config,
 )
 from histdatacom.orchestration.readiness import read_worker_readiness
 from histdatacom.orchestration.runtime import build_orchestration_runtime_policy
+from histdatacom.synthetic.reconstruction_plan import (
+    FIRST_PARTY_RECONSTRUCTION_HANDLERS,
+)
 
 
 class _FakeWorker:
@@ -133,6 +139,28 @@ def test_build_temporal_worker_applies_configured_concurrency(
     assert isinstance(
         built.worker_options["activity_executor"],
         ThreadPoolExecutor,
+    )
+
+
+def test_default_worker_registers_first_party_reconstruction_handlers(
+    tmp_path: Path,
+) -> None:
+    """Default startup makes every planned scientific adapter executable."""
+    _FakeWorker.instances.clear()
+    built = worker.build_temporal_worker(
+        object(),
+        config=_config(tmp_path),
+        worker_class=_FakeWorker,
+        workflows=("workflow",),
+    )
+
+    registered = registered_reconstruction_stage_handlers()
+    assert set(FIRST_PARTY_RECONSTRUCTION_HANDLERS.values()).issubset(
+        registered
+    )
+    assert any(
+        activity.__name__ == "reconstruction_window_activity"
+        for activity in built.activities
     )
 
 

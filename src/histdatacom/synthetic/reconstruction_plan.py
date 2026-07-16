@@ -64,6 +64,7 @@ from histdatacom.synthetic.cross_currency import (
     eurusd_triangle_reconciliation_config,
     plan_cross_currency_windows,
 )
+from histdatacom.synthetic.delivery import ReconstructionDeliveryMode
 from histdatacom.synthetic.ensembles import (
     EnsembleCalibrationConfigV1,
     plan_reconstruction_ensemble,
@@ -174,27 +175,6 @@ FIRST_PARTY_RECONSTRUCTION_HANDLERS: Mapping[ReconstructionStage, str] = {
 _PERIOD_RE = re.compile(r"^\d{6}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_SOURCE_PARTITION_UTC_SPILL_NS = 24 * 60 * 60 * 1_000_000_000
-
-
-class ReconstructionDeliveryMode(str, Enum):
-    """Delivery projection applied after modern-reference generation."""
-
-    MODERN_REFERENCE = "modern_reference"
-    BROKER_CONDITIONED = "broker_conditioned"
-
-    @classmethod
-    def from_value(
-        cls, value: str | "ReconstructionDeliveryMode"
-    ) -> "ReconstructionDeliveryMode":
-        if isinstance(value, cls):
-            return value
-        normalized = str(value).strip().lower().replace("-", "_")
-        try:
-            return cls(normalized)
-        except ValueError as err:
-            raise ValueError(
-                "unsupported reconstruction delivery mode"
-            ) from err
 
 
 class ReconstructionPlanCompatibilityError(ValueError):
@@ -1559,6 +1539,12 @@ def build_synthetic_infill_plan(
         fingerprint_constraint_id=(
             "modern-reference:" + str(resolved.motif_manifest["library_id"])
         ),
+        # The qualified first-party corpus intentionally declares its static
+        # holiday calendar advisory.  Coverage preflight still fails closed
+        # for unsupported currencies/events; this permits that explicit,
+        # non-exchange-specific limitation instead of rejecting every modern
+        # reference candidate at the handler seam.
+        require_complete_calendar_profile=False,
         require_fingerprint_validation=False,
     )
     selected_left_halo = max(

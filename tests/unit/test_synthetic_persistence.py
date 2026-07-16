@@ -17,12 +17,14 @@ from histdatacom.synthetic import (
     BrokerTransferConfigV1,
     ReconstructionCheckpointV1,
     ReconstructionCommitPhase,
+    ReconstructionProductManifestV2,
     ReconstructionPersistenceError,
     ReconstructionProductManifestV1,
     ReconstructionStoragePolicyV1,
     ReconstructionStoragePreflightError,
     SyntheticEventOrigin,
     cleanup_reconstruction_scratch,
+    commit_delivery_reconstruction_publication,
     commit_reconstruction_publication,
     discover_reconstruction_manifests,
     estimate_reconstruction_retention,
@@ -30,11 +32,15 @@ from histdatacom.synthetic import (
     publish_reconstruction_group,
     read_reconstruction_streams,
     reconstruction_parquet_paths,
+    project_modern_reference_delivery,
     render_broker_delivery,
     scan_reconstruction_events_polars,
     stage_reconstruction_publication,
+    stage_delivery_reconstruction_publication,
+    validate_cross_currency_output,
     verify_reconstruction_publication,
 )
+from histdatacom.synthetic.cross_currency import CrossCurrencyValidationStage
 from histdatacom.synthetic.contracts import SYNTHETIC_EVENT_ARROW_COLUMNS
 from tests.unit.test_broker_delivery_fingerprints import (
     BASE_WALL_NS,
@@ -144,6 +150,72 @@ def test_staging_is_invisible_and_commit_is_atomic_and_idempotent(
     )
     assert publish_retry.idempotent_retry
     assert publish_retry.manifest == committed.manifest
+
+
+def test_generic_delivery_commit_recovers_after_atomic_rename(
+    tmp_path: Path,
+) -> None:
+    """A retry after rename does not depend on the vanished staging path."""
+    run, window, group, _constraints = _group_with_constraints()
+    anchors = tuple(
+        event
+        for stream in group.streams
+        for event in stream.events
+        if event.origin is SyntheticEventOrigin.OBSERVED
+    )
+    validation = validate_cross_currency_output(
+        run=run,
+        window=window,
+        streams={stream.symbol: stream for stream in group.streams},
+        config=group.config,
+        stage=CrossCurrencyValidationStage.POST_BROKER,
+        observed_anchors=anchors,
+    )
+    delivered = project_modern_reference_delivery(
+        group, delivery_profile_id="modern-reference:fixture"
+    )
+    retention = estimate_reconstruction_retention(
+        run_id=run.run_id,
+        primary_member_id=window.ensemble_member_id,
+        retained_member_event_counts={
+            window.ensemble_member_id: sum(
+                len(stream.events) for stream in delivered.streams
+            )
+        },
+        estimated_partition_count=len(delivered.streams),
+        storage_policy=run.storage_policy,
+    )
+    root = tmp_path / "archive"
+    staged = stage_delivery_reconstruction_publication(
+        root,
+        delivered,
+        final_validation=validation,
+        benchmark_artifact_ids=("benchmark:fixture",),
+        benchmark_evidence={"gate": "passed"},
+        immutable_source_anchors=anchors,
+        symbol_group_id=window.synchronization_unit_id,
+        retention_plan=retention,
+        storage_policy=run.storage_policy,
+        staging_root=tmp_path / "window-scratch" / "publication",
+        row_group_size=2,
+    )
+
+    assert discover_reconstruction_manifests(root) == ()
+    committed = commit_delivery_reconstruction_publication(staged)
+    assert not committed.idempotent_retry
+    assert not staged.staging_directory.exists()
+    assert isinstance(committed.manifest, ReconstructionProductManifestV2)
+    assert discover_reconstruction_manifests(
+        root,
+        delivery_profile_id="modern-reference:fixture",
+    ) == (committed.manifest_path,)
+
+    recovered = commit_delivery_reconstruction_publication(staged)
+    assert recovered.idempotent_retry
+    assert recovered.manifest == committed.manifest
+    assert read_reconstruction_streams(committed.manifest_path) == (
+        delivered.streams
+    )
 
 
 def test_idempotent_publish_retry_revalidates_committed_partitions(

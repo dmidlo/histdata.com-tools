@@ -1,14 +1,16 @@
 """Atomic persistence for narrow reconstructed event products.
 
-This module is the durable boundary between a fully validated broker-rendered
-group and the final reconstructed tick archive.  It writes only the exact
+This module is the durable boundary between a fully validated delivered group
+and the final reconstructed tick archive.  Version one retains the legacy
+broker-rendered contract; version two accepts an explicit generic delivery
+without inventing a broker identity.  Both write only the exact
 ``SyntheticEventV1`` Arrow schema plus compact manifests.  Analytical feature
 frames, candidate rows, and rejection rows are never accepted by this API.
 
 Publication is a directory-level transaction on one filesystem.  Parquet
-partitions and the manifest are written below an undiscoverable ``.scratch``
-directory, validated there, and promoted with one atomic rename.  Discovery
-looks only below ``commits`` and therefore cannot advertise partial output.
+partitions and the manifest are written below undiscoverable scratch, validated
+there, and promoted with one atomic rename.  Discovery looks only below
+``commits`` and therefore cannot advertise partial output.
 """
 
 from __future__ import annotations
@@ -44,9 +46,22 @@ from histdatacom.synthetic.contracts import (
     synthetic_event_arrow_schema,
     synthetic_event_stream_to_arrow,
 )
+from histdatacom.synthetic.cross_currency import (
+    CrossCurrencyValidationReportV1,
+    CrossCurrencyValidationStage,
+)
+from histdatacom.synthetic.delivery import (
+    ReconstructionDeliveredGroupV1,
+    ReconstructionDeliveryMode,
+    ReconstructionDeliveryStatus,
+    reconstruction_streams_content_sha256,
+)
 from histdatacom.synthetic.streaming import ReconstructionStoragePolicyV1
 
 RECONSTRUCTION_PRODUCT_SCHEMA_VERSION = "histdatacom.reconstruction-product.v1"
+RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-product.v2"
+)
 RECONSTRUCTION_PARTITION_SCHEMA_VERSION = (
     "histdatacom.reconstruction-product-partition.v1"
 )
@@ -58,6 +73,9 @@ RECONSTRUCTION_CONSTRAINT_MANIFEST_SCHEMA_VERSION = (
 )
 RECONSTRUCTION_QUALITY_MANIFEST_SCHEMA_VERSION = (
     "histdatacom.reconstruction-quality-manifest.v1"
+)
+RECONSTRUCTION_DELIVERY_QUALITY_MANIFEST_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-delivery-quality-manifest.v1"
 )
 RECONSTRUCTION_REPLAY_MANIFEST_SCHEMA_VERSION = (
     "histdatacom.reconstruction-replay-manifest.v1"
@@ -1044,6 +1062,186 @@ class ReconstructionQualityManifestV1:
 
 
 @dataclass(frozen=True, slots=True)
+class ReconstructionDeliveryQualityManifestV1:
+    """Passing generic delivery, final validation, and benchmark evidence."""
+
+    delivery_manifest_id: str
+    delivery_profile_id: str
+    delivery_mode: ReconstructionDeliveryMode
+    delivery_output_content_sha256: str
+    final_validation_id: str
+    final_validation_status: str
+    cross_instrument_quality_status: str
+    cross_instrument_quality_sha256: str
+    observed_event_count: int
+    synthetic_event_count: int
+    identity_event_count: int
+    identity_lineage_sha256: str
+    delivery_action_counts: Mapping[str, int]
+    benchmark_artifact_ids: tuple[str, ...]
+    quality_manifest_id: str = ""
+    schema_version: str = (
+        RECONSTRUCTION_DELIVERY_QUALITY_MANIFEST_SCHEMA_VERSION
+    )
+
+    def __post_init__(self) -> None:
+        _require_version(
+            self.schema_version,
+            RECONSTRUCTION_DELIVERY_QUALITY_MANIFEST_SCHEMA_VERSION,
+            "reconstruction delivery quality manifest",
+        )
+        for name in (
+            "delivery_manifest_id",
+            "delivery_profile_id",
+            "final_validation_id",
+            "final_validation_status",
+            "cross_instrument_quality_status",
+        ):
+            object.__setattr__(self, name, _required_text(getattr(self, name)))
+        object.__setattr__(
+            self,
+            "delivery_mode",
+            ReconstructionDeliveryMode(self.delivery_mode),
+        )
+        for name in (
+            "delivery_output_content_sha256",
+            "cross_instrument_quality_sha256",
+            "identity_lineage_sha256",
+        ):
+            object.__setattr__(
+                self, name, _required_sha256(getattr(self, name), name)
+            )
+        for name in (
+            "observed_event_count",
+            "synthetic_event_count",
+            "identity_event_count",
+        ):
+            object.__setattr__(
+                self, name, _nonnegative_int(getattr(self, name), name)
+            )
+        actions = {
+            _required_text(name): _positive_int(count, f"action.{name}")
+            for name, count in self.delivery_action_counts.items()
+        }
+        object.__setattr__(
+            self, "delivery_action_counts", dict(sorted(actions.items()))
+        )
+        if self.delivery_mode is ReconstructionDeliveryMode.MODERN_REFERENCE:
+            if self.identity_event_count != self.synthetic_event_count:
+                raise ValueError(
+                    "identity delivery count differs from synthetic"
+                )
+            expected_actions = (
+                {"identity": self.identity_event_count}
+                if self.identity_event_count
+                else {}
+            )
+            if actions != expected_actions:
+                raise ValueError(
+                    "modern delivery actions are not identity-only"
+                )
+        artifacts = _normalized_text_tuple(self.benchmark_artifact_ids)
+        if not artifacts:
+            raise ValueError("delivery quality lacks benchmark artifacts")
+        object.__setattr__(self, "benchmark_artifact_ids", artifacts)
+        if self.final_validation_status != "passed":
+            raise ValueError("final delivery validation is not passing")
+        if self.cross_instrument_quality_status == "failed":
+            raise ValueError("cross-instrument delivery quality is failed")
+        expected = _stable_id("reconstruction-delivery-quality", self.payload())
+        supplied = _optional_text(self.quality_manifest_id)
+        if supplied is not None and supplied != expected:
+            raise ValueError("delivery quality manifest_id differs")
+        object.__setattr__(self, "quality_manifest_id", expected)
+
+    def payload(self) -> dict[str, JSONValue]:
+        """Return compact generic quality evidence."""
+        return {
+            "schema_version": self.schema_version,
+            "delivery_manifest_id": self.delivery_manifest_id,
+            "delivery_profile_id": self.delivery_profile_id,
+            "delivery_mode": self.delivery_mode.value,
+            "delivery_output_content_sha256": (
+                self.delivery_output_content_sha256
+            ),
+            "final_validation_id": self.final_validation_id,
+            "final_validation_status": self.final_validation_status,
+            "cross_instrument_quality_status": (
+                self.cross_instrument_quality_status
+            ),
+            "cross_instrument_quality_sha256": (
+                self.cross_instrument_quality_sha256
+            ),
+            "observed_event_count": self.observed_event_count,
+            "synthetic_event_count": self.synthetic_event_count,
+            "identity_event_count": self.identity_event_count,
+            "identity_lineage_sha256": self.identity_lineage_sha256,
+            "delivery_action_counts": dict(self.delivery_action_counts),
+            "benchmark_artifact_ids": list(self.benchmark_artifact_ids),
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return compact JSON-compatible quality evidence."""
+        return {
+            **self.payload(),
+            "quality_manifest_id": self.quality_manifest_id,
+        }
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> "ReconstructionDeliveryQualityManifestV1":
+        """Restore and verify generic delivery quality evidence."""
+        _require_schema(
+            data, RECONSTRUCTION_DELIVERY_QUALITY_MANIFEST_SCHEMA_VERSION
+        )
+        return cls(
+            delivery_manifest_id=str(data.get("delivery_manifest_id", "")),
+            delivery_profile_id=str(data.get("delivery_profile_id", "")),
+            delivery_mode=ReconstructionDeliveryMode(
+                str(data.get("delivery_mode", ""))
+            ),
+            delivery_output_content_sha256=str(
+                data.get("delivery_output_content_sha256", "")
+            ),
+            final_validation_id=str(data.get("final_validation_id", "")),
+            final_validation_status=str(
+                data.get("final_validation_status", "")
+            ),
+            cross_instrument_quality_status=str(
+                data.get("cross_instrument_quality_status", "")
+            ),
+            cross_instrument_quality_sha256=str(
+                data.get("cross_instrument_quality_sha256", "")
+            ),
+            observed_event_count=_strict_int(
+                data.get("observed_event_count"), "observed_event_count"
+            ),
+            synthetic_event_count=_strict_int(
+                data.get("synthetic_event_count"), "synthetic_event_count"
+            ),
+            identity_event_count=_strict_int(
+                data.get("identity_event_count"), "identity_event_count"
+            ),
+            identity_lineage_sha256=str(
+                data.get("identity_lineage_sha256", "")
+            ),
+            delivery_action_counts={
+                str(key): _strict_int(value, str(key))
+                for key, value in _mapping(
+                    data.get("delivery_action_counts"),
+                    "delivery_action_counts",
+                ).items()
+            },
+            benchmark_artifact_ids=_string_tuple(
+                data.get("benchmark_artifact_ids"), "benchmark_artifact_ids"
+            ),
+            quality_manifest_id=str(data.get("quality_manifest_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ReconstructionReplayManifestV1:
     """Logical replay hash and pinned physical writer evidence."""
 
@@ -1460,6 +1658,316 @@ class ReconstructionProductManifestV1:
 
 
 @dataclass(frozen=True, slots=True)
+class ReconstructionProductManifestV2:
+    """Generic-delivery synchronized product without broker impersonation."""
+
+    run_id: str
+    window_id: str
+    synchronization_unit_id: str
+    ensemble_member_id: str
+    delivery_profile_id: str
+    symbol_group_id: str
+    symbols: tuple[str, ...]
+    symbol_event_counts: Mapping[str, int]
+    partitions: tuple[ReconstructionProductPartitionV1, ...]
+    source: ReconstructionSourceManifestV1
+    constraints: ReconstructionConstraintManifestV1
+    quality: ReconstructionDeliveryQualityManifestV1
+    replay: ReconstructionReplayManifestV1
+    ensemble: ReconstructionEnsembleManifestV1
+    retention: ReconstructionRetentionPlanV1
+    publication_id: str = ""
+    manifest_id: str = ""
+    schema_version: str = RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_version(
+            self.schema_version,
+            RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION,
+            "reconstruction product v2 manifest",
+        )
+        for name in (
+            "run_id",
+            "window_id",
+            "synchronization_unit_id",
+            "ensemble_member_id",
+            "delivery_profile_id",
+            "symbol_group_id",
+        ):
+            object.__setattr__(self, name, _required_text(getattr(self, name)))
+        symbols = tuple(
+            sorted({_normalized_symbol(item) for item in self.symbols})
+        )
+        if not symbols:
+            raise ValueError("product v2 manifest requires symbols")
+        object.__setattr__(self, "symbols", symbols)
+        counts = {
+            _normalized_symbol(symbol): _nonnegative_int(
+                count, f"symbol_event_counts.{symbol}"
+            )
+            for symbol, count in self.symbol_event_counts.items()
+        }
+        if set(counts) != set(symbols):
+            raise ValueError("symbol counts do not cover product v2 group")
+        object.__setattr__(
+            self, "symbol_event_counts", dict(sorted(counts.items()))
+        )
+        partitions = tuple(
+            sorted(
+                self.partitions,
+                key=lambda item: (
+                    item.symbol,
+                    item.event_date,
+                    item.partition_id,
+                ),
+            )
+        )
+        if not partitions or len(partitions) > MAX_RECONSTRUCTION_PARTITIONS:
+            raise ValueError("product v2 partition count is empty or unbounded")
+        if len({item.relative_path for item in partitions}) != len(partitions):
+            raise ValueError("product v2 has duplicate partition paths")
+        actual_counts = dict.fromkeys(symbols, 0)
+        for partition in partitions:
+            if partition.symbol not in actual_counts:
+                raise ValueError("partition symbol is outside product v2 group")
+            actual_counts[partition.symbol] += partition.row_count
+        if actual_counts != counts:
+            raise ValueError("product v2 partition counts do not reconcile")
+        object.__setattr__(self, "partitions", partitions)
+        if not isinstance(self.source, ReconstructionSourceManifestV1):
+            raise TypeError("product v2 requires source evidence")
+        if not isinstance(self.constraints, ReconstructionConstraintManifestV1):
+            raise TypeError("product v2 requires constraint evidence")
+        if not isinstance(
+            self.quality, ReconstructionDeliveryQualityManifestV1
+        ):
+            raise TypeError("product v2 requires delivery quality evidence")
+        if not isinstance(self.replay, ReconstructionReplayManifestV1):
+            raise TypeError("product v2 requires replay evidence")
+        if not isinstance(self.ensemble, ReconstructionEnsembleManifestV1):
+            raise TypeError("product v2 requires ensemble evidence")
+        if not isinstance(self.retention, ReconstructionRetentionPlanV1):
+            raise TypeError("product v2 requires retention evidence")
+        if self.retention.run_id != self.run_id:
+            raise ValueError("retention run differs from product v2 run")
+        if self.ensemble_member_id not in self.retention.retained_member_ids:
+            raise ValueError("product v2 member is not retained")
+        if (
+            self.ensemble.run_id != self.run_id
+            or self.ensemble.materialized_member_id != self.ensemble_member_id
+            or self.ensemble.primary_member_id
+            != self.retention.primary_member_id
+            or self.ensemble.retained_member_ids
+            != self.retention.retained_member_ids
+            or dict(self.ensemble.member_event_estimates)
+            != dict(self.retention.member_event_counts)
+            or self.ensemble.retention_plan_id != self.retention.plan_id
+        ):
+            raise ValueError("product v2 ensemble does not reconcile")
+        actual_rows = sum(counts.values())
+        if len(partitions) > self.retention.estimated_partition_count:
+            raise ValueError("product v2 partitions exceed preflight")
+        if (
+            actual_rows
+            > self.retention.member_event_counts[self.ensemble_member_id]
+        ):
+            raise ValueError("product v2 rows exceed preflight")
+        if (
+            self.source.observed_event_count
+            + self.constraints.synthetic_event_count
+            != actual_rows
+        ):
+            raise ValueError("product v2 source/constraint counts differ")
+        if (
+            self.quality.observed_event_count
+            != self.source.observed_event_count
+        ):
+            raise ValueError("delivery/source observed counts differ")
+        if (
+            self.quality.synthetic_event_count
+            != self.constraints.synthetic_event_count
+        ):
+            raise ValueError("delivery/constraint synthetic counts differ")
+        if self.quality.delivery_profile_id != self.delivery_profile_id:
+            raise ValueError("delivery profile differs from product v2 axis")
+        expected_publication = _stable_id(
+            "reconstruction-publication-v2", self.publication_payload()
+        )
+        supplied_publication = _optional_text(self.publication_id)
+        if (
+            supplied_publication is not None
+            and supplied_publication != expected_publication
+        ):
+            raise ValueError("product v2 publication_id differs")
+        object.__setattr__(self, "publication_id", expected_publication)
+        expected_manifest = _stable_id(
+            "reconstruction-manifest-v2", self.payload()
+        )
+        supplied_manifest = _optional_text(self.manifest_id)
+        if (
+            supplied_manifest is not None
+            and supplied_manifest != expected_manifest
+        ):
+            raise ValueError("product v2 manifest_id differs")
+        object.__setattr__(self, "manifest_id", expected_manifest)
+        if (
+            len(self.to_json().encode("utf-8"))
+            > MAX_RECONSTRUCTION_MANIFEST_BYTES
+        ):
+            raise ValueError("reconstruction product v2 manifest exceeds limit")
+
+    @property
+    def event_count(self) -> int:
+        """Return total durable events."""
+        return sum(self.symbol_event_counts.values())
+
+    @property
+    def observed_event_count(self) -> int:
+        """Return total immutable observed rows."""
+        return self.source.observed_event_count
+
+    @property
+    def synthetic_event_count(self) -> int:
+        """Return total accepted synthetic rows."""
+        return self.constraints.synthetic_event_count
+
+    @property
+    def min_event_time_ns(self) -> int:
+        """Return the first product event time."""
+        return min(item.min_event_time_ns for item in self.partitions)
+
+    @property
+    def max_event_time_ns(self) -> int:
+        """Return the last product event time."""
+        return max(item.max_event_time_ns for item in self.partitions)
+
+    def publication_payload(self) -> dict[str, JSONValue]:
+        """Return writer-independent generic-delivery publication identity."""
+        return {
+            "schema_version": self.schema_version,
+            "event_schema_version": SYNTHETIC_EVENT_SCHEMA_VERSION,
+            "run_id": self.run_id,
+            "window_id": self.window_id,
+            "synchronization_unit_id": self.synchronization_unit_id,
+            "ensemble_member_id": self.ensemble_member_id,
+            "delivery_profile_id": self.delivery_profile_id,
+            "delivery_mode": self.quality.delivery_mode.value,
+            "symbol_group_id": self.symbol_group_id,
+            "symbols": list(self.symbols),
+            "symbol_event_counts": dict(self.symbol_event_counts),
+            "logical_content_sha256": self.replay.logical_content_sha256,
+            "source_manifest_id": self.source.source_manifest_id,
+            "constraint_manifest_id": self.constraints.constraint_manifest_id,
+            "quality_manifest_id": self.quality.quality_manifest_id,
+            "ensemble_manifest_id": self.ensemble.ensemble_manifest_id,
+            "retention_plan_id": self.retention.plan_id,
+        }
+
+    def payload(self) -> dict[str, JSONValue]:
+        """Return complete compact product v2 evidence."""
+        return {
+            **self.publication_payload(),
+            "publication_id": self.publication_id,
+            "partitions": [item.to_dict() for item in self.partitions],
+            "source": self.source.to_dict(),
+            "constraints": self.constraints.to_dict(),
+            "quality": self.quality.to_dict(),
+            "replay": self.replay.to_dict(),
+            "ensemble": self.ensemble.to_dict(),
+            "retention": self.retention.to_dict(),
+            "event_count": self.event_count,
+            "observed_event_count": self.observed_event_count,
+            "synthetic_event_count": self.synthetic_event_count,
+            "min_event_time_ns": self.min_event_time_ns,
+            "max_event_time_ns": self.max_event_time_ns,
+            "event_rows_inline": False,
+            "analytical_frame_columns_inline": False,
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return deterministic product v2 JSON."""
+        return {**self.payload(), "manifest_id": self.manifest_id}
+
+    def to_json(self) -> str:
+        """Return deterministic compact product v2 JSON."""
+        return str(canonical_contract_json(self.to_dict()))
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> "ReconstructionProductManifestV2":
+        """Restore and reconcile a generic-delivery product manifest."""
+        _require_schema(data, RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION)
+        _require_derived(
+            data, "event_schema_version", SYNTHETIC_EVENT_SCHEMA_VERSION
+        )
+        _require_derived(data, "event_rows_inline", False)
+        _require_derived(data, "analytical_frame_columns_inline", False)
+        manifest = cls(
+            run_id=str(data.get("run_id", "")),
+            window_id=str(data.get("window_id", "")),
+            synchronization_unit_id=str(
+                data.get("synchronization_unit_id", "")
+            ),
+            ensemble_member_id=str(data.get("ensemble_member_id", "")),
+            delivery_profile_id=str(data.get("delivery_profile_id", "")),
+            symbol_group_id=str(data.get("symbol_group_id", "")),
+            symbols=_string_tuple(data.get("symbols"), "symbols"),
+            symbol_event_counts={
+                str(key): _strict_int(value, str(key))
+                for key, value in _mapping(
+                    data.get("symbol_event_counts"), "symbol_event_counts"
+                ).items()
+            },
+            partitions=tuple(
+                ReconstructionProductPartitionV1.from_dict(item)
+                for item in _mapping_sequence(
+                    data.get("partitions"), "partitions"
+                )
+            ),
+            source=ReconstructionSourceManifestV1.from_dict(
+                _mapping(data.get("source"), "source")
+            ),
+            constraints=ReconstructionConstraintManifestV1.from_dict(
+                _mapping(data.get("constraints"), "constraints")
+            ),
+            quality=ReconstructionDeliveryQualityManifestV1.from_dict(
+                _mapping(data.get("quality"), "quality")
+            ),
+            replay=ReconstructionReplayManifestV1.from_dict(
+                _mapping(data.get("replay"), "replay")
+            ),
+            ensemble=ReconstructionEnsembleManifestV1.from_dict(
+                _mapping(data.get("ensemble"), "ensemble")
+            ),
+            retention=ReconstructionRetentionPlanV1.from_dict(
+                _mapping(data.get("retention"), "retention")
+            ),
+            publication_id=str(data.get("publication_id", "")),
+            manifest_id=str(data.get("manifest_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+        _require_derived(
+            data, "delivery_mode", manifest.quality.delivery_mode.value
+        )
+        for name in (
+            "event_count",
+            "observed_event_count",
+            "synthetic_event_count",
+            "min_event_time_ns",
+            "max_event_time_ns",
+        ):
+            if data.get(name) != getattr(manifest, name):
+                raise ValueError(f"derived product v2 field {name} differs")
+        return manifest
+
+    @classmethod
+    def from_json(cls, text: str) -> "ReconstructionProductManifestV2":
+        """Restore product v2 from JSON."""
+        return cls.from_dict(_json_mapping(text))
+
+
+@dataclass(frozen=True, slots=True)
 class StagedReconstructionPublicationV1:
     """Process-local reference to a validated, undiscoverable transaction."""
 
@@ -1484,6 +1992,31 @@ class PublishedReconstructionV1:
     """One committed publication and whether it was an idempotent retry."""
 
     manifest: ReconstructionProductManifestV1
+    manifest_path: Path
+    manifest_ref: ArtifactRef
+    idempotent_retry: bool
+
+
+@dataclass(frozen=True, slots=True)
+class StagedReconstructionPublicationV2:
+    """Validated generic-delivery transaction awaiting atomic promotion."""
+
+    root: Path
+    staging_directory: Path
+    committed_directory: Path
+    manifest: ReconstructionProductManifestV2
+
+    @property
+    def manifest_path(self) -> Path:
+        """Return the temporary manifest path."""
+        return self.staging_directory / RECONSTRUCTION_MANIFEST_FILENAME
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedReconstructionV2:
+    """One committed generic-delivery publication and retry status."""
+
+    manifest: ReconstructionProductManifestV2
     manifest_path: Path
     manifest_ref: ArtifactRef
     idempotent_retry: bool
@@ -1637,6 +2170,10 @@ def commit_reconstruction_publication(
     if final_directory.exists():
         existing_path = final_directory / RECONSTRUCTION_MANIFEST_FILENAME
         existing = verify_reconstruction_publication(existing_path)
+        if not isinstance(existing, ReconstructionProductManifestV1):
+            raise ReconstructionPersistenceError(
+                "legacy publication identity contains a delivery manifest"
+            )
         if existing != manifest:
             raise ReconstructionPersistenceError(
                 "publication identity already contains different evidence"
@@ -1662,6 +2199,10 @@ def commit_reconstruction_publication(
             raise
         existing_path = final_directory / RECONSTRUCTION_MANIFEST_FILENAME
         existing = verify_reconstruction_publication(existing_path)
+        if not isinstance(existing, ReconstructionProductManifestV1):
+            raise ReconstructionPersistenceError(
+                "concurrent legacy commit produced a delivery manifest"
+            )
         if existing != manifest:
             raise ReconstructionPersistenceError(
                 "concurrent publication committed different evidence"
@@ -1677,6 +2218,10 @@ def commit_reconstruction_publication(
     _fsync_directory(final_directory.parent)
     manifest_path = final_directory / RECONSTRUCTION_MANIFEST_FILENAME
     committed = verify_reconstruction_publication(manifest_path)
+    if not isinstance(committed, ReconstructionProductManifestV1):
+        raise ReconstructionPersistenceError(
+            "committed legacy publication restored a delivery manifest"
+        )
     return PublishedReconstructionV1(
         manifest=committed,
         manifest_path=manifest_path,
@@ -1731,9 +2276,223 @@ def publish_reconstruction_group(
         raise
 
 
+def stage_delivery_reconstruction_publication(
+    root: str | Path,
+    delivered_group: ReconstructionDeliveredGroupV1,
+    *,
+    final_validation: CrossCurrencyValidationReportV1,
+    benchmark_artifact_ids: Sequence[str],
+    benchmark_evidence: Mapping[str, JSONValue],
+    immutable_source_anchors: Iterable[SyntheticEventV1],
+    symbol_group_id: str,
+    retention_plan: ReconstructionRetentionPlanV1,
+    storage_policy: ReconstructionStoragePolicyV1,
+    staging_root: str | Path,
+    row_group_size: int = DEFAULT_RECONSTRUCTION_ROW_GROUP_SIZE,
+) -> StagedReconstructionPublicationV2:
+    """Stage one validated generic-delivery group in cancellable scratch."""
+    _validate_delivery_publication_inputs(
+        delivered_group,
+        final_validation,
+        retention_plan,
+        storage_policy,
+    )
+    group_id = _required_text(symbol_group_id)
+    row_group = _positive_int(row_group_size, "row_group_size")
+    events = tuple(
+        event
+        for stream in sorted(
+            delivered_group.streams, key=lambda item: item.symbol
+        )
+        for event in stream.events
+    )
+    if not events:
+        raise ReconstructionPersistenceError(
+            "final generic-delivery group contains no events"
+        )
+    anchors = tuple(immutable_source_anchors)
+    _validate_immutable_anchors(events, anchors)
+    logical_hash = reconstruction_logical_content_sha256(events)
+    root_path = Path(root).expanduser().resolve()
+    manifest = delivered_group.manifest
+    axis_directory = _delivery_axis_directory(
+        root_path,
+        run_id=manifest.run_id,
+        delivery_profile_id=manifest.delivery_profile_id,
+        ensemble_member_id=manifest.ensemble_member_id,
+        symbol_group_id=group_id,
+    )
+    axis_directory.mkdir(parents=True, exist_ok=True)
+    scratch = Path(staging_root).expanduser().resolve()
+    scratch.mkdir(parents=True, exist_ok=True)
+    if scratch.stat().st_dev != axis_directory.stat().st_dev:
+        raise ReconstructionPersistenceError(
+            "window scratch and output root are on different filesystems"
+        )
+    staging_directory = Path(
+        tempfile.mkdtemp(prefix="publication.tmp-", dir=scratch)
+    )
+    try:
+        partitions = _write_product_partitions(
+            staging_directory,
+            delivered_group.streams,
+            row_group_size=row_group,
+        )
+        source = _source_manifest(events, anchors)
+        constraints = _constraint_manifest(events)
+        quality = _delivery_quality_manifest(
+            delivered_group,
+            final_validation=final_validation,
+            benchmark_artifact_ids=benchmark_artifact_ids,
+            benchmark_evidence=benchmark_evidence,
+        )
+        ensemble = ReconstructionEnsembleManifestV1(
+            run_id=retention_plan.run_id,
+            materialized_member_id=manifest.ensemble_member_id,
+            primary_member_id=retention_plan.primary_member_id,
+            retained_member_ids=retention_plan.retained_member_ids,
+            member_event_estimates=retention_plan.member_event_counts,
+            retention_plan_id=retention_plan.plan_id,
+        )
+        pa, _ = _arrow_modules()
+        replay = ReconstructionReplayManifestV1(
+            logical_content_sha256=logical_hash,
+            partition_byte_sha256=_partition_byte_digest(partitions),
+            logical_hash_algorithm=RECONSTRUCTION_LOGICAL_HASH_ALGORITHM,
+            byte_hash_algorithm=RECONSTRUCTION_BYTE_HASH_ALGORITHM,
+            writer_id=RECONSTRUCTION_WRITER_ID,
+            writer_library="pyarrow",
+            writer_library_version=str(pa.__version__),
+            python_runtime=(
+                f"{sys.version_info.major}.{sys.version_info.minor}."
+                f"{sys.version_info.micro}"
+            ),
+            compression=RECONSTRUCTION_COMPRESSION,
+            row_group_size=row_group,
+            canonicalized_metadata_exclusions=(),
+        )
+        counts = {
+            stream.symbol: len(stream.events)
+            for stream in delivered_group.streams
+        }
+        product = ReconstructionProductManifestV2(
+            run_id=manifest.run_id,
+            window_id=manifest.window_id,
+            synchronization_unit_id=manifest.synchronization_unit_id,
+            ensemble_member_id=manifest.ensemble_member_id,
+            delivery_profile_id=manifest.delivery_profile_id,
+            symbol_group_id=group_id,
+            symbols=tuple(counts),
+            symbol_event_counts=counts,
+            partitions=partitions,
+            source=source,
+            constraints=constraints,
+            quality=quality,
+            replay=replay,
+            ensemble=ensemble,
+            retention=retention_plan,
+        )
+        manifest_bytes = product.to_json().encode("utf-8")
+        _validate_actual_storage(partitions, manifest_bytes, storage_policy)
+        committed_directory = (
+            axis_directory / "commits" / _path_component(product.publication_id)
+        )
+        _atomic_write_bytes(
+            staging_directory / RECONSTRUCTION_MANIFEST_FILENAME,
+            manifest_bytes,
+        )
+        staged = StagedReconstructionPublicationV2(
+            root=root_path,
+            staging_directory=staging_directory,
+            committed_directory=committed_directory,
+            manifest=product,
+        )
+        _verify_publication_directory(
+            staging_directory,
+            product,
+            require_committed_layout=False,
+        )
+        return staged
+    except Exception:
+        if staging_directory.exists():
+            shutil.rmtree(staging_directory)
+        raise
+
+
+def commit_delivery_reconstruction_publication(
+    staged: StagedReconstructionPublicationV2,
+) -> PublishedReconstructionV2:
+    """Atomically promote or recover one generic-delivery publication."""
+    if not isinstance(staged, StagedReconstructionPublicationV2):
+        raise TypeError("delivery commit requires a staged v2 publication")
+    manifest = staged.manifest
+    final_directory = staged.committed_directory
+    if final_directory.exists():
+        existing_path = final_directory / RECONSTRUCTION_MANIFEST_FILENAME
+        existing = verify_reconstruction_publication(existing_path)
+        if not isinstance(existing, ReconstructionProductManifestV2):
+            raise ReconstructionPersistenceError(
+                "delivery publication identity contains a legacy manifest"
+            )
+        if existing != manifest:
+            raise ReconstructionPersistenceError(
+                "delivery publication contains different evidence"
+            )
+        if staged.staging_directory.exists():
+            shutil.rmtree(staged.staging_directory)
+        return PublishedReconstructionV2(
+            manifest=existing,
+            manifest_path=existing_path,
+            manifest_ref=_artifact_ref_for_manifest(existing_path, existing),
+            idempotent_retry=True,
+        )
+    _verify_publication_directory(
+        staged.staging_directory,
+        manifest,
+        require_committed_layout=False,
+    )
+    final_directory.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.replace(staged.staging_directory, final_directory)
+    except OSError:
+        if not final_directory.exists():
+            raise
+        existing_path = final_directory / RECONSTRUCTION_MANIFEST_FILENAME
+        existing = verify_reconstruction_publication(existing_path)
+        if not isinstance(existing, ReconstructionProductManifestV2):
+            raise ReconstructionPersistenceError(
+                "concurrent delivery commit produced a legacy manifest"
+            )
+        if existing != manifest:
+            raise ReconstructionPersistenceError(
+                "concurrent delivery commit produced different evidence"
+            )
+        if staged.staging_directory.exists():
+            shutil.rmtree(staged.staging_directory)
+        return PublishedReconstructionV2(
+            manifest=existing,
+            manifest_path=existing_path,
+            manifest_ref=_artifact_ref_for_manifest(existing_path, existing),
+            idempotent_retry=True,
+        )
+    _fsync_directory(final_directory.parent)
+    manifest_path = final_directory / RECONSTRUCTION_MANIFEST_FILENAME
+    committed = verify_reconstruction_publication(manifest_path)
+    if not isinstance(committed, ReconstructionProductManifestV2):
+        raise ReconstructionPersistenceError(
+            "committed delivery publication restored a legacy manifest"
+        )
+    return PublishedReconstructionV2(
+        manifest=committed,
+        manifest_path=manifest_path,
+        manifest_ref=_artifact_ref_for_manifest(manifest_path, committed),
+        idempotent_retry=False,
+    )
+
+
 def load_reconstruction_manifest(
     path: str | Path,
-) -> ReconstructionProductManifestV1:
+) -> ReconstructionProductManifestV1 | ReconstructionProductManifestV2:
     """Load and verify compact manifest identities without reading Parquet."""
     target = Path(path)
     payload = target.read_bytes()
@@ -1747,12 +2506,20 @@ def load_reconstruction_manifest(
         raise ReconstructionPersistenceError(
             "reconstruction manifest is not UTF-8"
         ) from err
-    return ReconstructionProductManifestV1.from_json(text)
+    data = _json_mapping(text)
+    version = str(data.get("schema_version", ""))
+    if version == RECONSTRUCTION_PRODUCT_SCHEMA_VERSION:
+        return ReconstructionProductManifestV1.from_dict(data)
+    if version == RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION:
+        return ReconstructionProductManifestV2.from_dict(data)
+    raise ReconstructionPersistenceError(
+        "unsupported reconstruction product manifest version"
+    )
 
 
 def verify_reconstruction_publication(
     manifest_path: str | Path,
-) -> ReconstructionProductManifestV1:
+) -> ReconstructionProductManifestV1 | ReconstructionProductManifestV2:
     """Fail closed unless every committed file and replay hash reconciles."""
     path = Path(manifest_path).expanduser().resolve()
     manifest = load_reconstruction_manifest(path)
@@ -1768,6 +2535,7 @@ def discover_reconstruction_manifests(
     *,
     run_id: str | None = None,
     broker_profile_id: str | None = None,
+    delivery_profile_id: str | None = None,
     ensemble_member_id: str | None = None,
     symbol_group_id: str | None = None,
 ) -> tuple[Path, ...]:
@@ -1783,11 +2551,16 @@ def discover_reconstruction_manifests(
         _validate_committed_manifest_location(path.resolve(), manifest)
         if run_id is not None and manifest.run_id != run_id:
             continue
-        if (
-            broker_profile_id is not None
-            and manifest.broker_profile_id != broker_profile_id
-        ):
-            continue
+        if broker_profile_id is not None:
+            if not isinstance(manifest, ReconstructionProductManifestV1):
+                continue
+            if manifest.broker_profile_id != broker_profile_id:
+                continue
+        if delivery_profile_id is not None:
+            if not isinstance(manifest, ReconstructionProductManifestV2):
+                continue
+            if manifest.delivery_profile_id != delivery_profile_id:
+                continue
         if (
             ensemble_member_id is not None
             and manifest.ensemble_member_id != ensemble_member_id
@@ -2011,6 +2784,74 @@ def _validate_publication_inputs(
     if len(set(actual_symbols)) != len(actual_symbols):
         raise ReconstructionPersistenceError(
             "rendered group contains duplicate symbol streams"
+        )
+    if (
+        not policy.atomic_promotion_required
+        or not policy.advertise_only_committed
+    ):
+        raise ReconstructionPersistenceError(
+            "storage policy does not require committed-only atomic publication"
+        )
+
+
+def _validate_delivery_publication_inputs(
+    delivered_group: ReconstructionDeliveredGroupV1,
+    final_validation: CrossCurrencyValidationReportV1,
+    retention: ReconstructionRetentionPlanV1,
+    policy: ReconstructionStoragePolicyV1,
+) -> None:
+    if not isinstance(delivered_group, ReconstructionDeliveredGroupV1):
+        raise TypeError("delivery publication requires a delivered group")
+    if delivered_group.status is not ReconstructionDeliveryStatus.APPLIED:
+        raise ReconstructionPersistenceError(
+            "refused delivery groups cannot be published"
+        )
+    if not isinstance(final_validation, CrossCurrencyValidationReportV1):
+        raise TypeError("delivery publication requires final validation")
+    if not final_validation.passed:
+        raise ReconstructionPersistenceError(
+            "failed final validation cannot be published"
+        )
+    if final_validation.stage is not CrossCurrencyValidationStage.POST_BROKER:
+        raise ReconstructionPersistenceError(
+            "delivery publication requires the final post-delivery validation seam"
+        )
+    manifest = delivered_group.manifest
+    if (
+        final_validation.run_id != manifest.run_id
+        or final_validation.window_id != manifest.window_id
+        or final_validation.synchronization_unit_id
+        != manifest.synchronization_unit_id
+        or final_validation.ensemble_member_id != manifest.ensemble_member_id
+    ):
+        raise ReconstructionPersistenceError(
+            "final validation scope differs from delivery group"
+        )
+    if not isinstance(retention, ReconstructionRetentionPlanV1):
+        raise TypeError("delivery publication requires retention evidence")
+    if not isinstance(policy, ReconstructionStoragePolicyV1):
+        raise TypeError("delivery publication requires storage policy")
+    if retention.storage_policy_id != policy.policy_id:
+        raise ReconstructionPersistenceError(
+            "delivery retention uses a different storage policy"
+        )
+    if retention.run_id != manifest.run_id:
+        raise ReconstructionPersistenceError(
+            "delivery retention uses a different reconstruction run"
+        )
+    if manifest.ensemble_member_id not in retention.retained_member_ids:
+        raise ReconstructionPersistenceError(
+            "delivered member is absent from retention preflight"
+        )
+    actual = sum(len(stream.events) for stream in delivered_group.streams)
+    if actual > retention.member_event_counts[manifest.ensemble_member_id]:
+        raise ReconstructionPersistenceError(
+            "delivered rows exceed the pre-run member estimate"
+        )
+    symbols = tuple(stream.symbol for stream in delivered_group.streams)
+    if len(set(symbols)) != len(symbols):
+        raise ReconstructionPersistenceError(
+            "delivered group contains duplicate symbol streams"
         )
     if (
         not policy.atomic_promotion_required
@@ -2347,9 +3188,53 @@ def _quality_manifest(
     )
 
 
+def _delivery_quality_manifest(
+    group: ReconstructionDeliveredGroupV1,
+    *,
+    final_validation: CrossCurrencyValidationReportV1,
+    benchmark_artifact_ids: Sequence[str],
+    benchmark_evidence: Mapping[str, JSONValue],
+) -> ReconstructionDeliveryQualityManifestV1:
+    manifest = group.manifest
+    output_hash = reconstruction_streams_content_sha256(group.streams)
+    if manifest.output_content_sha256 != output_hash:
+        raise ReconstructionPersistenceError(
+            "delivery output hash differs before persistence"
+        )
+    evidence: dict[str, JSONValue] = {
+        "final_validation": final_validation.to_dict(),
+        "benchmark_artifact_ids": list(benchmark_artifact_ids),
+        "benchmark_evidence": dict(benchmark_evidence),
+    }
+    quality_hash = _content_sha256(evidence)
+    identity_hash = cast(str, manifest.identity_lineage_sha256)
+    return ReconstructionDeliveryQualityManifestV1(
+        delivery_manifest_id=manifest.manifest_id,
+        delivery_profile_id=manifest.delivery_profile_id,
+        delivery_mode=manifest.delivery_mode,
+        delivery_output_content_sha256=output_hash,
+        final_validation_id=final_validation.validation_id,
+        final_validation_status=final_validation.status.value,
+        cross_instrument_quality_status=(
+            "passed" if final_validation.passed else "failed"
+        ),
+        cross_instrument_quality_sha256=quality_hash,
+        observed_event_count=manifest.observed_event_count,
+        synthetic_event_count=manifest.synthetic_event_count,
+        identity_event_count=manifest.identity_event_count,
+        identity_lineage_sha256=identity_hash,
+        delivery_action_counts=(
+            {"identity": manifest.identity_event_count}
+            if manifest.identity_event_count
+            else {}
+        ),
+        benchmark_artifact_ids=tuple(benchmark_artifact_ids),
+    )
+
+
 def _verify_publication_directory(
     directory: Path,
-    manifest: ReconstructionProductManifestV1,
+    manifest: ReconstructionProductManifestV1 | ReconstructionProductManifestV2,
     *,
     require_committed_layout: bool,
 ) -> None:
@@ -2433,6 +3318,8 @@ def _find_matching_publication(
         symbol_group_id=symbol_group_id,
     ):
         manifest = load_reconstruction_manifest(path)
+        if not isinstance(manifest, ReconstructionProductManifestV1):
+            continue
         if (
             manifest.replay.logical_content_sha256 == logical_hash
             and manifest.quality.broker_transfer_manifest_id
@@ -2445,6 +3332,10 @@ def _find_matching_publication(
                     "row-group configuration"
                 )
             manifest = verify_reconstruction_publication(path)
+            if not isinstance(manifest, ReconstructionProductManifestV1):
+                raise ReconstructionPersistenceError(
+                    "legacy publication lookup restored a delivery manifest"
+                )
             return PublishedReconstructionV1(
                 manifest=manifest,
                 manifest_path=path,
@@ -2456,7 +3347,7 @@ def _find_matching_publication(
 
 def _validate_committed_manifest_location(
     path: Path,
-    manifest: ReconstructionProductManifestV1,
+    manifest: ReconstructionProductManifestV1 | ReconstructionProductManifestV2,
 ) -> None:
     if path.name != RECONSTRUCTION_MANIFEST_FILENAME:
         raise ReconstructionPersistenceError("unexpected manifest filename")
@@ -2470,12 +3361,22 @@ def _validate_committed_manifest_location(
             "manifest is not below the committed publication axis"
         )
     axis = publication.parent.parent
+    profile_axis: str
+    schema_version: str
+    if isinstance(manifest, ReconstructionProductManifestV1):
+        profile_axis = f"broker={_path_component(manifest.broker_profile_id)}"
+        schema_version = RECONSTRUCTION_PRODUCT_SCHEMA_VERSION
+    else:
+        profile_axis = (
+            f"delivery={_path_component(manifest.delivery_profile_id)}"
+        )
+        schema_version = RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION
     expected_axes = (
         f"group={_path_component(manifest.symbol_group_id)}",
         f"member={_path_component(manifest.ensemble_member_id)}",
-        f"broker={_path_component(manifest.broker_profile_id)}",
+        profile_axis,
         f"run={_path_component(manifest.run_id)}",
-        f"schema={_path_component(RECONSTRUCTION_PRODUCT_SCHEMA_VERSION)}",
+        f"schema={_path_component(schema_version)}",
     )
     cursor = axis
     for expected in expected_axes:
@@ -2504,6 +3405,25 @@ def _axis_directory(
         / f"schema={_path_component(RECONSTRUCTION_PRODUCT_SCHEMA_VERSION)}"
         / f"run={_path_component(run_id)}"
         / f"broker={_path_component(broker_profile_id)}"
+        / f"member={_path_component(ensemble_member_id)}"
+        / f"group={_path_component(symbol_group_id)}"
+    )
+
+
+def _delivery_axis_directory(
+    root: Path,
+    *,
+    run_id: str,
+    delivery_profile_id: str,
+    ensemble_member_id: str,
+    symbol_group_id: str,
+) -> Path:
+    return (
+        root
+        / RECONSTRUCTION_PRODUCT_DIRECTORY
+        / f"schema={_path_component(RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION)}"
+        / f"run={_path_component(run_id)}"
+        / f"delivery={_path_component(delivery_profile_id)}"
         / f"member={_path_component(ensemble_member_id)}"
         / f"group={_path_component(symbol_group_id)}"
     )
@@ -2617,7 +3537,7 @@ def _stable_id(prefix: str, payload: Mapping[str, JSONValue]) -> str:
 
 def _artifact_ref_for_manifest(
     path: Path,
-    manifest: ReconstructionProductManifestV1,
+    manifest: ReconstructionProductManifestV1 | ReconstructionProductManifestV2,
 ) -> ArtifactRef:
     payload = path.read_bytes()
     return ArtifactRef(
@@ -2631,6 +3551,9 @@ def _artifact_ref_for_manifest(
             "manifest_id": manifest.manifest_id,
             "event_count": manifest.event_count,
             "logical_content_sha256": (manifest.replay.logical_content_sha256),
+            "immutable_anchor_content_sha256": (
+                manifest.source.observed_content_sha256
+            ),
         },
     )
 
@@ -2898,6 +3821,7 @@ __all__ = [
     "RECONSTRUCTION_BYTE_HASH_ALGORITHM",
     "RECONSTRUCTION_COMPRESSION",
     "RECONSTRUCTION_CONSTRAINT_MANIFEST_SCHEMA_VERSION",
+    "RECONSTRUCTION_DELIVERY_QUALITY_MANIFEST_SCHEMA_VERSION",
     "RECONSTRUCTION_ENSEMBLE_MANIFEST_SCHEMA_VERSION",
     "RECONSTRUCTION_LOGICAL_HASH_ALGORITHM",
     "RECONSTRUCTION_MANIFEST_ARTIFACT_KIND",
@@ -2905,16 +3829,20 @@ __all__ = [
     "RECONSTRUCTION_PARTITION_SCHEMA_VERSION",
     "RECONSTRUCTION_PRODUCT_DIRECTORY",
     "RECONSTRUCTION_PRODUCT_SCHEMA_VERSION",
+    "RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION",
     "RECONSTRUCTION_QUALITY_MANIFEST_SCHEMA_VERSION",
     "RECONSTRUCTION_REPLAY_MANIFEST_SCHEMA_VERSION",
     "RECONSTRUCTION_RETENTION_PLAN_SCHEMA_VERSION",
     "RECONSTRUCTION_SOURCE_MANIFEST_SCHEMA_VERSION",
     "RECONSTRUCTION_WRITER_ID",
     "PublishedReconstructionV1",
+    "PublishedReconstructionV2",
     "ReconstructionConstraintManifestV1",
     "ReconstructionEnsembleManifestV1",
+    "ReconstructionDeliveryQualityManifestV1",
     "ReconstructionPersistenceError",
     "ReconstructionProductManifestV1",
+    "ReconstructionProductManifestV2",
     "ReconstructionProductPartitionV1",
     "ReconstructionQualityManifestV1",
     "ReconstructionReplayManifestV1",
@@ -2922,8 +3850,10 @@ __all__ = [
     "ReconstructionSourceManifestV1",
     "ReconstructionStoragePreflightError",
     "StagedReconstructionPublicationV1",
+    "StagedReconstructionPublicationV2",
     "cleanup_reconstruction_scratch",
     "commit_reconstruction_publication",
+    "commit_delivery_reconstruction_publication",
     "discover_reconstruction_manifests",
     "estimate_reconstruction_retention",
     "iter_reconstruction_event_batches",
@@ -2934,5 +3864,6 @@ __all__ = [
     "reconstruction_parquet_paths",
     "scan_reconstruction_events_polars",
     "stage_reconstruction_publication",
+    "stage_delivery_reconstruction_publication",
     "verify_reconstruction_publication",
 ]
