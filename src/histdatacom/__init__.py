@@ -9,7 +9,7 @@ Returns:
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from histdatacom.fx_enums import Format, Pairs, Timeframe
 from histdatacom.options import Options
@@ -24,11 +24,39 @@ __all__ = [
     "Pairs",
     "Timeframe",
     "Format",
+    "ReconstructionClient",
+    "ReconstructionExecutionRequestV1",
+    "ReconstructionExitCode",
+    "ReconstructionOperationReceiptV1",
+    "ReconstructionPlanSpecV1",
+    "ReconstructionPreflightV1",
 ]
 
 
 __version__ = "2.0.1"
 __author__ = "David Midlo"
+
+_RECONSTRUCTION_EXPORTS = frozenset(
+    {
+        "ReconstructionClient",
+        "ReconstructionExecutionRequestV1",
+        "ReconstructionExitCode",
+        "ReconstructionOperationReceiptV1",
+        "ReconstructionPlanSpecV1",
+        "ReconstructionPreflightV1",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily expose the typed reconstruction facade without import cycles."""
+    if name not in _RECONSTRUCTION_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+
+    value = getattr(import_module("histdatacom.reconstruction"), name)
+    globals()[name] = value
+    return value
 
 
 class APICaller(sys.modules[__name__].__class__):  # type: ignore # noqa:H601

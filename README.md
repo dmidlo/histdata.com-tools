@@ -60,6 +60,7 @@ Works on macOS, Linux, and Windows.
     - [Reconstructed-History Strategy Sensitivity](#reconstructed-history-strategy-sensitivity)
     - [EURUSD Triangle Reconstruction Certification](#eurusd-triangle-reconstruction-certification)
     - [Temporal Reconstruction Orchestration](#temporal-reconstruction-orchestration)
+    - [Public Reconstruction CLI and API](#public-reconstruction-cli-and-api)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -341,6 +342,7 @@ Commands:
   groups      List instrument groups and major triangles
   jobs        Inspect and control orchestrated work
   quality     Inspect local data quality evidence
+  reconstruction  Plan, run, and inspect reconstruction
   runtime     Inspect and manage the orchestration runtime
 
 Run `histdatacom analytics --help` for analytics commands.
@@ -348,6 +350,7 @@ Run `histdatacom cleanup --help` for cleanup commands.
 Run `histdatacom groups --help` for group discovery commands.
 Run `histdatacom jobs --help` for job telemetry commands.
 Run `histdatacom quality --help` for quality commands.
+Run `histdatacom reconstruction --help` for reconstruction.
 ```
 
 Maintainers: this help excerpt is generated from `ArgParser.format_help()` at a
@@ -3119,6 +3122,33 @@ See
 [`docs/reconstruction-temporal-orchestration.md`](docs/reconstruction-temporal-orchestration.md)
 for adapter registration, queue/resource policy, backpressure, recovery,
 cancellation, report reconciliation, and fault-injection guarantees.
+
+#### Public Reconstruction CLI and API
+
+`histdatacom reconstruction` and `ReconstructionClient` expose the same typed
+plan, operator-request, preflight, submission, receipt, status, cancel, resume,
+output-list, bounded-preview, and integrity-replay contracts. The installed
+command requires an explicit ex-post or ex-ante information mode plus the
+machine-readable acknowledgement that reconstructed output is plausible
+counterfactual evidence—not recovered historical truth.
+
+Only ASCII/T and the complete EURGBP/EURUSD/GBPUSD triangle are accepted. M1,
+bar, partial-triangle, and broker-only requests fail before execution. Temporal
+is the production path; `--local` is an explicit first-party handler smoke and
+checkpoint-recovery mode, never an automatic fallback. Operation receipts bind
+each workflow handle to its actual reconstruction status store, and resumed
+attempts preserve scientific/checkpoint identity while using fresh parent and
+child Temporal IDs.
+
+Committed outputs can be listed, previewed with bounded origin/anchor/generator/
+confidence/constraint-decision lineage, and replay-verified from either public
+surface. The CLI returns distinct invalid-plan, refusal, runtime, validation,
+and success exit codes.
+
+See
+[`docs/reconstruction-public-interfaces.md`](docs/reconstruction-public-interfaces.md)
+for exact JSON contracts, commands, Python examples, recovery semantics, and
+the exit-code table.
 
 ---
 

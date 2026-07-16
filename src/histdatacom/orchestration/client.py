@@ -384,8 +384,19 @@ async def submit_reconstruction_request(
     client_class: Any | None = None,
     status_store: ManifestStatusStore | None = None,
     workflow: Any = DEFAULT_RECONSTRUCTION_WORKFLOW_NAME,
+    workflow_id: str = "",
+    execution_attempt_id: str = "",
 ) -> OrchestrationJobHandle:
-    """Submit an artifact-only synthetic reconstruction workflow."""
+    """Submit an artifact-only synthetic reconstruction workflow.
+
+    ``execution_attempt_id`` is deliberately outside the immutable scientific
+    request.  A recovery submission can therefore use fresh parent/child
+    Temporal identities while reusing the exact request and durable window
+    checkpoints.  Empty attempt IDs preserve the original workflow IDs.
+    """
+    execution_attempt_id = _normalized_reconstruction_attempt_id(
+        execution_attempt_id
+    )
     resolved_config = resolve_orchestration_worker_config(
         config=config,
         supervisor=supervisor,
@@ -401,18 +412,21 @@ async def submit_reconstruction_request(
         supervisor=supervisor,
         client_class=client_class,
     )
-    workflow_id = _reconstruction_workflow_id(request)
+    resolved_workflow_id = workflow_id or _reconstruction_workflow_id(request)
+    payload: dict[str, Any] = {"request": request.to_dict()}
+    if execution_attempt_id:
+        payload["execution_attempt_id"] = execution_attempt_id
     handle = await _maybe_await(
         temporal_client.start_workflow(
             workflow,
-            {"request": request.to_dict()},
-            id=workflow_id,
+            payload,
+            id=resolved_workflow_id,
             task_queue=resolved_config.task_queues.orchestration,
         )
     )
     job_handle = OrchestrationJobHandle(
         request_id=request.request_id,
-        workflow_id=str(getattr(handle, "id", workflow_id)),
+        workflow_id=str(getattr(handle, "id", resolved_workflow_id)),
         run_id=str(getattr(handle, "run_id", "")),
         task_queue=resolved_config.task_queues.orchestration,
         namespace=resolved_config.namespace,
@@ -421,9 +435,9 @@ async def submit_reconstruction_request(
     store.write_job_snapshot(
         {
             "schema_version": 1,
-            "job_id": workflow_id,
+            "job_id": resolved_workflow_id,
             "request_id": request.request_id,
-            "workflow_id": workflow_id,
+            "workflow_id": resolved_workflow_id,
             "run_id": job_handle.run_id,
             "lifecycle": "submitted",
             "status": WorkStatus.PLANNED.value,
@@ -432,6 +446,7 @@ async def submit_reconstruction_request(
                 "reconstruction_run_id": request.run.run_id,
                 "request_fingerprint": request.request_fingerprint,
                 "window_count": len(request.tasks),
+                "execution_attempt_id": execution_attempt_id,
             },
         }
     )
@@ -1425,6 +1440,18 @@ def _reconstruction_workflow_id(
         f"{request.run.run_id}|{request.request_fingerprint}".encode("utf-8")
     ).hexdigest()[:24]
     return f"histdatacom-reconstruction-{request.request_id}-{digest}"
+
+
+def _normalized_reconstruction_attempt_id(value: str) -> str:
+    """Return one bounded non-secret Temporal attempt discriminator."""
+    attempt = str(value or "").strip()
+    if len(attempt) > 64:
+        raise ValueError("reconstruction execution_attempt_id exceeds 64 chars")
+    if any(not (char.isalnum() or char in {"-", "_", "."}) for char in attempt):
+        raise ValueError(
+            "reconstruction execution_attempt_id contains unsupported characters"
+        )
+    return attempt
 
 
 def resolve_orchestration_worker_config(

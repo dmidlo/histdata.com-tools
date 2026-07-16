@@ -824,6 +824,65 @@ def test_client_submission_adds_workspace_queues_and_persists_snapshot(
     assert snapshot["metadata"]["window_count"] == 1
 
 
+def test_recovery_submission_uses_fresh_parent_and_child_identities(
+    tmp_path: Path,
+) -> None:
+    """A resume attempt must not collide with earlier Temporal child IDs."""
+    request = _request(tmp_path)
+    config = build_orchestration_worker_config(
+        workspace=tmp_path,
+        runtime_home=tmp_path / "runtime",
+    )
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def start_workflow(self, workflow, payload, **options):
+            self.calls.append((workflow, payload, options))
+            return SimpleNamespace(id=options["id"], run_id="resume-run")
+
+    client = FakeClient()
+    handle = asyncio.run(
+        submit_reconstruction_request(
+            request,
+            config=config,
+            client=client,
+            workflow_id="reconstruction-resume-parent-001",
+            execution_attempt_id="resume-001",
+        )
+    )
+    payload = client.calls[0][1]
+    snapshot = ReconstructionCheckpointStore(
+        request.manifest_store_root
+    ).store.get_job_snapshot(handle.workflow_id)
+    initial_child_id = workflows._reconstruction_child_workflow_id(
+        request.request_id, request.tasks[0].window.window_id
+    )
+    resumed_child_id = workflows._reconstruction_child_workflow_id(
+        request.request_id,
+        request.tasks[0].window.window_id,
+        execution_attempt_id="resume-001",
+    )
+
+    assert handle.workflow_id == "reconstruction-resume-parent-001"
+    assert payload["execution_attempt_id"] == "resume-001"
+    assert payload["request"]["request_id"] == request.request_id
+    assert initial_child_id != resumed_child_id
+    assert snapshot is not None
+    assert snapshot["metadata"]["execution_attempt_id"] == "resume-001"
+
+    with pytest.raises(ValueError, match="unsupported characters"):
+        asyncio.run(
+            submit_reconstruction_request(
+                request,
+                config=config,
+                client=client,
+                execution_attempt_id="resume token must not enter history",
+            )
+        )
+
+
 def test_stale_input_fingerprint_receipt_is_rejected(tmp_path: Path) -> None:
     task = _task(tmp_path)
     request = _request(tmp_path, task)

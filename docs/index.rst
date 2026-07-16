@@ -51,6 +51,7 @@ Persistence, projections, and validation
    reverse-degradation-benchmark-corpus
    reconstruction-certification-contracts
    reconstruction-temporal-orchestration
+   reconstruction-public-interfaces
 
 Data quality
 ------------

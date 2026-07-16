@@ -1,0 +1,331 @@
+"""Installed command-line surface for typed reconstruction operations."""
+
+from __future__ import annotations
+
+import argparse
+from collections.abc import Mapping, Sequence
+import json
+from pathlib import Path
+import sys
+from typing import Any
+
+from histdatacom.cli_config import (
+    CliConfigError,
+    add_config_argument,
+    configured_reconstruction_argv,
+)
+from histdatacom.orchestration.supervisor import OrchestrationSupervisor
+from histdatacom.reconstruction import (
+    MAX_PREVIEW_LIMIT,
+    ReconstructionClient,
+    ReconstructionExitCode,
+    ReconstructionPublicError,
+    read_execution_request,
+    read_operation_receipt,
+    read_plan_spec,
+    reconstruction_exit_code,
+    write_execution_request,
+    write_operation_receipt,
+)
+from histdatacom.synthetic.information import InformationMode
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the reconstruction command family parser."""
+    parser = argparse.ArgumentParser(
+        prog="histdatacom reconstruction",
+        description=(
+            "Plan, preflight, execute, control, and inspect first-party "
+            "ASCII tick reconstruction."
+        ),
+        epilog=(
+            "Every execution request must explicitly select an information "
+            "mode and acknowledge that output is not recovered historical "
+            "truth. M1/bar inputs and partial symbol groups are unsupported."
+        ),
+    )
+    add_config_argument(parser)
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit machine-readable JSON instead of a compact summary",
+    )
+    parser.add_argument(
+        "--start-runtime",
+        action="store_true",
+        help="start the local Temporal runtime before submit, cancel, or resume",
+    )
+    subparsers = parser.add_subparsers(
+        dest="reconstruction_command", required=True
+    )
+
+    plan = subparsers.add_parser(
+        "plan", help="construct and validate a plan from a JSON plan spec"
+    )
+    plan.add_argument("--spec", required=True, metavar="PATH")
+
+    request = subparsers.add_parser(
+        "request", help="bind explicit operator intent to an immutable plan"
+    )
+    request.add_argument("--plan", required=True, metavar="PATH")
+    request.add_argument(
+        "--information-mode",
+        required=True,
+        choices=tuple(mode.value for mode in InformationMode),
+    )
+    request.add_argument(
+        "--acknowledge-scientific-nonclaim",
+        action="store_true",
+        help="acknowledge that output is plausible, not recovered truth",
+    )
+    request.add_argument(
+        "--allow-refusals",
+        action="store_true",
+        help="execute supported windows while retaining explicit refusals",
+    )
+    request.add_argument("--output", required=True, metavar="PATH")
+
+    preflight = subparsers.add_parser(
+        "preflight", help="validate readiness and print dry-run resources"
+    )
+    preflight.add_argument("--request", required=True, metavar="PATH")
+
+    run = subparsers.add_parser(
+        "run",
+        help="execute and wait, submit only, or run a bounded local smoke",
+    )
+    run.add_argument("--request", required=True, metavar="PATH")
+    mode = run.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--submit-only",
+        action="store_true",
+        help="return after Temporal submit",
+    )
+    mode.add_argument(
+        "--local",
+        action="store_true",
+        help="run the registered pipeline in-process for smoke/recovery",
+    )
+    run.add_argument(
+        "--window-id",
+        default="",
+        help="limit explicit local execution to one plan window",
+    )
+    run.add_argument("--receipt", required=True, metavar="PATH")
+
+    status = subparsers.add_parser(
+        "status", help="inspect every job in an operation receipt"
+    )
+    status.add_argument("--receipt", required=True, metavar="PATH")
+    status.add_argument(
+        "--offline", action="store_true", help="read durable status only"
+    )
+    status.add_argument("--output", default="", metavar="PATH")
+
+    cancel = subparsers.add_parser(
+        "cancel", help="request cancellation for every submitted job"
+    )
+    cancel.add_argument("--receipt", required=True, metavar="PATH")
+    cancel.add_argument("--reason", default="")
+    cancel.add_argument("--output", required=True, metavar="PATH")
+
+    resume = subparsers.add_parser(
+        "resume", help="resume durable checkpoints using fresh workflow IDs"
+    )
+    resume.add_argument("--receipt", required=True, metavar="PATH")
+    resume_mode = resume.add_mutually_exclusive_group()
+    resume_mode.add_argument("--submit-only", action="store_true")
+    resume_mode.add_argument("--local", action="store_true")
+    resume.add_argument("--output", required=True, metavar="PATH")
+
+    outputs = subparsers.add_parser(
+        "outputs", help="list verified committed products for a request"
+    )
+    outputs.add_argument("--request", required=True, metavar="PATH")
+
+    preview = subparsers.add_parser(
+        "preview", help="show bounded event origin, lineage, and decisions"
+    )
+    preview.add_argument("--manifest", required=True, metavar="PATH")
+    preview.add_argument(
+        "--limit", type=int, default=20, choices=range(1, MAX_PREVIEW_LIMIT + 1)
+    )
+
+    replay = subparsers.add_parser(
+        "replay", help="integrity-replay a committed reconstruction product"
+    )
+    replay.add_argument("--manifest", required=True, metavar="PATH")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the installed reconstruction command family."""
+    parser = build_parser()
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    try:
+        args = parser.parse_args(configured_reconstruction_argv(raw_argv))
+        client = _client(args)
+        result, code = _run_command(client, args)
+        _write_result(result, as_json=bool(args.json))
+        return int(code)
+    except CliConfigError as err:
+        return _write_error(
+            err,
+            reason_code="reconstruction_config_error",
+            exit_code=ReconstructionExitCode.INVALID_PLAN,
+            as_json="--json" in raw_argv,
+        )
+    except ReconstructionPublicError as err:
+        return _write_error(
+            err,
+            reason_code=err.reason_code,
+            exit_code=err.exit_code,
+            as_json="--json" in raw_argv,
+        )
+    except (OSError, TypeError, ValueError) as err:
+        return _write_error(
+            err,
+            reason_code="invalid_reconstruction_plan",
+            exit_code=ReconstructionExitCode.INVALID_PLAN,
+            as_json="--json" in raw_argv,
+        )
+    except Exception as err:  # pragma: no cover - defensive CLI boundary
+        return _write_error(
+            err,
+            reason_code="reconstruction_runtime_failure",
+            exit_code=ReconstructionExitCode.RUNTIME_FAILURE,
+            as_json="--json" in raw_argv,
+        )
+
+
+def _client(args: argparse.Namespace) -> ReconstructionClient:
+    supervisor = None
+    if args.start_runtime:
+        supervisor = OrchestrationSupervisor()
+        supervisor.start()
+    return ReconstructionClient(supervisor=supervisor)
+
+
+def _run_command(
+    client: ReconstructionClient, args: argparse.Namespace
+) -> tuple[Mapping[str, Any], ReconstructionExitCode]:
+    command = args.reconstruction_command
+    if command == "plan":
+        ref = client.construct_plan(read_plan_spec(args.spec))
+        return ref.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "request":
+        request = client.create_request(
+            args.plan,
+            information_mode=args.information_mode,
+            acknowledge_scientific_nonclaim=(
+                args.acknowledge_scientific_nonclaim
+            ),
+            allow_refusals=args.allow_refusals,
+        )
+        path = write_execution_request(request, args.output)
+        return {
+            "request": request.to_dict(),
+            "request_path": str(path),
+        }, ReconstructionExitCode.SUCCESS
+    if command == "preflight":
+        preflight = client.preflight(read_execution_request(args.request))
+        return preflight.to_dict(), reconstruction_exit_code(preflight)
+    if command == "run":
+        request = read_execution_request(args.request)
+        receipt = (
+            client.execute_local(request, window_id=args.window_id)
+            if args.local
+            else client.submit(request, wait=not args.submit_only)
+        )
+        path = write_operation_receipt(receipt, args.receipt)
+        return _receipt_result(receipt, path), reconstruction_exit_code(receipt)
+    if command == "status":
+        receipt = client.inspect(
+            read_operation_receipt(args.receipt), offline=args.offline
+        )
+        status_path = (
+            write_operation_receipt(receipt, args.output)
+            if args.output
+            else None
+        )
+        return _receipt_result(receipt, status_path), reconstruction_exit_code(
+            receipt
+        )
+    if command == "cancel":
+        receipt = client.cancel(
+            read_operation_receipt(args.receipt), reason=args.reason
+        )
+        path = write_operation_receipt(receipt, args.output)
+        return _receipt_result(receipt, path), reconstruction_exit_code(receipt)
+    if command == "resume":
+        receipt = client.resume(
+            read_operation_receipt(args.receipt),
+            wait=not args.submit_only,
+            local=args.local,
+        )
+        path = write_operation_receipt(receipt, args.output)
+        return _receipt_result(receipt, path), reconstruction_exit_code(receipt)
+    if command == "outputs":
+        return (
+            client.outputs(read_execution_request(args.request)),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "preview":
+        return (
+            client.preview(args.manifest, limit=args.limit),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "replay":
+        return client.replay(args.manifest), ReconstructionExitCode.SUCCESS
+    raise ValueError(f"unsupported reconstruction command: {command}")
+
+
+def _receipt_result(receipt: Any, path: Path | None) -> dict[str, Any]:
+    payload = dict(receipt.to_dict())
+    if path is not None:
+        payload["receipt_path"] = str(path)
+    return payload
+
+
+def _write_result(result: Mapping[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, indent=2, sort_keys=True))  # noqa:T201
+        return
+    status = result.get("status") or result.get("kind") or "complete"
+    identity = (
+        result.get("receipt_id")
+        or result.get("request_id")
+        or result.get("plan_id")
+        or result.get("sha256")
+        or ""
+    )
+    suffix = f" ({identity})" if identity else ""
+    print(f"Reconstruction {status}{suffix}")  # noqa:T201
+    for key in ("path", "request_path", "receipt_path", "manifest_path"):
+        if result.get(key):
+            print(f"{key}: {result[key]}")  # noqa:T201
+
+
+def _write_error(
+    error: Exception,
+    *,
+    reason_code: str,
+    exit_code: ReconstructionExitCode,
+    as_json: bool,
+) -> int:
+    payload = {
+        "status": "error",
+        "reason_code": reason_code,
+        "message": str(error),
+        "exit_code": int(exit_code),
+    }
+    if as_json:
+        print(json.dumps(payload, sort_keys=True), file=sys.stderr)  # noqa:T201
+    else:
+        print(  # noqa:T201
+            f"reconstruction error [{reason_code}]: {error}", file=sys.stderr
+        )
+    return int(exit_code)
+
+
+__all__ = ["build_parser", "main"]

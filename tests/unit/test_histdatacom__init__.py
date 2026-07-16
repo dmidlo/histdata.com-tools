@@ -19,6 +19,12 @@ def test_exposed_classes() -> None:
         "Pairs",
         "Timeframe",
         "Format",
+        "ReconstructionClient",
+        "ReconstructionExecutionRequestV1",
+        "ReconstructionExitCode",
+        "ReconstructionOperationReceiptV1",
+        "ReconstructionPlanSpecV1",
+        "ReconstructionPreflightV1",
     }
 
 

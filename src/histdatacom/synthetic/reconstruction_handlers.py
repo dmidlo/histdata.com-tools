@@ -444,7 +444,7 @@ def carving_handler(
         accepted_by_symbol: dict[str, list[SyntheticEventV1]] = {
             symbol: [] for symbol in invocation.run.symbols
         }
-        evidence: list[dict[str, JSONValue]] = []
+        evidence: list[JSONValue] = []
         candidates = 0
         accepted = 0
         rejected = 0
@@ -736,7 +736,7 @@ def validation_handler(
             delivered,
             final_validation=final_validation,
             benchmark_artifact_ids=tuple(
-                cast(str, ref.sha256)
+                ref.sha256
                 for name, ref in sorted(
                     plan.execution_manifest.artifacts.items()
                 )
@@ -806,8 +806,8 @@ def validation_handler(
             additional_refs=(descriptor,),
             output_bytes=(
                 _tree_size(staged.staging_directory)
-                + cast(int, descriptor.size_bytes or 0)
-                + cast(int, staged_manifest_ref.size_bytes or 0)
+                + (descriptor.size_bytes or 0)
+                + (staged_manifest_ref.size_bytes or 0)
             ),
         )
     except asyncio.CancelledError:
@@ -1210,7 +1210,7 @@ def _restore_delivered_group(
 def _group_without_streams(
     group: CrossCurrencyReconciledGroupV1,
 ) -> dict[str, JSONValue]:
-    payload = cast(dict[str, JSONValue], group.to_dict())
+    payload: dict[str, JSONValue] = group.to_dict()
     payload["streams"] = []
     return payload
 
@@ -1218,7 +1218,8 @@ def _group_without_streams(
 def _carved_evidence(
     batch: HistoricalCarvedCandidateBatchV1,
 ) -> dict[str, JSONValue]:
-    return cast(dict[str, JSONValue], batch.metadata())
+    payload: dict[str, JSONValue] = batch.metadata()
+    return payload
 
 
 def _candidate_evidence(
@@ -1628,7 +1629,7 @@ def _file_sha256(path: Path) -> str:
 
 def _artifact_graph_size(ref: ArtifactRef) -> int:
     """Measure a stage manifest and every distinct strong file it names."""
-    paths: dict[str, int] = {ref.path: cast(int, ref.size_bytes or 0)}
+    paths: dict[str, int] = {ref.path: ref.size_bytes or 0}
     if not ref.path.endswith(".json"):
         return sum(paths.values())
     try:

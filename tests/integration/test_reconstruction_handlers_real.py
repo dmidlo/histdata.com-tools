@@ -19,6 +19,13 @@ from typing import Any
 
 import pytest
 
+from histdatacom import reconstruction_cli
+from histdatacom.reconstruction import (
+    ReconstructionClient,
+    read_operation_receipt,
+    write_execution_request,
+)
+
 from histdatacom.orchestration.reconstruction import (
     RegisteredReconstructionStageExecutor,
     ReconstructionCheckpointStore,
@@ -51,10 +58,12 @@ from histdatacom.synthetic.reconstruction_handlers import (
     validation_handler,
 )
 from histdatacom.synthetic.reconstruction_plan import (
+    ReconstructionPlanResourceSummaryV1,
     ReconstructionPlanExecutionManifestV1,
     SyntheticInfillPlanV1,
     read_reconstruction_plan_execution_manifest,
     read_synthetic_infill_plan,
+    write_synthetic_infill_plan,
 )
 from histdatacom.synthetic.streaming import (
     ReconstructionCommitPhase,
@@ -231,6 +240,134 @@ def test_real_cancellation_removes_partial_window_scratch_for_every_handler(
         assert (
             discover_reconstruction_manifests(case.execution.output_root) == ()
         )
+
+
+def test_real_public_cli_and_api_execute_same_one_window_product(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Installed CLI and typed API meet at one real committed logical output."""
+    case = _case(tmp_path / "public-cli-api", max_parallel_windows=1)
+    estimate = case.task.resource_estimate
+    resources = ReconstructionPlanResourceSummaryV1(
+        source_event_count=estimate.input_event_count,
+        source_size_bytes=sum(
+            ref.size_bytes or 0
+            for ref in case.execution.artifacts.values()
+            if ref.kind == "histdata_ascii_tick_arrow"
+        ),
+        planned_window_count=1,
+        executable_window_count=1,
+        refused_window_count=0,
+        ensemble_member_count=1,
+        retained_member_count=1,
+        workflow_request_count=1,
+        estimated_candidate_event_count=estimate.candidate_event_count,
+        estimated_candidate_bytes=estimate.estimated_scratch_bytes,
+        estimated_peak_memory_bytes=estimate.estimated_memory_bytes,
+        estimated_peak_scratch_bytes=estimate.estimated_scratch_bytes,
+        estimated_output_bytes=estimate.estimated_output_bytes,
+        estimated_partition_count=3,
+    )
+    execution_ref = case.task.commands[0].configuration_refs[0]
+    public_plan = SyntheticInfillPlanV1(
+        run=case.plan.run,
+        configuration_id=case.plan.configuration_id,
+        execution_manifest_id=case.execution.manifest_id,
+        information_mode=case.plan.information_mode,
+        delivery_mode=case.plan.delivery_mode,
+        requested_start_ns=case.task.window.core_start_ns,
+        requested_end_ns=case.task.window.core_end_ns,
+        workflow_requests=(case.request,),
+        artifact_graph={
+            "execution_manifest": execution_ref,
+            **case.execution.artifacts,
+        },
+        resources=resources,
+    )
+    plan_ref = write_synthetic_infill_plan(
+        public_plan, tmp_path / "public-plan"
+    )
+    client = ReconstructionClient()
+    execution_request = client.create_request(
+        plan_ref.path,
+        information_mode=case.plan.information_mode,
+        acknowledge_scientific_nonclaim=True,
+    )
+    request_path = write_execution_request(
+        execution_request, tmp_path / "execution-request.json"
+    )
+    cli_receipt_path = tmp_path / "cli-receipt.json"
+
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "run",
+                "--request",
+                str(request_path),
+                "--local",
+                "--window-id",
+                case.task.window.window_id,
+                "--receipt",
+                str(cli_receipt_path),
+            ]
+        )
+        == 0
+    )
+    cli_run = json.loads(capsys.readouterr().out)
+    cli_receipt = read_operation_receipt(cli_receipt_path)
+    api_receipt = client.execute_local(
+        execution_request, window_id=case.task.window.window_id
+    )
+    manifest_path = cli_receipt.reports[0].committed_manifest_refs[0].path
+
+    assert cli_run["status"] == "committed"
+    assert cli_receipt.reports == api_receipt.reports
+    assert cli_receipt.reports[0].observed_event_count == 81
+    assert cli_receipt.reports[0].synthetic_event_count == 39
+
+    api_preview = client.preview(manifest_path, limit=100)
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "preview",
+                "--manifest",
+                manifest_path,
+                "--limit",
+                "100",
+            ]
+        )
+        == 0
+    )
+    cli_preview = json.loads(capsys.readouterr().out)
+    api_replay = client.replay(manifest_path)
+    assert (
+        reconstruction_cli.main(
+            ["--json", "replay", "--manifest", manifest_path]
+        )
+        == 0
+    )
+    cli_replay = json.loads(capsys.readouterr().out)
+
+    assert cli_preview == api_preview
+    assert cli_replay == api_replay
+    assert {row["origin"] for row in api_preview["rows"]} == {
+        "observed",
+        "synthetic",
+    }
+    synthetic = next(
+        row for row in api_preview["rows"] if row["origin"] == "synthetic"
+    )
+    assert synthetic["generation"]["generator_id"]
+    assert synthetic["generation"]["confidence"] is None
+    assert synthetic["constraint_decision"]["decision"] == "accepted"
+    assert synthetic["constraint_decision"]["constraint_set_id"]
+    assert synthetic["lineage"]["left_anchor_event_id"]
+    assert synthetic["lineage"]["right_anchor_event_id"]
+    assert api_replay["event_count"] == 120
+    assert api_replay["replay_verified"]
 
 
 def _case(

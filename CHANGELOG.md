@@ -2,6 +2,11 @@
 
 ### Added
 
+- **reconstruction**: expose the first-party reconstruction pipeline through
+  an installed CLI family and typed Python facade, with explicit information
+  mode/nonclaim requests, preflight resources and refusals, Temporal and local
+  execution, aligned status/cancel/resume receipts, bounded lineage previews,
+  replay verification, and stable exit codes (#467).
 - **data-quality**: make weekend and expected-session-closure remediation
   guidance profile-aware with bounded calendar-policy context while preserving
   stable public weekend hint codes (#344).

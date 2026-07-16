@@ -1413,7 +1413,15 @@ def main(
     cli_args = sys.argv[1:] if not options else []
     routed_command = routed_command_from_cli_args(
         cli_args,
-        {"analytics", "cleanup", "groups", "jobs", "quality", "runtime"},
+        {
+            "analytics",
+            "cleanup",
+            "groups",
+            "jobs",
+            "quality",
+            "reconstruction",
+            "runtime",
+        },
     )
     if not options and routed_command == "cleanup":
         from histdatacom.cleanup_cli import main as cleanup_main
@@ -1436,6 +1444,12 @@ def main(
 
         return quality_main(
             remove_routed_command_from_cli_args(cli_args, "quality")
+        )
+    if not options and routed_command == "reconstruction":
+        from histdatacom.reconstruction_cli import main as reconstruction_main
+
+        return reconstruction_main(
+            remove_routed_command_from_cli_args(cli_args, "reconstruction")
         )
     if not options and routed_command == "runtime":
         reexec_code = _maybe_reexec_windows_runtime_cli(cli_args)

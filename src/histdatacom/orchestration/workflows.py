@@ -1281,7 +1281,8 @@ class ReconstructionWindowWorkflow:
             "window_id": task.window.window_id,
             "checkpoint_id": state.checkpoint.checkpoint_id,
         }
-        return state.to_dict()
+        result_payload: dict[str, JSONValue] = state.to_dict()
+        return result_payload
 
     @workflow_query
     def status(self) -> dict[str, JSONValue]:
@@ -1307,6 +1308,7 @@ class ReconstructionRunWorkflow:
         request = ReconstructionWorkflowRequestV1.from_dict(
             _coerce_mapping(payload.get("request", payload))
         )
+        execution_attempt_id = _reconstruction_execution_attempt_id(payload)
         self._status = {
             "status": WorkStatus.PLANNED.value,
             "current_stage": "window_planning",
@@ -1328,7 +1330,9 @@ class ReconstructionRunWorkflow:
             for task in wave:
                 child_request = request.for_task(task)
                 child_id = _reconstruction_child_workflow_id(
-                    request.request_id, task.window.window_id
+                    request.request_id,
+                    task.window.window_id,
+                    execution_attempt_id=execution_attempt_id,
                 )
                 child_options: dict[str, Any] = {"id": child_id}
                 queue = request.task_queues.get("orchestration", "")
@@ -1407,10 +1411,30 @@ DEFAULT_WORKFLOWS = (
 )
 
 
-def _reconstruction_child_workflow_id(request_id: str, window_id: str) -> str:
+def _reconstruction_child_workflow_id(
+    request_id: str,
+    window_id: str,
+    *,
+    execution_attempt_id: str = "",
+) -> str:
     """Return a bounded deterministic child workflow ID."""
-    digest = hashlib.sha256(window_id.encode("utf-8")).hexdigest()[:24]
+    identity = window_id
+    if execution_attempt_id:
+        identity = f"{window_id}|{execution_attempt_id}"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
     return f"{request_id}-reconstruction-window-{digest}"
+
+
+def _reconstruction_execution_attempt_id(payload: dict[str, Any]) -> str:
+    """Validate the bounded recovery identity carried beside a request."""
+    attempt = str(payload.get("execution_attempt_id", "") or "").strip()
+    if len(attempt) > 64:
+        raise ValueError("reconstruction execution_attempt_id exceeds 64 chars")
+    if any(not (char.isalnum() or char in {"-", "_", "."}) for char in attempt):
+        raise ValueError(
+            "reconstruction execution_attempt_id contains unsupported characters"
+        )
+    return attempt
 
 
 def _reconstruction_work_status(

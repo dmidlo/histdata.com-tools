@@ -23,6 +23,7 @@ _COMMAND_SECTION_KEYS = {
     "groups",
     "jobs",
     "quality",
+    "reconstruction",
     "runtime",
     "worker",
 }
@@ -121,6 +122,7 @@ _COMMAND_KEY_ALIASES = {
     "analytics_command": "command",
     "job_command": "command",
     "jobs_command": "command",
+    "reconstruction_command": "command",
     "runtime_command": "command",
     "subcommand": "command",
     "worker_command": "command",
@@ -363,6 +365,57 @@ _CLEANUP_ALLOWED_KEYS = (
     | set(_CLEANUP_TRUE_FLAG_ARGS)
     | set(_CLEANUP_SCALAR_ARGS)
     | set(_CLEANUP_LIST_ARGS)
+)
+_RECONSTRUCTION_COMMANDS = {
+    "cancel",
+    "outputs",
+    "plan",
+    "preflight",
+    "preview",
+    "replay",
+    "request",
+    "resume",
+    "run",
+    "status",
+}
+_RECONSTRUCTION_ALIASES = {
+    **_COMMAND_KEY_ALIASES,
+    "acknowledge_nonclaim": "acknowledge_scientific_nonclaim",
+    "allow_partial": "allow_refusals",
+    "manifest_path": "manifest",
+    "plan_path": "plan",
+    "receipt_path": "receipt",
+    "request_path": "request",
+    "spec_path": "spec",
+}
+_RECONSTRUCTION_GLOBAL_TRUE_FLAG_ARGS = {
+    "json": "--json",
+    "start_runtime": "--start-runtime",
+}
+_RECONSTRUCTION_TRUE_FLAG_ARGS = {
+    "acknowledge_scientific_nonclaim": ("--acknowledge-scientific-nonclaim"),
+    "allow_refusals": "--allow-refusals",
+    "local": "--local",
+    "offline": "--offline",
+    "submit_only": "--submit-only",
+}
+_RECONSTRUCTION_SCALAR_ARGS = {
+    "information_mode": "--information-mode",
+    "limit": "--limit",
+    "manifest": "--manifest",
+    "output": "--output",
+    "plan": "--plan",
+    "reason": "--reason",
+    "receipt": "--receipt",
+    "request": "--request",
+    "spec": "--spec",
+    "window_id": "--window-id",
+}
+_RECONSTRUCTION_ALLOWED_KEYS = (
+    {"command"}
+    | set(_RECONSTRUCTION_GLOBAL_TRUE_FLAG_ARGS)
+    | set(_RECONSTRUCTION_TRUE_FLAG_ARGS)
+    | set(_RECONSTRUCTION_SCALAR_ARGS)
 )
 _QUALITY_COMMANDS = {
     "catalog",
@@ -797,6 +850,23 @@ def configured_quality_argv(args: Sequence[str]) -> list[str]:
         command_true_flags=_QUALITY_TRUE_FLAG_ARGS,
         command_scalar_args=_QUALITY_SCALAR_ARGS,
         command_list_args=_QUALITY_LIST_ARGS,
+    )
+
+
+def configured_reconstruction_argv(args: Sequence[str]) -> list[str]:
+    """Return reconstruction argv with YAML defaults injected."""
+    return _configured_subcommand_argv(
+        args,
+        section_name="reconstruction",
+        commands=_RECONSTRUCTION_COMMANDS,
+        allowed_keys=_RECONSTRUCTION_ALLOWED_KEYS,
+        aliases=_RECONSTRUCTION_ALIASES,
+        global_true_flags=_RECONSTRUCTION_GLOBAL_TRUE_FLAG_ARGS,
+        global_scalar_args={},
+        global_list_args={},
+        command_true_flags=_RECONSTRUCTION_TRUE_FLAG_ARGS,
+        command_scalar_args=_RECONSTRUCTION_SCALAR_ARGS,
+        command_list_args={},
     )
 
 
