@@ -5,9 +5,9 @@ validate both source distributions and wheels before publishing.
 
 ## Release Decision Tree
 
-Local publishing is the authoritative release path today. GitHub Actions
-publishing is future architecture and remains guarded until the repository is
-ready to move deployment out of the local maintainer workflow.
+GitHub Actions Trusted Publishing is the authoritative registry-publishing
+path. The local workflow remains the build, simple-registry preflight, install
+verification, and emergency credential-backed fallback path.
 
 1. Build and validate locally from any reviewed branch with
    `bash pypi.sh build`.
@@ -15,27 +15,32 @@ ready to move deployment out of the local maintainer workflow.
    This builds the artifacts, serves them through a local simple index, and
    verifies the installed package exactly like the TestPyPI install harness
    without requiring upload credentials.
-3. TestPyPI dry run: check out `dev`, confirm the tree is clean, then run
-   `bash pypi.sh testpypi`. Verify install behavior from TestPyPI before any
-   production release.
-4. PyPI production release: merge or fast-forward the reviewed release state to
-   `main`, confirm the same version passed TestPyPI from `dev`, then run
-   `bash pypi.sh pypi` from `main`.
-5. Emergency branch overrides are explicit: set
+3. TestPyPI dry run: manually dispatch `release.yml` from `dev` with
+   `release_target=testpypi`, approve the protected `testpypi` environment,
+   and verify the exact installed version from TestPyPI.
+4. Production promotion: open the explicit `dev` to `main` pull request so the
+   required `Production coverage` job runs once, then merge only after it
+   passes.
+5. PyPI production release: manually dispatch `release.yml` from `main` with
+   `release_target=pypi`, `testpypi_dry_run_confirmed=true`, and the successful
+   TestPyPI workflow run ID in `testpypi_run_id`. The workflow validates that
+   run, downloads its
+   exact `histdatacom-dist` artifact, verifies the TestPyPI file hashes, and
+   publishes those same files to PyPI without rebuilding them.
+6. Emergency local branch overrides are explicit: set
    `HISTDATACOM_ALLOW_RELEASE_BRANCH_MISMATCH=1` only after reviewing why the
    normal `dev` -> TestPyPI and `main` -> PyPI branch policy cannot be used.
 
-Tag pushes are intentionally build-only in the release workflow. The dormant
-GitHub Actions PyPI publishing path is reachable only from manual
-`workflow_dispatch`, the `pypi` environment approval gate, the `main` branch,
-and the explicit TestPyPI dry-run confirmation input.
+SemVer tag pushes such as `2.1.0` are intentionally build-only in the release
+workflow. Registry
+publishing is reachable only from manual `workflow_dispatch`, the matching
+protected environment approval gate, and the required branch. Production also
+requires the explicit TestPyPI confirmation and successful TestPyPI run ID.
 
 ## Trusted Publishing Configuration
 
-Trusted Publishing is the target GitHub Actions deployment model, not the
-current publishing path. Keep the configuration notes below current so the
-future migration is straightforward, but publish with `pypi.sh` until the
-Actions release path is deliberately enabled.
+Trusted Publishing is the active GitHub Actions deployment model. Keep the
+configuration below synchronized with the workflow and protected environments.
 
 The GitHub repository has protected `testpypi` and `pypi` environments with
 required reviewer approval. Configure the matching Trusted Publishers in
@@ -63,9 +68,10 @@ Local GPG detached signatures remain part of the local fallback path for now.
 GitHub release path does not use local GPG keys; it relies on GitHub artifact
 attestations and PyPI Trusted Publishing attestations.
 
-## Local Publishing
+## Local Publishing Fallback
 
-The existing local workflow is the current publishing workflow:
+The credential-backed local workflow remains available for an explicitly
+reviewed emergency or registry outage:
 
 ```sh
 bash pypi.sh build
@@ -310,17 +316,20 @@ Pull request CI uses workflow concurrency to cancel stale runs when a branch is
 updated. Release workflow concurrency does not cancel in-progress runs, so a
 manual publish cannot be interrupted by a later tag or dispatch event.
 
-The release workflow builds artifacts on `v*` tags and manual dispatches. It
-does not publish automatically on tag push. The dormant publish jobs are branch
-guarded to match local policy: TestPyPI is only dispatchable from `dev`, and
-PyPI is only dispatchable from `main`. Publishing through GitHub Actions also
-requires a matching protected environment approval and OIDC Trusted Publishing
-configured on the target index.
+The release workflow builds artifacts on SemVer-shaped `*.*.*` tags and manual
+dispatches. It
+does not publish automatically on tag push. The publish jobs are branch guarded:
+TestPyPI is only dispatchable from `dev`, and PyPI is only dispatchable from
+`main`. Publishing also requires a matching protected environment approval and
+OIDC Trusted Publishing configured on the target index.
 
-Actions publishing remains a guarded release path, not the authoritative local
-publish path. The publish jobs consume `histdatacom-dist`, which is assembled
-only from the metadata-only universal wheel and source distribution. Bundled
-platform wheels are an explicit private/offline dry-run path: set
+The TestPyPI job consumes `histdatacom-dist`, which is assembled only from the
+metadata-only universal wheel and source distribution. The PyPI job requires a
+successful TestPyPI release run, validates its workflow, branch, job, tag
+ancestry, permitted release-control-only post-tag diff, live artifact, and
+public TestPyPI hashes, then downloads and publishes that exact prior artifact.
+It does not rebuild production distributions. Bundled platform wheels are an
+explicit private/offline dry-run path: set
 `include_bundled_platform_wheels=true` only with `release_target=build-only`,
 and set `bundled_platform_wheel_size_confirmed=true` only after confirming the
 private/offline purpose and artifact-size policy.

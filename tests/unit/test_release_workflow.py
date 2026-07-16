@@ -94,6 +94,9 @@ def test_release_workflow_builds_platform_wheels_only_when_opted_in() -> None:
     assert isinstance(dispatch, dict)
     inputs = dispatch["inputs"]
     assert isinstance(inputs, dict)
+    push = triggers["push"]
+    assert isinstance(push, dict)
+    assert push["tags"] == ["*.*.*"]
     jobs = workflow["jobs"]
     assert isinstance(jobs, dict)
     expected_platforms = set(fetch_script.TEMPORAL_CLI_ASSETS)
@@ -107,6 +110,10 @@ def test_release_workflow_builds_platform_wheels_only_when_opted_in() -> None:
     assert isinstance(size_confirm, dict)
     assert size_confirm["default"] is False
     assert "size policy" in str(size_confirm["description"])
+    testpypi_run = inputs["testpypi_run_id"]
+    assert isinstance(testpypi_run, dict)
+    assert testpypi_run["default"] == ""
+    assert "exact files" in str(testpypi_run["description"])
 
     env = workflow["env"]
     assert isinstance(env, dict)
@@ -122,6 +129,13 @@ def test_release_workflow_builds_platform_wheels_only_when_opted_in() -> None:
     assert "build-only" in validation_command
     assert "bundled_platform_wheel_size_confirmed" in validation_command
     assert "private/offline" in validation_command
+    promotion_validation = _step_run(
+        validation, "Validate PyPI promotion input"
+    )
+    assert "testpypi_dry_run_confirmed=true" in promotion_validation
+    assert "TESTPYPI_DRY_RUN_CONFIRMED" in promotion_validation
+    assert "TESTPYPI_RUN_ID" in promotion_validation
+    assert "successful dev Release run" in promotion_validation
 
     build_platform = jobs["build-platform-wheels"]
     assert isinstance(build_platform, dict)
@@ -223,7 +237,7 @@ def test_release_workflow_builds_platform_wheels_only_when_opted_in() -> None:
     assert isinstance(assemble, dict)
     assert assemble["needs"] == "build-metadata"
     assert jobs["publish-testpypi"]["needs"] == "assemble-release-artifacts"
-    assert jobs["publish-pypi"]["needs"] == "assemble-release-artifacts"
+    assert jobs["publish-pypi"]["needs"] == "validate-release-inputs"
     assert jobs["publish-testpypi"]["if"] == (
         "github.event_name == 'workflow_dispatch' && "
         "inputs.release_target == 'testpypi' && "
@@ -245,6 +259,10 @@ def test_release_workflow_publishes_metadata_only_dist_artifact() -> None:
     build_metadata = jobs["build-metadata"]
     assert isinstance(build_metadata, dict)
     assert build_metadata["needs"] == "validate-release-inputs"
+    assert build_metadata["if"] == (
+        "github.event_name != 'workflow_dispatch' || "
+        "inputs.release_target != 'pypi'"
+    )
 
     assemble = jobs["assemble-release-artifacts"]
     assert isinstance(assemble, dict)
@@ -275,7 +293,61 @@ def test_release_workflow_publishes_metadata_only_dist_artifact() -> None:
     }
 
     assert jobs["publish-testpypi"]["needs"] == "assemble-release-artifacts"
-    assert jobs["publish-pypi"]["needs"] == "assemble-release-artifacts"
+    assert jobs["publish-pypi"]["needs"] == "validate-release-inputs"
+
+
+def test_pypi_promotion_reuses_exact_successful_testpypi_artifact() -> None:
+    """Production publishing must promote tested files instead of rebuilding."""
+    workflow = _release_workflow()
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    publish = jobs["publish-pypi"]
+    assert isinstance(publish, dict)
+
+    assert publish["needs"] == "validate-release-inputs"
+    permissions = publish["permissions"]
+    assert isinstance(permissions, dict)
+    assert permissions["actions"] == "read"
+    assert permissions["contents"] == "read"
+    assert permissions["id-token"] == "write"
+
+    checkout = _step(publish, "Check out production source and tags")
+    assert checkout["with"] == {"fetch-depth": 0}
+
+    validate = _step_run(publish, "Validate successful TestPyPI source run")
+    assert "actions/runs/${TESTPYPI_RUN_ID}" in validate
+    assert 'head_branch == "dev"' in validate
+    assert '.path == ".github/workflows/release.yml"' in validate
+    assert '.name == "Publish to TestPyPI"' in validate
+    assert '.conclusion == "success"' in validate
+    assert "histdatacom-dist" in validate
+    assert "git merge-base --is-ancestor" in validate
+    assert ".github/workflows/release.yml" in validate
+    assert "RELEASE.md" in validate
+    assert "tests/unit/test_release_workflow.py" in validate
+
+    download = _step_run(publish, "Download exact TestPyPI release artifacts")
+    assert 'gh run download "${TESTPYPI_RUN_ID}"' in download
+    assert "--name histdatacom-dist" in download
+    assert "--dir dist" in download
+
+    testpypi_verify = _step_run(
+        publish, "Verify exact TestPyPI artifact hashes"
+    )
+    assert "test.pypi.org/pypi/histdatacom" in testpypi_verify
+    assert "remote_hashes != local_hashes" in testpypi_verify
+    assert "histdatacom.pypi-artifact-promotion.v1" in testpypi_verify
+
+    pypi_verify = _step_run(publish, "Verify exact PyPI artifact hashes")
+    assert "pypi.org/pypi/histdatacom" in pypi_verify
+    assert 'remote_hashes != report["files"]' in pypi_verify
+    assert 'report["pypi_verified"] = True' in pypi_verify
+
+    step_names = [
+        step.get("name") for step in publish["steps"] if isinstance(step, dict)
+    ]
+    assert "Download release artifacts" not in step_names
+    assert "Build sdist and fallback wheel" not in step_names
 
 
 def test_package_metadata_advertises_platform_wheel_support() -> None:
@@ -397,19 +469,25 @@ def test_local_pypi_install_smoke_uses_exact_version_verifier() -> None:
     assert "pypi_install)\n            pypi_install\n            ;;" in script
 
 
-def test_release_docs_mark_local_publishing_as_current_path() -> None:
-    """Release docs should not imply Actions deployment is active today."""
+def test_release_docs_cover_trusted_promotion_and_local_fallback() -> None:
+    """Release docs should define exact promotion and the local fallback."""
     release_docs = _project_text("RELEASE.md")
     readme = _project_text("README.md")
 
     assert (
-        "Local publishing is the authoritative release path today."
-        in release_docs
+        "GitHub Actions Trusted Publishing is the authoritative" in release_docs
     )
-    assert "GitHub Actions" in release_docs
-    assert "publishing is future architecture" in release_docs
+    assert "Local Publishing Fallback" in release_docs
+    assert "testpypi_run_id" in release_docs
+    assert (
+        "publishes those same files to PyPI without rebuilding" in release_docs
+    )
+    assert "does not rebuild production distributions" in release_docs
     assert "TestPyPI is only dispatchable from `dev`" in release_docs
-    assert "PyPI is only dispatchable from `main`" in release_docs
+    assert re.search(
+        r"PyPI is only dispatchable from\s+`main`",
+        release_docs,
+    )
     assert (
         "`bash pypi.sh testpypi` is guarded to run from `dev`" in release_docs
     )

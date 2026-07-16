@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "*.*.*"
   workflow_dispatch:
     inputs:
       release_target:
@@ -20,6 +20,11 @@ on:
         required: true
         default: false
         type: boolean
+      testpypi_run_id:
+        description: "Required for PyPI: successful dev Release run that published the exact files to TestPyPI"
+        required: false
+        default: ""
+        type: string
       include_bundled_platform_wheels:
         description: "Build private/offline bundled platform wheels; build-only dry runs only"
         required: true
@@ -66,9 +71,36 @@ jobs:
           fi
         shell: bash
 
+      - name: Validate PyPI promotion input
+        env:
+          RELEASE_TARGET: ${{ inputs.release_target }}
+          TESTPYPI_DRY_RUN_CONFIRMED: ${{ inputs.testpypi_dry_run_confirmed }}
+          TESTPYPI_RUN_ID: ${{ inputs.testpypi_run_id }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]]; then
+            exit 0
+          fi
+
+          if [[ "${RELEASE_TARGET}" == "pypi" ]]; then
+            if [[ "${TESTPYPI_DRY_RUN_CONFIRMED}" != "true" ]]; then
+              echo "Set testpypi_dry_run_confirmed=true only after this version passes TestPyPI." >&2
+              exit 1
+            fi
+
+            if [[ ! "${TESTPYPI_RUN_ID}" =~ ^[0-9]+$ ]]; then
+              echo "Set testpypi_run_id to the successful dev Release run that published this version to TestPyPI." >&2
+              exit 1
+            fi
+          elif [[ -n "${TESTPYPI_RUN_ID}" ]]; then
+            echo "testpypi_run_id is accepted only for a PyPI promotion." >&2
+            exit 1
+          fi
+        shell: bash
+
   build-metadata:
     name: Build metadata release artifacts
     needs: validate-release-inputs
+    if: github.event_name != 'workflow_dispatch' || inputs.release_target != 'pypi'
     runs-on: ubuntu-latest
 
     steps:
@@ -394,31 +426,270 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    needs: assemble-release-artifacts
+    needs: validate-release-inputs
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && inputs.release_target == 'pypi' && github.ref == 'refs/heads/main'
     environment:
       name: pypi
       url: https://pypi.org/p/histdatacom
     permissions:
+      actions: read
       contents: read
       id-token: write
 
     steps:
-      - name: Require TestPyPI dry-run confirmation
-        if: ${{ inputs.testpypi_dry_run_confirmed != true }}
+      - name: Check out production source and tags
+        uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Validate successful TestPyPI source run
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TESTPYPI_RUN_ID: ${{ inputs.testpypi_run_id }}
         run: |
-          echo "Set testpypi_dry_run_confirmed=true only after this version passes TestPyPI."
-          exit 1
+          set -euo pipefail
+          mkdir -p release-reports
+
+          gh api \
+            "/repos/${GITHUB_REPOSITORY}/actions/runs/${TESTPYPI_RUN_ID}" \
+            > release-reports/testpypi-source-run.json
+          jq -e --arg repository "${GITHUB_REPOSITORY}" '
+            .status == "completed"
+            and .conclusion == "success"
+            and .event == "workflow_dispatch"
+            and .head_branch == "dev"
+            and .path == ".github/workflows/release.yml"
+            and .repository.full_name == $repository
+          ' release-reports/testpypi-source-run.json >/dev/null
+
+          gh api \
+            "/repos/${GITHUB_REPOSITORY}/actions/runs/${TESTPYPI_RUN_ID}/jobs?per_page=100" \
+            > release-reports/testpypi-source-jobs.json
+          jq -e '
+            [.jobs[] | select(
+              .name == "Publish to TestPyPI" and .conclusion == "success"
+            )] | length == 1
+          ' release-reports/testpypi-source-jobs.json >/dev/null
+
+          gh api \
+            "/repos/${GITHUB_REPOSITORY}/actions/runs/${TESTPYPI_RUN_ID}/artifacts?name=histdatacom-dist&per_page=100" \
+            > release-reports/testpypi-source-artifacts.json
+          jq -e '
+            [.artifacts[] | select(
+              .name == "histdatacom-dist" and (.expired | not)
+            )] | length == 1
+          ' release-reports/testpypi-source-artifacts.json >/dev/null
+
+          version="$(python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          module = ast.parse(
+              Path("src/histdatacom/__init__.py").read_text(encoding="utf-8")
+          )
+          for node in module.body:
+              if (
+                  isinstance(node, ast.Assign)
+                  and any(
+                      isinstance(target, ast.Name)
+                      and target.id == "__version__"
+                      for target in node.targets
+                  )
+              ):
+                  print(ast.literal_eval(node.value))
+                  break
+          else:
+              raise SystemExit("package version is missing")
+          PY
+          )"
+          source_sha="$(jq -r '.head_sha' release-reports/testpypi-source-run.json)"
+          tag_sha="$(git rev-parse "refs/tags/${version}^{commit}")"
+          git merge-base --is-ancestor "${tag_sha}" "${source_sha}"
+
+          unexpected_paths=0
+          while IFS= read -r path; do
+            case "${path}" in
+              .github/workflows/release.yml|RELEASE.md|tests/unit/test_release_workflow.py)
+                ;;
+              *)
+                echo "TestPyPI source run changes packaged or unreviewed path after tag ${version}: ${path}" >&2
+                unexpected_paths=1
+                ;;
+            esac
+          done < <(git diff --name-only "${tag_sha}" "${source_sha}")
+          if [[ "${unexpected_paths}" != "0" ]]; then
+            exit 1
+          fi
+
+          artifact_id="$(jq -r '
+            [.artifacts[] | select(
+              .name == "histdatacom-dist" and (.expired | not)
+            )][0].id
+          ' release-reports/testpypi-source-artifacts.json)"
+          artifact_digest="$(jq -r '
+            [.artifacts[] | select(
+              .name == "histdatacom-dist" and (.expired | not)
+            )][0].digest
+          ' release-reports/testpypi-source-artifacts.json)"
+          {
+            echo "version=${version}"
+            echo "source_sha=${source_sha}"
+            echo "tag_sha=${tag_sha}"
+            echo "artifact_id=${artifact_id}"
+            echo "artifact_digest=${artifact_digest}"
+          } >> "${GITHUB_OUTPUT}"
         shell: bash
 
-      - name: Download release artifacts
-        uses: actions/download-artifact@v8.0.1
-        with:
-          name: histdatacom-dist
-          path: dist
+      - name: Download exact TestPyPI release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TESTPYPI_RUN_ID: ${{ inputs.testpypi_run_id }}
+        run: |
+          gh run download "${TESTPYPI_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name histdatacom-dist \
+            --dir dist
+        shell: bash
+
+      - name: Verify exact TestPyPI artifact hashes
+        env:
+          ARTIFACT_DIGEST: ${{ steps.candidate.outputs.artifact_digest }}
+          ARTIFACT_ID: ${{ steps.candidate.outputs.artifact_id }}
+          RELEASE_VERSION: ${{ steps.candidate.outputs.version }}
+          SOURCE_SHA: ${{ steps.candidate.outputs.source_sha }}
+          TAG_SHA: ${{ steps.candidate.outputs.tag_sha }}
+          TESTPYPI_RUN_ID: ${{ inputs.testpypi_run_id }}
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import time
+          from urllib.error import HTTPError
+          from urllib.request import urlopen
+
+
+          version = os.environ["RELEASE_VERSION"]
+          dist = Path("dist")
+          files = sorted(
+              path for path in dist.iterdir() if path.suffix == ".whl"
+          ) + sorted(dist.glob("*.tar.gz"))
+          expected_names = {
+              f"histdatacom-{version}-py3-none-any.whl",
+              f"histdatacom-{version}.tar.gz",
+          }
+          if {path.name for path in files} != expected_names:
+              raise SystemExit(f"unexpected distribution set: {files}")
+          local_hashes = {
+              path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in files
+          }
+
+          url = f"https://test.pypi.org/pypi/histdatacom/{version}/json"
+          payload = None
+          for attempt in range(30):
+              try:
+                  with urlopen(url, timeout=30) as response:
+                      payload = json.load(response)
+                  break
+              except HTTPError as error:
+                  if error.code != 404 or attempt == 29:
+                      raise
+                  time.sleep(10)
+          if payload is None:
+              raise SystemExit("TestPyPI version metadata did not become available")
+          remote_hashes = {
+              item["filename"]: item["digests"]["sha256"]
+              for item in payload["urls"]
+          }
+          if remote_hashes != local_hashes:
+              raise SystemExit(
+                  f"TestPyPI artifact hashes differ: local={local_hashes}, "
+                  f"remote={remote_hashes}"
+              )
+
+          report = {
+              "schema_version": "histdatacom.pypi-artifact-promotion.v1",
+              "version": version,
+              "testpypi_run_id": int(os.environ["TESTPYPI_RUN_ID"]),
+              "source_sha": os.environ["SOURCE_SHA"],
+              "tag_sha": os.environ["TAG_SHA"],
+              "artifact_id": int(os.environ["ARTIFACT_ID"]),
+              "artifact_digest": os.environ["ARTIFACT_DIGEST"],
+              "files": local_hashes,
+              "testpypi_verified": True,
+              "pypi_verified": False,
+          }
+          path = Path("release-reports/pypi-artifact-promotion.json")
+          path.write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+        shell: bash
 
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@v1.14.0
         with:
           print-hash: true
+
+      - name: Verify exact PyPI artifact hashes
+        env:
+          RELEASE_VERSION: ${{ steps.candidate.outputs.version }}
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+          import time
+          from urllib.error import HTTPError
+          from urllib.request import urlopen
+
+
+          path = Path("release-reports/pypi-artifact-promotion.json")
+          report = json.loads(path.read_text(encoding="utf-8"))
+          version = os.environ["RELEASE_VERSION"]
+          url = f"https://pypi.org/pypi/histdatacom/{version}/json"
+          payload = None
+          for attempt in range(30):
+              try:
+                  with urlopen(url, timeout=30) as response:
+                      payload = json.load(response)
+                  break
+              except HTTPError as error:
+                  if error.code != 404 or attempt == 29:
+                      raise
+                  time.sleep(10)
+          if payload is None:
+              raise SystemExit("PyPI version metadata did not become available")
+          remote_hashes = {
+              item["filename"]: item["digests"]["sha256"]
+              for item in payload["urls"]
+          }
+          if remote_hashes != report["files"]:
+              raise SystemExit(
+                  f"PyPI artifact hashes differ: expected={report['files']}, "
+                  f"remote={remote_hashes}"
+              )
+          report["pypi_verified"] = True
+          path.write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+        shell: bash
+
+      - name: Upload PyPI promotion evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: histdatacom-pypi-promotion-report
+          path: release-reports/pypi-artifact-promotion.json
+          if-no-files-found: warn
