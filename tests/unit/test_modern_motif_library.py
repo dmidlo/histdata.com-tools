@@ -22,6 +22,10 @@ def test_profile_round_trip_is_strict_and_chronological() -> None:
     profile = ModernReferenceMotifProfileV1()
 
     assert ModernReferenceMotifProfileV1.from_dict(profile.to_dict()) == profile
+    canonical_payload = json.loads(
+        json.dumps(profile.to_dict(), sort_keys=True, separators=(",", ":"))
+    )
+    assert ModernReferenceMotifProfileV1.from_dict(canonical_payload) == profile
     assert profile.split_periods["train"][0] == "201901"
     assert profile.split_periods["final_holdout"] == ("202510",)
     assert profile.max_fragments == 256

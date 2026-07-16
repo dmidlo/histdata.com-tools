@@ -32,6 +32,7 @@ Empirical reconstruction pipeline
    historical-carving-contracts
    cross-currency-reconciliation-contracts
    reconstruction-ensemble-calibration-contracts
+   reconstruction-plan-contracts
    broker-capture-contracts
    broker-delivery-fingerprint-contracts
    broker-delivery-transfer-contracts

@@ -201,11 +201,14 @@ class ModernReferenceMotifProfileV1:
     def from_dict(
         cls, data: Mapping[str, Any]
     ) -> "ModernReferenceMotifProfileV1":
+        split_periods = _mapping(data.get("split_periods"))
         return cls(
             symbols=tuple(str(item) for item in _sequence(data.get("symbols"))),
             split_periods={
-                str(name): tuple(str(item) for item in _sequence(values))
-                for name, values in _mapping(data.get("split_periods")).items()
+                name: tuple(
+                    str(item) for item in _sequence(split_periods.get(name))
+                )
+                for name in _EXPECTED_SPLITS
             },
             synchronized_windows_per_period=int(
                 data.get("synchronized_windows_per_period", 0)

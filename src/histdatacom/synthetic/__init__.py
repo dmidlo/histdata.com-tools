@@ -1,5 +1,8 @@
 """Versioned contracts for synthetic market-event products."""
 
+from typing import Any
+
+
 from histdatacom.synthetic.activity import (
     ACTIVITY_EVENT_COLUMNS,
     ACTIVITY_REVERSE_DEGRADATION_METRICS,
@@ -638,7 +641,109 @@ from histdatacom.synthetic.strategy_sensitivity import (
     strategy_sensitivity_benchmark_hooks,
 )
 
+_RECONSTRUCTION_PLAN_EXPORTS = frozenset(
+    {
+        "ASCII_TICK_SOURCE_KIND",
+        "DEFAULT_RECONSTRUCTION_BASE_SEED",
+        "DEFAULT_RECONSTRUCTION_MAX_PARALLEL_WINDOWS",
+        "DEFAULT_RECONSTRUCTION_REQUEST_WINDOW_LIMIT",
+        "DEFAULT_RECONSTRUCTION_WINDOW_SIZE_NS",
+        "FIRST_PARTY_RECONSTRUCTION_HANDLERS",
+        "IMMUTABLE_ANCHOR_POLICY",
+        "PLAN_CONFIGURATION_ARTIFACT_KIND",
+        "PLAN_EXECUTION_MANIFEST_ARTIFACT_KIND",
+        "RECONSTRUCTION_PLAN_CONFIGURATION_SCHEMA_VERSION",
+        "RECONSTRUCTION_PLAN_EXECUTION_MANIFEST_SCHEMA_VERSION",
+        "RECONSTRUCTION_PLAN_REFUSAL_SCHEMA_VERSION",
+        "RECONSTRUCTION_PLAN_RESOURCE_SUMMARY_SCHEMA_VERSION",
+        "RECONSTRUCTION_SOURCE_INVENTORY_SCHEMA_VERSION",
+        "RECONSTRUCTION_SOURCE_PARTITION_SCHEMA_VERSION",
+        "SCIENTIFIC_NONCLAIM",
+        "SOURCE_INVENTORY_ARTIFACT_KIND",
+        "SYNTHETIC_INFILL_PLAN_ARTIFACT_KIND",
+        "SYNTHETIC_INFILL_PLAN_SCHEMA_VERSION",
+        "TICK_ONLY_INPUT_POLICY",
+        "ReconstructionDeliveryMode",
+        "ReconstructionPlanCompatibilityError",
+        "ReconstructionPlanConfigurationV1",
+        "ReconstructionPlanExecutionManifestV1",
+        "ReconstructionPlanRefusalCode",
+        "ReconstructionPlanRefusalV1",
+        "ReconstructionPlanResourceSummaryV1",
+        "ReconstructionStagePlanV1",
+        "ReconstructionSourceInventoryV1",
+        "ReconstructionSourcePartitionV1",
+        "SyntheticInfillPlanV1",
+        "build_synthetic_infill_plan",
+        "load_reconstruction_stage_plan",
+        "read_reconstruction_plan_configuration",
+        "read_reconstruction_plan_execution_manifest",
+        "read_reconstruction_source_inventory",
+        "read_synthetic_infill_plan",
+        "validate_synthetic_infill_plan_for_execution",
+        "write_synthetic_infill_plan",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    """Load orchestration-bound planning exports without an import cycle."""
+    if name not in _RECONSTRUCTION_PLAN_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+
+    reconstruction_plan = import_module(
+        "histdatacom.synthetic.reconstruction_plan"
+    )
+    value = getattr(reconstruction_plan, name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *_RECONSTRUCTION_PLAN_EXPORTS})
+
+
 __all__ = [
+    "ASCII_TICK_SOURCE_KIND",
+    "DEFAULT_RECONSTRUCTION_BASE_SEED",
+    "DEFAULT_RECONSTRUCTION_MAX_PARALLEL_WINDOWS",
+    "DEFAULT_RECONSTRUCTION_REQUEST_WINDOW_LIMIT",
+    "DEFAULT_RECONSTRUCTION_WINDOW_SIZE_NS",
+    "FIRST_PARTY_RECONSTRUCTION_HANDLERS",
+    "IMMUTABLE_ANCHOR_POLICY",
+    "PLAN_CONFIGURATION_ARTIFACT_KIND",
+    "PLAN_EXECUTION_MANIFEST_ARTIFACT_KIND",
+    "RECONSTRUCTION_PLAN_CONFIGURATION_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_EXECUTION_MANIFEST_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_REFUSAL_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_RESOURCE_SUMMARY_SCHEMA_VERSION",
+    "RECONSTRUCTION_SOURCE_INVENTORY_SCHEMA_VERSION",
+    "RECONSTRUCTION_SOURCE_PARTITION_SCHEMA_VERSION",
+    "SCIENTIFIC_NONCLAIM",
+    "SOURCE_INVENTORY_ARTIFACT_KIND",
+    "SYNTHETIC_INFILL_PLAN_ARTIFACT_KIND",
+    "SYNTHETIC_INFILL_PLAN_SCHEMA_VERSION",
+    "TICK_ONLY_INPUT_POLICY",
+    "ReconstructionDeliveryMode",
+    "ReconstructionPlanCompatibilityError",
+    "ReconstructionPlanConfigurationV1",
+    "ReconstructionPlanExecutionManifestV1",
+    "ReconstructionPlanRefusalCode",
+    "ReconstructionPlanRefusalV1",
+    "ReconstructionPlanResourceSummaryV1",
+    "ReconstructionStagePlanV1",
+    "ReconstructionSourceInventoryV1",
+    "ReconstructionSourcePartitionV1",
+    "SyntheticInfillPlanV1",
+    "build_synthetic_infill_plan",
+    "load_reconstruction_stage_plan",
+    "read_reconstruction_plan_configuration",
+    "read_reconstruction_plan_execution_manifest",
+    "read_reconstruction_source_inventory",
+    "read_synthetic_infill_plan",
+    "validate_synthetic_infill_plan_for_execution",
+    "write_synthetic_infill_plan",
     "DEFAULT_MODERN_MOTIF_SPLIT_PERIODS",
     "MODERN_REFERENCE_MOTIF_COVERAGE_SCHEMA_VERSION",
     "MODERN_REFERENCE_MOTIF_LEAKAGE_SCHEMA_VERSION",
